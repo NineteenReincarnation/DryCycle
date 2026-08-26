@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using DryCycle.HUD;
+using Menu;
 
 namespace DryCycle.Thirst;
 
@@ -35,6 +36,7 @@ internal static class ThirstHooks
         On.SaveState.SaveToString += SaveState_SaveToString;
         On.SaveState.SessionEnded += SaveState_SessionEnded;
         On.RoomCamera.FireUpSinglePlayerHUD += RoomCamera_FireUpSinglePlayerHUD;
+        On.Menu.SleepAndDeathScreen.GetDataFromGame += SleepAndDeathScreen_GetDataFromGame;
     }
 
     public static void Disable()
@@ -54,6 +56,7 @@ internal static class ThirstHooks
         On.SaveState.SaveToString -= SaveState_SaveToString;
         On.SaveState.SessionEnded -= SaveState_SessionEnded;
         On.RoomCamera.FireUpSinglePlayerHUD -= RoomCamera_FireUpSinglePlayerHUD;
+        On.Menu.SleepAndDeathScreen.GetDataFromGame -= SleepAndDeathScreen_GetDataFromGame;
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
@@ -165,9 +168,6 @@ internal static class ThirstHooks
 
             if (normalAttempt && !starvationAttempt && !waterEnough)
             {
-                // ReadyForWinJolly is a computed/read-only property in the current game API.
-                // Clearing the underlying local ready flag and input counter is sufficient to
-                // reject the close attempt without assigning to the Jolly property itself.
                 player.readyForWin = false;
                 player.touchedNoInputCounter = 0;
                 ThirstMeter.TryReject(player);
@@ -199,6 +199,19 @@ internal static class ThirstHooks
     {
         float currentWater = GetCurrentWater(game, self);
 
+        // SessionEnded can serialize the save from inside vanilla code. Put the
+        // next-cycle hydration into the SaveState before orig so that any save
+        // performed there already contains the two-pip hibernation cost.
+        if (survived)
+        {
+            float nextCycleWater = newMalnourished
+                ? 0f
+                : Math.Max(0f, currentWater - ThirstConstants.HibernateCost);
+
+            ThirstStore.SetSaved(self, nextCycleWater);
+            ThirstStore.WriteToUnrecognizedData(self);
+        }
+
         orig(self, game, survived, newMalnourished);
 
         if (!survived)
@@ -211,11 +224,8 @@ internal static class ThirstHooks
             self.food = 0;
         }
 
-        float nextCycleWater = newMalnourished
-            ? 0f
-            : Math.Max(0f, currentWater - ThirstConstants.HibernateRequirement);
-
-        ThirstStore.SetSaved(self, nextCycleWater);
+        // Vanilla may rebuild unrecognizedSaveStrings while ending the session,
+        // so write the already-calculated value once more after orig as well.
         ThirstStore.WriteToUnrecognizedData(self);
     }
 
@@ -229,6 +239,23 @@ internal static class ThirstHooks
         if (player != null && self.hud != null && IsStoryPlayer(player))
         {
             ThirstMeter.Attach(self.hud, player);
+        }
+    }
+
+    private static void SleepAndDeathScreen_GetDataFromGame(
+        On.Menu.SleepAndDeathScreen.orig_GetDataFromGame orig,
+        SleepAndDeathScreen self,
+        KarmaLadderScreen.SleepDeathScreenDataPackage package)
+    {
+        orig(self, package);
+
+        // The sleep/starve screen owns its own HUD. Attach the same hydration
+        // meter to that HUD so the save screen shows the post-sleep water value.
+        if ((self.IsSleepScreen || self.IsStarveScreen) &&
+            self.hud != null &&
+            package?.saveState != null)
+        {
+            ThirstMeter.Attach(self.hud, package.saveState);
         }
     }
 
