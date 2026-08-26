@@ -8,7 +8,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.0";
+    public const string Version = "0.2.1";
 
     private bool _initialized;
 
