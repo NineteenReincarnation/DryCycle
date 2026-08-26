@@ -15,10 +15,9 @@ internal static class ThirstConstants
     // 0.5 water per second = 0.0125 water per Player.Update.
     public const float DrinkPerTick = 0.0125f;
 
-    // While fully submerged, keep the vanilla lower-left HUD reveal trigger
-    // alive. When the player surfaces this short hold lets the existing vanilla
-    // karma / food / rain-meter fade animation close naturally instead of
-    // snapping off immediately.
+    // While actively drinking underwater, keep the vanilla lower-left HUD
+    // reveal trigger alive. When drinking stops, the remaining countdown lets
+    // the karma / food / rain-meter cluster fade away with vanilla timing.
     public const int UnderwaterHudHoldFrames = 20;
 
     // V2 remains the five-unit save format. UI-only changes do not alter save
