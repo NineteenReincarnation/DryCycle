@@ -218,12 +218,19 @@ internal static class ThirstHooks
         bool newMalnourished)
     {
         float currentWater = GetCurrentWater(game, self);
+        bool specialWarpSave = self != null && self.sessionEndingFromSpinningTopEncounter;
 
         if (survived)
         {
-            float nextCycleWater = newMalnourished
-                ? 0f
-                : Math.Max(0f, currentWater - ThirstConstants.HibernateCost);
+            // Rain World v1.11.8 also calls SessionEnded(survived: true) for
+            // Watcher spinning-top/warp transitions. Vanilla deliberately skips
+            // its food hibernation drain in that path, so hydration must likewise
+            // be preserved instead of charging the normal 3-point sleep cost.
+            float nextCycleWater = specialWarpSave
+                ? currentWater
+                : (newMalnourished
+                    ? 0f
+                    : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
 
             ThirstStore.SetSaved(self, nextCycleWater);
             ThirstStore.WriteToUnrecognizedData(self);
@@ -236,7 +243,7 @@ internal static class ThirstHooks
             return;
         }
 
-        if (newMalnourished)
+        if (newMalnourished && !specialWarpSave)
         {
             self.food = 0;
         }
@@ -255,7 +262,10 @@ internal static class ThirstHooks
             self.hud?.foodMeter != null &&
             package?.saveState != null)
         {
-            bool animateHibernateCost = self.IsSleepScreen && !self.goalMalnourished;
+            bool animateHibernateCost = self.IsSleepScreen &&
+                                        !self.goalMalnourished &&
+                                        !package.saveState.sessionEndingFromSpinningTopEncounter;
+
             ThirstMeter.ConfigureSleep(
                 self.hud.foodMeter,
                 package.saveState,
