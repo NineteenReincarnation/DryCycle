@@ -38,6 +38,7 @@ internal static class ThirstHooks
         On.RoomCamera.FireUpSinglePlayerHUD += RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame += SleepAndDeathScreen_GetDataFromGame;
         On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor += SlugcatPageContinue_ctor;
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.Update += SlugcatPageContinue_Update;
     }
 
     public static void Disable()
@@ -59,6 +60,7 @@ internal static class ThirstHooks
         On.RoomCamera.FireUpSinglePlayerHUD -= RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame -= SleepAndDeathScreen_GetDataFromGame;
         On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor -= SlugcatPageContinue_ctor;
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.Update -= SlugcatPageContinue_Update;
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
@@ -282,6 +284,14 @@ internal static class ThirstHooks
             slugcatNumber);
 
         ThirstMeter.AttachCharacterSelect(self.hud, water);
+    }
+
+    private static void SlugcatPageContinue_Update(
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.orig_Update orig,
+        SlugcatSelectMenu.SlugcatPageContinue self)
+    {
+        orig(self);
+        ThirstMeter.SyncCharacterSelect(self.hud);
     }
 
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
