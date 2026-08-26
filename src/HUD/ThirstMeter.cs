@@ -231,13 +231,10 @@ internal static class ThirstMeter
 
         if (actualWater < state.DisplayWater)
         {
-            // Water loss is authoritative and should not visually lag behind.
             state.DisplayWater = actualWater;
         }
         else
         {
-            // Water gain follows with a small amount of visual inertia so large
-            // hydration pickups also rise instead of popping instantly.
             float follow = (thirst.IsDrinking || state.GainWaveFrames > 0) ? 0.22f : 0.4f;
             state.DisplayWater = Mathf.Lerp(state.DisplayWater, actualWater, follow);
 
@@ -302,15 +299,18 @@ internal static class ThirstMeter
         }
 
         float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
-        float alpha = self.circles[0].sprite.alpha * FillAlpha;
-        float outerRadius = Mathf.Lerp(
-            self.circles[0].lastRad,
-            self.circles[0].rad,
-            timeStacker);
-        float radius = Mathf.Max(0f, outerRadius - FillRadiusInset);
 
-        if (!self.circles[0].sprite.isVisible ||
-            alpha <= 0.001f ||
+        // IMPORTANT: hydration visibility is controlled by the FoodMeter as a
+        // whole, not by the vanilla food-fill sprite for this particular pip.
+        // During eating, Rain World temporarily fades/shrinks that food sprite
+        // to play its restore animation. Tying water to it made a full water pip
+        // disappear and then pop back in. Use the meter fade and the stable snap
+        // radius instead so hydration remains unchanged underneath the food
+        // animation.
+        float alpha = Mathf.Clamp01(self.meter.fade) * FillAlpha;
+        float radius = Mathf.Max(0f, self.circles[0].snapRad - FillRadiusInset);
+
+        if (alpha <= 0.001f ||
             waterLevel <= 0.001f ||
             radius <= 0.001f)
         {
@@ -339,8 +339,8 @@ internal static class ThirstMeter
         fill.Mesh.alpha = alpha;
         fill.Mesh.isVisible = true;
 
-        // Hydration sits behind the vanilla food fill but inside the outline.
-        // Quarter-food graphics are also explicitly kept above this material.
+        // Keep water behind every vanilla food graphic, but do not inherit the
+        // food sprite's temporary visibility/radius during its fill animation.
         fill.Mesh.MoveBehindOtherNode(self.circles[1].sprite);
         self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
@@ -477,9 +477,6 @@ internal static class ThirstMeter
         float clampedLevel = Mathf.Clamp01(level);
         float baseSurface = Mathf.Lerp(-1f, 1f, clampedLevel);
 
-        // The wave is strongest around half-full and naturally disappears as a
-        // pip reaches completely empty/full, so the final static states remain
-        // clean semicircles/circles.
         float levelEnvelope = Mathf.Sin(clampedLevel * Mathf.PI);
         float amplitude = WaveAmplitude * waveStrength * levelEnvelope;
 
