@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+artifacts/
+
+# IDE
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Local game/reference assemblies
+lib/*.dll
+
+# Generated mod plugin binaries
+mod/plugins/*.dll
+mod/plugins/*.pdb
+
+# OS
+.DS_Store
+Thumbs.db
