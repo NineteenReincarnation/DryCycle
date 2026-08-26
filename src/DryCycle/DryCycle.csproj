@@ -6,26 +6,51 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>DryCycle</AssemblyName>
     <RootNamespace>DryCycle</RootNamespace>
+    <Version>0.2.0</Version>
     <IsPublishable>false</IsPublishable>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <PropertyGroup>
     <LocalReferenceDir>$(MSBuildThisFileDirectory)../../lib</LocalReferenceDir>
+    <RainWorldManagedDir Condition="'$(RainWorldPath)' != ''">$(RainWorldPath)/RainWorld_Data/Managed</RainWorldManagedDir>
+
     <PublicAssemblyPath Condition="Exists('$(LocalReferenceDir)/PUBLIC-Assembly-CSharp.dll')">$(LocalReferenceDir)/PUBLIC-Assembly-CSharp.dll</PublicAssemblyPath>
     <HooksAssemblyPath Condition="Exists('$(LocalReferenceDir)/HOOKS-Assembly-CSharp.dll')">$(LocalReferenceDir)/HOOKS-Assembly-CSharp.dll</HooksAssemblyPath>
+    <FirstpassAssemblyPath Condition="Exists('$(LocalReferenceDir)/Assembly-CSharp-firstpass.dll')">$(LocalReferenceDir)/Assembly-CSharp-firstpass.dll</FirstpassAssemblyPath>
+
     <PublicAssemblyPath Condition="'$(PublicAssemblyPath)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</PublicAssemblyPath>
     <HooksAssemblyPath Condition="'$(HooksAssemblyPath)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll</HooksAssemblyPath>
-  </PropertyGroup>
+    <FirstpassAssemblyPath Condition="'$(FirstpassAssemblyPath)' == '' and '$(RainWorldManagedDir)' != ''">$(RainWorldManagedDir)/Assembly-CSharp-firstpass.dll</FirstpassAssemblyPath>
 
-  <ItemGroup>
-    <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
-    <PackageReference Include="BepInEx.Core" Version="5.4.17" />
-    <PackageReference Include="UnityEngine.Modules" Version="2020.3.38" IncludeAssets="compile" />
-  </ItemGroup>
+    <BepInExAssemblyPath Condition="Exists('$(LocalReferenceDir)/BepInEx.dll')">$(LocalReferenceDir)/BepInEx.dll</BepInExAssemblyPath>
+    <UnityEngineAssemblyPath Condition="Exists('$(LocalReferenceDir)/UnityEngine.dll')">$(LocalReferenceDir)/UnityEngine.dll</UnityEngineAssemblyPath>
+    <UnityCoreAssemblyPath Condition="Exists('$(LocalReferenceDir)/UnityEngine.CoreModule.dll')">$(LocalReferenceDir)/UnityEngine.CoreModule.dll</UnityCoreAssemblyPath>
+
+    <BepInExAssemblyPath Condition="'$(BepInExAssemblyPath)' == '' and '$(RainWorldPath)' != '' and Exists('$(RainWorldPath)/BepInEx/core/BepInEx.dll')">$(RainWorldPath)/BepInEx/core/BepInEx.dll</BepInExAssemblyPath>
+    <UnityEngineAssemblyPath Condition="'$(UnityEngineAssemblyPath)' == '' and '$(RainWorldManagedDir)' != '' and Exists('$(RainWorldManagedDir)/UnityEngine.dll')">$(RainWorldManagedDir)/UnityEngine.dll</UnityEngineAssemblyPath>
+    <UnityCoreAssemblyPath Condition="'$(UnityCoreAssemblyPath)' == '' and '$(RainWorldManagedDir)' != '' and Exists('$(RainWorldManagedDir)/UnityEngine.CoreModule.dll')">$(RainWorldManagedDir)/UnityEngine.CoreModule.dll</UnityCoreAssemblyPath>
+  </PropertyGroup>
 
   <ItemGroup>
     <Reference Include="PUBLIC-Assembly-CSharp" HintPath="$(PublicAssemblyPath)" Private="false" />
     <Reference Include="HOOKS-Assembly-CSharp" HintPath="$(HooksAssemblyPath)" Private="false" />
+    <Reference Include="Assembly-CSharp-firstpass" HintPath="$(FirstpassAssemblyPath)" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BepInExAssemblyPath)' != ''">
+    <Reference Include="BepInEx" HintPath="$(BepInExAssemblyPath)" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(BepInExAssemblyPath)' == ''">
+    <PackageReference Include="BepInEx.Core" Version="5.4.17" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UnityEngineAssemblyPath)' != '' and '$(UnityCoreAssemblyPath)' != ''">
+    <Reference Include="UnityEngine" HintPath="$(UnityEngineAssemblyPath)" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(UnityCoreAssemblyPath)" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UnityEngineAssemblyPath)' == '' or '$(UnityCoreAssemblyPath)' == ''">
+    <PackageReference Include="UnityEngine.Modules" Version="2020.3.38" IncludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,6 +60,7 @@
   <Target Name="ValidateRainWorldReferences" BeforeTargets="ResolveReferences">
     <Error Condition="'$(PublicAssemblyPath)' == '' or !Exists('$(PublicAssemblyPath)')" Text="PUBLIC-Assembly-CSharp.dll was not found. Set RainWorldPath to the Rain World installation folder, or place the DLL in ./lib." />
     <Error Condition="'$(HooksAssemblyPath)' == '' or !Exists('$(HooksAssemblyPath)')" Text="HOOKS-Assembly-CSharp.dll was not found. Set RainWorldPath to the Rain World installation folder, or place the DLL in ./lib." />
+    <Error Condition="'$(FirstpassAssemblyPath)' == '' or !Exists('$(FirstpassAssemblyPath)')" Text="Assembly-CSharp-firstpass.dll was not found. Set RainWorldPath to the Rain World installation folder, or place the DLL in ./lib." />
   </Target>
 
   <Target Name="BuildDryCycleModFolder" AfterTargets="Build">
