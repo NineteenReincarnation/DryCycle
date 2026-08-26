@@ -8,7 +8,8 @@
     <AssemblyName>DryCycle</AssemblyName>
     <RootNamespace>DryCycle</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>../mod/newest/plugins</OutputPath>
+    <GameModOutputDir>D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <OutputPath>$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
   </PropertyGroup>
 
@@ -70,11 +71,12 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
   </Target>
 
   <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <ItemGroup>
-      <RemovePlugins Include="../mod/newest/plugins/*.pdb" />
+      <RemovePlugins Include="$(GameModOutputDir)/*.pdb" />
     </ItemGroup>
     <Delete Files="@(RemovePlugins)" />
   </Target>
