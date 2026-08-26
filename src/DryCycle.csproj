@@ -12,6 +12,13 @@
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
   </PropertyGroup>
 
+  <!-- RainWorldDir can be supplied as an environment variable or MSBuild property.
+       The second line is a convenience fallback for the current development machine. -->
+  <PropertyGroup>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DebugType>portable</DebugType>
   </PropertyGroup>
@@ -21,23 +28,29 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Standard Rain World code-mod references. RainWorldDir points at the game folder. -->
-    <Reference Include="../lib/*.dll">
+    <!-- Only reference the assemblies DryCycle actually needs. Avoid pulling every installed mod DLL into compilation. -->
+    <Reference Include="BepInEx">
+      <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="$(RainWorldDir)/BepInEx/core/*.dll">
+    <Reference Include="PUBLIC-Assembly-CSharp">
+      <HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="$(RainWorldDir)/BepInEx/plugins/*.dll">
+    <Reference Include="HOOKS-Assembly-CSharp">
+      <HintPath>$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="$(RainWorldDir)/BepInEx/utils/*.dll">
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll">
+    <Reference Include="UnityEngine">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="$(RainWorldDir)/RainWorld_Data/Managed/Unity*.dll">
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
@@ -48,6 +61,16 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+
+  <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Application/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll')" Text="PUBLIC-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/utils." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll')" Text="HOOKS-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/plugins." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+  </Target>
 
   <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <ItemGroup>
