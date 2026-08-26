@@ -28,6 +28,8 @@ internal static class ThirstHooks
 
         _enabled = true;
 
+        ThirstMeter.Enable();
+
         On.Player.Update += Player_Update;
         On.Player.ObjectEaten += Player_ObjectEaten;
         On.Player.EatMeatUpdate += Player_EatMeatUpdate;
@@ -35,10 +37,8 @@ internal static class ThirstHooks
         On.SaveState.LoadGame += SaveState_LoadGame;
         On.SaveState.SaveToString += SaveState_SaveToString;
         On.SaveState.SessionEnded += SaveState_SessionEnded;
-        On.RoomCamera.FireUpSinglePlayerHUD += RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame += SleepAndDeathScreen_GetDataFromGame;
         On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor += SlugcatPageContinue_ctor;
-        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.Update += SlugcatPageContinue_Update;
     }
 
     public static void Disable()
@@ -57,10 +57,10 @@ internal static class ThirstHooks
         On.SaveState.LoadGame -= SaveState_LoadGame;
         On.SaveState.SaveToString -= SaveState_SaveToString;
         On.SaveState.SessionEnded -= SaveState_SessionEnded;
-        On.RoomCamera.FireUpSinglePlayerHUD -= RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame -= SleepAndDeathScreen_GetDataFromGame;
         On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor -= SlugcatPageContinue_ctor;
-        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.Update -= SlugcatPageContinue_Update;
+
+        ThirstMeter.Disable();
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
@@ -204,8 +204,8 @@ internal static class ThirstHooks
         float currentWater = GetCurrentWater(game, self);
 
         // SessionEnded can serialize from inside vanilla code, so calculate the
-        // next-cycle value before orig. Normal sleep consumes the three pips to
-        // the left of the divider; starvation consumes all remaining water.
+        // next-cycle value before orig. Normal sleep consumes 3 hydration;
+        // starvation sleep consumes all remaining hydration.
         if (survived)
         {
             float nextCycleWater = newMalnourished
@@ -233,19 +233,6 @@ internal static class ThirstHooks
         ThirstStore.WriteToUnrecognizedData(self);
     }
 
-    private static void RoomCamera_FireUpSinglePlayerHUD(
-        On.RoomCamera.orig_FireUpSinglePlayerHUD orig,
-        RoomCamera self,
-        Player player)
-    {
-        orig(self, player);
-
-        if (player != null && self.hud != null && IsStoryPlayer(player))
-        {
-            ThirstMeter.Attach(self.hud, player);
-        }
-    }
-
     private static void SleepAndDeathScreen_GetDataFromGame(
         On.Menu.SleepAndDeathScreen.orig_GetDataFromGame orig,
         SleepAndDeathScreen self,
@@ -253,14 +240,18 @@ internal static class ThirstHooks
     {
         orig(self, package);
 
-        // The sleep/starve screen owns a separate HUD. Attach hydration only
-        // after vanilla InitSleepHud has created and positioned its food meter.
+        // The sleep/starve screen already owns a vanilla FoodMeter. Configure
+        // its hydration material rather than adding a second HUD row.
         if ((self.IsSleepScreen || self.IsStarveScreen) &&
-            self.hud != null &&
+            self.hud?.foodMeter != null &&
             package?.saveState != null)
         {
             bool animateHibernateCost = self.IsSleepScreen && !self.goalMalnourished;
-            ThirstMeter.Attach(self.hud, package.saveState, self, animateHibernateCost);
+            ThirstMeter.ConfigureSleep(
+                self.hud.foodMeter,
+                package.saveState,
+                self,
+                animateHibernateCost);
         }
     }
 
@@ -274,7 +265,7 @@ internal static class ThirstHooks
     {
         orig(self, menu, owner, pageIndex, slugcatNumber);
 
-        if (self.hud == null || menu?.manager?.rainWorld?.progression == null)
+        if (self.hud?.foodMeter == null || menu?.manager?.rainWorld?.progression == null)
         {
             return;
         }
@@ -283,15 +274,9 @@ internal static class ThirstHooks
             menu.manager.rainWorld.progression,
             slugcatNumber);
 
-        ThirstMeter.AttachCharacterSelect(self.hud, water);
-    }
-
-    private static void SlugcatPageContinue_Update(
-        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.orig_Update orig,
-        SlugcatSelectMenu.SlugcatPageContinue self)
-    {
-        orig(self);
-        ThirstMeter.SyncCharacterSelect(self.hud);
+        // Character select also reuses the existing food circles; no extra
+        // hydration row is created beside the food meter anymore.
+        ThirstMeter.ConfigureCharacterSelect(self.hud.foodMeter, water);
     }
 
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
