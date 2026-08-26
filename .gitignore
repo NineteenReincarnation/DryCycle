@@ -10,10 +10,15 @@ artifacts/
 *.user
 *.suo
 
-# Local game/reference assemblies
+# Optional local/stripped reference assemblies
 lib/*.dll
 
-# Generated debug symbols
+# Generated mod plugin binaries
+mod/newest/plugins/*.dll
+mod/newest/plugins/*.pdb
+
+# Legacy output locations
+mod/plugins/*.dll
 mod/plugins/*.pdb
 
 # OS
