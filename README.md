@@ -2,18 +2,20 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.4**.
+Current version: **0.2.5**.
 
 ## Current feature: hydration
 
-- Default hydration: **4 maximum / 2 required for normal hibernation**.
-- Hydration HUD is placed above the normal food meter.
-- Normal hibernation is blocked when hydration is below 2.
-- Normal hibernation consumes 2 hydration.
+- Default/max hydration: **5 pips**, displayed as **3 | 2**.
+- The hydration meter is placed above the normal food meter.
+- The sleep/starve save screen also receives the hydration meter.
+- Normal hibernation requires at least **2 hydration** and consumes **2 hydration**.
+- On a normal sleep screen, the two consumed hydration pips animate out before the meter settles on the next-cycle value.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
+- Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
-- Configured foods and edible creatures restore hydration.
+- Version 0.2.5 starts a new five-pip hydration save key. Legacy four-pip 0.2.4 test data is discarded once so an existing test save starts at the new full value of 5.
 
 Temperature mechanics are not implemented yet.
 
@@ -22,10 +24,8 @@ Temperature mechanics are not implemented yet.
 ```text
 DryCycle/
 ├─ mod/
-│  ├─ modinfo.json
-│  └─ newest/
-│     └─ plugins/        # DryCycle.dll is built here
-├─ lib/                  # optional extra stripped reference DLLs
+│  └─ modinfo.json
+├─ lib/
 └─ src/
    ├─ DryCycle.csproj
    ├─ Plugin.cs
@@ -60,19 +60,11 @@ RainWorld_Data/Managed/UnityEngine.CoreModule.dll
 
 This avoids accidentally compiling against unrelated installed mod DLLs.
 
-The resulting plugin is written directly to:
+The resulting plugin is written directly to the current test mod folder:
 
 ```text
-mod/newest/plugins/DryCycle.dll
+D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins/DryCycle.dll
 ```
-
-For testing, copy the repository's `mod` folder to:
-
-```text
-Rain World/RainWorld_Data/StreamingAssets/mods/DryCycle
-```
-
-and enable **DryCycle** in Remix.
 
 ## Source layout
 
@@ -86,4 +78,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-The HUD is attached through `RoomCamera.FireUpSinglePlayerHUD(Player)`, which provides the actual player directly.
+The gameplay HUD is attached through `RoomCamera.FireUpSinglePlayerHUD(Player)`. The sleep/starve HUD is attached after `Menu.SleepAndDeathScreen.GetDataFromGame` initializes the vanilla sleep HUD.
