@@ -13,8 +13,7 @@ artifacts/
 # Local game/reference assemblies
 lib/*.dll
 
-# Generated mod plugin binaries
-mod/plugins/*.dll
+# Generated debug symbols
 mod/plugins/*.pdb
 
 # OS
