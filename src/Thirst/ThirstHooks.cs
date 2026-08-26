@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DryCycle.HUD;
 using Menu;
@@ -9,10 +10,6 @@ internal static class ThirstHooks
 {
     private sealed class MeatHydrationState
     {
-        public MeatHydrationState()
-        {
-        }
-
         public int InitialMeat;
     }
 
@@ -93,17 +90,13 @@ internal static class ThirstHooks
                             breathBarActive &&
                             state.Water < ThirstConstants.MaxWater;
 
-        // Shortcut travel can leave the previous room's submersion values on a
-        // realized Player for a short time. Explicitly requiring a realized room
-        // and !inShortcut prevents drinking/wave animation from continuing while
-        // the player is actually inside a room-transition pipe.
+        // Shortcut travel can retain stale submersion values for a short time.
+        // Require a realized room and !inShortcut so water cannot be gained while
+        // the player is actually travelling through a transition pipe.
         state.IsDrinking = wantsToDrink;
 
         if (wantsToDrink)
         {
-            // Jolly story co-op uses one shared hydration pool, matching the
-            // single vanilla food meter shown by the shared story HUD. Any human
-            // player may drink and the common water amount updates immediately.
             ThirstMeter.ShowDrinking(self);
             ThirstStore.AddRuntime(self, ThirstConstants.DrinkPerTick);
         }
@@ -117,9 +110,8 @@ internal static class ThirstHooks
 
         orig(self, edible);
 
-        // Vanilla uses nourishment == -1 for special/invalid food interactions
-        // that return before actually feeding the player. Do not grant hydration
-        // for those cases just because ObjectEaten was entered.
+        // Vanilla uses nourishment == -1 for interactions that return before the
+        // player is actually fed. Those interactions must not grant hydration.
         if (water > 0f && nourishmentAllowed)
         {
             AddHydration(self, water);
@@ -163,7 +155,6 @@ internal static class ThirstHooks
         }
 
         float totalWater = FoodWaterTable.ForCreature(creature);
-
         if (totalWater <= 0f)
         {
             return;
@@ -177,16 +168,14 @@ internal static class ThirstHooks
     {
         RainWorldGame game = self?.room?.game;
 
-        if (game != null && game.IsStorySession && ModManager.CoopAvailable &&
-            game.PlayersToProgressOrWin != null && game.PlayersToProgressOrWin.Count > 1)
+        if (game != null &&
+            game.IsStorySession &&
+            ModManager.CoopAvailable &&
+            game.PlayersToProgressOrWin != null &&
+            game.PlayersToProgressOrWin.Count > 1)
         {
-            if (TryGetJollySleepState(self, out bool normalAttempt, out bool starvationAttempt) &&
-                normalAttempt &&
-                !starvationAttempt &&
-                ThirstStore.GetRuntimeWater(game, game.GetStorySession.saveState) + 0.0001f <
-                    ThirstConstants.HibernateRequirement)
+            if (RejectJollyHibernateForHydration(self))
             {
-                RejectJollyHibernate(self);
                 return;
             }
         }
@@ -236,24 +225,13 @@ internal static class ThirstHooks
         bool survived,
         bool newMalnourished)
     {
-        float currentWater = GetCurrentWater(game, self);
         bool specialWarpSave = self != null && self.sessionEndingFromSpinningTopEncounter;
 
         if (survived)
         {
-            // Rain World v1.11.8 also calls SessionEnded(survived: true) for
-            // Watcher spinning-top/warp transitions. Vanilla deliberately skips
-            // its food hibernation drain in that path, so hydration must likewise
-            // be preserved instead of charging the normal 3-point sleep cost.
-            // Jolly co-op uses the same shared hydration pool, so the sleep cost
-            // is charged exactly once for the party, not once per player.
-            float nextCycleWater = specialWarpSave
-                ? currentWater
-                : (newMalnourished
-                    ? 0f
-                    : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
-
-            ThirstStore.SetSaved(self, nextCycleWater);
+            SaveNextCycleHydration(self, game, newMalnourished, specialWarpSave);
+            // SaveState.SessionEnded writes progression from inside orig(), so
+            // DryCycle must update unrecognized save strings before calling it.
             ThirstStore.WriteToUnrecognizedData(self);
         }
 
@@ -272,6 +250,54 @@ internal static class ThirstHooks
         ThirstStore.WriteToUnrecognizedData(self);
     }
 
+    private static void SaveNextCycleHydration(
+        SaveState saveState,
+        RainWorldGame game,
+        bool newMalnourished,
+        bool specialWarpSave)
+    {
+        if (saveState == null)
+        {
+            return;
+        }
+
+        bool wrotePlayer = false;
+
+        if (game?.Players != null)
+        {
+            foreach (AbstractCreature abstractPlayer in game.Players)
+            {
+                if (abstractPlayer?.state is not PlayerState playerState)
+                {
+                    continue;
+                }
+
+                int playerNumber = playerState.playerNumber;
+                float currentWater = ThirstStore.GetRuntimeWater(game, saveState, playerNumber);
+                float nextWater = specialWarpSave
+                    ? currentWater
+                    : (newMalnourished
+                        ? 0f
+                        : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
+
+                ThirstStore.SetSaved(saveState, playerNumber, nextWater);
+                wrotePlayer = true;
+            }
+        }
+
+        if (!wrotePlayer)
+        {
+            float currentWater = ThirstStore.GetSaved(saveState, 0);
+            float nextWater = specialWarpSave
+                ? currentWater
+                : (newMalnourished
+                    ? 0f
+                    : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
+
+            ThirstStore.SetSaved(saveState, 0, nextWater);
+        }
+    }
+
     private static void SleepAndDeathScreen_GetDataFromGame(
         On.Menu.SleepAndDeathScreen.orig_GetDataFromGame orig,
         SleepAndDeathScreen self,
@@ -287,6 +313,9 @@ internal static class ThirstHooks
                                         !self.goalMalnourished &&
                                         !package.saveState.sessionEndingFromSpinningTopEncounter;
 
+            // The vanilla sleep screen has one FoodMeter. Keep its existing
+            // single-player presentation bound to player 0's saved hydration;
+            // gameplay Jolly HUD switches owner with the focused player.
             ThirstMeter.ConfigureSleep(
                 self.hud.foodMeter,
                 package.saveState,
@@ -326,38 +355,30 @@ internal static class ThirstHooks
 
         if (ThirstStore.AddRuntime(player, amount))
         {
-            // Food can restore water while the vanilla food meter itself does
-            // not change (for example when the stomach is already full). Reveal
-            // the shared lower-left cluster so the hydration gain animation is
-            // visible regardless of which Jolly player ate the item.
+            // Food may restore hydration while vanilla food does not change, so
+            // reveal this player's HUD long enough to show the water animation.
             ThirstMeter.ShowHydrationGain(player);
         }
     }
 
-    private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
+    private static bool RejectJollyHibernateForHydration(ShelterDoor door)
     {
-        return ThirstStore.GetRuntimeWater(game, saveState);
-    }
-
-    private static bool TryGetJollySleepState(
-        ShelterDoor door,
-        out bool normalAttempt,
-        out bool starvationAttempt)
-    {
-        normalAttempt = true;
-        starvationAttempt = false;
-
         RainWorldGame game = door?.room?.game;
-        if (game?.PlayersToProgressOrWin == null || game.PlayersToProgressOrWin.Count <= 1)
+        if (game?.PlayersToProgressOrWin == null)
         {
             return false;
         }
 
         bool anyLivingPlayer = false;
+        bool anyStarvationAttempt = false;
+        bool allNormalReady = true;
+        List<Player> livingPlayers = new();
 
         foreach (AbstractCreature abstractPlayer in game.PlayersToProgressOrWin)
         {
-            if (abstractPlayer?.state == null || abstractPlayer.state.dead)
+            if (abstractPlayer?.state is not PlayerState playerState ||
+                playerState.dead ||
+                playerState.permaDead)
             {
                 continue;
             }
@@ -365,42 +386,41 @@ internal static class ThirstHooks
             anyLivingPlayer = true;
             Player player = abstractPlayer.realizedCreature as Player;
 
-            if (player == null || player.room != door.room || player.isNPC)
+            if (player == null || player.isNPC || player.room != door.room)
             {
-                normalAttempt = false;
+                allNormalReady = false;
                 continue;
             }
+
+            livingPlayers.Add(player);
 
             if (player.ReadyForStarveJolly ||
                 player.sleepCounter < 0 ||
                 player.forceSleepCounter > 260)
             {
-                starvationAttempt = true;
+                anyStarvationAttempt = true;
             }
 
             if (!player.ReadyForWinJolly)
             {
-                normalAttempt = false;
+                allNormalReady = false;
             }
         }
 
-        return anyLivingPlayer;
-    }
-
-    private static void RejectJollyHibernate(ShelterDoor door)
-    {
-        RainWorldGame game = door?.room?.game;
-        if (game?.Players == null)
+        // Match vanilla Jolly behavior: a starvation attempt may close the
+        // shelter even when normal ready conditions are not met. Hydration does
+        // not block that path; successful starvation sleep will zero each saved
+        // player's hydration in SessionEnded.
+        if (!anyLivingPlayer || anyStarvationAttempt || !allNormalReady)
         {
-            return;
+            return false;
         }
 
-        foreach (AbstractCreature abstractPlayer in game.Players)
+        bool rejected = false;
+
+        foreach (Player player in livingPlayers)
         {
-            if (abstractPlayer?.realizedCreature is not Player player ||
-                player.dead ||
-                player.isNPC ||
-                player.room != door.room)
+            if (ThirstStore.For(player).Water + 0.0001f >= ThirstConstants.HibernateRequirement)
             {
                 continue;
             }
@@ -409,7 +429,10 @@ internal static class ThirstHooks
             player.ReadyForWinJolly = false;
             player.touchedNoInputCounter = 0;
             ThirstMeter.TryReject(player);
+            rejected = true;
         }
+
+        return rejected;
     }
 
     private static Player FindPrimaryPlayer(ShelterDoor door)
