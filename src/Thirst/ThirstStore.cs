@@ -8,6 +8,10 @@ internal static class ThirstStore
 {
     private sealed class SaveHydration
     {
+        public SaveHydration()
+        {
+        }
+
         public float Water = ThirstConstants.MaxWater;
     }
 
