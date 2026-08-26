@@ -27,10 +27,6 @@ internal static class ThirstMeter
 
     private sealed class MeterState
     {
-        public MeterState()
-        {
-        }
-
         public bool UseFixedWater;
         public float DisplayWater;
         public float TargetWater;
@@ -39,6 +35,7 @@ internal static class ThirstMeter
         public SleepAndDeathScreen SleepScreen;
 
         public bool GameplayInitialized;
+        public int GameplayPlayerNumber = -1;
         public float LastActualWater;
         public float WaveStrength;
         public float WavePhase;
@@ -47,10 +44,6 @@ internal static class ThirstMeter
 
     private sealed class RejectState
     {
-        public RejectState()
-        {
-        }
-
         public int Counter;
     }
 
@@ -121,7 +114,7 @@ internal static class ThirstMeter
         MeterState state = MeterStates.GetOrCreateValue(meter);
         state.UseFixedWater = true;
         state.SleepScreen = screen;
-        state.TargetWater = ThirstStore.GetSaved(saveState);
+        state.TargetWater = ThirstStore.GetSaved(saveState, 0);
         state.DisplayWater = state.TargetWater;
         state.SleepConsumeSteps = 0;
         state.SleepConsumeDelay = 0;
@@ -158,12 +151,12 @@ internal static class ThirstMeter
 
     public static void ShowDrinking(Player player)
     {
-        ShowHudForPlayers(player, ThirstConstants.UnderwaterHudHoldFrames);
+        ShowHudForPlayer(player, ThirstConstants.UnderwaterHudHoldFrames);
     }
 
     public static void ShowHydrationGain(Player player)
     {
-        ShowHudForPlayers(player, ThirstConstants.HydrationGainHudHoldFrames);
+        ShowHudForPlayer(player, ThirstConstants.HydrationGainHudHoldFrames);
     }
 
     public static void TryReject(Player player)
@@ -174,34 +167,31 @@ internal static class ThirstMeter
         }
 
         RejectStates.GetOrCreateValue(player).Counter = ThirstConstants.RejectHudHoldFrames;
-        ShowHudForPlayers(player, ThirstConstants.RejectHudHoldFrames);
+        ShowHudForPlayer(player, ThirstConstants.RejectHudHoldFrames);
+
+        if (TryGetPlayerGame(player, out RainWorldGame game) &&
+            game.cameras != null &&
+            game.cameras.Length > 0 &&
+            game.cameras[0]?.hud?.jollyMeter?.playerIcons != null)
+        {
+            int playerNumber = player.playerState?.playerNumber ?? 0;
+            if (playerNumber > 0 && playerNumber < game.cameras[0].hud.jollyMeter.playerIcons.Count)
+            {
+                game.cameras[0].hud.jollyMeter.playerIcons[playerNumber].blinkRed = 20;
+            }
+        }
     }
 
-    private static void ShowHudForPlayers(Player source, int holdFrames)
+    private static void ShowHudForPlayer(Player player, int holdFrames)
     {
-        if (source == null)
+        if (player == null)
         {
             return;
         }
 
-        if (TryGetPlayerGame(source, out RainWorldGame game) &&
-            game.IsStorySession &&
-            game.Players != null)
-        {
-            foreach (AbstractCreature abstractPlayer in game.Players)
-            {
-                if (abstractPlayer?.realizedCreature is Player player && !player.isNPC)
-                {
-                    player.showKarmaFoodRainTime = Mathf.Max(
-                        player.showKarmaFoodRainTime,
-                        holdFrames);
-                }
-            }
-
-            return;
-        }
-
-        source.showKarmaFoodRainTime = Mathf.Max(source.showKarmaFoodRainTime, holdFrames);
+        player.showKarmaFoodRainTime = Mathf.Max(
+            player.showKarmaFoodRainTime,
+            holdFrames);
     }
 
     private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
@@ -245,16 +235,15 @@ internal static class ThirstMeter
         MeterState state = MeterStates.GetOrCreateValue(meter);
         ThirstState thirst = ThirstStore.For(player);
         float actualWater = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+        int playerNumber = player.playerState?.playerNumber ?? 0;
 
-        if (!state.GameplayInitialized)
+        // In Jolly, RoomCamera changes hud.owner when the camera focus changes.
+        // The vanilla FoodMeter object itself is reused, so reset DryCycle's
+        // interpolation state immediately instead of animating one player's
+        // hydration into another player's value.
+        if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
         {
-            state.GameplayInitialized = true;
-            state.DisplayWater = actualWater;
-            state.TargetWater = actualWater;
-            state.LastActualWater = actualWater;
-            state.WaveStrength = 0f;
-            state.WavePhase = 0f;
-            state.GainWaveFrames = 0;
+            ResetGameplayState(state, playerNumber, actualWater);
             return;
         }
 
@@ -302,6 +291,18 @@ internal static class ThirstMeter
         }
 
         state.LastActualWater = actualWater;
+    }
+
+    private static void ResetGameplayState(MeterState state, int playerNumber, float actualWater)
+    {
+        state.GameplayInitialized = true;
+        state.GameplayPlayerNumber = playerNumber;
+        state.DisplayWater = actualWater;
+        state.TargetWater = actualWater;
+        state.LastActualWater = actualWater;
+        state.WaveStrength = 0f;
+        state.WavePhase = 0f;
+        state.GainWaveFrames = 0;
     }
 
     private static void MeterCircle_AddCircles(
@@ -481,14 +482,15 @@ internal static class ThirstMeter
         {
             MeterState state = MeterStates.GetOrCreateValue(meter);
             ThirstState thirst = ThirstStore.For(player);
+            float actual = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+            int playerNumber = player.playerState?.playerNumber ?? 0;
 
-            if (!state.GameplayInitialized)
+            // Draw may run immediately after the camera changed owner and before
+            // the next FoodMeter.Update. Reset here too so the first rendered
+            // frame already belongs to the newly focused player.
+            if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
             {
-                float actual = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
-                state.GameplayInitialized = true;
-                state.DisplayWater = actual;
-                state.TargetWater = actual;
-                state.LastActualWater = actual;
+                ResetGameplayState(state, playerNumber, actual);
             }
 
             water = Mathf.Clamp(state.DisplayWater, 0f, ThirstConstants.MaxWater);
