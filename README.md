@@ -2,23 +2,24 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.7**.
+Current version: **0.2.8**.
 
 ## Current feature: hydration
 
 - Hydration is a global **0..5** resource.
 - Normal hibernation requires at least **3 hydration** and consumes **3 hydration**.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
-- DryCycle no longer draws a separate hydration bar.
-- Hydration is rendered as a **cyan liquid/material fill inside every vanilla food pip**.
-- The liquid height is the global hydration percentage: full hydration fills the circle, half hydration fills its lower half, and intermediate values are rendered continuously.
-- Vanilla food graphics remain on top of the hydration material, including quarter-food states, so the same food circle simultaneously shows both food and water as in the `Thirsty.png` design reference.
+- DryCycle does not draw a separate hydration bar.
+- Hydration is rendered as a **cyan liquid/material fill inside the vanilla food pips**.
+- Water is distributed from left to right across the first five food pips. Each pip has exactly three hydration states: **empty, half full, or full**.
+- Example: hydration `2.5` renders as `full, full, half, empty, empty`; hydration `4.5` renders as `full, full, full, full, half`.
+- Vanilla food graphics remain on top of the hydration material, including quarter-food states, so one circle can independently show food in quarters and water in halves as in the `Thirsty.png` design reference.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
-- On a normal sleep screen the embedded water level animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
+- On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
-- The five-unit format continues to use the `DRYCYCLETHIRSTV2` save key, so 0.2.5/0.2.6 hydration values remain compatible with 0.2.7.
+- The five-unit format continues to use the `DRYCYCLETHIRSTV2` save key, so earlier five-unit hydration saves remain compatible.
 
 Temperature mechanics are not implemented yet.
 
@@ -81,4 +82,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` now hooks the vanilla `HUD.FoodMeter` and renders hydration material between the food meter's background and food graphics. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating any additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. The water layer is calculated independently for each pip instead of applying one shared liquid height to the whole meter. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
