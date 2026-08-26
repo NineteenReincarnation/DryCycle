@@ -7,6 +7,13 @@ namespace DryCycle.HUD;
 
 internal sealed class ThirstMeter : global::HUD.HudPart
 {
+    private enum MeterMode
+    {
+        Gameplay,
+        SleepScreen,
+        CharacterSelect
+    }
+
     private sealed class MeterLink
     {
         public MeterLink()
@@ -21,6 +28,7 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
     private static readonly Color WaterColor = new(0.25f, 0.95f, 1f);
 
+    private readonly MeterMode _mode;
     private readonly Player _player;
     private readonly SaveState _saveState;
     private readonly SleepAndDeathScreen _sleepScreen;
@@ -39,33 +47,42 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
     private ThirstMeter(
         global::HUD.HUD hud,
+        MeterMode mode,
         Player player,
         SaveState saveState,
         SleepAndDeathScreen sleepScreen,
+        float fixedWater,
         bool animateHibernateCost)
         : base(hud)
     {
+        _mode = mode;
         _player = player;
         _saveState = saveState;
         _sleepScreen = sleepScreen;
 
-        if (_player != null)
+        switch (_mode)
         {
-            _displayWater = ThirstStore.For(_player).Water;
-        }
-        else
-        {
-            _sleepTargetWater = ThirstStore.GetSaved(_saveState);
-            _displayWater = _sleepTargetWater;
+            case MeterMode.Gameplay:
+                _displayWater = ThirstStore.For(_player).Water;
+                break;
 
-            if (animateHibernateCost)
-            {
-                _displayWater = Mathf.Min(
-                    ThirstConstants.MaxWater,
-                    _sleepTargetWater + ThirstConstants.HibernateCost);
-                _sleepConsumePips = (int)ThirstConstants.HibernateCost;
-                _sleepConsumeDelay = 65;
-            }
+            case MeterMode.SleepScreen:
+                _sleepTargetWater = ThirstStore.GetSaved(_saveState);
+                _displayWater = _sleepTargetWater;
+
+                if (animateHibernateCost)
+                {
+                    _displayWater = Mathf.Min(
+                        ThirstConstants.MaxWater,
+                        _sleepTargetWater + ThirstConstants.HibernateCost);
+                    _sleepConsumePips = (int)ThirstConstants.HibernateCost;
+                    _sleepConsumeDelay = 65;
+                }
+                break;
+
+            case MeterMode.CharacterSelect:
+                _displayWater = Mathf.Clamp(fixedWater, 0f, ThirstConstants.MaxWater);
+                break;
         }
 
         _lastWater = _displayWater;
@@ -111,7 +128,15 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             return;
         }
 
-        ThirstMeter meter = new(hud, player, null, null, false);
+        ThirstMeter meter = new(
+            hud,
+            MeterMode.Gameplay,
+            player,
+            null,
+            null,
+            0f,
+            false);
+
         HudMeters.Add(hud, meter);
         PlayerMeters.GetOrCreateValue(player).Meter = meter;
         hud.AddPart(meter);
@@ -128,7 +153,35 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             return;
         }
 
-        ThirstMeter meter = new(hud, null, saveState, sleepScreen, animateHibernateCost);
+        ThirstMeter meter = new(
+            hud,
+            MeterMode.SleepScreen,
+            null,
+            saveState,
+            sleepScreen,
+            0f,
+            animateHibernateCost);
+
+        HudMeters.Add(hud, meter);
+        hud.AddPart(meter);
+    }
+
+    public static void AttachCharacterSelect(global::HUD.HUD hud, float water)
+    {
+        if (hud == null || HudMeters.TryGetValue(hud, out _))
+        {
+            return;
+        }
+
+        ThirstMeter meter = new(
+            hud,
+            MeterMode.CharacterSelect,
+            null,
+            null,
+            null,
+            water,
+            false);
+
         HudMeters.Add(hud, meter);
         hud.AddPart(meter);
     }
@@ -150,27 +203,15 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
         bool isDrinking = false;
 
-        if (_player != null)
+        if (_mode == MeterMode.Gameplay)
         {
             ThirstState state = ThirstStore.For(_player);
             _displayWater = state.Water;
             isDrinking = state.IsDrinking;
         }
-        else if (_sleepConsumePips > 0 &&
-                 (_sleepScreen == null || _sleepScreen.AllowFoodMeterTick))
+        else if (_mode == MeterMode.SleepScreen)
         {
-            _sleepConsumeDelay--;
-            if (_sleepConsumeDelay <= 0)
-            {
-                _displayWater = Mathf.Max(_sleepTargetWater, _displayWater - 1f);
-                _sleepConsumePips--;
-                _sleepConsumeDelay = 40;
-                hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
-            }
-        }
-        else if (_player == null && _sleepConsumePips <= 0)
-        {
-            _displayWater = _sleepTargetWater;
+            UpdateSleepConsumption();
         }
 
         float water = _displayWater;
@@ -192,14 +233,21 @@ internal sealed class ThirstMeter : global::HUD.HudPart
         }
 
         float foodFade = hud.foodMeter?.fade ?? 0f;
-        bool inShelter = _player?.room?.abstractRoom != null && _player.room.abstractRoom.shelter;
-        bool sleepScreenMeter = _player == null && _saveState != null;
-        float targetFade = sleepScreenMeter || inShelter || _visibleCounter > 0 || isDrinking ? 1f : foodFade;
-        _fade = Mathf.Lerp(_fade, Mathf.Max(foodFade, targetFade), 0.2f);
 
-        Vector2 origin = hud.foodMeter != null
-            ? hud.foodMeter.DrawPos(1f) + new Vector2(0f, 30f)
-            : new Vector2(50f, 55f);
+        if (_mode == MeterMode.SleepScreen || _mode == MeterMode.CharacterSelect)
+        {
+            // Menu meters must follow the vanilla food meter exactly. In particular,
+            // the sleep screen intentionally dims the food meter while it animates.
+            _fade = foodFade;
+        }
+        else
+        {
+            bool inShelter = _player?.room?.abstractRoom != null && _player.room.abstractRoom.shelter;
+            float targetFade = inShelter || _visibleCounter > 0 || isDrinking ? 1f : foodFade;
+            _fade = Mathf.Lerp(_fade, Mathf.Max(foodFade, targetFade), 0.2f);
+        }
+
+        Vector2 origin = GetOrigin();
 
         Color color = WaterColor;
         if (_rejectCounter > 0 && (_rejectCounter / 5) % 2 == 0)
@@ -228,12 +276,53 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             _inner[i].forceColor = color;
         }
 
-        // Five pips are shown as 3 | 2. A successful normal hibernation
-        // removes the two pips on the right side of this divider.
+        // The divider matches a vanilla food meter survival limit: the three
+        // pips to its left are the normal hibernation requirement/cost, while
+        // the two pips to its right are extra hydration capacity.
         _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
         _separator.y = origin.y;
         _separator.color = color;
         _separator.alpha = _fade;
+    }
+
+    private void UpdateSleepConsumption()
+    {
+        if (_sleepConsumePips > 0 &&
+            (_sleepScreen == null || _sleepScreen.AllowFoodMeterTick))
+        {
+            _sleepConsumeDelay--;
+            if (_sleepConsumeDelay <= 0)
+            {
+                _displayWater = Mathf.Max(_sleepTargetWater, _displayWater - 1f);
+                _sleepConsumePips--;
+                _sleepConsumeDelay = 40;
+                hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+            }
+        }
+        else if (_sleepConsumePips <= 0)
+        {
+            _displayWater = _sleepTargetWater;
+        }
+    }
+
+    private Vector2 GetOrigin()
+    {
+        if (hud.foodMeter == null)
+        {
+            return new Vector2(50f, 55f);
+        }
+
+        Vector2 foodOrigin = hud.foodMeter.DrawPos(1f);
+
+        if (_mode == MeterMode.CharacterSelect)
+        {
+            // Character-select food sits immediately to the right of the karma
+            // symbol. Put hydration after the entire vanilla food meter, keeping
+            // both resources on the same row.
+            return foodOrigin + new Vector2(hud.foodMeter.TotalWidth(1f) + 40f, 0f);
+        }
+
+        return foodOrigin + new Vector2(0f, 30f);
     }
 
     public override void Draw(float timeStacker)
