@@ -2,9 +2,9 @@ namespace DryCycle.Thirst;
 
 internal static class ThirstConstants
 {
-    // Hydration is a global 0..5 resource. The HUD no longer draws five
-    // separate hydration pips; this value is rendered as a liquid level inside
-    // every vanilla food circle instead.
+    // Hydration is a global 0..5 resource. Water is rendered inside the first
+    // five vanilla food pips, with each pip showing empty / half / full water.
+    public const int MaxPips = 5;
     public const float MaxWater = 5f;
 
     // Normal hibernation requires and consumes 3 hydration.
@@ -15,8 +15,14 @@ internal static class ThirstConstants
     // 0.5 water per second = 0.0125 water per Player.Update.
     public const float DrinkPerTick = 0.0125f;
 
-    // V2 remains the five-unit save format. This UI redesign does not change
-    // save semantics, so existing 0.2.5/0.2.6 hydration values stay valid.
+    // While fully submerged, keep the vanilla lower-left HUD reveal trigger
+    // alive. When the player surfaces this short hold lets the existing vanilla
+    // karma / food / rain-meter fade animation close naturally instead of
+    // snapping off immediately.
+    public const int UnderwaterHudHoldFrames = 20;
+
+    // V2 remains the five-unit save format. UI-only changes do not alter save
+    // semantics, so earlier five-unit hydration saves remain compatible.
     public const string SaveKey = "DRYCYCLETHIRSTV2";
     public const string LegacySaveKey = "DRYCYCLETHIRST";
 }
