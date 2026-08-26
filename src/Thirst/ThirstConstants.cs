@@ -2,12 +2,12 @@ namespace DryCycle.Thirst;
 
 internal static class ThirstConstants
 {
-    // The hydration meter follows the vanilla food-meter convention:
-    // five pips laid out as 3 | 2, with the three pips on the left being
-    // the amount consumed by a normal hibernation.
-    public const int MaxPips = 5;
-    public const int DividerAfterPip = 3;
-    public const float MaxWater = MaxPips;
+    // Hydration is a global 0..5 resource. The HUD no longer draws five
+    // separate hydration pips; this value is rendered as a liquid level inside
+    // every vanilla food circle instead.
+    public const float MaxWater = 5f;
+
+    // Normal hibernation requires and consumes 3 hydration.
     public const float HibernateRequirement = 3f;
     public const float HibernateCost = 3f;
 
@@ -15,8 +15,8 @@ internal static class ThirstConstants
     // 0.5 water per second = 0.0125 water per Player.Update.
     public const float DrinkPerTick = 0.0125f;
 
-    // V2 is the five-pip save format. The legacy key is removed on the
-    // next save so old four-pip test data cannot cap a new game at four.
+    // V2 remains the five-unit save format. This UI redesign does not change
+    // save semantics, so existing 0.2.5/0.2.6 hydration values stay valid.
     public const string SaveKey = "DRYCYCLETHIRSTV2";
     public const string LegacySaveKey = "DRYCYCLETHIRST";
 }
