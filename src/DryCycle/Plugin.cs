@@ -5,7 +5,7 @@ namespace DryCycle;
 [BepInPlugin(ModId, ModName, Version)]
 public sealed class Plugin : BaseUnityPlugin
 {
-    public const string ModId = "nineteenreincarnation.drycycle";
+    public const string ModId = "Anno";
     public const string ModName = "DryCycle";
     public const string Version = "0.1.0";
 
