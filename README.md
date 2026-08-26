@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.8**.
+Current version: **0.2.9**.
 
 ## Current feature: hydration
 
@@ -16,6 +16,7 @@ Current version: **0.2.8**.
 - Vanilla food graphics remain on top of the hydration material, including quarter-food states, so one circle can independently show food in quarters and water in halves as in the `Thirsty.png` design reference.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
 - On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
+- While fully submerged, DryCycle keeps Rain World's **vanilla lower-left HUD reveal trigger** active. This makes the karma icon, embedded food/hydration meter, and rain-cycle timer fade in together using the game's normal HUD animation. After surfacing, a short hold lets that same vanilla cluster fade away naturally.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
