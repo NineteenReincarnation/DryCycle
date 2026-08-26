@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -9,21 +10,12 @@ internal static class ThirstStore
 {
     private sealed class SaveHydration
     {
-        public SaveHydration()
-        {
-        }
-
-        public float Water = ThirstConstants.MaxWater;
+        public readonly Dictionary<int, float> WaterByPlayer = new();
     }
 
     private sealed class RuntimeHydration
     {
-        public RuntimeHydration()
-        {
-        }
-
-        public bool Initialized;
-        public float Water = ThirstConstants.MaxWater;
+        public readonly Dictionary<int, float> WaterByPlayer = new();
     }
 
     private static readonly ConditionalWeakTable<Player, ThirstState> PlayerStates = new();
@@ -32,20 +24,26 @@ internal static class ThirstStore
 
     public static ThirstState For(Player player)
     {
-        float sharedWater = GetRuntimeWaterForPlayer(player);
+        if (player == null)
+        {
+            return new ThirstState();
+        }
+
+        int playerNumber = GetPlayerNumber(player);
+        float runtimeWater = GetRuntimeWater(player);
 
         if (PlayerStates.TryGetValue(player, out ThirstState existing))
         {
-            if (Math.Abs(existing.Water - sharedWater) > 0.0001f)
+            if (Math.Abs(existing.Water - runtimeWater) > 0.0001f)
             {
-                existing.Set(sharedWater);
+                existing.Set(runtimeWater);
             }
 
             return existing;
         }
 
         ThirstState created = new();
-        created.Set(sharedWater);
+        created.Set(runtimeWater);
         created.LastWater = created.Water;
         PlayerStates.Add(player, created);
         return created;
@@ -58,24 +56,21 @@ internal static class ThirstStore
             return false;
         }
 
-        ThirstState sourceState = For(player);
         RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
-
         if (game == null || !game.IsStorySession)
         {
-            float before = sourceState.Water;
-            sourceState.Add(amount);
-            return sourceState.Water > before + 0.0001f;
+            ThirstState local = For(player);
+            float beforeLocal = local.Water;
+            local.Add(amount);
+            return local.Water > beforeLocal + 0.0001f;
         }
 
+        int playerNumber = GetPlayerNumber(player);
         RuntimeHydration runtime = RuntimeStates.GetOrCreateValue(game);
-        if (!runtime.Initialized)
-        {
-            runtime.Water = GetSaved(game.GetStorySession.saveState);
-            runtime.Initialized = true;
-        }
-
-        float previous = runtime.Water;
+        float previous = GetOrInitializeRuntimeSlot(
+            runtime,
+            game.GetStorySession?.saveState,
+            playerNumber);
         float next = Clamp(previous + amount);
 
         if (next <= previous + 0.0001f)
@@ -83,47 +78,86 @@ internal static class ThirstStore
             return false;
         }
 
-        runtime.Water = next;
-        SyncRealizedPlayers(game, next);
+        runtime.WaterByPlayer[playerNumber] = next;
+
+        if (PlayerStates.TryGetValue(player, out ThirstState state))
+        {
+            state.Set(next);
+        }
+
         return true;
     }
 
-    public static float GetRuntimeWater(RainWorldGame game, SaveState fallbackSaveState)
+    public static float GetRuntimeWater(Player player)
+    {
+        if (player == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
+        if (game == null || !game.IsStorySession)
+        {
+            if (PlayerStates.TryGetValue(player, out ThirstState localState))
+            {
+                return localState.Water;
+            }
+
+            return ThirstConstants.MaxWater;
+        }
+
+        return GetRuntimeWater(
+            game,
+            game.GetStorySession?.saveState,
+            GetPlayerNumber(player));
+    }
+
+    public static float GetRuntimeWater(
+        RainWorldGame game,
+        SaveState fallbackSaveState,
+        int playerNumber)
     {
         if (game == null || !game.IsStorySession)
         {
-            return GetSaved(fallbackSaveState);
+            return GetSaved(fallbackSaveState, playerNumber);
         }
 
         RuntimeHydration runtime = RuntimeStates.GetOrCreateValue(game);
-        if (!runtime.Initialized)
-        {
-            SaveState saveState = game.GetStorySession?.saveState ?? fallbackSaveState;
-            runtime.Water = GetSaved(saveState);
-            runtime.Initialized = true;
-        }
-
-        return runtime.Water;
+        SaveState saveState = game.GetStorySession?.saveState ?? fallbackSaveState;
+        return GetOrInitializeRuntimeSlot(runtime, saveState, playerNumber);
     }
 
     public static float GetSaved(SaveState saveState)
+    {
+        return GetSaved(saveState, 0);
+    }
+
+    public static float GetSaved(SaveState saveState, int playerNumber)
     {
         if (saveState == null)
         {
             return ThirstConstants.MaxWater;
         }
 
-        return SaveStates.GetOrCreateValue(saveState).Water;
+        SaveHydration hydration = SaveStates.GetOrCreateValue(saveState);
+        return hydration.WaterByPlayer.TryGetValue(playerNumber, out float water)
+            ? water
+            : ThirstConstants.MaxWater;
     }
 
     public static void SetSaved(SaveState saveState, float water)
     {
-        if (saveState == null)
+        SetSaved(saveState, 0, water);
+    }
+
+    public static void SetSaved(SaveState saveState, int playerNumber, float water)
+    {
+        if (saveState == null || playerNumber < 0)
         {
             return;
         }
 
-        SaveStates.GetOrCreateValue(saveState).Water = Clamp(water);
+        SaveStates.GetOrCreateValue(saveState).WaterByPlayer[playerNumber] = Clamp(water);
     }
 
     public static float GetForCharacterSelect(PlayerProgression progression, SlugcatStats.Name slugcat)
@@ -136,7 +170,7 @@ internal static class ThirstStore
         if (progression.currentSaveState != null &&
             progression.currentSaveState.saveStateNumber == slugcat)
         {
-            return ReadValueFromEntries(progression.currentSaveState.unrecognizedSaveStrings);
+            return ReadValueFromEntries(progression.currentSaveState.unrecognizedSaveStrings, 0);
         }
 
         if (!progression.HasSaveData)
@@ -165,7 +199,7 @@ internal static class ThirstStore
                 continue;
             }
 
-            return ReadValueFromSaveText(parts[1]);
+            return ReadValueFromSaveText(parts[1], 0);
         }
 
         return ThirstConstants.MaxWater;
@@ -178,7 +212,21 @@ internal static class ThirstStore
             return;
         }
 
-        SetSaved(saveState, ReadValueFromEntries(saveState.unrecognizedSaveStrings));
+        SaveHydration hydration = SaveStates.GetOrCreateValue(saveState);
+        hydration.WaterByPlayer.Clear();
+
+        if (saveState.unrecognizedSaveStrings == null)
+        {
+            return;
+        }
+
+        foreach (string entry in saveState.unrecognizedSaveStrings)
+        {
+            if (TryReadEntry(entry, out int playerNumber, out float water))
+            {
+                hydration.WaterByPlayer[playerNumber] = water;
+            }
+        }
     }
 
     public static void WriteToUnrecognizedData(SaveState saveState)
@@ -188,90 +236,137 @@ internal static class ThirstStore
             return;
         }
 
-        string prefix = ThirstConstants.SaveKey + "<svB>";
+        string mainPrefix = GetSavePrefix(0);
         string legacyPrefix = ThirstConstants.LegacySaveKey + "<svB>";
+        string coopPrefix = ThirstConstants.SaveKey + "P";
 
         saveState.unrecognizedSaveStrings.RemoveAll(s =>
             s != null &&
-            (s.StartsWith(prefix, StringComparison.Ordinal) ||
-             s.StartsWith(legacyPrefix, StringComparison.Ordinal)));
+            (s.StartsWith(mainPrefix, StringComparison.Ordinal) ||
+             s.StartsWith(legacyPrefix, StringComparison.Ordinal) ||
+             s.StartsWith(coopPrefix, StringComparison.Ordinal)));
 
-        saveState.unrecognizedSaveStrings.Add(
-            prefix + GetSaved(saveState).ToString("0.###", CultureInfo.InvariantCulture));
-    }
-
-    private static float GetRuntimeWaterForPlayer(Player player)
-    {
-        if (player == null)
+        SaveHydration hydration = SaveStates.GetOrCreateValue(saveState);
+        if (!hydration.WaterByPlayer.ContainsKey(0))
         {
-            return ThirstConstants.MaxWater;
+            hydration.WaterByPlayer[0] = ThirstConstants.MaxWater;
         }
 
-        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
-        if (game != null && game.IsStorySession)
-        {
-            return GetRuntimeWater(game, game.GetStorySession.saveState);
-        }
+        List<int> playerNumbers = new(hydration.WaterByPlayer.Keys);
+        playerNumbers.Sort();
 
-        return ThirstConstants.MaxWater;
-    }
-
-    private static void SyncRealizedPlayers(RainWorldGame game, float water)
-    {
-        if (game?.Players == null)
+        foreach (int playerNumber in playerNumbers)
         {
-            return;
-        }
-
-        foreach (AbstractCreature abstractPlayer in game.Players)
-        {
-            if (abstractPlayer?.realizedCreature is not Player player || player.isNPC)
+            if (playerNumber < 0)
             {
                 continue;
             }
 
-            if (PlayerStates.TryGetValue(player, out ThirstState state))
-            {
-                state.Set(water);
-            }
+            saveState.unrecognizedSaveStrings.Add(
+                GetSavePrefix(playerNumber) +
+                Clamp(hydration.WaterByPlayer[playerNumber])
+                    .ToString("0.###", CultureInfo.InvariantCulture));
         }
     }
 
-    private static float ReadValueFromEntries(System.Collections.Generic.List<string> entries)
+    private static int GetPlayerNumber(Player player)
+    {
+        return player?.playerState?.playerNumber ?? 0;
+    }
+
+    private static float GetOrInitializeRuntimeSlot(
+        RuntimeHydration runtime,
+        SaveState saveState,
+        int playerNumber)
+    {
+        if (runtime.WaterByPlayer.TryGetValue(playerNumber, out float water))
+        {
+            return water;
+        }
+
+        water = GetSaved(saveState, playerNumber);
+        runtime.WaterByPlayer[playerNumber] = water;
+        return water;
+    }
+
+    private static string GetSavePrefix(int playerNumber)
+    {
+        return playerNumber <= 0
+            ? ThirstConstants.SaveKey + "<svB>"
+            : ThirstConstants.SaveKey + "P" + playerNumber + "<svB>";
+    }
+
+    private static bool TryReadEntry(string entry, out int playerNumber, out float water)
+    {
+        playerNumber = 0;
+        water = ThirstConstants.MaxWater;
+
+        if (string.IsNullOrEmpty(entry))
+        {
+            return false;
+        }
+
+        string mainPrefix = GetSavePrefix(0);
+        if (entry.StartsWith(mainPrefix, StringComparison.Ordinal))
+        {
+            return TryParseWater(entry.Substring(mainPrefix.Length), out water);
+        }
+
+        string playerPrefix = ThirstConstants.SaveKey + "P";
+        if (!entry.StartsWith(playerPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int separator = entry.IndexOf("<svB>", playerPrefix.Length, StringComparison.Ordinal);
+        if (separator < 0)
+        {
+            return false;
+        }
+
+        string playerText = entry.Substring(
+            playerPrefix.Length,
+            separator - playerPrefix.Length);
+
+        if (!int.TryParse(playerText, NumberStyles.Integer, CultureInfo.InvariantCulture, out playerNumber) ||
+            playerNumber < 1)
+        {
+            return false;
+        }
+
+        return TryParseWater(entry.Substring(separator + 5), out water);
+    }
+
+    private static float ReadValueFromEntries(
+        List<string> entries,
+        int playerNumber)
     {
         if (entries == null)
         {
             return ThirstConstants.MaxWater;
         }
 
-        string prefix = ThirstConstants.SaveKey + "<svB>";
         float result = ThirstConstants.MaxWater;
-
         foreach (string entry in entries)
         {
-            if (entry == null || !entry.StartsWith(prefix, StringComparison.Ordinal))
+            if (TryReadEntry(entry, out int entryPlayer, out float parsed) &&
+                entryPlayer == playerNumber)
             {
-                continue;
-            }
-
-            string value = entry.Substring(prefix.Length);
-            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-            {
-                result = Clamp(parsed);
+                result = parsed;
             }
         }
 
         return result;
     }
 
-    private static float ReadValueFromSaveText(string saveText)
+    private static float ReadValueFromSaveText(string saveText, int playerNumber)
     {
         if (string.IsNullOrEmpty(saveText))
         {
             return ThirstConstants.MaxWater;
         }
 
-        string prefix = ThirstConstants.SaveKey + "<svB>";
+        string prefix = GetSavePrefix(playerNumber);
         int start = saveText.IndexOf(prefix, StringComparison.Ordinal);
         if (start < 0)
         {
@@ -285,13 +380,21 @@ internal static class ThirstStore
             end = saveText.Length;
         }
 
-        string value = saveText.Substring(start, end - start);
+        return TryParseWater(saveText.Substring(start, end - start), out float parsed)
+            ? parsed
+            : ThirstConstants.MaxWater;
+    }
+
+    private static bool TryParseWater(string value, out float water)
+    {
         if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
         {
-            return Clamp(parsed);
+            water = Clamp(parsed);
+            return true;
         }
 
-        return ThirstConstants.MaxWater;
+        water = ThirstConstants.MaxWater;
+        return false;
     }
 
     private static float Clamp(float value)
