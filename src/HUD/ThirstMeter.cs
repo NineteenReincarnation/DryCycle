@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using DryCycle.Thirst;
 using Menu;
@@ -10,16 +9,19 @@ namespace DryCycle.HUD;
 /// Hydration renderer for the vanilla FoodMeter.
 ///
 /// DryCycle does not create a second row of HUD circles. Hydration is packed
-/// into the vanilla food pips themselves. Water is distributed from left to
-/// right across the food meter, and every food pip has three visual water
-/// states: empty, lower-half full, or completely full. Vanilla full/quarter
-/// food graphics stay on top of the cyan hydration material.
+/// into the vanilla food pips themselves. Static water is shown in empty / half
+/// / full states, while replenishing water animates continuously upward through
+/// the active pip with a small moving wave on its surface.
 /// </summary>
 internal static class ThirstMeter
 {
-    private const int FillBands = 16;
+    private const int FillSegments = 20;
     private const float FillRadiusInset = 0.7f;
     private const float FillAlpha = 0.9f;
+    private const float WaveAmplitude = 0.085f;
+    private const float WaveFrequency = 5.2f;
+    private const float WavePhaseSpeed = 0.32f;
+    private const int GainWaveHoldFrames = 24;
 
     private static readonly Color WaterColor = new(0.03f, 0.9f, 0.95f);
 
@@ -35,6 +37,12 @@ internal static class ThirstMeter
         public int SleepConsumeSteps;
         public int SleepConsumeDelay;
         public SleepAndDeathScreen SleepScreen;
+
+        public bool GameplayInitialized;
+        public float LastActualWater;
+        public float WaveStrength;
+        public float WavePhase;
+        public int GainWaveFrames;
     }
 
     private sealed class RejectState
@@ -115,6 +123,7 @@ internal static class ThirstMeter
         state.DisplayWater = state.TargetWater;
         state.SleepConsumeSteps = 0;
         state.SleepConsumeDelay = 0;
+        state.WaveStrength = 0f;
 
         if (animateHibernateCost)
         {
@@ -142,6 +151,7 @@ internal static class ThirstMeter
         state.DisplayWater = state.TargetWater;
         state.SleepConsumeSteps = 0;
         state.SleepConsumeDelay = 0;
+        state.WaveStrength = 0f;
     }
 
     public static void TryReject(Player player)
@@ -156,29 +166,103 @@ internal static class ThirstMeter
     {
         orig(self);
 
-        if (MeterStates.TryGetValue(self, out MeterState state) &&
-            state.UseFixedWater &&
-            state.SleepScreen != null &&
-            state.SleepConsumeSteps > 0 &&
-            state.SleepScreen.AllowFoodMeterTick)
+        if (MeterStates.TryGetValue(self, out MeterState fixedState) &&
+            fixedState.UseFixedWater &&
+            fixedState.SleepScreen != null &&
+            fixedState.SleepConsumeSteps > 0 &&
+            fixedState.SleepScreen.AllowFoodMeterTick)
         {
-            state.SleepConsumeDelay--;
+            fixedState.SleepConsumeDelay--;
 
-            if (state.SleepConsumeDelay <= 0)
+            if (fixedState.SleepConsumeDelay <= 0)
             {
-                state.DisplayWater = Mathf.Max(state.TargetWater, state.DisplayWater - 1f);
-                state.SleepConsumeSteps--;
-                state.SleepConsumeDelay = 40;
+                fixedState.DisplayWater = Mathf.Max(fixedState.TargetWater, fixedState.DisplayWater - 1f);
+                fixedState.SleepConsumeSteps--;
+                fixedState.SleepConsumeDelay = 40;
                 self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
             }
         }
 
         if (self?.hud?.owner is Player player &&
-            RejectStates.TryGetValue(player, out RejectState reject) &&
-            reject.Counter > 0)
+            player.room?.game != null &&
+            player.room.game.IsStorySession &&
+            !player.isSlugpup)
         {
-            reject.Counter--;
+            UpdateGameplayAnimation(self, player);
+
+            if (RejectStates.TryGetValue(player, out RejectState reject) &&
+                reject.Counter > 0)
+            {
+                reject.Counter--;
+            }
         }
+    }
+
+    private static void UpdateGameplayAnimation(global::HUD.FoodMeter meter, Player player)
+    {
+        MeterState state = MeterStates.GetOrCreateValue(meter);
+        ThirstState thirst = ThirstStore.For(player);
+        float actualWater = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+
+        if (!state.GameplayInitialized)
+        {
+            state.GameplayInitialized = true;
+            state.DisplayWater = actualWater;
+            state.TargetWater = actualWater;
+            state.LastActualWater = actualWater;
+            state.WaveStrength = 0f;
+            state.WavePhase = 0f;
+            state.GainWaveFrames = 0;
+            return;
+        }
+
+        bool gainedWater = actualWater > state.LastActualWater + 0.0001f;
+
+        if (gainedWater || thirst.IsDrinking)
+        {
+            state.GainWaveFrames = GainWaveHoldFrames;
+        }
+        else if (state.GainWaveFrames > 0)
+        {
+            state.GainWaveFrames--;
+        }
+
+        state.TargetWater = actualWater;
+
+        if (actualWater < state.DisplayWater)
+        {
+            // Water loss is authoritative and should not visually lag behind.
+            state.DisplayWater = actualWater;
+        }
+        else
+        {
+            // Water gain follows with a small amount of visual inertia so large
+            // hydration pickups also rise instead of popping instantly.
+            float follow = (thirst.IsDrinking || state.GainWaveFrames > 0) ? 0.22f : 0.4f;
+            state.DisplayWater = Mathf.Lerp(state.DisplayWater, actualWater, follow);
+
+            if (Mathf.Abs(state.DisplayWater - actualWater) < 0.002f)
+            {
+                state.DisplayWater = actualWater;
+            }
+        }
+
+        state.WavePhase += WavePhaseSpeed;
+
+        bool animateGain = thirst.IsDrinking ||
+                           state.GainWaveFrames > 0 ||
+                           state.TargetWater > state.DisplayWater + 0.002f;
+
+        float targetWave = animateGain ? 1f : 0f;
+        float waveLerp = targetWave > state.WaveStrength ? 0.25f : 0.12f;
+        state.WaveStrength = Mathf.Lerp(state.WaveStrength, targetWave, waveLerp);
+
+        if (!animateGain && state.WaveStrength < 0.01f)
+        {
+            state.WaveStrength = 0f;
+        }
+
+        state.LastActualWater = actualWater;
     }
 
     private static void MeterCircle_AddCircles(
@@ -202,7 +286,12 @@ internal static class ThirstMeter
             return;
         }
 
-        if (!TryGetDisplayWater(self.meter, out float water) ||
+        if (!TryGetDisplayWater(
+                self.meter,
+                out float water,
+                out float waveStrength,
+                out float wavePhase,
+                out bool continuousFill) ||
             self.circles == null ||
             self.circles.Length < 2 ||
             self.circles[0]?.sprite == null ||
@@ -212,10 +301,7 @@ internal static class ThirstMeter
             return;
         }
 
-        // Hydration is distributed pip-by-pip from left to right. Each pip is
-        // deliberately quantized to 0, 1/2, or 1 so water uses two halves while
-        // vanilla food continues to use its four quarter-pip states.
-        float waterLevel = GetPipWaterLevel(water, self.number);
+        float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
         float alpha = self.circles[0].sprite.alpha * FillAlpha;
         float outerRadius = Mathf.Lerp(
             self.circles[0].lastRad,
@@ -245,17 +331,16 @@ internal static class ThirstMeter
             fill.Mesh,
             self.DrawPos(timeStacker),
             radius,
-            waterLevel);
+            waterLevel,
+            waveStrength,
+            wavePhase + self.number * 0.8f);
 
         fill.Mesh.color = color;
         fill.Mesh.alpha = alpha;
         fill.Mesh.isVisible = true;
 
-        // Vanilla circle[0] is the food-meter outline layer and circle[1] is
-        // the filled-food layer. Hydration sits behind the food fill but inside
-        // the outline. Because the hydration radius is slightly larger than the
-        // normal food fill, a thin cyan rim can still be visible around a full
-        // food pip, matching the supplied design reference.
+        // Hydration sits behind the vanilla food fill but inside the outline.
+        // Quarter-food graphics are also explicitly kept above this material.
         fill.Mesh.MoveBehindOtherNode(self.circles[1].sprite);
         self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
@@ -281,8 +366,6 @@ internal static class ThirstMeter
         if (CircleFills.TryGetValue(self.owner.circles[circleIndex], out WaterFill fill) &&
             fill.Mesh != null)
         {
-            // Quarter food is a separate vanilla sprite; explicitly keep it in
-            // front of the hydration material.
             self.quarterPips.MoveInFrontOfOtherNode(fill.Mesh);
         }
     }
@@ -304,9 +387,17 @@ internal static class ThirstMeter
         return created;
     }
 
-    private static bool TryGetDisplayWater(global::HUD.FoodMeter meter, out float water)
+    private static bool TryGetDisplayWater(
+        global::HUD.FoodMeter meter,
+        out float water,
+        out float waveStrength,
+        out float wavePhase,
+        out bool continuousFill)
     {
         water = 0f;
+        waveStrength = 0f;
+        wavePhase = 0f;
+        continuousFill = false;
 
         if (meter == null || meter.IsPupFoodMeter)
         {
@@ -325,14 +416,30 @@ internal static class ThirstMeter
             player.room.game.IsStorySession &&
             !player.isSlugpup)
         {
-            water = ThirstStore.For(player).Water;
+            MeterState state = MeterStates.GetOrCreateValue(meter);
+            ThirstState thirst = ThirstStore.For(player);
+
+            if (!state.GameplayInitialized)
+            {
+                float actual = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+                state.GameplayInitialized = true;
+                state.DisplayWater = actual;
+                state.TargetWater = actual;
+                state.LastActualWater = actual;
+            }
+
+            water = Mathf.Clamp(state.DisplayWater, 0f, ThirstConstants.MaxWater);
+            waveStrength = state.WaveStrength;
+            wavePhase = state.WavePhase;
+            continuousFill = state.WaveStrength > 0.02f ||
+                             state.TargetWater > state.DisplayWater + 0.002f;
             return true;
         }
 
         return false;
     }
 
-    private static float GetPipWaterLevel(float totalWater, int pipNumber)
+    private static float GetPipWaterLevel(float totalWater, int pipNumber, bool continuousFill)
     {
         if (pipNumber < 0 || pipNumber >= ThirstConstants.MaxPips)
         {
@@ -340,6 +447,11 @@ internal static class ThirstMeter
         }
 
         float localWater = Mathf.Clamp01(totalWater - pipNumber);
+
+        if (continuousFill)
+        {
+            return localWater;
+        }
 
         if (localWater >= 0.999f)
         {
@@ -358,27 +470,44 @@ internal static class ThirstMeter
         TriangleMesh mesh,
         Vector2 center,
         float radius,
-        float level)
+        float level,
+        float waveStrength,
+        float wavePhase)
     {
-        float surfaceY = Mathf.Lerp(-1f, 1f, Mathf.Clamp01(level));
+        float clampedLevel = Mathf.Clamp01(level);
+        float baseSurface = Mathf.Lerp(-1f, 1f, clampedLevel);
 
-        for (int i = 0; i <= FillBands; i++)
+        // The wave is strongest around half-full and naturally disappears as a
+        // pip reaches completely empty/full, so the final static states remain
+        // clean semicircles/circles.
+        float levelEnvelope = Mathf.Sin(clampedLevel * Mathf.PI);
+        float amplitude = WaveAmplitude * waveStrength * levelEnvelope;
+
+        for (int i = 0; i <= FillSegments; i++)
         {
-            float t = i / (float)FillBands;
-            float normalizedY = Mathf.Lerp(-1f, surfaceY, t);
-            float halfWidth = Mathf.Sqrt(Mathf.Max(0f, 1f - normalizedY * normalizedY)) * radius;
-            float y = center.y + normalizedY * radius;
+            float t = i / (float)FillSegments;
+            float normalizedX = Mathf.Lerp(-1f, 1f, t);
+            float circleHalfHeight = Mathf.Sqrt(Mathf.Max(0f, 1f - normalizedX * normalizedX));
+            float bottom = -circleHalfHeight;
+            float top = circleHalfHeight;
+            float wave = Mathf.Sin(wavePhase + normalizedX * WaveFrequency) * amplitude;
+            float liquidTop = Mathf.Clamp(baseSurface + wave, bottom, top);
+            float x = center.x + normalizedX * radius;
 
-            mesh.MoveVertice(i * 2, new Vector2(center.x - halfWidth, y));
-            mesh.MoveVertice(i * 2 + 1, new Vector2(center.x + halfWidth, y));
+            mesh.MoveVertice(
+                i * 2,
+                new Vector2(x, center.y + bottom * radius));
+            mesh.MoveVertice(
+                i * 2 + 1,
+                new Vector2(x, center.y + liquidTop * radius));
         }
     }
 
     private static TriangleMesh.Triangle[] BuildTriangles()
     {
-        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[FillBands * 2];
+        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[FillSegments * 2];
 
-        for (int i = 0; i < FillBands; i++)
+        for (int i = 0; i < FillSegments; i++)
         {
             int a = i * 2;
             int b = a + 1;
