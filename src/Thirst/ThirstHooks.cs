@@ -250,12 +250,13 @@ internal static class ThirstHooks
         orig(self, package);
 
         // The sleep/starve screen owns its own HUD. Attach the same hydration
-        // meter to that HUD so the save screen shows the post-sleep water value.
+        // meter after InitSleepHud has created the vanilla food meter.
         if ((self.IsSleepScreen || self.IsStarveScreen) &&
             self.hud != null &&
             package?.saveState != null)
         {
-            ThirstMeter.Attach(self.hud, package.saveState);
+            bool animateHibernateCost = self.IsSleepScreen && !self.goalMalnourished;
+            ThirstMeter.Attach(self.hud, package.saveState, self, animateHibernateCost);
         }
     }
 
