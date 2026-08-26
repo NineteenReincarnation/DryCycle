@@ -332,12 +332,14 @@ internal static class ThirstMeter
 
         float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
 
-        // Hydration visibility is tied to the FoodMeter as a whole rather than
-        // the food-fill sprite, because the fill sprite can fade during eating.
-        // Size follows the animated OUTER circle. Scale the inset with that
-        // circle too, matching vanilla's own quarter-pip scale behavior instead
-        // of leaving a fixed-pixel gap while the circle pops larger/smaller.
-        float alpha = Mathf.Clamp01(self.meter.fade) * FillAlpha;
+        // Follow the vanilla OUTER pip for reveal/fade/size, but never the food
+        // fill layer. This keeps water present during food restore animations
+        // while still respecting per-pip InitPlop, sleep fade and menu scrolling.
+        float outerFade = Mathf.Lerp(
+            self.circles[0].lastFade,
+            self.circles[0].fade,
+            timeStacker);
+        float alpha = Mathf.Clamp01(outerFade) * FillAlpha;
         float animatedOuterRadius = Mathf.Lerp(
             self.circles[0].lastRad,
             self.circles[0].rad,
