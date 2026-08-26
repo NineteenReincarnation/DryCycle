@@ -16,33 +16,94 @@ internal static class ThirstStore
         public float Water = ThirstConstants.MaxWater;
     }
 
+    private sealed class RuntimeHydration
+    {
+        public RuntimeHydration()
+        {
+        }
+
+        public bool Initialized;
+        public float Water = ThirstConstants.MaxWater;
+    }
+
     private static readonly ConditionalWeakTable<Player, ThirstState> PlayerStates = new();
     private static readonly ConditionalWeakTable<SaveState, SaveHydration> SaveStates = new();
+    private static readonly ConditionalWeakTable<RainWorldGame, RuntimeHydration> RuntimeStates = new();
 
     public static ThirstState For(Player player)
     {
+        float sharedWater = GetRuntimeWaterForPlayer(player);
+
         if (PlayerStates.TryGetValue(player, out ThirstState existing))
         {
+            if (Math.Abs(existing.Water - sharedWater) > 0.0001f)
+            {
+                existing.Set(sharedWater);
+            }
+
             return existing;
         }
 
-        float initial = ThirstConstants.MaxWater;
-        RainWorldGame game = player?.room?.game ?? player?.abstractCreature?.world?.game;
-
-        // A realized Player can temporarily have room == null while moving
-        // through a shortcut. If a hydration state is first requested during
-        // that window, fall back to the abstract creature's world instead of
-        // incorrectly initializing the player at full water.
-        if (game != null && game.IsStorySession)
-        {
-            initial = GetSaved(game.GetStorySession.saveState);
-        }
-
         ThirstState created = new();
-        created.Set(initial);
+        created.Set(sharedWater);
         created.LastWater = created.Water;
         PlayerStates.Add(player, created);
         return created;
+    }
+
+    public static bool AddRuntime(Player player, float amount)
+    {
+        if (player == null || amount <= 0f)
+        {
+            return false;
+        }
+
+        ThirstState sourceState = For(player);
+        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
+
+        if (game == null || !game.IsStorySession)
+        {
+            float before = sourceState.Water;
+            sourceState.Add(amount);
+            return sourceState.Water > before + 0.0001f;
+        }
+
+        RuntimeHydration runtime = RuntimeStates.GetOrCreateValue(game);
+        if (!runtime.Initialized)
+        {
+            runtime.Water = GetSaved(game.GetStorySession.saveState);
+            runtime.Initialized = true;
+        }
+
+        float previous = runtime.Water;
+        float next = Clamp(previous + amount);
+
+        if (next <= previous + 0.0001f)
+        {
+            return false;
+        }
+
+        runtime.Water = next;
+        SyncRealizedPlayers(game, next);
+        return true;
+    }
+
+    public static float GetRuntimeWater(RainWorldGame game, SaveState fallbackSaveState)
+    {
+        if (game == null || !game.IsStorySession)
+        {
+            return GetSaved(fallbackSaveState);
+        }
+
+        RuntimeHydration runtime = RuntimeStates.GetOrCreateValue(game);
+        if (!runtime.Initialized)
+        {
+            SaveState saveState = game.GetStorySession?.saveState ?? fallbackSaveState;
+            runtime.Water = GetSaved(saveState);
+            runtime.Initialized = true;
+        }
+
+        return runtime.Water;
     }
 
     public static float GetSaved(SaveState saveState)
@@ -137,6 +198,43 @@ internal static class ThirstStore
 
         saveState.unrecognizedSaveStrings.Add(
             prefix + GetSaved(saveState).ToString("0.###", CultureInfo.InvariantCulture));
+    }
+
+    private static float GetRuntimeWaterForPlayer(Player player)
+    {
+        if (player == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
+        if (game != null && game.IsStorySession)
+        {
+            return GetRuntimeWater(game, game.GetStorySession.saveState);
+        }
+
+        return ThirstConstants.MaxWater;
+    }
+
+    private static void SyncRealizedPlayers(RainWorldGame game, float water)
+    {
+        if (game?.Players == null)
+        {
+            return;
+        }
+
+        foreach (AbstractCreature abstractPlayer in game.Players)
+        {
+            if (abstractPlayer?.realizedCreature is not Player player || player.isNPC)
+            {
+                continue;
+            }
+
+            if (PlayerStates.TryGetValue(player, out ThirstState state))
+            {
+                state.Set(water);
+            }
+        }
     }
 
     private static float ReadValueFromEntries(System.Collections.Generic.List<string> entries)
