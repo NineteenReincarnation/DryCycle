@@ -88,6 +88,7 @@ internal static class ThirstMeter
         On.HUD.FoodMeter.Update += FoodMeter_Update;
         On.HUD.FoodMeter.MeterCircle.AddCircles += MeterCircle_AddCircles;
         On.HUD.FoodMeter.MeterCircle.Draw += MeterCircle_Draw;
+        On.HUD.FoodMeter.MeterCircle.ClearSprites += MeterCircle_ClearSprites;
         On.HUD.FoodMeter.QuarterPipShower.Draw += QuarterPipShower_Draw;
     }
 
@@ -102,6 +103,7 @@ internal static class ThirstMeter
         On.HUD.FoodMeter.Update -= FoodMeter_Update;
         On.HUD.FoodMeter.MeterCircle.AddCircles -= MeterCircle_AddCircles;
         On.HUD.FoodMeter.MeterCircle.Draw -= MeterCircle_Draw;
+        On.HUD.FoodMeter.MeterCircle.ClearSprites -= MeterCircle_ClearSprites;
         On.HUD.FoodMeter.QuarterPipShower.Draw -= QuarterPipShower_Draw;
     }
 
@@ -154,12 +156,29 @@ internal static class ThirstMeter
         state.WaveStrength = 0f;
     }
 
+    public static void ShowHydrationGain(Player player)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        player.showKarmaFoodRainTime = Mathf.Max(
+            player.showKarmaFoodRainTime,
+            ThirstConstants.HydrationGainHudHoldFrames);
+    }
+
     public static void TryReject(Player player)
     {
-        if (player != null)
+        if (player == null)
         {
-            RejectStates.GetOrCreateValue(player).Counter = 55;
+            return;
         }
+
+        RejectStates.GetOrCreateValue(player).Counter = ThirstConstants.RejectHudHoldFrames;
+        player.showKarmaFoodRainTime = Mathf.Max(
+            player.showKarmaFoodRainTime,
+            ThirstConstants.RejectHudHoldFrames);
     }
 
     private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
@@ -270,6 +289,19 @@ internal static class ThirstMeter
         EnsureFill(self);
     }
 
+    private static void MeterCircle_ClearSprites(
+        On.HUD.FoodMeter.MeterCircle.orig_ClearSprites orig,
+        global::HUD.FoodMeter.MeterCircle self)
+    {
+        if (self != null && CircleFills.TryGetValue(self, out WaterFill fill))
+        {
+            fill.Mesh?.RemoveFromContainer();
+            CircleFills.Remove(self);
+        }
+
+        orig(self);
+    }
+
     private static void MeterCircle_Draw(
         On.HUD.FoodMeter.MeterCircle.orig_Draw orig,
         global::HUD.FoodMeter.MeterCircle self,
@@ -300,16 +332,23 @@ internal static class ThirstMeter
 
         float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
 
-        // Hydration visibility stays independent from the vanilla food-fill
-        // sprite, because that layer can fade during a food restore animation.
-        // The material size, however, follows the animated OUTER food circle so
-        // the cyan fill expands and settles with Rain World's native pip pop.
+        // Hydration visibility is tied to the FoodMeter as a whole rather than
+        // the food-fill sprite, because the fill sprite can fade during eating.
+        // Size follows the animated OUTER circle. Scale the inset with that
+        // circle too, matching vanilla's own quarter-pip scale behavior instead
+        // of leaving a fixed-pixel gap while the circle pops larger/smaller.
         float alpha = Mathf.Clamp01(self.meter.fade) * FillAlpha;
         float animatedOuterRadius = Mathf.Lerp(
             self.circles[0].lastRad,
             self.circles[0].rad,
             timeStacker);
-        float radius = Mathf.Max(0f, animatedOuterRadius - FillRadiusInset);
+        float snapRadius = self.circles[0].snapRad;
+        float radiusScale = snapRadius > 0.001f
+            ? animatedOuterRadius / snapRadius
+            : 0f;
+        float radius = Mathf.Max(
+            0f,
+            (snapRadius - FillRadiusInset) * radiusScale);
 
         if (alpha <= 0.001f ||
             waterLevel <= 0.001f ||
@@ -340,9 +379,6 @@ internal static class ThirstMeter
         fill.Mesh.alpha = alpha;
         fill.Mesh.isVisible = true;
 
-        // Water remains behind every vanilla food graphic. It follows only the
-        // outer circle's radius animation and never inherits the food-fill
-        // sprite's temporary alpha/visibility changes.
         fill.Mesh.MoveBehindOtherNode(self.circles[1].sprite);
         self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
@@ -445,11 +481,6 @@ internal static class ThirstMeter
     {
         game = player?.room?.game;
 
-        // A realized player temporarily has room == null while travelling
-        // through a shortcut between rooms. The HUD itself stays alive and can
-        // remain visible during that transition, so use the abstract creature's
-        // world as the stable game reference instead of treating room == null as
-        // "not in gameplay" and hiding DryCycle's water layer.
         if (game == null)
         {
             game = player?.abstractCreature?.world?.game;
