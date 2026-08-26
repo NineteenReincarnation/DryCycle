@@ -165,8 +165,10 @@ internal static class ThirstHooks
 
             if (normalAttempt && !starvationAttempt && !waterEnough)
             {
+                // ReadyForWinJolly is a computed/read-only property in the current game API.
+                // Clearing the underlying local ready flag and input counter is sufficient to
+                // reject the close attempt without assigning to the Jolly property itself.
                 player.readyForWin = false;
-                player.ReadyForWinJolly = false;
                 player.touchedNoInputCounter = 0;
                 ThirstMeter.TryReject(player);
                 return;
