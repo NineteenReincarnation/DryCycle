@@ -79,18 +79,6 @@ internal static class ThirstHooks
                               self.bodyChunks[0].submersion > 0.9f &&
                               self.bodyChunks[1].submersion > 0.9f;
 
-        // Reuse Rain World's own lower-left HUD reveal animation while the
-        // player is underwater. showKarmaFoodRainTime is the vanilla trigger
-        // used by HUD.HUD to reveal the karma icon, food meter and rain-cycle
-        // timer together, so this keeps DryCycle's embedded hydration visible
-        // without forcing individual HUD-part fade values.
-        if (!self.dead && fullySubmerged)
-        {
-            self.showKarmaFoodRainTime = Math.Max(
-                self.showKarmaFoodRainTime,
-                ThirstConstants.UnderwaterHudHoldFrames);
-        }
-
         if (self.dead || !self.Consious || self.input == null || self.input.Length == 0)
         {
             state.IsDrinking = false;
@@ -107,6 +95,13 @@ internal static class ThirstHooks
 
         if (wantsToDrink)
         {
+            // Only active hydration replenishment forces the lower-left HUD to
+            // reveal. Rain World handles the actual karma/food/rain fade, so
+            // DryCycle's embedded water stays synchronized with the vanilla HUD.
+            self.showKarmaFoodRainTime = Math.Max(
+                self.showKarmaFoodRainTime,
+                ThirstConstants.UnderwaterHudHoldFrames);
+
             state.Add(ThirstConstants.DrinkPerTick);
         }
     }
@@ -215,9 +210,6 @@ internal static class ThirstHooks
     {
         float currentWater = GetCurrentWater(game, self);
 
-        // SessionEnded can serialize from inside vanilla code, so calculate the
-        // next-cycle value before orig. Normal sleep consumes 3 hydration;
-        // starvation sleep consumes all remaining hydration.
         if (survived)
         {
             float nextCycleWater = newMalnourished
@@ -240,8 +232,6 @@ internal static class ThirstHooks
             self.food = 0;
         }
 
-        // Vanilla may rebuild unrecognizedSaveStrings while ending the session,
-        // so write the already-calculated hydration value once more afterwards.
         ThirstStore.WriteToUnrecognizedData(self);
     }
 
@@ -252,8 +242,6 @@ internal static class ThirstHooks
     {
         orig(self, package);
 
-        // The sleep/starve screen already owns a vanilla FoodMeter. Configure
-        // its hydration material rather than adding a second HUD row.
         if ((self.IsSleepScreen || self.IsStarveScreen) &&
             self.hud?.foodMeter != null &&
             package?.saveState != null)
@@ -286,8 +274,6 @@ internal static class ThirstHooks
             menu.manager.rainWorld.progression,
             slugcatNumber);
 
-        // Character select also reuses the existing food circles; no extra
-        // hydration row is created beside the food meter anymore.
         ThirstMeter.ConfigureCharacterSelect(self.hud.foodMeter, water);
     }
 
