@@ -27,9 +27,15 @@ internal static class ThirstStore
         }
 
         float initial = ThirstConstants.MaxWater;
-        if (player.room?.game != null && player.room.game.IsStorySession)
+        RainWorldGame game = player?.room?.game ?? player?.abstractCreature?.world?.game;
+
+        // A realized Player can temporarily have room == null while moving
+        // through a shortcut. If a hydration state is first requested during
+        // that window, fall back to the abstract creature's world instead of
+        // incorrectly initializing the player at full water.
+        if (game != null && game.IsStorySession)
         {
-            initial = GetSaved(player.room.game.GetStorySession.saveState);
+            initial = GetSaved(game.GetStorySession.saveState);
         }
 
         ThirstState created = new();
