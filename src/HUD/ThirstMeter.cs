@@ -184,8 +184,8 @@ internal static class ThirstMeter
         }
 
         if (self?.hud?.owner is Player player &&
-            player.room?.game != null &&
-            player.room.game.IsStorySession &&
+            TryGetPlayerGame(player, out RainWorldGame game) &&
+            game.IsStorySession &&
             !player.isSlugpup)
         {
             UpdateGameplayAnimation(self, player);
@@ -414,8 +414,8 @@ internal static class ThirstMeter
         }
 
         if (meter.hud?.owner is Player player &&
-            player.room?.game != null &&
-            player.room.game.IsStorySession &&
+            TryGetPlayerGame(player, out RainWorldGame game) &&
+            game.IsStorySession &&
             !player.isSlugpup)
         {
             MeterState state = MeterStates.GetOrCreateValue(meter);
@@ -439,6 +439,23 @@ internal static class ThirstMeter
         }
 
         return false;
+    }
+
+    private static bool TryGetPlayerGame(Player player, out RainWorldGame game)
+    {
+        game = player?.room?.game;
+
+        // A realized player temporarily has room == null while travelling
+        // through a shortcut between rooms. The HUD itself stays alive and can
+        // remain visible during that transition, so use the abstract creature's
+        // world as the stable game reference instead of treating room == null as
+        // "not in gameplay" and hiding DryCycle's water layer.
+        if (game == null)
+        {
+            game = player?.abstractCreature?.world?.game;
+        }
+
+        return game != null;
     }
 
     private static float GetPipWaterLevel(float totalWater, int pipNumber, bool continuousFill)
