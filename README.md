@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.15**.
+Current version: **0.0.16**.
 
 ## Versioning
 
@@ -19,6 +19,7 @@ Examples:
 0.0.13 -> 0.0.14
 0.0.14 -> 0.0.15
 0.0.15 -> 0.0.16
+0.0.16 -> 0.0.17
 ```
 
 The patch number does not roll over at 9 during normal development updates.
@@ -34,7 +35,7 @@ The patch number does not roll over at 9 during normal development updates.
 - Example: hydration `2.5` renders as `full, full, half, empty, empty`; hydration `4.5` renders as `full, full, full, full, half`.
 - Vanilla food graphics remain on top of the hydration material, including quarter-food states, so one circle can independently show food in quarters and water in halves as in the `Thirsty.png` design reference.
 - **Hydration visibility is independent from the vanilla food-fill animation.** Eating can fade or rebuild the food-fill sprite without making the cyan water disappear.
-- **Hydration size follows the vanilla outer food-circle animation.** The inset now scales proportionally with the original outer-circle radius, so the cyan material expands and settles with the same pop animation instead of keeping a fixed-pixel border during scaling.
+- **Hydration size follows the vanilla outer food-circle animation.** The inset scales proportionally with the original outer-circle radius, so the cyan material expands and settles with the same pop animation instead of keeping a fixed-pixel border during scaling.
 - **Hydration remains available during shortcut/pipe room transitions.** Both the HUD renderer and hydration-state initialization fall back to `player.abstractCreature.world.game` while the realized player's `room` is temporarily `null`.
 - Drinking is explicitly disabled while `player.inShortcut` is true, preventing stale underwater/submersion values from continuing hydration gain or wave animation inside a transition pipe.
 - Custom hydration meshes are removed when the vanilla `FoodMeter.MeterCircle` clears its sprites, preventing leftover cyan meshes when HUDs or character-select pages are destroyed and recreated.
@@ -42,11 +43,14 @@ The patch number does not roll over at 9 during normal development updates.
 - Large hydration gains from food also use the rising-water animation instead of appearing instantly.
 - One-shot hydration gains reveal the vanilla lower-left HUD even if the vanilla food count did not change, such as eating hydrating food while the stomach is already full.
 - A failed hibernation attempt caused by insufficient hydration also reveals the lower-left HUD so the red rejection flash is visible.
-- Vanilla `ObjectEaten` interactions whose nourishment result is `-1` no longer grant hydration, matching Rain World's own early-return/invalid-food behavior.
-- **Watcher spinning-top/warp saves preserve hydration.** Rain World v1.11.8 calls `SaveState.SessionEnded(survived: true)` for these special transitions while deliberately skipping the normal food sleep drain; DryCycle now mirrors that behavior, does not charge the 3-point hydration hibernation cost, and suppresses the sleep-screen hydration drain animation for that special save path.
+- Vanilla `ObjectEaten` interactions whose nourishment result is `-1` do not grant hydration, matching Rain World's own early-return/invalid-food behavior.
+- **Watcher spinning-top/warp saves preserve hydration.** Rain World v1.11.8 calls `SaveState.SessionEnded(survived: true)` for these special transitions while deliberately skipping the normal food sleep drain; DryCycle mirrors that behavior, does not charge the 3-point hydration hibernation cost, and suppresses the sleep-screen hydration drain animation for that special save path.
+- **Jolly story co-op is supported with one shared hydration pool.** All human co-op players read and modify the same `0..5` water amount, matching the single shared vanilla story food HUD. Any human player can drink or gain hydration from food, and the shared lower-left HUD is revealed so the gain animation remains visible.
+- Human Jolly players using the pup option are included in the shared hydration system; NPC slugpups remain excluded and keep their vanilla pup food meters unchanged.
+- In Jolly co-op, normal shelter closure requires the party's shared hydration to meet the 3-point requirement. Starvation sleep remains allowed through the vanilla Jolly starvation path, and a successful normal hibernation charges the 3-point hydration cost exactly once for the party.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
 - On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
-- The vanilla lower-left HUD cluster is forced open while the player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
+- The vanilla lower-left HUD cluster is forced open while any human player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
@@ -113,4 +117,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. Jolly story co-op uses one shared runtime hydration pool for all human players while preserving the existing single save value and shared story HUD. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
