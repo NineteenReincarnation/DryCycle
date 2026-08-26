@@ -86,18 +86,21 @@ internal static class ThirstHooks
         }
 
         bool breathBarActive = self.airInLungs < 0.999f;
-        bool wantsToDrink = self.input[0].pckp &&
+        bool wantsToDrink = self.room != null &&
+                            !self.inShortcut &&
+                            self.input[0].pckp &&
                             fullySubmerged &&
                             breathBarActive &&
                             state.Water < ThirstConstants.MaxWater;
 
+        // Shortcut travel can leave the previous room's submersion values on a
+        // realized Player for a short time. Explicitly requiring a realized room
+        // and !inShortcut prevents drinking/wave animation from continuing while
+        // the player is actually inside a room-transition pipe.
         state.IsDrinking = wantsToDrink;
 
         if (wantsToDrink)
         {
-            // Only active hydration replenishment forces the lower-left HUD to
-            // reveal. Rain World handles the actual karma/food/rain fade, so
-            // DryCycle's embedded water stays synchronized with the vanilla HUD.
             self.showKarmaFoodRainTime = Math.Max(
                 self.showKarmaFoodRainTime,
                 ThirstConstants.UnderwaterHudHoldFrames);
@@ -109,11 +112,17 @@ internal static class ThirstHooks
     private static void Player_ObjectEaten(On.Player.orig_ObjectEaten orig, Player self, IPlayerEdible edible)
     {
         float water = FoodWaterTable.ForEdible(edible);
+        bool nourishmentAllowed = edible != null &&
+                                  SlugcatStats.NourishmentOfObjectEaten(self.SlugCatClass, edible) != -1;
+
         orig(self, edible);
 
-        if (water > 0f && IsStoryPlayer(self))
+        // Vanilla uses nourishment == -1 for special/invalid food interactions
+        // that return before actually feeding the player. Do not grant hydration
+        // for those cases just because ObjectEaten was entered.
+        if (water > 0f && nourishmentAllowed)
         {
-            ThirstStore.For(self).Add(water);
+            AddHydration(self, water);
         }
     }
 
@@ -161,7 +170,7 @@ internal static class ThirstHooks
         }
 
         int totalMeat = Math.Max(1, MeatStates.GetOrCreateValue(creature).InitialMeat);
-        ThirstStore.For(self).Add(totalWater * consumed / totalMeat);
+        AddHydration(self, totalWater * consumed / totalMeat);
     }
 
     private static void ShelterDoor_Close(On.ShelterDoor.orig_Close orig, ShelterDoor self)
@@ -277,6 +286,27 @@ internal static class ThirstHooks
         ThirstMeter.ConfigureCharacterSelect(self.hud.foodMeter, water);
     }
 
+    private static void AddHydration(Player player, float amount)
+    {
+        if (amount <= 0f || !IsStoryPlayer(player))
+        {
+            return;
+        }
+
+        ThirstState state = ThirstStore.For(player);
+        float before = state.Water;
+        state.Add(amount);
+
+        if (state.Water > before + 0.0001f)
+        {
+            // Food can restore water while the vanilla food meter itself does
+            // not change (for example when the stomach is already full). Reveal
+            // the lower-left cluster so the hydration gain animation is still
+            // visible in those cases.
+            ThirstMeter.ShowHydrationGain(player);
+        }
+    }
+
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
     {
         if (game?.Players != null)
@@ -315,8 +345,12 @@ internal static class ThirstHooks
 
     private static bool IsStoryPlayer(Player player)
     {
-        return player?.room?.game != null &&
-               player.room.game.IsStorySession &&
-               !player.isSlugpup;
+        if (player == null || player.isSlugpup)
+        {
+            return false;
+        }
+
+        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
+        return game != null && game.IsStorySession;
     }
 }
