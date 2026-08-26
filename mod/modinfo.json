@@ -1,0 +1,11 @@
+{
+  "id": "nineteenreincarnation.drycycle",
+  "name": "DryCycle",
+  "version": "0.1.0",
+  "authors": "NineteenReincarnation",
+  "description": "Adds survival mechanics centered on hydration and environmental temperature.",
+  "requirements": [],
+  "requirements_names": [],
+  "tags": [],
+  "checksum_override_version": false
+}
