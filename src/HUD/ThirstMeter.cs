@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DryCycle.Thirst;
+using Menu;
 using UnityEngine;
 
 namespace DryCycle.HUD;
@@ -22,21 +23,52 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
     private readonly Player _player;
     private readonly SaveState _saveState;
+    private readonly SleepAndDeathScreen _sleepScreen;
     private readonly global::HUD.HUDCircle[] _outer = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
     private readonly global::HUD.HUDCircle[] _inner = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
     private readonly FSprite _separator;
 
+    private float _displayWater;
+    private float _sleepTargetWater;
+    private int _sleepConsumePips;
+    private int _sleepConsumeDelay;
     private float _fade;
     private float _lastWater;
     private int _visibleCounter;
     private int _rejectCounter;
 
-    private ThirstMeter(global::HUD.HUD hud, Player player, SaveState saveState)
+    private ThirstMeter(
+        global::HUD.HUD hud,
+        Player player,
+        SaveState saveState,
+        SleepAndDeathScreen sleepScreen,
+        bool animateHibernateCost)
         : base(hud)
     {
         _player = player;
         _saveState = saveState;
-        _lastWater = CurrentWater;
+        _sleepScreen = sleepScreen;
+
+        if (_player != null)
+        {
+            _displayWater = ThirstStore.For(_player).Water;
+        }
+        else
+        {
+            _sleepTargetWater = ThirstStore.GetSaved(_saveState);
+            _displayWater = _sleepTargetWater;
+
+            if (animateHibernateCost)
+            {
+                _displayWater = Mathf.Min(
+                    ThirstConstants.MaxWater,
+                    _sleepTargetWater + ThirstConstants.HibernateCost);
+                _sleepConsumePips = (int)ThirstConstants.HibernateCost;
+                _sleepConsumeDelay = 65;
+            }
+        }
+
+        _lastWater = _displayWater;
         _visibleCounter = 200;
 
         for (int i = 0; i < _outer.Length; i++)
@@ -72,10 +104,6 @@ internal sealed class ThirstMeter : global::HUD.HudPart
         hud.fContainers[1].AddChild(_separator);
     }
 
-    private float CurrentWater => _player != null
-        ? ThirstStore.For(_player).Water
-        : ThirstStore.GetSaved(_saveState);
-
     public static void Attach(global::HUD.HUD hud, Player player)
     {
         if (hud == null || player == null || HudMeters.TryGetValue(hud, out _))
@@ -83,20 +111,24 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             return;
         }
 
-        ThirstMeter meter = new(hud, player, null);
+        ThirstMeter meter = new(hud, player, null, null, false);
         HudMeters.Add(hud, meter);
         PlayerMeters.GetOrCreateValue(player).Meter = meter;
         hud.AddPart(meter);
     }
 
-    public static void Attach(global::HUD.HUD hud, SaveState saveState)
+    public static void Attach(
+        global::HUD.HUD hud,
+        SaveState saveState,
+        SleepAndDeathScreen sleepScreen,
+        bool animateHibernateCost)
     {
         if (hud == null || saveState == null || HudMeters.TryGetValue(hud, out _))
         {
             return;
         }
 
-        ThirstMeter meter = new(hud, null, saveState);
+        ThirstMeter meter = new(hud, null, saveState, sleepScreen, animateHibernateCost);
         HudMeters.Add(hud, meter);
         hud.AddPart(meter);
     }
@@ -116,8 +148,32 @@ internal sealed class ThirstMeter : global::HUD.HudPart
     {
         base.Update();
 
-        float water = CurrentWater;
-        bool isDrinking = _player != null && ThirstStore.For(_player).IsDrinking;
+        bool isDrinking = false;
+
+        if (_player != null)
+        {
+            ThirstState state = ThirstStore.For(_player);
+            _displayWater = state.Water;
+            isDrinking = state.IsDrinking;
+        }
+        else if (_sleepConsumePips > 0 &&
+                 (_sleepScreen == null || _sleepScreen.AllowFoodMeterTick))
+        {
+            _sleepConsumeDelay--;
+            if (_sleepConsumeDelay <= 0)
+            {
+                _displayWater = Mathf.Max(_sleepTargetWater, _displayWater - 1f);
+                _sleepConsumePips--;
+                _sleepConsumeDelay = 40;
+                hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+            }
+        }
+        else if (_player == null && _sleepConsumePips <= 0)
+        {
+            _displayWater = _sleepTargetWater;
+        }
+
+        float water = _displayWater;
 
         if (Mathf.Abs(water - _lastWater) > 0.0001f)
         {
@@ -172,8 +228,8 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             _inner[i].forceColor = color;
         }
 
-        // Match the food-meter convention: 3 ordinary reserve pips | 2 pips
-        // that a normal hibernation consumes.
+        // Five pips are shown as 3 | 2. A successful normal hibernation
+        // removes the two pips on the right side of this divider.
         _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
         _separator.y = origin.y;
         _separator.color = color;
