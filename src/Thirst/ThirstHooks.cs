@@ -8,6 +8,10 @@ internal static class ThirstHooks
 {
     private sealed class MeatHydrationState
     {
+        public MeatHydrationState()
+        {
+        }
+
         public int InitialMeat;
     }
 
@@ -202,7 +206,6 @@ internal static class ThirstHooks
 
         if (newMalnourished)
         {
-            // Starvation hibernation consumes everything that remains.
             self.food = 0;
         }
 
