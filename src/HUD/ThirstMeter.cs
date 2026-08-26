@@ -156,16 +156,14 @@ internal static class ThirstMeter
         state.WaveStrength = 0f;
     }
 
+    public static void ShowDrinking(Player player)
+    {
+        ShowHudForPlayers(player, ThirstConstants.UnderwaterHudHoldFrames);
+    }
+
     public static void ShowHydrationGain(Player player)
     {
-        if (player == null)
-        {
-            return;
-        }
-
-        player.showKarmaFoodRainTime = Mathf.Max(
-            player.showKarmaFoodRainTime,
-            ThirstConstants.HydrationGainHudHoldFrames);
+        ShowHudForPlayers(player, ThirstConstants.HydrationGainHudHoldFrames);
     }
 
     public static void TryReject(Player player)
@@ -176,9 +174,34 @@ internal static class ThirstMeter
         }
 
         RejectStates.GetOrCreateValue(player).Counter = ThirstConstants.RejectHudHoldFrames;
-        player.showKarmaFoodRainTime = Mathf.Max(
-            player.showKarmaFoodRainTime,
-            ThirstConstants.RejectHudHoldFrames);
+        ShowHudForPlayers(player, ThirstConstants.RejectHudHoldFrames);
+    }
+
+    private static void ShowHudForPlayers(Player source, int holdFrames)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        if (TryGetPlayerGame(source, out RainWorldGame game) &&
+            game.IsStorySession &&
+            game.Players != null)
+        {
+            foreach (AbstractCreature abstractPlayer in game.Players)
+            {
+                if (abstractPlayer?.realizedCreature is Player player && !player.isNPC)
+                {
+                    player.showKarmaFoodRainTime = Mathf.Max(
+                        player.showKarmaFoodRainTime,
+                        holdFrames);
+                }
+            }
+
+            return;
+        }
+
+        source.showKarmaFoodRainTime = Mathf.Max(source.showKarmaFoodRainTime, holdFrames);
     }
 
     private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
@@ -205,7 +228,7 @@ internal static class ThirstMeter
         if (self?.hud?.owner is Player player &&
             TryGetPlayerGame(player, out RainWorldGame game) &&
             game.IsStorySession &&
-            !player.isSlugpup)
+            !player.isNPC)
         {
             UpdateGameplayAnimation(self, player);
 
@@ -454,7 +477,7 @@ internal static class ThirstMeter
         if (meter.hud?.owner is Player player &&
             TryGetPlayerGame(player, out RainWorldGame game) &&
             game.IsStorySession &&
-            !player.isSlugpup)
+            !player.isNPC)
         {
             MeterState state = MeterStates.GetOrCreateValue(meter);
             ThirstState thirst = ThirstStore.For(player);
