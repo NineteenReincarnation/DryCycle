@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.16**.
+Current version: **0.0.17**.
 
 ## Versioning
 
@@ -20,13 +20,14 @@ Examples:
 0.0.14 -> 0.0.15
 0.0.15 -> 0.0.16
 0.0.16 -> 0.0.17
+0.0.17 -> 0.0.18
 ```
 
 The patch number does not roll over at 9 during normal development updates.
 
 ## Current feature: hydration
 
-- Hydration is a global **0..5** resource.
+- Hydration is a **0..5** resource for each player.
 - Normal hibernation requires at least **3 hydration** and consumes **3 hydration**.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
 - DryCycle does not draw a separate hydration bar.
@@ -45,16 +46,19 @@ The patch number does not roll over at 9 during normal development updates.
 - A failed hibernation attempt caused by insufficient hydration also reveals the lower-left HUD so the red rejection flash is visible.
 - Vanilla `ObjectEaten` interactions whose nourishment result is `-1` do not grant hydration, matching Rain World's own early-return/invalid-food behavior.
 - **Watcher spinning-top/warp saves preserve hydration.** Rain World v1.11.8 calls `SaveState.SessionEnded(survived: true)` for these special transitions while deliberately skipping the normal food sleep drain; DryCycle mirrors that behavior, does not charge the 3-point hydration hibernation cost, and suppresses the sleep-screen hydration drain animation for that special save path.
-- **Jolly story co-op is supported with one shared hydration pool.** All human co-op players read and modify the same `0..5` water amount, matching the single shared vanilla story food HUD. Any human player can drink or gain hydration from food, and the shared lower-left HUD is revealed so the gain animation remains visible.
-- Human Jolly players using the pup option are included in the shared hydration system; NPC slugpups remain excluded and keep their vanilla pup food meters unchanged.
-- In Jolly co-op, normal shelter closure requires the party's shared hydration to meet the 3-point requirement. Starvation sleep remains allowed through the vanilla Jolly starvation path, and a successful normal hibernation charges the 3-point hydration cost exactly once for the party.
-- The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
+- **Jolly story co-op uses independent hydration for every human player.** P1, P2, P3 and P4 each have their own `0..5` water value. Drinking or eating hydrating food changes only the player who performed that action.
+- The vanilla Jolly camera changes `hud.owner` when focus moves between players. DryCycle follows that owner change and immediately swaps the embedded hydration display to the focused player's own water value instead of interpolating between players.
+- NPC slugpups remain excluded from DryCycle hydration and keep their vanilla pup food meters unchanged.
+- In Jolly co-op, a normal shelter close is rejected if any living player who is ready for normal hibernation has less than 3 hydration. Only the insufficient player loses their ready state and receives the rejection feedback. A successful normal hibernation subtracts 3 hydration from every player's own value independently.
+- Jolly starvation sleep remains on Rain World's vanilla starvation path. On a successful starvation cycle, each player's saved hydration is set to 0 independently.
+- Co-op hydration is saved per player number inside `SaveState.unrecognizedSaveStrings`. Player 0 keeps the existing `DRYCYCLETHIRSTV2<svB>` entry for solo-save compatibility; additional Jolly players use `DRYCYCLETHIRSTV2P1`, `DRYCYCLETHIRSTV2P2`, and so on.
+- The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page. The vanilla sleep/character-select screens only expose one FoodMeter, so those screens continue to display player 0's saved hydration; in gameplay the focused Jolly player is shown.
 - On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
-- The vanilla lower-left HUD cluster is forced open while any human player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
+- The vanilla lower-left HUD cluster is forced open while the currently focused player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
-- The five-unit format continues to use the `DRYCYCLETHIRSTV2` save key, so earlier five-unit hydration saves remain compatible.
+- Existing solo five-unit saves using `DRYCYCLETHIRSTV2` remain compatible. Co-op player slots that do not yet have a saved hydration entry start full at 5.
 
 Temperature mechanics are not implemented yet.
 
@@ -117,4 +121,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. Jolly story co-op uses one shared runtime hydration pool for all human players while preserving the existing single save value and shared story HUD. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. In Jolly story co-op, hydration is keyed by `PlayerState.playerNumber`; camera focus changes immediately swap the reused FoodMeter to the focused player's own hydration state. Sleep and character-select pages configure the existing food meter with player 0's saved hydration value rather than creating additional HUD circles.
