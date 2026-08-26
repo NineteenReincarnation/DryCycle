@@ -4,6 +4,10 @@ namespace DryCycle.Thirst;
 
 internal sealed class ThirstState
 {
+    public ThirstState()
+    {
+    }
+
     public float Water = ThirstConstants.MaxWater;
     public float LastWater = ThirstConstants.MaxWater;
     public bool IsDrinking;
