@@ -43,6 +43,7 @@ The patch number does not roll over at 9 during normal development updates.
 - One-shot hydration gains reveal the vanilla lower-left HUD even if the vanilla food count did not change, such as eating hydrating food while the stomach is already full.
 - A failed hibernation attempt caused by insufficient hydration also reveals the lower-left HUD so the red rejection flash is visible.
 - Vanilla `ObjectEaten` interactions whose nourishment result is `-1` no longer grant hydration, matching Rain World's own early-return/invalid-food behavior.
+- **Watcher spinning-top/warp saves preserve hydration.** Rain World v1.11.8 calls `SaveState.SessionEnded(survived: true)` for these special transitions while deliberately skipping the normal food sleep drain; DryCycle now mirrors that behavior, does not charge the 3-point hydration hibernation cost, and suppresses the sleep-screen hydration drain animation for that special save path.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
 - On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
 - The vanilla lower-left HUD cluster is forced open while the player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
