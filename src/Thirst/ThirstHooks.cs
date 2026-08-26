@@ -74,16 +74,28 @@ internal static class ThirstHooks
 
         ThirstState state = ThirstStore.For(self);
 
+        bool fullySubmerged = self.bodyChunks != null &&
+                              self.bodyChunks.Length >= 2 &&
+                              self.bodyChunks[0].submersion > 0.9f &&
+                              self.bodyChunks[1].submersion > 0.9f;
+
+        // Reuse Rain World's own lower-left HUD reveal animation while the
+        // player is underwater. showKarmaFoodRainTime is the vanilla trigger
+        // used by HUD.HUD to reveal the karma icon, food meter and rain-cycle
+        // timer together, so this keeps DryCycle's embedded hydration visible
+        // without forcing individual HUD-part fade values.
+        if (!self.dead && fullySubmerged)
+        {
+            self.showKarmaFoodRainTime = Math.Max(
+                self.showKarmaFoodRainTime,
+                ThirstConstants.UnderwaterHudHoldFrames);
+        }
+
         if (self.dead || !self.Consious || self.input == null || self.input.Length == 0)
         {
             state.IsDrinking = false;
             return;
         }
-
-        bool fullySubmerged = self.bodyChunks != null &&
-                              self.bodyChunks.Length >= 2 &&
-                              self.bodyChunks[0].submersion > 0.9f &&
-                              self.bodyChunks[1].submersion > 0.9f;
 
         bool breathBarActive = self.airInLungs < 0.999f;
         bool wantsToDrink = self.input[0].pckp &&
