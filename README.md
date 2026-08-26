@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.10**.
+Current version: **0.0.11**.
 
 ## Versioning
 
@@ -26,12 +26,14 @@ The patch number does not roll over at 9 during normal development updates.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
 - DryCycle does not draw a separate hydration bar.
 - Hydration is rendered as a **cyan liquid/material fill inside the vanilla food pips**.
-- Water is distributed from left to right across the first five food pips. Each pip has exactly three hydration states: **empty, half full, or full**.
+- Water is distributed from left to right across the first five food pips. At rest, each pip has exactly three hydration states: **empty, half full, or full**.
 - Example: hydration `2.5` renders as `full, full, half, empty, empty`; hydration `4.5` renders as `full, full, full, full, half`.
 - Vanilla food graphics remain on top of the hydration material, including quarter-food states, so one circle can independently show food in quarters and water in halves as in the `Thirsty.png` design reference.
+- While hydration is being replenished, the currently filling pip temporarily uses a **continuous rising liquid level with a moving wave surface**. When the refill animation settles, the display returns to the normal empty/half/full states.
+- Large hydration gains from food also use the rising-water animation instead of appearing instantly.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
 - On a normal sleep screen the embedded water amount animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
-- While fully submerged, DryCycle keeps Rain World's **vanilla lower-left HUD reveal trigger** active. This makes the karma icon, embedded food/hydration meter, and rain-cycle timer fade in together using the game's normal HUD animation. After surfacing, a short hold lets that same vanilla cluster fade away naturally.
+- The vanilla lower-left HUD cluster is forced open **only while the player is actively drinking**. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
@@ -98,4 +100,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. The water layer is calculated independently for each pip instead of applying one shared liquid height to the whole meter. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, while positive hydration changes animate upward with a moving wave before settling. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
