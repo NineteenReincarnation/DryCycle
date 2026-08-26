@@ -9,10 +9,11 @@ namespace DryCycle.HUD;
 /// <summary>
 /// Hydration renderer for the vanilla FoodMeter.
 ///
-/// DryCycle no longer creates a second row of HUD circles. Instead every
-/// vanilla food pip gets the same cyan liquid level behind its normal food
-/// graphics. The vanilla full/quarter-food graphics remain on top, so food and
-/// hydration can be read from the same circle as in the Thirsty.png design.
+/// DryCycle does not create a second row of HUD circles. Hydration is packed
+/// into the vanilla food pips themselves. Water is distributed from left to
+/// right across the food meter, and every food pip has three visual water
+/// states: empty, lower-half full, or completely full. Vanilla full/quarter
+/// food graphics stay on top of the cyan hydration material.
 /// </summary>
 internal static class ThirstMeter
 {
@@ -211,7 +212,10 @@ internal static class ThirstMeter
             return;
         }
 
-        float waterLevel = Mathf.Clamp01(water / ThirstConstants.MaxWater);
+        // Hydration is distributed pip-by-pip from left to right. Each pip is
+        // deliberately quantized to 0, 1/2, or 1 so water uses two halves while
+        // vanilla food continues to use its four quarter-pip states.
+        float waterLevel = GetPipWaterLevel(water, self.number);
         float alpha = self.circles[0].sprite.alpha * FillAlpha;
         float outerRadius = Mathf.Lerp(
             self.circles[0].lastRad,
@@ -326,6 +330,28 @@ internal static class ThirstMeter
         }
 
         return false;
+    }
+
+    private static float GetPipWaterLevel(float totalWater, int pipNumber)
+    {
+        if (pipNumber < 0 || pipNumber >= ThirstConstants.MaxPips)
+        {
+            return 0f;
+        }
+
+        float localWater = Mathf.Clamp01(totalWater - pipNumber);
+
+        if (localWater >= 0.999f)
+        {
+            return 1f;
+        }
+
+        if (localWater >= 0.5f)
+        {
+            return 0.5f;
+        }
+
+        return 0f;
     }
 
     private static void UpdateFillGeometry(
