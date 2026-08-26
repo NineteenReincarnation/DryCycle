@@ -37,6 +37,7 @@ internal static class ThirstHooks
         On.SaveState.SessionEnded += SaveState_SessionEnded;
         On.RoomCamera.FireUpSinglePlayerHUD += RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame += SleepAndDeathScreen_GetDataFromGame;
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor += SlugcatPageContinue_ctor;
     }
 
     public static void Disable()
@@ -57,6 +58,7 @@ internal static class ThirstHooks
         On.SaveState.SessionEnded -= SaveState_SessionEnded;
         On.RoomCamera.FireUpSinglePlayerHUD -= RoomCamera_FireUpSinglePlayerHUD;
         On.Menu.SleepAndDeathScreen.GetDataFromGame -= SleepAndDeathScreen_GetDataFromGame;
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.ctor -= SlugcatPageContinue_ctor;
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
@@ -199,9 +201,9 @@ internal static class ThirstHooks
     {
         float currentWater = GetCurrentWater(game, self);
 
-        // SessionEnded can serialize the save from inside vanilla code. Put the
-        // next-cycle hydration into the SaveState before orig so that any save
-        // performed there already contains the two-pip hibernation cost.
+        // SessionEnded can serialize from inside vanilla code, so calculate the
+        // next-cycle value before orig. Normal sleep consumes the three pips to
+        // the left of the divider; starvation consumes all remaining water.
         if (survived)
         {
             float nextCycleWater = newMalnourished
@@ -225,7 +227,7 @@ internal static class ThirstHooks
         }
 
         // Vanilla may rebuild unrecognizedSaveStrings while ending the session,
-        // so write the already-calculated value once more after orig as well.
+        // so write the already-calculated hydration value once more afterwards.
         ThirstStore.WriteToUnrecognizedData(self);
     }
 
@@ -249,8 +251,8 @@ internal static class ThirstHooks
     {
         orig(self, package);
 
-        // The sleep/starve screen owns its own HUD. Attach the same hydration
-        // meter after InitSleepHud has created the vanilla food meter.
+        // The sleep/starve screen owns a separate HUD. Attach hydration only
+        // after vanilla InitSleepHud has created and positioned its food meter.
         if ((self.IsSleepScreen || self.IsStarveScreen) &&
             self.hud != null &&
             package?.saveState != null)
@@ -258,6 +260,28 @@ internal static class ThirstHooks
             bool animateHibernateCost = self.IsSleepScreen && !self.goalMalnourished;
             ThirstMeter.Attach(self.hud, package.saveState, self, animateHibernateCost);
         }
+    }
+
+    private static void SlugcatPageContinue_ctor(
+        On.Menu.SlugcatSelectMenu.SlugcatPageContinue.orig_ctor orig,
+        SlugcatSelectMenu.SlugcatPageContinue self,
+        Menu.Menu menu,
+        MenuObject owner,
+        int pageIndex,
+        SlugcatStats.Name slugcatNumber)
+    {
+        orig(self, menu, owner, pageIndex, slugcatNumber);
+
+        if (self.hud == null || menu?.manager?.rainWorld?.progression == null)
+        {
+            return;
+        }
+
+        float water = ThirstStore.GetForCharacterSelect(
+            menu.manager.rainWorld.progression,
+            slugcatNumber);
+
+        ThirstMeter.AttachCharacterSelect(self.hud, water);
     }
 
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
