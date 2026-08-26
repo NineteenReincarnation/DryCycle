@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using DryCycle.Thirst;
 using Menu;
@@ -5,376 +6,361 @@ using UnityEngine;
 
 namespace DryCycle.HUD;
 
-internal sealed class ThirstMeter : global::HUD.HudPart
+/// <summary>
+/// Hydration renderer for the vanilla FoodMeter.
+///
+/// DryCycle no longer creates a second row of HUD circles. Instead every
+/// vanilla food pip gets the same cyan liquid level behind its normal food
+/// graphics. The vanilla full/quarter-food graphics remain on top, so food and
+/// hydration can be read from the same circle as in the Thirsty.png design.
+/// </summary>
+internal static class ThirstMeter
 {
-    private enum MeterMode
-    {
-        Gameplay,
-        SleepScreen,
-        CharacterSelect
-    }
+    private const int FillBands = 16;
+    private const float FillRadiusInset = 1.35f;
+    private const float FillAlpha = 0.9f;
 
-    private sealed class MeterLink
+    private static readonly Color WaterColor = new(0.03f, 0.9f, 0.95f);
+
+    private sealed class MeterState
     {
-        public MeterLink()
+        public MeterState()
         {
         }
 
-        public ThirstMeter Meter;
+        public bool UseFixedWater;
+        public float DisplayWater;
+        public float TargetWater;
+        public int SleepConsumeSteps;
+        public int SleepConsumeDelay;
+        public SleepAndDeathScreen SleepScreen;
     }
 
-    private static readonly ConditionalWeakTable<global::HUD.HUD, ThirstMeter> HudMeters = new();
-    private static readonly ConditionalWeakTable<Player, MeterLink> PlayerMeters = new();
-
-    private static readonly Color WaterColor = new(0.25f, 0.95f, 1f);
-
-    private readonly MeterMode _mode;
-    private readonly Player _player;
-    private readonly SaveState _saveState;
-    private readonly SleepAndDeathScreen _sleepScreen;
-    private readonly global::HUD.HUDCircle[] _outer = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
-    private readonly global::HUD.HUDCircle[] _inner = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
-    private readonly FSprite _separator;
-
-    private float _displayWater;
-    private float _sleepTargetWater;
-    private int _sleepConsumePips;
-    private int _sleepConsumeDelay;
-    private float _fade;
-    private float _lastWater;
-    private int _visibleCounter;
-    private int _rejectCounter;
-
-    private ThirstMeter(
-        global::HUD.HUD hud,
-        MeterMode mode,
-        Player player,
-        SaveState saveState,
-        SleepAndDeathScreen sleepScreen,
-        float fixedWater,
-        bool animateHibernateCost)
-        : base(hud)
+    private sealed class RejectState
     {
-        _mode = mode;
-        _player = player;
-        _saveState = saveState;
-        _sleepScreen = sleepScreen;
-
-        switch (_mode)
+        public RejectState()
         {
-            case MeterMode.Gameplay:
-                _displayWater = ThirstStore.For(_player).Water;
-                break;
-
-            case MeterMode.SleepScreen:
-                _sleepTargetWater = ThirstStore.GetSaved(_saveState);
-                _displayWater = _sleepTargetWater;
-
-                if (animateHibernateCost)
-                {
-                    _displayWater = Mathf.Min(
-                        ThirstConstants.MaxWater,
-                        _sleepTargetWater + ThirstConstants.HibernateCost);
-                    _sleepConsumePips = (int)ThirstConstants.HibernateCost;
-                    _sleepConsumeDelay = 65;
-                }
-                break;
-
-            case MeterMode.CharacterSelect:
-                _displayWater = Mathf.Clamp(fixedWater, 0f, ThirstConstants.MaxWater);
-                break;
         }
 
-        _lastWater = _displayWater;
-        _visibleCounter = 200;
+        public int Counter;
+    }
 
-        for (int i = 0; i < _outer.Length; i++)
+    private sealed class WaterFill
+    {
+        public WaterFill(FContainer container)
         {
-            _outer[i] = new global::HUD.HUDCircle(
-                hud,
-                global::HUD.HUDCircle.SnapToGraphic.FoodCircleA,
-                hud.fContainers[1],
-                0)
+            Mesh = new TriangleMesh("Futile_White", BuildTriangles(), false)
             {
-                forceColor = WaterColor
+                color = WaterColor,
+                alpha = 0f,
+                isVisible = false
             };
 
-            _inner[i] = new global::HUD.HUDCircle(
-                hud,
-                global::HUD.HUDCircle.SnapToGraphic.FoodCircleB,
-                hud.fContainers[1],
-                0)
-            {
-                forceColor = WaterColor
-            };
+            container.AddChild(Mesh);
         }
 
-        _separator = new FSprite("pixel")
-        {
-            color = WaterColor,
-            anchorX = 0.5f,
-            anchorY = 0.5f,
-            scaleX = 1.5f,
-            scaleY = 34f,
-            alpha = 0f
-        };
-        hud.fContainers[1].AddChild(_separator);
+        public readonly TriangleMesh Mesh;
     }
 
-    public static void Attach(global::HUD.HUD hud, Player player)
+    private static readonly ConditionalWeakTable<global::HUD.FoodMeter, MeterState> MeterStates = new();
+    private static readonly ConditionalWeakTable<global::HUD.FoodMeter.MeterCircle, WaterFill> CircleFills = new();
+    private static readonly ConditionalWeakTable<Player, RejectState> RejectStates = new();
+
+    private static bool _enabled;
+
+    public static void Enable()
     {
-        if (hud == null || player == null || HudMeters.TryGetValue(hud, out _))
+        if (_enabled)
         {
             return;
         }
 
-        ThirstMeter meter = new(
-            hud,
-            MeterMode.Gameplay,
-            player,
-            null,
-            null,
-            0f,
-            false);
-
-        HudMeters.Add(hud, meter);
-        PlayerMeters.GetOrCreateValue(player).Meter = meter;
-        hud.AddPart(meter);
+        _enabled = true;
+        On.HUD.FoodMeter.Update += FoodMeter_Update;
+        On.HUD.FoodMeter.MeterCircle.AddCircles += MeterCircle_AddCircles;
+        On.HUD.FoodMeter.MeterCircle.Draw += MeterCircle_Draw;
+        On.HUD.FoodMeter.QuarterPipShower.Draw += QuarterPipShower_Draw;
     }
 
-    public static void Attach(
-        global::HUD.HUD hud,
+    public static void Disable()
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        _enabled = false;
+        On.HUD.FoodMeter.Update -= FoodMeter_Update;
+        On.HUD.FoodMeter.MeterCircle.AddCircles -= MeterCircle_AddCircles;
+        On.HUD.FoodMeter.MeterCircle.Draw -= MeterCircle_Draw;
+        On.HUD.FoodMeter.QuarterPipShower.Draw -= QuarterPipShower_Draw;
+    }
+
+    public static void ConfigureSleep(
+        global::HUD.FoodMeter meter,
         SaveState saveState,
-        SleepAndDeathScreen sleepScreen,
+        SleepAndDeathScreen screen,
         bool animateHibernateCost)
     {
-        if (hud == null || saveState == null || HudMeters.TryGetValue(hud, out _))
+        if (meter == null || saveState == null)
         {
             return;
         }
 
-        ThirstMeter meter = new(
-            hud,
-            MeterMode.SleepScreen,
-            null,
-            saveState,
-            sleepScreen,
-            0f,
-            animateHibernateCost);
+        MeterState state = MeterStates.GetOrCreateValue(meter);
+        state.UseFixedWater = true;
+        state.SleepScreen = screen;
+        state.TargetWater = ThirstStore.GetSaved(saveState);
+        state.DisplayWater = state.TargetWater;
+        state.SleepConsumeSteps = 0;
+        state.SleepConsumeDelay = 0;
 
-        HudMeters.Add(hud, meter);
-        hud.AddPart(meter);
+        if (animateHibernateCost)
+        {
+            state.DisplayWater = Mathf.Min(
+                ThirstConstants.MaxWater,
+                state.TargetWater + ThirstConstants.HibernateCost);
+
+            state.SleepConsumeSteps = Mathf.RoundToInt(
+                Mathf.Max(0f, state.DisplayWater - state.TargetWater));
+            state.SleepConsumeDelay = 65;
+        }
     }
 
-    public static void AttachCharacterSelect(global::HUD.HUD hud, float water)
+    public static void ConfigureCharacterSelect(global::HUD.FoodMeter meter, float water)
     {
-        if (hud == null || HudMeters.TryGetValue(hud, out _))
+        if (meter == null)
         {
             return;
         }
 
-        ThirstMeter meter = new(
-            hud,
-            MeterMode.CharacterSelect,
-            null,
-            null,
-            null,
-            water,
-            false);
-
-        HudMeters.Add(hud, meter);
-        hud.AddPart(meter);
-    }
-
-    public static void SyncCharacterSelect(global::HUD.HUD hud)
-    {
-        if (hud == null ||
-            !HudMeters.TryGetValue(hud, out ThirstMeter meter) ||
-            meter._mode != MeterMode.CharacterSelect)
-        {
-            return;
-        }
-
-        // SlugcatPageContinue updates the vanilla food position/fade after
-        // HUD.Update. Re-sync here from the page's Update hook so hydration has
-        // no one-frame lag while the character pages scroll.
-        meter._fade = hud.foodMeter?.fade ?? 0f;
-        meter.RefreshLayout();
+        MeterState state = MeterStates.GetOrCreateValue(meter);
+        state.UseFixedWater = true;
+        state.SleepScreen = null;
+        state.TargetWater = Mathf.Clamp(water, 0f, ThirstConstants.MaxWater);
+        state.DisplayWater = state.TargetWater;
+        state.SleepConsumeSteps = 0;
+        state.SleepConsumeDelay = 0;
     }
 
     public static void TryReject(Player player)
     {
-        if (player != null &&
-            PlayerMeters.TryGetValue(player, out MeterLink link) &&
-            link.Meter != null)
+        if (player != null)
         {
-            link.Meter._rejectCounter = 55;
-            link.Meter._visibleCounter = 200;
+            RejectStates.GetOrCreateValue(player).Counter = 55;
         }
     }
 
-    public override void Update()
+    private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
     {
-        base.Update();
+        orig(self);
 
-        bool isDrinking = false;
-
-        if (_mode == MeterMode.Gameplay)
+        if (MeterStates.TryGetValue(self, out MeterState state) &&
+            state.UseFixedWater &&
+            state.SleepScreen != null &&
+            state.SleepConsumeSteps > 0 &&
+            state.SleepScreen.AllowFoodMeterTick)
         {
-            ThirstState state = ThirstStore.For(_player);
-            _displayWater = state.Water;
-            isDrinking = state.IsDrinking;
-        }
-        else if (_mode == MeterMode.SleepScreen)
-        {
-            UpdateSleepConsumption();
-        }
+            state.SleepConsumeDelay--;
 
-        float water = _displayWater;
-
-        if (Mathf.Abs(water - _lastWater) > 0.0001f)
-        {
-            _visibleCounter = 200;
-            _lastWater = water;
-        }
-
-        if (_visibleCounter > 0)
-        {
-            _visibleCounter--;
-        }
-
-        if (_rejectCounter > 0)
-        {
-            _rejectCounter--;
-        }
-
-        float foodFade = hud.foodMeter?.fade ?? 0f;
-
-        if (_mode == MeterMode.SleepScreen || _mode == MeterMode.CharacterSelect)
-        {
-            // Menu meters follow the vanilla food meter exactly. In particular,
-            // the sleep screen intentionally dims its meter during the animation.
-            _fade = foodFade;
-        }
-        else
-        {
-            bool inShelter = _player?.room?.abstractRoom != null && _player.room.abstractRoom.shelter;
-            float targetFade = inShelter || _visibleCounter > 0 || isDrinking ? 1f : foodFade;
-            _fade = Mathf.Lerp(_fade, Mathf.Max(foodFade, targetFade), 0.2f);
-        }
-
-        for (int i = 0; i < _outer.Length; i++)
-        {
-            _outer[i].Update();
-            _inner[i].Update();
-        }
-
-        RefreshLayout();
-    }
-
-    private void UpdateSleepConsumption()
-    {
-        if (_sleepConsumePips > 0 &&
-            (_sleepScreen == null || _sleepScreen.AllowFoodMeterTick))
-        {
-            _sleepConsumeDelay--;
-            if (_sleepConsumeDelay <= 0)
+            if (state.SleepConsumeDelay <= 0)
             {
-                _displayWater = Mathf.Max(_sleepTargetWater, _displayWater - 1f);
-                _sleepConsumePips--;
-                _sleepConsumeDelay = 40;
-                hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+                state.DisplayWater = Mathf.Max(state.TargetWater, state.DisplayWater - 1f);
+                state.SleepConsumeSteps--;
+                state.SleepConsumeDelay = 40;
+                self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
             }
         }
-        else if (_sleepConsumePips <= 0)
+
+        if (self?.hud?.owner is Player player &&
+            RejectStates.TryGetValue(player, out RejectState reject) &&
+            reject.Counter > 0)
         {
-            _displayWater = _sleepTargetWater;
+            reject.Counter--;
         }
     }
 
-    private void RefreshLayout()
+    private static void MeterCircle_AddCircles(
+        On.HUD.FoodMeter.MeterCircle.orig_AddCircles orig,
+        global::HUD.FoodMeter.MeterCircle self)
     {
-        Vector2 origin = GetOrigin();
-        Color color = WaterColor;
+        orig(self);
+        EnsureFill(self);
+    }
 
-        if (_rejectCounter > 0 && (_rejectCounter / 5) % 2 == 0)
+    private static void MeterCircle_Draw(
+        On.HUD.FoodMeter.MeterCircle.orig_Draw orig,
+        global::HUD.FoodMeter.MeterCircle self,
+        float timeStacker)
+    {
+        orig(self, timeStacker);
+
+        WaterFill fill = EnsureFill(self);
+        if (fill == null)
+        {
+            return;
+        }
+
+        if (!TryGetDisplayWater(self.meter, out float water) ||
+            self.circles == null ||
+            self.circles.Length < 2 ||
+            self.circles[0]?.sprite == null ||
+            self.circles[1]?.sprite == null)
+        {
+            fill.Mesh.isVisible = false;
+            return;
+        }
+
+        float waterLevel = Mathf.Clamp01(water / ThirstConstants.MaxWater);
+        float alpha = self.circles[0].sprite.alpha * FillAlpha;
+        float outerRadius = Mathf.Lerp(
+            self.circles[0].lastRad,
+            self.circles[0].rad,
+            timeStacker);
+        float radius = Mathf.Max(0f, outerRadius - FillRadiusInset);
+
+        if (!self.circles[0].sprite.isVisible ||
+            alpha <= 0.001f ||
+            waterLevel <= 0.001f ||
+            radius <= 0.001f)
+        {
+            fill.Mesh.isVisible = false;
+            return;
+        }
+
+        Color color = WaterColor;
+        if (self.meter.hud?.owner is Player player &&
+            RejectStates.TryGetValue(player, out RejectState reject) &&
+            reject.Counter > 0 &&
+            (reject.Counter / 5) % 2 == 0)
         {
             color = Color.red;
         }
 
-        for (int i = 0; i < _outer.Length; i++)
-        {
-            float x = origin.x + i * 30f + (i >= ThirstConstants.DividerAfterPip ? 15f : 0f);
-            Vector2 pos = new(x, origin.y);
-            float fill = Mathf.Clamp01(_displayWater - i);
+        UpdateFillGeometry(
+            fill.Mesh,
+            self.DrawPos(timeStacker),
+            radius,
+            waterLevel);
 
-            _outer[i].pos = pos;
-            _inner[i].pos = pos;
-            _outer[i].rad = _outer[i].snapRad;
-            _outer[i].thickness = _outer[i].snapThickness;
-            _inner[i].rad = _inner[i].snapRad;
-            _inner[i].thickness = _inner[i].snapThickness;
-            _outer[i].fade = _fade;
-            _inner[i].fade = _fade * fill;
-            _outer[i].forceColor = color;
-            _inner[i].forceColor = color;
-        }
+        fill.Mesh.color = color;
+        fill.Mesh.alpha = alpha;
+        fill.Mesh.isVisible = true;
 
-        // The divider matches a vanilla food meter survival limit: the three
-        // pips to its left are the normal hibernation requirement/cost, while
-        // the two pips to its right are extra hydration capacity.
-        _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
-        _separator.y = origin.y;
-        _separator.color = color;
-        _separator.alpha = _fade;
+        // Vanilla circle[1] is the inner/background layer and circle[0] is the
+        // normal food/outline layer. Keep water between them so vanilla full and
+        // quarter-food graphics remain readable on top of the cyan liquid.
+        fill.Mesh.MoveInFrontOfOtherNode(self.circles[1].sprite);
+        self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
 
-    private Vector2 GetOrigin()
+    private static void QuarterPipShower_Draw(
+        On.HUD.FoodMeter.QuarterPipShower.orig_Draw orig,
+        global::HUD.FoodMeter.QuarterPipShower self,
+        float timeStacker)
     {
-        if (hud.foodMeter == null)
+        orig(self, timeStacker);
+
+        if (self?.owner?.circles == null || self.quarterPips == null)
         {
-            return new Vector2(50f, 55f);
+            return;
         }
 
-        Vector2 foodOrigin = hud.foodMeter.DrawPos(1f);
-
-        if (_mode == MeterMode.CharacterSelect)
+        int circleIndex = self.owner.showCount;
+        if (circleIndex < 0 || circleIndex >= self.owner.circles.Count)
         {
-            // Character-select food sits immediately to the right of the karma
-            // symbol. Put hydration after the entire vanilla food meter, keeping
-            // both resources on the same row.
-            return foodOrigin + new Vector2(hud.foodMeter.TotalWidth(1f) + 40f, 0f);
+            return;
         }
 
-        return foodOrigin + new Vector2(0f, 30f);
-    }
-
-    public override void Draw(float timeStacker)
-    {
-        for (int i = 0; i < _outer.Length; i++)
+        if (CircleFills.TryGetValue(self.owner.circles[circleIndex], out WaterFill fill) &&
+            fill.Mesh != null)
         {
-            _outer[i].Draw(timeStacker);
-            _inner[i].Draw(timeStacker);
+            // Quarter food is a separate vanilla sprite; explicitly keep it in
+            // front of the hydration material.
+            self.quarterPips.MoveInFrontOfOtherNode(fill.Mesh);
         }
     }
 
-    public override void ClearSprites()
+    private static WaterFill EnsureFill(global::HUD.FoodMeter.MeterCircle circle)
     {
-        for (int i = 0; i < _outer.Length; i++)
+        if (circle?.meter?.fContainer == null)
         {
-            _outer[i].ClearSprite();
-            _inner[i].ClearSprite();
+            return null;
         }
 
-        _separator.RemoveFromContainer();
-
-        if (_player != null &&
-            PlayerMeters.TryGetValue(_player, out MeterLink link) &&
-            ReferenceEquals(link.Meter, this))
+        if (CircleFills.TryGetValue(circle, out WaterFill existing))
         {
-            link.Meter = null;
+            return existing;
         }
 
-        base.ClearSprites();
+        WaterFill created = new(circle.meter.fContainer);
+        CircleFills.Add(circle, created);
+        return created;
+    }
+
+    private static bool TryGetDisplayWater(global::HUD.FoodMeter meter, out float water)
+    {
+        water = 0f;
+
+        if (meter == null || meter.IsPupFoodMeter)
+        {
+            return false;
+        }
+
+        if (MeterStates.TryGetValue(meter, out MeterState fixedState) &&
+            fixedState.UseFixedWater)
+        {
+            water = Mathf.Clamp(fixedState.DisplayWater, 0f, ThirstConstants.MaxWater);
+            return true;
+        }
+
+        if (meter.hud?.owner is Player player &&
+            player.room?.game != null &&
+            player.room.game.IsStorySession &&
+            !player.isSlugpup)
+        {
+            water = ThirstStore.For(player).Water;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void UpdateFillGeometry(
+        TriangleMesh mesh,
+        Vector2 center,
+        float radius,
+        float level)
+    {
+        float surfaceY = Mathf.Lerp(-1f, 1f, Mathf.Clamp01(level));
+
+        for (int i = 0; i <= FillBands; i++)
+        {
+            float t = i / (float)FillBands;
+            float normalizedY = Mathf.Lerp(-1f, surfaceY, t);
+            float halfWidth = Mathf.Sqrt(Mathf.Max(0f, 1f - normalizedY * normalizedY)) * radius;
+            float y = center.y + normalizedY * radius;
+
+            mesh.MoveVertice(i * 2, new Vector2(center.x - halfWidth, y));
+            mesh.MoveVertice(i * 2 + 1, new Vector2(center.x + halfWidth, y));
+        }
+    }
+
+    private static TriangleMesh.Triangle[] BuildTriangles()
+    {
+        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[FillBands * 2];
+
+        for (int i = 0; i < FillBands; i++)
+        {
+            int a = i * 2;
+            int b = a + 1;
+            int c = a + 2;
+            int d = a + 3;
+
+            triangles[i * 2] = new TriangleMesh.Triangle(a, b, c);
+            triangles[i * 2 + 1] = new TriangleMesh.Triangle(b, d, c);
+        }
+
+        return triangles;
     }
 }
