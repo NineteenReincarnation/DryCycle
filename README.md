@@ -2,20 +2,21 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.5**.
+Current version: **0.2.6**.
 
 ## Current feature: hydration
 
 - Default/max hydration: **5 pips**, displayed as **3 | 2**.
-- The hydration meter is placed above the normal food meter.
-- The sleep/starve save screen also receives the hydration meter.
-- Normal hibernation requires at least **2 hydration** and consumes **2 hydration**.
-- On a normal sleep screen, the two consumed hydration pips animate out before the meter settles on the next-cycle value.
+- The **3 pips to the left of the divider** are the normal hibernation requirement and cost.
+- Normal hibernation requires at least **3 hydration** and consumes **3 hydration**.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
+- The gameplay hydration meter is placed above the normal food meter.
+- The sleep/starve screen also receives the hydration meter. Its fade follows the vanilla food meter so both meters dim and animate together.
+- The character continue/select page shows saved hydration beside the vanilla food meter.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
-- Version 0.2.5 starts a new five-pip hydration save key. Legacy four-pip 0.2.4 test data is discarded once so an existing test save starts at the new full value of 5.
+- The five-pip format uses the `DRYCYCLETHIRSTV2` save key. Legacy four-pip test data is discarded once so an old test save starts at the new full value of 5.
 
 Temperature mechanics are not implemented yet.
 
@@ -78,4 +79,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-The gameplay HUD is attached through `RoomCamera.FireUpSinglePlayerHUD(Player)`. The sleep/starve HUD is attached after `Menu.SleepAndDeathScreen.GetDataFromGame` initializes the vanilla sleep HUD.
+The gameplay HUD is attached through `RoomCamera.FireUpSinglePlayerHUD(Player)`. The sleep/starve HUD is attached after `Menu.SleepAndDeathScreen.GetDataFromGame` initializes the vanilla sleep HUD. The character continue page attaches hydration after `SlugcatSelectMenu.SlugcatPageContinue` builds its HUD.
