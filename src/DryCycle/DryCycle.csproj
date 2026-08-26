@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>DryCycle</AssemblyName>
+    <RootNamespace>DryCycle</RootNamespace>
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LocalReferenceDir>$(MSBuildThisFileDirectory)../../lib</LocalReferenceDir>
+    <PublicAssemblyPath Condition="Exists('$(LocalReferenceDir)/PUBLIC-Assembly-CSharp.dll')">$(LocalReferenceDir)/PUBLIC-Assembly-CSharp.dll</PublicAssemblyPath>
+    <HooksAssemblyPath Condition="Exists('$(LocalReferenceDir)/HOOKS-Assembly-CSharp.dll')">$(LocalReferenceDir)/HOOKS-Assembly-CSharp.dll</HooksAssemblyPath>
+    <PublicAssemblyPath Condition="'$(PublicAssemblyPath)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</PublicAssemblyPath>
+    <HooksAssemblyPath Condition="'$(HooksAssemblyPath)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll</HooksAssemblyPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Core" Version="5.4.17" />
+    <PackageReference Include="UnityEngine.Modules" Version="2020.3.38" IncludeAssets="compile" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="PUBLIC-Assembly-CSharp" HintPath="$(PublicAssemblyPath)" Private="false" />
+    <Reference Include="HOOKS-Assembly-CSharp" HintPath="$(HooksAssemblyPath)" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ModAssetFiles Include="$(MSBuildThisFileDirectory)../../mod/**/*" Exclude="$(MSBuildThisFileDirectory)../../mod/plugins/**/*" />
+  </ItemGroup>
+
+  <Target Name="ValidateRainWorldReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(PublicAssemblyPath)' == '' or !Exists('$(PublicAssemblyPath)')" Text="PUBLIC-Assembly-CSharp.dll was not found. Set RainWorldPath to the Rain World installation folder, or place the DLL in ./lib." />
+    <Error Condition="'$(HooksAssemblyPath)' == '' or !Exists('$(HooksAssemblyPath)')" Text="HOOKS-Assembly-CSharp.dll was not found. Set RainWorldPath to the Rain World installation folder, or place the DLL in ./lib." />
+  </Target>
+
+  <Target Name="BuildDryCycleModFolder" AfterTargets="Build">
+    <PropertyGroup>
+      <DryCycleModOutput>$(MSBuildThisFileDirectory)../../artifacts/DryCycle</DryCycleModOutput>
+    </PropertyGroup>
+    <RemoveDir Directories="$(DryCycleModOutput)" />
+    <MakeDir Directories="$(DryCycleModOutput)/plugins" />
+    <Copy SourceFiles="@(ModAssetFiles)" DestinationFiles="@(ModAssetFiles->'$(DryCycleModOutput)/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DryCycleModOutput)/plugins" />
+  </Target>
+</Project>
