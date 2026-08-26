@@ -101,11 +101,11 @@ internal static class ThirstHooks
 
         if (wantsToDrink)
         {
-            self.showKarmaFoodRainTime = Math.Max(
-                self.showKarmaFoodRainTime,
-                ThirstConstants.UnderwaterHudHoldFrames);
-
-            state.Add(ThirstConstants.DrinkPerTick);
+            // Jolly story co-op uses one shared hydration pool, matching the
+            // single vanilla food meter shown by the shared story HUD. Any human
+            // player may drink and the common water amount updates immediately.
+            ThirstMeter.ShowDrinking(self);
+            ThirstStore.AddRuntime(self, ThirstConstants.DrinkPerTick);
         }
     }
 
@@ -175,23 +175,42 @@ internal static class ThirstHooks
 
     private static void ShelterDoor_Close(On.ShelterDoor.orig_Close orig, ShelterDoor self)
     {
-        Player player = FindPrimaryPlayer(self);
+        RainWorldGame game = self?.room?.game;
 
-        if (player != null && !player.stillInStartShelter && IsStoryPlayer(player))
+        if (game != null && game.IsStorySession && ModManager.CoopAvailable &&
+            game.PlayersToProgressOrWin != null && game.PlayersToProgressOrWin.Count > 1)
         {
-            bool starvationAttempt = player.sleepCounter < 0 ||
-                                     player.forceSleepCounter > 260 ||
-                                     player.ReadyForStarveJolly;
-
-            bool normalAttempt = player.readyForWin || player.ReadyForWinJolly;
-            bool waterEnough = ThirstStore.For(player).Water + 0.0001f >= ThirstConstants.HibernateRequirement;
-
-            if (normalAttempt && !starvationAttempt && !waterEnough)
+            if (TryGetJollySleepState(self, out bool normalAttempt, out bool starvationAttempt) &&
+                normalAttempt &&
+                !starvationAttempt &&
+                ThirstStore.GetRuntimeWater(game, game.GetStorySession.saveState) + 0.0001f <
+                    ThirstConstants.HibernateRequirement)
             {
-                player.readyForWin = false;
-                player.touchedNoInputCounter = 0;
-                ThirstMeter.TryReject(player);
+                RejectJollyHibernate(self);
                 return;
+            }
+        }
+        else
+        {
+            Player player = FindPrimaryPlayer(self);
+
+            if (player != null && !player.stillInStartShelter && IsStoryPlayer(player))
+            {
+                bool starvationAttempt = player.sleepCounter < 0 ||
+                                         player.forceSleepCounter > 260 ||
+                                         player.ReadyForStarveJolly;
+
+                bool normalAttempt = player.readyForWin || player.ReadyForWinJolly;
+                bool waterEnough = ThirstStore.For(player).Water + 0.0001f >=
+                                   ThirstConstants.HibernateRequirement;
+
+                if (normalAttempt && !starvationAttempt && !waterEnough)
+                {
+                    player.readyForWin = false;
+                    player.touchedNoInputCounter = 0;
+                    ThirstMeter.TryReject(player);
+                    return;
+                }
             }
         }
 
@@ -226,6 +245,8 @@ internal static class ThirstHooks
             // Watcher spinning-top/warp transitions. Vanilla deliberately skips
             // its food hibernation drain in that path, so hydration must likewise
             // be preserved instead of charging the normal 3-point sleep cost.
+            // Jolly co-op uses the same shared hydration pool, so the sleep cost
+            // is charged exactly once for the party, not once per player.
             float nextCycleWater = specialWarpSave
                 ? currentWater
                 : (newMalnourished
@@ -303,34 +324,92 @@ internal static class ThirstHooks
             return;
         }
 
-        ThirstState state = ThirstStore.For(player);
-        float before = state.Water;
-        state.Add(amount);
-
-        if (state.Water > before + 0.0001f)
+        if (ThirstStore.AddRuntime(player, amount))
         {
             // Food can restore water while the vanilla food meter itself does
             // not change (for example when the stomach is already full). Reveal
-            // the lower-left cluster so the hydration gain animation is still
-            // visible in those cases.
+            // the shared lower-left cluster so the hydration gain animation is
+            // visible regardless of which Jolly player ate the item.
             ThirstMeter.ShowHydrationGain(player);
         }
     }
 
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
     {
-        if (game?.Players != null)
+        return ThirstStore.GetRuntimeWater(game, saveState);
+    }
+
+    private static bool TryGetJollySleepState(
+        ShelterDoor door,
+        out bool normalAttempt,
+        out bool starvationAttempt)
+    {
+        normalAttempt = true;
+        starvationAttempt = false;
+
+        RainWorldGame game = door?.room?.game;
+        if (game?.PlayersToProgressOrWin == null || game.PlayersToProgressOrWin.Count <= 1)
         {
-            foreach (AbstractCreature abstractPlayer in game.Players)
+            return false;
+        }
+
+        bool anyLivingPlayer = false;
+
+        foreach (AbstractCreature abstractPlayer in game.PlayersToProgressOrWin)
+        {
+            if (abstractPlayer?.state == null || abstractPlayer.state.dead)
             {
-                if (abstractPlayer?.realizedCreature is Player player && !player.dead)
-                {
-                    return ThirstStore.For(player).Water;
-                }
+                continue;
+            }
+
+            anyLivingPlayer = true;
+            Player player = abstractPlayer.realizedCreature as Player;
+
+            if (player == null || player.room != door.room || player.isNPC)
+            {
+                normalAttempt = false;
+                continue;
+            }
+
+            if (player.ReadyForStarveJolly ||
+                player.sleepCounter < 0 ||
+                player.forceSleepCounter > 260)
+            {
+                starvationAttempt = true;
+            }
+
+            if (!player.ReadyForWinJolly)
+            {
+                normalAttempt = false;
             }
         }
 
-        return ThirstStore.GetSaved(saveState);
+        return anyLivingPlayer;
+    }
+
+    private static void RejectJollyHibernate(ShelterDoor door)
+    {
+        RainWorldGame game = door?.room?.game;
+        if (game?.Players == null)
+        {
+            return;
+        }
+
+        foreach (AbstractCreature abstractPlayer in game.Players)
+        {
+            if (abstractPlayer?.realizedCreature is not Player player ||
+                player.dead ||
+                player.isNPC ||
+                player.room != door.room)
+            {
+                continue;
+            }
+
+            player.readyForWin = false;
+            player.ReadyForWinJolly = false;
+            player.touchedNoInputCounter = 0;
+            ThirstMeter.TryReject(player);
+        }
     }
 
     private static Player FindPrimaryPlayer(ShelterDoor door)
@@ -344,7 +423,8 @@ internal static class ThirstHooks
         {
             if (abstractPlayer?.realizedCreature is Player player &&
                 player.room == door.room &&
-                !player.dead)
+                !player.dead &&
+                !player.isNPC)
             {
                 return player;
             }
@@ -355,7 +435,7 @@ internal static class ThirstHooks
 
     private static bool IsStoryPlayer(Player player)
     {
-        if (player == null || player.isSlugpup)
+        if (player == null || player.isNPC)
         {
             return false;
         }
