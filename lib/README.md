@@ -1,15 +1,19 @@
-# Local Rain World references
+# Compile-time references
 
-This folder is for local compile-time references only. Do not commit the game DLLs.
+DryCycle does not redistribute Rain World game assemblies.
 
-If `RainWorldPath` is not provided, place these two files here:
+For a local build, either set the MSBuild property `RainWorldPath` to the Rain World installation directory, or place these files in this `lib` directory:
+
+Required Rain World references:
 
 - `PUBLIC-Assembly-CSharp.dll`
 - `HOOKS-Assembly-CSharp.dll`
+- `Assembly-CSharp-firstpass.dll`
 
-They are normally found in the Rain World installation under:
+Optional offline references (used when present instead of NuGet packages):
 
-- `BepInEx/utils/PUBLIC-Assembly-CSharp.dll`
-- `BepInEx/plugins/HOOKS-Assembly-CSharp.dll`
+- `BepInEx.dll`
+- `UnityEngine.dll`
+- `UnityEngine.CoreModule.dll`
 
-The DLL files are ignored by `.gitignore`.
+When `RainWorldPath` is set, DryCycle automatically resolves the required game assemblies from the normal Rain World/BepInEx directories.
