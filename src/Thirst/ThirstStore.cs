@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 namespace DryCycle.Thirst;
 
@@ -58,6 +59,51 @@ internal static class ThirstStore
         SaveStates.GetOrCreateValue(saveState).Water = Clamp(water);
     }
 
+    public static float GetForCharacterSelect(PlayerProgression progression, SlugcatStats.Name slugcat)
+    {
+        if (progression == null || slugcat == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        if (progression.currentSaveState != null &&
+            progression.currentSaveState.saveStateNumber == slugcat)
+        {
+            return ReadValueFromEntries(progression.currentSaveState.unrecognizedSaveStrings);
+        }
+
+        if (!progression.HasSaveData)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        string[] progressionLines = progression.GetProgLinesFromMemory();
+        if (progressionLines == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        foreach (string line in progressionLines)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                continue;
+            }
+
+            string[] parts = Regex.Split(line, "<progDivB>");
+            if (parts.Length != 2 ||
+                parts[0] != "SAVE STATE" ||
+                BackwardsCompatibilityRemix.ParseSaveNumber(parts[1]) != slugcat)
+            {
+                continue;
+            }
+
+            return ReadValueFromSaveText(parts[1]);
+        }
+
+        return ThirstConstants.MaxWater;
+    }
+
     public static void ReadFromUnrecognizedData(SaveState saveState)
     {
         if (saveState == null)
@@ -65,29 +111,7 @@ internal static class ThirstStore
             return;
         }
 
-        // 0.2.5 changes the meter from four pips to five. Only the V2 key is
-        // imported; an old 0.2.4 key therefore starts once at the new full 5.
-        float result = ThirstConstants.MaxWater;
-        string prefix = ThirstConstants.SaveKey + "<svB>";
-
-        if (saveState.unrecognizedSaveStrings != null)
-        {
-            foreach (string entry in saveState.unrecognizedSaveStrings)
-            {
-                if (entry == null || !entry.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                string value = entry.Substring(prefix.Length);
-                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-                {
-                    result = Clamp(parsed);
-                }
-            }
-        }
-
-        SetSaved(saveState, result);
+        SetSaved(saveState, ReadValueFromEntries(saveState.unrecognizedSaveStrings));
     }
 
     public static void WriteToUnrecognizedData(SaveState saveState)
@@ -107,6 +131,63 @@ internal static class ThirstStore
 
         saveState.unrecognizedSaveStrings.Add(
             prefix + GetSaved(saveState).ToString("0.###", CultureInfo.InvariantCulture));
+    }
+
+    private static float ReadValueFromEntries(System.Collections.Generic.List<string> entries)
+    {
+        if (entries == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        string prefix = ThirstConstants.SaveKey + "<svB>";
+        float result = ThirstConstants.MaxWater;
+
+        foreach (string entry in entries)
+        {
+            if (entry == null || !entry.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string value = entry.Substring(prefix.Length);
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+            {
+                result = Clamp(parsed);
+            }
+        }
+
+        return result;
+    }
+
+    private static float ReadValueFromSaveText(string saveText)
+    {
+        if (string.IsNullOrEmpty(saveText))
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        string prefix = ThirstConstants.SaveKey + "<svB>";
+        int start = saveText.IndexOf(prefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
+        start += prefix.Length;
+        int end = saveText.IndexOf("<svA>", start, StringComparison.Ordinal);
+        if (end < 0)
+        {
+            end = saveText.Length;
+        }
+
+        string value = saveText.Substring(start, end - start);
+        if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+        {
+            return Clamp(parsed);
+        }
+
+        return ThirstConstants.MaxWater;
     }
 
     private static float Clamp(float value)
