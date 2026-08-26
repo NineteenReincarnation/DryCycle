@@ -186,6 +186,22 @@ internal sealed class ThirstMeter : global::HUD.HudPart
         hud.AddPart(meter);
     }
 
+    public static void SyncCharacterSelect(global::HUD.HUD hud)
+    {
+        if (hud == null ||
+            !HudMeters.TryGetValue(hud, out ThirstMeter meter) ||
+            meter._mode != MeterMode.CharacterSelect)
+        {
+            return;
+        }
+
+        // SlugcatPageContinue updates the vanilla food position/fade after
+        // HUD.Update. Re-sync here from the page's Update hook so hydration has
+        // no one-frame lag while the character pages scroll.
+        meter._fade = hud.foodMeter?.fade ?? 0f;
+        meter.RefreshLayout();
+    }
+
     public static void TryReject(Player player)
     {
         if (player != null &&
@@ -236,8 +252,8 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
         if (_mode == MeterMode.SleepScreen || _mode == MeterMode.CharacterSelect)
         {
-            // Menu meters must follow the vanilla food meter exactly. In particular,
-            // the sleep screen intentionally dims the food meter while it animates.
+            // Menu meters follow the vanilla food meter exactly. In particular,
+            // the sleep screen intentionally dims its meter during the animation.
             _fade = foodFade;
         }
         else
@@ -247,42 +263,13 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             _fade = Mathf.Lerp(_fade, Mathf.Max(foodFade, targetFade), 0.2f);
         }
 
-        Vector2 origin = GetOrigin();
-
-        Color color = WaterColor;
-        if (_rejectCounter > 0 && (_rejectCounter / 5) % 2 == 0)
-        {
-            color = Color.red;
-        }
-
         for (int i = 0; i < _outer.Length; i++)
         {
-            float x = origin.x + i * 30f + (i >= ThirstConstants.DividerAfterPip ? 15f : 0f);
-            Vector2 pos = new(x, origin.y);
-            float fill = Mathf.Clamp01(water - i);
-
             _outer[i].Update();
             _inner[i].Update();
-
-            _outer[i].pos = pos;
-            _inner[i].pos = pos;
-            _outer[i].rad = _outer[i].snapRad;
-            _outer[i].thickness = _outer[i].snapThickness;
-            _inner[i].rad = _inner[i].snapRad;
-            _inner[i].thickness = _inner[i].snapThickness;
-            _outer[i].fade = _fade;
-            _inner[i].fade = _fade * fill;
-            _outer[i].forceColor = color;
-            _inner[i].forceColor = color;
         }
 
-        // The divider matches a vanilla food meter survival limit: the three
-        // pips to its left are the normal hibernation requirement/cost, while
-        // the two pips to its right are extra hydration capacity.
-        _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
-        _separator.y = origin.y;
-        _separator.color = color;
-        _separator.alpha = _fade;
+        RefreshLayout();
     }
 
     private void UpdateSleepConsumption()
@@ -303,6 +290,43 @@ internal sealed class ThirstMeter : global::HUD.HudPart
         {
             _displayWater = _sleepTargetWater;
         }
+    }
+
+    private void RefreshLayout()
+    {
+        Vector2 origin = GetOrigin();
+        Color color = WaterColor;
+
+        if (_rejectCounter > 0 && (_rejectCounter / 5) % 2 == 0)
+        {
+            color = Color.red;
+        }
+
+        for (int i = 0; i < _outer.Length; i++)
+        {
+            float x = origin.x + i * 30f + (i >= ThirstConstants.DividerAfterPip ? 15f : 0f);
+            Vector2 pos = new(x, origin.y);
+            float fill = Mathf.Clamp01(_displayWater - i);
+
+            _outer[i].pos = pos;
+            _inner[i].pos = pos;
+            _outer[i].rad = _outer[i].snapRad;
+            _outer[i].thickness = _outer[i].snapThickness;
+            _inner[i].rad = _inner[i].snapRad;
+            _inner[i].thickness = _inner[i].snapThickness;
+            _outer[i].fade = _fade;
+            _inner[i].fade = _fade * fill;
+            _outer[i].forceColor = color;
+            _inner[i].forceColor = color;
+        }
+
+        // The divider matches a vanilla food meter survival limit: the three
+        // pips to its left are the normal hibernation requirement/cost, while
+        // the two pips to its right are extra hydration capacity.
+        _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
+        _separator.y = origin.y;
+        _separator.color = color;
+        _separator.alpha = _fade;
     }
 
     private Vector2 GetOrigin()
