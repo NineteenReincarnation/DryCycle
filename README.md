@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.12**.
+Current version: **0.0.13**.
 
 ## Versioning
 
@@ -16,6 +16,7 @@ Examples:
 0.0.10 -> 0.0.11
 0.0.11 -> 0.0.12
 0.0.12 -> 0.0.13
+0.0.13 -> 0.0.14
 ```
 
 The patch number does not roll over at 9 during normal development updates.
@@ -30,7 +31,8 @@ The patch number does not roll over at 9 during normal development updates.
 - Water is distributed from left to right across the first five food pips. At rest, each pip has exactly three hydration states: **empty, half full, or full**.
 - Example: hydration `2.5` renders as `full, full, half, empty, empty`; hydration `4.5` renders as `full, full, full, full, half`.
 - Vanilla food graphics remain on top of the hydration material, including quarter-food states, so one circle can independently show food in quarters and water in halves as in the `Thirsty.png` design reference.
-- **Hydration visibility is independent from the vanilla food-fill animation.** Eating can still shrink/fade/pop the food graphic, but the cyan water material underneath remains continuously visible and keeps its own stable radius instead of disappearing and reappearing with the food pip.
+- **Hydration visibility is independent from the vanilla food-fill animation.** Eating can fade or rebuild the food-fill sprite without making the cyan water disappear.
+- **Hydration size follows the vanilla outer food-circle animation.** When eating causes the original food pip to expand/pop and settle, the cyan water material scales with the same interpolated outer radius while keeping its own alpha/visibility, so the water stays present and still feels physically attached to the food pip.
 - While hydration is being replenished, the currently filling pip temporarily uses a **continuous rising liquid level with a moving wave surface**. When the refill animation settles, the display returns to the normal empty/half/full states.
 - Large hydration gains from food also use the rising-water animation instead of appearing instantly.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
@@ -102,4 +104,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, and the water layer now stays visible independently from vanilla food-pip refill animations. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, the water layer remains visible independently from the vanilla food-fill sprite, and its radius follows the vanilla outer-circle pop animation. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating additional HUD circles.
