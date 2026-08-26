@@ -2,21 +2,23 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.6**.
+Current version: **0.2.7**.
 
 ## Current feature: hydration
 
-- Default/max hydration: **5 pips**, displayed as **3 | 2**.
-- The **3 pips to the left of the divider** are the normal hibernation requirement and cost.
+- Hydration is a global **0..5** resource.
 - Normal hibernation requires at least **3 hydration** and consumes **3 hydration**.
 - Starvation hibernation consumes all remaining hydration and leaves food at 0.
-- The gameplay hydration meter is placed above the normal food meter.
-- The sleep/starve screen also receives the hydration meter. Its fade follows the vanilla food meter so both meters dim and animate together.
-- The character continue/select page shows saved hydration beside the vanilla food meter.
+- DryCycle no longer draws a separate hydration bar.
+- Hydration is rendered as a **cyan liquid/material fill inside every vanilla food pip**.
+- The liquid height is the global hydration percentage: full hydration fills the circle, half hydration fills its lower half, and intermediate values are rendered continuously.
+- Vanilla food graphics remain on top of the hydration material, including quarter-food states, so the same food circle simultaneously shows both food and water as in the `Thirsty.png` design reference.
+- The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page.
+- On a normal sleep screen the embedded water level animates downward by the 3-point hibernation cost while following the vanilla food meter's own visibility/fade.
 - While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
-- The five-pip format uses the `DRYCYCLETHIRSTV2` save key. Legacy four-pip test data is discarded once so an old test save starts at the new full value of 5.
+- The five-unit format continues to use the `DRYCYCLETHIRSTV2` save key, so 0.2.5/0.2.6 hydration values remain compatible with 0.2.7.
 
 Temperature mechanics are not implemented yet.
 
@@ -79,4 +81,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-The gameplay HUD is attached through `RoomCamera.FireUpSinglePlayerHUD(Player)`. The sleep/starve HUD is attached after `Menu.SleepAndDeathScreen.GetDataFromGame` initializes the vanilla sleep HUD. The character continue page attaches hydration after `SlugcatSelectMenu.SlugcatPageContinue` builds its HUD.
+`src/HUD/ThirstMeter.cs` now hooks the vanilla `HUD.FoodMeter` and renders hydration material between the food meter's background and food graphics. Sleep and character-select pages configure the existing food meter with their saved hydration value rather than creating any additional HUD circles.
