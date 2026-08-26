@@ -2,19 +2,19 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.2.10**.
+Current version: **0.0.10**.
 
 ## Versioning
 
-DryCycle uses a simple sequential patch counter for development updates. Every update increments only the last number by 1.
+DryCycle uses a simple sequential patch counter for development updates. Every update increments only the last number by 1, and the current development series stays on `0.0.x`.
 
 Examples:
 
 ```text
 0.0.1 -> 0.0.2
 0.0.9 -> 0.0.10
-0.2.9 -> 0.2.10
-0.2.10 -> 0.2.11
+0.0.10 -> 0.0.11
+0.0.11 -> 0.0.12
 ```
 
 The patch number does not roll over at 9 during normal development updates.
