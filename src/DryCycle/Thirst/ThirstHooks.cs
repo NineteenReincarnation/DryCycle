@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Reflection;
 using DryCycle.HUD;
 
 namespace DryCycle.Thirst;
@@ -193,10 +194,35 @@ internal static class ThirstHooks
     {
         orig(self, cam);
 
-        if (self.owner is Player player && IsStoryPlayer(player))
+        Player player = FindHudPlayer(self, cam);
+        if (player != null && IsStoryPlayer(player))
         {
             ThirstMeter.Attach(self, player);
         }
+    }
+
+    private static Player FindHudPlayer(global::HUD.HUD hud, RoomCamera cam)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        // HUD.owner exists in some reference/decompiled builds, but is absent from
+        // at least one 1.11.8 runtime build. Reflection avoids a hard field token,
+        // so the hook keeps working instead of throwing MissingFieldException.
+        FieldInfo ownerField = hud?.GetType().GetField("owner", flags);
+        if (ownerField?.GetValue(hud) is Player ownerPlayer)
+        {
+            return ownerPlayer;
+        }
+
+        // FireUpSinglePlayerHUD is invoked for the camera's followed slugcat.
+        // Read this field reflectively for the same cross-build reason.
+        FieldInfo followedField = cam?.GetType().GetField("followAbstractCreature", flags);
+        if (followedField?.GetValue(cam) is AbstractCreature followed && followed.realizedCreature is Player followedPlayer)
+        {
+            return followedPlayer;
+        }
+
+        return null;
     }
 
     private static float GetCurrentWater(RainWorldGame game, SaveState saveState)
