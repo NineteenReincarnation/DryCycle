@@ -300,15 +300,16 @@ internal static class ThirstMeter
 
         float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
 
-        // IMPORTANT: hydration visibility is controlled by the FoodMeter as a
-        // whole, not by the vanilla food-fill sprite for this particular pip.
-        // During eating, Rain World temporarily fades/shrinks that food sprite
-        // to play its restore animation. Tying water to it made a full water pip
-        // disappear and then pop back in. Use the meter fade and the stable snap
-        // radius instead so hydration remains unchanged underneath the food
-        // animation.
+        // Hydration visibility stays independent from the vanilla food-fill
+        // sprite, because that layer can fade during a food restore animation.
+        // The material size, however, follows the animated OUTER food circle so
+        // the cyan fill expands and settles with Rain World's native pip pop.
         float alpha = Mathf.Clamp01(self.meter.fade) * FillAlpha;
-        float radius = Mathf.Max(0f, self.circles[0].snapRad - FillRadiusInset);
+        float animatedOuterRadius = Mathf.Lerp(
+            self.circles[0].lastRad,
+            self.circles[0].rad,
+            timeStacker);
+        float radius = Mathf.Max(0f, animatedOuterRadius - FillRadiusInset);
 
         if (alpha <= 0.001f ||
             waterLevel <= 0.001f ||
@@ -339,8 +340,9 @@ internal static class ThirstMeter
         fill.Mesh.alpha = alpha;
         fill.Mesh.isVisible = true;
 
-        // Keep water behind every vanilla food graphic, but do not inherit the
-        // food sprite's temporary visibility/radius during its fill animation.
+        // Water remains behind every vanilla food graphic. It follows only the
+        // outer circle's radius animation and never inherits the food-fill
+        // sprite's temporary alpha/visibility changes.
         fill.Mesh.MoveBehindOtherNode(self.circles[1].sprite);
         self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
