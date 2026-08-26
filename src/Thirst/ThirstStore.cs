@@ -40,30 +40,50 @@ internal static class ThirstStore
 
     public static float GetSaved(SaveState saveState)
     {
+        if (saveState == null)
+        {
+            return ThirstConstants.MaxWater;
+        }
+
         return SaveStates.GetOrCreateValue(saveState).Water;
     }
 
     public static void SetSaved(SaveState saveState, float water)
     {
+        if (saveState == null)
+        {
+            return;
+        }
+
         SaveStates.GetOrCreateValue(saveState).Water = Clamp(water);
     }
 
     public static void ReadFromUnrecognizedData(SaveState saveState)
     {
+        if (saveState == null)
+        {
+            return;
+        }
+
+        // 0.2.5 changes the meter from four pips to five. Only the V2 key is
+        // imported; an old 0.2.4 key therefore starts once at the new full 5.
         float result = ThirstConstants.MaxWater;
         string prefix = ThirstConstants.SaveKey + "<svB>";
 
-        foreach (string entry in saveState.unrecognizedSaveStrings)
+        if (saveState.unrecognizedSaveStrings != null)
         {
-            if (!entry.StartsWith(prefix, StringComparison.Ordinal))
+            foreach (string entry in saveState.unrecognizedSaveStrings)
             {
-                continue;
-            }
+                if (entry == null || !entry.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            string value = entry.Substring(prefix.Length);
-            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-            {
-                result = Clamp(parsed);
+                string value = entry.Substring(prefix.Length);
+                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+                {
+                    result = Clamp(parsed);
+                }
             }
         }
 
@@ -72,9 +92,21 @@ internal static class ThirstStore
 
     public static void WriteToUnrecognizedData(SaveState saveState)
     {
+        if (saveState?.unrecognizedSaveStrings == null)
+        {
+            return;
+        }
+
         string prefix = ThirstConstants.SaveKey + "<svB>";
-        saveState.unrecognizedSaveStrings.RemoveAll(s => s.StartsWith(prefix, StringComparison.Ordinal));
-        saveState.unrecognizedSaveStrings.Add(prefix + GetSaved(saveState).ToString("0.###", CultureInfo.InvariantCulture));
+        string legacyPrefix = ThirstConstants.LegacySaveKey + "<svB>";
+
+        saveState.unrecognizedSaveStrings.RemoveAll(s =>
+            s != null &&
+            (s.StartsWith(prefix, StringComparison.Ordinal) ||
+             s.StartsWith(legacyPrefix, StringComparison.Ordinal)));
+
+        saveState.unrecognizedSaveStrings.Add(
+            prefix + GetSaved(saveState).ToString("0.###", CultureInfo.InvariantCulture));
     }
 
     private static float Clamp(float value)
