@@ -21,19 +21,22 @@ internal sealed class ThirstMeter : global::HUD.HudPart
     private static readonly Color WaterColor = new(0.25f, 0.95f, 1f);
 
     private readonly Player _player;
-    private readonly global::HUD.HUDCircle[] _outer = new global::HUD.HUDCircle[4];
-    private readonly global::HUD.HUDCircle[] _inner = new global::HUD.HUDCircle[4];
+    private readonly SaveState _saveState;
+    private readonly global::HUD.HUDCircle[] _outer = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
+    private readonly global::HUD.HUDCircle[] _inner = new global::HUD.HUDCircle[ThirstConstants.MaxPips];
+    private readonly FSprite _separator;
 
     private float _fade;
     private float _lastWater;
     private int _visibleCounter;
     private int _rejectCounter;
 
-    private ThirstMeter(global::HUD.HUD hud, Player player)
+    private ThirstMeter(global::HUD.HUD hud, Player player, SaveState saveState)
         : base(hud)
     {
         _player = player;
-        _lastWater = ThirstStore.For(player).Water;
+        _saveState = saveState;
+        _lastWater = CurrentWater;
         _visibleCounter = 200;
 
         for (int i = 0; i < _outer.Length; i++)
@@ -56,7 +59,22 @@ internal sealed class ThirstMeter : global::HUD.HudPart
                 forceColor = WaterColor
             };
         }
+
+        _separator = new FSprite("pixel")
+        {
+            color = WaterColor,
+            anchorX = 0.5f,
+            anchorY = 0.5f,
+            scaleX = 1.5f,
+            scaleY = 34f,
+            alpha = 0f
+        };
+        hud.fContainers[1].AddChild(_separator);
     }
+
+    private float CurrentWater => _player != null
+        ? ThirstStore.For(_player).Water
+        : ThirstStore.GetSaved(_saveState);
 
     public static void Attach(global::HUD.HUD hud, Player player)
     {
@@ -65,9 +83,21 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             return;
         }
 
-        ThirstMeter meter = new(hud, player);
+        ThirstMeter meter = new(hud, player, null);
         HudMeters.Add(hud, meter);
         PlayerMeters.GetOrCreateValue(player).Meter = meter;
+        hud.AddPart(meter);
+    }
+
+    public static void Attach(global::HUD.HUD hud, SaveState saveState)
+    {
+        if (hud == null || saveState == null || HudMeters.TryGetValue(hud, out _))
+        {
+            return;
+        }
+
+        ThirstMeter meter = new(hud, null, saveState);
+        HudMeters.Add(hud, meter);
         hud.AddPart(meter);
     }
 
@@ -86,8 +116,8 @@ internal sealed class ThirstMeter : global::HUD.HudPart
     {
         base.Update();
 
-        ThirstState state = ThirstStore.For(_player);
-        float water = state.Water;
+        float water = CurrentWater;
+        bool isDrinking = _player != null && ThirstStore.For(_player).IsDrinking;
 
         if (Mathf.Abs(water - _lastWater) > 0.0001f)
         {
@@ -106,8 +136,9 @@ internal sealed class ThirstMeter : global::HUD.HudPart
         }
 
         float foodFade = hud.foodMeter?.fade ?? 0f;
-        bool inShelter = _player.room?.abstractRoom != null && _player.room.abstractRoom.shelter;
-        float targetFade = inShelter || _visibleCounter > 0 || state.IsDrinking ? 1f : foodFade;
+        bool inShelter = _player?.room?.abstractRoom != null && _player.room.abstractRoom.shelter;
+        bool sleepScreenMeter = _player == null && _saveState != null;
+        float targetFade = sleepScreenMeter || inShelter || _visibleCounter > 0 || isDrinking ? 1f : foodFade;
         _fade = Mathf.Lerp(_fade, Mathf.Max(foodFade, targetFade), 0.2f);
 
         Vector2 origin = hud.foodMeter != null
@@ -122,7 +153,7 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
         for (int i = 0; i < _outer.Length; i++)
         {
-            float x = origin.x + i * 30f + (i >= (int)ThirstConstants.HibernateRequirement ? 15f : 0f);
+            float x = origin.x + i * 30f + (i >= ThirstConstants.DividerAfterPip ? 15f : 0f);
             Vector2 pos = new(x, origin.y);
             float fill = Mathf.Clamp01(water - i);
 
@@ -140,6 +171,13 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             _outer[i].forceColor = color;
             _inner[i].forceColor = color;
         }
+
+        // Match the food-meter convention: 3 ordinary reserve pips | 2 pips
+        // that a normal hibernation consumes.
+        _separator.x = origin.x + ThirstConstants.DividerAfterPip * 30f - 7.5f;
+        _separator.y = origin.y;
+        _separator.color = color;
+        _separator.alpha = _fade;
     }
 
     public override void Draw(float timeStacker)
@@ -159,7 +197,11 @@ internal sealed class ThirstMeter : global::HUD.HudPart
             _inner[i].ClearSprite();
         }
 
-        if (PlayerMeters.TryGetValue(_player, out MeterLink link) && ReferenceEquals(link.Meter, this))
+        _separator.RemoveFromContainer();
+
+        if (_player != null &&
+            PlayerMeters.TryGetValue(_player, out MeterLink link) &&
+            ReferenceEquals(link.Meter, this))
         {
             link.Meter = null;
         }
