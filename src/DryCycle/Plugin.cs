@@ -1,4 +1,5 @@
 using BepInEx;
+using DryCycle.Thirst;
 
 namespace DryCycle;
 
@@ -7,7 +8,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.0";
+    public const string Version = "0.2.0";
 
     private bool _initialized;
 
@@ -19,7 +20,12 @@ public sealed class Plugin : BaseUnityPlugin
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        _initialized = false;
+
+        if (_initialized)
+        {
+            ThirstHooks.Disable();
+            _initialized = false;
+        }
     }
 
     private void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -32,6 +38,7 @@ public sealed class Plugin : BaseUnityPlugin
         }
 
         _initialized = true;
-        Logger.LogInfo($"{ModName} {Version} initialized. Gameplay systems are not enabled yet.");
+        ThirstHooks.Enable();
+        Logger.LogInfo($"{ModName} {Version}: thirst system enabled.");
     }
 }
