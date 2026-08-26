@@ -17,7 +17,7 @@ namespace DryCycle.HUD;
 internal static class ThirstMeter
 {
     private const int FillBands = 16;
-    private const float FillRadiusInset = 1.35f;
+    private const float FillRadiusInset = 0.7f;
     private const float FillAlpha = 0.9f;
 
     private static readonly Color WaterColor = new(0.03f, 0.9f, 0.95f);
@@ -247,10 +247,12 @@ internal static class ThirstMeter
         fill.Mesh.alpha = alpha;
         fill.Mesh.isVisible = true;
 
-        // Vanilla circle[1] is the inner/background layer and circle[0] is the
-        // normal food/outline layer. Keep water between them so vanilla full and
-        // quarter-food graphics remain readable on top of the cyan liquid.
-        fill.Mesh.MoveInFrontOfOtherNode(self.circles[1].sprite);
+        // Vanilla circle[0] is the food-meter outline layer and circle[1] is
+        // the filled-food layer. Hydration sits behind the food fill but inside
+        // the outline. Because the hydration radius is slightly larger than the
+        // normal food fill, a thin cyan rim can still be visible around a full
+        // food pip, matching the supplied design reference.
+        fill.Mesh.MoveBehindOtherNode(self.circles[1].sprite);
         self.circles[0].sprite.MoveInFrontOfOtherNode(fill.Mesh);
     }
 
