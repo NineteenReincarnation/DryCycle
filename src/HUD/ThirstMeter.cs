@@ -8,6 +8,10 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 {
     private sealed class MeterLink
     {
+        public MeterLink()
+        {
+        }
+
         public ThirstMeter Meter;
     }
 
@@ -118,7 +122,6 @@ internal sealed class ThirstMeter : global::HUD.HudPart
 
         for (int i = 0; i < _outer.Length; i++)
         {
-            // Match the FoodMeter language: a gap after the required two pips.
             float x = origin.x + i * 30f + (i >= (int)ThirstConstants.HibernateRequirement ? 15f : 0f);
             Vector2 pos = new(x, origin.y);
             float fill = Mathf.Clamp01(water - i);
