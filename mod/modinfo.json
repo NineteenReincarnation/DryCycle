@@ -1,12 +1,12 @@
 {
   "id": "Anno",
   "name": "DryCycle",
-  "version": "0.0.23",
+  "version": "0.0.24",
   "authors": "NineteenReincarnation",
   "description": "Adds hydration as an additional Rain World survival resource.",
   "target_game_version": "v1.11.8",
-  "requirements": [],
-  "requirements_names": [],
+  "requirements": ["slime-cubed.slugbase"],
+  "requirements_names": ["SlugBase"],
   "tags": [],
   "checksum_override_version": false
 }
