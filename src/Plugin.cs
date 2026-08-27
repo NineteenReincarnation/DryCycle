@@ -3,6 +3,7 @@ using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.HUD;
+using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Thirst;
 
@@ -39,6 +40,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            DewPodHooks.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
@@ -72,6 +74,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
+            DewPodHooks.Enable();
             KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
@@ -83,6 +86,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            DewPodHooks.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
