@@ -86,6 +86,19 @@ internal static class ThirstHooks
 
         ThirstState state = ThirstStore.For(self);
 
+        // WaterLossRate is expressed in WV per real gameplay second. Convert it
+        // back to DryCycle's pip-space only at the storage boundary. This runs
+        // independently for every Jolly player and continues through shortcuts;
+        // dead players do not keep losing hydration.
+        if (!self.dead)
+        {
+            float passiveLoss = SlugBaseHydrationFeatures.GetWaterLossPerTick(self);
+            if (passiveLoss > 0f)
+            {
+                ThirstStore.RemoveRuntime(self, passiveLoss);
+            }
+        }
+
         bool fullySubmerged = self.bodyChunks != null &&
                               self.bodyChunks.Length >= 2 &&
                               self.bodyChunks[0].submersion > 0.9f &&
@@ -376,8 +389,8 @@ internal static class ThirstHooks
                                          player.ReadyForStarveJolly;
 
                 bool normalAttempt = player.readyForWin || player.ReadyForWinJolly;
-                bool waterEnough = ThirstStore.For(player).Water + 0.0001f >=
-                                   ThirstConstants.HibernateRequirement;
+                int requiredPips = SlugBaseHydrationFeatures.GetWaterPips(player);
+                bool waterEnough = ThirstStore.For(player).Water + 0.0001f >= requiredPips;
 
                 if (normalAttempt && !starvationAttempt && !waterEnough)
                 {
@@ -459,12 +472,13 @@ internal static class ThirstHooks
                 }
 
                 int playerNumber = playerState.playerNumber;
+                int hibernateCost = SlugBaseHydrationFeatures.GetWaterPips(playerState.slugcatCharacter);
                 float currentWater = ThirstStore.GetRuntimeWater(game, saveState, playerNumber);
                 float nextWater = specialWarpSave
                     ? currentWater
                     : (newMalnourished
                         ? 0f
-                        : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
+                        : Math.Max(0f, currentWater - hibernateCost));
 
                 ThirstStore.SetSaved(saveState, playerNumber, nextWater);
                 wrotePlayer = true;
@@ -473,12 +487,13 @@ internal static class ThirstHooks
 
         if (!wrotePlayer)
         {
+            int hibernateCost = SlugBaseHydrationFeatures.GetWaterPips(saveState.saveStateNumber);
             float currentWater = ThirstStore.GetSaved(saveState, 0);
             float nextWater = specialWarpSave
                 ? currentWater
                 : (newMalnourished
                     ? 0f
-                    : Math.Max(0f, currentWater - ThirstConstants.HibernateCost));
+                    : Math.Max(0f, currentWater - hibernateCost));
 
             ThirstStore.SetSaved(saveState, 0, nextWater);
         }
@@ -612,7 +627,8 @@ internal static class ThirstHooks
 
         foreach (Player player in livingPlayers)
         {
-            if (ThirstStore.For(player).Water + 0.0001f >= ThirstConstants.HibernateRequirement)
+            int requiredPips = SlugBaseHydrationFeatures.GetWaterPips(player);
+            if (ThirstStore.For(player).Water + 0.0001f >= requiredPips)
             {
                 continue;
             }
