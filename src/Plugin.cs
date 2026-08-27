@@ -2,6 +2,7 @@ using System;
 using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.HUD;
 using DryCycle.Thirst;
 
 #pragma warning disable CS0618
@@ -15,7 +16,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.19";
+    public const string Version = "0.0.20";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -32,6 +33,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            HydrationDivider.Disable();
             ThirstHooks.Disable();
             _initialized = false;
         }
@@ -49,11 +51,14 @@ internal sealed class Plugin : BaseUnityPlugin
         try
         {
             ThirstHooks.Enable();
+            HydrationDivider.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: thirst system enabled.");
         }
         catch (Exception ex)
         {
+            HydrationDivider.Disable();
+            ThirstHooks.Disable();
             Logger.LogError(ex);
             throw;
         }
