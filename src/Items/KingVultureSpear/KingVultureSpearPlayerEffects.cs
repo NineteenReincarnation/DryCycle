@@ -61,6 +61,7 @@ internal static class KingVultureSpearPlayerEffects
         On.Player.Update += Player_Update;
         On.Player.UpdateAnimation += Player_UpdateAnimation;
         On.Player.UpdateBodyMode += Player_UpdateBodyMode;
+        On.PlayerGraphics.Update += PlayerGraphics_Update;
         On.SlugcatHand.Update += SlugcatHand_Update;
     }
 
@@ -75,6 +76,7 @@ internal static class KingVultureSpearPlayerEffects
         On.Player.Update -= Player_Update;
         On.Player.UpdateAnimation -= Player_UpdateAnimation;
         On.Player.UpdateBodyMode -= Player_UpdateBodyMode;
+        On.PlayerGraphics.Update -= PlayerGraphics_Update;
         On.SlugcatHand.Update -= SlugcatHand_Update;
     }
 
@@ -106,7 +108,7 @@ internal static class KingVultureSpearPlayerEffects
         }
 
         UpdatePullPoseState(self, state);
-        ApplyPullStrain(self, state);
+        ApplyVirtualHeavyCarryConstraint(self, state);
     }
 
     private static void UpdatePullPoseState(Player player, PlayerPullPoseState state)
@@ -155,9 +157,11 @@ internal static class KingVultureSpearPlayerEffects
         state.Progress = Mathf.Min(state.Progress + 1, PullFramesRequired);
     }
 
-    private static void ApplyPullStrain(Player player, PlayerPullPoseState state)
+    private static void ApplyVirtualHeavyCarryConstraint(Player player, PlayerPullPoseState state)
     {
-        if (!state.Active || !TryGetActiveTusk(player, state, out KingTusks.Tusk tusk))
+        if (!state.Active ||
+            player?.mainBodyChunk == null ||
+            !TryGetActiveTusk(player, state, out KingTusks.Tusk tusk))
         {
             return;
         }
@@ -165,12 +169,76 @@ internal static class KingVultureSpearPlayerEffects
         Vector2 grabPoint = GetPullGrabPoint(tusk);
         Vector2 towardTusk = Custom.DirVec(player.mainBodyChunk.pos, grabPoint);
         float strain = Mathf.InverseLerp(0f, PullFramesRequired, state.Progress);
+        float distance = Vector2.Distance(player.mainBodyChunk.pos, grabPoint);
+        float stretched = Mathf.InverseLerp(18f, PullRange, distance);
 
-        player.mainBodyChunk.vel += towardTusk * Mathf.Lerp(0.025f, 0.08f, strain);
+        // Vanilla HeavyCarry moves the player's main chunk toward a heavy grabbed
+        // chunk while the grabbed object receives the opposite share. During tusk
+        // extraction the corpse must stay effectively immovable, so only the player
+        // receives a small capped version of that correction. This creates the same
+        // resistant pull without actually attaching/moving the King Vulture corpse.
+        float torsoEffort = Mathf.Lerp(0.10f, 0.24f, strain) * Mathf.Lerp(0.7f, 1f, stretched);
+        player.mainBodyChunk.vel += towardTusk * torsoEffort;
 
         if (player.bodyChunks != null && player.bodyChunks.Length > 1)
         {
-            player.bodyChunks[1].vel -= towardTusk * Mathf.Lerp(0.008f, 0.025f, strain);
+            BodyChunk rear = player.bodyChunks[1];
+            rear.vel -= towardTusk * Mathf.Lerp(0.045f, 0.11f, strain);
+
+            if (rear.ContactPoint.y < 0)
+            {
+                rear.vel.x -= towardTusk.x * Mathf.Lerp(0.02f, 0.055f, strain);
+            }
+        }
+
+        if (Mathf.Abs(towardTusk.x) > 0.2f)
+        {
+            player.flipDirection = towardTusk.x < 0f ? -1 : 1;
+        }
+    }
+
+    private static void PlayerGraphics_Update(
+        On.PlayerGraphics.orig_Update orig,
+        PlayerGraphics self)
+    {
+        orig(self);
+
+        Player player = self?.player;
+        if (player == null ||
+            player.isNPC ||
+            !PullPoseStates.TryGetValue(player, out PlayerPullPoseState state) ||
+            !state.Active ||
+            self.drawPositions == null ||
+            self.drawPositions.GetLength(0) < 2 ||
+            self.drawPositions.GetLength(1) < 1 ||
+            !TryGetActiveTusk(player, state, out KingTusks.Tusk tusk))
+        {
+            return;
+        }
+
+        Vector2 grabPoint = GetPullGrabPoint(tusk);
+        Vector2 towardTusk = Custom.DirVec(player.mainBodyChunk.pos, grabPoint);
+        if (towardTusk.sqrMagnitude < 0.0001f)
+        {
+            towardTusk = new Vector2(player.flipDirection, 0f);
+        }
+
+        float strain = Mathf.InverseLerp(0f, PullFramesRequired, state.Progress);
+        float effortPulse = Mathf.Sin(state.Progress * 0.72f) * Mathf.Lerp(0.2f, 0.8f, strain);
+
+        // This is the missing half of the old implementation. SlugcatHand only
+        // reproduces the hands. Vanilla Drag/HeavyCarry also displaces the torso
+        // toward the heavy object while the rear body chunk resists it. Recreate
+        // that body silhouette at render time so the slugcat visibly leans and
+        // stretches against an object that refuses to move.
+        self.drawPositions[0, 0] += towardTusk * (Mathf.Lerp(3.5f, 8f, strain) + effortPulse);
+        self.drawPositions[1, 0] -= towardTusk * Mathf.Lerp(2f, 4.8f, strain);
+        self.drawPositions[1, 0].y -= Mathf.Lerp(0.4f, 1.8f, strain);
+
+        if (self.head != null)
+        {
+            self.head.pos += towardTusk * Mathf.Lerp(1.2f, 3.2f, strain);
+            self.head.vel += towardTusk * Mathf.Lerp(0.25f, 0.8f, strain);
         }
     }
 
@@ -202,8 +270,6 @@ internal static class KingVultureSpearPlayerEffects
             float strain = Mathf.InverseLerp(0f, PullFramesRequired, state.Progress);
             float tremor = Mathf.Sin(state.Progress * 0.6f + self.limbNumber * 1.7f) * 0.55f * strain;
 
-            // Match vanilla HeavyCarry/Drag presentation: both free hands hunt an
-            // absolute point on opposite sides of the immovable target.
             self.reachingForObject = true;
             self.absoluteHuntPos = grabPoint +
                                    perpendicular * handSide * (6f + tremor) +
