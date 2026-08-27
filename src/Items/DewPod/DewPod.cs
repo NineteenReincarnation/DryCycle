@@ -22,6 +22,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
     private int _leakDripCounter;
     private int _drinkPoseFrames;
+    private int _drinkSoundCooldown;
     private Vector2 _drinkPoseTarget;
     private float _rotation;
     private float _lastRotation;
@@ -94,6 +95,11 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         if (_drinkPoseFrames > 0)
         {
             _drinkPoseFrames--;
+        }
+
+        if (_drinkSoundCooldown > 0)
+        {
+            _drinkSoundCooldown--;
         }
 
         if (AbstrPod == null || room == null)
@@ -223,6 +229,20 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     {
         _drinkPoseTarget = mouthPosition;
         _drinkPoseFrames = 2;
+
+        if (_drinkSoundCooldown <= 0 && room != null && firstChunk != null)
+        {
+            // The swollen Water Nut mouth sound is the closest vanilla wet sip.
+            // Play it rhythmically rather than every simulation tick so sustained
+            // drinking reads as repeated swallowing instead of audio chatter.
+            room.PlaySound(
+                SoundID.Slugcat_Bite_Water_Nut,
+                firstChunk,
+                loop: false,
+                vol: 0.48f,
+                pitch: Random.Range(0.94f, 1.08f));
+            _drinkSoundCooldown = Random.Range(17, 23);
+        }
     }
 
     private void UpdateRollingPhysics()
