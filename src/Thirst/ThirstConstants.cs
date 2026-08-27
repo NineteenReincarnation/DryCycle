@@ -7,9 +7,12 @@ internal static class ThirstConstants
     public const int MaxPips = 5;
     public const float MaxWater = 5f;
 
-    // Normal hibernation requires and consumes 3 hydration.
-    public const float HibernateRequirement = 3f;
-    public const float HibernateCost = 3f;
+    // The cyan divider is drawn after this many hydration pips. The amount to
+    // the left of the divider is the normal hibernation requirement and cost.
+    // Current layout: 1 pip | 4 pips, therefore normal sleep requires/consumes 1.
+    public const int HydrationSleepDividerAfterPip = 1;
+    public const float HibernateRequirement = HydrationSleepDividerAfterPip;
+    public const float HibernateCost = HydrationSleepDividerAfterPip;
 
     // Rain World runs gameplay at 40 simulation ticks per second.
     // 0.5 water per second = 0.0125 water per Player.Update.
