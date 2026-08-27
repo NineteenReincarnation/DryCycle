@@ -44,16 +44,16 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
-        // By PreModsInit all BepInEx plugin assemblies are already loaded. This
-        // lets DryCycle discover SlugBase by reflection when it exists, while
-        // remaining completely independent when it does not. Registration still
-        // occurs before SlugBase's PostModsInit JSON scan.
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
+        // Retry discovery here in case DryCycle's PreModsInit hook ran before an
+        // optional SlugBase assembly became visible. SlugBase JSON scanning occurs
+        // later in PostModsInit, so feature registration is still early enough.
+        SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
         if (_initialized)
