@@ -6,9 +6,12 @@ namespace DryCycle.Items.DewPod;
 internal sealed class AbstractDewPod : AbstractConsumable
 {
     public const float MaxWaterWV = 800f;
+    public const string LiquidColorAttributePrefix = "DRYCYCLE_DEWPOD_COLOR=";
 
     public float WaterWV;
     public bool Broken;
+    public Color LiquidColor;
+    public bool HasLiquidColor;
 
     public AbstractDewPod(
         World world,
@@ -31,6 +34,8 @@ internal sealed class AbstractDewPod : AbstractConsumable
     {
         WaterWV = Mathf.Clamp(waterWV, 0f, MaxWaterWV);
         Broken = broken;
+        LiquidColor = Color.clear;
+        HasLiquidColor = false;
     }
 
     public override string ToString()
@@ -47,6 +52,17 @@ internal sealed class AbstractDewPod : AbstractConsumable
             placedObjectIndex,
             WaterWV,
             Broken ? 1 : 0);
+
+        if (HasLiquidColor)
+        {
+            baseString += string.Format(
+                CultureInfo.InvariantCulture,
+                "<oA>{0}{1},{2},{3}",
+                LiquidColorAttributePrefix,
+                LiquidColor.r,
+                LiquidColor.g,
+                LiquidColor.b);
+        }
 
         baseString = SaveState.SetCustomData(this, baseString);
         return SaveUtils.AppendUnrecognizedStringAttrs(baseString, "<oA>", unrecognizedAttributes);
