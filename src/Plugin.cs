@@ -3,6 +3,7 @@ using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.HUD;
+using DryCycle.Items.KingVultureSpear;
 using DryCycle.Thirst;
 
 #pragma warning disable CS0618
@@ -16,7 +17,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.29";
+    public const string Version = "0.0.30";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -38,6 +39,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             ThirstHooks.Disable();
+            KingVultureSpearHooks.Disable();
             _initialized = false;
         }
     }
@@ -63,17 +65,19 @@ internal sealed class Plugin : BaseUnityPlugin
 
         try
         {
+            KingVultureSpearHooks.Enable();
             ThirstHooks.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
             _initialized = true;
-            Logger.LogInfo($"{ModName} {Version}: thirst system enabled.");
+            Logger.LogInfo($"{ModName} {Version}: systems enabled.");
         }
         catch (Exception ex)
         {
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             ThirstHooks.Disable();
+            KingVultureSpearHooks.Disable();
             Logger.LogError(ex);
             throw;
         }
