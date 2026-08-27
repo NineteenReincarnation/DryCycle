@@ -40,11 +40,19 @@ internal static class ThirstMeter
         public float WaveStrength;
         public float WavePhase;
         public int GainWaveFrames;
+        public int LastFoodGainSerial;
     }
 
     private sealed class RejectState
     {
         public int Counter;
+    }
+
+    private sealed class FoodGainState
+    {
+        public int Serial;
+        public float StartWater;
+        public float TargetWater;
     }
 
     private sealed class WaterFill
@@ -67,6 +75,7 @@ internal static class ThirstMeter
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter, MeterState> MeterStates = new();
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter.MeterCircle, WaterFill> CircleFills = new();
     private static readonly ConditionalWeakTable<Player, RejectState> RejectStates = new();
+    private static readonly ConditionalWeakTable<Player, FoodGainState> FoodGainStates = new();
 
     private static bool _enabled;
 
@@ -154,8 +163,24 @@ internal static class ThirstMeter
         ShowHudForPlayer(player, ThirstConstants.UnderwaterHudHoldFrames);
     }
 
-    public static void ShowHydrationGain(Player player)
+    public static void ShowHydrationGain(Player player, float beforeWater, float afterWater)
     {
+        if (player == null)
+        {
+            return;
+        }
+
+        float start = Mathf.Clamp(beforeWater, 0f, ThirstConstants.MaxWater);
+        float target = Mathf.Clamp(afterWater, 0f, ThirstConstants.MaxWater);
+
+        if (target > start + 0.0001f)
+        {
+            FoodGainState gain = FoodGainStates.GetOrCreateValue(player);
+            gain.Serial++;
+            gain.StartWater = start;
+            gain.TargetWater = target;
+        }
+
         ShowHudForPlayer(player, ThirstConstants.HydrationGainHudHoldFrames);
     }
 
@@ -237,19 +262,48 @@ internal static class ThirstMeter
         float actualWater = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
         int playerNumber = player.playerState?.playerNumber ?? 0;
 
+        bool hasFoodGain = FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
+                           foodGain.Serial != state.LastFoodGainSerial;
+
         // In Jolly, RoomCamera changes hud.owner when the camera focus changes.
-        // The vanilla FoodMeter object itself is reused, so reset DryCycle's
-        // interpolation state immediately instead of animating one player's
-        // hydration into another player's value.
+        // The vanilla FoodMeter object itself is reused. If a food hydration gain
+        // occurred before this meter became visible, initialize from the pre-gain
+        // amount so the first visible frame still gets the same rising-water
+        // animation used by underwater drinking.
         if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
         {
-            ResetGameplayState(state, playerNumber, actualWater);
-            return;
+            if (hasFoodGain)
+            {
+                ResetGameplayState(
+                    state,
+                    playerNumber,
+                    Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+                state.TargetWater = actualWater;
+                state.GainWaveFrames = GainWaveHoldFrames;
+                state.LastFoodGainSerial = foodGain.Serial;
+            }
+            else
+            {
+                ResetGameplayState(state, playerNumber, actualWater);
+                return;
+            }
+        }
+        else if (hasFoodGain)
+        {
+            // An instant food gain updates gameplay water immediately. Keep the
+            // visual water at its pre-eat level and let the same continuous
+            // interpolation/wave path used by drinking raise it to the target.
+            state.DisplayWater = Mathf.Min(
+                state.DisplayWater,
+                Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+            state.TargetWater = actualWater;
+            state.GainWaveFrames = GainWaveHoldFrames;
+            state.LastFoodGainSerial = foodGain.Serial;
         }
 
         bool gainedWater = actualWater > state.LastActualWater + 0.0001f;
 
-        if (gainedWater || thirst.IsDrinking)
+        if (gainedWater || thirst.IsDrinking || hasFoodGain)
         {
             state.GainWaveFrames = GainWaveHoldFrames;
         }
@@ -266,6 +320,8 @@ internal static class ThirstMeter
         }
         else
         {
+            // Drinking and food use the exact same follow speed. Food therefore
+            // rises through each affected pip rather than snapping to its result.
             float follow = (thirst.IsDrinking || state.GainWaveFrames > 0) ? 0.22f : 0.4f;
             state.DisplayWater = Mathf.Lerp(state.DisplayWater, actualWater, follow);
 
@@ -486,11 +542,26 @@ internal static class ThirstMeter
             int playerNumber = player.playerState?.playerNumber ?? 0;
 
             // Draw may run immediately after the camera changed owner and before
-            // the next FoodMeter.Update. Reset here too so the first rendered
-            // frame already belongs to the newly focused player.
+            // the next FoodMeter.Update. Preserve a pending food-gain animation
+            // here too, otherwise the first draw could snap straight to the new
+            // amount before Update gets a chance to initialize the wave.
             if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
             {
-                ResetGameplayState(state, playerNumber, actual);
+                if (FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
+                    foodGain.Serial != state.LastFoodGainSerial)
+                {
+                    ResetGameplayState(
+                        state,
+                        playerNumber,
+                        Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+                    state.TargetWater = actual;
+                    state.GainWaveFrames = GainWaveHoldFrames;
+                    state.LastFoodGainSerial = foodGain.Serial;
+                }
+                else
+                {
+                    ResetGameplayState(state, playerNumber, actual);
+                }
             }
 
             water = Mathf.Clamp(state.DisplayWater, 0f, ThirstConstants.MaxWater);
