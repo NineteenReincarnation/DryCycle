@@ -47,6 +47,9 @@
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>D:\Application\Steam\steamapps\common\Rain World\RainWorld_Data\Managed\Unity.Mathematics.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine">
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll</HintPath>
       <Private>false</Private>
