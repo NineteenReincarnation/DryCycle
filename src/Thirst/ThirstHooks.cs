@@ -13,7 +13,16 @@ internal static class ThirstHooks
         public int InitialMeat;
     }
 
+    private sealed class FullFoodEatState
+    {
+        public bool Active;
+        public int OriginalFood;
+        public int OriginalQuarterFood;
+        public bool OverflowVisualShownThisHold;
+    }
+
     private static readonly ConditionalWeakTable<Creature, MeatHydrationState> MeatStates = new();
+    private static readonly ConditionalWeakTable<Player, FullFoodEatState> FullFoodEatStates = new();
     private static bool _enabled;
 
     public static void Enable()
@@ -28,6 +37,8 @@ internal static class ThirstHooks
         ThirstMeter.Enable();
 
         On.Player.Update += Player_Update;
+        On.Player.AddFood += Player_AddFood;
+        On.Player.AddQuarterFood += Player_AddQuarterFood;
         On.Player.ObjectEaten += Player_ObjectEaten;
         On.Player.EatMeatUpdate += Player_EatMeatUpdate;
         On.ShelterDoor.Close += ShelterDoor_Close;
@@ -48,6 +59,8 @@ internal static class ThirstHooks
         _enabled = false;
 
         On.Player.Update -= Player_Update;
+        On.Player.AddFood -= Player_AddFood;
+        On.Player.AddQuarterFood -= Player_AddQuarterFood;
         On.Player.ObjectEaten -= Player_ObjectEaten;
         On.Player.EatMeatUpdate -= Player_EatMeatUpdate;
         On.ShelterDoor.Close -= ShelterDoor_Close;
@@ -62,7 +75,16 @@ internal static class ThirstHooks
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
     {
-        orig(self, eu);
+        bool fullHydratingEat = BeginFullHydratingEat(self);
+
+        try
+        {
+            orig(self, eu);
+        }
+        finally
+        {
+            EndFullHydratingEat(self, fullHydratingEat);
+        }
 
         if (!IsStoryPlayer(self))
         {
@@ -102,11 +124,35 @@ internal static class ThirstHooks
         }
     }
 
+    private static void Player_AddFood(On.Player.orig_AddFood orig, Player self, int add)
+    {
+        if (IsFullHydratingEatActive(self))
+        {
+            // The temporary one-food gap exists only to pass vanilla's full-
+            // stomach gate. Hydrating overflow food must not increase normal food
+            // or story food statistics while the stomach is already full.
+            return;
+        }
+
+        orig(self, add);
+    }
+
+    private static void Player_AddQuarterFood(On.Player.orig_AddQuarterFood orig, Player self)
+    {
+        if (IsFullHydratingEatActive(self))
+        {
+            return;
+        }
+
+        orig(self);
+    }
+
     private static void Player_ObjectEaten(On.Player.orig_ObjectEaten orig, Player self, IPlayerEdible edible)
     {
         float water = FoodWaterTable.ForEdible(edible);
         bool nourishmentAllowed = edible != null &&
                                   SlugcatStats.NourishmentOfObjectEaten(self.SlugCatClass, edible) != -1;
+        bool overflowEat = IsFullHydratingEatActive(self);
 
         orig(self, edible);
 
@@ -115,6 +161,11 @@ internal static class ThirstHooks
         if (water > 0f && nourishmentAllowed)
         {
             AddHydration(self, water);
+
+            if (overflowEat)
+            {
+                ThirstMeter.ShowOverflowFoodEat(self);
+            }
         }
     }
 
@@ -122,6 +173,7 @@ internal static class ThirstHooks
     {
         Creature creature = null;
         int before = 0;
+        bool overflowEat = IsFullHydratingEatActive(self);
 
         if (self.grasps != null && graspIndex >= 0 && graspIndex < self.grasps.Length)
         {
@@ -162,6 +214,130 @@ internal static class ThirstHooks
 
         int totalMeat = Math.Max(1, MeatStates.GetOrCreateValue(creature).InitialMeat);
         AddHydration(self, totalWater * consumed / totalMeat);
+
+        if (overflowEat)
+        {
+            ThirstMeter.ShowOverflowFoodEat(self);
+        }
+    }
+
+    private static bool BeginFullHydratingEat(Player player)
+    {
+        if (player == null || player.playerState == null)
+        {
+            return false;
+        }
+
+        FullFoodEatState state = FullFoodEatStates.GetOrCreateValue(player);
+        bool pickupHeld = player.input != null &&
+                          player.input.Length > 0 &&
+                          player.input[0].pckp;
+
+        if (!pickupHeld)
+        {
+            state.OverflowVisualShownThisHold = false;
+        }
+
+        if (!pickupHeld ||
+            !IsStoryPlayer(player) ||
+            player.dead ||
+            !player.Consious ||
+            player.FoodInStomach < player.MaxFoodInStomach ||
+            !HasHydratingFoodInVanillaEatSlot(player))
+        {
+            return false;
+        }
+
+        state.Active = true;
+        state.OriginalFood = player.playerState.foodInStomach;
+        state.OriginalQuarterFood = player.playerState.quarterFoodPoints;
+
+        // Vanilla refuses edible objects and meat when FoodInStomach is already
+        // MaxFoodInStomach. Open one temporary slot while Player.Update runs, and
+        // suppress AddFood/AddQuarterFood above so this is hydration-only eating.
+        player.playerState.foodInStomach = Math.Max(0, state.OriginalFood - 1);
+
+        if (!state.OverflowVisualShownThisHold)
+        {
+            state.OverflowVisualShownThisHold = true;
+            ThirstMeter.ShowOverflowFoodEat(player);
+        }
+
+        return true;
+    }
+
+    private static void EndFullHydratingEat(Player player, bool wasActive)
+    {
+        if (!wasActive || player?.playerState == null)
+        {
+            return;
+        }
+
+        if (!FullFoodEatStates.TryGetValue(player, out FullFoodEatState state))
+        {
+            return;
+        }
+
+        player.playerState.foodInStomach = state.OriginalFood;
+        player.playerState.quarterFoodPoints = state.OriginalQuarterFood;
+        state.Active = false;
+    }
+
+    private static bool IsFullHydratingEatActive(Player player)
+    {
+        return player != null &&
+               FullFoodEatStates.TryGetValue(player, out FullFoodEatState state) &&
+               state.Active;
+    }
+
+    private static bool HasHydratingFoodInVanillaEatSlot(Player player)
+    {
+        if (player?.grasps == null)
+        {
+            return false;
+        }
+
+        // Match the regular edible selection in Player.GrabUpdate: the first
+        // edible grasp wins. If that chosen item is not hydrating, do not bypass
+        // the full-food warning just because the other hand holds hydrating food.
+        if (!ModManager.MSC || player.SlugCatClass != MoreSlugcats.MoreSlugcatsEnums.SlugcatStatsName.Spear)
+        {
+            int limit = Math.Min(2, player.grasps.Length);
+            for (int i = 0; i < limit; i++)
+            {
+                if (player.grasps[i]?.grabbed is not IPlayerEdible edible || !edible.Edible)
+                {
+                    continue;
+                }
+
+                return FoodWaterTable.ForEdible(edible) > 0f &&
+                       SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, edible) != -1;
+            }
+        }
+
+        // Meat eating uses grasp 0, except the MMF convenience rule that selects
+        // grasp 1 when grasp 0 is empty or is not a creature.
+        int meatIndex = 0;
+        if (ModManager.MMF &&
+            player.grasps.Length > 1 &&
+            (player.grasps[0] == null || player.grasps[0].grabbed is not Creature) &&
+            player.grasps[1]?.grabbed is Creature)
+        {
+            meatIndex = 1;
+        }
+
+        if (meatIndex >= player.grasps.Length ||
+            player.grasps[meatIndex]?.grabbed is not Creature creature ||
+            creature.State == null ||
+            creature.State.meatLeft <= 0 ||
+            creature.Template == null ||
+            creature.Template.meatPoints <= 0 ||
+            !player.CanEatMeat(creature))
+        {
+            return false;
+        }
+
+        return FoodWaterTable.ForCreature(creature) > 0f;
     }
 
     private static void ShelterDoor_Close(On.ShelterDoor.orig_Close orig, ShelterDoor self)
