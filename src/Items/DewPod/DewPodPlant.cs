@@ -74,6 +74,21 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         PlacedObjectIndex = placedObjectIndex;
         RootPos = ResolveRootPosition(room, placedObject?.pos ?? Vector2.zero);
 
+        // A fresh growth produces 2-4 mature pods. The distribution is symmetric
+        // around three (25% / 50% / 25%), so the mathematical expectation is
+        // exactly three mature pods. Slot choice is shuffled per plant and cycle,
+        // but remains deterministic while revisiting the same room in that cycle.
+        if (_runtimeState != null &&
+            !_runtimeState.Dormant &&
+            !_runtimeState.ConsumptionReported &&
+            _runtimeState.HarvestedMask == 0)
+        {
+            _runtimeState.InitialMask = BuildSpawnMask(
+                OriginRoom,
+                PlacedObjectIndex,
+                _runtimeState.CycleNumber);
+        }
+
         for (int i = 0; i < SlotCount; i++)
         {
             Vector2 rest = GetRestTip(i, 0f);
@@ -83,6 +98,54 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         }
 
         TryRefreshLiquidColor();
+    }
+
+    private static int BuildSpawnMask(int roomIndex, int placedObjectIndex, int cycleNumber)
+    {
+        unchecked
+        {
+            uint state = 2166136261u;
+            state = (state ^ (uint)roomIndex) * 16777619u;
+            state = (state ^ (uint)placedObjectIndex) * 16777619u;
+            state = (state ^ (uint)(cycleNumber + 1)) * 16777619u;
+            state ^= state >> 13;
+            state *= 0x5bd1e995u;
+            state ^= state >> 15;
+
+            uint countRoll = NextSpawnRandom(ref state) & 3u;
+            int matureCount = countRoll switch
+            {
+                0u => 2,
+                3u => 4,
+                _ => 3
+            };
+
+            int[] slots = { 0, 1, 2, 3 };
+            for (int i = slots.Length - 1; i > 0; i--)
+            {
+                int j = (int)(NextSpawnRandom(ref state) % (uint)(i + 1));
+                (slots[i], slots[j]) = (slots[j], slots[i]);
+            }
+
+            int mask = 0;
+            for (int i = 0; i < matureCount; i++)
+            {
+                mask |= 1 << slots[i];
+            }
+
+            return mask;
+        }
+    }
+
+    private static uint NextSpawnRandom(ref uint state)
+    {
+        unchecked
+        {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            return state;
+        }
     }
 
     internal bool IsMatureSlot(int slot)
