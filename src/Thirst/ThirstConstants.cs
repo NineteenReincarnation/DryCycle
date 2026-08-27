@@ -2,8 +2,8 @@ namespace DryCycle.Thirst;
 
 internal static class ThirstConstants
 {
-    // Hydration is a global 0..5 resource. Water is rendered inside the first
-    // five vanilla food pips, with each pip showing empty / half / full water.
+    // Hydration remains a global 0..5 resource. Water is rendered inside the
+    // first five vanilla food pips, with each pip showing empty / half / full.
     public const int MaxPips = 5;
     public const float MaxWater = 5f;
 
@@ -17,15 +17,13 @@ internal static class ThirstConstants
     // same gameplay weakness state as Rain World's malnourished/starving state.
     public const int WeaknessWaterValueThreshold = HalfPipWaterValue;
 
-    // The cyan divider is drawn after this many hydration pips. The amount to
-    // the left of the divider is the normal hibernation requirement and cost.
-    // Current layout: 1 pip | 4 pips, therefore normal sleep requires/consumes 1.
-    public const int HydrationSleepDividerAfterPip = 1;
-    public const float HibernateRequirement = HydrationSleepDividerAfterPip;
-    public const float HibernateCost = HydrationSleepDividerAfterPip;
+    // Rain World gameplay simulation runs at 40 ticks per second. SlugBase's
+    // WaterLossRate feature is expressed in WV per second and is converted to
+    // pip-space only when DryCycle subtracts the value from runtime hydration.
+    public const float SimulationTicksPerSecond = 40f;
 
-    // Rain World runs gameplay at 40 simulation ticks per second.
-    // 0.5 water per second = 0.0125 pip per tick = 5 WV per tick = 200 WV/sec.
+    // Drinking remains 0.5 hydration pip per second:
+    // 0.0125 pip/tick = 5 WV/tick = 200 WV/second.
     public const float DrinkPerTick = 0.0125f;
 
     // HUD reveal timings. Drinking refreshes a short hold continuously; one-shot
@@ -35,8 +33,8 @@ internal static class ThirstConstants
     public const int HydrationGainHudHoldFrames = 60;
     public const int RejectHudHoldFrames = 55;
 
-    // V2 remains the five-unit save format. WV is an internal conversion layer,
-    // so existing hydration saves remain compatible without a save migration.
+    // V2 remains the five-unit save format. WV and SlugBase character settings
+    // are runtime/configuration layers, so no save migration is required.
     public const string SaveKey = "DRYCYCLETHIRSTV2";
     public const string LegacySaveKey = "DRYCYCLETHIRST";
 }
