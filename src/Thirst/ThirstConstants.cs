@@ -11,6 +11,7 @@ internal static class ThirstConstants
 
     public const int UnderwaterHudHoldFrames = 20;
     public const int HydrationGainHudHoldFrames = 60;
+    public const int HydrationLossHudHoldFrames = 60;
     public const int RejectHudHoldFrames = 55;
 
     public const string SaveKey = "DRYCYCLETHIRSTV2";
