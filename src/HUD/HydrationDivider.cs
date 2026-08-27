@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DryCycle.Thirst;
 using UnityEngine;
 
 namespace DryCycle.HUD;
@@ -98,13 +99,13 @@ internal static class HydrationDivider
     {
         if (!ShouldShow(meter) ||
             meter.circles == null ||
-            meter.circles.Count <= Thirst.ThirstConstants.HydrationSleepDividerAfterPip)
+            meter.circles.Count <= ThirstConstants.HydrationSleepDividerAfterPip)
         {
             Hide(meter);
             return;
         }
 
-        int rightIndex = Thirst.ThirstConstants.HydrationSleepDividerAfterPip;
+        int rightIndex = ThirstConstants.HydrationSleepDividerAfterPip;
         int leftIndex = rightIndex - 1;
 
         if (leftIndex < 0 || rightIndex >= meter.circles.Count)
