@@ -256,7 +256,7 @@ internal static class DewPodPlantHooks
         }
         else
         {
-            int initialMask = BuildInitialMask(room.abstractRoom.index, placedObjectIndex, cycleNumber);
+            int initialMask = BuildInitialMask(room.abstractRoom.index, placedObjectIndex);
             created = new PlantRuntimeState
             {
                 CycleNumber = cycleNumber,
@@ -271,14 +271,15 @@ internal static class DewPodPlantHooks
         return created;
     }
 
-    private static int BuildInitialMask(int roomIndex, int placedObjectIndex, int cycleNumber)
+    private static int BuildInitialMask(int roomIndex, int placedObjectIndex)
     {
         unchecked
         {
+            // Stable per placed plant: the same plant keeps the same 3-or-4-slot
+            // morphology instead of changing shape every unharvested cycle.
             uint hash = 2166136261u;
             hash = (hash ^ (uint)roomIndex) * 16777619u;
             hash = (hash ^ (uint)placedObjectIndex) * 16777619u;
-            hash = (hash ^ (uint)cycleNumber) * 16777619u;
             hash ^= hash >> 13;
             hash *= 0x5bd1e995u;
             hash ^= hash >> 15;
@@ -356,7 +357,8 @@ internal static class DewPodPlantHooks
             !player.Consious ||
             player.isNPC ||
             player.inShortcut ||
-            player.FreeHand() < 0)
+            player.FreeHand() < 0 ||
+            IsUsingPickupForHydration(player))
         {
             ResetHarvestState(state, clearReleaseLatch: false);
             return;
@@ -414,6 +416,27 @@ internal static class DewPodPlantHooks
         {
             ResetHarvestState(state, clearReleaseLatch: false);
         }
+    }
+
+    private static bool IsUsingPickupForHydration(Player player)
+    {
+        if (player?.grasps != null)
+        {
+            int limit = Math.Min(2, player.grasps.Length);
+            for (int i = 0; i < limit; i++)
+            {
+                if (player.grasps[i]?.grabbed is DewPod pod && pod.WaterWV > 0.0001f)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return player?.bodyChunks != null &&
+               player.bodyChunks.Length >= 2 &&
+               player.bodyChunks[0].submersion > 0.9f &&
+               player.bodyChunks[1].submersion > 0.9f &&
+               player.airInLungs < 0.999f;
     }
 
     private static bool FindNearestPod(Player player, out PodCandidate candidate)
