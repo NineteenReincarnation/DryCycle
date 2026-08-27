@@ -16,11 +16,33 @@ internal sealed class KingVultureSpear : Spear
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
+        // This intentionally mirrors KingTusks.Tusk.InitiateSprites instead of
+        // reusing Spear's sprite. The body and detail meshes must have the same
+        // topology/UV layout as the original tusk for the KingTusk shader pattern
+        // to line up 1:1.
         sLeaser.sprites = new FSprite[2];
         sLeaser.sprites[0] = TriangleMesh.MakeLongMesh(TuskSegments, pointyTip: true, customColor: true);
         sLeaser.sprites[1] = TriangleMesh.MakeLongMesh(TuskSegments, pointyTip: true, customColor: true);
         sLeaser.sprites[1].shader = rCam.game.rainWorld.Shaders["KingTusk"];
+
+        ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         AddToContainer(sLeaser, rCam, null);
+    }
+
+    public override void AddToContainer(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        FContainer newContainer)
+    {
+        // Vanilla KingTusks.Tusk places both the body and KingTusk detail layer
+        // in Midground. Do exactly the same for the detached item.
+        FContainer container = newContainer ?? rCam.ReturnFContainer("Midground");
+
+        for (int i = 0; i < sLeaser.sprites.Length; i++)
+        {
+            sLeaser.sprites[i].RemoveFromContainer();
+            container.AddChild(sLeaser.sprites[i]);
+        }
     }
 
     public override void DrawSprites(
@@ -34,7 +56,6 @@ internal sealed class KingVultureSpear : Spear
             reinitiateSpritesOnDraw = false;
             sLeaser.RemoveAllSpritesFromContainer();
             InitiateSprites(sLeaser, rCam);
-            ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         }
 
         if (sLeaser.sprites.Length < 2 ||
@@ -57,12 +78,19 @@ internal sealed class KingVultureSpear : Spear
         }
         direction.Normalize();
 
-        DrawTuskMesh(body, detail, center, direction, camPos);
-        UpdateColors(body, detail, rCam.currentPalette, center);
+        DrawVanillaTuskMesh(body, detail, center, direction, camPos);
+
+        // Vanilla only reapplies per-vertex darkness every draw under MMF. The
+        // detached item follows the same rule, but samples lighting at its own
+        // position now that it no longer belongs to VultureGraphics.
+        if (ModManager.MMF)
+        {
+            UpdateVanillaTuskColors(body, detail, rCam.currentPalette, center);
+        }
 
         // Match vanilla PlayerCarryableItem/Spear pickup feedback. Because these
         // meshes use per-vertex colors, blink them by tinting the vertex arrays
-        // instead of assigning FSprite.color, which would destroy the tusk pattern.
+        // instead of replacing the original KingTusk sprite color/state.
         if (blink > 0 && Random.value < 0.5f)
         {
             TintMesh(body, blinkColor, 0.9f);
@@ -85,61 +113,75 @@ internal sealed class KingVultureSpear : Spear
     {
         color = palette.blackColor;
 
-        if (sLeaser.sprites.Length >= 2 &&
-            sLeaser.sprites[0] is TriangleMesh body &&
-            sLeaser.sprites[1] is TriangleMesh detail)
+        if (sLeaser.sprites.Length < 2 ||
+            sLeaser.sprites[0] is not TriangleMesh body ||
+            sLeaser.sprites[1] is not TriangleMesh detail)
         {
-            UpdateColors(body, detail, palette, firstChunk.pos);
+            return;
         }
+
+        // Important: VultureGraphics.ApplyPalette first assigns its common sprite
+        // tint to every sprite, then KingTusks.Tusk.ApplyPalette writes the custom
+        // vertex colors and detail alpha. The KingTusk shader uses that complete
+        // sprite state. Skipping this tint is why the detached pattern did not
+        // match the corpse-side tusk even though the mesh/formulas were the same.
+        body.color = palette.blackColor;
+        detail.color = palette.blackColor;
+
+        UpdateVanillaTuskColors(body, detail, palette, firstChunk.pos);
     }
 
-    private void DrawTuskMesh(
+    private void DrawVanillaTuskMesh(
         TriangleMesh body,
         TriangleMesh detail,
         Vector2 center,
         Vector2 direction,
         Vector2 camPos)
     {
+        // The following is the same geometry calculation used by
+        // KingTusks.Tusk.DrawSprites in Rain World v1.11.8. Only the coordinate
+        // source changes from the Vulture's two tusk chunkPoints to this Spear's
+        // position/rotation.
         AbstractKingVultureSpear data = Data;
         int side = data?.SourceSide ?? 0;
-        Vector2 profile = data?.Profile ?? new Vector2(0.35f, 0.25f);
+        Vector2 zRot = data?.Profile ?? new Vector2(0.35f, 0.25f);
         Vector2 perpendicular = Custom.PerpendicularVector(direction);
         float sideSign = side == 0 ? -1f : 1f;
 
         Vector2 previous = center +
                            direction * -35f +
-                           perpendicular * (profile.y * sideSign * -15f);
+                           perpendicular * (zRot.y * sideSign * -15f);
         float previousRadius = 0f;
 
         for (int i = 0; i < TuskSegments; i++)
         {
-            float t = Mathf.InverseLerp(0f, TuskSegments - 1f, i);
+            float f = Mathf.InverseLerp(0f, TuskSegments - 1f, i);
             Vector2 point = center +
-                            direction * Mathf.Lerp(-30f, 60f, t) +
-                            perpendicular * (TuskBend(t) * 20f * profile.x) +
-                            perpendicular * (TuskProfileBend(t) * profile.y * sideSign * 10f);
+                            direction * Mathf.Lerp(-30f, 60f, f) +
+                            perpendicular * (TuskBend(f) * 20f * zRot.x) +
+                            perpendicular * (TuskProfBend(f) * zRot.y * sideSign * 10f);
 
             Vector2 segment = point - previous;
-            Vector2 segmentDir = segment.sqrMagnitude > 0.0001f
+            Vector2 segmentDirection = segment.sqrMagnitude > 0.0001f
                 ? segment.normalized
                 : direction;
-            Vector2 segmentPerp = Custom.PerpendicularVector(segmentDir);
+            Vector2 segmentPerpendicular = Custom.PerpendicularVector(segmentDirection);
             float lengthStep = Vector2.Distance(point, previous) / 5f;
-            float radius = TuskRadius(t, Mathf.Abs(profile.y));
-            Vector2 averageRadius = segmentPerp * ((radius + previousRadius) * 0.5f);
+            float radius = TuskRad(f, Mathf.Abs(zRot.y));
+            Vector2 averageRadius = segmentPerpendicular * ((radius + previousRadius) * 0.5f);
 
-            body.MoveVertice(i * 4, previous - averageRadius + segmentDir * lengthStep - camPos);
-            body.MoveVertice(i * 4 + 1, previous + averageRadius + segmentDir * lengthStep - camPos);
+            body.MoveVertice(i * 4, previous - averageRadius + segmentDirection * lengthStep - camPos);
+            body.MoveVertice(i * 4 + 1, previous + averageRadius + segmentDirection * lengthStep - camPos);
 
             if (i == TuskSegments - 1)
             {
-                body.MoveVertice(i * 4 + 2, point + segmentDir * lengthStep - camPos);
+                body.MoveVertice(i * 4 + 2, point + segmentDirection * lengthStep - camPos);
             }
             else
             {
-                Vector2 currentRadius = segmentPerp * radius;
-                body.MoveVertice(i * 4 + 2, point - currentRadius - segmentDir * lengthStep - camPos);
-                body.MoveVertice(i * 4 + 3, point + currentRadius - segmentDir * lengthStep - camPos);
+                Vector2 currentRadius = segmentPerpendicular * radius;
+                body.MoveVertice(i * 4 + 2, point - currentRadius - segmentDirection * lengthStep - camPos);
+                body.MoveVertice(i * 4 + 3, point + currentRadius - segmentDirection * lengthStep - camPos);
             }
 
             previousRadius = radius;
@@ -152,42 +194,56 @@ internal sealed class KingVultureSpear : Spear
         }
     }
 
-    private void UpdateColors(
+    private void UpdateVanillaTuskColors(
         TriangleMesh body,
         TriangleMesh detail,
         RoomPalette palette,
         Vector2 worldPos)
     {
+        // This mirrors KingTusks.Tusk.ApplyPalette / UpdateTuskColors from
+        // Rain World v1.11.8 using the visual parameters captured from the source
+        // tusk when it was extracted.
         AbstractKingVultureSpear data = Data;
         Color armor = data?.ArmorColor ?? Color.Lerp(Color.gray, Color.white, 0.35f);
         HSLColor colorA = data?.ColorA ?? new HSLColor(0f, 0.4f, 0.55f);
         HSLColor colorB = data?.ColorB ?? new HSLColor(0f, 0.8f, 0.45f);
-        float pattern = data?.PatternDisplace ?? 1f;
-        float darkness = ModManager.MMF && room != null
-            ? room.Darkness(worldPos)
-            : 0f;
+        float patternDisplace = data?.PatternDisplace ?? 1f;
+
+        float darkness = 0f;
+        if (ModManager.MMF && room != null)
+        {
+            // VultureGraphics uses Darkness * (1 - 0.5 * LightSourceExposure).
+            // Use the detached tusk's own position in place of the old Vulture
+            // main body position so the same vanilla lighting model follows it.
+            darkness = room.Darkness(worldPos);
+            darkness *= 1f - 0.5f * room.LightSourceExposure(worldPos);
+        }
 
         int count = Mathf.Min(body.verticeColors.Length, detail.verticeColors.Length);
         for (int i = 0; i < count; i++)
         {
-            float t = Mathf.InverseLerp(0f, body.verticeColors.Length - 1f, i);
-            Color bodyColor = Color.Lerp(armor, Color.white, Mathf.Pow(t, 2f));
-            Color detailColor = Color.Lerp(
-                Color.Lerp(
-                    HSLColor.Lerp(colorA, colorB, t).rgb,
-                    palette.blackColor,
-                    0.65f - 0.4f * t),
-                armor,
-                Mathf.Pow(t, 2f));
+            float f = Mathf.InverseLerp(0f, body.verticeColors.Length - 1f, i);
 
-            body.verticeColors[i] = Color.Lerp(bodyColor, palette.blackColor, darkness);
-            detail.verticeColors[i] = Color.Lerp(detailColor, palette.blackColor, darkness);
+            body.verticeColors[i] = Color.Lerp(
+                Color.Lerp(armor, Color.white, Mathf.Pow(f, 2f)),
+                palette.blackColor,
+                darkness);
+
+            detail.verticeColors[i] = Color.Lerp(
+                Color.Lerp(
+                    Color.Lerp(
+                        HSLColor.Lerp(colorA, colorB, f).rgb,
+                        palette.blackColor,
+                        0.65f - 0.4f * f),
+                    armor,
+                    Mathf.Pow(f, 2f)),
+                palette.blackColor,
+                darkness);
         }
 
-        // Do not assign body.color/detail.color here. TriangleMesh customColor uses
-        // the per-vertex arrays above, and assigning FSprite.color after them turns
-        // the detached tusk into a flat white mesh and erases the KingTusk pattern.
-        detail.alpha = pattern;
+        // Vanilla KingTusks.Tusk.ApplyPalette drives the KingTusk shader pattern
+        // with owner.patternDisplace through the detail mesh alpha.
+        detail.alpha = patternDisplace;
     }
 
     private static void TintMesh(TriangleMesh mesh, Color target, float amount)
@@ -204,23 +260,24 @@ internal sealed class KingVultureSpear : Spear
         }
     }
 
+    // Exact KingTusks.Tusk geometry formulas from Rain World v1.11.8.
     private static float TuskBend(float f)
     {
         return Mathf.Sin(Mathf.Pow(f, 0.85f) * Mathf.PI * 2f) * Mathf.Pow(1f - f, 2f);
     }
 
-    private static float TuskProfileBend(float f)
+    private static float TuskProfBend(float f)
     {
         return -Mathf.Cos(Mathf.Pow(f, 0.85f) * Mathf.PI * 2.5f) * Mathf.Pow(1f - f, 3f);
     }
 
-    private static float TuskRadius(float f, float profileFactor)
+    private static float TuskRad(float f, float profileFac)
     {
         return 0.5f +
                2f * Mathf.Pow(
                    Mathf.Clamp01(
                        Mathf.Sin(
-                           Mathf.Pow(f, Mathf.Lerp(0.65f, 0.5f, profileFactor)) * Mathf.PI)),
-                   1.2f - 0.3f * profileFactor);
+                           Mathf.Pow(f, Mathf.Lerp(0.65f, 0.5f, profileFac)) * Mathf.PI)),
+                   1.2f - 0.3f * profileFac);
     }
 }
