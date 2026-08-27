@@ -5,15 +5,15 @@ namespace DryCycle.Items.KingVultureSpear;
 internal static class KingVultureSpearCombat
 {
     private const float DamageMultiplier = 3f;
-    private const float WeaknessWaterLossMultiplier = 3f;
-    private const int WeaknessFrames = 200;
+    private const float PostThrowWaterLossMultiplier = 1.25f;
+    private const int PostThrowWaterLossFrames = 120;
 
-    private sealed class PlayerWeaknessState
+    private sealed class PlayerThrowState
     {
-        public int RemainingFrames;
+        public int WaterLossFramesRemaining;
     }
 
-    private static readonly ConditionalWeakTable<Player, PlayerWeaknessState> WeaknessStates = new();
+    private static readonly ConditionalWeakTable<Player, PlayerThrowState> ThrowStates = new();
     private static bool _enabled;
 
     public static void Enable()
@@ -48,13 +48,13 @@ internal static class KingVultureSpearCombat
     {
         if (player == null ||
             player.isNPC ||
-            !WeaknessStates.TryGetValue(player, out PlayerWeaknessState state) ||
-            state.RemainingFrames <= 0)
+            !ThrowStates.TryGetValue(player, out PlayerThrowState state) ||
+            state.WaterLossFramesRemaining <= 0)
         {
             return 1f;
         }
 
-        return WeaknessWaterLossMultiplier;
+        return PostThrowWaterLossMultiplier;
     }
 
     private static void Player_ThrownSpear(
@@ -77,7 +77,16 @@ internal static class KingVultureSpearCombat
 
         if (self != null && !self.isNPC)
         {
-            WeaknessStates.GetOrCreateValue(self).RemainingFrames = WeaknessFrames;
+            // Hydration penalty is independent from the breathing state: exactly
+            // 3 seconds at 40 simulation ticks per second, with the player's
+            // current passive loss multiplied directly by 1.25.
+            ThrowStates.GetOrCreateValue(self).WaterLossFramesRemaining = PostThrowWaterLossFrames;
+
+            // Trigger Rain World's native post-exertion breathing state once.
+            // Player.Update then lowers aerobicLevel using vanilla recovery rules,
+            // and PlayerGraphics automatically speeds up/slows down breathing from
+            // the same value. No custom breathing timer or recovery is maintained.
+            self.aerobicLevel = 1f;
         }
     }
 
@@ -125,13 +134,13 @@ internal static class KingVultureSpearCombat
 
         if (self == null ||
             self.isNPC ||
-            !WeaknessStates.TryGetValue(self, out PlayerWeaknessState state) ||
-            state.RemainingFrames <= 0)
+            !ThrowStates.TryGetValue(self, out PlayerThrowState state) ||
+            state.WaterLossFramesRemaining <= 0)
         {
             return;
         }
 
-        state.RemainingFrames--;
+        state.WaterLossFramesRemaining--;
     }
 
     private static bool HasOtherCarriedKingVultureSpear(
