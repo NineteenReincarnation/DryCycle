@@ -1,13 +1,14 @@
 using System.Runtime.CompilerServices;
 using DryCycle.Thirst;
+using Menu;
 using UnityEngine;
 
 namespace DryCycle.HUD;
 
 /// <summary>
 /// Draws the cyan hydration hibernation divider inside the vanilla FoodMeter.
-/// The number of hydration pips to the left of this line is also the normal
-/// hibernation requirement/cost (see ThirstConstants.HydrationSleepDividerAfterPip).
+/// Its position comes from the current character's SlugBase WaterPips feature
+/// (or DryCycle's built-in defaults for vanilla slugcats).
 ///
 /// Rain World's own survival-limit divider does not merely draw a line between
 /// two normally spaced circles. MeterCircle.XAdd creates an extra half-circle
@@ -89,8 +90,8 @@ internal static class HydrationDivider
         Vector2 result = orig(self, timeStacker);
 
         if (self?.meter != null &&
-            ShouldShow(self.meter) &&
-            self.number >= ThirstConstants.HydrationSleepDividerAfterPip)
+            TryGetDividerPips(self.meter, out int dividerPips) &&
+            self.number >= dividerPips)
         {
             // Vanilla's survival-limit gap is exactly CircleDistance / 2.
             // Normal FoodMeter distance is 30 px, so this contributes 15 px of
@@ -108,9 +109,9 @@ internal static class HydrationDivider
     {
         orig(self, timeStacker);
 
-        if (ShouldShow(self) &&
+        if (TryGetDividerPips(self, out int dividerPips) &&
             self.lineSprite != null &&
-            self.ShowSurvivalLimit > ThirstConstants.HydrationSleepDividerAfterPip)
+            self.ShowSurvivalLimit > dividerPips)
         {
             // The vanilla white survival line is positioned directly from the
             // FoodMeter origin rather than from MeterCircle.DrawPos. Since all
@@ -137,31 +138,43 @@ internal static class HydrationDivider
 
     private static void DrawDivider(global::HUD.FoodMeter meter, float timeStacker)
     {
-        if (!ShouldShow(meter) ||
+        if (!TryGetDividerPips(meter, out int dividerPips) ||
             meter.circles == null ||
-            meter.circles.Count <= ThirstConstants.HydrationSleepDividerAfterPip)
+            meter.circles.Count == 0 ||
+            dividerPips > meter.circles.Count)
         {
             Hide(meter);
             return;
         }
 
-        int rightIndex = ThirstConstants.HydrationSleepDividerAfterPip;
-        int leftIndex = rightIndex - 1;
-
-        if (leftIndex < 0 || rightIndex >= meter.circles.Count)
+        int leftIndex = dividerPips - 1;
+        if (leftIndex < 0 || leftIndex >= meter.circles.Count)
         {
             Hide(meter);
             return;
         }
 
         global::HUD.FoodMeter.MeterCircle left = meter.circles[leftIndex];
-        global::HUD.FoodMeter.MeterCircle right = meter.circles[rightIndex];
+        Vector2 center;
 
-        // MeterCircle_DrawPos has already inserted the same half-distance gap
-        // used by Rain World's own survival-limit divider. Taking the midpoint
-        // therefore places the cyan line in the middle of that enlarged gap,
-        // leaving equal visual spacing to the circles on both sides.
-        Vector2 center = (left.DrawPos(timeStacker) + right.DrawPos(timeStacker)) * 0.5f;
+        if (dividerPips < meter.circles.Count)
+        {
+            global::HUD.FoodMeter.MeterCircle right = meter.circles[dividerPips];
+
+            // MeterCircle_DrawPos has already inserted the same half-distance gap
+            // used by Rain World's own survival-limit divider. Taking the midpoint
+            // therefore places the cyan line in the middle of that enlarged gap.
+            center = (left.DrawPos(timeStacker) + right.DrawPos(timeStacker)) * 0.5f;
+        }
+        else
+        {
+            // If WaterPips equals the complete meter length, there is no circle on
+            // the right to average with. Reproduce the same 22.5 px placement on
+            // a normal 30 px meter: half a normal step plus half the extra gap.
+            center = left.DrawPos(timeStacker) +
+                     new Vector2(meter.CircleDistance(timeStacker) * 0.75f, 0f);
+        }
+
         float alpha = Mathf.Clamp01(Mathf.Lerp(meter.lastFade, meter.fade, timeStacker));
 
         if (alpha <= 0.001f)
@@ -185,8 +198,10 @@ internal static class HydrationDivider
         divider.Sprite.isVisible = true;
     }
 
-    private static bool ShouldShow(global::HUD.FoodMeter meter)
+    private static bool TryGetDividerPips(global::HUD.FoodMeter meter, out int dividerPips)
     {
+        dividerPips = 0;
+
         if (meter == null || meter.IsPupFoodMeter || meter.hud?.owner == null)
         {
             return false;
@@ -202,13 +217,32 @@ internal static class HydrationDivider
             }
 
             RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
-            return game != null && game.IsStorySession;
+            if (game == null || !game.IsStorySession)
+            {
+                return false;
+            }
+
+            dividerPips = SlugBaseHydrationFeatures.GetWaterPips(player);
+            return dividerPips > 0;
         }
 
-        // These are the two non-gameplay FoodMeters where DryCycle already
-        // renders saved hydration through ThirstMeter.Configure*.
-        return ownerType == global::HUD.HUD.OwnerType.SleepScreen ||
-               ownerType == global::HUD.HUD.OwnerType.CharacterSelect;
+        if (ownerType == global::HUD.HUD.OwnerType.SleepScreen &&
+            meter.hud.owner is SleepAndDeathScreen sleepScreen &&
+            sleepScreen.saveState?.saveStateNumber != null)
+        {
+            dividerPips = SlugBaseHydrationFeatures.GetWaterPips(sleepScreen.saveState.saveStateNumber);
+            return dividerPips > 0;
+        }
+
+        if (ownerType == global::HUD.HUD.OwnerType.CharacterSelect &&
+            meter.hud.owner is SlugcatSelectMenu.SlugcatPageContinue page &&
+            page.slugcatNumber != null)
+        {
+            dividerPips = SlugBaseHydrationFeatures.GetWaterPips(page.slugcatNumber);
+            return dividerPips > 0;
+        }
+
+        return false;
     }
 
     private static DividerSprite Ensure(global::HUD.FoodMeter meter)
