@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.25**.
+Current version: **0.0.26**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.23 -> 0.0.24
 0.0.24 -> 0.0.25
 0.0.25 -> 0.0.26
+0.0.26 -> 0.0.27
 ```
 
 The patch number does not roll over at 9.
@@ -85,6 +85,7 @@ SlugBase's own `food_max`/food-meter behavior remains the source of truth for a 
 - Hydration is rendered as cyan liquid inside vanilla food pips; there is no second hydration row.
 - Static hydration uses empty / half / full states.
 - Drinking and food hydration gains use the same continuous rising-water animation and wave surface.
+- Passive dehydration automatically reveals the vanilla lower-left HUD every time another **half hydration pip (200 WV)** has been lost. With the default `WaterLossRate = 5 WV/s`, this occurs once every **40 seconds** while water is being consumed normally.
 - Water stays visible during vanilla food restore/pop animations and scales with the food-circle outer-radius animation.
 - The cyan hibernation divider uses the current character's `WaterPips` and copies the vanilla survival-divider spacing.
 - Normal sleep drains water visually from right to left.
