@@ -35,15 +35,17 @@ internal static class SlugBaseHydrationFeatures
             return;
         }
 
-        _initialized = true;
-
         try
         {
             Assembly slugBaseAssembly = FindSlugBaseAssembly();
             if (slugBaseAssembly == null)
             {
+                // No dependency is declared. If another plugin has not loaded
+                // SlugBase yet, a later PreModsInit/OnModsInit call may retry.
                 return;
             }
+
+            _initialized = true;
 
             Type featureTypes = slugBaseAssembly.GetType("SlugBase.Features.FeatureTypes", throwOnError: false);
             Type characterType = slugBaseAssembly.GetType("SlugBase.SlugBaseCharacter", throwOnError: false);
@@ -78,9 +80,8 @@ internal static class SlugBaseHydrationFeatures
                 return;
             }
 
-            // Constructing these feature objects registers the JSON keys with
-            // SlugBase's FeatureManager. A BepInEx soft dependency makes SlugBase
-            // load first when present, but does not require it to be installed.
+            // Constructing the reflected feature objects registers these exact
+            // JSON keys with SlugBase's FeatureManager before its JSON scan.
             _waterLossRateFeature = playerFloat.Invoke(null, new object[] { "WaterLossRate" });
             _waterPipsFeature = playerInt.Invoke(null, new object[] { "WaterPips" });
 
@@ -96,8 +97,6 @@ internal static class SlugBaseHydrationFeatures
         }
         catch (Exception ex)
         {
-            // SlugBase support is optional. A compatibility failure must never
-            // prevent DryCycle itself from loading.
             Available = false;
             Plugin.Logger?.LogWarning($"SlugBase hydration compatibility disabled: {ex}");
         }
@@ -156,13 +155,13 @@ internal static class SlugBaseHydrationFeatures
 
         return id switch
         {
-            "Yellow" => 1,     // Monk
-            "White" => 2,      // Survivor
-            "Red" => 3,        // Hunter
+            "Yellow" => 1,
+            "White" => 2,
+            "Red" => 3,
             "Gourmand" => 4,
             "Artificer" => 3,
             "Rivulet" => 3,
-            "Spear" => 3,      // Spearmaster
+            "Spear" => 3,
             "Saint" => 2,
             "Inv" => 6,
             "Watcher" => 2,
