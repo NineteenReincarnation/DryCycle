@@ -6,14 +6,6 @@ using UnityEngine;
 
 namespace DryCycle.HUD;
 
-/// <summary>
-/// Hydration renderer for the vanilla FoodMeter.
-///
-/// DryCycle does not create a second hydration row. Hydration is packed into the
-/// vanilla food pips themselves. Static water is shown in empty / half / full
-/// states, while replenishing water animates continuously upward through the
-/// active pip with a small moving wave on its surface.
-/// </summary>
 internal static class ThirstMeter
 {
     private const int FillSegments = 20;
@@ -32,6 +24,7 @@ internal static class ThirstMeter
     private sealed class MeterState
     {
         public bool UseFixedWater;
+        public float MaxWater;
         public float DisplayWater;
         public float TargetWater;
         public float SleepDrainRemaining;
@@ -190,7 +183,8 @@ internal static class ThirstMeter
         MeterState state = MeterStates.GetOrCreateValue(meter);
         state.UseFixedWater = true;
         state.SleepScreen = screen;
-        state.TargetWater = ThirstStore.GetSaved(saveState, 0);
+        state.MaxWater = ThirstStore.GetMaxWaterPips(saveState.saveStateNumber);
+        state.TargetWater = Mathf.Clamp(ThirstStore.GetSaved(saveState, 0), 0f, state.MaxWater);
         state.DisplayWater = state.TargetWater;
         state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
@@ -202,12 +196,8 @@ internal static class ThirstMeter
         {
             int hibernateCost = SlugBaseHydrationFeatures.GetWaterPips(saveState.saveStateNumber);
 
-            // SaveState already contains the post-hibernation value. Reconstruct
-            // the pre-sleep amount for the HUD, then drain only the amount that
-            // was actually spent. Because water is packed left-to-right, lowering
-            // this scalar value always consumes the rightmost occupied pip first.
             state.DisplayWater = Mathf.Min(
-                ThirstConstants.MaxWater,
+                state.MaxWater,
                 state.TargetWater + hibernateCost);
 
             state.SleepDrainRemaining = Mathf.Max(0f, state.DisplayWater - state.TargetWater);
@@ -227,7 +217,8 @@ internal static class ThirstMeter
         MeterState state = MeterStates.GetOrCreateValue(meter);
         state.UseFixedWater = true;
         state.SleepScreen = null;
-        state.TargetWater = Mathf.Clamp(water, 0f, ThirstConstants.MaxWater);
+        state.MaxWater = meter.circles?.Count ?? Mathf.CeilToInt(Mathf.Max(0f, water));
+        state.TargetWater = Mathf.Clamp(water, 0f, state.MaxWater);
         state.DisplayWater = state.TargetWater;
         state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
@@ -248,8 +239,9 @@ internal static class ThirstMeter
             return;
         }
 
-        float start = Mathf.Clamp(beforeWater, 0f, ThirstConstants.MaxWater);
-        float target = Mathf.Clamp(afterWater, 0f, ThirstConstants.MaxWater);
+        float maxWater = ThirstStore.GetMaxWaterPips(player);
+        float start = Mathf.Clamp(beforeWater, 0f, maxWater);
+        float target = Mathf.Clamp(afterWater, 0f, maxWater);
 
         if (target > start + 0.0001f)
         {
@@ -312,10 +304,6 @@ internal static class ThirstMeter
         On.HUD.FoodMeter.orig_RefuseFood orig,
         global::HUD.FoodMeter self)
     {
-        // Player.GrabUpdate calls RefuseFood every frame while the pickup button
-        // is held against a full stomach. Keep one vanilla refusal burst for the
-        // attempt, then suppress repeated resets until a frame arrives with no
-        // RefuseFood call. This also works when Jolly's HUD owner is another cat.
         RefuseLatchState latch = RefuseLatchStates.GetOrCreateValue(self);
         latch.CalledSinceLastUpdate = true;
 
@@ -367,8 +355,6 @@ internal static class ThirstMeter
 
                 if (visiblePipCount < fixedState.SleepLastVisiblePipCount)
                 {
-                    // A rightmost hydration pip has just emptied. Use the same
-                    // depletion sound timing idea as vanilla food sleep ticks.
                     self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
                     fixedState.SleepLastVisiblePipCount = visiblePipCount;
                 }
@@ -401,7 +387,8 @@ internal static class ThirstMeter
     {
         MeterState state = MeterStates.GetOrCreateValue(meter);
         ThirstState thirst = ThirstStore.For(player);
-        float actualWater = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+        float maxWater = ThirstStore.GetMaxWaterPips(player);
+        float actualWater = Mathf.Clamp(thirst.Water, 0f, maxWater);
         int playerNumber = player.playerState?.playerNumber ?? 0;
 
         int lastFoodGainSerial = state.LastFoodGainSerialByPlayer.TryGetValue(
@@ -413,18 +400,13 @@ internal static class ThirstMeter
         bool hasFoodGain = FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
                            foodGain.Serial != lastFoodGainSerial;
 
-        // In Jolly, RoomCamera changes hud.owner when the camera focus changes.
-        // The vanilla FoodMeter object itself is reused. If a food hydration gain
-        // occurred before this meter became visible, initialize from the pre-gain
-        // amount so the first visible frame still gets the same rising-water
-        // animation used by underwater drinking.
         if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
         {
             ResetGameplayState(state, playerNumber, actualWater);
 
             if (hasFoodGain)
             {
-                state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater);
+                state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, maxWater);
                 state.TargetWater = actualWater;
                 state.GainWaveFrames = GainWaveHoldFrames;
                 state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
@@ -436,12 +418,9 @@ internal static class ThirstMeter
         }
         else if (hasFoodGain)
         {
-            // An instant food gain updates gameplay water immediately. Keep the
-            // visual water at its pre-eat level and let the same continuous
-            // interpolation/wave path used by drinking raise it to the target.
             state.DisplayWater = Mathf.Min(
                 state.DisplayWater,
-                Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+                Mathf.Clamp(foodGain.StartWater, 0f, maxWater));
             state.TargetWater = actualWater;
             state.GainWaveFrames = GainWaveHoldFrames;
             state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
@@ -466,8 +445,6 @@ internal static class ThirstMeter
         }
         else
         {
-            // Drinking and food use the exact same follow speed. Food therefore
-            // rises through each affected pip rather than snapping to its result.
             float follow = (thirst.IsDrinking || state.GainWaveFrames > 0) ? 0.22f : 0.4f;
             state.DisplayWater = Mathf.Lerp(state.DisplayWater, actualWater, follow);
 
@@ -697,9 +674,6 @@ internal static class ThirstMeter
 
         float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
 
-        // Follow the vanilla OUTER pip for reveal/fade/size, but never the food
-        // fill layer. This keeps water present during food restore animations
-        // while still respecting per-pip InitPlop, sleep fade and menu scrolling.
         float outerFade = Mathf.Lerp(
             self.circles[0].lastFade,
             self.circles[0].fade,
@@ -812,10 +786,7 @@ internal static class ThirstMeter
         if (MeterStates.TryGetValue(meter, out MeterState fixedState) &&
             fixedState.UseFixedWater)
         {
-            water = Mathf.Clamp(fixedState.DisplayWater, 0f, ThirstConstants.MaxWater);
-
-            // Sleep depletion is continuous so the currently rightmost occupied
-            // pip visibly drains before the next pip to its left is touched.
+            water = Mathf.Clamp(fixedState.DisplayWater, 0f, fixedState.MaxWater);
             continuousFill = fixedState.SleepScreen != null &&
                              fixedState.SleepDrainRemaining > 0.0001f &&
                              fixedState.SleepConsumeDelay <= 0;
@@ -829,7 +800,8 @@ internal static class ThirstMeter
         {
             MeterState state = MeterStates.GetOrCreateValue(meter);
             ThirstState thirst = ThirstStore.For(player);
-            float actual = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
+            float maxWater = ThirstStore.GetMaxWaterPips(player);
+            float actual = Mathf.Clamp(thirst.Water, 0f, maxWater);
             int playerNumber = player.playerState?.playerNumber ?? 0;
 
             int lastFoodGainSerial = state.LastFoodGainSerialByPlayer.TryGetValue(
@@ -838,10 +810,6 @@ internal static class ThirstMeter
                     ? rememberedFoodSerial
                     : 0;
 
-            // Draw may run immediately after the camera changed owner and before
-            // the next FoodMeter.Update. Preserve a pending food-gain animation
-            // here too, otherwise the first draw could snap straight to the new
-            // amount before Update gets a chance to initialize the wave.
             if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
             {
                 ResetGameplayState(state, playerNumber, actual);
@@ -849,14 +817,14 @@ internal static class ThirstMeter
                 if (FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
                     foodGain.Serial != lastFoodGainSerial)
                 {
-                    state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater);
+                    state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, maxWater);
                     state.TargetWater = actual;
                     state.GainWaveFrames = GainWaveHoldFrames;
                     state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
                 }
             }
 
-            water = Mathf.Clamp(state.DisplayWater, 0f, ThirstConstants.MaxWater);
+            water = Mathf.Clamp(state.DisplayWater, 0f, maxWater);
             waveStrength = state.WaveStrength;
             wavePhase = state.WavePhase;
             continuousFill = state.WaveStrength > 0.02f ||
@@ -881,7 +849,7 @@ internal static class ThirstMeter
 
     private static float GetPipWaterLevel(float totalWater, int pipNumber, bool continuousFill)
     {
-        if (pipNumber < 0 || pipNumber >= ThirstConstants.MaxPips)
+        if (pipNumber < 0)
         {
             return 0f;
         }
