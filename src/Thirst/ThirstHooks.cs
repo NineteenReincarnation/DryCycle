@@ -353,11 +353,17 @@ internal static class ThirstHooks
             return;
         }
 
+        ThirstState state = ThirstStore.For(player);
+        float beforeWater = state.Water;
+
         if (ThirstStore.AddRuntime(player, amount))
         {
-            // Food may restore hydration while vanilla food does not change, so
-            // reveal this player's HUD long enough to show the water animation.
-            ThirstMeter.ShowHydrationGain(player);
+            float afterWater = ThirstStore.For(player).Water;
+
+            // Food hydration is applied to gameplay state immediately, but the
+            // HUD is explicitly told the pre/post values so it can replay the
+            // same continuous rising surface and moving wave used while drinking.
+            ThirstMeter.ShowHydrationGain(player, beforeWater, afterWater);
         }
     }
 
