@@ -287,15 +287,19 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     {
         color = FallbackLiquidColor;
 
-        // An untouched/default RoomPalette has transparent-zero colors. A real
-        // palette can legitimately contain very dark water, so alpha is the safe
-        // initialization check rather than RGB brightness.
-        if (palette.waterColor1.a <= 0.001f && palette.waterColor2.a <= 0.001f)
+        // Dew Pod water should visually match the exposed surface of the room's
+        // water, not the deeper body color. This is also the color a player sees
+        // when deciding what water they are collecting.
+        if (palette.waterSurfaceColor1.a <= 0.001f &&
+            palette.waterSurfaceColor2.a <= 0.001f)
         {
             return false;
         }
 
-        color = Color.Lerp(palette.waterColor2, palette.waterColor1, 0.5f);
+        color = Color.Lerp(
+            palette.waterSurfaceColor2,
+            palette.waterSurfaceColor1,
+            0.5f);
         color.a = 1f;
         return true;
     }
@@ -450,12 +454,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         // vertical axis, while retaining a readable dark-green wall around it.
         liquid.scaleX = width * Mathf.Lerp(0.60f, 0.78f, fill);
         liquid.scaleY = height * Mathf.Lerp(0.22f, 0.88f, fill);
-
-        Color displayedLiquid = Color.Lerp(
-            rCam.currentPalette.blackColor,
-            LiquidColor,
-            0.88f);
-        liquid.color = displayedLiquid;
+        liquid.color = LiquidColor;
 
         bool broken = Broken;
         for (int i = 2; i <= 3; i++)
