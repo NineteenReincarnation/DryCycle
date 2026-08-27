@@ -12,7 +12,6 @@ using DryCycle.Thirst;
 namespace DryCycle;
 
 [BepInPlugin(ModId, ModName, Version)]
-[BepInDependency("slime-cubed.slugbase", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
@@ -25,16 +24,13 @@ internal sealed class Plugin : BaseUnityPlugin
     public void OnEnable()
     {
         Logger = base.Logger;
-
-        // Optional compatibility: if SlugBase is installed, register DryCycle's
-        // JSON features. Reflection keeps DryCycle loadable without SlugBase.dll.
-        SlugBaseHydrationFeatures.Initialize();
-
+        On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
     public void OnDisable()
     {
+        On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
 
         if (_initialized)
@@ -44,6 +40,16 @@ internal sealed class Plugin : BaseUnityPlugin
             ThirstHooks.Disable();
             _initialized = false;
         }
+    }
+
+    private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
+    {
+        // By PreModsInit all BepInEx plugin assemblies are already loaded. This
+        // lets DryCycle discover SlugBase by reflection when it exists, while
+        // remaining completely independent when it does not. Registration still
+        // occurs before SlugBase's PostModsInit JSON scan.
+        SlugBaseHydrationFeatures.Initialize();
+        orig(self);
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
