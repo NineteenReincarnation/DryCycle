@@ -447,11 +447,11 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         liquid.x = drawPos.x;
         liquid.y = drawPos.y - Mathf.Lerp(3.4f, 0.45f, fill);
 
-        // Pull the liquid inward relative to the shell. This leaves a thicker
-        // dark-green fleshy wall around the visible water without increasing the
-        // overall item size.
-        liquid.scaleX = width * Mathf.Lerp(0.54f, 0.72f, fill);
-        liquid.scaleY = height * Mathf.Lerp(0.14f, 0.70f, fill);
+        // Keep a visible dark-green wall, but let the liquid occupy more of the
+        // pod again. Width grows only a little; vertical fill grows much more so
+        // the water no longer reads as a short, flattened oval inside the shell.
+        liquid.scaleX = width * Mathf.Lerp(0.58f, 0.76f, fill);
+        liquid.scaleY = height * Mathf.Lerp(0.20f, 0.84f, fill);
 
         Color displayedLiquid = Color.Lerp(
             rCam.currentPalette.blackColor,
