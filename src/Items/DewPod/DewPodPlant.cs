@@ -10,7 +10,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
     private const int StemSegments = 3;
     private const int RootSpriteCount = 3;
-    private const int SpritesPerSlot = 6;
+    private const int SpritesPerSlot = 4;
 
     private static readonly Vector2[] StemRootOffsets =
     {
@@ -332,9 +332,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private int StemSprite(int slot) => RootSpriteCount + slot * SpritesPerSlot;
     private int ShellSprite(int slot) => StemSprite(slot) + 1;
     private int LiquidSprite(int slot) => StemSprite(slot) + 2;
-    private int WindowSprite(int slot) => StemSprite(slot) + 3;
-    private int HighlightSprite(int slot) => StemSprite(slot) + 4;
-    private int BudSprite(int slot) => StemSprite(slot) + 5;
+    private int BudSprite(int slot) => StemSprite(slot) + 3;
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
@@ -353,8 +351,6 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 customColor: false);
             sLeaser.sprites[ShellSprite(i)] = new FSprite("Circle20");
             sLeaser.sprites[LiquidSprite(i)] = new FSprite("Circle20");
-            sLeaser.sprites[WindowSprite(i)] = new FSprite("Circle20");
-            sLeaser.sprites[HighlightSprite(i)] = new FSprite("Circle20");
             sLeaser.sprites[BudSprite(i)] = new FSprite("Circle20");
         }
 
@@ -415,14 +411,10 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
             FSprite shell = sLeaser.sprites[ShellSprite(i)];
             FSprite liquid = sLeaser.sprites[LiquidSprite(i)];
-            FSprite window = sLeaser.sprites[WindowSprite(i)];
-            FSprite highlight = sLeaser.sprites[HighlightSprite(i)];
             FSprite bud = sLeaser.sprites[BudSprite(i)];
 
             shell.isVisible = mature;
             liquid.isVisible = mature;
-            window.isVisible = mature;
-            highlight.isVisible = mature;
             bud.isVisible = !mature;
 
             if (mature)
@@ -433,7 +425,6 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                     direction = Vector2.up;
                 }
 
-                Vector2 perpendicular = Custom.PerpendicularVector(direction);
                 float rotation = Custom.VecToDeg(direction) - 90f;
                 float scale = SlotScales[i];
                 Vector2 podPos = tip - camPos;
@@ -450,23 +441,6 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 liquid.scaleY = shell.scaleY * 0.86f;
                 liquid.rotation = rotation;
                 liquid.color = displayedLiquid;
-
-                Vector2 windowPos = podPos + direction * (5.35f * scale);
-                window.x = windowPos.x;
-                window.y = windowPos.y;
-                window.scaleX = shell.scaleX * 0.44f;
-                window.scaleY = shell.scaleY * 0.23f;
-                window.rotation = rotation;
-                window.alpha = 0.70f;
-                window.color = Color.Lerp(displayedLiquid, Color.white, 0.48f);
-
-                Vector2 highlightPos = podPos - perpendicular * (2.2f * scale) + direction * (1.8f * scale);
-                highlight.x = highlightPos.x;
-                highlight.y = highlightPos.y;
-                highlight.scaleX = shell.scaleX * 0.10f;
-                highlight.scaleY = shell.scaleY * 0.35f;
-                highlight.rotation = rotation;
-                highlight.alpha = 0.28f;
             }
             else
             {
@@ -561,7 +535,6 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         {
             sLeaser.sprites[StemSprite(i)].color = stemColor;
             sLeaser.sprites[ShellSprite(i)].color = shellColor;
-            sLeaser.sprites[HighlightSprite(i)].color = Color.white;
             sLeaser.sprites[BudSprite(i)].color = budColor;
         }
     }
