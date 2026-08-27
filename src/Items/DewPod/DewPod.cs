@@ -101,7 +101,11 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
                 AbstractDewPod.MaxWaterWV - AbstrPod.WaterWV);
 
             Color sourceColor = LiquidColor;
-            TryGetLocalWaterColor(room, out sourceColor);
+            if (TryGetLocalWaterColor(room, out Color localWaterColor))
+            {
+                sourceColor = localWaterColor;
+            }
+
             AddWater(addedWV, sourceColor);
         }
 
