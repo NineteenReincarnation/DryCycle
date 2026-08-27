@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.31**.
+Current version: **0.0.32**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.29 -> 0.0.30
 0.0.30 -> 0.0.31
 0.0.31 -> 0.0.32
+0.0.32 -> 0.0.33
 ```
 
 The patch number does not roll over at 9.
@@ -103,7 +103,7 @@ Version 0.0.30 adds the first prototype of the **KingVultureSpear** extraction s
 
 - Only a **dead King Vulture** can be harvested.
 - The player must have a free hand and stand close to the King Vulture's head/tusk area.
-- Holding the pickup/eat input for about **55 frames** starts and completes the pull. During the hold, small forces are applied to the selected tusk, the corpse's head, and the player to make the interaction read as a physical extraction rather than an instant spawn.
+- Holding the pickup/eat input for about **55 frames** starts and completes the pull.
 - The two King Vulture tusks are tracked independently. Each side can be extracted once. After a successful extraction, the pickup button must be released before a second tusk can be pulled.
 - The closest eligible tusk is selected automatically. A tusk that is already detached/fired far away from the head is not treated as something that can be harvested from the corpse.
 - When extraction finishes, the original corpse-side tusk body, detail layer, wire, and laser are hidden. A separate `KingVultureSpear` object is created at the same position and orientation and is immediately grabbed by the player's free hand.
@@ -115,7 +115,15 @@ Version 0.0.30 adds the first prototype of the **KingVultureSpear** extraction s
 
 Version 0.0.31 adds the missing `Unity.Mathematics.dll` compile reference required by Rain World APIs exposing `Unity.Mathematics.float2` in their public signatures.
 
-This is still a source-level prototype and has not yet been runtime-tested against the local game installation.
+Version 0.0.32 addresses the first in-game extraction test feedback:
+
+- An eligible corpse-side tusk now gets vanilla-style pickup feedback when the player enters range: a pickup-range sound plus a visible white pulse/highlight.
+- While the pickup button is held, the selected tusk pulses more strongly, receives a more visible tug, and the slugcat's free hand reaches toward the tusk so the pull action is readable before extraction completes.
+- Detached `KingVultureSpear` meshes no longer assign `FSprite.color = white` after setting custom per-vertex colors. That assignment was flattening the original King Tusk color/detail pattern into a white mesh; the item now keeps the original-style vertex colors and `KingTusk` detail shader.
+- The two corpse tusks now survive front/behind sprite-slot swaps independently. Both dynamic body/detail slots are restored before each corpse draw, after which only the actually extracted side is hidden. This prevents removing one tusk from making the remaining tusk disappear when the head orientation changes.
+- A detached KingVultureSpear also uses a per-vertex white blink when it later becomes a normal pickup candidate, preserving its pattern instead of replacing it with a flat color.
+
+This is still a source-level prototype and should be re-tested in the local Rain World installation.
 
 ## Standard Rain World build setup
 
@@ -159,6 +167,7 @@ src/HUD/HydrationDivider.cs
 src/Items/KingVultureSpear/AbstractKingVultureSpear.cs
 src/Items/KingVultureSpear/KingVultureSpear.cs
 src/Items/KingVultureSpear/KingVultureSpearHooks.cs
+src/Items/KingVultureSpear/KingVultureSpearFeedback.cs
 ```
 
 Temperature mechanics are not implemented yet.
