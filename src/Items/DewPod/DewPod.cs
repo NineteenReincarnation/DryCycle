@@ -216,8 +216,12 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
         float fill = Fill;
         float fullness = Mathf.Lerp(0.62f, 1f, Mathf.Sqrt(fill));
-        float height = Mathf.Lerp(0.72f, 1.15f, fullness);
-        float width = Mathf.Lerp(0.58f, 0.86f, fullness);
+
+        // Keep the pod rounded, but stretch it just enough toward a short fleshy
+        // cylinder instead of a near-circular fruit. The change is intentionally
+        // small so it still reads as a soft, water-filled organic structure.
+        float height = Mathf.Lerp(0.74f, 1.18f, fullness);
+        float width = Mathf.Lerp(0.58f, 0.84f, fullness);
 
         FSprite shell = sLeaser.sprites[0];
         shell.x = drawPos.x;
@@ -228,22 +232,26 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         FSprite liquid = sLeaser.sprites[1];
         liquid.isVisible = fill > 0.005f;
         liquid.x = drawPos.x;
-        liquid.y = drawPos.y - Mathf.Lerp(3.5f, 0.4f, fill);
-        liquid.scaleX = width * Mathf.Lerp(0.62f, 0.82f, fill);
-        liquid.scaleY = height * Mathf.Lerp(0.16f, 0.78f, fill);
+        liquid.y = drawPos.y - Mathf.Lerp(3.4f, 0.45f, fill);
+
+        // Pull the liquid inward relative to the shell. This leaves a thicker
+        // dark-green fleshy wall around the visible water without increasing the
+        // overall item size.
+        liquid.scaleX = width * Mathf.Lerp(0.54f, 0.72f, fill);
+        liquid.scaleY = height * Mathf.Lerp(0.14f, 0.70f, fill);
 
         FSprite window = sLeaser.sprites[2];
         window.x = drawPos.x;
-        window.y = drawPos.y + height * 5.2f;
-        window.scaleX = width * 0.48f;
-        window.scaleY = Mathf.Lerp(0.12f, 0.28f, fullness);
+        window.y = drawPos.y + height * 5.15f;
+        window.scaleX = width * 0.42f;
+        window.scaleY = Mathf.Lerp(0.12f, 0.27f, fullness);
         window.alpha = Mathf.Lerp(0.22f, 0.72f, fill);
 
         FSprite highlight = sLeaser.sprites[3];
         highlight.isVisible = fill > 0.02f;
-        highlight.x = drawPos.x - width * 2.5f;
-        highlight.y = drawPos.y + height * 2.2f;
-        highlight.scaleX = width * 0.12f;
+        highlight.x = drawPos.x - width * 2.45f;
+        highlight.y = drawPos.y + height * 2.25f;
+        highlight.scaleX = width * 0.11f;
         highlight.scaleY = height * Mathf.Lerp(0.18f, 0.42f, fill);
         highlight.alpha = Mathf.Lerp(0.08f, 0.38f, fill);
 
