@@ -4,49 +4,23 @@ namespace DryCycle.Thirst;
 
 internal sealed class ThirstState
 {
-    public ThirstState()
-    {
-    }
-
-    // Water remains stored in pip units for save compatibility and HUD logic.
-    // WaterValue exposes the same state in DryCycle's internal WV scale.
-    public float Water = ThirstConstants.MaxWater;
-    public float LastWater = ThirstConstants.MaxWater;
+    // Water is stored in pip units. The upper bound is player-specific and is
+    // enforced by ThirstStore from the player's maximum food-pip count.
+    public float Water;
+    public float LastWater;
     public bool IsDrinking;
 
     public float WaterValue => Water * ThirstConstants.WaterValuePerPip;
     public float LastWaterValue => LastWater * ThirstConstants.WaterValuePerPip;
 
-    public void Add(float amount)
-    {
-        if (amount <= 0f)
-        {
-            return;
-        }
-
-        LastWater = Water;
-        Water = Mathf.Clamp(Water + amount, 0f, ThirstConstants.MaxWater);
-    }
-
     public void Set(float amount)
     {
         LastWater = Water;
-        Water = Mathf.Clamp(amount, 0f, ThirstConstants.MaxWater);
-    }
-
-    public void AddWaterValue(float amount)
-    {
-        if (amount <= 0f)
-        {
-            return;
-        }
-
-        Add(amount / ThirstConstants.WaterValuePerPip);
+        Water = Mathf.Max(0f, amount);
     }
 
     public void SetWaterValue(float amount)
     {
-        Set(Mathf.Clamp(amount, 0f, ThirstConstants.MaxWaterValue) /
-            ThirstConstants.WaterValuePerPip);
+        Set(Mathf.Max(0f, amount) / ThirstConstants.WaterValuePerPip);
     }
 }
