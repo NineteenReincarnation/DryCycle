@@ -176,6 +176,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         }
 
         player.SlugcatGrab(pod, freeHand);
+        room.PlaySound(SoundID.Seed_Cob_Pick, pod.firstChunk);
 
         Vector2 recoil = Custom.DirVec(spawnPos, player.mainBodyChunk.pos);
         player.mainBodyChunk.vel += recoil * 0.25f;
