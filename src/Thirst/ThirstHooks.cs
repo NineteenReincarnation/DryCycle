@@ -33,7 +33,6 @@ internal static class ThirstHooks
         }
 
         _enabled = true;
-
         ThirstMeter.Enable();
 
         On.Player.Update += Player_Update;
@@ -86,10 +85,8 @@ internal static class ThirstHooks
 
         ThirstState state = ThirstStore.For(self);
 
-        // WaterLossRate is expressed in WV per real gameplay second. Convert it
-        // back to DryCycle's pip-space only at the storage boundary. This runs
-        // independently for every Jolly player and continues through shortcuts;
-        // dead players do not keep losing hydration.
+        // WaterLossRate is WV/second. Each player loses water independently,
+        // including while travelling through shortcuts. Dead players stop losing.
         if (!self.dead)
         {
             float passiveLoss = SlugBaseHydrationFeatures.GetWaterLossPerTick(self);
@@ -110,17 +107,15 @@ internal static class ThirstHooks
             return;
         }
 
+        float maxWater = ThirstStore.GetMaxWaterPips(self);
         bool breathBarActive = self.airInLungs < 0.999f;
         bool wantsToDrink = self.room != null &&
                             !self.inShortcut &&
                             self.input[0].pckp &&
                             fullySubmerged &&
                             breathBarActive &&
-                            state.Water < ThirstConstants.MaxWater;
+                            state.Water < maxWater - 0.0001f;
 
-        // Shortcut travel can retain stale submersion values for a short time.
-        // Require a realized room and !inShortcut so water cannot be gained while
-        // the player is actually travelling through a transition pipe.
         state.IsDrinking = wantsToDrink;
 
         if (wantsToDrink)
@@ -132,9 +127,6 @@ internal static class ThirstHooks
 
     private static void Player_GrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
     {
-        // checkInput() has already run by the time vanilla reaches GrabUpdate, so
-        // this wrapper sees the current pickup button on the very first eating
-        // frame. Keep the temporary food-slot bypass scoped only to eating logic.
         bool fullHydratingEat = BeginFullHydratingEat(self);
 
         try
@@ -151,9 +143,6 @@ internal static class ThirstHooks
     {
         if (IsFullHydratingEatActive(self))
         {
-            // The temporary one-food gap exists only to pass vanilla's full-
-            // stomach gate. Hydrating overflow food must not increase normal food
-            // or story food statistics while the stomach is already full.
             return;
         }
 
@@ -179,8 +168,6 @@ internal static class ThirstHooks
 
         orig(self, edible);
 
-        // Vanilla uses nourishment == -1 for interactions that return before the
-        // player is actually fed. Those interactions must not grant hydration.
         if (water > 0f && nourishmentAllowed)
         {
             AddHydration(self, water);
@@ -275,9 +262,6 @@ internal static class ThirstHooks
         state.OriginalFood = player.playerState.foodInStomach;
         state.OriginalQuarterFood = player.playerState.quarterFoodPoints;
 
-        // Vanilla refuses edible objects and meat when FoodInStomach is already
-        // MaxFoodInStomach. Open one temporary slot while GrabUpdate runs, and
-        // suppress AddFood/AddQuarterFood above so this is hydration-only eating.
         player.playerState.foodInStomach = Math.Max(0, state.OriginalFood - 1);
 
         if (!state.OverflowVisualShownThisHold)
@@ -320,9 +304,6 @@ internal static class ThirstHooks
             return false;
         }
 
-        // Match the regular edible selection in Player.GrabUpdate: the first
-        // edible grasp wins. If that chosen item is not hydrating, do not bypass
-        // the full-food warning just because the other hand holds hydrating food.
         if (!ModManager.MSC || player.SlugCatClass != MoreSlugcats.MoreSlugcatsEnums.SlugcatStatsName.Spear)
         {
             int limit = Math.Min(2, player.grasps.Length);
@@ -338,8 +319,6 @@ internal static class ThirstHooks
             }
         }
 
-        // Meat eating uses grasp 0, except the MMF convenience rule that selects
-        // grasp 1 when grasp 0 is empty or is not a creature.
         int meatIndex = 0;
         if (ModManager.MMF &&
             player.grasps.Length > 1 &&
@@ -429,8 +408,6 @@ internal static class ThirstHooks
         if (survived)
         {
             SaveNextCycleHydration(self, game, newMalnourished, specialWarpSave);
-            // SaveState.SessionEnded writes progression from inside orig(), so
-            // DryCycle must update unrecognized save strings before calling it.
             ThirstStore.WriteToUnrecognizedData(self);
         }
 
@@ -514,9 +491,6 @@ internal static class ThirstHooks
                                         !self.goalMalnourished &&
                                         !package.saveState.sessionEndingFromSpinningTopEncounter;
 
-            // The vanilla sleep screen has one FoodMeter. Keep its existing
-            // single-player presentation bound to player 0's saved hydration;
-            // gameplay Jolly HUD switches owner with the focused player.
             ThirstMeter.ConfigureSleep(
                 self.hud.foodMeter,
                 package.saveState,
@@ -560,10 +534,6 @@ internal static class ThirstHooks
         if (ThirstStore.AddRuntime(player, amount))
         {
             float afterWater = ThirstStore.For(player).Water;
-
-            // Food hydration is applied to gameplay state immediately, but the
-            // HUD is explicitly told the pre/post values so it can replay the
-            // same continuous rising surface and moving wave used while drinking.
             ThirstMeter.ShowHydrationGain(player, beforeWater, afterWater);
         }
     }
@@ -614,10 +584,6 @@ internal static class ThirstHooks
             }
         }
 
-        // Match vanilla Jolly behavior: a starvation attempt may close the
-        // shelter even when normal ready conditions are not met. Hydration does
-        // not block that path; successful starvation sleep will zero each saved
-        // player's hydration in SessionEnded.
         if (!anyLivingPlayer || anyStarvationAttempt || !allNormalReady)
         {
             return false;
