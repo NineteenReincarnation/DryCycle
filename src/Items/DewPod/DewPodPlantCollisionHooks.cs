@@ -792,14 +792,18 @@ internal static class DewPodPlantCollisionHooks
 
                 int shellIndex = RootSpriteCount + slot * SpritesPerPlantSlot + 1;
                 int liquidIndex = RootSpriteCount + slot * SpritesPerPlantSlot + 2;
-                if (shellIndex >= leaser.sprites.Length || liquidIndex >= leaser.sprites.Length)
+                int accentIndex = RootSpriteCount + slot * SpritesPerPlantSlot + 3;
+                if (shellIndex >= leaser.sprites.Length ||
+                    liquidIndex >= leaser.sprites.Length ||
+                    accentIndex >= leaser.sprites.Length)
                 {
                     continue;
                 }
 
                 FSprite shell = leaser.sprites[shellIndex];
                 FSprite liquid = leaser.sprites[liquidIndex];
-                if (shell == null || liquid == null)
+                FSprite damageMark = leaser.sprites[accentIndex];
+                if (shell == null || liquid == null || damageMark == null)
                 {
                     continue;
                 }
@@ -817,15 +821,70 @@ internal static class DewPodPlantCollisionHooks
                     direction = Vector2.up;
                 }
 
+                Vector2 perpendicular = Custom.PerpendicularVector(direction);
                 float sink = Mathf.Lerp(3.6f, 0f, roundedFill);
                 liquid.x = shell.x - direction.x * sink;
                 liquid.y = shell.y - direction.y * sink;
 
-                // The fleshy wall also relaxes slightly as water escapes, while
+                // The fleshy wall relaxes slightly as water escapes, while
                 // retaining the same overall cylindrical identity.
                 shell.scaleX *= Mathf.Lerp(0.82f, 1f, roundedFill);
                 shell.scaleY *= Mathf.Lerp(0.88f, 1f, roundedFill);
+                shell.color = Color.Lerp(shell.color, self.currentPalette.blackColor, 0.12f);
+
+                // Reuse the mature pod's highlight sprite as a puncture scar after
+                // the spear has passed through. Position, angle, and size are
+                // deterministic-random per plant/slot: they vary between pods but
+                // remain stable frame-to-frame and across room redraws.
+                float sideOffset = Mathf.Lerp(
+                    -2.55f,
+                    2.55f,
+                    StableDamageRandom01(plant, slot, 11));
+                float axialOffset = Mathf.Lerp(
+                    -3.15f,
+                    3.15f,
+                    StableDamageRandom01(plant, slot, 12));
+                Vector2 damagePos = new(shell.x, shell.y);
+                damagePos += perpendicular * sideOffset + direction * axialOffset;
+
+                damageMark.isVisible = true;
+                damageMark.x = damagePos.x;
+                damageMark.y = damagePos.y;
+                damageMark.scaleX = shell.scaleX * Mathf.Lerp(
+                    0.055f,
+                    0.095f,
+                    StableDamageRandom01(plant, slot, 13));
+                damageMark.scaleY = shell.scaleY * Mathf.Lerp(
+                    0.24f,
+                    0.42f,
+                    StableDamageRandom01(plant, slot, 14));
+                damageMark.rotation = shell.rotation + Mathf.Lerp(
+                    -62f,
+                    62f,
+                    StableDamageRandom01(plant, slot, 15));
+                damageMark.alpha = 0.96f;
+                damageMark.color = self.currentPalette.blackColor;
             }
+        }
+    }
+
+    private static float StableDamageRandom01(DewPodPlant plant, int slot, int salt)
+    {
+        unchecked
+        {
+            int seed = plant?.OriginRoom ?? 0;
+            seed = seed * 397 ^ (plant?.PlacedObjectIndex ?? 0);
+            seed = seed * 397 ^ slot;
+            seed = seed * 397 ^ salt;
+
+            uint value = (uint)seed;
+            value ^= value >> 16;
+            value *= 0x7FEB352Du;
+            value ^= value >> 15;
+            value *= 0x846CA68Bu;
+            value ^= value >> 16;
+
+            return (value & 0x00FFFFFFu) / 16777215f;
         }
     }
 
