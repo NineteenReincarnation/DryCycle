@@ -1,6 +1,4 @@
-using System;
 using System.Runtime.CompilerServices;
-using DryCycle.Thirst;
 
 namespace DryCycle.Items.KingVultureSpear;
 
@@ -44,6 +42,19 @@ internal static class KingVultureSpearCombat
         On.Player.Grabability -= Player_Grabability;
         On.Player.SlugcatGrab -= Player_SlugcatGrab;
         On.Player.Update -= Player_Update;
+    }
+
+    internal static float GetWaterLossMultiplier(Player player)
+    {
+        if (player == null ||
+            player.isNPC ||
+            !WeaknessStates.TryGetValue(player, out PlayerWeaknessState state) ||
+            state.RemainingFrames <= 0)
+        {
+            return 1f;
+        }
+
+        return WeaknessWaterLossMultiplier;
     }
 
     private static void Player_ThrownSpear(
@@ -120,31 +131,6 @@ internal static class KingVultureSpearCombat
             return;
         }
 
-        // ThirstHooks already removes the normal 1x passive loss each player tick.
-        // Removing another 2x here makes the total exactly 3x for 200 ticks = 5 s.
-        if (!self.dead && IsStoryPlayer(self))
-        {
-            float normalLoss = SlugBaseHydrationFeatures.GetWaterLossPerTick(self);
-            float extraLoss = normalLoss * (WeaknessWaterLossMultiplier - 1f);
-
-            if (extraLoss > 0f)
-            {
-                ThirstState thirst = ThirstStore.For(self);
-                float beforeWater = thirst.Water;
-
-                if (ThirstStore.RemoveRuntime(self, extraLoss))
-                {
-                    float afterWater = thirst.Water;
-                    if (CrossedHalfPipLossBoundary(beforeWater, afterWater))
-                    {
-                        self.showKarmaFoodRainTime = Math.Max(
-                            self.showKarmaFoodRainTime,
-                            ThirstConstants.HydrationLossHudHoldFrames);
-                    }
-                }
-            }
-        }
-
         state.RemainingFrames--;
     }
 
@@ -189,23 +175,5 @@ internal static class KingVultureSpearCombat
         }
 
         return player.spearOnBack?.spear == spear;
-    }
-
-    private static bool IsStoryPlayer(Player player)
-    {
-        RainWorldGame game = player?.room?.game ?? player?.abstractCreature?.world?.game;
-        return game != null && game.IsStorySession;
-    }
-
-    private static bool CrossedHalfPipLossBoundary(float beforeWater, float afterWater)
-    {
-        if (afterWater >= beforeWater - 0.000001f)
-        {
-            return false;
-        }
-
-        int beforeHalfPips = (int)Math.Ceiling(Math.Max(0f, beforeWater) * 2.0);
-        int afterHalfPips = (int)Math.Ceiling(Math.Max(0f, afterWater) * 2.0);
-        return afterHalfPips < beforeHalfPips;
     }
 }
