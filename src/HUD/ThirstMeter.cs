@@ -200,13 +200,15 @@ internal static class ThirstMeter
 
         if (animateHibernateCost)
         {
+            int hibernateCost = SlugBaseHydrationFeatures.GetWaterPips(saveState.saveStateNumber);
+
             // SaveState already contains the post-hibernation value. Reconstruct
             // the pre-sleep amount for the HUD, then drain only the amount that
             // was actually spent. Because water is packed left-to-right, lowering
             // this scalar value always consumes the rightmost occupied pip first.
             state.DisplayWater = Mathf.Min(
                 ThirstConstants.MaxWater,
-                state.TargetWater + ThirstConstants.HibernateCost);
+                state.TargetWater + hibernateCost);
 
             state.SleepDrainRemaining = Mathf.Max(0f, state.DisplayWater - state.TargetWater);
             state.SleepConsumeDelay = 65;
