@@ -413,7 +413,10 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private int StemSprite(int slot) => RootSpriteCount + slot * SpritesPerSlot;
     private int ShellSprite(int slot) => StemSprite(slot) + 1;
     private int LiquidSprite(int slot) => StemSprite(slot) + 2;
-    private int BudSprite(int slot) => StemSprite(slot) + 3;
+    // Mature slots reuse the same accent sprite as a subtle highlight; empty or
+    // immature slots reuse it as the bud. This keeps the sprite layout stable for
+    // the collision overlay code while restoring the sheen without a top window.
+    private int AccentSprite(int slot) => StemSprite(slot) + 3;
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
@@ -432,7 +435,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 customColor: false);
             sLeaser.sprites[ShellSprite(i)] = new FSprite("Circle20");
             sLeaser.sprites[LiquidSprite(i)] = new FSprite("Circle20");
-            sLeaser.sprites[BudSprite(i)] = new FSprite("Circle20");
+            sLeaser.sprites[AccentSprite(i)] = new FSprite("Circle20");
         }
 
         AddToContainer(sLeaser, rCam, null);
@@ -471,6 +474,10 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             localGrowthColor,
             rCam.currentPalette.blackColor,
             0.06f);
+        Color budColor = Color.Lerp(
+            rCam.currentPalette.blackColor,
+            new Color(0.23f, 0.43f, 0.29f),
+            0.80f);
 
         rootBack.color = localGrowthColor;
         rootCenter.color = localGrowthColor;
@@ -501,11 +508,11 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
             FSprite shell = sLeaser.sprites[ShellSprite(i)];
             FSprite liquid = sLeaser.sprites[LiquidSprite(i)];
-            FSprite bud = sLeaser.sprites[BudSprite(i)];
+            FSprite accent = sLeaser.sprites[AccentSprite(i)];
 
             shell.isVisible = mature;
             liquid.isVisible = mature;
-            bud.isVisible = !mature;
+            accent.isVisible = true;
 
             if (mature)
             {
@@ -515,6 +522,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                     direction = Vector2.up;
                 }
 
+                Vector2 perpendicular = Custom.PerpendicularVector(direction);
                 float rotation = Custom.VecToDeg(direction) - 90f;
                 float scale = SlotScales[i];
                 Vector2 podPos = tip - camPos;
@@ -531,16 +539,31 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 liquid.scaleY = shell.scaleY * 0.86f;
                 liquid.rotation = rotation;
                 liquid.color = displayedLiquid;
+
+                // Restore only a restrained side sheen. The translucent top window
+                // remains removed. Keeping the sheen narrow and close to the rim
+                // prevents the pod from reading like a glossy glass capsule.
+                Vector2 highlightPos = podPos +
+                                       perpendicular * (2.65f * scale) +
+                                       direction * (1.55f * scale);
+                accent.x = highlightPos.x;
+                accent.y = highlightPos.y;
+                accent.scaleX = shell.scaleX * 0.075f;
+                accent.scaleY = shell.scaleY * 0.29f;
+                accent.rotation = rotation - 6f;
+                accent.alpha = 0.20f;
+                accent.color = Color.Lerp(shell.color, Color.white, 0.52f);
             }
             else
             {
                 Vector2 budPos = stemEnd - camPos;
-                bud.x = budPos.x;
-                bud.y = budPos.y;
-                bud.scaleX = immature ? 0.27f : 0.18f;
-                bud.scaleY = immature ? 0.42f : 0.16f;
-                bud.rotation = Custom.VecToDeg(Custom.DirVec(stemRoot, stemEnd)) - 90f;
-                bud.alpha = harvested ? 0.74f : 1f;
+                accent.x = budPos.x;
+                accent.y = budPos.y;
+                accent.scaleX = immature ? 0.27f : 0.18f;
+                accent.scaleY = immature ? 0.42f : 0.16f;
+                accent.rotation = Custom.VecToDeg(Custom.DirVec(stemRoot, stemEnd)) - 90f;
+                accent.alpha = harvested ? 0.74f : 1f;
+                accent.color = budColor;
             }
         }
 
@@ -619,7 +642,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         {
             sLeaser.sprites[StemSprite(i)].color = palette.blackColor;
             sLeaser.sprites[ShellSprite(i)].color = shellColor;
-            sLeaser.sprites[BudSprite(i)].color = budColor;
+            sLeaser.sprites[AccentSprite(i)].color = budColor;
         }
     }
 
