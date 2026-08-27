@@ -60,6 +60,15 @@ internal sealed class KingVultureSpear : Spear
         DrawTuskMesh(body, detail, center, direction, camPos);
         UpdateColors(body, detail, rCam.currentPalette, center);
 
+        // Match vanilla PlayerCarryableItem/Spear pickup feedback. Because these
+        // meshes use per-vertex colors, blink them by tinting the vertex arrays
+        // instead of assigning FSprite.color, which would destroy the tusk pattern.
+        if (blink > 0 && Random.value < 0.5f)
+        {
+            TintMesh(body, blinkColor, 0.9f);
+            TintMesh(detail, blinkColor, 0.9f);
+        }
+
         body.isVisible = true;
         detail.isVisible = true;
 
@@ -154,7 +163,9 @@ internal sealed class KingVultureSpear : Spear
         HSLColor colorA = data?.ColorA ?? new HSLColor(0f, 0.4f, 0.55f);
         HSLColor colorB = data?.ColorB ?? new HSLColor(0f, 0.8f, 0.45f);
         float pattern = data?.PatternDisplace ?? 1f;
-        float darkness = room != null ? room.Darkness(worldPos) : 0f;
+        float darkness = ModManager.MMF && room != null
+            ? room.Darkness(worldPos)
+            : 0f;
 
         int count = Mathf.Min(body.verticeColors.Length, detail.verticeColors.Length);
         for (int i = 0; i < count; i++)
@@ -173,9 +184,24 @@ internal sealed class KingVultureSpear : Spear
             detail.verticeColors[i] = Color.Lerp(detailColor, palette.blackColor, darkness);
         }
 
-        body.color = Color.white;
-        detail.color = Color.white;
+        // Do not assign body.color/detail.color here. TriangleMesh customColor uses
+        // the per-vertex arrays above, and assigning FSprite.color after them turns
+        // the detached tusk into a flat white mesh and erases the KingTusk pattern.
         detail.alpha = pattern;
+    }
+
+    private static void TintMesh(TriangleMesh mesh, Color target, float amount)
+    {
+        if (mesh?.verticeColors == null)
+        {
+            return;
+        }
+
+        float t = Mathf.Clamp01(amount);
+        for (int i = 0; i < mesh.verticeColors.Length; i++)
+        {
+            mesh.verticeColors[i] = Color.Lerp(mesh.verticeColors[i], target, t);
+        }
     }
 
     private static float TuskBend(float f)
