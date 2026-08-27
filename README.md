@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.17**.
+Current version: **0.0.18**.
 
 ## Versioning
 
@@ -21,6 +21,7 @@ Examples:
 0.0.15 -> 0.0.16
 0.0.16 -> 0.0.17
 0.0.17 -> 0.0.18
+0.0.18 -> 0.0.19
 ```
 
 The patch number does not roll over at 9 during normal development updates.
@@ -41,8 +42,8 @@ The patch number does not roll over at 9 during normal development updates.
 - Drinking is explicitly disabled while `player.inShortcut` is true, preventing stale underwater/submersion values from continuing hydration gain or wave animation inside a transition pipe.
 - Custom hydration meshes are removed when the vanilla `FoodMeter.MeterCircle` clears its sprites, preventing leftover cyan meshes when HUDs or character-select pages are destroyed and recreated.
 - While hydration is being replenished, the currently filling pip temporarily uses a **continuous rising liquid level with a moving wave surface**. When the refill animation settles, the display returns to the normal empty/half/full states.
-- Large hydration gains from food also use the rising-water animation instead of appearing instantly.
-- One-shot hydration gains reveal the vanilla lower-left HUD even if the vanilla food count did not change, such as eating hydrating food while the stomach is already full.
+- **Hydration gained from food and meat now uses the same rising-water animation as underwater drinking.** The HUD records the pre-eat and post-eat hydration values, starts visually from the old amount, then raises the liquid through each affected pip with the same follow speed and moving wave instead of snapping to the result.
+- Food hydration gains still force the lower-left HUD to appear even when the vanilla food count itself does not change, such as eating a hydrating item while the stomach is already full.
 - A failed hibernation attempt caused by insufficient hydration also reveals the lower-left HUD so the red rejection flash is visible.
 - Vanilla `ObjectEaten` interactions whose nourishment result is `-1` do not grant hydration, matching Rain World's own early-return/invalid-food behavior.
 - **Watcher spinning-top/warp saves preserve hydration.** Rain World v1.11.8 calls `SaveState.SessionEnded(survived: true)` for these special transitions while deliberately skipping the normal food sleep drain; DryCycle mirrors that behavior, does not charge the 3-point hydration hibernation cost, and suppresses the sleep-screen hydration drain animation for that special save path.
@@ -121,4 +122,4 @@ src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. In Jolly story co-op, hydration is keyed by `PlayerState.playerNumber`; camera focus changes immediately swap the reused FoodMeter to the focused player's own hydration state. Sleep and character-select pages configure the existing food meter with player 0's saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Food and meat hydration gains explicitly queue their pre-gain value so the reused FoodMeter cannot miss the rise animation even when it was hidden or a Jolly camera focus change happened at the same time. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. In Jolly story co-op, hydration is keyed by `PlayerState.playerNumber`; camera focus changes immediately swap the reused FoodMeter to the focused player's own hydration state. Sleep and character-select pages configure the existing food meter with player 0's saved hydration value rather than creating additional HUD circles.
