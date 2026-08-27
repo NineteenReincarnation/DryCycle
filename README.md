@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.29**.
+Current version: **0.0.30**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.27 -> 0.0.28
 0.0.28 -> 0.0.29
 0.0.29 -> 0.0.30
+0.0.30 -> 0.0.31
 ```
 
 The patch number does not roll over at 9.
@@ -97,6 +97,24 @@ SlugBase's own `food_max`/food-meter behavior remains the source of truth for a 
 - Jolly co-op keeps hydration, passive loss, and `WaterPips` independent per human player.
 - NPC slugpups remain excluded from DryCycle hydration.
 
+## KingVultureSpear prototype
+
+Version 0.0.30 adds the first prototype of the **KingVultureSpear** extraction system.
+
+- Only a **dead King Vulture** can be harvested.
+- The player must have a free hand and stand close to the King Vulture's head/tusk area.
+- Holding the pickup/eat input for about **55 frames** starts and completes the pull. During the hold, small forces are applied to the selected tusk, the corpse's head, and the player to make the interaction read as a physical extraction rather than an instant spawn.
+- The two King Vulture tusks are tracked independently. Each side can be extracted once. After a successful extraction, the pickup button must be released before a second tusk can be pulled.
+- The closest eligible tusk is selected automatically. A tusk that is already detached/fired far away from the head is not treated as something that can be harvested from the corpse.
+- When extraction finishes, the original corpse-side tusk body, detail layer, wire, and laser are hidden. A separate `KingVultureSpear` object is created at the same position and orientation and is immediately grabbed by the player's free hand.
+- The detached item copies the source tusk's side, current profile (`zRot`), King Vulture color pair, armor color, and `patternDisplace` value.
+- Its renderer recreates the original King Tusk's **15-segment `TriangleMesh` geometry**, including the original tusk bend/profile/radius formulas, and uses Rain World's original **`KingTusk` shader**. The item does not keep the original sprite instances, wire, or laser, so it remains independent from the corpse's `VultureGraphics` lifecycle.
+- The usable item currently inherits normal `Spear` gameplay behavior. Special damage, durability, charging, tethering, or other weapon abilities have not been assigned yet.
+- `KingVultureSpear` has its own registered `AbstractObjectType`, an `AbstractSpear` subclass, and a custom save parser so the object can be abstractized/realized instead of existing only as a temporary room effect.
+- Which tusks have been removed from a particular corpse is currently stored on that King Vulture's `AbstractCreature` for its current abstract/realized lifetime. It is not yet designed as a permanent cross-cycle world-resource state.
+
+This is a source-level prototype and has not yet been runtime-tested against the local game installation.
+
 ## Standard Rain World build setup
 
 The project targets **.NET Framework 4.8** and compiles against the installed Rain World assemblies. SlugBase is not needed to compile.
@@ -135,8 +153,9 @@ src/Thirst/SlugBaseHydrationFeatures.cs
 src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 src/HUD/HydrationDivider.cs
-src/Items/
-src/Items/KingVultureSpear/
+src/Items/KingVultureSpear/AbstractKingVultureSpear.cs
+src/Items/KingVultureSpear/KingVultureSpear.cs
+src/Items/KingVultureSpear/KingVultureSpearHooks.cs
 ```
 
 Temperature mechanics are not implemented yet.
