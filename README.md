@@ -49,15 +49,15 @@ Built-in `WaterPips` values:
 | Inv | 6 |
 | Watcher | 2 |
 
-Characters not listed above fall back to `WaterPips = 2` and `WaterLossRate = 5`.
+Characters not listed above fall back to `WaterPips = 2` and `WaterLossRate = 5`. `Night` is Rain World's hidden legacy Nightcat identifier rather than a normal story campaign, so DryCycle currently leaves it on that fallback instead of treating it as a separate campaign default.
 
 `WaterPips` is **not** a capacity setting. Capacity always follows the character's food meter. A character may therefore have, for example, 12 maximum food/water pips while only requiring 6 pips to hibernate.
 
 ## Optional SlugBase compatibility
 
-SlugBase is **not required** to run DryCycle. DryCycle declares only a BepInEx soft dependency for load ordering when SlugBase happens to be installed, and it contains no compile-time `SlugBase.dll` reference.
+SlugBase is **not required** to run DryCycle. `modinfo.json` has no SlugBase requirement, the plugin declares no SlugBase dependency metadata, and the project has no compile-time `SlugBase.dll` reference.
 
-When SlugBase is installed, DryCycle registers two optional custom player features through reflection:
+When SlugBase is present, DryCycle discovers it during Rain World's mod initialization and registers two optional custom player features through reflection before SlugBase performs its JSON scan:
 
 ```json
 {
