@@ -38,6 +38,7 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
+            KingVultureSpearCombat.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
@@ -71,6 +72,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
+            KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
             _initialized = true;
@@ -80,6 +82,7 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
+            KingVultureSpearCombat.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
