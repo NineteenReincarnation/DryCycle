@@ -37,6 +37,7 @@ internal static class ThirstHooks
         ThirstMeter.Enable();
 
         On.Player.Update += Player_Update;
+        On.Player.GrabUpdate += Player_GrabUpdate;
         On.Player.AddFood += Player_AddFood;
         On.Player.AddQuarterFood += Player_AddQuarterFood;
         On.Player.ObjectEaten += Player_ObjectEaten;
@@ -59,6 +60,7 @@ internal static class ThirstHooks
         _enabled = false;
 
         On.Player.Update -= Player_Update;
+        On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.AddFood -= Player_AddFood;
         On.Player.AddQuarterFood -= Player_AddQuarterFood;
         On.Player.ObjectEaten -= Player_ObjectEaten;
@@ -75,16 +77,7 @@ internal static class ThirstHooks
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
     {
-        bool fullHydratingEat = BeginFullHydratingEat(self);
-
-        try
-        {
-            orig(self, eu);
-        }
-        finally
-        {
-            EndFullHydratingEat(self, fullHydratingEat);
-        }
+        orig(self, eu);
 
         if (!IsStoryPlayer(self))
         {
@@ -121,6 +114,23 @@ internal static class ThirstHooks
         {
             ThirstMeter.ShowDrinking(self);
             ThirstStore.AddRuntime(self, ThirstConstants.DrinkPerTick);
+        }
+    }
+
+    private static void Player_GrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
+    {
+        // checkInput() has already run by the time vanilla reaches GrabUpdate, so
+        // this wrapper sees the current pickup button on the very first eating
+        // frame. Keep the temporary food-slot bypass scoped only to eating logic.
+        bool fullHydratingEat = BeginFullHydratingEat(self);
+
+        try
+        {
+            orig(self, eu);
+        }
+        finally
+        {
+            EndFullHydratingEat(self, fullHydratingEat);
         }
     }
 
@@ -253,7 +263,7 @@ internal static class ThirstHooks
         state.OriginalQuarterFood = player.playerState.quarterFoodPoints;
 
         // Vanilla refuses edible objects and meat when FoodInStomach is already
-        // MaxFoodInStomach. Open one temporary slot while Player.Update runs, and
+        // MaxFoodInStomach. Open one temporary slot while GrabUpdate runs, and
         // suppress AddFood/AddQuarterFood above so this is hydration-only eating.
         player.playerState.foodInStomach = Math.Max(0, state.OriginalFood - 1);
 
