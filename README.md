@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.32**.
+Current version: **0.0.33**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.30 -> 0.0.31
 0.0.31 -> 0.0.32
 0.0.32 -> 0.0.33
+0.0.33 -> 0.0.34
 ```
 
 The patch number does not roll over at 9.
@@ -119,9 +119,18 @@ Version 0.0.32 addresses the first in-game extraction test feedback:
 
 - An eligible corpse-side tusk now gets vanilla-style pickup feedback when the player enters range: a pickup-range sound plus a visible white pulse/highlight.
 - While the pickup button is held, the selected tusk pulses more strongly, receives a more visible tug, and the slugcat's free hand reaches toward the tusk so the pull action is readable before extraction completes.
-- Detached `KingVultureSpear` meshes no longer assign `FSprite.color = white` after setting custom per-vertex colors. That assignment was flattening the original King Tusk color/detail pattern into a white mesh; the item now keeps the original-style vertex colors and `KingTusk` detail shader.
-- The two corpse tusks now survive front/behind sprite-slot swaps independently. Both dynamic body/detail slots are restored before each corpse draw, after which only the actually extracted side is hidden. This prevents removing one tusk from making the remaining tusk disappear when the head orientation changes.
-- A detached KingVultureSpear also uses a per-vertex white blink when it later becomes a normal pickup candidate, preserving its pattern instead of replacing it with a flat color.
+- Detached `KingVultureSpear` meshes no longer assign a flat white sprite color after setting custom per-vertex colors.
+- The two corpse tusks now survive front/behind sprite-slot swaps independently. Both dynamic body/detail slots are restored before each corpse draw, after which only the actually extracted side is hidden.
+- A detached KingVultureSpear also uses a per-vertex white blink when it later becomes a normal pickup candidate.
+
+Version 0.0.33 changes the detached tusk renderer to follow the original Rain World v1.11.8 King Tusk rendering path as closely as possible rather than merely approximating its colors:
+
+- Body/detail meshes still use the exact vanilla 15-segment `MakeLongMesh` topology and the exact `TuskBend`, `TuskProfBend`, and `TuskRad` formulas.
+- Both detached meshes are now placed in the same **Midground** container used by `KingTusks.Tusk`.
+- `ApplyPalette` now restores the vanilla common sprite tint before writing the custom vertex colors. This sprite-level state is part of the original `KingTusk` shader input and was the main remaining reason the detached pattern could differ from the corpse-side tusk.
+- Body and detail vertex colors now mirror the original `KingTusks.Tusk.ApplyPalette` / `UpdateTuskColors` formulas directly.
+- The detail mesh alpha is still the original `patternDisplace`, exactly as in `KingTusks.Tusk.ApplyPalette`.
+- Under MMF, detached-tusk darkness now also applies Rain World's `LightSourceExposure` factor, matching the lighting calculation used by `VultureGraphics` while allowing the light response to follow the detached item.
 
 This is still a source-level prototype and should be re-tested in the local Rain World installation.
 
