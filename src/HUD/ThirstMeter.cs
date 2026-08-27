@@ -25,6 +25,7 @@ internal static class ThirstMeter
     private const int GainWaveHoldFrames = 24;
     private const int OverflowPipLifetime = 100;
     private const float OverflowPipScale = 0.5f;
+    private const float SleepDrainPerFrame = 0.05f;
 
     private static readonly Color WaterColor = new(0.03f, 0.9f, 0.95f);
 
@@ -33,8 +34,9 @@ internal static class ThirstMeter
         public bool UseFixedWater;
         public float DisplayWater;
         public float TargetWater;
-        public int SleepConsumeSteps;
+        public float SleepDrainRemaining;
         public int SleepConsumeDelay;
+        public int SleepLastVisiblePipCount;
         public SleepAndDeathScreen SleepScreen;
 
         public bool GameplayInitialized;
@@ -190,20 +192,26 @@ internal static class ThirstMeter
         state.SleepScreen = screen;
         state.TargetWater = ThirstStore.GetSaved(saveState, 0);
         state.DisplayWater = state.TargetWater;
-        state.SleepConsumeSteps = 0;
+        state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
+        state.SleepLastVisiblePipCount = Mathf.CeilToInt(Mathf.Max(0f, state.DisplayWater - 0.0001f));
         state.WaveStrength = 0f;
         state.OverflowTimer = 0;
 
         if (animateHibernateCost)
         {
+            // SaveState already contains the post-hibernation value. Reconstruct
+            // the pre-sleep amount for the HUD, then drain only the amount that
+            // was actually spent. Because water is packed left-to-right, lowering
+            // this scalar value always consumes the rightmost occupied pip first.
             state.DisplayWater = Mathf.Min(
                 ThirstConstants.MaxWater,
                 state.TargetWater + ThirstConstants.HibernateCost);
 
-            state.SleepConsumeSteps = Mathf.RoundToInt(
-                Mathf.Max(0f, state.DisplayWater - state.TargetWater));
+            state.SleepDrainRemaining = Mathf.Max(0f, state.DisplayWater - state.TargetWater);
             state.SleepConsumeDelay = 65;
+            state.SleepLastVisiblePipCount = Mathf.CeilToInt(
+                Mathf.Max(0f, state.DisplayWater - 0.0001f));
         }
     }
 
@@ -219,8 +227,9 @@ internal static class ThirstMeter
         state.SleepScreen = null;
         state.TargetWater = Mathf.Clamp(water, 0f, ThirstConstants.MaxWater);
         state.DisplayWater = state.TargetWater;
-        state.SleepConsumeSteps = 0;
+        state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
+        state.SleepLastVisiblePipCount = Mathf.CeilToInt(Mathf.Max(0f, state.DisplayWater - 0.0001f));
         state.WaveStrength = 0f;
         state.OverflowTimer = 0;
     }
@@ -334,17 +343,39 @@ internal static class ThirstMeter
         if (MeterStates.TryGetValue(self, out MeterState fixedState) &&
             fixedState.UseFixedWater &&
             fixedState.SleepScreen != null &&
-            fixedState.SleepConsumeSteps > 0 &&
+            fixedState.SleepDrainRemaining > 0.0001f &&
             fixedState.SleepScreen.AllowFoodMeterTick)
         {
-            fixedState.SleepConsumeDelay--;
-
-            if (fixedState.SleepConsumeDelay <= 0)
+            if (fixedState.SleepConsumeDelay > 0)
             {
-                fixedState.DisplayWater = Mathf.Max(fixedState.TargetWater, fixedState.DisplayWater - 1f);
-                fixedState.SleepConsumeSteps--;
-                fixedState.SleepConsumeDelay = 40;
-                self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+                fixedState.SleepConsumeDelay--;
+            }
+            else
+            {
+                float drain = Mathf.Min(SleepDrainPerFrame, fixedState.SleepDrainRemaining);
+                fixedState.DisplayWater = Mathf.Max(
+                    fixedState.TargetWater,
+                    fixedState.DisplayWater - drain);
+                fixedState.SleepDrainRemaining = Mathf.Max(
+                    0f,
+                    fixedState.DisplayWater - fixedState.TargetWater);
+
+                int visiblePipCount = Mathf.CeilToInt(
+                    Mathf.Max(0f, fixedState.DisplayWater - 0.0001f));
+
+                if (visiblePipCount < fixedState.SleepLastVisiblePipCount)
+                {
+                    // A rightmost hydration pip has just emptied. Use the same
+                    // depletion sound timing idea as vanilla food sleep ticks.
+                    self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+                    fixedState.SleepLastVisiblePipCount = visiblePipCount;
+                }
+
+                if (fixedState.SleepDrainRemaining <= 0.0001f)
+                {
+                    fixedState.DisplayWater = fixedState.TargetWater;
+                    fixedState.SleepDrainRemaining = 0f;
+                }
             }
         }
 
@@ -780,6 +811,12 @@ internal static class ThirstMeter
             fixedState.UseFixedWater)
         {
             water = Mathf.Clamp(fixedState.DisplayWater, 0f, ThirstConstants.MaxWater);
+
+            // Sleep depletion is continuous so the currently rightmost occupied
+            // pip visibly drains before the next pip to its left is touched.
+            continuousFill = fixedState.SleepScreen != null &&
+                             fixedState.SleepDrainRemaining > 0.0001f &&
+                             fixedState.SleepConsumeDelay <= 0;
             return true;
         }
 
