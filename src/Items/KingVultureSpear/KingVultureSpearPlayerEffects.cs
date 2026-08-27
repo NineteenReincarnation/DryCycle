@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using RWCustom;
 using UnityEngine;
+using KingVultureSpearItem = global::DryCycle.Items.KingVultureSpear.KingVultureSpear;
 
 namespace DryCycle.Items.KingVultureSpear;
 
@@ -277,14 +278,14 @@ internal static class KingVultureSpearPlayerEffects
         {
             for (int i = 0; i < player.grasps.Length; i++)
             {
-                if (player.grasps[i]?.grabbed is KingVultureSpear)
+                if (player.grasps[i]?.grabbed is KingVultureSpearItem)
                 {
                     count++;
                 }
             }
         }
 
-        if (player.spearOnBack?.spear is KingVultureSpear)
+        if (player.spearOnBack?.spear is KingVultureSpearItem)
         {
             count++;
         }
