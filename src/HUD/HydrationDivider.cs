@@ -8,6 +8,12 @@ namespace DryCycle.HUD;
 /// Draws the cyan hydration hibernation divider inside the vanilla FoodMeter.
 /// The number of hydration pips to the left of this line is also the normal
 /// hibernation requirement/cost (see ThirstConstants.HydrationSleepDividerAfterPip).
+///
+/// Rain World's own survival-limit divider does not merely draw a line between
+/// two normally spaced circles. MeterCircle.XAdd creates an extra half-circle
+/// distance on the right side of the divider, leaving visible air on both sides.
+/// DryCycle mirrors that layout by adding the same half-distance to every circle
+/// on the right side of the hydration divider.
 /// </summary>
 internal static class HydrationDivider
 {
@@ -59,6 +65,7 @@ internal static class HydrationDivider
         _enabled = true;
         On.HUD.FoodMeter.Draw += FoodMeter_Draw;
         On.HUD.FoodMeter.ClearSprites += FoodMeter_ClearSprites;
+        On.HUD.FoodMeter.MeterCircle.DrawPos += MeterCircle_DrawPos;
     }
 
     public static void Disable()
@@ -71,6 +78,27 @@ internal static class HydrationDivider
         _enabled = false;
         On.HUD.FoodMeter.Draw -= FoodMeter_Draw;
         On.HUD.FoodMeter.ClearSprites -= FoodMeter_ClearSprites;
+        On.HUD.FoodMeter.MeterCircle.DrawPos -= MeterCircle_DrawPos;
+    }
+
+    private static Vector2 MeterCircle_DrawPos(
+        On.HUD.FoodMeter.MeterCircle.orig_DrawPos orig,
+        global::HUD.FoodMeter.MeterCircle self,
+        float timeStacker)
+    {
+        Vector2 result = orig(self, timeStacker);
+
+        if (self?.meter != null &&
+            ShouldShow(self.meter) &&
+            self.number >= ThirstConstants.HydrationSleepDividerAfterPip)
+        {
+            // Vanilla's survival-limit gap is exactly CircleDistance / 2.
+            // Normal FoodMeter distance is 30 px, so this contributes 15 px of
+            // additional space to the right side of the cyan divider.
+            result.x += self.meter.CircleDistance(timeStacker) / 2f;
+        }
+
+        return result;
     }
 
     private static void FoodMeter_Draw(
@@ -79,6 +107,18 @@ internal static class HydrationDivider
         float timeStacker)
     {
         orig(self, timeStacker);
+
+        if (ShouldShow(self) &&
+            self.lineSprite != null &&
+            self.ShowSurvivalLimit > ThirstConstants.HydrationSleepDividerAfterPip)
+        {
+            // The vanilla white survival line is positioned directly from the
+            // FoodMeter origin rather than from MeterCircle.DrawPos. Since all
+            // circles to its right were shifted by the hydration gap above, move
+            // the white line by the same amount so its own spacing stays intact.
+            self.lineSprite.x += self.CircleDistance(timeStacker) / 2f;
+        }
+
         DrawDivider(self, timeStacker);
     }
 
@@ -116,6 +156,11 @@ internal static class HydrationDivider
 
         global::HUD.FoodMeter.MeterCircle left = meter.circles[leftIndex];
         global::HUD.FoodMeter.MeterCircle right = meter.circles[rightIndex];
+
+        // MeterCircle_DrawPos has already inserted the same half-distance gap
+        // used by Rain World's own survival-limit divider. Taking the midpoint
+        // therefore places the cyan line in the middle of that enlarged gap,
+        // leaving equal visual spacing to the circles on both sides.
         Vector2 center = (left.DrawPos(timeStacker) + right.DrawPos(timeStacker)) * 0.5f;
         float alpha = Mathf.Clamp01(Mathf.Lerp(meter.lastFade, meter.fade, timeStacker));
 
