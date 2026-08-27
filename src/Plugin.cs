@@ -12,12 +12,12 @@ using DryCycle.Thirst;
 namespace DryCycle;
 
 [BepInPlugin(ModId, ModName, Version)]
-[BepInDependency("slime-cubed.slugbase", BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency("slime-cubed.slugbase", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.24";
+    public const string Version = "0.0.25";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -26,9 +26,8 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         Logger = base.Logger;
 
-        // Register DryCycle's custom SlugBase PlayerFeatures before SlugBase's
-        // post-mod-init JSON scan. The hard dependency above guarantees SlugBase
-        // is present before this plugin is allowed to load.
+        // Optional compatibility: if SlugBase is installed, register DryCycle's
+        // JSON features. Reflection keeps DryCycle loadable without SlugBase.dll.
         SlugBaseHydrationFeatures.Initialize();
 
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
