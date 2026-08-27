@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.30**.
+Current version: **0.0.31**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.28 -> 0.0.29
 0.0.29 -> 0.0.30
 0.0.30 -> 0.0.31
+0.0.31 -> 0.0.32
 ```
 
 The patch number does not roll over at 9.
@@ -113,7 +113,9 @@ Version 0.0.30 adds the first prototype of the **KingVultureSpear** extraction s
 - `KingVultureSpear` has its own registered `AbstractObjectType`, an `AbstractSpear` subclass, and a custom save parser so the object can be abstractized/realized instead of existing only as a temporary room effect.
 - Which tusks have been removed from a particular corpse is currently stored on that King Vulture's `AbstractCreature` for its current abstract/realized lifetime. It is not yet designed as a permanent cross-cycle world-resource state.
 
-This is a source-level prototype and has not yet been runtime-tested against the local game installation.
+Version 0.0.31 adds the missing `Unity.Mathematics.dll` compile reference required by Rain World APIs exposing `Unity.Mathematics.float2` in their public signatures.
+
+This is still a source-level prototype and has not yet been runtime-tested against the local game installation.
 
 ## Standard Rain World build setup
 
@@ -132,6 +134,7 @@ BepInEx/plugins/HOOKS-Assembly-CSharp.dll
 RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll
 RainWorld_Data/Managed/UnityEngine.dll
 RainWorld_Data/Managed/UnityEngine.CoreModule.dll
+RainWorld_Data/Managed/Unity.Mathematics.dll
 ```
 
 Output path on the current development machine:
