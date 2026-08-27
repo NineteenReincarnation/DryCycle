@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.22**.
+Current version: **0.0.23**.
 
 ## Versioning
 
@@ -26,6 +26,7 @@ Examples:
 0.0.20 -> 0.0.21
 0.0.21 -> 0.0.22
 0.0.22 -> 0.0.23
+0.0.23 -> 0.0.24
 ```
 
 The patch number does not roll over at 9 during normal development updates.
@@ -33,6 +34,9 @@ The patch number does not roll over at 9 during normal development updates.
 ## Current feature: hydration
 
 - Hydration is a **0..5** resource for each player.
+- DryCycle now exposes hydration internally as **Water Value (WV)** while retaining the existing pip-based save format for compatibility.
+- **1 full hydration pip = 400 WV**, **1 half pip = 200 WV**, and the five-pip maximum is **2000 WV**.
+- At **200 WV or lower** (half of one hydration pip or less), the player receives Rain World's normal **Malnourished / starving weakness** gameplay state. DryCycle applies this through the temporary `malnourishedByCreature` channel so recovering above 200 WV does not clear a genuine vanilla starvation-cycle malnourished state.
 - A cyan hydration divider is drawn between the first and second hydration pips. It uses the same cyan as a full water pip and follows the vanilla FoodMeter fade/position.
 - The hydration divider copies Rain World's own survival-divider spacing: every food pip on its right is shifted by an additional **half `CircleDistance`** (15 px on the normal FoodMeter), so the cyan line has the same clear gap on both sides as the vanilla white food divider. The vanilla white divider is offset by the same added hydration gap when it lies to the right, preserving its original spacing too.
 - The number of hydration pips to the left of the cyan divider defines normal hibernation water requirement and cost. The divider is currently after pip 1, so normal hibernation requires at least **1 hydration** and consumes **1 hydration**.
@@ -66,7 +70,7 @@ The patch number does not roll over at 9 during normal development updates.
 - The same embedded rendering is used in gameplay, on the sleep/starve screen, and on the character continue/select page. The vanilla sleep/character-select screens only expose one FoodMeter, so those screens continue to display player 0's saved hydration; in gameplay the focused Jolly player is shown.
 - On a normal sleep screen the embedded water amount animates downward by the 1-point hibernation cost while following the vanilla food meter's own visibility/fade.
 - The vanilla lower-left HUD cluster is forced open while the currently focused player is actively drinking. The karma icon, food/hydration meter, and rain-cycle timer therefore fade in together using Rain World's normal HUD animation, then fade away naturally after drinking stops.
-- While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**.
+- While fully submerged and consuming lung air, hold the pickup/eat input (Shift on the default keyboard layout) to drink at **0.5 hydration per second**, equivalent to **200 WV per second**.
 - Configured foods and edible creatures restore hydration independently from food.
 - Hydration is stored in `SaveState.unrecognizedSaveStrings`; no external save file is used.
 - Existing solo five-unit saves using `DRYCYCLETHIRSTV2` remain compatible. Co-op player slots that do not yet have a saved hydration entry start full at 5.
@@ -128,9 +132,10 @@ src/Thirst/ThirstHooks.cs
 src/Thirst/ThirstStore.cs
 src/Thirst/ThirstState.cs
 src/Thirst/ThirstConstants.cs
+src/Thirst/HydrationWeakness.cs
 src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 src/HUD/HydrationDivider.cs
 ```
 
-`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Food and meat hydration gains explicitly queue their pre-gain value so the reused FoodMeter cannot miss the rise animation even when it was hidden or a Jolly camera focus change happened at the same time. Full-stomach hydration-only eating uses a temporary 50%-scale overflow food pip to the right of the meter while keeping the real vanilla food count unchanged. Normal sleep reconstructs the pre-sleep water total and drains the current rightmost occupied pip continuously toward the saved post-sleep target, so depletion proceeds right-to-left regardless of where the cyan divider is drawn. `src/HUD/HydrationDivider.cs` draws the cyan hibernation divider between the first and second hydration pips and inserts the same half-`CircleDistance` spacing that Rain World's vanilla survival divider gives to the circles on its right; the vanilla white divider is offset by the same added gap when needed. `HydrationSleepDividerAfterPip` remains the single source of truth for both divider placement and normal hydration sleep requirement/cost. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. In Jolly story co-op, hydration is keyed by `PlayerState.playerNumber`; camera focus changes immediately swap the reused FoodMeter to the focused player's own hydration state. Sleep and character-select pages configure the existing food meter with player 0's saved hydration value rather than creating additional HUD circles.
+`src/HUD/ThirstMeter.cs` hooks the vanilla `HUD.FoodMeter` and renders hydration material inside its existing circles. Static hydration remains quantized to half-pip states, positive hydration changes animate upward with a moving wave before settling, water visibility remains independent from the vanilla food-fill sprite, radius scaling follows the vanilla outer-circle pop, and custom meshes are removed with the vanilla HUD lifecycle. Food and meat hydration gains explicitly queue their pre-gain value so the reused FoodMeter cannot miss the rise animation even when it was hidden or a Jolly camera focus change happened at the same time. Full-stomach hydration-only eating uses a temporary 50%-scale overflow food pip to the right of the meter while keeping the real vanilla food count unchanged. Normal sleep reconstructs the pre-sleep water total and drains the current rightmost occupied pip continuously toward the saved post-sleep target, so depletion proceeds right-to-left regardless of where the cyan divider is drawn. `src/HUD/HydrationDivider.cs` draws the cyan hibernation divider between the first and second hydration pips and inserts the same half-`CircleDistance` spacing that Rain World's vanilla survival divider gives to the circles on its right; the vanilla white divider is offset by the same added gap when needed. `HydrationSleepDividerAfterPip` remains the single source of truth for both divider placement and normal hydration sleep requirement/cost. `src/Thirst/HydrationWeakness.cs` converts the current pip-based water amount into WV and applies Rain World's temporary malnourished weakness at 200 WV or below while preserving genuine vanilla starvation malnourishment. Gameplay hydration lookup remains valid while the realized player is temporarily between rooms in a shortcut. In Jolly story co-op, hydration is keyed by `PlayerState.playerNumber`; camera focus changes immediately swap the reused FoodMeter to the focused player's own hydration state. Sleep and character-select pages configure the existing food meter with player 0's saved hydration value rather than creating additional HUD circles.
