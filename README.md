@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.26**.
+Current version: **0.0.27**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.24 -> 0.0.25
 0.0.25 -> 0.0.26
 0.0.26 -> 0.0.27
+0.0.27 -> 0.0.28
 ```
 
 The patch number does not roll over at 9.
@@ -83,12 +83,14 @@ SlugBase's own `food_max`/food-meter behavior remains the source of truth for a 
 ## Current HUD behavior
 
 - Hydration is rendered as cyan liquid inside vanilla food pips; there is no second hydration row.
-- Static hydration uses empty / half / full states.
-- Drinking and food hydration gains use the same continuous rising-water animation and wave surface.
+- The water display is now **fully continuous** rather than quantized to empty / half / full. A total of `2.37` hydration therefore renders as two full water pips and a third pip filled to **37%**.
+- Whenever the currently active water pip is partially filled, its liquid surface keeps a subtle idle wave even when the player is not drinking.
+- Drinking and food hydration gains continue to use a stronger wave and smooth rising-water animation before settling back to the idle wave.
+- Passive dehydration tracks the real WV value continuously, so while the HUD is visible the current rightmost water surface can be watched slowly sinking instead of snapping between half-pip states.
 - Passive dehydration automatically reveals the vanilla lower-left HUD every time another **half hydration pip (200 WV)** has been lost. With the default `WaterLossRate = 5 WV/s`, this occurs once every **40 seconds** while water is being consumed normally.
 - Water stays visible during vanilla food restore/pop animations and scales with the food-circle outer-radius animation.
 - The cyan hibernation divider uses the current character's `WaterPips` and copies the vanilla survival-divider spacing.
-- Normal sleep drains water visually from right to left.
+- Normal sleep drains water visually from right to left using the same continuous liquid-level representation.
 - Full-stomach hydrating food can still be eaten without increasing normal food; a temporary 50%-scale overflow food pip appears to the right.
 - Non-hydrating food at full stomach keeps the vanilla refusal feedback without repeatedly resetting the shake forever.
 - Shortcut transitions preserve hydration HUD state; drinking itself remains disabled while travelling through a shortcut.
