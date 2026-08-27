@@ -23,6 +23,9 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     private int _leakDripCounter;
     private int _drinkPoseFrames;
     private Vector2 _drinkPoseTarget;
+    private float _rotation;
+    private float _lastRotation;
+    private float _angularVelocity;
 
     public AbstractDewPod AbstrPod => abstractPhysicalObject as AbstractDewPod;
 
@@ -67,19 +70,26 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
         airFriction = 0.995f;
         gravity = 0.9f;
-        bounce = 0.18f;
-        surfaceFriction = 0.72f;
+        bounce = 0.22f;
+        // A fleshy pod still loses speed, but it should not glue itself to the
+        // first landing point. The lower surface friction lets horizontal throw
+        // momentum survive long enough for a readable short roll.
+        surfaceFriction = 0.42f;
         collisionLayer = 1;
         waterFriction = 0.93f;
         buoyancy = 1.15f;
 
         _leakDripCounter = Random.Range(4, 10);
+        _rotation = DamageRandom01(3) * 360f;
+        _lastRotation = _rotation;
         RestoreLiquidColorFromSavedAttributes();
     }
 
     public override void Update(bool eu)
     {
+        _lastRotation = _rotation;
         base.Update(eu);
+        UpdateRollingPhysics();
 
         if (_drinkPoseFrames > 0)
         {
@@ -159,7 +169,27 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
     public override void TerrainImpact(int chunk, IntVector2 direction, float speed, bool firstContact)
     {
+        float incomingHorizontalVelocity = firstChunk?.vel.x ?? 0f;
+
         base.TerrainImpact(chunk, direction, speed, firstContact);
+
+        // Preserve part of the incoming horizontal momentum on floor/ceiling
+        // impacts. Without this, the spherical BodyChunk can lose almost all of
+        // its lateral motion on the first terrain contact and visually "stick".
+        if (firstContact &&
+            direction.y != 0 &&
+            (grabbedBy == null || grabbedBy.Count == 0) &&
+            Mathf.Abs(incomingHorizontalVelocity) > 0.55f)
+        {
+            float minimumRetainedVelocity = incomingHorizontalVelocity * 0.58f;
+            if (Mathf.Sign(firstChunk.vel.x) != Mathf.Sign(incomingHorizontalVelocity) ||
+                Mathf.Abs(firstChunk.vel.x) < Mathf.Abs(minimumRetainedVelocity))
+            {
+                firstChunk.vel.x = minimumRetainedVelocity;
+            }
+
+            _angularVelocity = Mathf.Clamp(-firstChunk.vel.x * 5.6f, -32f, 32f);
+        }
 
         if (firstContact && speed >= 8.5f)
         {
@@ -193,6 +223,51 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     {
         _drinkPoseTarget = mouthPosition;
         _drinkPoseFrames = 2;
+    }
+
+    private void UpdateRollingPhysics()
+    {
+        if (firstChunk == null)
+        {
+            return;
+        }
+
+        bool held = grabbedBy != null && grabbedBy.Count > 0;
+        if (held)
+        {
+            _angularVelocity *= 0.72f;
+            _rotation = Mathf.Repeat(_rotation + _angularVelocity, 360f);
+            return;
+        }
+
+        bool touchingHorizontalSurface = firstChunk.ContactPoint.y != 0;
+        if (touchingHorizontalSurface)
+        {
+            // Tie visual spin to actual lateral motion. The response is softened so
+            // the pod feels fleshy rather than like a rigid billiard ball.
+            float targetAngularVelocity = Mathf.Clamp(-firstChunk.vel.x * 5.6f, -32f, 32f);
+            _angularVelocity = Mathf.Lerp(_angularVelocity, targetAngularVelocity, 0.34f);
+            _angularVelocity *= 0.985f;
+
+            // Leave a small amount of rolling inertia after the first impact, then
+            // let normal terrain friction bring it to rest naturally.
+            if (Mathf.Abs(firstChunk.vel.x) > 0.08f)
+            {
+                firstChunk.vel.x *= 0.992f;
+            }
+            else if (Mathf.Abs(_angularVelocity) < 0.25f)
+            {
+                _angularVelocity = 0f;
+            }
+        }
+        else
+        {
+            float airTarget = Mathf.Clamp(-firstChunk.vel.x * 3.4f, -25f, 25f);
+            _angularVelocity = Mathf.Lerp(_angularVelocity, airTarget, 0.06f);
+            _angularVelocity *= 0.995f;
+        }
+
+        _rotation = Mathf.Repeat(_rotation + _angularVelocity, 360f);
     }
 
     private void AddWater(float addedWV, Color sourceColor)
@@ -402,17 +477,34 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         room.AddObject(new DewPodWaterDrip(origin, velocity, LiquidColor));
     }
 
+    private float DamageRandom01(int salt)
+    {
+        int id = abstractPhysicalObject?.ID.number ?? 0;
+        float value = Mathf.Sin((id + salt * 1013) * 12.9898f) * 43758.5453f;
+        return value - Mathf.Floor(value);
+    }
+
+    private static Vector2 RotateLocal(Vector2 local, float degrees)
+    {
+        float radians = degrees * Mathf.Deg2Rad;
+        float sin = Mathf.Sin(radians);
+        float cos = Mathf.Cos(radians);
+        return new Vector2(
+            local.x * cos - local.y * sin,
+            local.x * sin + local.y * cos);
+    }
+
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        // Shell, liquid, one crack stroke, and a shared accent sprite. The accent
-        // is a restrained surface highlight while intact and becomes the secondary
-        // crack after rupture. The old translucent top-window stays removed.
+        // Shell, liquid, and two thin accent/crack strokes. The fourth sprite is a
+        // restrained highlight while intact and becomes a second crack when broken.
+        // The translucent top-window remains removed.
         sLeaser.sprites = new FSprite[4];
 
         sLeaser.sprites[0] = new FSprite("Circle20");
         sLeaser.sprites[1] = new FSprite("Circle20");
         sLeaser.sprites[2] = new FSprite("Futile_White");
-        sLeaser.sprites[3] = new FSprite("Circle20");
+        sLeaser.sprites[3] = new FSprite("Futile_White");
 
         AddToContainer(sLeaser, rCam, null);
     }
@@ -434,9 +526,10 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
         float fill = Fill;
         float fullness = Mathf.Lerp(0.62f, 1f, Mathf.Sqrt(fill));
+        float visualRotation = Mathf.LerpAngle(_lastRotation, _rotation, timeStacker);
 
-        // Slightly more columnar than the earlier egg-like silhouette while still
-        // keeping soft rounded caps. Empty pods shrink, but preserve the same form.
+        // Slightly columnar, with soft rounded caps. Empty pods shrink but preserve
+        // the same identity.
         float height = Mathf.Lerp(0.76f, 1.24f, fullness);
         float width = Mathf.Lerp(0.57f, 0.82f, fullness);
 
@@ -445,52 +538,79 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         shell.y = drawPos.y;
         shell.scaleX = width;
         shell.scaleY = height;
+        shell.rotation = visualRotation;
 
         FSprite liquid = sLeaser.sprites[1];
         liquid.isVisible = fill > 0.005f;
-        liquid.x = drawPos.x;
-        liquid.y = drawPos.y - Mathf.Lerp(3.35f, 0.30f, fill);
+        Vector2 liquidOffset = RotateLocal(
+            new Vector2(0f, -Mathf.Lerp(3.35f, 0.30f, fill)),
+            visualRotation);
+        liquid.x = drawPos.x + liquidOffset.x;
+        liquid.y = drawPos.y + liquidOffset.y;
 
         // The visible water occupies most of the fleshy chamber, especially in the
         // vertical axis, while retaining a readable dark-green wall around it.
         liquid.scaleX = width * Mathf.Lerp(0.60f, 0.78f, fill);
         liquid.scaleY = height * Mathf.Lerp(0.22f, 0.88f, fill);
+        liquid.rotation = visualRotation;
         liquid.color = LiquidColor;
 
         bool broken = Broken;
 
         FSprite primaryCrack = sLeaser.sprites[2];
         primaryCrack.isVisible = broken;
-        primaryCrack.x = drawPos.x + 1.3f;
-        primaryCrack.y = drawPos.y + 2.4f;
-        primaryCrack.scaleX = 0.12f;
-        primaryCrack.scaleY = 0.42f;
-        primaryCrack.rotation = 32f;
-        primaryCrack.alpha = 1f;
-        primaryCrack.color = rCam.currentPalette.blackColor;
+        if (broken)
+        {
+            Vector2 primaryLocal = new(
+                Mathf.Lerp(-2.65f, 2.65f, DamageRandom01(11)),
+                Mathf.Lerp(-3.15f, 3.15f, DamageRandom01(12)));
+            Vector2 primaryOffset = RotateLocal(primaryLocal, visualRotation);
+            primaryCrack.x = drawPos.x + primaryOffset.x;
+            primaryCrack.y = drawPos.y + primaryOffset.y;
+            primaryCrack.scaleX = Mathf.Lerp(0.08f, 0.14f, DamageRandom01(13));
+            primaryCrack.scaleY = Mathf.Lerp(0.30f, 0.50f, DamageRandom01(14));
+            primaryCrack.rotation = visualRotation + Mathf.Lerp(-68f, 68f, DamageRandom01(15));
+            primaryCrack.alpha = 1f;
+            primaryCrack.color = rCam.currentPalette.blackColor;
+        }
 
         FSprite accent = sLeaser.sprites[3];
         if (!broken)
         {
-            // A narrow wet sheen rather than the old bright white patch. It sits
-            // close to the shell edge and grows only slightly with the water level.
+            // A narrow wet sheen rather than a bright white patch. Since this is
+            // attached to the pod surface, it rotates with the rolling body.
             accent.isVisible = fill > 0.02f;
-            accent.x = drawPos.x - width * 3.15f;
-            accent.y = drawPos.y + height * 1.75f;
+            Vector2 highlightOffset = RotateLocal(
+                new Vector2(-width * 3.15f, height * 1.75f),
+                visualRotation);
+            accent.x = drawPos.x + highlightOffset.x;
+            accent.y = drawPos.y + highlightOffset.y;
             accent.scaleX = width * 0.075f;
             accent.scaleY = height * Mathf.Lerp(0.20f, 0.31f, fill);
-            accent.rotation = -7f;
+            accent.rotation = visualRotation - 7f;
             accent.alpha = Mathf.Lerp(0.08f, 0.22f, fill);
             accent.color = Color.Lerp(shell.color, Color.white, 0.52f);
         }
         else
         {
+            float secondX = Mathf.Lerp(-2.45f, 2.45f, DamageRandom01(21));
+            float primaryX = Mathf.Lerp(-2.65f, 2.65f, DamageRandom01(11));
+            if (Mathf.Abs(secondX - primaryX) < 1.15f)
+            {
+                secondX = -primaryX;
+            }
+
+            Vector2 secondaryLocal = new(
+                secondX,
+                Mathf.Lerp(-2.85f, 2.85f, DamageRandom01(22)));
+            Vector2 secondaryOffset = RotateLocal(secondaryLocal, visualRotation);
+
             accent.isVisible = true;
-            accent.x = drawPos.x + 2.2f;
-            accent.y = drawPos.y + 0.5f;
-            accent.scaleX = 0.10f;
-            accent.scaleY = 0.28f;
-            accent.rotation = -38f;
+            accent.x = drawPos.x + secondaryOffset.x;
+            accent.y = drawPos.y + secondaryOffset.y;
+            accent.scaleX = Mathf.Lerp(0.07f, 0.12f, DamageRandom01(23));
+            accent.scaleY = Mathf.Lerp(0.22f, 0.40f, DamageRandom01(24));
+            accent.rotation = visualRotation + Mathf.Lerp(-72f, 72f, DamageRandom01(25));
             accent.alpha = 1f;
             accent.color = rCam.currentPalette.blackColor;
         }
