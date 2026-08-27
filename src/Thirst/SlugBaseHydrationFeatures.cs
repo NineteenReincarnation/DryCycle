@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using DryCycle.Items.KingVultureSpear;
 
 namespace DryCycle.Thirst;
 
@@ -144,9 +145,15 @@ internal static class SlugBaseHydrationFeatures
 
     public static float GetWaterLossPerTick(Player player)
     {
-        return GetWaterLossRate(player) /
-               ThirstConstants.WaterValuePerPip /
-               ThirstConstants.SimulationTicksPerSecond;
+        float currentLossPerTick = GetWaterLossRate(player) /
+                                   ThirstConstants.WaterValuePerPip /
+                                   ThirstConstants.SimulationTicksPerSecond;
+        float multiplier = KingVultureSpearCombat.GetWaterLossMultiplier(player);
+
+        // Status effects scale the player's current loss directly: A × B.
+        // If the configured/current loss changes, the same multiplier applies to
+        // that new value instead of adding a separately calculated loss amount.
+        return currentLossPerTick * multiplier;
     }
 
     private static int GetDefaultWaterPips(SlugcatStats.Name slugcat)
