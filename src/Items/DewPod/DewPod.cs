@@ -252,7 +252,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         }
     }
 
-    private static bool TryGetLocalWaterColor(Room sourceRoom, out Color color)
+    internal static bool TryGetLocalWaterColor(Room sourceRoom, out Color color)
     {
         color = FallbackLiquidColor;
 
@@ -430,11 +430,10 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         float fill = Fill;
         float fullness = Mathf.Lerp(0.62f, 1f, Mathf.Sqrt(fill));
 
-        // Keep the pod rounded, but stretch it just enough toward a short fleshy
-        // cylinder instead of a near-circular fruit. The change is intentionally
-        // small so it still reads as a soft, water-filled organic structure.
-        float height = Mathf.Lerp(0.74f, 1.18f, fullness);
-        float width = Mathf.Lerp(0.58f, 0.84f, fullness);
+        // Slightly more columnar than the earlier egg-like silhouette while still
+        // keeping soft rounded caps. Empty pods shrink, but preserve the same form.
+        float height = Mathf.Lerp(0.76f, 1.24f, fullness);
+        float width = Mathf.Lerp(0.57f, 0.82f, fullness);
 
         FSprite shell = sLeaser.sprites[0];
         shell.x = drawPos.x;
@@ -445,13 +444,12 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         FSprite liquid = sLeaser.sprites[1];
         liquid.isVisible = fill > 0.005f;
         liquid.x = drawPos.x;
-        liquid.y = drawPos.y - Mathf.Lerp(3.4f, 0.45f, fill);
+        liquid.y = drawPos.y - Mathf.Lerp(3.35f, 0.30f, fill);
 
-        // Keep a visible dark-green wall, but let the liquid occupy more of the
-        // pod again. Width grows only a little; vertical fill grows much more so
-        // the water no longer reads as a short, flattened oval inside the shell.
-        liquid.scaleX = width * Mathf.Lerp(0.58f, 0.76f, fill);
-        liquid.scaleY = height * Mathf.Lerp(0.20f, 0.84f, fill);
+        // The visible water occupies most of the fleshy chamber, especially in the
+        // vertical axis, while retaining a readable dark-green wall around it.
+        liquid.scaleX = width * Mathf.Lerp(0.60f, 0.78f, fill);
+        liquid.scaleY = height * Mathf.Lerp(0.22f, 0.88f, fill);
 
         Color displayedLiquid = Color.Lerp(
             rCam.currentPalette.blackColor,
@@ -461,18 +459,18 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
         FSprite window = sLeaser.sprites[2];
         window.x = drawPos.x;
-        window.y = drawPos.y + height * 5.15f;
-        window.scaleX = width * 0.42f;
-        window.scaleY = Mathf.Lerp(0.12f, 0.27f, fullness);
+        window.y = drawPos.y + height * 5.22f;
+        window.scaleX = width * 0.44f;
+        window.scaleY = Mathf.Lerp(0.12f, 0.28f, fullness);
         window.alpha = Mathf.Lerp(0.22f, 0.72f, fill);
         window.color = Color.Lerp(displayedLiquid, Color.white, 0.48f);
 
         FSprite highlight = sLeaser.sprites[3];
         highlight.isVisible = fill > 0.02f;
-        highlight.x = drawPos.x - width * 2.45f;
-        highlight.y = drawPos.y + height * 2.25f;
+        highlight.x = drawPos.x - width * 2.40f;
+        highlight.y = drawPos.y + height * 2.35f;
         highlight.scaleX = width * 0.11f;
-        highlight.scaleY = height * Mathf.Lerp(0.18f, 0.42f, fill);
+        highlight.scaleY = height * Mathf.Lerp(0.18f, 0.44f, fill);
         highlight.alpha = Mathf.Lerp(0.08f, 0.38f, fill);
 
         bool broken = Broken;
