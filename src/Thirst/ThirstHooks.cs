@@ -92,7 +92,24 @@ internal static class ThirstHooks
             float passiveLoss = SlugBaseHydrationFeatures.GetWaterLossPerTick(self);
             if (passiveLoss > 0f)
             {
-                ThirstStore.RemoveRuntime(self, passiveLoss);
+                float beforeWater = state.Water;
+
+                if (ThirstStore.RemoveRuntime(self, passiveLoss))
+                {
+                    float afterWater = state.Water;
+
+                    // Half a hydration pip is exactly 200 WV. Reveal the vanilla
+                    // lower-left HUD each time passive loss crosses another 0.5-pip
+                    // boundary. Math.Ceiling prevents a full pip from notifying on
+                    // the first tiny WV loss; the notification happens only after
+                    // a complete half-pip segment has actually been consumed.
+                    if (CrossedHalfPipLossBoundary(beforeWater, afterWater))
+                    {
+                        self.showKarmaFoodRainTime = Math.Max(
+                            self.showKarmaFoodRainTime,
+                            ThirstConstants.HydrationLossHudHoldFrames);
+                    }
+                }
             }
         }
 
@@ -607,6 +624,18 @@ internal static class ThirstHooks
         }
 
         return rejected;
+    }
+
+    private static bool CrossedHalfPipLossBoundary(float beforeWater, float afterWater)
+    {
+        if (afterWater >= beforeWater - 0.000001f)
+        {
+            return false;
+        }
+
+        int beforeHalfPips = (int)Math.Ceiling(Math.Max(0f, beforeWater) * 2.0);
+        int afterHalfPips = (int)Math.Ceiling(Math.Max(0f, afterWater) * 2.0);
+        return afterHalfPips < beforeHalfPips;
     }
 
     private static Player FindPrimaryPlayer(ShelterDoor door)
