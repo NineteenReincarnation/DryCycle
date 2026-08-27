@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using DevInterface;
 using DryCycle.HUD;
 using DryCycle.Thirst;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.DewPod;
@@ -50,6 +51,7 @@ internal static class DewPodHooks
         On.PlacedObject.GenerateEmptyData += PlacedObject_GenerateEmptyData;
         On.Room.Loaded += Room_Loaded;
         On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType += ObjectsPage_DevObjectGetCategoryFromPlacedType;
+        On.DevInterface.ObjectsPage.CreateObjRep += ObjectsPage_CreateObjRep;
         On.Player.Grabability += Player_Grabability;
         On.Player.GrabUpdate += Player_GrabUpdate;
         On.PlayerGraphics.Update += PlayerGraphics_Update;
@@ -70,6 +72,7 @@ internal static class DewPodHooks
         On.PlacedObject.GenerateEmptyData -= PlacedObject_GenerateEmptyData;
         On.Room.Loaded -= Room_Loaded;
         On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType -= ObjectsPage_DevObjectGetCategoryFromPlacedType;
+        On.DevInterface.ObjectsPage.CreateObjRep -= ObjectsPage_CreateObjRep;
         On.Player.Grabability -= Player_Grabability;
         On.Player.GrabUpdate -= Player_GrabUpdate;
         On.PlayerGraphics.Update -= PlayerGraphics_Update;
@@ -128,6 +131,40 @@ internal static class DewPodHooks
         }
 
         return orig(self, type);
+    }
+
+    private static void ObjectsPage_CreateObjRep(
+        On.DevInterface.ObjectsPage.orig_CreateObjRep orig,
+        ObjectsPage self,
+        PlacedObject.Type type,
+        PlacedObject placedObject)
+    {
+        if (type != PlacedType)
+        {
+            orig(self, type, placedObject);
+            return;
+        }
+
+        if (placedObject == null)
+        {
+            placedObject = new PlacedObject(type, null)
+            {
+                pos = self.owner.room.game.cameras[0].pos +
+                      Vector2.Lerp(self.owner.mousePos, new Vector2(-683f, 384f), 0.25f) +
+                      Custom.DegToVec(UnityEngine.Random.value * 360f) * 0.2f
+            };
+            self.RoomSettings.placedObjects.Add(placedObject);
+        }
+
+        PlacedObjectRepresentation representation = new ConsumableRepresentation(
+            self.owner,
+            type + "_Rep",
+            self,
+            placedObject,
+            type.ToString());
+
+        self.tempNodes.Add(representation);
+        self.subNodes.Add(representation);
     }
 
     private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
