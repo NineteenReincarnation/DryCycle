@@ -20,6 +20,17 @@
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
   </PropertyGroup>
 
+  <!-- SlugBase is now a hard runtime dependency. SlugBaseDll may be supplied
+       explicitly, otherwise try common local-mod and Steam Workshop layouts. -->
+  <PropertyGroup>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(MSBuildProjectDirectory)/../lib/SlugBase.dll')">$(MSBuildProjectDirectory)/../lib/SlugBase.dll</SlugBaseDll>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(RainWorldDir)/BepInEx/plugins/SlugBase.dll')">$(RainWorldDir)/BepInEx/plugins/SlugBase.dll</SlugBaseDll>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/slugbase/plugins/SlugBase.dll')">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/slugbase/plugins/SlugBase.dll</SlugBaseDll>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/slugbase/newest/plugins/SlugBase.dll')">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/slugbase/newest/plugins/SlugBase.dll</SlugBaseDll>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(RainWorldDir)/../../workshop/content/312520/2933196558/plugins/SlugBase.dll')">$(RainWorldDir)/../../workshop/content/312520/2933196558/plugins/SlugBase.dll</SlugBaseDll>
+    <SlugBaseDll Condition="'$(SlugBaseDll)' == '' and Exists('$(RainWorldDir)/../../workshop/content/312520/2933196558/newest/plugins/SlugBase.dll')">$(RainWorldDir)/../../workshop/content/312520/2933196558/newest/plugins/SlugBase.dll</SlugBaseDll>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DebugType>portable</DebugType>
   </PropertyGroup>
@@ -54,6 +65,10 @@
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="SlugBase">
+      <HintPath>$(SlugBaseDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -71,6 +86,7 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="'$(SlugBaseDll)' == '' Or !Exists('$(SlugBaseDll)')" Text="SlugBase.dll not found. Install SlugBase or pass -p:SlugBaseDll=&quot;.../SlugBase.dll&quot;." />
     <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
   </Target>
 
