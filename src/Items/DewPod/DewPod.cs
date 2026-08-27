@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using RWCustom;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace DryCycle.Items.DewPod;
 
