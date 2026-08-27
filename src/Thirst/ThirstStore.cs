@@ -88,6 +88,45 @@ internal static class ThirstStore
         return true;
     }
 
+    public static bool RemoveRuntime(Player player, float amount)
+    {
+        if (player == null || amount <= 0f)
+        {
+            return false;
+        }
+
+        RainWorldGame game = player.room?.game ?? player.abstractCreature?.world?.game;
+        if (game == null || !game.IsStorySession)
+        {
+            ThirstState local = For(player);
+            float beforeLocal = local.Water;
+            local.Set(beforeLocal - amount);
+            return local.Water < beforeLocal - 0.0001f;
+        }
+
+        int playerNumber = GetPlayerNumber(player);
+        RuntimeHydration runtime = RuntimeStates.GetOrCreateValue(game);
+        float previous = GetOrInitializeRuntimeSlot(
+            runtime,
+            game.GetStorySession?.saveState,
+            playerNumber);
+        float next = Clamp(previous - amount);
+
+        if (next >= previous - 0.0001f)
+        {
+            return false;
+        }
+
+        runtime.WaterByPlayer[playerNumber] = next;
+
+        if (PlayerStates.TryGetValue(player, out ThirstState state))
+        {
+            state.Set(next);
+        }
+
+        return true;
+    }
+
     public static float GetRuntimeWater(Player player)
     {
         if (player == null)
