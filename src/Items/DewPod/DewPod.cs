@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
 using RWCustom;
 using UnityEngine;
 
@@ -14,6 +17,8 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     private const float RefillPerTickWV = RefillRateWVPerSecond / SimulationTicksPerSecond;
     private const float LeakPerTickWV = LeakRateWVPerSecond / SimulationTicksPerSecond;
 
+    private static readonly Color FallbackLiquidColor = new(0.50f, 0.92f, 0.78f);
+
     private int _leakDripCounter;
     private int _drinkPoseFrames;
     private Vector2 _drinkPoseTarget;
@@ -23,6 +28,34 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
     public float WaterWV => AbstrPod?.WaterWV ?? 0f;
     public bool Broken => AbstrPod?.Broken ?? true;
     public float Fill => Mathf.Clamp01(WaterWV / AbstractDewPod.MaxWaterWV);
+    public Color LiquidColor => AbstrPod != null && AbstrPod.HasLiquidColor
+        ? AbstrPod.LiquidColor
+        : FallbackLiquidColor;
+
+    private sealed class DewPodWaterDrip : WaterDrip
+    {
+        private readonly Color _liquidColor;
+
+        public DewPodWaterDrip(Vector2 pos, Vector2 vel, Color liquidColor)
+            : base(pos, vel, waterColor: false)
+        {
+            _liquidColor = liquidColor;
+            width = 1.5f;
+        }
+
+        public override void ApplyPalette(
+            RoomCamera.SpriteLeaser sLeaser,
+            RoomCamera rCam,
+            RoomPalette palette)
+        {
+            colors = new Color[3]
+            {
+                Color.Lerp(palette.blackColor, _liquidColor, 0.55f),
+                _liquidColor,
+                Color.Lerp(_liquidColor, Color.white, 0.72f)
+            };
+        }
+    }
 
     public DewPod(AbstractPhysicalObject abstractPhysicalObject)
         : base(abstractPhysicalObject)
@@ -40,6 +73,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         buoyancy = 1.15f;
 
         _leakDripCounter = Random.Range(4, 10);
+        RestoreLiquidColorFromSavedAttributes();
     }
 
     public override void Update(bool eu)
@@ -56,11 +90,19 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
             return;
         }
 
-        if (!AbstrPod.Broken && firstChunk.submersion > 0f && AbstrPod.WaterWV < AbstractDewPod.MaxWaterWV)
+        InitializeLiquidColorFromRoomIfNeeded();
+
+        if (!AbstrPod.Broken &&
+            firstChunk.submersion > 0f &&
+            AbstrPod.WaterWV < AbstractDewPod.MaxWaterWV)
         {
-            AbstrPod.WaterWV = Mathf.Min(
-                AbstractDewPod.MaxWaterWV,
-                AbstrPod.WaterWV + RefillPerTickWV);
+            float addedWV = Mathf.Min(
+                RefillPerTickWV,
+                AbstractDewPod.MaxWaterWV - AbstrPod.WaterWV);
+
+            Color sourceColor = LiquidColor;
+            TryGetLocalWaterColor(room, out sourceColor);
+            AddWater(addedWV, sourceColor);
         }
 
         if (!AbstrPod.Broken || AbstrPod.WaterWV <= 0f)
@@ -94,6 +136,8 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         {
             firstChunk.HardSetPosition(placeRoom.MiddleOfTile(abstractPhysicalObject.pos));
         }
+
+        InitializeLiquidColorFromRoomIfNeeded();
     }
 
     public override void Grabbed(Creature.Grasp grasp)
@@ -146,6 +190,166 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         _drinkPoseFrames = 2;
     }
 
+    private void AddWater(float addedWV, Color sourceColor)
+    {
+        if (AbstrPod == null || addedWV <= 0f)
+        {
+            return;
+        }
+
+        float beforeWV = Mathf.Clamp(AbstrPod.WaterWV, 0f, AbstractDewPod.MaxWaterWV);
+        float actualAddedWV = Mathf.Min(
+            addedWV,
+            AbstractDewPod.MaxWaterWV - beforeWV);
+
+        if (actualAddedWV <= 0f)
+        {
+            return;
+        }
+
+        sourceColor.a = 1f;
+        float afterWV = beforeWV + actualAddedWV;
+
+        if (!AbstrPod.HasLiquidColor || beforeWV <= 0.0001f)
+        {
+            AbstrPod.LiquidColor = sourceColor;
+            AbstrPod.HasLiquidColor = true;
+        }
+        else
+        {
+            // Volume-weighted mixing: only the newly added WV contributes the
+            // source palette color. Existing liquid keeps its previous share.
+            float sourceShare = actualAddedWV / afterWV;
+            AbstrPod.LiquidColor = Color.Lerp(
+                AbstrPod.LiquidColor,
+                sourceColor,
+                sourceShare);
+            AbstrPod.LiquidColor.a = 1f;
+        }
+
+        AbstrPod.WaterWV = afterWV;
+    }
+
+    private void InitializeLiquidColorFromRoomIfNeeded()
+    {
+        if (AbstrPod == null ||
+            AbstrPod.HasLiquidColor ||
+            AbstrPod.WaterWV <= 0f ||
+            room == null)
+        {
+            return;
+        }
+
+        if (TryGetLocalWaterColor(room, out Color localWaterColor))
+        {
+            AbstrPod.LiquidColor = localWaterColor;
+            AbstrPod.HasLiquidColor = true;
+        }
+    }
+
+    private static bool TryGetLocalWaterColor(Room sourceRoom, out Color color)
+    {
+        color = FallbackLiquidColor;
+
+        if (sourceRoom == null)
+        {
+            return false;
+        }
+
+        if (sourceRoom.waterObject != null &&
+            TryGetPaletteWaterColor(sourceRoom.waterObject.palette, out color))
+        {
+            return true;
+        }
+
+        if (sourceRoom.game?.cameras != null)
+        {
+            for (int i = 0; i < sourceRoom.game.cameras.Length; i++)
+            {
+                RoomCamera camera = sourceRoom.game.cameras[i];
+                if (camera?.room == sourceRoom &&
+                    TryGetPaletteWaterColor(camera.currentPalette, out color))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetPaletteWaterColor(RoomPalette palette, out Color color)
+    {
+        color = FallbackLiquidColor;
+
+        // An untouched/default RoomPalette has transparent-zero colors. A real
+        // palette can legitimately contain very dark water, so alpha is the safe
+        // initialization check rather than RGB brightness.
+        if (palette.waterColor1.a <= 0.001f && palette.waterColor2.a <= 0.001f)
+        {
+            return false;
+        }
+
+        color = Color.Lerp(palette.waterColor2, palette.waterColor1, 0.5f);
+        color.a = 1f;
+        return true;
+    }
+
+    private void RestoreLiquidColorFromSavedAttributes()
+    {
+        if (AbstrPod?.unrecognizedAttributes == null ||
+            AbstrPod.unrecognizedAttributes.Length == 0)
+        {
+            return;
+        }
+
+        List<string> remaining = new();
+
+        foreach (string attribute in AbstrPod.unrecognizedAttributes)
+        {
+            if (attribute != null &&
+                attribute.StartsWith(
+                    AbstractDewPod.LiquidColorAttributePrefix,
+                    StringComparison.Ordinal) &&
+                TryParseSavedColor(
+                    attribute.Substring(AbstractDewPod.LiquidColorAttributePrefix.Length),
+                    out Color parsedColor))
+            {
+                AbstrPod.LiquidColor = parsedColor;
+                AbstrPod.HasLiquidColor = true;
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(attribute))
+            {
+                remaining.Add(attribute);
+            }
+        }
+
+        AbstrPod.unrecognizedAttributes = remaining.ToArray();
+    }
+
+    private static bool TryParseSavedColor(string value, out Color color)
+    {
+        color = Color.clear;
+        string[] parts = (value ?? string.Empty).Split(',');
+
+        if (parts.Length != 3 ||
+            !float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float r) ||
+            !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float g) ||
+            !float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float b))
+        {
+            return false;
+        }
+
+        color = new Color(
+            Mathf.Clamp01(r),
+            Mathf.Clamp01(g),
+            Mathf.Clamp01(b),
+            1f);
+        return true;
+    }
+
     private void BreakOpen()
     {
         if (AbstrPod == null || AbstrPod.Broken)
@@ -153,6 +357,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
             return;
         }
 
+        InitializeLiquidColorFromRoomIfNeeded();
         AbstrPod.Broken = true;
         AbstrPod.WaterWV = Mathf.Max(0f, AbstrPod.WaterWV - BreakBurstLossWV);
 
@@ -166,7 +371,10 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         {
             Vector2 velocity = Custom.RNV() * Mathf.Lerp(2f, 7f, Random.value);
             velocity.y += Random.Range(0.5f, 3f);
-            room.AddObject(new WaterDrip(firstChunk.pos + Custom.RNV() * 2f, velocity, waterColor: true));
+            room.AddObject(new DewPodWaterDrip(
+                firstChunk.pos + Custom.RNV() * 2f,
+                velocity,
+                LiquidColor));
         }
     }
 
@@ -182,7 +390,7 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         Vector2 velocity = firstChunk.vel * 0.15f +
                            new Vector2(Random.Range(-0.8f, 0.8f), Random.Range(-2.4f, -0.5f)) * pressure;
 
-        room.AddObject(new WaterDrip(origin, velocity, waterColor: true));
+        room.AddObject(new DewPodWaterDrip(origin, velocity, LiquidColor));
     }
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
@@ -240,12 +448,19 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         liquid.scaleX = width * Mathf.Lerp(0.54f, 0.72f, fill);
         liquid.scaleY = height * Mathf.Lerp(0.14f, 0.70f, fill);
 
+        Color displayedLiquid = Color.Lerp(
+            rCam.currentPalette.blackColor,
+            LiquidColor,
+            0.88f);
+        liquid.color = displayedLiquid;
+
         FSprite window = sLeaser.sprites[2];
         window.x = drawPos.x;
         window.y = drawPos.y + height * 5.15f;
         window.scaleX = width * 0.42f;
         window.scaleY = Mathf.Lerp(0.12f, 0.27f, fullness);
         window.alpha = Mathf.Lerp(0.22f, 0.72f, fill);
+        window.color = Color.Lerp(displayedLiquid, Color.white, 0.48f);
 
         FSprite highlight = sLeaser.sprites[3];
         highlight.isVisible = fill > 0.02f;
@@ -285,11 +500,6 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         }
 
         sLeaser.sprites[0].color = shellColor;
-        sLeaser.sprites[1].color = Color.Lerp(
-            new Color(0.14f, 0.48f, 0.50f),
-            new Color(0.50f, 0.92f, 0.78f),
-            Fill);
-        sLeaser.sprites[2].color = Color.Lerp(Color.white, new Color(0.62f, 0.96f, 0.82f), 0.45f);
         sLeaser.sprites[3].color = Color.white;
         sLeaser.sprites[4].color = palette.blackColor;
         sLeaser.sprites[5].color = palette.blackColor;
