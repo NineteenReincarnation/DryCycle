@@ -98,7 +98,10 @@ internal static class KingVultureSpearHooks
     {
         orig(self);
 
-        if (self != null &&
+        // Only our AbstractSpear subclass is safe to pass into Spear. A generic
+        // AbstractPhysicalObject carrying the same ExtEnum type can exist when a
+        // malformed/foreign save attribute falls back to vanilla parsing.
+        if (self is AbstractKingVultureSpear &&
             self.type == ObjectType &&
             self.realizedObject == null)
         {
