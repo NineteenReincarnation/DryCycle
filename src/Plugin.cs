@@ -16,7 +16,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.22";
+    public const string Version = "0.0.23";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -34,6 +34,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             HydrationDivider.Disable();
+            HydrationWeakness.Disable();
             ThirstHooks.Disable();
             _initialized = false;
         }
@@ -51,6 +52,7 @@ internal sealed class Plugin : BaseUnityPlugin
         try
         {
             ThirstHooks.Enable();
+            HydrationWeakness.Enable();
             HydrationDivider.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: thirst system enabled.");
@@ -58,6 +60,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             HydrationDivider.Disable();
+            HydrationWeakness.Disable();
             ThirstHooks.Disable();
             Logger.LogError(ex);
             throw;
