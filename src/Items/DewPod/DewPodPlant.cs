@@ -28,6 +28,16 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         new(16f, 19f)
     };
 
+    // Sample a short strip just inside the supporting terrain rather than using a
+    // hard-coded plant green. This follows the same RoomCamera.PixelColorAtCoordinate
+    // approach used by vanilla environment-blending organisms such as WormGrass.
+    private static readonly Vector2[] GroundColorSampleOffsets =
+    {
+        new(-7f, -4f),
+        new(0f, -5f),
+        new(7f, -4f)
+    };
+
     private static readonly float[] SlotScales = { 0.94f, 1.04f, 1f, 0.92f };
     private static readonly float[] PhaseOffsets = { 0.2f, 1.7f, 3.1f, 4.6f };
 
@@ -329,6 +339,77 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         }
     }
 
+    private Color GetLocalGrowthColor(RoomCamera rCam)
+    {
+        Color fallback = rCam != null
+            ? rCam.currentPalette.blackColor
+            : Color.black;
+
+        if (rCam?.room != room || room == null)
+        {
+            return fallback;
+        }
+
+        Color accumulated = Color.clear;
+        float totalWeight = 0f;
+
+        for (int i = 0; i < GroundColorSampleOffsets.Length; i++)
+        {
+            Vector2 samplePos = RootPos + GroundColorSampleOffsets[i];
+            if (!TrySampleLocalLevelColor(rCam, samplePos, out Color sampled))
+            {
+                continue;
+            }
+
+            float weight = i == 1 ? 2f : 1f;
+            accumulated += sampled * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0f)
+        {
+            return fallback;
+        }
+
+        Color result = accumulated * (1f / totalWeight);
+        result.a = 1f;
+        return result;
+    }
+
+    private bool TrySampleLocalLevelColor(
+        RoomCamera rCam,
+        Vector2 worldPos,
+        out Color color)
+    {
+        color = rCam != null
+            ? rCam.currentPalette.blackColor
+            : Color.black;
+
+        if (rCam?.room != room || room == null || rCam.levelTexture == null)
+        {
+            return false;
+        }
+
+        Vector2 texturePos = worldPos - rCam.CamPos(rCam.currentCameraPosition);
+        if (texturePos.x < 1f ||
+            texturePos.y < 1f ||
+            texturePos.x >= rCam.levelTexture.width - 1f ||
+            texturePos.y >= rCam.levelTexture.height - 1f)
+        {
+            return false;
+        }
+
+        color = rCam.PixelColorAtCoordinate(worldPos);
+
+        // PixelColorAtCoordinate resolves the level texture through the active
+        // palette. Apply local room darkness as vanilla environment-blending
+        // graphics do, so plants in shadowed machinery do not remain too bright.
+        float darkness = Mathf.Clamp01(room.Darkness(worldPos));
+        color = Color.Lerp(color, rCam.currentPalette.blackColor, darkness);
+        color.a = 1f;
+        return true;
+    }
+
     private int StemSprite(int slot) => RootSpriteCount + slot * SpritesPerSlot;
     private int ShellSprite(int slot) => StemSprite(slot) + 1;
     private int LiquidSprite(int slot) => StemSprite(slot) + 2;
@@ -385,10 +466,17 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         rootFront.scaleY = 0.31f;
         rootFront.rotation = 12f;
 
-        Color displayedLiquid = Color.Lerp(
+        Color localGrowthColor = GetLocalGrowthColor(rCam);
+        Color stemColor = Color.Lerp(
+            localGrowthColor,
             rCam.currentPalette.blackColor,
-            LiquidColor,
-            0.88f);
+            0.06f);
+
+        rootBack.color = localGrowthColor;
+        rootCenter.color = localGrowthColor;
+        rootFront.color = localGrowthColor;
+
+        Color displayedLiquid = LiquidColor;
 
         for (int i = 0; i < SlotCount; i++)
         {
@@ -402,8 +490,10 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 ? tip
                 : Vector2.Lerp(stemRoot, tip, harvested ? 0.58f : 0.70f);
 
+            FSprite stem = sLeaser.sprites[StemSprite(i)];
+            stem.color = stemColor;
             DrawStem(
-                sLeaser.sprites[StemSprite(i)] as TriangleMesh,
+                stem as TriangleMesh,
                 stemRoot,
                 stemEnd,
                 i,
@@ -509,14 +599,6 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
     public void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
     {
-        Color rootColor = Color.Lerp(
-            palette.blackColor,
-            new Color(0.14f, 0.34f, 0.22f),
-            0.78f);
-        Color stemColor = Color.Lerp(
-            palette.blackColor,
-            new Color(0.20f, 0.46f, 0.30f),
-            0.82f);
         Color shellColor = Color.Lerp(
             palette.blackColor,
             new Color(0.18f, 0.48f, 0.36f),
@@ -526,14 +608,16 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             new Color(0.23f, 0.43f, 0.29f),
             0.80f);
 
+        // DrawSprites replaces these fallback colors with the exact level-texture
+        // color sampled underneath the plant whenever the plant is on camera.
         for (int i = 0; i < RootSpriteCount; i++)
         {
-            sLeaser.sprites[i].color = rootColor;
+            sLeaser.sprites[i].color = palette.blackColor;
         }
 
         for (int i = 0; i < SlotCount; i++)
         {
-            sLeaser.sprites[StemSprite(i)].color = stemColor;
+            sLeaser.sprites[StemSprite(i)].color = palette.blackColor;
             sLeaser.sprites[ShellSprite(i)].color = shellColor;
             sLeaser.sprites[BudSprite(i)].color = budColor;
         }
