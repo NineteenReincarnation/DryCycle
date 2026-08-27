@@ -11,9 +11,9 @@ internal static class KingVultureSpearPlayerEffects
     private const float PullRange = 70f;
     private const float MaxTuskDistanceFromHead = 120f;
 
-    private const float RunSpeedMultiplier = 0.75f;
-    private const float PoleClimbSpeedMultiplier = 0.74f;
-    private const float CorridorClimbSpeedMultiplier = 0.78f;
+    private const float RunSpeedMultiplier = 0.8f;
+    private const float PoleClimbSpeedMultiplier = 0.8f;
+    private const float CorridorClimbSpeedMultiplier = 0.8f;
 
     private sealed class PlayerPullPoseState
     {
