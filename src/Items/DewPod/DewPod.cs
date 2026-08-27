@@ -404,14 +404,15 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        // Shell, liquid, and two optional crack strokes. No separate highlight or
-        // translucent top-window layers are used.
+        // Shell, liquid, one crack stroke, and a shared accent sprite. The accent
+        // is a restrained surface highlight while intact and becomes the secondary
+        // crack after rupture. The old translucent top-window stays removed.
         sLeaser.sprites = new FSprite[4];
 
         sLeaser.sprites[0] = new FSprite("Circle20");
         sLeaser.sprites[1] = new FSprite("Circle20");
         sLeaser.sprites[2] = new FSprite("Futile_White");
-        sLeaser.sprites[3] = new FSprite("Futile_White");
+        sLeaser.sprites[3] = new FSprite("Circle20");
 
         AddToContainer(sLeaser, rCam, null);
     }
@@ -457,16 +458,41 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         liquid.color = LiquidColor;
 
         bool broken = Broken;
-        for (int i = 2; i <= 3; i++)
+
+        FSprite primaryCrack = sLeaser.sprites[2];
+        primaryCrack.isVisible = broken;
+        primaryCrack.x = drawPos.x + 1.3f;
+        primaryCrack.y = drawPos.y + 2.4f;
+        primaryCrack.scaleX = 0.12f;
+        primaryCrack.scaleY = 0.42f;
+        primaryCrack.rotation = 32f;
+        primaryCrack.alpha = 1f;
+        primaryCrack.color = rCam.currentPalette.blackColor;
+
+        FSprite accent = sLeaser.sprites[3];
+        if (!broken)
         {
-            bool primaryCrack = i == 2;
-            FSprite crack = sLeaser.sprites[i];
-            crack.isVisible = broken;
-            crack.x = drawPos.x + (primaryCrack ? 1.3f : 2.2f);
-            crack.y = drawPos.y + (primaryCrack ? 2.4f : 0.5f);
-            crack.scaleX = 0.12f;
-            crack.scaleY = primaryCrack ? 0.42f : 0.30f;
-            crack.rotation = primaryCrack ? 32f : -38f;
+            // A narrow wet sheen rather than the old bright white patch. It sits
+            // close to the shell edge and grows only slightly with the water level.
+            accent.isVisible = fill > 0.02f;
+            accent.x = drawPos.x - width * 3.15f;
+            accent.y = drawPos.y + height * 1.75f;
+            accent.scaleX = width * 0.075f;
+            accent.scaleY = height * Mathf.Lerp(0.20f, 0.31f, fill);
+            accent.rotation = -7f;
+            accent.alpha = Mathf.Lerp(0.08f, 0.22f, fill);
+            accent.color = Color.Lerp(shell.color, Color.white, 0.52f);
+        }
+        else
+        {
+            accent.isVisible = true;
+            accent.x = drawPos.x + 2.2f;
+            accent.y = drawPos.y + 0.5f;
+            accent.scaleX = 0.10f;
+            accent.scaleY = 0.28f;
+            accent.rotation = -38f;
+            accent.alpha = 1f;
+            accent.color = rCam.currentPalette.blackColor;
         }
 
         if (slatedForDeletetion || room != rCam.room)
