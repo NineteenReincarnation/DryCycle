@@ -68,7 +68,8 @@ internal static class ThirstMeter
 
     private sealed class RefuseLatchState
     {
-        public bool WarningIssuedThisHold;
+        public bool WarningIssued;
+        public bool CalledSinceLastUpdate;
     }
 
     private sealed class WaterFill
@@ -130,10 +131,10 @@ internal static class ThirstMeter
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter, MeterState> MeterStates = new();
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter.MeterCircle, WaterFill> CircleFills = new();
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter, OverflowFoodPip> OverflowPips = new();
+    private static readonly ConditionalWeakTable<global::HUD.FoodMeter, RefuseLatchState> RefuseLatchStates = new();
     private static readonly ConditionalWeakTable<Player, RejectState> RejectStates = new();
     private static readonly ConditionalWeakTable<Player, FoodGainState> FoodGainStates = new();
     private static readonly ConditionalWeakTable<Player, OverflowEatState> OverflowEatStates = new();
-    private static readonly ConditionalWeakTable<Player, RefuseLatchState> RefuseLatchStates = new();
 
     private static bool _enabled;
 
@@ -300,36 +301,35 @@ internal static class ThirstMeter
         On.HUD.FoodMeter.orig_RefuseFood orig,
         global::HUD.FoodMeter self)
     {
-        // Vanilla calls RefuseFood every update while pickup is held against a
-        // full stomach, resetting refuseCounter to 10 forever. Keep the vanilla
-        // ten-frame warning, but only trigger it once per pickup-button hold.
-        if (self?.hud?.owner is Player player)
-        {
-            RefuseLatchState latch = RefuseLatchStates.GetOrCreateValue(player);
-            bool pickupHeld = player.input != null &&
-                              player.input.Length > 0 &&
-                              player.input[0].pckp;
+        // Player.GrabUpdate calls RefuseFood every frame while the pickup button
+        // is held against a full stomach. Keep one vanilla refusal burst for the
+        // attempt, then suppress repeated resets until a frame arrives with no
+        // RefuseFood call. This also works when Jolly's HUD owner is another cat.
+        RefuseLatchState latch = RefuseLatchStates.GetOrCreateValue(self);
+        latch.CalledSinceLastUpdate = true;
 
-            if (!pickupHeld)
-            {
-                latch.WarningIssuedThisHold = false;
-            }
-            else if (latch.WarningIssuedThisHold)
-            {
-                return;
-            }
-            else
-            {
-                latch.WarningIssuedThisHold = true;
-            }
+        if (latch.WarningIssued)
+        {
+            return;
         }
 
+        latch.WarningIssued = true;
         orig(self);
     }
 
     private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
     {
         orig(self);
+
+        if (RefuseLatchStates.TryGetValue(self, out RefuseLatchState refuseLatch))
+        {
+            if (!refuseLatch.CalledSinceLastUpdate)
+            {
+                refuseLatch.WarningIssued = false;
+            }
+
+            refuseLatch.CalledSinceLastUpdate = false;
+        }
 
         if (MeterStates.TryGetValue(self, out MeterState fixedState) &&
             fixedState.UseFixedWater &&
@@ -360,13 +360,6 @@ internal static class ThirstMeter
                 reject.Counter > 0)
             {
                 reject.Counter--;
-            }
-
-            if (player.input == null ||
-                player.input.Length == 0 ||
-                !player.input[0].pckp)
-            {
-                RefuseLatchStates.GetOrCreateValue(player).WarningIssuedThisHold = false;
             }
         }
     }
