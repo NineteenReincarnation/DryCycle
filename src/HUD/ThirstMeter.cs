@@ -14,6 +14,7 @@ internal static class ThirstMeter
     private const float WaveAmplitude = 0.085f;
     private const float WaveFrequency = 5.2f;
     private const float WavePhaseSpeed = 0.32f;
+    private const float IdleWaveStrength = 0.45f;
     private const int GainWaveHoldFrames = 24;
     private const int OverflowPipLifetime = 100;
     private const float OverflowPipScale = 0.5f;
@@ -189,7 +190,8 @@ internal static class ThirstMeter
         state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
         state.SleepLastVisiblePipCount = Mathf.CeilToInt(Mathf.Max(0f, state.DisplayWater - 0.0001f));
-        state.WaveStrength = 0f;
+        state.WaveStrength = HasPartialPip(state.DisplayWater) ? IdleWaveStrength : 0f;
+        state.WavePhase = 0f;
         state.OverflowTimer = 0;
 
         if (animateHibernateCost)
@@ -204,6 +206,7 @@ internal static class ThirstMeter
             state.SleepConsumeDelay = 65;
             state.SleepLastVisiblePipCount = Mathf.CeilToInt(
                 Mathf.Max(0f, state.DisplayWater - 0.0001f));
+            state.WaveStrength = HasPartialPip(state.DisplayWater) ? IdleWaveStrength : 0f;
         }
     }
 
@@ -223,7 +226,8 @@ internal static class ThirstMeter
         state.SleepDrainRemaining = 0f;
         state.SleepConsumeDelay = 0;
         state.SleepLastVisiblePipCount = Mathf.CeilToInt(Mathf.Max(0f, state.DisplayWater - 0.0001f));
-        state.WaveStrength = 0f;
+        state.WaveStrength = HasPartialPip(state.DisplayWater) ? IdleWaveStrength : 0f;
+        state.WavePhase = 0f;
         state.OverflowTimer = 0;
     }
 
@@ -330,40 +334,56 @@ internal static class ThirstMeter
             refuseLatch.CalledSinceLastUpdate = false;
         }
 
-        if (MeterStates.TryGetValue(self, out MeterState fixedState) &&
-            fixedState.UseFixedWater &&
-            fixedState.SleepScreen != null &&
-            fixedState.SleepDrainRemaining > 0.0001f &&
-            fixedState.SleepScreen.AllowFoodMeterTick)
+        if (MeterStates.TryGetValue(self, out MeterState fixedState) && fixedState.UseFixedWater)
         {
-            if (fixedState.SleepConsumeDelay > 0)
+            if (fixedState.SleepScreen != null &&
+                fixedState.SleepDrainRemaining > 0.0001f &&
+                fixedState.SleepScreen.AllowFoodMeterTick)
             {
-                fixedState.SleepConsumeDelay--;
+                if (fixedState.SleepConsumeDelay > 0)
+                {
+                    fixedState.SleepConsumeDelay--;
+                }
+                else
+                {
+                    float drain = Mathf.Min(SleepDrainPerFrame, fixedState.SleepDrainRemaining);
+                    fixedState.DisplayWater = Mathf.Max(
+                        fixedState.TargetWater,
+                        fixedState.DisplayWater - drain);
+                    fixedState.SleepDrainRemaining = Mathf.Max(
+                        0f,
+                        fixedState.DisplayWater - fixedState.TargetWater);
+
+                    int visiblePipCount = Mathf.CeilToInt(
+                        Mathf.Max(0f, fixedState.DisplayWater - 0.0001f));
+
+                    if (visiblePipCount < fixedState.SleepLastVisiblePipCount)
+                    {
+                        self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
+                        fixedState.SleepLastVisiblePipCount = visiblePipCount;
+                    }
+
+                    if (fixedState.SleepDrainRemaining <= 0.0001f)
+                    {
+                        fixedState.DisplayWater = fixedState.TargetWater;
+                        fixedState.SleepDrainRemaining = 0f;
+                    }
+                }
             }
-            else
+
+            fixedState.WavePhase += WavePhaseSpeed;
+            float fixedTargetWave = HasPartialPip(fixedState.DisplayWater)
+                ? IdleWaveStrength
+                : 0f;
+            float fixedWaveLerp = fixedTargetWave > fixedState.WaveStrength ? 0.18f : 0.10f;
+            fixedState.WaveStrength = Mathf.Lerp(
+                fixedState.WaveStrength,
+                fixedTargetWave,
+                fixedWaveLerp);
+
+            if (fixedTargetWave <= 0f && fixedState.WaveStrength < 0.01f)
             {
-                float drain = Mathf.Min(SleepDrainPerFrame, fixedState.SleepDrainRemaining);
-                fixedState.DisplayWater = Mathf.Max(
-                    fixedState.TargetWater,
-                    fixedState.DisplayWater - drain);
-                fixedState.SleepDrainRemaining = Mathf.Max(
-                    0f,
-                    fixedState.DisplayWater - fixedState.TargetWater);
-
-                int visiblePipCount = Mathf.CeilToInt(
-                    Mathf.Max(0f, fixedState.DisplayWater - 0.0001f));
-
-                if (visiblePipCount < fixedState.SleepLastVisiblePipCount)
-                {
-                    self.hud.PlaySound(SoundID.HUD_Food_Meter_Deplete_Plop_A);
-                    fixedState.SleepLastVisiblePipCount = visiblePipCount;
-                }
-
-                if (fixedState.SleepDrainRemaining <= 0.0001f)
-                {
-                    fixedState.DisplayWater = fixedState.TargetWater;
-                    fixedState.SleepDrainRemaining = 0f;
-                }
+                fixedState.WaveStrength = 0f;
             }
         }
 
@@ -441,7 +461,15 @@ internal static class ThirstMeter
 
         if (actualWater < state.DisplayWater)
         {
-            state.DisplayWater = actualWater;
+            // Passive WaterLossRate already decreases the true value continuously.
+            // Follow it closely instead of snapping to half/full display states, so
+            // the visible surface can be watched sinking while the HUD is open.
+            state.DisplayWater = Mathf.Lerp(state.DisplayWater, actualWater, 0.24f);
+
+            if (Mathf.Abs(state.DisplayWater - actualWater) < 0.0005f)
+            {
+                state.DisplayWater = actualWater;
+            }
         }
         else
         {
@@ -460,11 +488,13 @@ internal static class ThirstMeter
                            state.GainWaveFrames > 0 ||
                            state.TargetWater > state.DisplayWater + 0.002f;
 
-        float targetWave = animateGain ? 1f : 0f;
+        float targetWave = animateGain
+            ? 1f
+            : (HasPartialPip(state.DisplayWater) ? IdleWaveStrength : 0f);
         float waveLerp = targetWave > state.WaveStrength ? 0.25f : 0.12f;
         state.WaveStrength = Mathf.Lerp(state.WaveStrength, targetWave, waveLerp);
 
-        if (!animateGain && state.WaveStrength < 0.01f)
+        if (targetWave <= 0f && state.WaveStrength < 0.01f)
         {
             state.WaveStrength = 0f;
         }
@@ -513,7 +543,7 @@ internal static class ThirstMeter
         state.DisplayWater = actualWater;
         state.TargetWater = actualWater;
         state.LastActualWater = actualWater;
-        state.WaveStrength = 0f;
+        state.WaveStrength = HasPartialPip(actualWater) ? IdleWaveStrength : 0f;
         state.WavePhase = 0f;
         state.GainWaveFrames = 0;
         state.OverflowTimer = 0;
@@ -661,8 +691,7 @@ internal static class ThirstMeter
                 self.meter,
                 out float water,
                 out float waveStrength,
-                out float wavePhase,
-                out bool continuousFill) ||
+                out float wavePhase) ||
             self.circles == null ||
             self.circles.Length < 2 ||
             self.circles[0]?.sprite == null ||
@@ -672,7 +701,7 @@ internal static class ThirstMeter
             return;
         }
 
-        float waterLevel = GetPipWaterLevel(water, self.number, continuousFill);
+        float waterLevel = GetPipWaterLevel(water, self.number);
 
         float outerFade = Mathf.Lerp(
             self.circles[0].lastFade,
@@ -770,13 +799,11 @@ internal static class ThirstMeter
         global::HUD.FoodMeter meter,
         out float water,
         out float waveStrength,
-        out float wavePhase,
-        out bool continuousFill)
+        out float wavePhase)
     {
         water = 0f;
         waveStrength = 0f;
         wavePhase = 0f;
-        continuousFill = false;
 
         if (meter == null || meter.IsPupFoodMeter)
         {
@@ -787,9 +814,8 @@ internal static class ThirstMeter
             fixedState.UseFixedWater)
         {
             water = Mathf.Clamp(fixedState.DisplayWater, 0f, fixedState.MaxWater);
-            continuousFill = fixedState.SleepScreen != null &&
-                             fixedState.SleepDrainRemaining > 0.0001f &&
-                             fixedState.SleepConsumeDelay <= 0;
+            waveStrength = fixedState.WaveStrength;
+            wavePhase = fixedState.WavePhase;
             return true;
         }
 
@@ -827,8 +853,6 @@ internal static class ThirstMeter
             water = Mathf.Clamp(state.DisplayWater, 0f, maxWater);
             waveStrength = state.WaveStrength;
             wavePhase = state.WavePhase;
-            continuousFill = state.WaveStrength > 0.02f ||
-                             state.TargetWater > state.DisplayWater + 0.002f;
             return true;
         }
 
@@ -847,31 +871,28 @@ internal static class ThirstMeter
         return game != null;
     }
 
-    private static float GetPipWaterLevel(float totalWater, int pipNumber, bool continuousFill)
+    private static float GetPipWaterLevel(float totalWater, int pipNumber)
     {
         if (pipNumber < 0)
         {
             return 0f;
         }
 
-        float localWater = Mathf.Clamp01(totalWater - pipNumber);
+        // Every pip now reflects the real scalar hydration amount continuously.
+        // There is no empty/half/full quantization: 2.37 water means two full pips
+        // followed by a third pip whose liquid surface is at 37% height.
+        return Mathf.Clamp01(totalWater - pipNumber);
+    }
 
-        if (continuousFill)
+    private static bool HasPartialPip(float totalWater)
+    {
+        if (totalWater <= 0.001f)
         {
-            return localWater;
+            return false;
         }
 
-        if (localWater >= 0.999f)
-        {
-            return 1f;
-        }
-
-        if (localWater >= 0.5f)
-        {
-            return 0.5f;
-        }
-
-        return 0f;
+        float fractional = totalWater - Mathf.Floor(totalWater);
+        return fractional > 0.001f && fractional < 0.999f;
     }
 
     private static void UpdateFillGeometry(
