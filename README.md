@@ -2,16 +2,16 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.27**.
+Current version: **0.0.28**.
 
 ## Versioning
 
 DryCycle increments only the final development number:
 
 ```text
-0.0.25 -> 0.0.26
 0.0.26 -> 0.0.27
 0.0.27 -> 0.0.28
+0.0.28 -> 0.0.29
 ```
 
 The patch number does not roll over at 9.
@@ -135,6 +135,8 @@ src/Thirst/SlugBaseHydrationFeatures.cs
 src/Thirst/FoodWaterTable.cs
 src/HUD/ThirstMeter.cs
 src/HUD/HydrationDivider.cs
+src/Items/
+src/Items/VultureSpear/
 ```
 
 Temperature mechanics are not implemented yet.
