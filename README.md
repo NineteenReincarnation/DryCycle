@@ -2,7 +2,7 @@
 
 Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
-Current version: **0.0.33**.
+Current version: **0.0.34**.
 
 ## Versioning
 
@@ -132,6 +132,13 @@ Version 0.0.33 changes the detached tusk renderer to follow the original Rain Wo
 - The detail mesh alpha is still the original `patternDisplace`, exactly as in `KingTusks.Tusk.ApplyPalette`.
 - Under MMF, detached-tusk darkness now also applies Rain World's `LightSourceExposure` factor, matching the lighting calculation used by `VultureGraphics` while allowing the light response to follow the detached item.
 
+Version 0.0.34 adds the requested extraction pose and carrying weight penalties:
+
+- While a tusk is being pulled from a dead King Vulture, the slugcat's available hands use the same absolute-target arm presentation as Rain World's vanilla heavy-corpse dragging, with a small increasing body strain toward the tusk. The corpse remains effectively immovable during the extraction.
+- A human-controlled slugcat carrying a `KingVultureSpear` in either hand or on `spearOnBack` runs at **75%** normal speed, climbs poles at **74%** normal speed, and corridor-climbs at **78%** normal speed.
+- The movement multipliers are applied only around the relevant vanilla movement update and the original `SlugcatStats` values are restored immediately afterward, avoiding persistent stat mutation.
+- NPC slugpups do not receive these carrying penalties.
+
 This is still a source-level prototype and should be re-tested in the local Rain World installation.
 
 ## Standard Rain World build setup
@@ -177,6 +184,7 @@ src/Items/KingVultureSpear/AbstractKingVultureSpear.cs
 src/Items/KingVultureSpear/KingVultureSpear.cs
 src/Items/KingVultureSpear/KingVultureSpearHooks.cs
 src/Items/KingVultureSpear/KingVultureSpearFeedback.cs
+src/Items/KingVultureSpear/KingVultureSpearPlayerEffects.cs
 ```
 
 Temperature mechanics are not implemented yet.

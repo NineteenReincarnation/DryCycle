@@ -17,7 +17,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.33";
+    public const string Version = "0.0.34";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -38,8 +38,10 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
+            KingVultureSpearCombat.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
+            KingVultureSpearPlayerEffects.Disable();
             KingVultureSpearHooks.Disable();
             _initialized = false;
         }
@@ -67,8 +69,10 @@ internal sealed class Plugin : BaseUnityPlugin
         try
         {
             KingVultureSpearHooks.Enable();
+            KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
+            KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
             _initialized = true;
@@ -78,8 +82,10 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
+            KingVultureSpearCombat.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
+            KingVultureSpearPlayerEffects.Disable();
             KingVultureSpearHooks.Disable();
             Logger.LogError(ex);
             throw;
