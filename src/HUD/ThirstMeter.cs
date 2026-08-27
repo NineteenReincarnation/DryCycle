@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DryCycle.Thirst;
 using Menu;
@@ -8,10 +9,10 @@ namespace DryCycle.HUD;
 /// <summary>
 /// Hydration renderer for the vanilla FoodMeter.
 ///
-/// DryCycle does not create a second row of HUD circles. Hydration is packed
-/// into the vanilla food pips themselves. Static water is shown in empty / half
-/// / full states, while replenishing water animates continuously upward through
-/// the active pip with a small moving wave on its surface.
+/// DryCycle does not create a second hydration row. Hydration is packed into the
+/// vanilla food pips themselves. Static water is shown in empty / half / full
+/// states, while replenishing water animates continuously upward through the
+/// active pip with a small moving wave on its surface.
 /// </summary>
 internal static class ThirstMeter
 {
@@ -22,6 +23,8 @@ internal static class ThirstMeter
     private const float WaveFrequency = 5.2f;
     private const float WavePhaseSpeed = 0.32f;
     private const int GainWaveHoldFrames = 24;
+    private const int OverflowPipLifetime = 100;
+    private const float OverflowPipScale = 0.5f;
 
     private static readonly Color WaterColor = new(0.03f, 0.9f, 0.95f);
 
@@ -40,7 +43,10 @@ internal static class ThirstMeter
         public float WaveStrength;
         public float WavePhase;
         public int GainWaveFrames;
-        public int LastFoodGainSerial;
+        public int OverflowTimer;
+
+        public readonly Dictionary<int, int> LastFoodGainSerialByPlayer = new();
+        public readonly Dictionary<int, int> LastOverflowSerialByPlayer = new();
     }
 
     private sealed class RejectState
@@ -53,6 +59,16 @@ internal static class ThirstMeter
         public int Serial;
         public float StartWater;
         public float TargetWater;
+    }
+
+    private sealed class OverflowEatState
+    {
+        public int Serial;
+    }
+
+    private sealed class RefuseLatchState
+    {
+        public bool WarningIssuedThisHold;
     }
 
     private sealed class WaterFill
@@ -72,10 +88,52 @@ internal static class ThirstMeter
         public readonly TriangleMesh Mesh;
     }
 
+    private sealed class OverflowFoodPip
+    {
+        public OverflowFoodPip(FContainer container)
+        {
+            Inner = new FSprite("FoodCircleB")
+            {
+                color = Color.white,
+                alpha = 0f,
+                isVisible = false
+            };
+
+            Outer = new FSprite("FoodCircleA")
+            {
+                color = Color.white,
+                alpha = 0f,
+                isVisible = false
+            };
+
+            container.AddChild(Inner);
+            container.AddChild(Outer);
+            Outer.MoveInFrontOfOtherNode(Inner);
+        }
+
+        public readonly FSprite Outer;
+        public readonly FSprite Inner;
+
+        public void Hide()
+        {
+            Outer.isVisible = false;
+            Inner.isVisible = false;
+        }
+
+        public void Clear()
+        {
+            Outer.RemoveFromContainer();
+            Inner.RemoveFromContainer();
+        }
+    }
+
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter, MeterState> MeterStates = new();
     private static readonly ConditionalWeakTable<global::HUD.FoodMeter.MeterCircle, WaterFill> CircleFills = new();
+    private static readonly ConditionalWeakTable<global::HUD.FoodMeter, OverflowFoodPip> OverflowPips = new();
     private static readonly ConditionalWeakTable<Player, RejectState> RejectStates = new();
     private static readonly ConditionalWeakTable<Player, FoodGainState> FoodGainStates = new();
+    private static readonly ConditionalWeakTable<Player, OverflowEatState> OverflowEatStates = new();
+    private static readonly ConditionalWeakTable<Player, RefuseLatchState> RefuseLatchStates = new();
 
     private static bool _enabled;
 
@@ -88,6 +146,9 @@ internal static class ThirstMeter
 
         _enabled = true;
         On.HUD.FoodMeter.Update += FoodMeter_Update;
+        On.HUD.FoodMeter.Draw += FoodMeter_Draw;
+        On.HUD.FoodMeter.ClearSprites += FoodMeter_ClearSprites;
+        On.HUD.FoodMeter.RefuseFood += FoodMeter_RefuseFood;
         On.HUD.FoodMeter.MeterCircle.AddCircles += MeterCircle_AddCircles;
         On.HUD.FoodMeter.MeterCircle.Draw += MeterCircle_Draw;
         On.HUD.FoodMeter.MeterCircle.ClearSprites += MeterCircle_ClearSprites;
@@ -103,6 +164,9 @@ internal static class ThirstMeter
 
         _enabled = false;
         On.HUD.FoodMeter.Update -= FoodMeter_Update;
+        On.HUD.FoodMeter.Draw -= FoodMeter_Draw;
+        On.HUD.FoodMeter.ClearSprites -= FoodMeter_ClearSprites;
+        On.HUD.FoodMeter.RefuseFood -= FoodMeter_RefuseFood;
         On.HUD.FoodMeter.MeterCircle.AddCircles -= MeterCircle_AddCircles;
         On.HUD.FoodMeter.MeterCircle.Draw -= MeterCircle_Draw;
         On.HUD.FoodMeter.MeterCircle.ClearSprites -= MeterCircle_ClearSprites;
@@ -128,6 +192,7 @@ internal static class ThirstMeter
         state.SleepConsumeSteps = 0;
         state.SleepConsumeDelay = 0;
         state.WaveStrength = 0f;
+        state.OverflowTimer = 0;
 
         if (animateHibernateCost)
         {
@@ -156,6 +221,7 @@ internal static class ThirstMeter
         state.SleepConsumeSteps = 0;
         state.SleepConsumeDelay = 0;
         state.WaveStrength = 0f;
+        state.OverflowTimer = 0;
     }
 
     public static void ShowDrinking(Player player)
@@ -182,6 +248,17 @@ internal static class ThirstMeter
         }
 
         ShowHudForPlayer(player, ThirstConstants.HydrationGainHudHoldFrames);
+    }
+
+    public static void ShowOverflowFoodEat(Player player)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        OverflowEatStates.GetOrCreateValue(player).Serial++;
+        ShowHudForPlayer(player, OverflowPipLifetime);
     }
 
     public static void TryReject(Player player)
@@ -219,6 +296,37 @@ internal static class ThirstMeter
             holdFrames);
     }
 
+    private static void FoodMeter_RefuseFood(
+        On.HUD.FoodMeter.orig_RefuseFood orig,
+        global::HUD.FoodMeter self)
+    {
+        // Vanilla calls RefuseFood every update while pickup is held against a
+        // full stomach, resetting refuseCounter to 10 forever. Keep the vanilla
+        // ten-frame warning, but only trigger it once per pickup-button hold.
+        if (self?.hud?.owner is Player player)
+        {
+            RefuseLatchState latch = RefuseLatchStates.GetOrCreateValue(player);
+            bool pickupHeld = player.input != null &&
+                              player.input.Length > 0 &&
+                              player.input[0].pckp;
+
+            if (!pickupHeld)
+            {
+                latch.WarningIssuedThisHold = false;
+            }
+            else if (latch.WarningIssuedThisHold)
+            {
+                return;
+            }
+            else
+            {
+                latch.WarningIssuedThisHold = true;
+            }
+        }
+
+        orig(self);
+    }
+
     private static void FoodMeter_Update(On.HUD.FoodMeter.orig_Update orig, global::HUD.FoodMeter self)
     {
         orig(self);
@@ -246,11 +354,19 @@ internal static class ThirstMeter
             !player.isNPC)
         {
             UpdateGameplayAnimation(self, player);
+            UpdateOverflowState(self, player, decrementTimer: true);
 
             if (RejectStates.TryGetValue(player, out RejectState reject) &&
                 reject.Counter > 0)
             {
                 reject.Counter--;
+            }
+
+            if (player.input == null ||
+                player.input.Length == 0 ||
+                !player.input[0].pckp)
+            {
+                RefuseLatchStates.GetOrCreateValue(player).WarningIssuedThisHold = false;
             }
         }
     }
@@ -262,8 +378,14 @@ internal static class ThirstMeter
         float actualWater = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
         int playerNumber = player.playerState?.playerNumber ?? 0;
 
+        int lastFoodGainSerial = state.LastFoodGainSerialByPlayer.TryGetValue(
+            playerNumber,
+            out int rememberedFoodSerial)
+                ? rememberedFoodSerial
+                : 0;
+
         bool hasFoodGain = FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
-                           foodGain.Serial != state.LastFoodGainSerial;
+                           foodGain.Serial != lastFoodGainSerial;
 
         // In Jolly, RoomCamera changes hud.owner when the camera focus changes.
         // The vanilla FoodMeter object itself is reused. If a food hydration gain
@@ -272,19 +394,17 @@ internal static class ThirstMeter
         // animation used by underwater drinking.
         if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
         {
+            ResetGameplayState(state, playerNumber, actualWater);
+
             if (hasFoodGain)
             {
-                ResetGameplayState(
-                    state,
-                    playerNumber,
-                    Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+                state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater);
                 state.TargetWater = actualWater;
                 state.GainWaveFrames = GainWaveHoldFrames;
-                state.LastFoodGainSerial = foodGain.Serial;
+                state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
             }
             else
             {
-                ResetGameplayState(state, playerNumber, actualWater);
                 return;
             }
         }
@@ -298,7 +418,7 @@ internal static class ThirstMeter
                 Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
             state.TargetWater = actualWater;
             state.GainWaveFrames = GainWaveHoldFrames;
-            state.LastFoodGainSerial = foodGain.Serial;
+            state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
         }
 
         bool gainedWater = actualWater > state.LastActualWater + 0.0001f;
@@ -349,6 +469,40 @@ internal static class ThirstMeter
         state.LastActualWater = actualWater;
     }
 
+    private static void UpdateOverflowState(
+        global::HUD.FoodMeter meter,
+        Player player,
+        bool decrementTimer)
+    {
+        MeterState state = MeterStates.GetOrCreateValue(meter);
+        int playerNumber = player.playerState?.playerNumber ?? 0;
+
+        if (state.GameplayPlayerNumber != playerNumber)
+        {
+            state.OverflowTimer = 0;
+        }
+
+        if (OverflowEatStates.TryGetValue(player, out OverflowEatState overflow))
+        {
+            int lastSerial = state.LastOverflowSerialByPlayer.TryGetValue(
+                playerNumber,
+                out int rememberedSerial)
+                    ? rememberedSerial
+                    : 0;
+
+            if (overflow.Serial != lastSerial)
+            {
+                state.LastOverflowSerialByPlayer[playerNumber] = overflow.Serial;
+                state.OverflowTimer = OverflowPipLifetime;
+            }
+        }
+
+        if (decrementTimer && state.OverflowTimer > 0)
+        {
+            state.OverflowTimer--;
+        }
+    }
+
     private static void ResetGameplayState(MeterState state, int playerNumber, float actualWater)
     {
         state.GameplayInitialized = true;
@@ -359,6 +513,111 @@ internal static class ThirstMeter
         state.WaveStrength = 0f;
         state.WavePhase = 0f;
         state.GainWaveFrames = 0;
+        state.OverflowTimer = 0;
+    }
+
+    private static void FoodMeter_Draw(
+        On.HUD.FoodMeter.orig_Draw orig,
+        global::HUD.FoodMeter self,
+        float timeStacker)
+    {
+        orig(self, timeStacker);
+        DrawOverflowFoodPip(self, timeStacker);
+    }
+
+    private static void FoodMeter_ClearSprites(
+        On.HUD.FoodMeter.orig_ClearSprites orig,
+        global::HUD.FoodMeter self)
+    {
+        if (self != null && OverflowPips.TryGetValue(self, out OverflowFoodPip pip))
+        {
+            pip.Clear();
+            OverflowPips.Remove(self);
+        }
+
+        orig(self);
+    }
+
+    private static void DrawOverflowFoodPip(global::HUD.FoodMeter meter, float timeStacker)
+    {
+        if (meter == null || meter.IsPupFoodMeter || meter.hud?.owner is not Player player)
+        {
+            HideOverflowPip(meter);
+            return;
+        }
+
+        MeterState state = MeterStates.GetOrCreateValue(meter);
+        UpdateOverflowState(meter, player, decrementTimer: false);
+
+        if (state.OverflowTimer <= 0 || meter.circles == null || meter.circles.Count == 0)
+        {
+            HideOverflowPip(meter);
+            return;
+        }
+
+        OverflowFoodPip pip = EnsureOverflowPip(meter);
+        if (pip == null)
+        {
+            return;
+        }
+
+        global::HUD.FoodMeter.MeterCircle lastCircle = meter.circles[meter.circles.Count - 1];
+        Vector2 center = lastCircle.DrawPos(timeStacker) +
+                         new Vector2(meter.CircleDistance(timeStacker) * 0.75f, 0f);
+
+        float elapsed = OverflowPipLifetime - state.OverflowTimer + timeStacker;
+        float remaining = state.OverflowTimer - timeStacker;
+        float meterFade = Mathf.Lerp(meter.lastFade, meter.fade, timeStacker);
+        float fadeIn = Mathf.InverseLerp(0f, 5f, elapsed);
+        float fadeOut = Mathf.InverseLerp(0f, 16f, remaining);
+        float alpha = Mathf.Clamp01(meterFade) * Mathf.Min(fadeIn, fadeOut);
+
+        if (alpha <= 0.001f)
+        {
+            pip.Hide();
+            return;
+        }
+
+        float popT = Mathf.Clamp01(elapsed / 12f);
+        float popScale = 1f + 0.28f * Mathf.Sin(popT * Mathf.PI);
+        float fillT = Mathf.Clamp01((elapsed - 2f) / 8f);
+
+        pip.Outer.x = center.x;
+        pip.Outer.y = center.y;
+        pip.Inner.x = center.x;
+        pip.Inner.y = center.y;
+        pip.Outer.scale = OverflowPipScale * popScale;
+        pip.Inner.scale = OverflowPipScale * fillT * popScale;
+        pip.Outer.alpha = alpha;
+        pip.Inner.alpha = alpha;
+        pip.Outer.isVisible = true;
+        pip.Inner.isVisible = fillT > 0.001f;
+        pip.Outer.MoveInFrontOfOtherNode(pip.Inner);
+    }
+
+    private static OverflowFoodPip EnsureOverflowPip(global::HUD.FoodMeter meter)
+    {
+        if (meter?.fContainer == null)
+        {
+            return null;
+        }
+
+        if (OverflowPips.TryGetValue(meter, out OverflowFoodPip existing))
+        {
+            return existing;
+        }
+
+        OverflowFoodPip created = new(meter.fContainer);
+        OverflowPips.Add(meter, created);
+        return created;
+    }
+
+    private static void HideOverflowPip(global::HUD.FoodMeter meter)
+    {
+        if (meter != null && OverflowPips.TryGetValue(meter, out OverflowFoodPip pip))
+        {
+            pip.Hide();
+        }
     }
 
     private static void MeterCircle_AddCircles(
@@ -541,26 +800,27 @@ internal static class ThirstMeter
             float actual = Mathf.Clamp(thirst.Water, 0f, ThirstConstants.MaxWater);
             int playerNumber = player.playerState?.playerNumber ?? 0;
 
+            int lastFoodGainSerial = state.LastFoodGainSerialByPlayer.TryGetValue(
+                playerNumber,
+                out int rememberedFoodSerial)
+                    ? rememberedFoodSerial
+                    : 0;
+
             // Draw may run immediately after the camera changed owner and before
             // the next FoodMeter.Update. Preserve a pending food-gain animation
             // here too, otherwise the first draw could snap straight to the new
             // amount before Update gets a chance to initialize the wave.
             if (!state.GameplayInitialized || state.GameplayPlayerNumber != playerNumber)
             {
+                ResetGameplayState(state, playerNumber, actual);
+
                 if (FoodGainStates.TryGetValue(player, out FoodGainState foodGain) &&
-                    foodGain.Serial != state.LastFoodGainSerial)
+                    foodGain.Serial != lastFoodGainSerial)
                 {
-                    ResetGameplayState(
-                        state,
-                        playerNumber,
-                        Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater));
+                    state.DisplayWater = Mathf.Clamp(foodGain.StartWater, 0f, ThirstConstants.MaxWater);
                     state.TargetWater = actual;
                     state.GainWaveFrames = GainWaveHoldFrames;
-                    state.LastFoodGainSerial = foodGain.Serial;
-                }
-                else
-                {
-                    ResetGameplayState(state, playerNumber, actual);
+                    state.LastFoodGainSerialByPlayer[playerNumber] = foodGain.Serial;
                 }
             }
 
