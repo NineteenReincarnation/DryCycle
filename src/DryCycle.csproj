@@ -55,6 +55,10 @@
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -72,6 +76,7 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll')" Text="Unity.Mathematics.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
   </Target>
 
