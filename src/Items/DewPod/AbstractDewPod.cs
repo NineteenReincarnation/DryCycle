@@ -5,7 +5,7 @@ namespace DryCycle.Items.DewPod;
 
 internal sealed class AbstractDewPod : AbstractConsumable
 {
-    public const float MaxWaterWV = 500f;
+    public const float MaxWaterWV = 800f;
 
     public float WaterWV;
     public bool Broken;
