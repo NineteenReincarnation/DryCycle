@@ -400,14 +400,14 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        sLeaser.sprites = new FSprite[6];
+        // Shell, liquid, and two optional crack strokes. No separate highlight or
+        // translucent top-window layers are used.
+        sLeaser.sprites = new FSprite[4];
 
         sLeaser.sprites[0] = new FSprite("Circle20");
         sLeaser.sprites[1] = new FSprite("Circle20");
-        sLeaser.sprites[2] = new FSprite("Circle20");
-        sLeaser.sprites[3] = new FSprite("Circle20");
-        sLeaser.sprites[4] = new FSprite("Futile_White");
-        sLeaser.sprites[5] = new FSprite("Futile_White");
+        sLeaser.sprites[2] = new FSprite("Futile_White");
+        sLeaser.sprites[3] = new FSprite("Futile_White");
 
         AddToContainer(sLeaser, rCam, null);
     }
@@ -457,32 +457,17 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
             0.88f);
         liquid.color = displayedLiquid;
 
-        FSprite window = sLeaser.sprites[2];
-        window.x = drawPos.x;
-        window.y = drawPos.y + height * 5.22f;
-        window.scaleX = width * 0.44f;
-        window.scaleY = Mathf.Lerp(0.12f, 0.28f, fullness);
-        window.alpha = Mathf.Lerp(0.22f, 0.72f, fill);
-        window.color = Color.Lerp(displayedLiquid, Color.white, 0.48f);
-
-        FSprite highlight = sLeaser.sprites[3];
-        highlight.isVisible = fill > 0.02f;
-        highlight.x = drawPos.x - width * 2.40f;
-        highlight.y = drawPos.y + height * 2.35f;
-        highlight.scaleX = width * 0.11f;
-        highlight.scaleY = height * Mathf.Lerp(0.18f, 0.44f, fill);
-        highlight.alpha = Mathf.Lerp(0.08f, 0.38f, fill);
-
         bool broken = Broken;
-        for (int i = 4; i <= 5; i++)
+        for (int i = 2; i <= 3; i++)
         {
+            bool primaryCrack = i == 2;
             FSprite crack = sLeaser.sprites[i];
             crack.isVisible = broken;
-            crack.x = drawPos.x + (i == 4 ? 1.3f : 2.2f);
-            crack.y = drawPos.y + (i == 4 ? 2.4f : 0.5f);
+            crack.x = drawPos.x + (primaryCrack ? 1.3f : 2.2f);
+            crack.y = drawPos.y + (primaryCrack ? 2.4f : 0.5f);
             crack.scaleX = 0.12f;
-            crack.scaleY = i == 4 ? 0.42f : 0.30f;
-            crack.rotation = i == 4 ? 32f : -38f;
+            crack.scaleY = primaryCrack ? 0.42f : 0.30f;
+            crack.rotation = primaryCrack ? 32f : -38f;
         }
 
         if (slatedForDeletetion || room != rCam.room)
@@ -503,9 +488,8 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         }
 
         sLeaser.sprites[0].color = shellColor;
-        sLeaser.sprites[3].color = Color.white;
-        sLeaser.sprites[4].color = palette.blackColor;
-        sLeaser.sprites[5].color = palette.blackColor;
+        sLeaser.sprites[2].color = palette.blackColor;
+        sLeaser.sprites[3].color = palette.blackColor;
     }
 
     public void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContainer)
