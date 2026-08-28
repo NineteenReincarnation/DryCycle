@@ -4,18 +4,17 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Keeps player quicksand occlusion tied to the authored front curve rather than
-/// the full TerrainCurve surface band. QuicksandZoneHooks may move the player into
-/// Sand, but this outer hook delays that move until the rendered feet touch and then
-/// reorders the player immediately behind the deep-fill mesh (sprite 2), leaving the
-/// 50 px surface strip behind the player. This avoids the whole body disappearing as
-/// soon as the player first touches quicksand while preserving the original curve
-/// rendering and shader setup.
+/// Owns player quicksand draw ordering.
+///
+/// Players are deliberately excluded from QuicksandZoneHooks' generic MoveToBack
+/// path. This hook waits until the rendered feet touch the authored front curve,
+/// then moves only player sprites that normally belong to the body/midground layer
+/// behind TerrainCurve's deep-fill mesh. Foreground, Items, HUD and Bloom sprites are
+/// left in their native containers, and every moved sprite is restored to the exact
+/// container it had before quicksand occlusion.
 /// </summary>
 internal static class QuicksandPlayerRenderContact
 {
-    // PlayerGraphics keeps the ordinary legs sprite at index 4 for the standard
-    // slugcat graphics layout. Custom graphics fall back to lower BodyChunk contact.
     private const int PlayerLegSpriteIndex = 4;
     private const float ContactEpsilon = 0.02f;
     private const float ReleaseClearance = 2.0f;
@@ -25,6 +24,9 @@ internal static class QuicksandPlayerRenderContact
     private sealed class State
     {
         internal bool SurfaceContactLatched;
+        internal bool Occluding;
+        internal bool[] OccludableSprites;
+        internal FContainer[] NativeContainers;
     }
 
     private static readonly ConditionalWeakTable<RoomCamera.SpriteLeaser, State> States = new();
@@ -59,9 +61,6 @@ internal static class QuicksandPlayerRenderContact
         RoomCamera rCam,
         Vector2 camPos)
     {
-        // This hook is enabled after QuicksandZoneHooks, so orig() first lets the
-        // existing quicksand renderer make its normal container decision. We only
-        // undo that decision for a player whose feet have not reached the surface.
         orig(self, timeStacker, rCam, camPos);
 
         if (self == null || self.sprites == null || rCam?.room == null)
@@ -73,14 +72,14 @@ internal static class QuicksandPlayerRenderContact
         Player player = ResolvePlayer(self.drawableObject);
         if (player == null ||
             player.room != rCam.room ||
-            !QuicksandSinkRateLimiter.TryGetVisualSink(
+            !QuicksandSinkRateLimiter.TryGetPlayerQuicksandState(
                 player,
-                out _,
                 out QuicksandZone zone,
                 out _) ||
             !IsUsableZone(zone))
         {
-            state.SurfaceContactLatched = false;
+            RestoreMovedSprites(self, state);
+            ResetState(state);
             return;
         }
 
@@ -99,43 +98,33 @@ internal static class QuicksandPlayerRenderContact
         }
         else if (penetration < -ReleaseClearance)
         {
-            // A real upward jump should become fully visible again once the rendered
-            // feet have clearly left the sand, instead of remaining clipped merely
-            // because the physics sink state has not cleared yet.
+            // The physics state may remain active for a few frames after a low jump.
+            // Once the rendered feet are clearly above the curve, stop clipping.
             state.SurfaceContactLatched = false;
         }
 
         if (!state.SurfaceContactLatched)
         {
-            // Until the feet actually touch, keep the player in the native containers.
-            // The inner hook may have already moved the sprites into Sand this frame;
-            // restore them here without changing any terrain geometry.
-            self.AddSpritesToContainer(null, rCam);
+            RestoreMovedSprites(self, state);
             return;
         }
 
-        // TerrainCurve uses sprite 1 for a roughly 50 px surface strip and sprite 2
-        // for the deep fill from the authored front curve downward. Moving a player
-        // to the absolute back of Sand puts the whole body behind both meshes, which
-        // is why first contact could hide half the slugcat immediately. Instead place
-        // the player between those two terrain meshes: in front of the surface strip,
-        // but directly behind the deep fill. The deep fill then occludes only pixels
-        // that are actually below the front curve.
-        if (!PlacePlayerBehindDeepFill(self, rCam, zone))
+        if (!PlacePlayerBehindDeepFill(self, rCam, zone, state))
         {
-            // If the terrain leaser is unavailable for a frame, prefer a fully visible
-            // player over the old severe over-occlusion.
-            self.AddSpritesToContainer(null, rCam);
+            // Missing terrain leaser/container should fail visible, not hide the cat.
+            RestoreMovedSprites(self, state);
         }
     }
 
     private static bool PlacePlayerBehindDeepFill(
         RoomCamera.SpriteLeaser playerLeaser,
         RoomCamera rCam,
-        QuicksandZone zone)
+        QuicksandZone zone,
+        State state)
     {
         if (playerLeaser?.sprites == null ||
             rCam?.spriteLeasers == null ||
+            state == null ||
             !IsUsableZone(zone))
         {
             return false;
@@ -160,14 +149,31 @@ internal static class QuicksandPlayerRenderContact
         }
 
         FContainer sand = rCam.ReturnFContainer("Sand");
+        FContainer midground = rCam.ReturnFContainer("Midground");
         FSprite deepFill = zoneLeaser.sprites[2];
-        if (sand == null || deepFill.container != sand)
+        if (sand == null || midground == null || deepFill.container != sand)
         {
             return false;
         }
 
+        if (!state.Occluding ||
+            state.OccludableSprites == null ||
+            state.NativeContainers == null ||
+            state.OccludableSprites.Length != playerLeaser.sprites.Length ||
+            state.NativeContainers.Length != playerLeaser.sprites.Length)
+        {
+            RestoreMovedSprites(playerLeaser, state);
+            CaptureOccludableSprites(playerLeaser, midground, state);
+        }
+
+        bool movedAny = false;
         for (int i = 0; i < playerLeaser.sprites.Length; i++)
         {
+            if (!state.OccludableSprites[i])
+            {
+                continue;
+            }
+
             FSprite sprite = playerLeaser.sprites[i];
             if (sprite == null)
             {
@@ -179,29 +185,98 @@ internal static class QuicksandPlayerRenderContact
                 sand.AddChild(sprite);
             }
 
+            // Deep fill begins at the authored front curve. Placing the body directly
+            // behind it clips only the portion actually below the curve; the 50 px
+            // surface strip remains behind the player instead of hiding half the body.
             sprite.MoveBehindOtherNode(deepFill);
+            movedAny = true;
         }
 
-        if (playerLeaser.containers != null)
+        state.Occluding = movedAny;
+        return movedAny;
+    }
+
+    private static void CaptureOccludableSprites(
+        RoomCamera.SpriteLeaser playerLeaser,
+        FContainer midground,
+        State state)
+    {
+        int count = playerLeaser.sprites.Length;
+        state.OccludableSprites = new bool[count];
+        state.NativeContainers = new FContainer[count];
+
+        IMuddableGraphics muddable = playerLeaser.drawableObject as IMuddableGraphics;
+        for (int i = 0; i < count; i++)
         {
-            for (int i = 0; i < playerLeaser.containers.Length; i++)
+            FSprite sprite = playerLeaser.sprites[i];
+            if (sprite == null || sprite.container == null)
             {
-                FContainer container = playerLeaser.containers[i];
-                if (container == null)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (container.container != sand)
-                {
-                    sand.AddChild(container);
-                }
+            // Native Midground catches body-adjacent extras such as the face/gills;
+            // IMuddableGraphics catches the canonical physical body sprites even if
+            // another graphics mod has placed them in a custom container.
+            bool bodySprite = sprite.container == midground ||
+                              (muddable != null && muddable.MuddableSprite(playerLeaser, i));
+            if (!bodySprite)
+            {
+                continue;
+            }
 
-                container.MoveBehindOtherNode(deepFill);
+            state.OccludableSprites[i] = true;
+            state.NativeContainers[i] = sprite.container;
+        }
+    }
+
+    private static void RestoreMovedSprites(
+        RoomCamera.SpriteLeaser playerLeaser,
+        State state)
+    {
+        if (playerLeaser?.sprites == null ||
+            state == null ||
+            !state.Occluding ||
+            state.OccludableSprites == null ||
+            state.NativeContainers == null)
+        {
+            return;
+        }
+
+        int count = Mathf.Min(
+            playerLeaser.sprites.Length,
+            Mathf.Min(state.OccludableSprites.Length, state.NativeContainers.Length));
+
+        for (int i = 0; i < count; i++)
+        {
+            if (!state.OccludableSprites[i])
+            {
+                continue;
+            }
+
+            FSprite sprite = playerLeaser.sprites[i];
+            FContainer nativeContainer = state.NativeContainers[i];
+            if (sprite != null && nativeContainer != null && sprite.container != nativeContainer)
+            {
+                nativeContainer.AddChild(sprite);
             }
         }
 
-        return true;
+        state.Occluding = false;
+        state.OccludableSprites = null;
+        state.NativeContainers = null;
+    }
+
+    private static void ResetState(State state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        state.SurfaceContactLatched = false;
+        state.Occluding = false;
+        state.OccludableSprites = null;
+        state.NativeContainers = null;
     }
 
     private static Player ResolvePlayer(IDrawable drawable)
