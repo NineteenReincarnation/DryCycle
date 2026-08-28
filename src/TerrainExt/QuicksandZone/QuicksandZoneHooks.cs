@@ -157,7 +157,7 @@ internal static class QuicksandZoneHooks
 
         if (physicalObject == null ||
             physicalObject.room != rCam.room ||
-            !QuicksandRealisticPhysics.TryGetVisualSink(
+            !QuicksandSinkRateLimiter.TryGetVisualSink(
                 physicalObject,
                 out Vector2 visualOffset,
                 out _,
