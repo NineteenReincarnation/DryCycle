@@ -151,13 +151,10 @@ internal static class QuicksandPlayerLocomotionSupport
 
     private static bool IsInQuicksand(Player player)
     {
-        return player != null &&
-               QuicksandSinkRateLimiter.TryGetVisualSink(
-                   player,
-                   out _,
-                   out _,
-                   out float immersion) &&
-               immersion > 0.005f;
+        return QuicksandSinkRateLimiter.TryGetPlayerQuicksandState(
+            player,
+            out _,
+            out _);
     }
 
     private static bool IsMovingUp(Player player)
