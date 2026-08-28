@@ -1,14 +1,16 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using DryCycle.Thirst;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
 namespace DryCycle.Items.DewPod;
 
 /// <summary>
-/// Provides Dew Pod drinking/rupture audio. Drinking uses the Ancient Site mod's
-/// external soundeffects/DC_DrinkWater.ogg sample through a custom SoundID, while
-/// rupture audio keeps the existing organic pop + disguised crack transient.
+/// Provides Dew Pod drinking/rupture audio. Both Dew Pod sipping and direct
+/// underwater drinking use Ancient Site's soundeffects/DC_DrinkWater.ogg sample
+/// through the same custom SoundID, while rupture audio keeps the existing
+/// organic pop + disguised crack transient.
 /// </summary>
 internal static class DewPodAudioHooks
 {
@@ -33,7 +35,13 @@ internal static class DewPodAudioHooks
         internal int SipCooldown;
     }
 
+    private sealed class UnderwaterAudioState
+    {
+        internal int SipCooldown;
+    }
+
     private static readonly ConditionalWeakTable<DewPod, AudioState> States = new();
+    private static readonly ConditionalWeakTable<Player, UnderwaterAudioState> UnderwaterStates = new();
     private static bool _enabled;
 
     internal static SoundID DrinkWaterSound { get; private set; }
@@ -91,16 +99,24 @@ internal static class DewPodAudioHooks
 
         for (int i = 0; i < self.updateList.Count; i++)
         {
-            if (self.updateList[i] is not DewPod pod ||
-                pod.room != self ||
-                pod.slatedForDeletetion)
+            UpdatableAndDeletable updateable = self.updateList[i];
+
+            if (updateable is DewPod pod &&
+                pod.room == self &&
+                !pod.slatedForDeletetion)
             {
+                AudioState state = States.GetOrCreateValue(pod);
+                UpdateRuptureAudio(self, pod, state);
+                UpdateDrinkingAudio(self, pod, state);
                 continue;
             }
 
-            AudioState state = States.GetOrCreateValue(pod);
-            UpdateRuptureAudio(self, pod, state);
-            UpdateDrinkingAudio(self, pod, state);
+            if (updateable is Player player &&
+                player.room == self &&
+                !player.slatedForDeletetion)
+            {
+                UpdateUnderwaterDrinkingAudio(self, player);
+            }
         }
     }
 
@@ -188,14 +204,85 @@ internal static class DewPodAudioHooks
             mouthPos = target;
         }
 
-        // Play the authored Ancient Site sample without extra pitch coloration.
-        // Frequency stays at the previous fast sip cadence requested for Dew Pods.
+        PlayDrinkSound(room, mouthPos);
+        state.SipCooldown = Random.Range(6, 10);
+    }
+
+    private static void UpdateUnderwaterDrinkingAudio(Room room, Player player)
+    {
+        UnderwaterAudioState audioState = UnderwaterStates.GetOrCreateValue(player);
+        ThirstState thirstState = ThirstStore.For(player);
+
+        if (thirstState == null || !thirstState.IsDrinking || player.dead || !player.Consious)
+        {
+            // Reset when the action stops so a new underwater drink begins with
+            // immediate feedback rather than inheriting an old cooldown.
+            audioState.SipCooldown = 0;
+            return;
+        }
+
+        // When the same pickup press is already being used to sip a held Dew Pod,
+        // do not stack a second identical DC_DrinkWater instance on top of it.
+        if (IsDrinkingFromHeldDewPod(player))
+        {
+            audioState.SipCooldown = 0;
+            return;
+        }
+
+        if (audioState.SipCooldown > 0)
+        {
+            audioState.SipCooldown--;
+            return;
+        }
+
+        Vector2 mouthPos = player.mainBodyChunk != null
+            ? player.mainBodyChunk.pos
+            : (player.firstChunk != null ? player.firstChunk.pos : Vector2.zero);
+
+        PlayDrinkSound(room, mouthPos);
+        audioState.SipCooldown = Random.Range(6, 10);
+    }
+
+    private static bool IsDrinkingFromHeldDewPod(Player player)
+    {
+        if (player?.grasps == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < player.grasps.Length; i++)
+        {
+            if (player.grasps[i]?.grabbed is not DewPod pod)
+            {
+                continue;
+            }
+
+            int poseFrames = DrinkPoseFramesField?.GetValue(pod) is int frames
+                ? frames
+                : 0;
+
+            if (poseFrames > 0 && pod.WaterWV > 0f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void PlayDrinkSound(Room room, Vector2 position)
+    {
+        if (room == null || DrinkWaterSound == null)
+        {
+            return;
+        }
+
+        // Preserve the authored sample exactly: same resource, volume and pitch for
+        // Dew Pod sipping and direct underwater drinking.
         room.PlaySound(
             DrinkWaterSound,
-            mouthPos,
+            position,
             1f,
             1f);
-
-        state.SipCooldown = Random.Range(6, 10);
     }
 }
