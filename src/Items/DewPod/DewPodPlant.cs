@@ -12,6 +12,10 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private const int RootSpriteCount = 3;
     private const int SpritesPerSlot = 4;
 
+    // These offsets are expressed in plant-local coordinates:
+    // X runs along the supporting surface and Y points out along its normal.
+    // On a normal floor this is identical to the old world-space layout, while
+    // walls, ceilings, slopes and Watcher curves rotate the whole plant naturally.
     private static readonly Vector2[] StemRootOffsets =
     {
         new(-7.5f, 2.5f),
@@ -29,8 +33,9 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     };
 
     // Sample a short strip just inside the supporting terrain rather than using a
-    // hard-coded plant green. This follows the same RoomCamera.PixelColorAtCoordinate
-    // approach used by vanilla environment-blending organisms such as WormGrass.
+    // hard-coded plant green. Offsets are also plant-local so PixelColorAtCoordinate
+    // keeps sampling "under" the root even when the plant is attached to a wall or
+    // a Watcher curved surface.
     private static readonly Vector2[] GroundColorSampleOffsets =
     {
         new(-7f, -4f),
@@ -47,6 +52,8 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private readonly Vector2[] _tipPos = new Vector2[SlotCount];
     private readonly Vector2[] _lastTipPos = new Vector2[SlotCount];
     private readonly Vector2[] _tipVel = new Vector2[SlotCount];
+    private readonly Vector2 _surfaceNormal;
+    private readonly Vector2 _surfaceTangent;
 
     private int _age;
     private int _pullSlot = -1;
@@ -58,6 +65,8 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     internal int OriginRoom { get; }
     internal int PlacedObjectIndex { get; }
     internal Vector2 RootPos { get; private set; }
+    internal Vector2 SurfaceNormal => _surfaceNormal;
+    internal Vector2 SurfaceTangent => _surfaceTangent;
 
     internal DewPodPlant(
         Room room,
@@ -72,7 +81,18 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         _runtimeState = runtimeState;
         OriginRoom = originRoom;
         PlacedObjectIndex = placedObjectIndex;
-        RootPos = ResolveRootPosition(room, placedObject?.pos ?? Vector2.zero);
+
+        DewPodPlantAttachment attachment = DewPodPlantAttachmentResolver.Resolve(
+            room,
+            placedObject?.pos ?? Vector2.zero);
+        RootPos = attachment.Position;
+        _surfaceNormal = attachment.Normal.sqrMagnitude > 0.0001f
+            ? attachment.Normal.normalized
+            : Vector2.up;
+
+        // Clockwise perpendicular keeps floor-attached plants using +X to the
+        // screen-right, preserving the original slot ordering on ordinary floors.
+        _surfaceTangent = new Vector2(_surfaceNormal.y, -_surfaceNormal.x).normalized;
 
         // A fresh growth produces 2-4 mature pods. The distribution is symmetric
         // around three (25% / 50% / 25%), so the mathematical expectation is
@@ -174,6 +194,28 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
         return _tipPos[slot];
     }
+
+    internal Vector2 GetStemRootPosition(int slot)
+    {
+        if (slot < 0 || slot >= SlotCount)
+        {
+            return RootPos;
+        }
+
+        return LocalToWorld(StemRootOffsets[slot]);
+    }
+
+    internal Vector2 LocalToWorld(Vector2 local)
+    {
+        return RootPos + _surfaceTangent * local.x + _surfaceNormal * local.y;
+    }
+
+    private Vector2 LocalVectorToWorld(Vector2 local)
+    {
+        return _surfaceTangent * local.x + _surfaceNormal * local.y;
+    }
+
+    private float SurfaceRotation => Custom.VecToDeg(_surfaceNormal) - 90f;
 
     internal void SetPullInfluence(int slot, Vector2 target, float strength)
     {
@@ -287,10 +329,15 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             _lastTipPos[i] = _tipPos[i];
 
             Vector2 rest = GetRestTip(i, _age);
-            Vector2 stemRoot = RootPos + StemRootOffsets[i];
+            Vector2 stemRoot = GetStemRootPosition(i);
 
             _tipVel[i] += (rest - _tipPos[i]) * 0.075f;
             _tipVel[i] *= 0.80f;
+
+            // Keep a small amount of world gravity even for wall/ceiling plants.
+            // The local rest pose still determines where they grow, while this
+            // produces a subtle downward sag that stops wall-mounted plants from
+            // looking like rigid decals.
             _tipVel[i].y -= 0.012f;
 
             ApplyNearbyPlayerPush(i);
@@ -361,30 +408,8 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     {
         float sway = Mathf.Sin(age * 0.028f + PhaseOffsets[slot]) * (0.75f + slot * 0.12f);
         float bob = Mathf.Sin(age * 0.019f + PhaseOffsets[slot] * 1.3f) * 0.35f;
-        return RootPos + RestTipOffsets[slot] + new Vector2(sway, bob);
-    }
-
-    private static Vector2 ResolveRootPosition(Room sourceRoom, Vector2 placedPos)
-    {
-        if (sourceRoom == null)
-        {
-            return placedPos;
-        }
-
-        IntVector2 tile = sourceRoom.GetTilePosition(placedPos);
-        int minY = Math.Max(0, tile.y - 6);
-
-        for (int y = tile.y; y >= minY; y--)
-        {
-            if (!sourceRoom.GetTile(tile.x, y).Solid)
-            {
-                continue;
-            }
-
-            return sourceRoom.MiddleOfTile(tile.x, y) + new Vector2(0f, 10f);
-        }
-
-        return placedPos;
+        Vector2 local = RestTipOffsets[slot] + new Vector2(sway, bob);
+        return LocalToWorld(local);
     }
 
     private void TryRefreshLiquidColor()
@@ -418,7 +443,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
 
         for (int i = 0; i < GroundColorSampleOffsets.Length; i++)
         {
-            Vector2 samplePos = RootPos + GroundColorSampleOffsets[i];
+            Vector2 samplePos = LocalToWorld(GroundColorSampleOffsets[i]);
             if (!TrySampleLocalLevelColor(rCam, samplePos, out Color sampled))
             {
                 continue;
@@ -477,7 +502,8 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private int ShellSprite(int slot) => StemSprite(slot) + 1;
     private int LiquidSprite(int slot) => StemSprite(slot) + 2;
     // Mature slots reuse the same accent sprite as a side highlight; empty or
-    // immature slots reuse it as the bud. The translucent top window stays removed.
+    // immature slots reuse it as the bud. The top window is drawn by the classic
+    // visual overlay so the collision-layer sprite layout stays unchanged.
     private int AccentSprite(int slot) => StemSprite(slot) + 3;
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
@@ -509,27 +535,34 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         float timeStacker,
         Vector2 camPos)
     {
-        Vector2 root = RootPos - camPos;
+        float surfaceRotation = SurfaceRotation;
 
-        FSprite rootBack = sLeaser.sprites[0];
-        rootBack.x = root.x - 5f;
-        rootBack.y = root.y + 1f;
-        rootBack.scaleX = 0.74f;
-        rootBack.scaleY = 0.34f;
-        rootBack.rotation = -14f;
+        SetRootSprite(
+            sLeaser.sprites[0],
+            new Vector2(-5f, 1f),
+            0.74f,
+            0.34f,
+            -14f,
+            surfaceRotation,
+            camPos);
 
-        FSprite rootCenter = sLeaser.sprites[1];
-        rootCenter.x = root.x;
-        rootCenter.y = root.y + 2.2f;
-        rootCenter.scaleX = 0.92f;
-        rootCenter.scaleY = 0.39f;
+        SetRootSprite(
+            sLeaser.sprites[1],
+            new Vector2(0f, 2.2f),
+            0.92f,
+            0.39f,
+            0f,
+            surfaceRotation,
+            camPos);
 
-        FSprite rootFront = sLeaser.sprites[2];
-        rootFront.x = root.x + 6f;
-        rootFront.y = root.y + 1.1f;
-        rootFront.scaleX = 0.68f;
-        rootFront.scaleY = 0.31f;
-        rootFront.rotation = 12f;
+        SetRootSprite(
+            sLeaser.sprites[2],
+            new Vector2(6f, 1.1f),
+            0.68f,
+            0.31f,
+            12f,
+            surfaceRotation,
+            camPos);
 
         Color localGrowthColor = GetLocalGrowthColor(rCam);
         Color stemColor = Color.Lerp(
@@ -541,16 +574,16 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             new Color(0.23f, 0.43f, 0.29f),
             0.80f);
 
-        rootBack.color = localGrowthColor;
-        rootCenter.color = localGrowthColor;
-        rootFront.color = localGrowthColor;
+        sLeaser.sprites[0].color = localGrowthColor;
+        sLeaser.sprites[1].color = localGrowthColor;
+        sLeaser.sprites[2].color = localGrowthColor;
 
         Color displayedLiquid = LiquidColor;
 
         for (int i = 0; i < SlotCount; i++)
         {
             Vector2 tip = Vector2.Lerp(_lastTipPos[i], _tipPos[i], timeStacker);
-            Vector2 stemRoot = RootPos + StemRootOffsets[i];
+            Vector2 stemRoot = GetStemRootPosition(i);
             bool mature = IsMatureSlot(i);
             bool harvested = IsHarvestedSlot(i);
             bool immature = !mature && !harvested;
@@ -581,7 +614,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 Vector2 direction = Custom.DirVec(stemRoot, tip);
                 if (direction.sqrMagnitude < 0.001f)
                 {
-                    direction = Vector2.up;
+                    direction = _surfaceNormal;
                 }
 
                 Vector2 perpendicular = Custom.PerpendicularVector(direction);
@@ -603,7 +636,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 liquid.color = displayedLiquid;
 
                 // Stronger side sheen so the fleshy pod still reads as wet at normal
-                // game zoom. It stays away from the top-window treatment.
+                // game zoom. It follows the local stem direction on every surface.
                 Vector2 highlightPos = podPos +
                                        perpendicular * (2.45f * scale) +
                                        direction * (1.35f * scale);
@@ -618,11 +651,17 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             else
             {
                 Vector2 budPos = stemEnd - camPos;
+                Vector2 budDirection = Custom.DirVec(stemRoot, stemEnd);
+                if (budDirection.sqrMagnitude < 0.001f)
+                {
+                    budDirection = _surfaceNormal;
+                }
+
                 accent.x = budPos.x;
                 accent.y = budPos.y;
                 accent.scaleX = immature ? 0.27f : 0.18f;
                 accent.scaleY = immature ? 0.42f : 0.16f;
-                accent.rotation = Custom.VecToDeg(Custom.DirVec(stemRoot, stemEnd)) - 90f;
+                accent.rotation = Custom.VecToDeg(budDirection) - 90f;
                 accent.alpha = harvested ? 0.74f : 1f;
                 accent.color = budColor;
             }
@@ -632,6 +671,23 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         {
             sLeaser.CleanSpritesAndRemove();
         }
+    }
+
+    private void SetRootSprite(
+        FSprite sprite,
+        Vector2 localOffset,
+        float scaleX,
+        float scaleY,
+        float localRotation,
+        float surfaceRotation,
+        Vector2 camPos)
+    {
+        Vector2 world = LocalToWorld(localOffset) - camPos;
+        sprite.x = world.x;
+        sprite.y = world.y;
+        sprite.scaleX = scaleX;
+        sprite.scaleY = scaleY;
+        sprite.rotation = surfaceRotation + localRotation;
     }
 
     private void DrawStem(
@@ -649,7 +705,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         Vector2 overall = end - start;
         if (overall.sqrMagnitude < 0.001f)
         {
-            overall = Vector2.up;
+            overall = _surfaceNormal;
         }
 
         Vector2 perpendicular = Custom.PerpendicularVector(overall.normalized);
@@ -666,7 +722,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
             Vector2 direction = Custom.DirVec(p0, p1);
             if (direction.sqrMagnitude < 0.001f)
             {
-                direction = Vector2.up;
+                direction = _surfaceNormal;
             }
 
             Vector2 normal = Custom.PerpendicularVector(direction);
