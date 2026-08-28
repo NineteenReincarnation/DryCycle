@@ -40,6 +40,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            DewPodClassicVisualHooks.Disable();
             DewPodPlantCollisionHooks.Disable();
             DewPodPlantHooks.Disable();
             DewPodHooks.Disable();
@@ -79,6 +80,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Enable();
             DewPodPlantHooks.Enable();
             DewPodPlantCollisionHooks.Enable();
+            DewPodClassicVisualHooks.Enable();
             KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
@@ -90,6 +92,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            DewPodClassicVisualHooks.Disable();
             DewPodPlantCollisionHooks.Disable();
             DewPodPlantHooks.Disable();
             DewPodHooks.Disable();
