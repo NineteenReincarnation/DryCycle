@@ -11,11 +11,19 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
     private const float MaxStainHeight = 60f;
     private const float TerrainBackOffset = 50f;
     private const float TerrainMaxDepth = 35f;
+    private const float TerrainJoinDistance = 30f;
+    private const float TerrainJoinFraction = 0.13f;
 
     private static readonly Color FallbackSurfaceColor = new(0.79f, 0.61f, 0.32f);
     private static readonly Color FallbackDeepColor = new(0.43f, 0.28f, 0.15f);
     private static readonly Color FallbackLightFlowColor = new(0.92f, 0.76f, 0.43f);
     private static readonly Color FallbackDarkFlowColor = new(0.50f, 0.32f, 0.17f);
+
+    // TerrainCurve.UpdateLightInfo clears and republishes these arrays every draw,
+    // even while TerrainCurve.doLighting is false. Quicksand must do the same or
+    // SlopedTerrainSurface can consume stale light data from another drawable.
+    private static readonly Vector4[] EmptyTerrainLightColors = new Vector4[16];
+    private static readonly Vector4[] EmptyTerrainLightParams = new Vector4[16];
 
     private readonly PlacedObject _placedObject;
     private readonly Vector2[] _surface = new Vector2[SampleCount];
@@ -263,6 +271,11 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
             };
         }
 
+        sLeaser.containers = new FContainer[1]
+        {
+            new FContainer()
+        };
+
         AddToContainer(sLeaser, rCam, null);
     }
 
@@ -280,6 +293,7 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
 
         QuicksandSurface.SampleZone(_placedObject, Data, _surface, _bottom);
         ApplyTerrainShaderSettings(rCam);
+        ResetTerrainLightInfo();
 
         TriangleMesh stain = sLeaser.sprites[0] as TriangleMesh;
         TriangleMesh surfaceMesh = sLeaser.sprites[1] as TriangleMesh;
@@ -305,19 +319,113 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         for (int i = 0; i < SampleCount; i++)
         {
             float u = (float)i / (SampleCount - 1);
-            float movingWaveStrength = 0.60f + terrainWaves * 2.4f;
+
+            // Keep both ends geometrically identical to adjacent TerrainCurve surfaces.
+            // The animated flow is strongest in the middle and smoothly reaches zero
+            // before either join, preventing an unavoidable normal/depth discontinuity.
+            float edgeMotion = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.Clamp01(Mathf.Min(u, 1f - u) / TerrainJoinFraction));
+
+            float movingWaveStrength = 0.22f + terrainWaves * 0.55f;
             float movingWave =
                 Mathf.Sin(u * Mathf.PI * 6f - _flowTime * 0.050f * Data.FlowSpeed) * movingWaveStrength +
                 Mathf.Sin(u * Mathf.PI * 14f - _flowTime * 0.083f * Data.FlowSpeed + 1.7f) *
-                (0.24f + terrainWaves * 0.70f);
+                (0.08f + terrainWaves * 0.18f);
             float localWave = Mathf.Lerp(_lastWave[i], _wave[i], timeStacker);
 
-            _animatedFront[i] = _surface[i] + Vector2.up * (movingWave + localWave);
-            _visualBack[i] = _animatedFront[i] + Vector2.up * TerrainBackOffset;
-            _screenFront[i] = _animatedFront[i] - camPos;
-            _screenBack[i] = _visualBack[i] - camPos;
+            Vector2 front = _surface[i] +
+                            Vector2.up * (movingWave + localWave) * edgeMotion;
+            Vector2 back = front + Vector2.up * TerrainBackOffset;
+
+            float joinStrength = GetTerrainJoinStrength(u);
+            if (joinStrength > 0f &&
+                TrySampleAdjacentTerrain(_surface[i], out Vector2 terrainFront, out Vector2 terrainBack))
+            {
+                front = Vector2.Lerp(front, terrainFront, joinStrength);
+                back = Vector2.Lerp(back, terrainBack, joinStrength);
+            }
+
+            _animatedFront[i] = front;
+            _visualBack[i] = back;
+            _screenFront[i] = front - camPos;
+            _screenBack[i] = back - camPos;
             _screenBottom[i] = _bottom[i] - camPos;
         }
+    }
+
+    private static float GetTerrainJoinStrength(float u)
+    {
+        float edgeDistance = Mathf.Min(u, 1f - u);
+        if (edgeDistance >= TerrainJoinFraction)
+        {
+            return 0f;
+        }
+
+        return 1f - Mathf.SmoothStep(0f, 1f, edgeDistance / TerrainJoinFraction);
+    }
+
+    private bool TrySampleAdjacentTerrain(
+        Vector2 reference,
+        out Vector2 front,
+        out Vector2 back)
+    {
+        front = default;
+        back = default;
+
+        if (!ModManager.Watcher || room?.terrain?.terrainList == null)
+        {
+            return false;
+        }
+
+        float bestDistance = TerrainJoinDistance;
+        bool found = false;
+
+        for (int i = 0; i < room.terrain.terrainList.Count; i++)
+        {
+            if (room.terrain.terrainList[i] is not TerrainCurve curve ||
+                curve.frontPoints == null ||
+                curve.backPoints == null ||
+                curve.frontPoints.Length < 2 ||
+                curve.backPoints.Length < 2 ||
+                Mathf.Abs(curve.segmentWidth) < 0.0001f)
+            {
+                continue;
+            }
+
+            if (reference.x < curve.startX - TerrainJoinDistance ||
+                reference.x > curve.endX + TerrainJoinDistance)
+            {
+                continue;
+            }
+
+            float raw = (reference.x - curve.startX) / curve.segmentWidth;
+            int segment = Mathf.Clamp(
+                Mathf.FloorToInt(raw),
+                0,
+                Mathf.Min(curve.frontPoints.Length, curve.backPoints.Length) - 2);
+            float t = Mathf.Clamp01(raw - segment);
+            Vector2 candidateFront = Vector2.Lerp(
+                curve.frontPoints[segment],
+                curve.frontPoints[segment + 1],
+                t);
+            Vector2 candidateBack = Vector2.Lerp(
+                curve.backPoints[segment],
+                curve.backPoints[segment + 1],
+                t);
+            float distance = Vector2.Distance(reference, candidateFront);
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                front = candidateFront;
+                back = candidateBack;
+                found = true;
+            }
+        }
+
+        return found;
     }
 
     private void DrawTerrainSurface(
@@ -359,6 +467,7 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
 
             if (useTerrainPalette)
             {
+                // These channels intentionally mirror TerrainCurve.DrawSprites.
                 surfaceMesh.verticeColors[nearIndex] = new Color(
                     0f,
                     frontDelta.x,
@@ -515,6 +624,13 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 _flowSpeedMultiplier[i],
                 1f);
 
+            // Fade flow markings at the two joins so the actual terrain boundary is
+            // visually indistinguishable from an adjacent TerrainCurve.
+            float edgeFade = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.Clamp01(Mathf.Min(phase, 1f - phase) / TerrainJoinFraction));
+
             float visualDepth = Mathf.Clamp01(_flowDepth[i]);
             Vector2 front = _placedObject.pos +
                             QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, phase);
@@ -539,8 +655,9 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
             stripe.color = i % 4 == 0 ? darkFlow : lightFlow;
             stripe.alpha = (i % 4 == 0 ? 0.18f : 0.32f) *
                            Mathf.Lerp(1f, 0.70f, visualDepth) *
-                           Mathf.Lerp(0.65f, 1f, grain);
-            stripe.isVisible = true;
+                           Mathf.Lerp(0.65f, 1f, grain) *
+                           edgeFade;
+            stripe.isVisible = stripe.alpha > 0.002f;
         }
     }
 
@@ -560,14 +677,36 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
 
         FContainer sand = newContainer ?? rCam.ReturnFContainer("Sand");
         FContainer foreground = rCam.ReturnFContainer("Foreground");
+        FContainer quicksandLayer = sLeaser.containers != null && sLeaser.containers.Length > 0
+            ? sLeaser.containers[0]
+            : null;
 
         foreground.AddChild(sLeaser.sprites[0]);
-        sand.AddChild(sLeaser.sprites[1]);
+
+        if (quicksandLayer == null)
+        {
+            // Fallback for an already-existing SpriteLeaser created before this
+            // version: preserve the exact TerrainCurve ordering directly in Sand.
+            sand.AddChild(sLeaser.sprites[1]);
+            for (int i = 0; i < FlowStripeCount; i++)
+            {
+                sand.AddChild(sLeaser.sprites[i + 3]);
+            }
+            sand.AddChild(sLeaser.sprites[2]);
+            return;
+        }
+
+        // The whole quicksand surface is one Sand-layer group. Because QuicksandZone
+        // runtime objects are created after Room.Loaded has created Watcher terrain,
+        // adding this group last makes quicksand the exterior skin when the two overlap.
+        sand.AddChild(quicksandLayer);
+        quicksandLayer.AddChild(sLeaser.sprites[1]);
         for (int i = 0; i < FlowStripeCount; i++)
         {
-            sand.AddChild(sLeaser.sprites[i + 3]);
+            quicksandLayer.AddChild(sLeaser.sprites[i + 3]);
         }
-        sand.AddChild(sLeaser.sprites[2]);
+        quicksandLayer.AddChild(sLeaser.sprites[2]);
+        quicksandLayer.MoveToFront();
     }
 
     private static TriangleMesh.Triangle[] BuildStripTriangles()
@@ -640,6 +779,14 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 room.roomSettings.TerrainSkyFade,
                 0f,
                 0f));
+    }
+
+    private static void ResetTerrainLightInfo()
+    {
+        Array.Clear(EmptyTerrainLightColors, 0, EmptyTerrainLightColors.Length);
+        Array.Clear(EmptyTerrainLightParams, 0, EmptyTerrainLightParams.Length);
+        Shader.SetGlobalVectorArray("_lightSourceColors", EmptyTerrainLightColors);
+        Shader.SetGlobalVectorArray("_lightSourceParams", EmptyTerrainLightParams);
     }
 
     private static bool CanUseTerrainShader(RoomCamera rCam)
