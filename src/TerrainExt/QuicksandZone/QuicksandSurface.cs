@@ -51,11 +51,12 @@ internal static class QuicksandSurface
             return;
         }
 
+        float bottomY = placedObject.pos.y - data.BottomDepth;
         for (int i = 0; i < count; i++)
         {
             float u = count <= 1 ? 0f : (float)i / (count - 1);
             surface[i] = placedObject.pos + EvaluateByApproximateLength(data.SurfaceSpline, u);
-            bottom[i] = placedObject.pos + EvaluateByApproximateLength(data.BottomSpline, u);
+            bottom[i] = new Vector2(surface[i].x, bottomY);
         }
     }
 
@@ -131,13 +132,14 @@ internal static class QuicksandSurface
             bottom[bestSegment + 1],
             bestT);
         Vector2 depthVector = bottomPoint - bestSurface;
-        float depthLength = depthVector.magnitude;
-        if (depthLength < 4f)
+
+        Vector2 inward = SafeNormal(new Vector2(tangent.y, -tangent.x), Vector2.down);
+        if (Vector2.Dot(inward, depthVector) < 0f)
         {
-            return false;
+            inward = -inward;
         }
 
-        Vector2 inward = depthVector / depthLength;
+        float depthLength = Mathf.Max(4f, Vector2.Dot(depthVector, inward));
         float signedDepth = Vector2.Dot(point - bestSurface, inward);
 
         if (signedDepth < -radius || signedDepth > depthLength + radius * 0.65f)
@@ -180,6 +182,37 @@ internal static class QuicksandSurface
         }
 
         return spline.posB;
+    }
+
+    internal static float FindNearestU(BezierSpline spline, Vector2 localPoint, out float distance)
+    {
+        const int coarseSamples = 96;
+        float bestU = 0f;
+        float bestDistanceSq = float.MaxValue;
+        Vector2 previous = EvaluateByApproximateLength(spline, 0f);
+
+        for (int i = 1; i <= coarseSamples; i++)
+        {
+            float nextU = (float)i / coarseSamples;
+            Vector2 next = EvaluateByApproximateLength(spline, nextU);
+            Vector2 segment = next - previous;
+            float segmentLengthSq = segment.sqrMagnitude;
+            float t = segmentLengthSq > 0.0001f
+                ? Mathf.Clamp01(Vector2.Dot(localPoint - previous, segment) / segmentLengthSq)
+                : 0f;
+            Vector2 closest = previous + segment * t;
+            float candidate = (localPoint - closest).sqrMagnitude;
+            if (candidate < bestDistanceSq)
+            {
+                bestDistanceSq = candidate;
+                bestU = Mathf.Lerp((float)(i - 1) / coarseSamples, nextU, t);
+            }
+
+            previous = next;
+        }
+
+        distance = Mathf.Sqrt(bestDistanceSq);
+        return Mathf.Clamp01(bestU);
     }
 
     private static Vector2 SafeNormal(Vector2 value, Vector2 fallback)
