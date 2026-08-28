@@ -7,24 +7,17 @@ internal static class QuicksandPhysicsHooks
 {
     private const int SampleCount = 64;
 
-    private const float PlayerSurfaceRestRadius = 1.22f;
-    private const float ObjectSurfaceRestRadius = 1.10f;
-    private const float PlayerCrawlDistancePerTick = 0.022f;
-    private const float PlayerEdgeCrawlDistancePerTick = 0.095f;
-    private const float PlayerEdgeAssistDistance = 24f;
-    private const float PlayerIdleVisualSinkPerTick = 0.055f;
-    private const float PlayerStruggleVisualSinkPerTick = 0.008f;
-    private const float PlayerEdgeRecoveryPerTick = 0.11f;
-    private const float ObjectVisualSinkPerTick = 0.045f;
-    private const float PlayerVisualSinkLimit = 64f;
+    // Quicksand no longer pins an object to a synthetic surface position. The body
+    // really moves through the sand; these values simply make that movement extremely
+    // viscous. At 40 ticks/s the player sinks roughly 1.1 -> 1.8 px/s.
+    private const float PlayerSurfaceSinkSpeed = 0.028f;
+    private const float PlayerDeepSinkSpeed = 0.045f;
+    private const float PlayerHorizontalSpeed = 0.018f;
+    private const float ObjectSinkSpeed = 0.035f;
+    private const float ObjectTangentialRetention = 0.08f;
     private const float PlayerHeadVisualClearance = 8f;
     private const int PlayerDeathConfirmTicks = 8;
-    private const int ExitReentryCooldown = 24;
-
-    // The quicksand pin must never override an external warp/teleport. Normal
-    // quicksand motion is sub-pixel to a few pixels per frame, while Dev Console
-    // ov, shortcuts and scripted warps move the anchor much farther in one step.
-    private const float ExternalDisplacementReleaseDistance = 32f;
+    private const int ExitReentryCooldown = 6;
 
     private sealed class ZoneCache
     {
@@ -36,14 +29,8 @@ internal static class QuicksandPhysicsHooks
     {
         internal bool Active;
         internal QuicksandZone Zone;
-        internal int AnchorChunkIndex = -1;
-        internal float SurfaceU;
-        internal float VisualSink;
-        internal float VisualSinkLimit;
         internal int FullySubmergedTicks;
         internal int ReentryCooldown;
-        internal bool HasPinnedAnchor;
-        internal Vector2 LastPinnedAnchor;
     }
 
     private static readonly ConditionalWeakTable<QuicksandZone, ZoneCache> ZoneCaches = new();
@@ -74,6 +61,9 @@ internal static class QuicksandPhysicsHooks
         On.Room.Update -= Room_Update;
     }
 
+    // Kept as the rendering hook contract. There is deliberately no visual offset
+    // anymore: immersion comes from the real BodyChunk positions moving downward.
+    // The renderer only needs to know that the drawable belongs behind the terrain.
     internal static bool TryGetVisualSink(
         PhysicalObject physicalObject,
         out Vector2 visualOffset,
@@ -87,22 +77,12 @@ internal static class QuicksandPhysicsHooks
         if (physicalObject == null ||
             !SinkStates.TryGetValue(physicalObject, out SinkState state) ||
             !state.Active ||
-            state.Zone == null ||
-            !state.Zone.TrySampleSurfaceFrame(
-                state.SurfaceU,
-                out _,
-                out _,
-                out Vector2 inward,
-                out _))
+            state.Zone == null)
         {
             return false;
         }
 
-        visualOffset = inward * state.VisualSink;
         zone = state.Zone;
-        progress = state.VisualSinkLimit > 0.001f
-            ? Mathf.Clamp01(state.VisualSink / state.VisualSinkLimit)
-            : 0f;
         return true;
     }
 
@@ -124,39 +104,62 @@ internal static class QuicksandPhysicsHooks
             return;
         }
 
-        // Detect an external teleport before suppressing terrain collision or
-        // damping velocity. Otherwise the next Room.Update would snap the object
-        // straight back to its old SurfaceU, making commands such as ov appear to
-        // have failed.
-        if (state.Active && ShouldReleaseForExternalMove(owner, state))
+        if (state.Active && !IsStateValid(owner, state))
         {
             Deactivate(state, ExitReentryCooldown);
         }
 
         if (!state.Active &&
             state.ReentryCooldown <= 0 &&
-            TryFindEntry(
-                owner,
-                out QuicksandZone entryZone,
-                out int anchorIndex,
-                out QuicksandSurface.Contact entryContact))
+            TryFindEntry(owner, out QuicksandZone entryZone, out _))
         {
-            Activate(owner, state, entryZone, anchorIndex, entryContact);
+            Activate(state, entryZone);
         }
 
-        if (!state.Active)
+        if (!state.Active ||
+            !TryGetContactInZone(
+                self,
+                state.Zone,
+                predictive: true,
+                out QuicksandSurface.Contact contact) ||
+            !state.Zone.Data.IsQuicksand(contact.U))
         {
             orig(self);
             return;
         }
 
+        // The quicksand section replaces TerrainCurve support for this chunk only.
+        // Adjacent normal-material sections keep their ordinary terrain collision,
+        // which lets a player slowly crawl out across a material boundary.
         bool originalTerrainCollision = self.collideWithTerrain;
         self.collideWithTerrain = false;
-        self.vel *= owner is Player ? 0.015f : 0.04f;
+
+        ApplyViscousVelocity(self, owner, state.Zone, contact, preGravity: true);
 
         try
         {
             orig(self);
+
+            if (state.Active &&
+                TryGetContactInZone(
+                    self,
+                    state.Zone,
+                    predictive: false,
+                    out QuicksandSurface.Contact currentContact) &&
+                state.Zone.Data.IsQuicksand(currentContact.U))
+            {
+                ApplyViscousVelocity(
+                    self,
+                    owner,
+                    state.Zone,
+                    currentContact,
+                    preGravity: false);
+            }
+            else
+            {
+                // Do not carry stored quicksand momentum out onto solid terrain.
+                self.vel *= owner is Player ? 0.18f : 0.30f;
+            }
         }
         finally
         {
@@ -200,13 +203,17 @@ internal static class QuicksandPhysicsHooks
                     continue;
                 }
 
-                if (ShouldReleaseForExternalMove(physicalObject, state))
+                if (!IsStateValid(physicalObject, state) ||
+                    !HasQuicksandContact(physicalObject, state.Zone, predictive: false))
                 {
                     Deactivate(state, ExitReentryCooldown);
                     continue;
                 }
 
-                UpdatePinnedObject(physicalObject, state);
+                if (physicalObject is Player player)
+                {
+                    CheckPlayerFullySubmerged(player, state);
+                }
             }
         }
     }
@@ -220,310 +227,90 @@ internal static class QuicksandPhysicsHooks
             return false;
         }
 
+        // Preserve the existing scope: players and loose items use quicksand. Other
+        // creatures keep their native creature physics until explicitly adapted.
         return physicalObject is Player || physicalObject is not Creature;
     }
 
-    private static bool ShouldReleaseForExternalMove(
-        PhysicalObject physicalObject,
-        SinkState state)
+    private static bool IsStateValid(PhysicalObject physicalObject, SinkState state)
     {
-        if (physicalObject == null ||
-            state == null ||
-            !state.Active ||
-            state.Zone == null)
-        {
-            return false;
-        }
-
-        // A room transfer must always win over the old quicksand state.
-        if (state.Zone.room != physicalObject.room)
-        {
-            return true;
-        }
-
-        if (!state.HasPinnedAnchor ||
-            state.AnchorChunkIndex < 0 ||
-            state.AnchorChunkIndex >= physicalObject.bodyChunks.Length)
-        {
-            return false;
-        }
-
-        BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
-        if (anchor == null)
-        {
-            return true;
-        }
-
-        float releaseDistance = Mathf.Max(
-            ExternalDisplacementReleaseDistance,
-            Mathf.Max(1f, anchor.rad) * 4f);
-        return Vector2.Distance(anchor.pos, state.LastPinnedAnchor) > releaseDistance;
+        return physicalObject != null &&
+               physicalObject.room != null &&
+               state != null &&
+               state.Active &&
+               state.Zone != null &&
+               state.Zone.room == physicalObject.room &&
+               !state.Zone.slatedForDeletetion &&
+               state.Zone.PlacedObject != null &&
+               state.Zone.PlacedObject.active &&
+               state.Zone.Data != null;
     }
 
-    private static void Activate(
-        PhysicalObject physicalObject,
-        SinkState state,
-        QuicksandZone zone,
-        int anchorIndex,
-        QuicksandSurface.Contact contact)
+    private static void Activate(SinkState state, QuicksandZone zone)
     {
         state.Active = true;
         state.Zone = zone;
-        state.AnchorChunkIndex = Mathf.Clamp(anchorIndex, 0, physicalObject.bodyChunks.Length - 1);
-        state.SurfaceU = Mathf.Clamp01(contact.U);
-        state.VisualSink = 0f;
         state.FullySubmergedTicks = 0;
-
-        BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
-        state.HasPinnedAnchor = anchor != null;
-        state.LastPinnedAnchor = anchor?.pos ?? Vector2.zero;
-
-        if (zone.TrySampleSurfaceFrame(
-                state.SurfaceU,
-                out _,
-                out _,
-                out Vector2 inward,
-                out _))
-        {
-            state.VisualSinkLimit = physicalObject is Player
-                ? PlayerVisualSinkLimit
-                : ComputeObjectVisualSinkLimit(physicalObject, inward);
-        }
-        else
-        {
-            state.VisualSinkLimit = physicalObject is Player ? PlayerVisualSinkLimit : 32f;
-        }
     }
 
-    private static void UpdatePinnedObject(PhysicalObject physicalObject, SinkState state)
+    private static void ApplyViscousVelocity(
+        BodyChunk chunk,
+        PhysicalObject owner,
+        QuicksandZone zone,
+        QuicksandSurface.Contact contact,
+        bool preGravity)
     {
-        if (physicalObject.room == null ||
-            state.Zone == null ||
-            state.Zone.room != physicalObject.room ||
-            state.Zone.slatedForDeletetion ||
-            state.Zone.PlacedObject == null ||
-            !state.Zone.PlacedObject.active ||
-            state.Zone.Data == null ||
-            state.AnchorChunkIndex < 0 ||
-            state.AnchorChunkIndex >= physicalObject.bodyChunks.Length)
-        {
-            Deactivate(state, 0);
-            return;
-        }
+        Vector2 tangent = contact.Tangent;
+        Vector2 inward = contact.Inward;
+        float deepness = Mathf.Clamp01(
+            contact.SignedDepth / Mathf.Max(1f, contact.DepthLength));
 
-        if (physicalObject is not Player &&
-            physicalObject.grabbedBy != null &&
-            physicalObject.grabbedBy.Count > 0)
-        {
-            Deactivate(state, 0);
-            return;
-        }
+        float tangentSpeed;
+        float inwardSpeed;
 
-        if (!state.Zone.Data.IsQuicksand(state.SurfaceU))
+        if (owner is Player player)
         {
-            Deactivate(state, ExitReentryCooldown);
-            return;
-        }
-
-        BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
-        if (anchor == null ||
-            !state.Zone.TrySampleSurfaceFrame(
-                state.SurfaceU,
-                out Vector2 surfacePoint,
-                out Vector2 tangent,
-                out Vector2 inward,
-                out _))
-        {
-            Deactivate(state, 0);
-            return;
-        }
-
-        float playerInputX = 0f;
-        float edgeRecovery = 0f;
-
-        if (physicalObject is Player player)
-        {
-            playerInputX = player.input != null && player.input.Length > 0
+            float inputX = player.input != null && player.input.Length > 0
                 ? player.input[0].x
                 : 0f;
+            float tangentRightSign = Mathf.Abs(tangent.x) > 0.05f
+                ? Mathf.Sign(tangent.x)
+                : 1f;
 
-            if (playerInputX != 0f &&
-                state.Zone.Data.TryGetQuicksandInterval(
-                    state.SurfaceU,
-                    out float intervalStart,
-                    out float intervalEnd))
-            {
-                float tangentWorldSign = Mathf.Abs(tangent.x) > 0.05f
-                    ? Mathf.Sign(tangent.x)
-                    : 1f;
-                float directionU = Mathf.Sign(playerInputX * tangentWorldSign);
-                float exitU = directionU > 0f ? intervalEnd : intervalStart;
-                float surfaceLength = state.Zone.EstimateSurfaceLength();
-                float distanceToExit = Mathf.Abs(exitU - state.SurfaceU) * surfaceLength;
-                float edgeFactor = 1f - Mathf.InverseLerp(
-                    4f,
-                    PlayerEdgeAssistDistance,
-                    distanceToExit);
-                edgeFactor = Mathf.Clamp01(edgeFactor);
-
-                float crawlDistance = Mathf.Lerp(
-                    PlayerCrawlDistancePerTick,
-                    PlayerEdgeCrawlDistancePerTick,
-                    edgeFactor);
-                float nextU = state.SurfaceU +
-                              directionU * crawlDistance / surfaceLength;
-
-                bool crossedBoundary = directionU > 0f
-                    ? nextU >= exitU - 0.00001f
-                    : nextU <= exitU + 0.00001f;
-
-                if (crossedBoundary || !state.Zone.Data.IsQuicksand(Mathf.Clamp01(nextU)))
-                {
-                    ExitToTerrain(
-                        physicalObject,
-                        state,
-                        anchor,
-                        exitU,
-                        directionU);
-                    return;
-                }
-
-                state.SurfaceU = Mathf.Clamp01(nextU);
-                edgeRecovery = PlayerEdgeRecoveryPerTick * edgeFactor;
-
-                if (!state.Zone.TrySampleSurfaceFrame(
-                        state.SurfaceU,
-                        out surfacePoint,
-                        out tangent,
-                        out inward,
-                        out _))
-                {
-                    Deactivate(state, 0);
-                    return;
-                }
-            }
-        }
-
-        float restRadius = physicalObject is Player
-            ? PlayerSurfaceRestRadius
-            : ObjectSurfaceRestRadius;
-        Vector2 targetAnchor = surfacePoint -
-                               inward * Mathf.Max(1f, anchor.rad) * restRadius;
-        TranslatePhysicalObject(physicalObject, targetAnchor - anchor.pos);
-        KillMomentum(physicalObject);
-
-        state.LastPinnedAnchor = targetAnchor;
-        state.HasPinnedAnchor = true;
-
-        float sinkDelta;
-        if (physicalObject is Player)
-        {
-            sinkDelta = playerInputX == 0f
-                ? PlayerIdleVisualSinkPerTick
-                : PlayerStruggleVisualSinkPerTick;
-            sinkDelta -= edgeRecovery;
+            // No flow-driven player motion. With no input, tangential speed is zero;
+            // holding a direction only permits a very small crawl along the surface.
+            tangentSpeed = inputX * PlayerHorizontalSpeed * tangentRightSign;
+            inwardSpeed = Mathf.Lerp(
+                PlayerSurfaceSinkSpeed,
+                PlayerDeepSinkSpeed,
+                Mathf.SmoothStep(0f, 1f, deepness));
         }
         else
         {
-            sinkDelta = ObjectVisualSinkPerTick;
+            tangentSpeed = Vector2.Dot(chunk.vel, tangent) * ObjectTangentialRetention;
+            inwardSpeed = ObjectSinkSpeed;
         }
 
-        state.VisualSink = Mathf.Clamp(
-            state.VisualSink + sinkDelta,
-            0f,
-            state.VisualSinkLimit);
-
-        if (physicalObject is Player sinkingPlayer)
+        if (preGravity)
         {
-            CheckPlayerVisualSubmersion(sinkingPlayer, state, surfacePoint, inward);
-        }
-    }
-
-    private static void ExitToTerrain(
-        PhysicalObject physicalObject,
-        SinkState state,
-        BodyChunk anchor,
-        float boundaryU,
-        float directionU)
-    {
-        float surfaceLength = state.Zone.EstimateSurfaceLength();
-        float epsilonU = Mathf.Min(0.012f, 3f / surfaceLength);
-        float terrainU = Mathf.Clamp01(boundaryU + directionU * epsilonU);
-
-        if (!state.Zone.TrySampleSurfaceFrame(
-                terrainU,
-                out Vector2 surfacePoint,
-                out Vector2 tangent,
-                out Vector2 inward,
-                out _))
-        {
-            Deactivate(state, ExitReentryCooldown);
-            return;
+            // BodyChunk.Update applies normal gravity. Cancel almost all of that
+            // component in advance so gravity cannot turn the intended slow sink
+            // into a free fall during the update itself.
+            float gravityIntoSand = Vector2.Dot(
+                Vector2.down * owner.gravity,
+                inward);
+            inwardSpeed -= gravityIntoSand;
         }
 
-        float restRadius = physicalObject is Player
-            ? PlayerSurfaceRestRadius
-            : ObjectSurfaceRestRadius;
-        Vector2 targetAnchor = surfacePoint -
-                               inward * Mathf.Max(1f, anchor.rad) * restRadius +
-                               tangent * directionU * 2f;
-        TranslatePhysicalObject(physicalObject, targetAnchor - anchor.pos);
-        KillMomentum(physicalObject);
-        Deactivate(state, ExitReentryCooldown);
-    }
-
-    private static void CheckPlayerVisualSubmersion(
-        Player player,
-        SinkState state,
-        Vector2 surfacePoint,
-        Vector2 inward)
-    {
-        if (player == null || player.dead)
-        {
-            state.FullySubmergedTicks = 0;
-            return;
-        }
-
-        Vector2 visualHead;
-        if (player.graphicsModule is PlayerGraphics graphics && graphics.head != null)
-        {
-            visualHead = graphics.head.pos + inward * state.VisualSink;
-        }
-        else
-        {
-            BodyChunk main = player.bodyChunks[0];
-            if (main == null)
-            {
-                state.FullySubmergedTicks = 0;
-                return;
-            }
-
-            visualHead = main.pos + Vector2.up * (main.rad + PlayerHeadVisualClearance) +
-                         inward * state.VisualSink;
-        }
-
-        float visualHeadDepth = Vector2.Dot(visualHead - surfacePoint, inward);
-        if (visualHeadDepth < PlayerHeadVisualClearance)
-        {
-            state.FullySubmergedTicks = 0;
-            return;
-        }
-
-        state.FullySubmergedTicks++;
-        if (state.FullySubmergedTicks >= PlayerDeathConfirmTicks)
-        {
-            player.Die();
-        }
+        chunk.vel = tangent * tangentSpeed + inward * inwardSpeed;
     }
 
     private static bool TryFindEntry(
         PhysicalObject physicalObject,
         out QuicksandZone zone,
-        out int anchorChunkIndex,
         out QuicksandSurface.Contact contact)
     {
         zone = null;
-        anchorChunkIndex = -1;
         contact = default;
 
         Room room = physicalObject?.room;
@@ -563,13 +350,40 @@ internal static class QuicksandPhysicsHooks
                 {
                     bestDepth = candidateContact.SignedDepth;
                     zone = candidateZone;
-                    anchorChunkIndex = chunkIndex;
                     contact = candidateContact;
                 }
             }
         }
 
-        return zone != null && anchorChunkIndex >= 0;
+        return zone != null;
+    }
+
+    private static bool HasQuicksandContact(
+        PhysicalObject physicalObject,
+        QuicksandZone zone,
+        bool predictive)
+    {
+        if (physicalObject?.bodyChunks == null || zone?.Data == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = physicalObject.bodyChunks[i];
+            if (chunk != null &&
+                TryGetContactInZone(
+                    chunk,
+                    zone,
+                    predictive,
+                    out QuicksandSurface.Contact contact) &&
+                zone.Data.IsQuicksand(contact.U))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryGetContactInZone(
@@ -628,6 +442,32 @@ internal static class QuicksandPhysicsHooks
         return false;
     }
 
+    private static bool TryGetPointContactInZone(
+        Vector2 point,
+        QuicksandZone zone,
+        out QuicksandSurface.Contact contact)
+    {
+        contact = default;
+        if (zone == null ||
+            zone.slatedForDeletetion ||
+            zone.PlacedObject == null ||
+            !zone.PlacedObject.active ||
+            zone.Data == null)
+        {
+            return false;
+        }
+
+        ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
+        QuicksandSurface.SampleZone(zone.PlacedObject, zone.Data, cache.Surface, cache.Bottom);
+        return QuicksandSurface.TryGetContact(
+                   point,
+                   1f,
+                   cache.Surface,
+                   cache.Bottom,
+                   out contact) &&
+               zone.Data.IsQuicksand(contact.U);
+    }
+
     private static bool IsInsideEntryBand(
         QuicksandSurface.Contact contact,
         float radius,
@@ -637,90 +477,65 @@ internal static class QuicksandPhysicsHooks
                contact.SignedDepth <= contact.DepthLength + radius * 0.12f;
     }
 
-    private static float ComputeObjectVisualSinkLimit(
-        PhysicalObject physicalObject,
-        Vector2 inward)
+    private static void CheckPlayerFullySubmerged(Player player, SinkState state)
     {
-        if (physicalObject?.bodyChunks == null || physicalObject.bodyChunks.Length == 0)
+        if (player == null || player.dead || state?.Zone == null)
         {
-            return 32f;
-        }
-
-        float min = float.PositiveInfinity;
-        float max = float.NegativeInfinity;
-        float largestRadius = 1f;
-
-        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = physicalObject.bodyChunks[i];
-            if (chunk == null)
+            if (state != null)
             {
-                continue;
+                state.FullySubmergedTicks = 0;
             }
-
-            float projection = Vector2.Dot(chunk.pos, inward);
-            min = Mathf.Min(min, projection - chunk.rad);
-            max = Mathf.Max(max, projection + chunk.rad);
-            largestRadius = Mathf.Max(largestRadius, chunk.rad);
-        }
-
-        if (float.IsInfinity(min) || float.IsInfinity(max))
-        {
-            return 32f;
-        }
-
-        return Mathf.Max(28f, max - min + largestRadius + 8f);
-    }
-
-    private static void TranslatePhysicalObject(PhysicalObject physicalObject, Vector2 delta)
-    {
-        if (physicalObject == null || delta.sqrMagnitude < 0.0000001f)
-        {
             return;
         }
 
-        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
+        for (int i = 0; i < player.bodyChunks.Length; i++)
         {
-            BodyChunk chunk = physicalObject.bodyChunks[i];
-            if (chunk == null)
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk == null ||
+                !TryGetContactInZone(
+                    chunk,
+                    state.Zone,
+                    predictive: false,
+                    out QuicksandSurface.Contact contact) ||
+                !state.Zone.Data.IsQuicksand(contact.U) ||
+                contact.SignedDepth < chunk.rad * 0.95f)
             {
-                continue;
-            }
-
-            chunk.pos += delta;
-            chunk.lastPos += delta;
-            chunk.lastLastPos += delta;
-        }
-
-        if (physicalObject.graphicsModule?.bodyParts != null)
-        {
-            for (int i = 0; i < physicalObject.graphicsModule.bodyParts.Length; i++)
-            {
-                BodyPart part = physicalObject.graphicsModule.bodyParts[i];
-                if (part == null)
-                {
-                    continue;
-                }
-
-                part.pos += delta;
-                part.lastPos += delta;
+                state.FullySubmergedTicks = 0;
+                return;
             }
         }
-    }
 
-    private static void KillMomentum(PhysicalObject physicalObject)
-    {
-        if (physicalObject?.bodyChunks == null)
+        Vector2 headPoint;
+        if (player.graphicsModule is PlayerGraphics graphics && graphics.head != null)
         {
+            headPoint = graphics.head.pos;
+        }
+        else
+        {
+            BodyChunk main = player.bodyChunks[0];
+            if (main == null)
+            {
+                state.FullySubmergedTicks = 0;
+                return;
+            }
+
+            headPoint = main.pos + Vector2.up * (main.rad + PlayerHeadVisualClearance);
+        }
+
+        if (!TryGetPointContactInZone(
+                headPoint,
+                state.Zone,
+                out QuicksandSurface.Contact headContact) ||
+            headContact.SignedDepth < PlayerHeadVisualClearance)
+        {
+            state.FullySubmergedTicks = 0;
             return;
         }
 
-        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
+        state.FullySubmergedTicks++;
+        if (state.FullySubmergedTicks >= PlayerDeathConfirmTicks)
         {
-            if (physicalObject.bodyChunks[i] != null)
-            {
-                physicalObject.bodyChunks[i].vel = Vector2.zero;
-            }
+            player.Die();
         }
     }
 
@@ -728,13 +543,7 @@ internal static class QuicksandPhysicsHooks
     {
         state.Active = false;
         state.Zone = null;
-        state.AnchorChunkIndex = -1;
-        state.SurfaceU = 0f;
-        state.VisualSink = 0f;
-        state.VisualSinkLimit = 0f;
         state.FullySubmergedTicks = 0;
         state.ReentryCooldown = Mathf.Max(state.ReentryCooldown, cooldown);
-        state.HasPinnedAnchor = false;
-        state.LastPinnedAnchor = Vector2.zero;
     }
 }
