@@ -240,7 +240,7 @@ internal static class SpinebackLizardHooks
         BodyChunk source,
         Vector2? directionAndMomentum,
         BodyChunk hitChunk,
-        Appendage.Pos onAppendagePos,
+        PhysicalObject.Appendage.Pos onAppendagePos,
         Creature.DamageType type,
         float damage,
         float stunBonus)
