@@ -3,11 +3,9 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Final post-player-update guard for the shallow quicksand surface layer.
-/// Rain World's locomotion code can inject a small velocity away from a surface
-/// after BodyChunk terrain collision has already been disabled; on quicksand that
-/// reads as a short hop/bounce. This removes only that unsolicited outward normal
-/// component while preserving explicit jump/upward-climb input.
+/// Final shallow-surface bounce guard.
+/// The quicksand surface is only used as a height test here. Any automatic bounce
+/// suppression is world-Y only and never changes X velocity.
 /// </summary>
 internal static class QuicksandEntryBounceGuard
 {
@@ -55,7 +53,8 @@ internal static class QuicksandEntryBounceGuard
             return;
         }
 
-        // Do not interfere with an intentional attempt to leave the sand.
+        // Intentional upward input is handled by the fixed Y-axis struggle/climb
+        // rules and must not be cancelled here.
         if (player.jumpBoost > 0f)
         {
             return;
@@ -83,12 +82,12 @@ internal static class QuicksandEntryBounceGuard
                     continue;
                 }
 
-                TryAbsorbOutwardSurfaceVelocity(chunk, zone);
+                TryAbsorbVerticalSurfaceBounce(chunk, zone);
             }
         }
     }
 
-    private static void TryAbsorbOutwardSurfaceVelocity(BodyChunk chunk, QuicksandZone zone)
+    private static void TryAbsorbVerticalSurfaceBounce(BodyChunk chunk, QuicksandZone zone)
     {
         float radius = Mathf.Max(1f, chunk.rad);
         if (chunk.pos.x < zone.startX - radius * 1.15f ||
@@ -103,32 +102,27 @@ internal static class QuicksandEntryBounceGuard
                 u,
                 out Vector2 surfacePoint,
                 out _,
-                out Vector2 inward,
-                out float depthLength))
+                out _,
+                out _))
         {
             return;
         }
 
-        float signedDepth = Vector2.Dot(chunk.pos - surfacePoint, inward);
+        float bottomY = zone.PlacedObject.pos.y - zone.Data.BottomDepth;
+        float depthLength = Mathf.Max(4f, surfacePoint.y - bottomY);
+        float signedDepth = surfacePoint.y - chunk.pos.y;
+
         if (signedDepth < -radius * InfluenceMargin ||
             signedDepth > Mathf.Min(depthLength, radius * MaxSurfaceDepthRadius))
         {
             return;
         }
 
-        if (inward.sqrMagnitude < 0.0001f)
+        // Positive world-Y velocity is an upward bounce. Remove only that Y
+        // component. X velocity is deliberately untouched.
+        if (chunk.vel.y > 0f)
         {
-            return;
-        }
-
-        inward.Normalize();
-        float inwardSpeed = Vector2.Dot(chunk.vel, inward);
-        if (inwardSpeed < 0f)
-        {
-            // Zero only the velocity normal that points out of the sand. Tangential
-            // movement is retained, so this does not create a horizontal conveyor or
-            // pin the player to one x-coordinate on a curved surface.
-            chunk.vel -= inward * inwardSpeed;
+            chunk.vel.y = 0f;
         }
     }
 
