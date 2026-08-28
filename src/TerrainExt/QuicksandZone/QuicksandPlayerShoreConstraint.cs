@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
@@ -31,10 +30,6 @@ internal static class QuicksandPlayerShoreConstraint
 
     private const float ShoreTopTolerance = 3.0f;
     private const int ExitConfirmTicks = 4;
-
-    // Very small non-quicksand gaps are treated as one physical pool so two shore
-    // constraints cannot fight over a few pixels of material painting.
-    private const float MergeMaterialGapWorld = 8.0f;
 
     private const float ShallowClimbEfficiency = 0.38f;
     private const float DeepClimbEfficiency = 0.045f;
@@ -192,8 +187,8 @@ internal static class QuicksandPlayerShoreConstraint
         if (state.MaxImmersion <= ExitReleaseImmersion)
         {
             // Do not instantly release on a single threshold crossing. The player
-            // must remain shallow, keep pushing toward the bank and have the lowest
-            // main body edge at the local shore top for several ticks.
+            // must remain shallow, keep pushing toward the bank and have every main
+            // body chunk at its own local curved shore height for several ticks.
             if (HasOutwardInput(player, state.ShoreSide) &&
                 BodyAtShoreTop(player, state))
             {
@@ -237,7 +232,6 @@ internal static class QuicksandPlayerShoreConstraint
                state.ContactSeen &&
                !state.ExitUnlocked &&
                state.ShoreSide != 0 &&
-               state.MaxImmersion > ExitReleaseImmersion &&
                DistanceToShore(player, state, state.ShoreSide) <= ShoreAcquireDistance;
     }
 
@@ -311,12 +305,11 @@ internal static class QuicksandPlayerShoreConstraint
 
     private static bool BodyAtShoreTop(Player player, State state)
     {
-        if (!TryGetShoreSurface(state, out float surfaceY))
+        if (!state.Active || !Valid(state.Zone))
         {
             return false;
         }
 
-        float lowestBottom = float.PositiveInfinity;
         bool found = false;
         for (int i = 0; i < player.bodyChunks.Length; i++)
         {
@@ -326,36 +319,28 @@ internal static class QuicksandPlayerShoreConstraint
                 continue;
             }
 
-            lowestBottom = Mathf.Min(
-                lowestBottom,
-                chunk.pos.y - Mathf.Max(1f, chunk.rad));
+            float sampleX = Mathf.Clamp(chunk.pos.x, state.LeftX, state.RightX);
+            float u = state.Zone.MaterialUAtWorldX(sampleX);
+            if (!state.Zone.TrySampleSurfaceFrame(
+                    u,
+                    out Vector2 surface,
+                    out _,
+                    out _,
+                    out _))
+            {
+                return false;
+            }
+
+            float bottomY = chunk.pos.y - Mathf.Max(1f, chunk.rad);
+            if (bottomY < surface.y - ShoreTopTolerance)
+            {
+                return false;
+            }
+
             found = true;
         }
 
-        return found && lowestBottom >= surfaceY - ShoreTopTolerance;
-    }
-
-    private static bool TryGetShoreSurface(State state, out float surfaceY)
-    {
-        surfaceY = 0f;
-        if (!Valid(state?.Zone) || state.ShoreSide == 0)
-        {
-            return false;
-        }
-
-        float u = state.ShoreSide < 0 ? state.StartU : state.EndU;
-        if (!state.Zone.TrySampleSurfaceFrame(
-                u,
-                out Vector2 surface,
-                out _,
-                out _,
-                out _))
-        {
-            return false;
-        }
-
-        surfaceY = surface.y;
-        return true;
+        return found;
     }
 
     private static void UpdateMeasuredImmersion(Player player, State state)
@@ -451,41 +436,25 @@ internal static class QuicksandPlayerShoreConstraint
             return false;
         }
 
-        List<Vector2> intervals = new();
-        zone.Data.FillQuicksandIntervals(intervals);
-        if (intervals.Count == 0)
-        {
-            return false;
-        }
-
+        var boundaries = zone.Data.MaterialBoundaries;
         float playerX = AverageX(player);
         float bestDistance = float.PositiveInfinity;
+        bool quicksand = false;
+        float intervalStartU = 0f;
 
-        float mergedStartU = intervals[0].x;
-        float mergedEndU = intervals[0].y;
-
-        for (int i = 1; i <= intervals.Count; i++)
+        for (int i = 0; i <= boundaries.Count; i++)
         {
-            bool mergeNext = false;
-            if (i < intervals.Count &&
-                TrySurfaceX(zone, mergedEndU, out float currentRightX) &&
-                TrySurfaceX(zone, intervals[i].x, out float nextLeftX))
-            {
-                mergeNext = nextLeftX - currentRightX <= MergeMaterialGapWorld;
-            }
+            float boundaryU = i < boundaries.Count ? boundaries[i] : 1f;
 
-            if (mergeNext)
-            {
-                mergedEndU = intervals[i].y;
-                continue;
-            }
-
-            if (TrySurfaceX(zone, mergedStartU, out float leftX) &&
-                TrySurfaceX(zone, mergedEndU, out float rightX))
+            if (quicksand && boundaryU > intervalStartU + 0.0001f &&
+                TrySurfaceX(zone, intervalStartU, out float leftX) &&
+                TrySurfaceX(zone, boundaryU, out float rightX))
             {
                 if (rightX < leftX)
                 {
-                    (leftX, rightX) = (rightX, leftX);
+                    float swap = leftX;
+                    leftX = rightX;
+                    rightX = swap;
                 }
 
                 float distance = playerX < leftX
@@ -497,17 +466,17 @@ internal static class QuicksandPlayerShoreConstraint
                 if (distance < bestDistance)
                 {
                     bestDistance = distance;
-                    bestStartU = mergedStartU;
-                    bestEndU = mergedEndU;
+                    bestStartU = intervalStartU;
+                    bestEndU = boundaryU;
                     bestLeftX = leftX;
                     bestRightX = rightX;
                 }
             }
 
-            if (i < intervals.Count)
+            if (i < boundaries.Count)
             {
-                mergedStartU = intervals[i].x;
-                mergedEndU = intervals[i].y;
+                quicksand = !quicksand;
+                intervalStartU = boundaryU;
             }
         }
 
