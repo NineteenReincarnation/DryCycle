@@ -4,16 +4,17 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Makes quicksand struggle input affect sink rate only.
+/// Makes Up affect quicksand sink rate without replacing the player's normal jump.
 ///
-/// The inner capture hook records the Player state produced by native Player.Update
+/// The inner update capture records the Player state produced by native Player.Update
 /// before QuicksandSinkRateLimiter applies its post-update support state. The outer
-/// hook restores that native state whenever Up or Jump is being used as a struggle,
-/// so struggle never locks the player into Stand/Crawl/Default.
+/// update hook restores that native state while Up is being used as a struggle, so
+/// Up changes sink rate only and never locks the player into Stand/Crawl/Default.
 ///
-/// Jump itself is swallowed while the player is already in quicksand. Holding Up or
-/// Jump simply changes whole-player descent from the normal sink rate to a slower
-/// world-Y descent. No horizontal impulse is generated.
+/// Jump is deliberately different: it remains Rain World's normal jump. A second
+/// inner capture hook records the native Player.Jump result before the legacy sink
+/// hook can replace its velocity; the outer Jump hook restores that native result so
+/// both jump height and horizontal jump impulse remain intact in quicksand.
 /// </summary>
 internal static class QuicksandPlayerStruggleControl
 {
@@ -28,13 +29,23 @@ internal static class QuicksandPlayerStruggleControl
         internal int CanJump;
     }
 
+    private sealed class NativeJumpState
+    {
+        internal bool HasValue;
+        internal Vector2[] Velocities;
+        internal bool Standing;
+        internal int CanJump;
+        internal float JumpBoost;
+    }
+
     private static readonly ConditionalWeakTable<Player, NativeState> NativeStates = new();
+    private static readonly ConditionalWeakTable<Player, NativeJumpState> NativeJumpStates = new();
     private static bool _captureEnabled;
     private static bool _outerEnabled;
 
     /// <summary>
-    /// Must be enabled before QuicksandSinkRateLimiter so this hook sits inside it
-    /// and can see the state produced directly by native Player.Update.
+    /// Must be enabled before QuicksandSinkRateLimiter so these hooks sit inside it
+    /// and can see the state produced directly by native Player.Update / Player.Jump.
     /// </summary>
     internal static void EnableNativeCapture()
     {
@@ -45,11 +56,12 @@ internal static class QuicksandPlayerStruggleControl
 
         _captureEnabled = true;
         On.Player.Update += Player_Update_CaptureNativeState;
+        On.Player.Jump += Player_Jump_CaptureNativeState;
     }
 
     /// <summary>
-    /// Must be enabled after the quicksand player support hooks so this hook is the
-    /// final owner of struggle displacement/state for the frame.
+    /// Must be enabled after the quicksand player support hooks so these hooks are
+    /// the final owners of Up-struggle displacement and restored native jump state.
     /// </summary>
     internal static void Enable()
     {
@@ -76,6 +88,7 @@ internal static class QuicksandPlayerStruggleControl
         {
             _captureEnabled = false;
             On.Player.Update -= Player_Update_CaptureNativeState;
+            On.Player.Jump -= Player_Jump_CaptureNativeState;
         }
     }
 
@@ -95,6 +108,38 @@ internal static class QuicksandPlayerStruggleControl
         state.Standing = self.standing;
         state.BodyMode = self.bodyMode;
         state.CanJump = self.canJump;
+        state.HasValue = true;
+    }
+
+    private static void Player_Jump_CaptureNativeState(
+        On.Player.orig_Jump orig,
+        Player self)
+    {
+        orig(self);
+
+        if (self == null || self.bodyChunks == null)
+        {
+            return;
+        }
+
+        NativeJumpState state = NativeJumpStates.GetValue(
+            self,
+            _ => new NativeJumpState());
+
+        if (state.Velocities == null || state.Velocities.Length != self.bodyChunks.Length)
+        {
+            state.Velocities = new Vector2[self.bodyChunks.Length];
+        }
+
+        for (int i = 0; i < self.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            state.Velocities[i] = chunk != null ? chunk.vel : Vector2.zero;
+        }
+
+        state.Standing = self.standing;
+        state.CanJump = self.canJump;
+        state.JumpBoost = self.jumpBoost;
         state.HasValue = true;
     }
 
@@ -125,7 +170,7 @@ internal static class QuicksandPlayerStruggleControl
 
         // Restore exactly the high-level state native Player.Update produced before
         // the baseline quicksand controller applied its supported-Stand fallback.
-        // This means struggle changes motion only; it does not choose a body mode.
+        // This means Up changes motion only; it does not choose a body mode.
         if (NativeStates.TryGetValue(self, out NativeState nativeState) &&
             nativeState.HasValue)
         {
@@ -135,7 +180,7 @@ internal static class QuicksandPlayerStruggleControl
         }
 
         // Whatever the native update and baseline sink controller did internally,
-        // the final whole-player motion for a struggle frame is still a small,
+        // the final whole-player motion for an Up-struggle frame is still a small,
         // strictly downward world-Y step. Relative body-chunk pose is preserved.
         float rawAverageDisplacement = AverageChunkY(self) - startAverageY;
         float positionCorrectionY = -StruggleSinkSpeed - rawAverageDisplacement;
@@ -149,22 +194,53 @@ internal static class QuicksandPlayerStruggleControl
 
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
     {
-        if (IsInQuicksand(self))
+        bool inQuicksand = IsInQuicksand(self);
+        NativeJumpState nativeJumpState = self != null
+            ? NativeJumpStates.GetValue(self, _ => new NativeJumpState())
+            : null;
+
+        if (nativeJumpState != null)
         {
-            // Jump is only a struggle input in quicksand. Player_Update sees the held
-            // input and applies the reduced sink rate; no normal jump state/impulse is
-            // allowed to leak into the sand controller.
-            return;
+            nativeJumpState.HasValue = false;
         }
 
         orig(self);
+
+        if (!inQuicksand ||
+            self == null ||
+            self.bodyChunks == null ||
+            nativeJumpState == null ||
+            !nativeJumpState.HasValue ||
+            nativeJumpState.Velocities == null)
+        {
+            return;
+        }
+
+        int count = Mathf.Min(self.bodyChunks.Length, nativeJumpState.Velocities.Length);
+        for (int i = 0; i < count; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            if (chunk != null)
+            {
+                // Restore the complete native jump impulse. In particular, do not
+                // shorten horizontal distance and do not replace normal jump height
+                // with the old fixed quicksand struggle velocity.
+                chunk.vel = nativeJumpState.Velocities[i];
+            }
+        }
+
+        self.standing = nativeJumpState.Standing;
+        self.canJump = nativeJumpState.CanJump;
+        self.jumpBoost = nativeJumpState.JumpBoost;
+        self.feetStuckPos = null;
     }
 
     private static bool HasStruggleInput(Player player)
     {
+        // Up remains the deliberate slow-sink struggle. Jump is now fully native.
         return player?.input != null &&
                player.input.Length > 0 &&
-               (player.input[0].y > 0 || player.input[0].jmp);
+               player.input[0].y > 0;
     }
 
     private static bool IsInQuicksand(Player player)
