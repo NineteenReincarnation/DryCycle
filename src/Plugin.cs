@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.48";
+    public const string Version = "0.1.49";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -57,6 +57,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
+            QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
@@ -109,6 +110,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ThirstHooks.Enable();
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
+            QuicksandAIHazard.Enable();
 
             // Native-state capture remains innermost. Horizontal quicksand limiting
             // is installed before the sink controller so its post-update X correction
@@ -146,6 +148,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
+            QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
