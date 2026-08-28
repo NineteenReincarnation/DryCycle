@@ -21,6 +21,11 @@ internal static class QuicksandPhysicsHooks
     private const int PlayerDeathConfirmTicks = 8;
     private const int ExitReentryCooldown = 24;
 
+    // The quicksand pin must never override an external warp/teleport. Normal
+    // quicksand motion is sub-pixel to a few pixels per frame, while Dev Console
+    // ov, shortcuts and scripted warps move the anchor much farther in one step.
+    private const float ExternalDisplacementReleaseDistance = 32f;
+
     private sealed class ZoneCache
     {
         internal readonly Vector2[] Surface = new Vector2[SampleCount];
@@ -37,6 +42,8 @@ internal static class QuicksandPhysicsHooks
         internal float VisualSinkLimit;
         internal int FullySubmergedTicks;
         internal int ReentryCooldown;
+        internal bool HasPinnedAnchor;
+        internal Vector2 LastPinnedAnchor;
     }
 
     private static readonly ConditionalWeakTable<QuicksandZone, ZoneCache> ZoneCaches = new();
@@ -117,6 +124,15 @@ internal static class QuicksandPhysicsHooks
             return;
         }
 
+        // Detect an external teleport before suppressing terrain collision or
+        // damping velocity. Otherwise the next Room.Update would snap the object
+        // straight back to its old SurfaceU, making commands such as ov appear to
+        // have failed.
+        if (state.Active && ShouldReleaseForExternalMove(owner, state))
+        {
+            Deactivate(state, ExitReentryCooldown);
+        }
+
         if (!state.Active &&
             state.ReentryCooldown <= 0 &&
             TryFindEntry(
@@ -179,10 +195,18 @@ internal static class QuicksandPhysicsHooks
                     state.ReentryCooldown--;
                 }
 
-                if (state.Active)
+                if (!state.Active)
                 {
-                    UpdatePinnedObject(physicalObject, state);
+                    continue;
                 }
+
+                if (ShouldReleaseForExternalMove(physicalObject, state))
+                {
+                    Deactivate(state, ExitReentryCooldown);
+                    continue;
+                }
+
+                UpdatePinnedObject(physicalObject, state);
             }
         }
     }
@@ -199,6 +223,43 @@ internal static class QuicksandPhysicsHooks
         return physicalObject is Player || physicalObject is not Creature;
     }
 
+    private static bool ShouldReleaseForExternalMove(
+        PhysicalObject physicalObject,
+        SinkState state)
+    {
+        if (physicalObject == null ||
+            state == null ||
+            !state.Active ||
+            state.Zone == null)
+        {
+            return false;
+        }
+
+        // A room transfer must always win over the old quicksand state.
+        if (state.Zone.room != physicalObject.room)
+        {
+            return true;
+        }
+
+        if (!state.HasPinnedAnchor ||
+            state.AnchorChunkIndex < 0 ||
+            state.AnchorChunkIndex >= physicalObject.bodyChunks.Length)
+        {
+            return false;
+        }
+
+        BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
+        if (anchor == null)
+        {
+            return true;
+        }
+
+        float releaseDistance = Mathf.Max(
+            ExternalDisplacementReleaseDistance,
+            Mathf.Max(1f, anchor.rad) * 4f);
+        return Vector2.Distance(anchor.pos, state.LastPinnedAnchor) > releaseDistance;
+    }
+
     private static void Activate(
         PhysicalObject physicalObject,
         SinkState state,
@@ -212,6 +273,10 @@ internal static class QuicksandPhysicsHooks
         state.SurfaceU = Mathf.Clamp01(contact.U);
         state.VisualSink = 0f;
         state.FullySubmergedTicks = 0;
+
+        BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
+        state.HasPinnedAnchor = anchor != null;
+        state.LastPinnedAnchor = anchor?.pos ?? Vector2.zero;
 
         if (zone.TrySampleSurfaceFrame(
                 state.SurfaceU,
@@ -234,6 +299,7 @@ internal static class QuicksandPhysicsHooks
     {
         if (physicalObject.room == null ||
             state.Zone == null ||
+            state.Zone.room != physicalObject.room ||
             state.Zone.slatedForDeletetion ||
             state.Zone.PlacedObject == null ||
             !state.Zone.PlacedObject.active ||
@@ -345,6 +411,9 @@ internal static class QuicksandPhysicsHooks
                                inward * Mathf.Max(1f, anchor.rad) * restRadius;
         TranslatePhysicalObject(physicalObject, targetAnchor - anchor.pos);
         KillMomentum(physicalObject);
+
+        state.LastPinnedAnchor = targetAnchor;
+        state.HasPinnedAnchor = true;
 
         float sinkDelta;
         if (physicalObject is Player)
@@ -665,5 +734,7 @@ internal static class QuicksandPhysicsHooks
         state.VisualSinkLimit = 0f;
         state.FullySubmergedTicks = 0;
         state.ReentryCooldown = Mathf.Max(state.ReentryCooldown, cooldown);
+        state.HasPinnedAnchor = false;
+        state.LastPinnedAnchor = Vector2.zero;
     }
 }
