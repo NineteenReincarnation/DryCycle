@@ -11,9 +11,9 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// semantics at the exact moments the native locomotion code needs them, so the
 /// native run cycle, animationFrame progression and body bobbing still execute.
 ///
-/// Up/Jump are reserved as quicksand struggle inputs. While either is held this
-/// support layer does not force Stand or visual foot grounding; the separate struggle
-/// controller changes only the sink rate and leaves the native player state alone.
+/// Up is reserved as the quicksand slow-sink struggle input. Jump remains a normal
+/// Rain World jump, so this support layer continues to expose Stand/canJump on the
+/// jump frame and then stops forcing grounded state as soon as upward motion begins.
 ///
 /// PlayerGraphics normally anchors the legs only when the lower BodyChunk reports a
 /// floor contact. A temporary visual-only floor contact is supplied exclusively
@@ -155,9 +155,11 @@ internal static class QuicksandPlayerLocomotionSupport
 
     private static bool HasStruggleInput(Player player)
     {
+        // Up slows the sink. Jump is intentionally not treated as struggle so the
+        // native jump state and full jump height remain available.
         return player?.input != null &&
                player.input.Length > 0 &&
-               (player.input[0].y > 0 || player.input[0].jmp);
+               player.input[0].y > 0;
     }
 
     private static bool IsInQuicksand(Player player)
