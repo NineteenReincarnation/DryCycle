@@ -151,9 +151,11 @@ internal static class QuicksandPlayerStruggleControl
 
     private static bool TryGetQuicksandState(Player player, out float immersion)
     {
-        return QuicksandSinkRateLimiter.TryGetPlayerQuicksandState(
-            player,
-            out _,
-            out immersion);
+        immersion = 0f;
+        return player != null &&
+               QuicksandSinkRateLimiter.TryGetPlayerQuicksandState(
+                   player,
+                   out _,
+                   out immersion);
     }
 }
