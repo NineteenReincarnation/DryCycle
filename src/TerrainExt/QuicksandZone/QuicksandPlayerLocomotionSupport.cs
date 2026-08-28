@@ -11,6 +11,10 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// semantics at the exact moments the native locomotion code needs them, so the
 /// native run cycle, animationFrame progression and body bobbing still execute.
 ///
+/// Up/Jump are reserved as quicksand struggle inputs. While either is held this
+/// support layer does not force Stand or visual foot grounding; the separate struggle
+/// controller changes only the sink rate and leaves the native player state alone.
+///
 /// PlayerGraphics normally anchors the legs only when the lower BodyChunk reports a
 /// floor contact. A temporary visual-only floor contact is supplied exclusively
 /// during PlayerGraphics.Update and restored immediately afterwards. Player physics
@@ -126,6 +130,7 @@ internal static class QuicksandPlayerLocomotionSupport
         if (!IsInQuicksand(player) ||
             player.dead ||
             !player.Consious ||
+            HasStruggleInput(player) ||
             IsMovingUp(player) ||
             player.animation != Player.AnimationIndex.None)
         {
@@ -142,9 +147,17 @@ internal static class QuicksandPlayerLocomotionSupport
         return IsInQuicksand(player) &&
                !player.dead &&
                player.Consious &&
+               !HasStruggleInput(player) &&
                !IsMovingUp(player) &&
                player.animation == Player.AnimationIndex.None &&
                player.bodyMode == Player.BodyModeIndex.Stand;
+    }
+
+    private static bool HasStruggleInput(Player player)
+    {
+        return player?.input != null &&
+               player.input.Length > 0 &&
+               (player.input[0].y > 0 || player.input[0].jmp);
     }
 
     private static bool IsInQuicksand(Player player)
