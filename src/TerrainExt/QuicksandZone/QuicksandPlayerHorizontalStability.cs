@@ -8,9 +8,10 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// Rules:
 /// - quicksand never creates X motion;
 /// - with no left/right input, passive whole-player X drift is removed;
-/// - with left/right input, native walking is preserved but abnormal whole-player
-///   X speed/displacement is capped;
-/// - the first frame that crosses into quicksand absorbs most incoming X momentum;
+/// - with left/right input, native walking is preserved, abnormal whole-player
+///   X speed/displacement is guarded, then the final in-sand X result is multiplied
+///   by 0.45 to create the quicksand restraint;
+/// - the first frame that crosses into quicksand absorbs excessive incoming X momentum;
 /// - a swept segment test catches high-speed boundary crossings that would otherwise
 ///   tunnel completely through a quicksand strip in one Player.Update.
 ///
@@ -19,6 +20,7 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// </summary>
 internal static class QuicksandPlayerHorizontalStability
 {
+    private const float HorizontalMultiplier = 0.45f;
     private const float NativeRunSpeedScale = 0.65f;
     private const float MinimumHorizontalCap = 1.80f;
     private const float MaximumHorizontalCap = 3.25f;
@@ -116,28 +118,32 @@ internal static class QuicksandPlayerHorizontalStability
 
         if (enteringThisFrame && sweptIntoQuicksand)
         {
-            // Keep travel up to the first swept contact, then permit only a small
-            // amount of post-contact penetration. This absorbs a fast turn/dash at
-            // the boundary instead of allowing a one-frame tunnel through the zone.
+            // Keep travel up to the first swept contact untouched. The existing
+            // entry guard first removes the dash/turn spike; only the post-contact
+            // portion is then multiplied by the final quicksand X multiplier.
             float clampedEntryT = Mathf.Clamp01(entryT);
             float entryCenterX = Mathf.Lerp(startAverageX, endAverageX, clampedEntryT);
             float remainingTravel = endAverageX - entryCenterX;
             float postContactLimit = speedCap * EntryTravelRetention;
-            targetAverageX = entryCenterX + Mathf.Clamp(
+            float guardedPostContactTravel = Mathf.Clamp(
                 remainingTravel,
                 -postContactLimit,
                 postContactLimit);
+            targetAverageX = entryCenterX +
+                             guardedPostContactTravel * HorizontalMultiplier;
         }
         else
         {
-            // Already inside quicksand: preserve active native walking, but never let
-            // a special turn/slide state translate the whole player faster than the
-            // quicksand walking cap in a single physics tick.
+            // Already inside quicksand: preserve the native left/right result, keep
+            // the existing abrupt-turn/special-state cap, then retain exactly 45%
+            // of the guarded whole-player displacement for this physics tick.
             float displacement = endAverageX - startAverageX;
-            targetAverageX = startAverageX + Mathf.Clamp(
+            float guardedDisplacement = Mathf.Clamp(
                 displacement,
                 -speedCap,
                 speedCap);
+            targetAverageX = startAverageX +
+                             guardedDisplacement * HorizontalMultiplier;
         }
 
         float positionCorrectionX = targetAverageX - AverageChunkX(self);
@@ -146,13 +152,13 @@ internal static class QuicksandPlayerHorizontalStability
             TranslatePlayerX(self, positionCorrectionX);
         }
 
-        // Cap only center-of-mass X velocity. Entry gets a stronger one-time absorb;
-        // ordinary in-sand walking uses the full cap. Relative chunk velocity remains
-        // intact so the native leg/body cycle is not flattened.
+        // Preserve the existing anti-turn velocity guard, then apply the same final
+        // 0.45 multiplier to the common X velocity. Relative chunk velocity remains
+        // untouched so the native leg/body cycle is not flattened.
         float velocityCap = enteringThisFrame
             ? speedCap * EntryVelocityRetention
             : speedCap;
-        ClampWholePlayerHorizontalVelocity(self, velocityCap);
+        LimitAndScaleWholePlayerHorizontalVelocity(self, velocityCap);
     }
 
     private static float ResolveHorizontalSpeedCap(Player player)
@@ -388,14 +394,17 @@ internal static class QuicksandPlayerHorizontalStability
         }
     }
 
-    private static void ClampWholePlayerHorizontalVelocity(Player player, float maxAbsVelocity)
+    private static void LimitAndScaleWholePlayerHorizontalVelocity(
+        Player player,
+        float maxAbsVelocity)
     {
         float averageVelocityX = AverageChunkVelocityX(player);
-        float clampedVelocityX = Mathf.Clamp(
+        float guardedVelocityX = Mathf.Clamp(
             averageVelocityX,
             -maxAbsVelocity,
             maxAbsVelocity);
-        float correction = clampedVelocityX - averageVelocityX;
+        float targetVelocityX = guardedVelocityX * HorizontalMultiplier;
+        float correction = targetVelocityX - averageVelocityX;
 
         if (Mathf.Abs(correction) > Epsilon)
         {
