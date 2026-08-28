@@ -4,20 +4,20 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
 /// Baseline quicksand motion model.
-/// Keep the normal behaviour deliberately simple until the contact physics are
-/// stable: one fixed sink speed after surface contact, plus one fixed outward
-/// struggle impulse when the player jumps.
+///
+/// Physics rules are intentionally simple:
+/// - quicksand surface geometry is used only to decide whether a chunk is inside;
+/// - sinking is always straight down on the world Y axis;
+/// - jumping/struggling is always straight up on the world Y axis;
+/// - no quicksand physics operation is allowed to add an X displacement;
+/// - while a chunk is in the quicksand band, native terrain collision is disabled.
 /// </summary>
 internal static class QuicksandSinkRateLimiter
 {
     // Rain World physics runs at about 40 ticks/s.
-    // Player: 0.10 px/tick = ~4 px/s.
-    // Loose object: 0.065 px/tick = ~2.6 px/s.
     private const float PlayerSinkSpeed = 0.10f;
     private const float ObjectSinkSpeed = 0.065f;
-
-    // Jumping in quicksand is a short struggle, not a normal jump.
-    private const float PlayerStruggleOutwardSpeed = 1.15f;
+    private const float PlayerStruggleUpwardSpeed = 1.15f;
     private const float DetectionMarginRadii = 2.0f;
 
     private static bool _enabled;
@@ -30,6 +30,7 @@ internal static class QuicksandSinkRateLimiter
         }
 
         _enabled = true;
+        On.Player.Update += Player_Update;
         On.BodyChunk.Update += BodyChunk_Update;
         On.Player.Jump += Player_Jump;
     }
@@ -42,26 +43,132 @@ internal static class QuicksandSinkRateLimiter
         }
 
         _enabled = false;
+        On.Player.Update -= Player_Update;
         On.BodyChunk.Update -= BodyChunk_Update;
         On.Player.Jump -= Player_Jump;
+    }
+
+    private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
+    {
+        if (self == null ||
+            self.room == null ||
+            self.bodyChunks == null ||
+            self.bodyChunks.Length == 0)
+        {
+            orig(self, eu);
+            return;
+        }
+
+        int count = self.bodyChunks.Length;
+        Vector2[] startPositions = new Vector2[count];
+        bool[] startedTouching = new bool[count];
+        bool[] collisionOverridden = new bool[count];
+        bool[] originalTerrainCollision = new bool[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            startPositions[i] = chunk.pos;
+            originalTerrainCollision[i] = chunk.collideWithTerrain;
+
+            if (!TryFindVerticalContact(
+                    chunk,
+                    out _,
+                    out _,
+                    out float startDepth,
+                    out _))
+            {
+                continue;
+            }
+
+            float radius = Mathf.Max(1f, chunk.rad);
+            startedTouching[i] = startDepth >= -radius;
+
+            // Once a body chunk is at or immediately approaching quicksand, do not
+            // let Rain World's normal tile/terrain collision decide its motion.
+            collisionOverridden[i] = true;
+            chunk.collideWithTerrain = false;
+        }
+
+        try
+        {
+            orig(self, eu);
+        }
+        finally
+        {
+            for (int i = 0; i < count; i++)
+            {
+                BodyChunk chunk = self.bodyChunks[i];
+                if (chunk != null && collisionOverridden[i])
+                {
+                    chunk.collideWithTerrain = originalTerrainCollision[i];
+                }
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            if (chunk == null ||
+                !TryFindVerticalContact(
+                    chunk,
+                    out _,
+                    out float currentSurfaceY,
+                    out float currentDepth,
+                    out _))
+            {
+                continue;
+            }
+
+            float radius = Mathf.Max(1f, chunk.rad);
+            bool touchingSurface = startedTouching[i] || currentDepth >= -radius;
+            if (!touchingSurface)
+            {
+                continue;
+            }
+
+            float verticalDisplacement = chunk.pos.y - startPositions[i].y;
+
+            // Positive Y movement is an intentional upward movement (jump, climb,
+            // pole movement). Do not turn it into a sink step here.
+            if (verticalDisplacement > 0f)
+            {
+                continue;
+            }
+
+            // A chunk that crossed the surface this frame is placed one fixed sink
+            // step below the contact height. A chunk already in sand simply loses
+            // exactly one fixed Y step. X is never touched here.
+            float targetY = startedTouching[i]
+                ? startPositions[i].y - PlayerSinkSpeed
+                : currentSurfaceY + radius - PlayerSinkSpeed;
+
+            chunk.pos.y = targetY;
+            chunk.vel.y = -PlayerSinkSpeed;
+        }
     }
 
     private static void BodyChunk_Update(On.BodyChunk.orig_Update orig, BodyChunk self)
     {
         PhysicalObject owner = self?.owner;
-        if (!CanLimit(owner) ||
-            !TryFindContactFrame(
+        if (!CanLimitLooseObject(owner) ||
+            !TryFindVerticalContact(
                 self,
-                out QuicksandZone zone,
-                out Vector2 inward,
-                out float startDepth))
+                out _,
+                out _,
+                out float startDepth,
+                out _))
         {
             orig(self);
             return;
         }
 
-        bool isPlayer = owner is Player;
-        if (!isPlayer && owner.grabbedBy != null && owner.grabbedBy.Count > 0)
+        if (owner.grabbedBy != null && owner.grabbedBy.Count > 0)
         {
             orig(self);
             return;
@@ -69,39 +176,48 @@ internal static class QuicksandSinkRateLimiter
 
         Vector2 startPos = self.pos;
         float radius = Mathf.Max(1f, self.rad);
-        float fixedSinkSpeed = isPlayer ? PlayerSinkSpeed : ObjectSinkSpeed;
+        bool startedTouching = startDepth >= -radius;
 
-        orig(self);
+        bool originalTerrainCollision = self.collideWithTerrain;
+        self.collideWithTerrain = false;
 
-        if (!IsUsableZone(zone) ||
-            !TrySampleAtChunk(self, zone, out Vector2 currentInward, out float currentDepth))
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            self.collideWithTerrain = originalTerrainCollision;
+        }
+
+        if (!TryFindVerticalContact(
+                self,
+                out _,
+                out float currentSurfaceY,
+                out float currentDepth,
+                out _))
         {
             return;
         }
 
-        inward = currentInward;
-        Vector2 displacement = self.pos - startPos;
-        float inwardDisplacement = Vector2.Dot(displacement, inward);
-
-        // Before the body actually touches the surface, leave its approach alone.
-        // The moment a radius reaches the sand, normal motion becomes exactly the
-        // authored fixed sink speed. If a fast impact crossed the surface this frame,
-        // correcting the displacement here also removes the free-fall overshoot.
-        bool touchingSurface = startDepth >= -radius || currentDepth >= -radius;
+        bool touchingSurface = startedTouching || currentDepth >= -radius;
         if (!touchingSurface)
         {
             return;
         }
 
-        // Negative means the body is intentionally moving out of the sand (jump /
-        // climb). Do not fight that here. Any non-outward motion sinks at one speed.
-        if (inwardDisplacement >= 0f)
+        float verticalDisplacement = self.pos.y - startPos.y;
+        if (verticalDisplacement > 0f)
         {
-            self.pos += inward * (fixedSinkSpeed - inwardDisplacement);
-
-            float inwardVelocity = Vector2.Dot(self.vel, inward);
-            self.vel += inward * (fixedSinkSpeed - inwardVelocity);
+            return;
         }
+
+        float targetY = startedTouching
+            ? startPos.y - ObjectSinkSpeed
+            : currentSurfaceY + radius - ObjectSinkSpeed;
+
+        self.pos.y = targetY;
+        self.vel.y = -ObjectSinkSpeed;
     }
 
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
@@ -112,7 +228,21 @@ internal static class QuicksandSinkRateLimiter
             return;
         }
 
-        bool inQuicksand = TryFindPlayerFrame(self, out Vector2 inward);
+        bool inQuicksand = IsPlayerTouchingQuicksand(self);
+        float[] beforeX = null;
+
+        if (inQuicksand)
+        {
+            beforeX = new float[self.bodyChunks.Length];
+            for (int i = 0; i < self.bodyChunks.Length; i++)
+            {
+                if (self.bodyChunks[i] != null)
+                {
+                    beforeX[i] = self.bodyChunks[i].vel.x;
+                }
+            }
+        }
+
         orig(self);
 
         if (!inQuicksand)
@@ -120,9 +250,6 @@ internal static class QuicksandSinkRateLimiter
             return;
         }
 
-        // Replace whatever normal jump the base game produced with one fixed
-        // outward struggle impulse. Tangential velocity is left intact.
-        Vector2 outward = -inward;
         for (int i = 0; i < self.bodyChunks.Length; i++)
         {
             BodyChunk chunk = self.bodyChunks[i];
@@ -131,18 +258,18 @@ internal static class QuicksandSinkRateLimiter
                 continue;
             }
 
-            float outwardSpeed = Vector2.Dot(chunk.vel, outward);
-            chunk.vel += outward * (PlayerStruggleOutwardSpeed - outwardSpeed);
+            // The struggle impulse is Y-only. Restore the X velocity that existed
+            // before the normal jump code ran so quicksand does not create sideways
+            // jump movement of its own.
+            chunk.vel.x = beforeX[i];
+            chunk.vel.y = PlayerStruggleUpwardSpeed;
         }
 
-        // Prevent Rain World's held-jump boost from turning the fixed struggle into
-        // a normal jump over the following ticks.
         self.jumpBoost = 0f;
     }
 
-    private static bool TryFindPlayerFrame(Player player, out Vector2 inward)
+    private static bool IsPlayerTouchingQuicksand(Player player)
     {
-        inward = Vector2.down;
         if (player?.bodyChunks == null)
         {
             return false;
@@ -151,9 +278,19 @@ internal static class QuicksandSinkRateLimiter
         for (int i = 0; i < player.bodyChunks.Length; i++)
         {
             BodyChunk chunk = player.bodyChunks[i];
-            if (chunk != null &&
-                TryFindContactFrame(chunk, out _, out inward, out float depth) &&
-                depth >= -Mathf.Max(1f, chunk.rad))
+            if (chunk == null ||
+                !TryFindVerticalContact(
+                    chunk,
+                    out _,
+                    out _,
+                    out float depth,
+                    out float depthLength))
+            {
+                continue;
+            }
+
+            float radius = Mathf.Max(1f, chunk.rad);
+            if (depth >= -radius && depth <= depthLength + radius * 0.50f)
             {
                 return true;
             }
@@ -162,15 +299,17 @@ internal static class QuicksandSinkRateLimiter
         return false;
     }
 
-    private static bool TryFindContactFrame(
+    private static bool TryFindVerticalContact(
         BodyChunk chunk,
         out QuicksandZone bestZone,
-        out Vector2 bestInward,
-        out float bestDepth)
+        out float bestSurfaceY,
+        out float bestDepth,
+        out float bestDepthLength)
     {
         bestZone = null;
-        bestInward = Vector2.down;
+        bestSurfaceY = 0f;
         bestDepth = float.NegativeInfinity;
+        bestDepthLength = 0f;
 
         PhysicalObject owner = chunk?.owner;
         Room room = owner?.room;
@@ -179,7 +318,6 @@ internal static class QuicksandSinkRateLimiter
             return false;
         }
 
-        float radius = Mathf.Max(1f, chunk.rad);
         for (int i = 0; i < room.updateList.Count; i++)
         {
             if (room.updateList[i] is not QuicksandZone zone || !IsUsableZone(zone))
@@ -187,12 +325,12 @@ internal static class QuicksandSinkRateLimiter
                 continue;
             }
 
-            if (!TrySampleAtChunk(chunk, zone, out Vector2 inward, out float depth))
-            {
-                continue;
-            }
-
-            if (depth < -radius * DetectionMarginRadii)
+            if (!TrySampleVerticalAtChunk(
+                    chunk,
+                    zone,
+                    out float surfaceY,
+                    out float depth,
+                    out float depthLength))
             {
                 continue;
             }
@@ -201,21 +339,24 @@ internal static class QuicksandSinkRateLimiter
             {
                 bestDepth = depth;
                 bestZone = zone;
-                bestInward = inward;
+                bestSurfaceY = surfaceY;
+                bestDepthLength = depthLength;
             }
         }
 
         return bestZone != null;
     }
 
-    private static bool TrySampleAtChunk(
+    private static bool TrySampleVerticalAtChunk(
         BodyChunk chunk,
         QuicksandZone zone,
-        out Vector2 inward,
-        out float signedDepth)
+        out float surfaceY,
+        out float signedDepth,
+        out float depthLength)
     {
-        inward = Vector2.down;
+        surfaceY = 0f;
         signedDepth = 0f;
+        depthLength = 0f;
 
         float radius = Mathf.Max(1f, chunk.rad);
         if (chunk.pos.x < zone.startX - radius * 1.15f ||
@@ -230,33 +371,32 @@ internal static class QuicksandSinkRateLimiter
                 u,
                 out Vector2 surfacePoint,
                 out _,
-                out inward,
-                out float depthLength))
+                out _,
+                out _))
         {
             return false;
         }
 
-        if (inward.sqrMagnitude < 0.0001f)
-        {
-            inward = Vector2.down;
-        }
-        else
-        {
-            inward.Normalize();
-        }
+        surfaceY = surfacePoint.y;
+        float bottomY = zone.PlacedObject.pos.y - zone.Data.BottomDepth;
+        depthLength = Mathf.Max(4f, surfaceY - bottomY);
 
-        signedDepth = Vector2.Dot(chunk.pos - surfacePoint, inward);
+        // Positive depth means below the surface. This is deliberately world-Y
+        // depth, not distance along the curved surface normal.
+        signedDepth = surfaceY - chunk.pos.y;
+
         return signedDepth >= -radius * DetectionMarginRadii &&
                signedDepth <= depthLength + radius * 0.50f;
     }
 
-    private static bool CanLimit(PhysicalObject owner)
+    private static bool CanLimitLooseObject(PhysicalObject owner)
     {
         return owner != null &&
+               owner is not Player &&
+               owner is not Creature &&
                owner.room != null &&
                owner.bodyChunks != null &&
-               owner.bodyChunks.Length > 0 &&
-               (owner is Player || owner is not Creature);
+               owner.bodyChunks.Length > 0;
     }
 
     private static bool IsUsableZone(QuicksandZone zone)
