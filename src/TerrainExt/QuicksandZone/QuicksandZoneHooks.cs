@@ -106,6 +106,8 @@ internal static class QuicksandZoneHooks
             self.RoomSettings.placedObjects.Add(placedObject);
         }
 
+        EnsureRuntimeObject(self.owner.room, placedObject);
+
         PlacedObjectRepresentation representation = new QuicksandZoneRepresentation(
             self.owner,
             type + "_Rep",
@@ -115,7 +117,6 @@ internal static class QuicksandZoneHooks
 
         self.tempNodes.Add(representation);
         self.subNodes.Add(representation);
-        EnsureRuntimeObject(self.owner.room, placedObject);
     }
 
     private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
@@ -164,8 +165,6 @@ internal static class QuicksandZoneHooks
         {
             if (renderState.Active)
             {
-                // Restore the drawable's own normal container choices after leaving
-                // the quicksand. This also restores MSC/Watcher-specific graphics.
                 self.AddSpritesToContainer(null, rCam);
                 renderState.Active = false;
             }
@@ -181,15 +180,11 @@ internal static class QuicksandZoneHooks
 
         if (!renderState.Active)
         {
-            // Let the drawable rebuild any internal layout first, then force its
-            // visible sprites behind Sand. The quicksand surface itself becomes the
-            // clipping boundary: everything above the curve stays visible, and the
-            // portion below it is naturally hidden.
             self.AddSpritesToContainer(sand, rCam);
             renderState.Active = true;
         }
 
-        MoveDrawableBehindSand(self, sand);
+        MoveDrawableBehindTerrain(self, sand);
         ApplyVisualSinkOffset(self, visualOffset);
     }
 
@@ -203,12 +198,10 @@ internal static class QuicksandZoneHooks
         return drawable as PhysicalObject;
     }
 
-    private static void MoveDrawableBehindSand(
+    private static void MoveDrawableBehindTerrain(
         RoomCamera.SpriteLeaser sLeaser,
         FContainer sand)
     {
-        // Reverse traversal followed by MoveToBack preserves the sprite array's
-        // relative ordering while placing the whole drawable behind the sand mesh.
         for (int i = sLeaser.sprites.Length - 1; i >= 0; i--)
         {
             FSprite sprite = sLeaser.sprites[i];
@@ -252,9 +245,6 @@ internal static class QuicksandZoneHooks
             return;
         }
 
-        // DrawSprites has already rebuilt every sprite position for this camera
-        // frame, so this offset never accumulates. Physics remains fixed on the
-        // surface while only the rendered image sinks through it.
         for (int i = 0; i < sLeaser.sprites.Length; i++)
         {
             FSprite sprite = sLeaser.sprites[i];
@@ -275,31 +265,36 @@ internal static class QuicksandZoneHooks
             return;
         }
 
-        bool hasZone = false;
-        bool hasTerrainMask = false;
+        QuicksandZone zone = null;
+        QuicksandFlowOverlay overlay = null;
 
         for (int i = 0; i < room.updateList.Count; i++)
         {
             if (room.updateList[i] is QuicksandZone existingZone &&
                 existingZone.PlacedObject == placedObject)
             {
-                hasZone = true;
+                zone = existingZone;
             }
-            else if (room.updateList[i] is QuicksandTerrainMaskSource existingMask &&
-                     existingMask.PlacedObject == placedObject)
+            else if (room.updateList[i] is QuicksandFlowOverlay existingOverlay &&
+                     existingOverlay.Zone?.PlacedObject == placedObject)
             {
-                hasTerrainMask = true;
+                overlay = existingOverlay;
             }
         }
 
-        if (!hasZone)
+        if (zone == null)
         {
-            room.AddObject(new QuicksandZone(placedObject));
+            zone = new QuicksandZone(room, placedObject);
+            room.AddObject(zone);
+        }
+        else
+        {
+            zone.RefreshCurve();
         }
 
-        if (ModManager.Watcher && !hasTerrainMask)
+        if (overlay == null)
         {
-            room.AddObject(new QuicksandTerrainMaskSource(placedObject));
+            room.AddObject(new QuicksandFlowOverlay(zone));
         }
     }
 }
