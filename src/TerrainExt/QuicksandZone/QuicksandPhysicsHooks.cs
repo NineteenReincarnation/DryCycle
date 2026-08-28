@@ -63,9 +63,10 @@ internal static class QuicksandPhysicsHooks
         }
 
         bool originalTerrainCollision = self.collideWithTerrain;
+        QuicksandSurface.Contact contact = default;
         bool quicksandOverridesTerrain =
             originalTerrainCollision &&
-            TryGetQuicksandContact(self, predictive: true, out QuicksandSurface.Contact contact);
+            TryGetQuicksandContact(self, predictive: true, out contact);
 
         Player player = self.owner as Player;
         PlayerChunkState playerState = player != null
