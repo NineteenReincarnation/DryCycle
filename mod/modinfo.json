@@ -1,7 +1,7 @@
 {
   "id": "Anno",
   "name": "DryCycle",
-  "version": "0.0.38",
+  "version": "0.0.39",
   "authors": "NineteenReincarnation",
   "description": "Adds hydration as an additional Rain World survival resource.",
   "target_game_version": "v1.11.8",
