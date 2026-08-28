@@ -4,8 +4,8 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
 /// Baseline quicksand motion model.
-/// Keep the vertical/normal behaviour deliberately simple until the contact physics
-/// are stable: a fixed sink speed while moving into sand, plus a fixed outward
+/// Keep the normal behaviour deliberately simple until the contact physics are
+/// stable: one fixed sink speed after surface contact, plus one fixed outward
 /// struggle impulse when the player jumps.
 /// </summary>
 internal static class QuicksandSinkRateLimiter
@@ -50,8 +50,11 @@ internal static class QuicksandSinkRateLimiter
     {
         PhysicalObject owner = self?.owner;
         if (!CanLimit(owner) ||
-            (!owner.Equals(self.owner)) ||
-            (!TryFindContactFrame(self, out QuicksandZone zone, out Vector2 inward, out float signedDepth)))
+            !TryFindContactFrame(
+                self,
+                out QuicksandZone zone,
+                out Vector2 inward,
+                out float startDepth))
         {
             orig(self);
             return;
@@ -65,34 +68,39 @@ internal static class QuicksandSinkRateLimiter
         }
 
         Vector2 startPos = self.pos;
+        float radius = Mathf.Max(1f, self.rad);
         float fixedSinkSpeed = isPlayer ? PlayerSinkSpeed : ObjectSinkSpeed;
 
         orig(self);
 
-        // Re-sample the same authored curve after the native update. If the chunk is
-        // still close to this quicksand surface, cap only displacement into the sand.
         if (!IsUsableZone(zone) ||
             !TrySampleAtChunk(self, zone, out Vector2 currentInward, out float currentDepth))
         {
             return;
         }
 
-        // Use the current curve normal so curved quicksand still behaves correctly.
         inward = currentInward;
         Vector2 displacement = self.pos - startPos;
         float inwardDisplacement = Vector2.Dot(displacement, inward);
 
-        if (inwardDisplacement > fixedSinkSpeed)
+        // Before the body actually touches the surface, leave its approach alone.
+        // The moment a radius reaches the sand, normal motion becomes exactly the
+        // authored fixed sink speed. If a fast impact crossed the surface this frame,
+        // correcting the displacement here also removes the free-fall overshoot.
+        bool touchingSurface = startDepth >= -radius || currentDepth >= -radius;
+        if (!touchingSurface)
         {
-            self.pos -= inward * (inwardDisplacement - fixedSinkSpeed);
+            return;
         }
 
-        // Keep the velocity coherent with the fixed displacement. Do not touch
-        // outward velocity: that is needed for the explicit jump/struggle action.
-        float inwardVelocity = Vector2.Dot(self.vel, inward);
-        if (inwardVelocity > fixedSinkSpeed)
+        // Negative means the body is intentionally moving out of the sand (jump /
+        // climb). Do not fight that here. Any non-outward motion sinks at one speed.
+        if (inwardDisplacement >= 0f)
         {
-            self.vel -= inward * (inwardVelocity - fixedSinkSpeed);
+            self.pos += inward * (fixedSinkSpeed - inwardDisplacement);
+
+            float inwardVelocity = Vector2.Dot(self.vel, inward);
+            self.vel += inward * (fixedSinkSpeed - inwardVelocity);
         }
     }
 
@@ -112,8 +120,8 @@ internal static class QuicksandSinkRateLimiter
             return;
         }
 
-        // The existing player code may generate a full normal jump. Replace only the
-        // component away from the quicksand with one fixed struggle impulse.
+        // Replace whatever normal jump the base game produced with one fixed
+        // outward struggle impulse. Tangential velocity is left intact.
         Vector2 outward = -inward;
         for (int i = 0; i < self.bodyChunks.Length; i++)
         {
@@ -127,7 +135,8 @@ internal static class QuicksandSinkRateLimiter
             chunk.vel += outward * (PlayerStruggleOutwardSpeed - outwardSpeed);
         }
 
-        // Do not let Rain World's jumpBoost turn this fixed struggle into a normal jump.
+        // Prevent Rain World's held-jump boost from turning the fixed struggle into
+        // a normal jump over the following ticks.
         self.jumpBoost = 0f;
     }
 
@@ -142,7 +151,9 @@ internal static class QuicksandSinkRateLimiter
         for (int i = 0; i < player.bodyChunks.Length; i++)
         {
             BodyChunk chunk = player.bodyChunks[i];
-            if (chunk != null && TryFindContactFrame(chunk, out _, out inward, out _))
+            if (chunk != null &&
+                TryFindContactFrame(chunk, out _, out inward, out float depth) &&
+                depth >= -Mathf.Max(1f, chunk.rad))
             {
                 return true;
             }
@@ -181,8 +192,7 @@ internal static class QuicksandSinkRateLimiter
                 continue;
             }
 
-            if (depth < -radius * DetectionMarginRadii ||
-                depth > zone.Data.BottomDepth + radius * 0.5f)
+            if (depth < -radius * DetectionMarginRadii)
             {
                 continue;
             }
