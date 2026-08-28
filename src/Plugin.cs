@@ -2,6 +2,7 @@ using System;
 using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.Creatures;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
@@ -27,6 +28,10 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         Logger = base.Logger;
 
+        // Creature ExtEnums and StaticWorld hooks must exist before the game's
+        // initialization screen constructs creature templates and prebaked pathing.
+        SpinebackLizardHooks.Enable();
+
         // Custom SoundIDs must exist before Rain World's SoundLoader constructs its
         // trigger array from the merged SoundEffects/Sounds.txt data.
         DewPodAudioHooks.InitializeSoundIds();
@@ -39,6 +44,7 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        SpinebackLizardHooks.Disable();
 
         if (_initialized)
         {
@@ -111,6 +117,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
             KingVultureSpearHooks.Disable();
+            SpinebackLizardHooks.Disable();
             Logger.LogError(ex);
             throw;
         }
