@@ -9,6 +9,7 @@
     <RootNamespace>DryCycle</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GameModOutputDir>D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <GameModRootDir>$(GameModOutputDir)/../..</GameModRootDir>
     <OutputPath>$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
   </PropertyGroup>
@@ -87,7 +88,21 @@
     <ItemGroup>
       <RemovePlugins Include="$(GameModOutputDir)/*.pdb" />
     </ItemGroup>
+
     <Delete Files="@(RemovePlugins)" />
+
+    <!-- Rain World's custom SoundID data is merged from the mod root's
+         modify/soundeffects/sounds.txt. Keep the authored OGG itself in
+         Ancient Site/soundeffects/DC_DrinkWater.ogg. -->
+    <MakeDir Directories="$(GameModRootDir)/modify/soundeffects" />
+    <Copy
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/modify/soundeffects/sounds.txt"
+      DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
+      SkipUnchangedFiles="true" />
+
+    <Warning
+      Condition="!Exists('$(GameModRootDir)/soundeffects/DC_DrinkWater.ogg')"
+      Text="Dew Pod drinking SFX not found: $(GameModRootDir)/soundeffects/DC_DrinkWater.ogg" />
   </Target>
 
 </Project>
