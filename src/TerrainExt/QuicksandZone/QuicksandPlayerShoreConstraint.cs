@@ -193,7 +193,7 @@ internal static class QuicksandPlayerShoreConstraint
         bool outwardInput = HasOutwardInput(player, state.ShoreSide);
         bool shallowJumpIntent = outwardInput &&
                                  state.MaxImmersion <= JumpExitImmersion &&
-                                 JumpHeld(player);
+                                 JumpPressedAndAvailable(player);
 
         return !shallowJumpIntent;
     }
@@ -473,11 +473,13 @@ internal static class QuicksandPlayerShoreConstraint
         return shoreSide != 0 && HorizontalInputDirection(player) == shoreSide;
     }
 
-    private static bool JumpHeld(Player player)
+    private static bool JumpPressedAndAvailable(Player player)
     {
         return player?.input != null &&
-               player.input.Length > 0 &&
-               player.input[0].jmp;
+               player.input.Length > 1 &&
+               player.input[0].jmp &&
+               !player.input[1].jmp &&
+               player.canJump > 0;
     }
 
     private static int HorizontalInputDirection(Player player)
