@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.54";
+    public const string Version = "0.1.55";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -55,6 +55,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerShoreConstraint.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
             QuicksandLooseObjectSinkEase.Disable();
@@ -115,6 +116,12 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandLooseObjectSinkEase.Enable();
             QuicksandPlayerLocomotionSupport.Enable();
             QuicksandPlayerStruggleControl.Enable();
+
+            // The shore layer is installed last among Player.Update hooks. It sees
+            // the final quicksand movement, blocks only deep sideways leakage at a
+            // material edge, and converts attempted outward travel into a small
+            // depth-dependent climb without creating wall/floor ContactPoints.
+            QuicksandPlayerShoreConstraint.Enable();
             QuicksandWeaponSettling.Enable();
 
             // Carryable items are still deleted by the generic submerged cleanup.
@@ -142,6 +149,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerShoreConstraint.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
             QuicksandLooseObjectSinkEase.Disable();
