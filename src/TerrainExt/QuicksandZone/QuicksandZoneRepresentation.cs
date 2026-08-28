@@ -15,6 +15,7 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
     private static readonly Color QuicksandLineColor = new(0.95f, 0.70f, 0.23f);
     private static readonly Color BottomLineColor = new(0.50f, 0.31f, 0.18f);
     private static readonly Color MaterialPointColor = new(1f, 0.82f, 0.18f);
+    private static readonly Color MaterialDeleteHoverColor = new(1f, 0.50f, 0f);
 
     private sealed class MaterialBoundaryHandle : Handle
     {
@@ -130,35 +131,50 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
 
         bool boundariesChanged = false;
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         bool materialClick = shift && Input.GetMouseButtonDown(1);
+        bool materialDeleteClick = control && Input.GetMouseButtonDown(0);
 
-        // Keep Watcher's normal spline editing untouched: Shift + left click is
-        // handled by BezierSplineControl and creates the ordinary white geometry
-        // control points. Shift + right click is reserved exclusively for the
-        // yellow quicksand material boundaries.
+        // Keep Watcher's normal spline editing untouched:
+        // - Shift + left click stays owned by BezierSplineControl for white geometry points.
+        // - Shift + right click adds a yellow material boundary, or deletes one under the cursor.
+        // - Ctrl + left click mirrors Watcher's normal midpoint deletion gesture for yellow points.
         MaterialBoundaryHandle deleteHandle = null;
-        if (materialClick)
+        float nearestDeleteDistance = float.PositiveInfinity;
+        if (materialClick || materialDeleteClick)
         {
             for (int i = 0; i < _materialHandles.Count; i++)
             {
-                if (_materialHandles[i].MouseOver)
+                MaterialBoundaryHandle handle = _materialHandles[i];
+                if (!handle.MouseOver)
                 {
-                    deleteHandle = _materialHandles[i];
-                    break;
+                    continue;
+                }
+
+                float distance = Vector2.SqrMagnitude(handle.absPos - owner.mousePos);
+                if (distance < nearestDeleteDistance)
+                {
+                    nearestDeleteDistance = distance;
+                    deleteHandle = handle;
+                }
+            }
+        }
+
+        if (control)
+        {
+            for (int i = 0; i < _materialHandles.Count; i++)
+            {
+                MaterialBoundaryHandle handle = _materialHandles[i];
+                if (handle.MouseOver)
+                {
+                    handle.SetColor(MaterialDeleteHoverColor);
                 }
             }
         }
 
         if (deleteHandle != null)
         {
-            if (owner.draggedNode == deleteHandle)
-            {
-                owner.draggedNode = null;
-            }
-            deleteHandle.dragged = false;
-            subNodes.Remove(deleteHandle);
-            _materialHandles.Remove(deleteHandle);
-            deleteHandle.ClearSprites();
+            RemoveBoundaryHandle(deleteHandle);
             boundariesChanged = true;
         }
         else
@@ -294,6 +310,24 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
         MaterialBoundaryHandle handle = new(owner, this, u);
         _materialHandles.Add(handle);
         subNodes.Add(handle);
+    }
+
+    private void RemoveBoundaryHandle(MaterialBoundaryHandle handle)
+    {
+        if (handle == null)
+        {
+            return;
+        }
+
+        if (owner.draggedNode == handle)
+        {
+            owner.draggedNode = null;
+        }
+
+        handle.dragged = false;
+        subNodes.Remove(handle);
+        _materialHandles.Remove(handle);
+        handle.ClearSprites();
     }
 
     private void SyncMaterialBoundaries()
