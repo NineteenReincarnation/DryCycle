@@ -232,16 +232,16 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
 
         if (_drinkSoundCooldown <= 0 && room != null && firstChunk != null)
         {
-            // The swollen Water Nut mouth sound is the closest vanilla wet sip.
-            // Play it rhythmically rather than every simulation tick so sustained
-            // drinking reads as repeated swallowing instead of audio chatter.
+            // Use the vanilla Water Nut mouth sound as a wet sip. It is deliberately
+            // fairly audible and frequent because Dew Pod drinking is a sustained
+            // suction action rather than a single bite.
             room.PlaySound(
                 SoundID.Slugcat_Bite_Water_Nut,
                 firstChunk,
                 loop: false,
-                vol: 0.48f,
-                pitch: Random.Range(0.94f, 1.08f));
-            _drinkSoundCooldown = Random.Range(17, 23);
+                vol: 0.78f,
+                pitch: Random.Range(0.96f, 1.06f));
+            _drinkSoundCooldown = Random.Range(9, 14);
         }
     }
 
@@ -597,19 +597,19 @@ internal sealed class DewPod : PlayerCarryableItem, IDrawable
         FSprite accent = sLeaser.sprites[3];
         if (!broken)
         {
-            // A narrow wet sheen rather than a bright white patch. Since this is
-            // attached to the pod surface, it rotates with the rolling body.
+            // A broader, brighter wet sheen than the previous restrained pass.
+            // It remains a side highlight only; the translucent top window stays removed.
             accent.isVisible = fill > 0.02f;
             Vector2 highlightOffset = RotateLocal(
-                new Vector2(-width * 3.15f, height * 1.75f),
+                new Vector2(-width * 2.95f, height * 1.55f),
                 visualRotation);
             accent.x = drawPos.x + highlightOffset.x;
             accent.y = drawPos.y + highlightOffset.y;
-            accent.scaleX = width * 0.075f;
-            accent.scaleY = height * Mathf.Lerp(0.20f, 0.31f, fill);
+            accent.scaleX = width * 0.12f;
+            accent.scaleY = height * Mathf.Lerp(0.28f, 0.45f, fill);
             accent.rotation = visualRotation - 7f;
-            accent.alpha = Mathf.Lerp(0.08f, 0.22f, fill);
-            accent.color = Color.Lerp(shell.color, Color.white, 0.52f);
+            accent.alpha = Mathf.Lerp(0.18f, 0.38f, fill);
+            accent.color = Color.Lerp(shell.color, Color.white, 0.68f);
         }
         else
         {
