@@ -4,11 +4,13 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Delays the player's Sand-container occlusion until the rendered feet actually
-/// touch the curved quicksand surface. QuicksandZoneHooks still owns the terrain
-/// drawing and container order; this outer render hook only restores the player's
-/// normal container while the quicksand physics state is active but the feet are
-/// visually still above the surface.
+/// Keeps player quicksand occlusion tied to the authored front curve rather than
+/// the full TerrainCurve surface band. QuicksandZoneHooks may move the player into
+/// Sand, but this outer hook delays that move until the rendered feet touch and then
+/// reorders the player immediately behind the deep-fill mesh (sprite 2), leaving the
+/// 50 px surface strip behind the player. This avoids the whole body disappearing as
+/// soon as the player first touches quicksand while preserving the original curve
+/// rendering and shader setup.
 /// </summary>
 internal static class QuicksandPlayerRenderContact
 {
@@ -105,11 +107,101 @@ internal static class QuicksandPlayerRenderContact
 
         if (!state.SurfaceContactLatched)
         {
-            // Restore PlayerGraphics' native containers. The inner quicksand hook will
-            // move the player behind Sand again on a later frame once the feet really
-            // cross the authored curve. No quicksand surface geometry is changed.
+            // Until the feet actually touch, keep the player in the native containers.
+            // The inner hook may have already moved the sprites into Sand this frame;
+            // restore them here without changing any terrain geometry.
+            self.AddSpritesToContainer(null, rCam);
+            return;
+        }
+
+        // TerrainCurve uses sprite 1 for a roughly 50 px surface strip and sprite 2
+        // for the deep fill from the authored front curve downward. Moving a player
+        // to the absolute back of Sand puts the whole body behind both meshes, which
+        // is why first contact could hide half the slugcat immediately. Instead place
+        // the player between those two terrain meshes: in front of the surface strip,
+        // but directly behind the deep fill. The deep fill then occludes only pixels
+        // that are actually below the front curve.
+        if (!PlacePlayerBehindDeepFill(self, rCam, zone))
+        {
+            // If the terrain leaser is unavailable for a frame, prefer a fully visible
+            // player over the old severe over-occlusion.
             self.AddSpritesToContainer(null, rCam);
         }
+    }
+
+    private static bool PlacePlayerBehindDeepFill(
+        RoomCamera.SpriteLeaser playerLeaser,
+        RoomCamera rCam,
+        QuicksandZone zone)
+    {
+        if (playerLeaser?.sprites == null ||
+            rCam?.spriteLeasers == null ||
+            !IsUsableZone(zone))
+        {
+            return false;
+        }
+
+        RoomCamera.SpriteLeaser zoneLeaser = null;
+        for (int i = 0; i < rCam.spriteLeasers.Count; i++)
+        {
+            RoomCamera.SpriteLeaser candidate = rCam.spriteLeasers[i];
+            if (candidate != null && candidate.drawableObject == zone)
+            {
+                zoneLeaser = candidate;
+                break;
+            }
+        }
+
+        if (zoneLeaser?.sprites == null ||
+            zoneLeaser.sprites.Length <= 2 ||
+            zoneLeaser.sprites[2] == null)
+        {
+            return false;
+        }
+
+        FContainer sand = rCam.ReturnFContainer("Sand");
+        FSprite deepFill = zoneLeaser.sprites[2];
+        if (sand == null || deepFill.container != sand)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < playerLeaser.sprites.Length; i++)
+        {
+            FSprite sprite = playerLeaser.sprites[i];
+            if (sprite == null)
+            {
+                continue;
+            }
+
+            if (sprite.container != sand)
+            {
+                sand.AddChild(sprite);
+            }
+
+            sprite.MoveBehindOtherNode(deepFill);
+        }
+
+        if (playerLeaser.containers != null)
+        {
+            for (int i = 0; i < playerLeaser.containers.Length; i++)
+            {
+                FContainer container = playerLeaser.containers[i];
+                if (container == null)
+                {
+                    continue;
+                }
+
+                if (container.container != sand)
+                {
+                    sand.AddChild(container);
+                }
+
+                container.MoveBehindOtherNode(deepFill);
+            }
+        }
+
+        return true;
     }
 
     private static Player ResolvePlayer(IDrawable drawable)
