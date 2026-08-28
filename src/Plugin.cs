@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.42";
+    public const string Version = "0.0.43";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -58,6 +58,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
@@ -106,10 +107,12 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
 
-            // QuicksandSinkRateLimiter is the single owner of player / loose-object
-            // translation. Weapon settling is intentionally separate and never edits
-            // translational motion.
+            // QuicksandSinkRateLimiter owns player / loose-object sinking. Scheme-D
+            // deliberately keeps ContactPoint at zero, so a small support layer
+            // restores only the missing no-input horizontal braking without creating
+            // fake ground or any curve-normal motion.
             QuicksandSinkRateLimiter.Enable();
+            QuicksandPlayerHorizontalStability.Enable();
             QuicksandWeaponSettling.Enable();
             QuicksandSubmersionCleanup.Enable();
 
@@ -131,6 +134,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
