@@ -26,6 +26,11 @@ internal sealed class Plugin : BaseUnityPlugin
     public void OnEnable()
     {
         Logger = base.Logger;
+
+        // Custom SoundIDs must exist before Rain World's SoundLoader constructs its
+        // trigger array from the merged SoundEffects/Sounds.txt data.
+        DewPodAudioHooks.InitializeSoundIds();
+
         On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
