@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.50";
+    public const string Version = "0.1.51";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -103,7 +103,8 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandAIHazard.Enable();
 
             // Creature AI avoidance and post-entry escape are separate layers. The
-            // escape layer owns creature motion/death once actual immersion begins.
+            // escape layer supplies a sinking virtual soft floor so native creature
+            // locomotion keeps ownership of turning, pose, legs and flight.
             QuicksandCreatureEscape.Enable();
 
             QuicksandPlayerStruggleControl.EnableNativeCapture();
