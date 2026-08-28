@@ -105,6 +105,14 @@
       DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
       SkipUnchangedFiles="true" />
 
+    <!-- Room base-temperature data is intentionally a plain editable mod-root file.
+         Runtime hot reload reads this deployed copy directly. -->
+    <MakeDir Directories="$(GameModRootDir)/world" />
+    <Copy
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.txt"
+      DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt"
+      SkipUnchangedFiles="true" />
+
     <Warning
       Condition="!Exists('$(GameModRootDir)/soundeffects/DC_DrinkWater.ogg')"
       Text="Dew Pod drinking SFX not found: $(GameModRootDir)/soundeffects/DC_DrinkWater.ogg" />
