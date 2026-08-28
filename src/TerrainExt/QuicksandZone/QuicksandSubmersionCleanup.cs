@@ -6,6 +6,12 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// Removes non-player creatures and carryable items after they are completely
 /// below a quicksand surface. Cleanup runs after Room.Update so no object is
 /// destroyed in the middle of its own update.
+///
+/// Realized deletion and render deletion are handled together. Rain World's
+/// UpdatableAndDeletable.Destroy() only marks the realized object for removal, so
+/// every matching RoomCamera.SpriteLeaser is cleaned and removed immediately before
+/// the object is destroyed. This prevents a fully submerged item's last sprite from
+/// remaining frozen in the Sand container for another frame or indefinitely.
 /// </summary>
 internal static class QuicksandSubmersionCleanup
 {
@@ -170,8 +176,10 @@ internal static class QuicksandSubmersionCleanup
 
     private static void DeleteSubmergedObject(PhysicalObject physicalObject)
     {
+        Room room = physicalObject?.room;
+
         // Release anything holding this object so no creature keeps a stale grasp.
-        while (physicalObject.grabbedBy != null && physicalObject.grabbedBy.Count > 0)
+        while (physicalObject?.grabbedBy != null && physicalObject.grabbedBy.Count > 0)
         {
             Creature.Grasp grasp = physicalObject.grabbedBy[physicalObject.grabbedBy.Count - 1];
             if (grasp == null)
@@ -193,11 +201,58 @@ internal static class QuicksandSubmersionCleanup
             }
         }
 
+        // Remove all realized drawing immediately, before Destroy() merely marks the
+        // object for next-update cleanup. This covers both items that draw themselves
+        // and creatures/items whose SpriteLeaser belongs to a GraphicsModule.
+        RemoveRenderedObject(room, physicalObject);
+
         // Mark both realized and abstract objects for deletion. Room cleanup removes
         // the realized object from update/physics lists and the abstract object from
         // the room entity lists, so it will not be realized again later.
-        physicalObject.Destroy();
-        physicalObject.abstractPhysicalObject?.Destroy();
+        physicalObject?.Destroy();
+        physicalObject?.abstractPhysicalObject?.Destroy();
+    }
+
+    private static void RemoveRenderedObject(Room room, PhysicalObject physicalObject)
+    {
+        if (room?.game?.cameras == null || physicalObject == null)
+        {
+            return;
+        }
+
+        for (int cameraIndex = 0; cameraIndex < room.game.cameras.Length; cameraIndex++)
+        {
+            RoomCamera camera = room.game.cameras[cameraIndex];
+            if (camera == null || camera.spriteLeasers == null)
+            {
+                continue;
+            }
+
+            for (int i = camera.spriteLeasers.Count - 1; i >= 0; i--)
+            {
+                RoomCamera.SpriteLeaser leaser = camera.spriteLeasers[i];
+                if (leaser == null || ResolvePhysicalObject(leaser.drawableObject) != physicalObject)
+                {
+                    continue;
+                }
+
+                // CleanSpritesAndRemove removes every FSprite/FContainer immediately.
+                // Remove the leaser from the camera list in the same pass so the
+                // quicksand render hook cannot run once more and re-add it to Sand.
+                leaser.CleanSpritesAndRemove();
+                camera.spriteLeasers.RemoveAt(i);
+            }
+        }
+    }
+
+    private static PhysicalObject ResolvePhysicalObject(IDrawable drawable)
+    {
+        if (drawable is GraphicsModule graphicsModule)
+        {
+            return graphicsModule.owner;
+        }
+
+        return drawable as PhysicalObject;
     }
 
     private static bool IsUsableZone(QuicksandZone zone)
