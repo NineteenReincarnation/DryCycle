@@ -15,6 +15,7 @@ using DryCycle.Thirst;
 namespace DryCycle;
 
 [BepInPlugin(ModId, ModName, Version)]
+[BepInDependency("slime-cubed.devconsole", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
@@ -38,13 +39,16 @@ internal sealed class Plugin : BaseUnityPlugin
 
         On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+        On.RainWorld.PostModsInit += RainWorld_PostModsInit;
     }
 
     public void OnDisable()
     {
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         SpinebackLizardHooks.Disable();
+        SpinebackLizardDevConsoleSupport.ResetRegistration();
 
         if (_initialized)
         {
@@ -67,6 +71,10 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
+        // Dev Console clears its safe-spawner table during PreModsInit, so allow our
+        // optional registration to be rebuilt during the matching PostModsInit.
+        SpinebackLizardDevConsoleSupport.ResetRegistration();
+
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
     }
@@ -121,5 +129,16 @@ internal sealed class Plugin : BaseUnityPlugin
             Logger.LogError(ex);
             throw;
         }
+    }
+
+    private static void RainWorld_PostModsInit(
+        On.RainWorld.orig_PostModsInit orig,
+        RainWorld self)
+    {
+        // Soft dependency load order makes Dev Console install its PostModsInit hook
+        // first. Calling orig therefore lets it rebuild its built-in safe-spawner
+        // table before DryCycle appends SpinebackLizard.
+        orig(self);
+        SpinebackLizardDevConsoleSupport.TryRegister();
     }
 }
