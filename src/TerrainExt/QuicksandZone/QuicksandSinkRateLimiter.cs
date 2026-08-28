@@ -65,8 +65,39 @@ internal static class QuicksandSinkRateLimiter
     }
 
     /// <summary>
-    /// Shared render-side quicksand test. Physics ownership lives here, so render
-    /// containment no longer depends on the retired legacy player/object physics.
+    /// Returns the authoritative player quicksand state, including predictive entry
+    /// frames where immersion is still zero. Player-only systems use this method so
+    /// jump, locomotion and rendering all agree on the same contact lifetime.
+    /// </summary>
+    internal static bool TryGetPlayerQuicksandState(
+        Player player,
+        out QuicksandZone zone,
+        out float immersion)
+    {
+        zone = null;
+        immersion = 0f;
+
+        if (!PlayerStates.TryGetValue(player, out PlayerSinkState state) ||
+            !IsPlayerStateValid(player, state))
+        {
+            return false;
+        }
+
+        zone = state.Zone;
+
+        // State.Immersion is updated after the native Player.Update call. During the
+        // entry frame a Jump() can occur before that update, so sample the current
+        // body as well and keep the larger value. This prevents a full native jump
+        // from leaking through on the first quicksand-contact frame.
+        float liveImmersion = ComputeObjectImmersion(player, state.Zone);
+        immersion = Mathf.Clamp01(Mathf.Max(state.Immersion, liveImmersion));
+        return true;
+    }
+
+    /// <summary>
+    /// Shared render-side quicksand test for non-player physical objects. Player
+    /// rendering has its own curve-contact layer and must never enter the generic
+    /// MoveToBack path in QuicksandZoneHooks.
     /// </summary>
     internal static bool TryGetVisualSink(
         PhysicalObject physicalObject,
@@ -79,24 +110,13 @@ internal static class QuicksandSinkRateLimiter
         progress = 0f;
 
         if (physicalObject == null ||
+            physicalObject is Player ||
             physicalObject.room == null ||
             physicalObject.room.updateList == null ||
             physicalObject.bodyChunks == null ||
             physicalObject.bodyChunks.Length == 0)
         {
             return false;
-        }
-
-        if (physicalObject is Player player &&
-            PlayerStates.TryGetValue(player, out PlayerSinkState playerState) &&
-            playerState.Active &&
-            IsUsableZone(playerState.Zone) &&
-            playerState.Zone.room == player.room &&
-            playerState.Immersion > 0.005f)
-        {
-            zone = playerState.Zone;
-            progress = Mathf.Clamp01(playerState.Immersion);
-            return true;
         }
 
         float bestProgress = 0f;
