@@ -24,14 +24,6 @@ internal static class DewPodClassicVisualHooks
     private const int PlantRootSpriteCount = 3;
     private const int PlantSpritesPerSlot = 4;
 
-    private static readonly Vector2[] PlantStemRootOffsets =
-    {
-        new(-7.5f, 2.5f),
-        new(-2.5f, 3.5f),
-        new(3.5f, 3f),
-        new(8f, 2f)
-    };
-
     private static readonly float[] PlantSlotScales = { 0.94f, 1.04f, 1f, 0.92f };
 
     private static readonly FieldInfo PlantLiquidColorField = typeof(DewPodPlant).GetField(
@@ -409,11 +401,11 @@ internal static class DewPodClassicVisualHooks
                 }
 
                 Vector2 tip = _plant.GetPodPosition(slot);
-                Vector2 stemRoot = _plant.RootPos + PlantStemRootOffsets[slot];
+                Vector2 stemRoot = _plant.GetStemRootPosition(slot);
                 Vector2 direction = Custom.DirVec(stemRoot, tip);
                 if (direction.sqrMagnitude < 0.001f)
                 {
-                    direction = Vector2.up;
+                    direction = _plant.SurfaceNormal;
                 }
 
                 float scale = PlantSlotScales[slot];
