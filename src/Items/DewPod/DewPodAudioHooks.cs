@@ -6,19 +6,24 @@ using Random = UnityEngine.Random;
 namespace DryCycle.Items.DewPod;
 
 /// <summary>
-/// Provides clearly audible feedback for sustained Dew Pod drinking and for the
-/// exact frame an intact detached pod ruptures. The rupture transition is watched
-/// instead of being tied only to TerrainImpact, so weapon/explosion breaks keep the
-/// same material identity without replaying sounds for already-broken saved pods.
+/// Provides Dew Pod drinking/rupture audio. Drinking uses the Ancient Site mod's
+/// external soundeffects/DC_DrinkWater.ogg sample through a custom SoundID, while
+/// rupture audio keeps the existing organic pop + disguised crack transient.
 /// </summary>
 internal static class DewPodAudioHooks
 {
+    private const string DrinkWaterSoundName = "DC_DrinkWater";
+
     private static readonly FieldInfo DrinkPoseFramesField = typeof(DewPod).GetField(
         "_drinkPoseFrames",
         BindingFlags.Instance | BindingFlags.NonPublic);
 
     private static readonly FieldInfo DrinkPoseTargetField = typeof(DewPod).GetField(
         "_drinkPoseTarget",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+
+    private static readonly FieldInfo LegacyDrinkSoundCooldownField = typeof(DewPod).GetField(
+        "_drinkSoundCooldown",
         BindingFlags.Instance | BindingFlags.NonPublic);
 
     private sealed class AudioState
@@ -31,6 +36,20 @@ internal static class DewPodAudioHooks
     private static readonly ConditionalWeakTable<DewPod, AudioState> States = new();
     private static bool _enabled;
 
+    internal static SoundID DrinkWaterSound { get; private set; }
+
+    /// <summary>
+    /// Must run before Rain World's SoundLoader builds its SoundID trigger array.
+    /// Plugin.OnEnable calls this before any RainWorld init hooks are registered.
+    /// </summary>
+    internal static void InitializeSoundIds()
+    {
+        if (DrinkWaterSound == null)
+        {
+            DrinkWaterSound = new SoundID(DrinkWaterSoundName, register: true);
+        }
+    }
+
     internal static void Enable()
     {
         if (_enabled)
@@ -38,6 +57,7 @@ internal static class DewPodAudioHooks
             return;
         }
 
+        InitializeSoundIds();
         _enabled = true;
         On.Room.Update += Room_Update;
     }
@@ -55,6 +75,13 @@ internal static class DewPodAudioHooks
 
     private static void Room_Update(On.Room.orig_Update orig, Room self)
     {
+        // DewPod.MarkDrinking still owns the pose state and previously played the
+        // vanilla Water Nut bite sample. Keep its tiny cooldown above zero before
+        // the room update so that legacy sound never fires. A value of 3 is used
+        // rather than a huge sentinel, so disabling this hook restores vanilla
+        // behavior naturally within a few ticks.
+        SuppressLegacyDrinkSound(self);
+
         orig(self);
 
         if (self?.updateList == null)
@@ -74,6 +101,24 @@ internal static class DewPodAudioHooks
             AudioState state = States.GetOrCreateValue(pod);
             UpdateRuptureAudio(self, pod, state);
             UpdateDrinkingAudio(self, pod, state);
+        }
+    }
+
+    private static void SuppressLegacyDrinkSound(Room room)
+    {
+        if (room?.updateList == null || LegacyDrinkSoundCooldownField == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is DewPod pod &&
+                pod.room == room &&
+                !pod.slatedForDeletetion)
+            {
+                LegacyDrinkSoundCooldownField.SetValue(pod, 3);
+            }
         }
     }
 
@@ -103,9 +148,8 @@ internal static class DewPodAudioHooks
                 1.08f,
                 Random.Range(0.88f, 1.02f));
 
-            // Rock_Hit_Wall is deliberately pushed far outside its normal pitch and
-            // reduced to a quiet micro-transient. At this speed/level it reads as a
-            // short fibrous shell crack layered into the pop rather than a rock hit.
+            // Rock_Hit_Wall is pushed far outside its normal pitch and reduced to
+            // a quiet micro-transient so it reads as fibrous shell fracture.
             room.PlaySound(
                 SoundID.Rock_Hit_Wall,
                 pos,
@@ -127,7 +171,10 @@ internal static class DewPodAudioHooks
             ? frames
             : 0;
 
-        if (poseFrames <= 0 || pod.WaterWV <= 0f || state.SipCooldown > 0)
+        if (poseFrames <= 0 ||
+            pod.WaterWV <= 0f ||
+            state.SipCooldown > 0 ||
+            DrinkWaterSound == null)
         {
             return;
         }
@@ -141,21 +188,13 @@ internal static class DewPodAudioHooks
             mouthPos = target;
         }
 
-        // The existing Bite_Water_Nut sample is intentionally soft in vanilla.
-        // Lead with the fuller Eat_Water_Nut sample at the mouth, then add a quieter
-        // wet bite transient. This remains spatial but is loud enough to survive
-        // normal room ambience and rain.
+        // Play the authored Ancient Site sample without extra pitch coloration.
+        // Frequency stays at the previous fast sip cadence requested for Dew Pods.
         room.PlaySound(
-            SoundID.Slugcat_Eat_Water_Nut,
+            DrinkWaterSound,
             mouthPos,
-            1.28f,
-            Random.Range(0.96f, 1.06f));
-
-        room.PlaySound(
-            SoundID.Slugcat_Bite_Water_Nut,
-            mouthPos,
-            0.82f,
-            Random.Range(1.00f, 1.10f));
+            1f,
+            1f);
 
         state.SipCooldown = Random.Range(6, 10);
     }
