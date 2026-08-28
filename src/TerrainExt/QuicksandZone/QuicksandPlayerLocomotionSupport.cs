@@ -11,9 +11,10 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// semantics at the exact moments the native locomotion code needs them, so the
 /// native run cycle, animationFrame progression and body bobbing still execute.
 ///
-/// Up/Jump are reserved as quicksand struggle inputs. While either is held this
-/// support layer does not force Stand or visual foot grounding; the separate struggle
-/// controller changes only the sink rate and leaves the native player state alone.
+/// Player struggle input is temporarily disabled. Standing/canJump support therefore
+/// remains available while shallowly immersed, allowing QuicksandPlayerStruggleControl
+/// to authorize its single reduced jump. Once the player is moving upward this layer
+/// immediately stops forcing grounded state.
 ///
 /// PlayerGraphics normally anchors the legs only when the lower BodyChunk reports a
 /// floor contact. A temporary visual-only floor contact is supplied exclusively
@@ -108,9 +109,6 @@ internal static class QuicksandPlayerLocomotionSupport
             return;
         }
 
-        // Set the state immediately before the native locomotion methods execute.
-        // Unlike the old fake ContactPoint approach, this does not claim that a solid
-        // tile exists below the player.
         player.feetStuckPos = null;
         player.standing = true;
         player.bodyMode = Player.BodyModeIndex.Stand;
@@ -130,7 +128,6 @@ internal static class QuicksandPlayerLocomotionSupport
         if (!IsInQuicksand(player) ||
             player.dead ||
             !player.Consious ||
-            HasStruggleInput(player) ||
             IsMovingUp(player) ||
             player.animation != Player.AnimationIndex.None)
         {
@@ -147,17 +144,9 @@ internal static class QuicksandPlayerLocomotionSupport
         return IsInQuicksand(player) &&
                !player.dead &&
                player.Consious &&
-               !HasStruggleInput(player) &&
                !IsMovingUp(player) &&
                player.animation == Player.AnimationIndex.None &&
                player.bodyMode == Player.BodyModeIndex.Stand;
-    }
-
-    private static bool HasStruggleInput(Player player)
-    {
-        return player?.input != null &&
-               player.input.Length > 0 &&
-               (player.input[0].y > 0 || player.input[0].jmp);
     }
 
     private static bool IsInQuicksand(Player player)
