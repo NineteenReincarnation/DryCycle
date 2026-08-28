@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace DryCycle.TerrainExt.QuicksandZone;
@@ -11,6 +12,8 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// - with left/right input, native walking is preserved, abnormal whole-player
 ///   X speed/displacement is guarded, then the final in-sand X result is multiplied
 ///   by 0.45 to create the quicksand restraint;
+/// - normal jumps are exempt from the 0.45 restraint while rising, preserving the
+///   native horizontal jump impulse and therefore normal jump distance;
 /// - the first frame that crosses into quicksand absorbs excessive incoming X momentum;
 /// - a swept segment test catches high-speed boundary crossings that would otherwise
 ///   tunnel completely through a quicksand strip in one Player.Update.
@@ -26,11 +29,18 @@ internal static class QuicksandPlayerHorizontalStability
     private const float MaximumHorizontalCap = 3.25f;
     private const float EntryVelocityRetention = 0.55f;
     private const float EntryTravelRetention = 0.35f;
+    private const float JumpUpwardThreshold = 0.015f;
     private const float SweepSampleSpacing = 3f;
     private const int MaxSweepSamples = 48;
     private const float SurfaceInfluenceRadii = 1.25f;
     private const float Epsilon = 0.000001f;
 
+    private sealed class JumpBypassState
+    {
+        internal bool Active;
+    }
+
+    private static readonly ConditionalWeakTable<Player, JumpBypassState> JumpBypassStates = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -77,6 +87,17 @@ internal static class QuicksandPlayerHorizontalStability
         float startAverageX = AverageChunkX(self);
         bool startedInQuicksand = TryFindCurrentQuicksand(self, out _);
         bool hadHorizontalInput = HasHorizontalInput(self);
+        bool jumpPressedThisFrame = IsJumpPressedThisFrame(self);
+        JumpBypassState jumpState = JumpBypassStates.GetValue(
+            self,
+            _ => new JumpBypassState());
+
+        if (startedInQuicksand && jumpPressedThisFrame)
+        {
+            // The jump begins from quicksand support, but its native X impulse must
+            // not be scaled down by the walking restraint on this same frame.
+            jumpState.Active = true;
+        }
 
         orig(self, eu);
 
@@ -95,7 +116,28 @@ internal static class QuicksandPlayerHorizontalStability
 
         if (!startedInQuicksand && !currentlyInQuicksand && !sweptIntoQuicksand)
         {
+            jumpState.Active = false;
             return;
+        }
+
+        if (jumpState.Active)
+        {
+            // Preserve the complete native launch while the player rises. Once the
+            // player clears the sand, ordinary airborne physics is already outside
+            // this limiter. If the jump never clears the zone, the restraint resumes
+            // only after the upward phase ends.
+            if (!currentlyInQuicksand && !sweptIntoQuicksand)
+            {
+                jumpState.Active = false;
+                return;
+            }
+
+            if (jumpPressedThisFrame || AverageChunkVelocityY(self) > JumpUpwardThreshold)
+            {
+                return;
+            }
+
+            jumpState.Active = false;
         }
 
         bool hasHorizontalInput = hadHorizontalInput || HasHorizontalInput(self);
@@ -345,6 +387,18 @@ internal static class QuicksandPlayerHorizontalStability
                player.input[0].x != 0;
     }
 
+    private static bool IsJumpPressedThisFrame(Player player)
+    {
+        if (player?.input == null ||
+            player.input.Length == 0 ||
+            !player.input[0].jmp)
+        {
+            return false;
+        }
+
+        return player.input.Length < 2 || !player.input[1].jmp;
+    }
+
     private static float AverageChunkX(Player player)
     {
         float total = 0f;
@@ -379,6 +433,26 @@ internal static class QuicksandPlayerHorizontalStability
             }
 
             total += chunk.vel.x;
+            count++;
+        }
+
+        return count > 0 ? total / count : 0f;
+    }
+
+    private static float AverageChunkVelocityY(Player player)
+    {
+        float total = 0f;
+        int count = 0;
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            total += chunk.vel.y;
             count++;
         }
 
