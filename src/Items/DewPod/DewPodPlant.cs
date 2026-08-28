@@ -476,9 +476,8 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
     private int StemSprite(int slot) => RootSpriteCount + slot * SpritesPerSlot;
     private int ShellSprite(int slot) => StemSprite(slot) + 1;
     private int LiquidSprite(int slot) => StemSprite(slot) + 2;
-    // Mature slots reuse the same accent sprite as a subtle highlight; empty or
-    // immature slots reuse it as the bud. This keeps the sprite layout stable for
-    // the collision overlay code while restoring the sheen without a top window.
+    // Mature slots reuse the same accent sprite as a side highlight; empty or
+    // immature slots reuse it as the bud. The translucent top window stays removed.
     private int AccentSprite(int slot) => StemSprite(slot) + 3;
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
@@ -603,19 +602,18 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
                 liquid.rotation = rotation;
                 liquid.color = displayedLiquid;
 
-                // Restore only a restrained side sheen. The translucent top window
-                // remains removed. Keeping the sheen narrow and close to the rim
-                // prevents the pod from reading like a glossy glass capsule.
+                // Stronger side sheen so the fleshy pod still reads as wet at normal
+                // game zoom. It stays away from the top-window treatment.
                 Vector2 highlightPos = podPos +
-                                       perpendicular * (2.65f * scale) +
-                                       direction * (1.55f * scale);
+                                       perpendicular * (2.45f * scale) +
+                                       direction * (1.35f * scale);
                 accent.x = highlightPos.x;
                 accent.y = highlightPos.y;
-                accent.scaleX = shell.scaleX * 0.075f;
-                accent.scaleY = shell.scaleY * 0.29f;
+                accent.scaleX = shell.scaleX * 0.115f;
+                accent.scaleY = shell.scaleY * 0.41f;
                 accent.rotation = rotation - 6f;
-                accent.alpha = 0.20f;
-                accent.color = Color.Lerp(shell.color, Color.white, 0.52f);
+                accent.alpha = 0.34f;
+                accent.color = Color.Lerp(shell.color, Color.white, 0.68f);
             }
             else
             {
