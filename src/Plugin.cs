@@ -57,8 +57,8 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandEntryBounceGuard.Disable();
-            QuicksandSinkRateLimiter.Disable();
             QuicksandRealisticPhysics.Disable();
+            QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
@@ -105,9 +105,15 @@ internal sealed class Plugin : BaseUnityPlugin
             ThirstHooks.Enable();
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
-            QuicksandRealisticPhysics.Enable();
+
+            // HookGen/RuntimeDetour executes the newest no-config detour first.
+            // Install the integration limiter first so QuicksandRealisticPhysics sees
+            // the object's real incoming velocity before the limiter compensates the
+            // gravity step inside BodyChunk.Update.
             QuicksandSinkRateLimiter.Enable();
+            QuicksandRealisticPhysics.Enable();
             QuicksandEntryBounceGuard.Enable();
+
             DewPodPlantHooks.Enable();
             DewPodPlantCollisionHooks.Enable();
             DewPodClassicVisualHooks.Enable();
@@ -125,8 +131,8 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandEntryBounceGuard.Disable();
-            QuicksandSinkRateLimiter.Disable();
             QuicksandRealisticPhysics.Disable();
+            QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
