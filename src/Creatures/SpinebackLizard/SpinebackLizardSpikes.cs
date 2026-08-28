@@ -5,28 +5,59 @@ using UnityEngine;
 namespace DryCycle.Creatures;
 
 /// <summary>
-/// Custom thorny-devil surface for Spineback Lizard. In normal movement the sprites
-/// form pale armored plates, rust/dark patches and many short conical spines along a
-/// broad body. While defending, the same surface pieces fold into a compact armored
-/// sphere instead of stretching the vanilla lizard mesh.
+/// Custom Spineback surface based on the supplied concept art: a reddish-brown
+/// dorsal mantle over a pale sand body, cream broken stripes, and several separated
+/// clusters of long near-black spines rather than an evenly covered thorn coat.
 /// </summary>
 internal sealed class SpinebackLizardSpikes : Template
 {
-    private const int OuterShellSprite = 0;
-    private const int InnerShellSprite = 1;
+    private const int BackPatchStart = 0;
+    private const int BackPatchCount = 20;
 
-    private const int PlateStart = 2;
-    private const int PlateCount = 18;
+    private const int StripePairCount = 9;
+    private const int StripeStart = BackPatchStart + BackPatchCount;
+    private const int StripeSpriteCount = StripePairCount * 2;
 
-    private const int PatchStart = PlateStart + PlateCount;
-    private const int PatchCount = 10;
+    private const int SpikeStart = StripeStart + StripeSpriteCount;
+    private const int SpikeCount = 26;
 
-    private const int SpikeStart = PatchStart + PatchCount;
-    private const int SpikeCount = 28;
+    private static readonly float[] StripePositions =
+    {
+        0.27f, 0.34f, 0.41f, 0.49f, 0.57f, 0.65f, 0.73f, 0.81f, 0.89f
+    };
 
-    private readonly float _phase;
-    private readonly float[] _plateVariation = new float[PlateCount];
-    private readonly float[] _patchVariation = new float[PatchCount];
+    // Small swept head crest -> very long shoulder crown -> low bridge -> second
+    // long rear crown -> short tail-base thorns. This distribution follows the
+    // supplied drawing instead of spacing every thorn uniformly down the spine.
+    private static readonly float[] SpikePositions =
+    {
+        0.015f, 0.035f, 0.055f, 0.078f, 0.105f,
+        0.145f, 0.175f, 0.205f, 0.235f, 0.270f, 0.305f, 0.345f,
+        0.395f, 0.445f,
+        0.525f, 0.560f, 0.595f, 0.635f, 0.675f, 0.715f, 0.755f,
+        0.805f, 0.845f, 0.885f, 0.925f, 0.960f
+    };
+
+    private static readonly float[] SpikeLengths =
+    {
+        1.05f, 1.18f, 1.30f, 1.42f, 1.55f,
+        2.75f, 3.65f, 4.35f, 4.05f, 3.55f, 2.80f, 2.05f,
+        0.82f, 0.92f,
+        2.45f, 3.35f, 3.95f, 3.65f, 3.10f, 2.55f, 1.90f,
+        1.48f, 1.30f, 1.13f, 0.96f, 0.82f
+    };
+
+    private static readonly float[] SpikeLeans =
+    {
+        1.15f, 1.05f, 0.95f, 0.85f, 0.72f,
+        0.05f, 0.18f, 0.34f, 0.48f, 0.62f, 0.78f, 0.92f,
+        0.65f, 0.72f,
+        0.02f, 0.18f, 0.34f, 0.50f, 0.65f, 0.78f, 0.90f,
+        0.78f, 0.82f, 0.86f, 0.90f, 0.94f
+    };
+
+    private readonly float[] _backVariation = new float[BackPatchCount];
+    private readonly float[] _stripeVariation = new float[StripePairCount];
     private readonly float[] _spikeVariation = new float[SpikeCount];
 
     internal SpinebackLizardSpikes(LizardGraphics graphics, int startSprite)
@@ -36,16 +67,15 @@ internal sealed class SpinebackLizardSpikes : Template
         numberOfSprites = SpikeStart + SpikeCount;
 
         int seed = graphics?.lizard?.abstractCreature?.ID.RandomSeed ?? 0;
-        _phase = Mathf.Repeat(seed * 37.173f, 360f);
 
-        for (int i = 0; i < PlateCount; i++)
+        for (int i = 0; i < BackPatchCount; i++)
         {
-            _plateVariation[i] = SpinebackLizardHooks.Stable01(seed + 3001 + i * 97);
+            _backVariation[i] = SpinebackLizardHooks.Stable01(seed + 3001 + i * 97);
         }
 
-        for (int i = 0; i < PatchCount; i++)
+        for (int i = 0; i < StripePairCount; i++)
         {
-            _patchVariation[i] = SpinebackLizardHooks.Stable01(seed + 5003 + i * 131);
+            _stripeVariation[i] = SpinebackLizardHooks.Stable01(seed + 5003 + i * 131);
         }
 
         for (int i = 0; i < SpikeCount; i++)
@@ -56,36 +86,25 @@ internal sealed class SpinebackLizardSpikes : Template
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        FSprite outerShell = new FSprite("Circle20");
-        outerShell.alpha = 0f;
-        sLeaser.sprites[startSprite + OuterShellSprite] = outerShell;
-
-        FSprite innerShell = new FSprite("Circle20");
-        innerShell.alpha = 0f;
-        sLeaser.sprites[startSprite + InnerShellSprite] = innerShell;
-
-        for (int i = 0; i < PlateCount; i++)
-        {
-            FSprite plate = new FSprite("Circle20");
-            plate.anchorX = 0.5f;
-            plate.anchorY = 0.5f;
-            sLeaser.sprites[startSprite + PlateStart + i] = plate;
-        }
-
-        for (int i = 0; i < PatchCount; i++)
+        for (int i = 0; i < BackPatchCount; i++)
         {
             FSprite patch = new FSprite("Circle20");
             patch.anchorX = 0.5f;
             patch.anchorY = 0.5f;
-            sLeaser.sprites[startSprite + PatchStart + i] = patch;
+            sLeaser.sprites[startSprite + BackPatchStart + i] = patch;
+        }
+
+        for (int i = 0; i < StripeSpriteCount; i++)
+        {
+            FSprite stripe = new FSprite("Circle20");
+            stripe.anchorX = 0.5f;
+            stripe.anchorY = 0.5f;
+            sLeaser.sprites[startSprite + StripeStart + i] = stripe;
         }
 
         for (int i = 0; i < SpikeCount; i++)
         {
             FSprite spike = new FSprite("LizardScaleA3");
-            // Match the way vanilla/LizKin spine spikes are anchored: the root sits
-            // close to the bottom of the sprite and almost all visible length points
-            // away from the body surface.
             spike.anchorY = 0.15f;
             sLeaser.sprites[startSprite + SpikeStart + i] = spike;
         }
@@ -103,36 +122,22 @@ internal sealed class SpinebackLizardSpikes : Template
             return;
         }
 
-        float defense = SpinebackLizardHooks.GetDefenseProgress(lizard);
-        float ballBlend = Mathf.SmoothStep(
-            0f,
-            1f,
-            Mathf.InverseLerp(0.14f, 0.82f, defense));
+        Color backColor = SpinebackLizardHooks.ShadeForRoom(
+            lizard,
+            rCam,
+            SpinebackLizardHooks.GetBackColor(lizard));
+        Color stripeColor = SpinebackLizardHooks.ShadeForRoom(
+            lizard,
+            rCam,
+            SpinebackLizardHooks.GetStripeColor(lizard));
+        Color spikeColor = SpinebackLizardHooks.ShadeForRoom(
+            lizard,
+            rCam,
+            SpinebackLizardHooks.GetSpikeColor(lizard));
 
-        Vector2 center = GetVisualCenter(lizard, timeStacker);
-        float breath = 1f + Mathf.Sin(Time.time * 5.2f + _phase * 0.017453292f) * 0.018f * ballBlend;
-
-        Color bodyColor = SpinebackLizardHooks.ShadeForRoom(
-            lizard,
-            rCam,
-            SpinebackLizardHooks.GetBodyColor(lizard));
-        Color plateColor = SpinebackLizardHooks.ShadeForRoom(
-            lizard,
-            rCam,
-            SpinebackLizardHooks.GetPlateColor(lizard));
-        Color rustColor = SpinebackLizardHooks.ShadeForRoom(
-            lizard,
-            rCam,
-            SpinebackLizardHooks.GetRustColor(lizard));
-        Color darkColor = SpinebackLizardHooks.ShadeForRoom(
-            lizard,
-            rCam,
-            SpinebackLizardHooks.GetDarkColor(lizard));
-
-        DrawBallShell(sLeaser, center, camPos, ballBlend, breath, bodyColor, darkColor);
-        DrawPlates(sLeaser, timeStacker, camPos, center, ballBlend, plateColor, rustColor);
-        DrawPatches(sLeaser, timeStacker, camPos, center, ballBlend, rustColor, darkColor);
-        DrawSpikes(sLeaser, timeStacker, camPos, center, ballBlend, plateColor, darkColor);
+        DrawBackMantle(sLeaser, timeStacker, camPos, backColor);
+        DrawBrokenStripes(sLeaser, timeStacker, camPos, stripeColor);
+        DrawGroupedSpines(sLeaser, timeStacker, camPos, backColor, spikeColor);
     }
 
     public override void ApplyPalette(
@@ -143,200 +148,153 @@ internal sealed class SpinebackLizardSpikes : Template
         base.ApplyPalette(sLeaser, rCam, palette);
     }
 
-    private void DrawBallShell(
-        RoomCamera.SpriteLeaser sLeaser,
-        Vector2 center,
-        Vector2 camPos,
-        float ballBlend,
-        float breath,
-        Color bodyColor,
-        Color darkColor)
-    {
-        FSprite outer = sLeaser.sprites[startSprite + OuterShellSprite];
-        outer.x = center.x - camPos.x;
-        outer.y = center.y - camPos.y;
-        outer.scaleX = Mathf.Lerp(0.35f, 2.12f, ballBlend) * breath;
-        outer.scaleY = Mathf.Lerp(0.30f, 1.92f, ballBlend) * breath;
-        outer.color = darkColor;
-        outer.alpha = Mathf.SmoothStep(0f, 1f, ballBlend);
-
-        FSprite inner = sLeaser.sprites[startSprite + InnerShellSprite];
-        inner.x = center.x - camPos.x;
-        inner.y = center.y - camPos.y + 0.5f;
-        inner.scaleX = Mathf.Lerp(0.30f, 1.92f, ballBlend) * breath;
-        inner.scaleY = Mathf.Lerp(0.26f, 1.73f, ballBlend) * breath;
-        inner.color = bodyColor;
-        inner.alpha = Mathf.SmoothStep(0f, 1f, ballBlend);
-    }
-
-    private void DrawPlates(
+    private void DrawBackMantle(
         RoomCamera.SpriteLeaser sLeaser,
         float timeStacker,
         Vector2 camPos,
-        Vector2 center,
-        float ballBlend,
-        Color plateColor,
-        Color rustColor)
+        Color backColor)
     {
-        for (int i = 0; i < PlateCount; i++)
+        for (int i = 0; i < BackPatchCount; i++)
         {
-            float t = Mathf.Lerp(0.035f, 0.74f, i / (float)(PlateCount - 1));
+            float t = Mathf.Lerp(0.035f, 0.945f, i / (float)(BackPatchCount - 1));
             LizardGraphics.LizardSpineData spine = lGraphics.SpinePosition(t, timeStacker);
+            Vector2 tangent = SafeNormal(spine.dir, Vector2.right);
 
-            Vector2 normal = SafeNormal(spine.perp, Vector2.up);
-            float side = (i % 2 == 0) ? 1f : -1f;
-            float sideOffset = spine.rad * Mathf.Lerp(0.22f, 0.58f, _plateVariation[i]);
-            Vector2 normalPos = spine.pos + normal * side * sideOffset;
+            // Keep the darker mantle on the visible dorsal half while leaving the
+            // pale base body exposed below, matching the two-tone concept.
+            Vector2 drawPos = Vector2.Lerp(spine.pos, spine.outerPos, 0.43f);
+            float localWidth = Mathf.Clamp(spine.rad / 9.5f, 0.42f, 1.10f);
+            float taper = Mathf.Lerp(1f, 0.62f, Mathf.InverseLerp(0.66f, 0.96f, t));
+            float variation = Mathf.Lerp(0.92f, 1.08f, _backVariation[i]);
 
-            float angle = _phase + i * (360f / PlateCount) + _plateVariation[i] * 13f;
-            Vector2 radial = Custom.DegToVec(angle);
-            float ring = Mathf.Lerp(5.5f, 12.5f, _plateVariation[i]);
-            Vector2 ballPos = center + radial * ring;
-
-            Vector2 drawPos = Vector2.Lerp(normalPos, ballPos, ballBlend);
-            Vector2 normalDir = SafeNormal(spine.dir, Vector2.right);
-            Vector2 ballTangent = new Vector2(-radial.y, radial.x);
-            Vector2 drawDir = SafeNormal(Vector2.Lerp(normalDir, ballTangent, ballBlend), Vector2.right);
-
-            FSprite plate = sLeaser.sprites[startSprite + PlateStart + i];
-            plate.x = drawPos.x - camPos.x;
-            plate.y = drawPos.y - camPos.y;
-            plate.rotation = Custom.VecToDeg(drawDir);
-            plate.scaleX = Mathf.Lerp(
-                Mathf.Lerp(0.25f, 0.43f, _plateVariation[i]),
-                Mathf.Lerp(0.34f, 0.50f, _plateVariation[i]),
-                ballBlend);
-            plate.scaleY = Mathf.Lerp(
-                Mathf.Lerp(0.18f, 0.31f, _plateVariation[i]),
-                Mathf.Lerp(0.25f, 0.39f, _plateVariation[i]),
-                ballBlend);
-            plate.color = (i % 5 == 0) ? Color.Lerp(plateColor, rustColor, 0.24f) : plateColor;
-            plate.alpha = 1f;
-        }
-    }
-
-    private void DrawPatches(
-        RoomCamera.SpriteLeaser sLeaser,
-        float timeStacker,
-        Vector2 camPos,
-        Vector2 center,
-        float ballBlend,
-        Color rustColor,
-        Color darkColor)
-    {
-        for (int i = 0; i < PatchCount; i++)
-        {
-            float t = Mathf.Lerp(0.06f, 0.70f, i / (float)(PatchCount - 1));
-            LizardGraphics.LizardSpineData spine = lGraphics.SpinePosition(t, timeStacker);
-            Vector2 normal = SafeNormal(spine.perp, Vector2.up);
-            float side = (i % 2 == 0) ? -1f : 1f;
-            Vector2 normalPos = spine.pos + normal * side * spine.rad * Mathf.Lerp(0.08f, 0.36f, _patchVariation[i]);
-
-            float angle = _phase + 21f + i * (360f / PatchCount);
-            Vector2 radial = Custom.DegToVec(angle);
-            Vector2 ballPos = center + radial * Mathf.Lerp(4f, 10f, _patchVariation[i]);
-            Vector2 drawPos = Vector2.Lerp(normalPos, ballPos, ballBlend);
-
-            FSprite patch = sLeaser.sprites[startSprite + PatchStart + i];
+            FSprite patch = sLeaser.sprites[startSprite + BackPatchStart + i];
             patch.x = drawPos.x - camPos.x;
             patch.y = drawPos.y - camPos.y;
-            patch.rotation = angle;
-            patch.scaleX = Mathf.Lerp(0.20f, 0.39f, _patchVariation[i]) * Mathf.Lerp(1f, 1.15f, ballBlend);
-            patch.scaleY = Mathf.Lerp(0.15f, 0.30f, _patchVariation[i]) * Mathf.Lerp(1f, 1.12f, ballBlend);
-            patch.color = (i % 3 == 0) ? darkColor : rustColor;
-            patch.alpha = Mathf.Lerp(0.80f, 0.94f, ballBlend);
+            patch.rotation = Custom.VecToDeg(tangent);
+            patch.scaleX = Mathf.Lerp(0.58f, 0.46f, t) * variation;
+            patch.scaleY = localWidth * Mathf.Lerp(0.52f, 0.34f, t) * taper;
+            patch.color = backColor;
+            patch.alpha = 0.98f;
         }
     }
 
-    private void DrawSpikes(
+    private void DrawBrokenStripes(
         RoomCamera.SpriteLeaser sLeaser,
         float timeStacker,
         Vector2 camPos,
-        Vector2 center,
-        float ballBlend,
-        Color plateColor,
-        Color darkColor)
+        Color stripeColor)
+    {
+        for (int i = 0; i < StripePairCount; i++)
+        {
+            float t = StripePositions[i];
+            LizardGraphics.LizardSpineData spine = lGraphics.SpinePosition(t, timeStacker);
+            Vector2 outward = GetSurfaceOutward(spine);
+            Vector2 tangent = SafeNormal(spine.dir, Vector2.right);
+
+            float variation = _stripeVariation[i];
+            float kink = Mathf.Lerp(-0.28f, 0.28f, variation);
+            if (i % 2 == 0)
+            {
+                kink = -kink;
+            }
+
+            Vector2 stripeDirA = SafeNormal(-outward + tangent * kink, -outward);
+            Vector2 stripeDirB = SafeNormal(-outward - tangent * kink * 0.65f, -outward);
+
+            float stripeLength = Mathf.Lerp(0.34f, 0.49f, variation) *
+                                 Mathf.Lerp(1f, 0.72f, Mathf.InverseLerp(0.72f, 0.92f, t));
+            float stripeWidth = Mathf.Lerp(0.105f, 0.155f, variation);
+
+            Vector2 posA = spine.pos + outward * spine.rad * 0.19f;
+            Vector2 posB = spine.pos - outward * spine.rad * 0.16f + tangent * kink * 2.2f;
+
+            DrawStripeSegment(
+                sLeaser.sprites[startSprite + StripeStart + i * 2],
+                posA,
+                stripeDirA,
+                stripeWidth,
+                stripeLength,
+                stripeColor,
+                camPos);
+
+            DrawStripeSegment(
+                sLeaser.sprites[startSprite + StripeStart + i * 2 + 1],
+                posB,
+                stripeDirB,
+                stripeWidth * 0.88f,
+                stripeLength * 0.72f,
+                stripeColor,
+                camPos);
+        }
+    }
+
+    private static void DrawStripeSegment(
+        FSprite stripe,
+        Vector2 pos,
+        Vector2 direction,
+        float width,
+        float length,
+        Color color,
+        Vector2 camPos)
+    {
+        stripe.x = pos.x - camPos.x;
+        stripe.y = pos.y - camPos.y;
+        stripe.rotation = Custom.AimFromOneVectorToAnother(-direction, direction);
+        stripe.scaleX = width;
+        stripe.scaleY = length;
+        stripe.color = color;
+        stripe.alpha = 0.96f;
+    }
+
+    private void DrawGroupedSpines(
+        RoomCamera.SpriteLeaser sLeaser,
+        float timeStacker,
+        Vector2 camPos,
+        Color backColor,
+        Color spikeColor)
     {
         for (int i = 0; i < SpikeCount; i++)
         {
-            float t = Mathf.Lerp(0.005f, 0.90f, i / (float)(SpikeCount - 1));
+            float t = SpikePositions[i];
             LizardGraphics.LizardSpineData spine = lGraphics.SpinePosition(t, timeStacker);
-
-            // Use the actual visible body surface, not spine.pos + rad. The previous
-            // version could place roots inside the body mesh. outerPos is also what
-            // Rain World's normal spine-spike cosmetics use.
-            Vector2 outward = SafeNormal(
-                spine.outerPos - spine.pos,
-                SafeNormal(spine.perp * spine.depthRotation, Vector2.up));
+            Vector2 outward = GetSurfaceOutward(spine);
             Vector2 tangent = SafeNormal(spine.dir, Vector2.right);
 
-            // Keep every normal-state thorn pointing out of the visible silhouette.
-            // A small fore/aft lean prevents them from looking like a perfect comb
-            // without flipping any of them back into the body.
-            float lean = Mathf.Lerp(-0.42f, 0.42f, _spikeVariation[i]);
-            if (t < 0.16f)
-            {
-                lean += (i % 2 == 0) ? -0.20f : 0.20f;
-            }
-            Vector2 normalDir = SafeNormal(outward + tangent * lean, outward);
+            float variation = _spikeVariation[i];
+            float lean = SpikeLeans[i] + Mathf.Lerp(-0.08f, 0.08f, variation);
+            Vector2 spikeDir = SafeNormal(outward + tangent * lean, outward);
 
-            float hornFactor;
-            if (t < 0.11f)
-            {
-                // Large head/neck horns are a defining thorny-devil silhouette.
-                hornFactor = Mathf.Lerp(2.75f, 3.45f, _spikeVariation[i]);
-            }
-            else if (t < 0.32f)
-            {
-                hornFactor = Mathf.Lerp(2.05f, 2.75f, _spikeVariation[i]);
-            }
-            else if (t < 0.68f)
-            {
-                hornFactor = Mathf.Lerp(1.45f, 2.15f, _spikeVariation[i]);
-            }
-            else
-            {
-                hornFactor = Mathf.Lerp(1.05f, 1.70f, _spikeVariation[i]);
-            }
+            float rootLift = Mathf.Lerp(1.9f, 1.0f, t);
+            Vector2 drawPos = spine.outerPos + outward * rootLift;
 
-            // Push the root a few pixels outside the mesh so the base cannot be
-            // swallowed by the wide body silhouette.
-            float rootLift = Mathf.Lerp(2.8f, 1.4f, t);
-            Vector2 normalPos = spine.outerPos + outward * rootLift;
-
-            float radialAngle = _phase + i * (360f / SpikeCount) + _spikeVariation[i] * 9f;
-            Vector2 radialDir = Custom.DegToVec(radialAngle);
-            float radialDistance = Mathf.Lerp(18.5f, 24.5f, _spikeVariation[i]) + hornFactor * 2.0f;
-            Vector2 ballPos = center + radialDir * radialDistance;
-
-            Vector2 drawPos = Vector2.Lerp(normalPos, ballPos, ballBlend);
-            Vector2 spikeDir = SafeNormal(Vector2.Lerp(normalDir, radialDir, ballBlend), radialDir);
+            float length = SpikeLengths[i] * Mathf.Lerp(0.92f, 1.10f, variation);
+            float thickness = Mathf.Lerp(0.40f, 0.57f, variation);
+            if (length > 3f)
+            {
+                thickness *= 1.08f;
+            }
 
             FSprite spike = sLeaser.sprites[startSprite + SpikeStart + i];
             spike.x = drawPos.x - camPos.x;
             spike.y = drawPos.y - camPos.y;
-
-            // LizardScaleA sprites already point along their local +Y axis. Vanilla
-            // spine cosmetics use AimFromOneVectorToAnother directly; the old -90
-            // degree offset rotated the thorns almost along the body and hid them.
             spike.rotation = Custom.AimFromOneVectorToAnother(-spikeDir, spikeDir);
-            spike.scaleX = ((i % 2 == 0) ? 1f : -1f) *
-                           Mathf.Lerp(0.70f, 1.05f, _spikeVariation[i]);
-            spike.scaleY = hornFactor * Mathf.Lerp(1f, 1.12f, ballBlend);
-            spike.color = Color.Lerp(plateColor, darkColor, Mathf.Lerp(0.08f, 0.28f, t));
+            spike.scaleX = ((i % 2 == 0) ? 1f : -1f) * thickness;
+            spike.scaleY = length;
+
+            // The small facial/neck crest stays brown like the concept drawing;
+            // the two large dorsal crowns and tail spines are almost black.
+            spike.color = i < 5
+                ? Color.Lerp(backColor, spikeColor, 0.36f)
+                : spikeColor;
             spike.alpha = 1f;
         }
     }
 
-    private static Vector2 GetVisualCenter(Lizard lizard, float timeStacker)
+    private static Vector2 GetSurfaceOutward(LizardGraphics.LizardSpineData spine)
     {
-        Vector2 center = Vector2.zero;
-        int count = Mathf.Min(3, lizard.bodyChunks.Length);
-        for (int i = 0; i < count; i++)
-        {
-            center += Vector2.Lerp(lizard.bodyChunks[i].lastPos, lizard.bodyChunks[i].pos, timeStacker);
-        }
-        return count > 0 ? center / count : lizard.mainBodyChunk.pos;
+        return SafeNormal(
+            spine.outerPos - spine.pos,
+            SafeNormal(spine.perp * spine.depthRotation, Vector2.up));
     }
 
     private static Vector2 SafeNormal(Vector2 value, Vector2 fallback)
