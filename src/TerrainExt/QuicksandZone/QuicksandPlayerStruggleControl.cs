@@ -9,7 +9,7 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// while the player is in quicksand; there is no per-contact one-jump lock. The
 /// baseline sink controller still executes the normal Player.Jump chain and strips
 /// its horizontal jump impulse, while this outer hook applies a small vertical launch
-/// and a hold-jump boost that falls linearly from 3.25 at zero immersion to 0 at full
+/// and a hold-jump boost that falls linearly from 2.5 at zero immersion to 0 at full
 /// immersion.
 /// </summary>
 internal static class QuicksandPlayerStruggleControl
@@ -17,7 +17,7 @@ internal static class QuicksandPlayerStruggleControl
     private const float UpperChunkJumpSpeed = 2.00f;
     private const float LowerChunkJumpSpeed = 1.70f;
     private const float ExtraChunkJumpSpeed = 1.85f;
-    private const float MaximumJumpBoost = 3.25f;
+    private const float MaximumJumpBoost = 2.50f;
 
     private static bool _outerEnabled;
 
