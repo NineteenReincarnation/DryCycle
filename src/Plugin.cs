@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.43";
+    public const string Version = "0.0.44";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -58,6 +58,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerLocomotionSupport.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
@@ -108,11 +109,12 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandZoneHooks.Enable();
 
             // QuicksandSinkRateLimiter owns player / loose-object sinking. Scheme-D
-            // deliberately keeps ContactPoint at zero, so a small support layer
-            // restores only the missing no-input horizontal braking without creating
-            // fake ground or any curve-normal motion.
+            // keeps hard-ground ContactPoint out of player physics; the locomotion
+            // layer restores native Stand/run animation at Player method boundaries
+            // and only supplies a temporary floor contact inside PlayerGraphics.
             QuicksandSinkRateLimiter.Enable();
             QuicksandPlayerHorizontalStability.Enable();
+            QuicksandPlayerLocomotionSupport.Enable();
             QuicksandWeaponSettling.Enable();
             QuicksandSubmersionCleanup.Enable();
 
@@ -134,6 +136,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerLocomotionSupport.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandZoneHooks.Disable();
