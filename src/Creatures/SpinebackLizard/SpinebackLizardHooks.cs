@@ -6,8 +6,8 @@ using UnityEngine;
 namespace DryCycle.Creatures;
 
 /// <summary>
-/// Spineback Lizard prototype. Gameplay statistics, AI and pathing still use Blue
-/// Lizard as the baseline, while the visible silhouette and palette are custom.
+/// Spineback Lizard prototype. Gameplay statistics, AI, relationships and pathing use
+/// Green Lizard as the baseline, while the visible silhouette and palette are custom.
 /// </summary>
 internal static class SpinebackLizardHooks
 {
@@ -115,16 +115,16 @@ internal static class SpinebackLizardHooks
     private static void StaticWorld_InitCustomTemplates(On.StaticWorld.orig_InitCustomTemplates orig)
     {
         orig();
-        InstallTemplateFromBlueLizard();
+        InstallTemplateFromGreenLizard();
     }
 
     private static void StaticWorld_InitStaticWorld(On.StaticWorld.orig_InitStaticWorld orig)
     {
         orig();
-        SyncRelationshipsFromBlueLizard();
+        SyncRelationshipsFromGreenLizard();
     }
 
-    private static void InstallTemplateFromBlueLizard()
+    private static void InstallTemplateFromGreenLizard()
     {
         CreatureTemplate.Type spinebackType = SpinebackLizardEnums.Type;
         if (spinebackType == null || spinebackType.Index < 0 || StaticWorld.creatureTemplates == null)
@@ -132,14 +132,14 @@ internal static class SpinebackLizardHooks
             return;
         }
 
-        int blueIndex = CreatureTemplate.Type.BlueLizard.Index;
-        if (blueIndex < 0 || blueIndex >= StaticWorld.creatureTemplates.Length)
+        int greenIndex = CreatureTemplate.Type.GreenLizard.Index;
+        if (greenIndex < 0 || greenIndex >= StaticWorld.creatureTemplates.Length)
         {
             return;
         }
 
-        CreatureTemplate blue = StaticWorld.creatureTemplates[blueIndex];
-        if (blue == null)
+        CreatureTemplate green = StaticWorld.creatureTemplates[greenIndex];
+        if (green == null)
         {
             return;
         }
@@ -153,20 +153,20 @@ internal static class SpinebackLizardHooks
             Array.Resize(ref StaticWorld.creatureTemplates, requiredLength);
         }
 
-        CreatureTemplate template = new CreatureTemplate(blue)
+        CreatureTemplate template = new CreatureTemplate(green)
         {
             type = spinebackType,
             name = "Spineback Lizard",
             index = spinebackType.Index,
             doPreBakedPathing = false,
-            preBakedPathingAncestor = blue,
+            preBakedPathingAncestor = green,
             shortcutColor = new Color(0.57f, 0.37f, 0.30f)
         };
 
         StaticWorld.creatureTemplates[spinebackType.Index] = template;
     }
 
-    private static void SyncRelationshipsFromBlueLizard()
+    private static void SyncRelationshipsFromGreenLizard()
     {
         CreatureTemplate.Type spinebackType = SpinebackLizardEnums.Type;
         CreatureTemplate[] templates = StaticWorld.creatureTemplates;
@@ -175,48 +175,48 @@ internal static class SpinebackLizardHooks
             templates == null ||
             spinebackType.Index < 0 ||
             spinebackType.Index >= templates.Length ||
-            CreatureTemplate.Type.BlueLizard.Index < 0 ||
-            CreatureTemplate.Type.BlueLizard.Index >= templates.Length)
+            CreatureTemplate.Type.GreenLizard.Index < 0 ||
+            CreatureTemplate.Type.GreenLizard.Index >= templates.Length)
         {
             return;
         }
 
         int spineIndex = spinebackType.Index;
-        int blueIndex = CreatureTemplate.Type.BlueLizard.Index;
+        int greenIndex = CreatureTemplate.Type.GreenLizard.Index;
         CreatureTemplate spineback = templates[spineIndex];
-        CreatureTemplate blue = templates[blueIndex];
+        CreatureTemplate green = templates[greenIndex];
 
-        if (spineback?.relationships == null || blue?.relationships == null)
+        if (spineback?.relationships == null || green?.relationships == null)
         {
             return;
         }
 
-        int outboundCount = Math.Min(spineback.relationships.Length, blue.relationships.Length);
+        int outboundCount = Math.Min(spineback.relationships.Length, green.relationships.Length);
         for (int i = 0; i < outboundCount; i++)
         {
-            if (blue.relationships[i] != null)
+            if (green.relationships[i] != null)
             {
-                spineback.relationships[i] = blue.relationships[i].Duplicate();
+                spineback.relationships[i] = green.relationships[i].Duplicate();
             }
         }
 
-        if (spineIndex < spineback.relationships.Length && blueIndex < blue.relationships.Length)
+        if (spineIndex < spineback.relationships.Length && greenIndex < green.relationships.Length)
         {
-            spineback.relationships[spineIndex] = blue.relationships[blueIndex].Duplicate();
+            spineback.relationships[spineIndex] = green.relationships[greenIndex].Duplicate();
         }
 
         for (int i = 0; i < templates.Length; i++)
         {
             CreatureTemplate other = templates[i];
             if (other?.relationships == null ||
-                blueIndex >= other.relationships.Length ||
+                greenIndex >= other.relationships.Length ||
                 spineIndex >= other.relationships.Length ||
-                other.relationships[blueIndex] == null)
+                other.relationships[greenIndex] == null)
             {
                 continue;
             }
 
-            other.relationships[spineIndex] = other.relationships[blueIndex].Duplicate();
+            other.relationships[spineIndex] = other.relationships[greenIndex].Duplicate();
         }
     }
 
@@ -234,8 +234,7 @@ internal static class SpinebackLizardHooks
 
         int seed = self.lizard.abstractCreature?.ID.RandomSeed ?? 0;
 
-        // Match the supplied concept: large blunt head, thick low body and a heavy
-        // tail rather than Blue Lizard's narrow silhouette.
+        // Match the supplied concept: large blunt head, thick low body and a heavy tail.
         self.iVars.fatness = Mathf.Lerp(1.28f, 1.42f, Stable01(seed + 503));
         self.iVars.headSize = Mathf.Lerp(1.14f, 1.28f, Stable01(seed + 907));
         self.iVars.tailFatness = Mathf.Lerp(1.12f, 1.30f, Stable01(seed + 1301));
@@ -273,8 +272,6 @@ internal static class SpinebackLizardHooks
 
         self.ColorBody(sLeaser, body);
 
-        // Keep the head mostly reddish-brown like the concept art, with a lighter
-        // lower-jaw/throat accent and a near-black eye/mouth detail.
         if (self.SpriteHeadStart >= 0 && self.SpriteHeadStart + 4 < sLeaser.sprites.Length)
         {
             sLeaser.sprites[self.SpriteHeadStart].color = back;
@@ -290,8 +287,8 @@ internal static class SpinebackLizardHooks
             sLeaser.sprites[i].color = (i % 2 == 0) ? back : body;
         }
 
-        // Remove Blue Lizard's random cosmetic rolls. The Spineback silhouette is
-        // entirely defined by its own grouped spine and dorsal-pattern layer.
+        // Hide the baseline lizard's random cosmetics. Spineback uses only its own
+        // head crest, grouped dorsal spines and body pattern layer.
         if (GraphicsStates.TryGetValue(self, out GraphicsState graphicsState))
         {
             int vanillaStart = Math.Max(0, graphicsState.VanillaExtraStart);
