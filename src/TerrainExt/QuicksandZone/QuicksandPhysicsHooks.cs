@@ -277,6 +277,9 @@ internal static class QuicksandPhysicsHooks
         Vector2 current = chunk.pos;
         Vector2 predicted = current + chunk.vel + Vector2.down * chunk.owner.gravity;
         float radius = Mathf.Max(1f, chunk.rad);
+        bool playerChunk = chunk.owner is Player;
+        float currentEntryMargin = playerChunk ? 1.02f : 0.32f;
+        float predictiveEntryMargin = playerChunk ? 1.02f : 0.12f;
 
         for (int i = 0; i < room.updateList.Count; i++)
         {
@@ -298,7 +301,7 @@ internal static class QuicksandPhysicsHooks
                     cache.Surface,
                     cache.Bottom,
                     out QuicksandSurface.Contact currentContact) &&
-                IsInsideOverrideBand(currentContact, radius, entryMargin: 0.32f))
+                IsInsideOverrideBand(currentContact, radius, currentEntryMargin))
             {
                 contact = currentContact;
                 return true;
@@ -316,7 +319,7 @@ internal static class QuicksandPhysicsHooks
                     cache.Surface,
                     cache.Bottom,
                     out QuicksandSurface.Contact predictedContact) &&
-                IsInsideOverrideBand(predictedContact, radius, entryMargin: 0.12f) &&
+                IsInsideOverrideBand(predictedContact, radius, predictiveEntryMargin) &&
                 Vector2.Dot(predicted - current, predictedContact.Inward) > -0.05f)
             {
                 contact = predictedContact;
