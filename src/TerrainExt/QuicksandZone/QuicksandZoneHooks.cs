@@ -9,24 +9,13 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 internal static class QuicksandZoneHooks
 {
     private const string PlacedTypeName = "QuicksandZone";
-    private const int LayerSampleCount = 64;
-    private const float HeadCoverClearance = 8f;
 
-    private sealed class PlayerLayerState
+    private sealed class SinkRenderState
     {
-        internal bool SplitActive;
+        internal bool Active;
     }
 
-    private sealed class ZoneLayerCache
-    {
-        internal readonly Vector2[] Surface = new Vector2[LayerSampleCount];
-        internal readonly Vector2[] Bottom = new Vector2[LayerSampleCount];
-    }
-
-    private static readonly ConditionalWeakTable<PlayerGraphics, PlayerLayerState> PlayerLayerStates = new();
-    private static readonly ConditionalWeakTable<QuicksandZone, ZoneLayerCache> ZoneLayerCaches = new();
-    private static readonly int[] UpperPlayerSprites = { 0, 3, 5, 6, 7, 8, 9 };
-    private static readonly int[] LowerPlayerSprites = { 1, 2, 4 };
+    private static readonly ConditionalWeakTable<RoomCamera.SpriteLeaser, SinkRenderState> SinkRenderStates = new();
     private static bool _enabled;
 
     internal static PlacedObject.Type PlacedType { get; private set; }
@@ -46,7 +35,7 @@ internal static class QuicksandZoneHooks
             ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep += ObjectsPage_CreateObjRep;
         On.Room.Loaded += Room_Loaded;
-        On.PlayerGraphics.DrawSprites += PlayerGraphics_DrawSprites;
+        On.RoomCamera.SpriteLeaser.Update += SpriteLeaser_Update;
     }
 
     internal static void Disable()
@@ -62,7 +51,7 @@ internal static class QuicksandZoneHooks
             ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep -= ObjectsPage_CreateObjRep;
         On.Room.Loaded -= Room_Loaded;
-        On.PlayerGraphics.DrawSprites -= PlayerGraphics_DrawSprites;
+        On.RoomCamera.SpriteLeaser.Update -= SpriteLeaser_Update;
 
         PlacedType?.Unregister();
         PlacedType = null;
@@ -148,155 +137,135 @@ internal static class QuicksandZoneHooks
         }
     }
 
-    private static void PlayerGraphics_DrawSprites(
-        On.PlayerGraphics.orig_DrawSprites orig,
-        PlayerGraphics self,
-        RoomCamera.SpriteLeaser sLeaser,
-        RoomCamera rCam,
+    private static void SpriteLeaser_Update(
+        On.RoomCamera.SpriteLeaser.orig_Update orig,
+        RoomCamera.SpriteLeaser self,
         float timeStacker,
+        RoomCamera rCam,
         Vector2 camPos)
     {
-        orig(self, sLeaser, rCam, timeStacker, camPos);
+        orig(self, timeStacker, rCam, camPos);
 
-        if (self?.player == null || sLeaser?.sprites == null || rCam?.room == null)
+        if (self == null || self.sprites == null || rCam?.room == null)
         {
             return;
         }
 
-        PlayerLayerState state = PlayerLayerStates.GetOrCreateValue(self);
-        bool splitActive = IsPlayerTouchingQuicksand(self.player);
+        SinkRenderState renderState = SinkRenderStates.GetOrCreateValue(self);
+        PhysicalObject physicalObject = ResolvePhysicalObject(self.drawableObject);
 
-        if (!splitActive)
+        if (physicalObject == null ||
+            physicalObject.room != rCam.room ||
+            !QuicksandPhysicsHooks.TryGetVisualSink(
+                physicalObject,
+                out Vector2 visualOffset,
+                out _,
+                out _))
         {
-            if (state.SplitActive)
+            if (renderState.Active)
             {
-                self.AddToContainer(sLeaser, rCam, null);
-                state.SplitActive = false;
+                // Restore the drawable's own normal container choices after leaving
+                // the quicksand. This also restores MSC/Watcher-specific graphics.
+                self.AddSpritesToContainer(null, rCam);
+                renderState.Active = false;
             }
 
             return;
         }
 
-        FContainer sandContainer = rCam.ReturnFContainer("Sand");
-        if (sandContainer == null)
+        FContainer sand = rCam.ReturnFContainer("Sand");
+        if (sand == null)
         {
             return;
         }
 
-        bool headFullyCovered = IsHeadFullyCovered(self);
-        MoveSpritesToSand(sLeaser, sandContainer, LowerPlayerSprites, moveToFront: false);
-        MoveSpritesToSand(
-            sLeaser,
-            sandContainer,
-            UpperPlayerSprites,
-            moveToFront: !headFullyCovered);
+        if (!renderState.Active)
+        {
+            // Let the drawable rebuild any internal layout first, then force its
+            // visible sprites behind Sand. The quicksand surface itself becomes the
+            // clipping boundary: everything above the curve stays visible, and the
+            // portion below it is naturally hidden.
+            self.AddSpritesToContainer(sand, rCam);
+            renderState.Active = true;
+        }
 
-        state.SplitActive = true;
+        MoveDrawableBehindSand(self, sand);
+        ApplyVisualSinkOffset(self, visualOffset);
     }
 
-    private static void MoveSpritesToSand(
-        RoomCamera.SpriteLeaser sLeaser,
-        FContainer sandContainer,
-        int[] spriteIndices,
-        bool moveToFront)
+    private static PhysicalObject ResolvePhysicalObject(IDrawable drawable)
     {
-        for (int i = 0; i < spriteIndices.Length; i++)
+        if (drawable is GraphicsModule graphicsModule)
         {
-            int spriteIndex = spriteIndices[i];
-            if (spriteIndex < 0 || spriteIndex >= sLeaser.sprites.Length)
-            {
-                continue;
-            }
+            return graphicsModule.owner;
+        }
 
-            FSprite sprite = sLeaser.sprites[spriteIndex];
+        return drawable as PhysicalObject;
+    }
+
+    private static void MoveDrawableBehindSand(
+        RoomCamera.SpriteLeaser sLeaser,
+        FContainer sand)
+    {
+        // Reverse traversal followed by MoveToBack preserves the sprite array's
+        // relative ordering while placing the whole drawable behind the sand mesh.
+        for (int i = sLeaser.sprites.Length - 1; i >= 0; i--)
+        {
+            FSprite sprite = sLeaser.sprites[i];
             if (sprite == null)
             {
                 continue;
             }
 
-            if (sprite.container != sandContainer)
+            if (sprite.container != sand)
             {
-                sandContainer.AddChild(sprite);
+                sand.AddChild(sprite);
             }
 
-            if (moveToFront)
-            {
-                sprite.MoveToFront();
-            }
-            else
-            {
-                sprite.MoveToBack();
-            }
-        }
-    }
-
-    private static bool IsPlayerTouchingQuicksand(Player player)
-    {
-        Room room = player?.room;
-        if (room?.updateList == null)
-        {
-            return false;
+            sprite.MoveToBack();
         }
 
-        for (int i = 0; i < room.updateList.Count; i++)
+        if (sLeaser.containers == null)
         {
-            if (room.updateList[i] is QuicksandZone zone &&
-                !zone.slatedForDeletetion &&
-                zone.IntersectsPlayerForLayer(player))
-            {
-                return true;
-            }
+            return;
         }
 
-        return false;
-    }
-
-    private static bool IsHeadFullyCovered(PlayerGraphics graphics)
-    {
-        Player player = graphics?.player;
-        Room room = player?.room;
-        if (room?.updateList == null || graphics.head == null)
+        for (int i = sLeaser.containers.Length - 1; i >= 0; i--)
         {
-            return false;
-        }
-
-        Vector2 headPosition = graphics.head.pos;
-
-        for (int i = 0; i < room.updateList.Count; i++)
-        {
-            if (room.updateList[i] is not QuicksandZone zone ||
-                zone.slatedForDeletetion ||
-                zone.PlacedObject == null ||
-                !zone.PlacedObject.active ||
-                zone.PlacedObject.data is not QuicksandZoneData data ||
-                !zone.IntersectsPlayerForLayer(player))
+            FContainer container = sLeaser.containers[i];
+            if (container == null)
             {
                 continue;
             }
 
-            ZoneLayerCache cache = ZoneLayerCaches.GetValue(zone, _ => new ZoneLayerCache());
-            QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
+            sand.AddChild(container);
+            container.MoveToBack();
+        }
+    }
 
-            if (!QuicksandSurface.TryGetContact(
-                    headPosition,
-                    HeadCoverClearance + 2f,
-                    cache.Surface,
-                    cache.Bottom,
-                    out QuicksandSurface.Contact contact))
+    private static void ApplyVisualSinkOffset(
+        RoomCamera.SpriteLeaser sLeaser,
+        Vector2 visualOffset)
+    {
+        if (visualOffset.sqrMagnitude < 0.0000001f)
+        {
+            return;
+        }
+
+        // DrawSprites has already rebuilt every sprite position for this camera
+        // frame, so this offset never accumulates. Physics remains fixed on the
+        // surface while only the rendered image sinks through it.
+        for (int i = 0; i < sLeaser.sprites.Length; i++)
+        {
+            FSprite sprite = sLeaser.sprites[i];
+            if (sprite == null)
             {
                 continue;
             }
 
-            float headDepth = Vector2.Dot(
-                headPosition - contact.SurfacePoint,
-                contact.Inward);
-            if (headDepth >= HeadCoverClearance)
-            {
-                return true;
-            }
+            sprite.x += visualOffset.x;
+            sprite.y += visualOffset.y;
         }
-
-        return false;
     }
 
     private static void EnsureRuntimeObject(Room room, PlacedObject placedObject)
@@ -328,10 +297,6 @@ internal static class QuicksandZoneHooks
             room.AddObject(new QuicksandZone(placedObject));
         }
 
-        // TerrainCurve.Update() always creates a TerrainCurveMaskSource. The
-        // SlopedTerrainSurface shader alone is not the complete Watcher terrain
-        // pipeline; this mask is what makes sunlight/depth/edge lighting line up
-        // with the original curved terrain.
         if (ModManager.Watcher && !hasTerrainMask)
         {
             room.AddObject(new QuicksandTerrainMaskSource(placedObject));
