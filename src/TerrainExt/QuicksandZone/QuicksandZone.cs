@@ -9,6 +9,8 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
     private const int SampleCount = 64;
     private const int FlowStripeCount = 14;
     private const float MaxStainHeight = 60f;
+    private const float TerrainBackOffset = 50f;
+    private const float TerrainMaxDepth = 35f;
 
     private static readonly Color FallbackSurfaceColor = new(0.79f, 0.61f, 0.32f);
     private static readonly Color FallbackDeepColor = new(0.43f, 0.28f, 0.15f);
@@ -18,6 +20,11 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
     private readonly PlacedObject _placedObject;
     private readonly Vector2[] _surface = new Vector2[SampleCount];
     private readonly Vector2[] _bottom = new Vector2[SampleCount];
+    private readonly Vector2[] _animatedFront = new Vector2[SampleCount];
+    private readonly Vector2[] _visualBack = new Vector2[SampleCount];
+    private readonly Vector2[] _screenFront = new Vector2[SampleCount];
+    private readonly Vector2[] _screenBack = new Vector2[SampleCount];
+    private readonly Vector2[] _screenBottom = new Vector2[SampleCount];
     private readonly float[] _wave = new float[SampleCount];
     private readonly float[] _lastWave = new float[SampleCount];
     private readonly float[] _waveVelocity = new float[SampleCount];
@@ -230,24 +237,29 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         TriangleMesh.Triangle[] triangles = BuildStripTriangles();
+        bool terrain = CanUseTerrainShader(rCam);
 
-        sLeaser.sprites = new FSprite[2 + FlowStripeCount];
+        sLeaser.sprites = new FSprite[3 + FlowStripeCount];
         sLeaser.sprites[0] = new TriangleMesh("Futile_White", triangles, customColor: true)
         {
-            shader = rCam.game.rainWorld.Shaders["Basic"]
+            shader = rCam.game.rainWorld.Shaders[terrain ? "SlopedTerrainStain" : "Basic"]
         };
         sLeaser.sprites[1] = new TriangleMesh("Futile_White", triangles, customColor: true)
         {
-            shader = rCam.game.rainWorld.Shaders["Basic"]
+            shader = rCam.game.rainWorld.Shaders[terrain ? "SlopedTerrainSurface" : "Basic"]
+        };
+        sLeaser.sprites[2] = new TriangleMesh("Futile_White", triangles, customColor: true)
+        {
+            shader = rCam.game.rainWorld.Shaders[terrain ? "SlopedTerrainSurface" : "Basic"]
         };
 
         for (int i = 0; i < FlowStripeCount; i++)
         {
-            sLeaser.sprites[i + 2] = new FSprite("pixel")
+            sLeaser.sprites[i + 3] = new FSprite("pixel")
             {
                 anchorY = 0.5f,
                 scaleX = i % 3 == 0 ? 1.8f : 1.1f,
-                alpha = i % 4 == 0 ? 0.34f : 0.50f
+                alpha = i % 4 == 0 ? 0.28f : 0.42f
             };
         }
 
@@ -269,119 +281,219 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         QuicksandSurface.SampleZone(_placedObject, Data, _surface, _bottom);
         ApplyTerrainShaderSettings(rCam);
 
-        TriangleMesh fill = sLeaser.sprites[0] as TriangleMesh;
-        TriangleMesh stain = sLeaser.sprites[1] as TriangleMesh;
+        TriangleMesh stain = sLeaser.sprites[0] as TriangleMesh;
+        TriangleMesh surfaceMesh = sLeaser.sprites[1] as TriangleMesh;
+        TriangleMesh underfill = sLeaser.sprites[2] as TriangleMesh;
         bool useTerrainPalette = CanUseTerrainShader(rCam);
 
-        fill.shader = rCam.game.rainWorld.Shaders[useTerrainPalette ? "SlopedTerrainSurface" : "Basic"];
         stain.shader = rCam.game.rainWorld.Shaders[useTerrainPalette ? "SlopedTerrainStain" : "Basic"];
+        surfaceMesh.shader = rCam.game.rainWorld.Shaders[useTerrainPalette ? "SlopedTerrainSurface" : "Basic"];
+        underfill.shader = rCam.game.rainWorld.Shaders[useTerrainPalette ? "SlopedTerrainSurface" : "Basic"];
 
+        float minDepth = room.roomSettings.TerrainDepth;
+        float maxDepth = TerrainMaxDepth;
         float terrainWaves = room.roomSettings.TerrainWaves;
-        float terrainDepth = room.roomSettings.TerrainDepth;
-        float bottomDepth = Mathf.Clamp(terrainDepth + 30f, terrainDepth, 35f);
-        float stainHeight = room.roomSettings.TerrainStainHeight * MaxStainHeight;
-        bool showStain = room.roomSettings.TerrainStainAmount > 0.0001f && stainHeight > 0.01f;
-        stain.isVisible = showStain;
 
-        Color surfaceFallback = GetSurfaceFallback(rCam);
-        Color deepFallback = GetDeepFallback(rCam);
+        BuildVisualCurves(timeStacker, camPos, terrainWaves);
+        DrawTerrainSurface(surfaceMesh, underfill, useTerrainPalette, rCam, minDepth, maxDepth);
+        DrawTerrainStain(stain, useTerrainPalette, rCam, minDepth, maxDepth);
+        DrawFlowStripes(sLeaser, timeStacker, camPos, rCam, minDepth, maxDepth);
+    }
 
-        Vector2[] animatedSurface = new Vector2[SampleCount];
+    private void BuildVisualCurves(float timeStacker, Vector2 camPos, float terrainWaves)
+    {
         for (int i = 0; i < SampleCount; i++)
         {
             float u = (float)i / (SampleCount - 1);
-            Vector2 surface = _surface[i];
-            Vector2 bottom = _bottom[i];
-            Vector2 inward = SafeNormal(bottom - surface, Vector2.down);
-            Vector2 outward = -inward;
-
             float movingWaveStrength = 0.60f + terrainWaves * 2.4f;
             float movingWave =
                 Mathf.Sin(u * Mathf.PI * 6f - _flowTime * 0.050f * Data.FlowSpeed) * movingWaveStrength +
                 Mathf.Sin(u * Mathf.PI * 14f - _flowTime * 0.083f * Data.FlowSpeed + 1.7f) *
                 (0.24f + terrainWaves * 0.70f);
             float localWave = Mathf.Lerp(_lastWave[i], _wave[i], timeStacker);
-            animatedSurface[i] = surface + outward * (movingWave + localWave);
+
+            _animatedFront[i] = _surface[i] + Vector2.up * (movingWave + localWave);
+            _visualBack[i] = _animatedFront[i] + Vector2.up * TerrainBackOffset;
+            _screenFront[i] = _animatedFront[i] - camPos;
+            _screenBack[i] = _visualBack[i] - camPos;
+            _screenBottom[i] = _bottom[i] - camPos;
         }
+    }
+
+    private void DrawTerrainSurface(
+        TriangleMesh surfaceMesh,
+        TriangleMesh underfill,
+        bool useTerrainPalette,
+        RoomCamera rCam,
+        float minDepth,
+        float maxDepth)
+    {
+        surfaceMesh.isVisible = true;
+        underfill.isVisible = true;
+
+        Color surfaceFallback = GetSurfaceFallback(rCam);
+        Color deepFallback = GetDeepFallback(rCam);
 
         for (int i = 0; i < SampleCount; i++)
         {
-            Vector2 surface = animatedSurface[i];
-            Vector2 bottom = _bottom[i];
-            Vector2 surfaceTangent = GetSampleTangent(animatedSurface, i);
-            Vector2 bottomTangent = GetSampleTangent(_bottom, i);
+            Vector2 frontDelta = GetSampleDelta(_screenFront, i);
+            Vector2 backDelta = GetSampleDelta(_screenBack, i);
             Vector3 depthVector = new(
-                bottom.x - surface.x,
-                bottom.y - surface.y,
-                bottomDepth - terrainDepth);
-            Vector3 frontTangent = new(surfaceTangent.x, surfaceTangent.y, 0f);
-            Vector3 backTangent = new(bottomTangent.x, bottomTangent.y, 0f);
+                _screenBack[i].x - _screenFront[i].x,
+                _screenBack[i].y - _screenFront[i].y,
+                maxDepth - minDepth);
+            Vector3 frontTangent = new(frontDelta.x, frontDelta.y, 0f);
+            Vector3 backTangent = new(backDelta.x, backDelta.y, 0f);
             Vector3 frontNormal3 = Vector3.Cross(depthVector, frontTangent).normalized;
             Vector3 backNormal3 = Vector3.Cross(depthVector, backTangent).normalized;
             Vector2 frontNormal = new(frontNormal3.x, frontNormal3.y);
             Vector2 backNormal = new(backNormal3.x, backNormal3.y);
 
-            int topIndex = i * 2;
-            int bottomIndex = topIndex + 1;
-            fill.MoveVertice(topIndex, surface - camPos);
-            fill.MoveVertice(bottomIndex, bottom - camPos);
+            int nearIndex = i * 2;
+            int farIndex = nearIndex + 1;
+
+            surfaceMesh.MoveVertice(nearIndex, _screenFront[i]);
+            surfaceMesh.MoveVertice(farIndex, _screenBack[i]);
+            underfill.MoveVertice(nearIndex, _screenBottom[i]);
+            underfill.MoveVertice(farIndex, _screenFront[i]);
 
             if (useTerrainPalette)
             {
-                fill.verticeColors[topIndex] = new Color(
+                surfaceMesh.verticeColors[nearIndex] = new Color(
                     0f,
-                    surfaceTangent.x,
-                    surfaceTangent.y,
-                    terrainDepth / 30f);
-                fill.verticeColors[bottomIndex] = new Color(
+                    frontDelta.x,
+                    frontDelta.y,
+                    minDepth / 30f);
+                surfaceMesh.verticeColors[farIndex] = new Color(
                     1f,
-                    bottomTangent.x,
-                    bottomTangent.y,
-                    bottomDepth / 30f);
-                fill.UVvertices[topIndex] = frontNormal;
-                fill.UVvertices[bottomIndex] = backNormal;
+                    backDelta.x,
+                    backDelta.y,
+                    maxDepth / 30f);
+                surfaceMesh.UVvertices[nearIndex] = frontNormal;
+                surfaceMesh.UVvertices[farIndex] = backNormal;
+
+                underfill.verticeColors[nearIndex] = new Color(
+                    _screenBottom[i].y - _screenFront[i].y,
+                    frontDelta.x,
+                    frontDelta.y,
+                    minDepth / 30f);
+                underfill.verticeColors[farIndex] = new Color(
+                    0f,
+                    frontDelta.x,
+                    frontDelta.y,
+                    minDepth / 30f);
+                underfill.UVvertices[nearIndex] = frontNormal;
+                underfill.UVvertices[farIndex] = frontNormal;
             }
             else
             {
-                fill.verticeColors[topIndex] = surfaceFallback;
-                fill.verticeColors[bottomIndex] = deepFallback;
-                fill.UVvertices[topIndex] = Vector2.zero;
-                fill.UVvertices[bottomIndex] = Vector2.zero;
-            }
-
-            if (showStain)
-            {
-                Vector2 stainTop = surface + Vector2.up * stainHeight;
-                stain.MoveVertice(topIndex, surface - camPos);
-                stain.MoveVertice(bottomIndex, stainTop - camPos);
-
-                if (useTerrainPalette)
-                {
-                    stain.verticeColors[topIndex] = new Color(0f, 0f, 0f, terrainDepth / 30f);
-                    stain.verticeColors[bottomIndex] = new Color(0f, 0f, 0f, terrainDepth / 30f);
-                    stain.UVvertices[topIndex] = Vector2.zero;
-                    stain.UVvertices[bottomIndex] = Vector2.one;
-                }
-                else
-                {
-                    Color stainColor = Color.Lerp(surfaceFallback, rCam.currentPalette.blackColor, 0.18f);
-                    stainColor.a = room.roomSettings.TerrainStainAmount * 0.40f;
-                    Color topColor = stainColor;
-                    topColor.a = 0f;
-                    stain.verticeColors[topIndex] = stainColor;
-                    stain.verticeColors[bottomIndex] = topColor;
-                }
+                surfaceMesh.verticeColors[nearIndex] = surfaceFallback;
+                surfaceMesh.verticeColors[farIndex] = deepFallback;
+                underfill.verticeColors[nearIndex] = deepFallback;
+                underfill.verticeColors[farIndex] = surfaceFallback;
+                surfaceMesh.UVvertices[nearIndex] = Vector2.zero;
+                surfaceMesh.UVvertices[farIndex] = Vector2.zero;
+                underfill.UVvertices[nearIndex] = Vector2.zero;
+                underfill.UVvertices[farIndex] = Vector2.zero;
             }
         }
+    }
 
-        DrawFlowStripes(sLeaser, timeStacker, camPos, rCam);
+    private void DrawTerrainStain(
+        TriangleMesh stain,
+        bool useTerrainPalette,
+        RoomCamera rCam,
+        float minDepth,
+        float maxDepth)
+    {
+        float stainHeight = room.roomSettings.TerrainStainHeight * MaxStainHeight;
+        bool show = room.roomSettings.TerrainStainAmount > 0.0001f && stainHeight > 0.01f;
+        stain.isVisible = show;
+        if (!show)
+        {
+            return;
+        }
+
+        if (!useTerrainPalette)
+        {
+            Color baseColor = Color.Lerp(
+                GetSurfaceFallback(rCam),
+                rCam.currentPalette.blackColor,
+                0.18f);
+            baseColor.a = room.roomSettings.TerrainStainAmount * 0.40f;
+            Color fadeColor = baseColor;
+            fadeColor.a = 0f;
+
+            for (int i = 0; i < SampleCount; i++)
+            {
+                int nearIndex = i * 2;
+                int farIndex = nearIndex + 1;
+                stain.MoveVertice(nearIndex, _screenFront[i]);
+                stain.MoveVertice(farIndex, _screenFront[i] + Vector2.up * stainHeight);
+                stain.verticeColors[nearIndex] = baseColor;
+                stain.verticeColors[farIndex] = fadeColor;
+                stain.UVvertices[nearIndex] = Vector2.zero;
+                stain.UVvertices[farIndex] = Vector2.one;
+            }
+
+            return;
+        }
+
+        int backCursor = 0;
+        for (int frontIndex = 0; frontIndex < SampleCount; frontIndex++)
+        {
+            Vector2 projectedFront = TerrainCurve.ApplyDepth(rCam, _screenFront[frontIndex], minDepth);
+
+            while (backCursor < SampleCount - 2 &&
+                   TerrainCurve.ApplyDepth(rCam, _screenBack[backCursor + 1], maxDepth).x < projectedFront.x)
+            {
+                backCursor++;
+            }
+
+            Vector2 backA = TerrainCurve.ApplyDepth(rCam, _screenBack[backCursor], maxDepth);
+            Vector2 backB = TerrainCurve.ApplyDepth(rCam, _screenBack[backCursor + 1], maxDepth);
+            float t = Mathf.Abs(backB.x - backA.x) > 0.0001f
+                ? Custom.InverseLerpUnclamped(backA.x, backB.x, projectedFront.x)
+                : 0f;
+            Vector2 projectedBack = Vector2.Lerp(backA, backB, t);
+
+            Vector2 depthZero = Vector2.LerpUnclamped(
+                projectedFront,
+                projectedBack,
+                Custom.InverseLerpUnclamped(minDepth, maxDepth, 0f));
+            Vector2 depthThirty = Vector2.LerpUnclamped(
+                projectedFront,
+                projectedBack,
+                Custom.InverseLerpUnclamped(minDepth, maxDepth, 30f));
+            Vector2 stainTopAtZero = depthZero + Vector2.up * stainHeight;
+            Vector2 stainTopAtThirty = depthThirty + Vector2.up * stainHeight;
+            Vector2 stainBottom = projectedFront;
+            Vector2 stainTop = new(
+                stainTopAtZero.x,
+                Mathf.Max(stainTopAtZero.y, stainTopAtThirty.y));
+
+            int nearIndex = frontIndex * 2;
+            int farIndex = nearIndex + 1;
+            stain.MoveVertice(nearIndex, stainBottom);
+            stain.MoveVertice(farIndex, stainTop);
+            stain.verticeColors[nearIndex] = new Color(0f, 0f, 0f, minDepth / 30f);
+            stain.verticeColors[farIndex] = new Color(0f, 0f, 0f, minDepth / 30f);
+            stain.UVvertices[nearIndex] = new Vector2(
+                Custom.InverseLerpUnclamped(depthZero.y, stainTopAtZero.y, stainBottom.y),
+                Custom.InverseLerpUnclamped(depthThirty.y, stainTopAtThirty.y, stainBottom.y));
+            stain.UVvertices[farIndex] = new Vector2(
+                Custom.InverseLerpUnclamped(depthZero.y, stainTopAtZero.y, stainTop.y),
+                Custom.InverseLerpUnclamped(depthThirty.y, stainTopAtThirty.y, stainTop.y));
+        }
     }
 
     private void DrawFlowStripes(
         RoomCamera.SpriteLeaser sLeaser,
         float timeStacker,
         Vector2 camPos,
-        RoomCamera rCam)
+        RoomCamera rCam,
+        float minDepth,
+        float maxDepth)
     {
         float signedSpeed = Data.FlowSpeed;
         float direction = signedSpeed >= 0f ? 1f : -1f;
@@ -403,30 +515,30 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 _flowSpeedMultiplier[i],
                 1f);
 
-            Vector2 surface = _placedObject.pos +
-                              QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, phase);
-            Vector2 bottom = _placedObject.pos +
-                             QuicksandSurface.EvaluateByApproximateLength(Data.BottomSpline, phase);
-            Vector2 center = Vector2.Lerp(surface, bottom, _flowDepth[i]);
+            float visualDepth = Mathf.Clamp01(_flowDepth[i]);
+            Vector2 front = _placedObject.pos +
+                            QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, phase);
+            Vector2 rawPoint = front + Vector2.up * TerrainBackOffset * visualDepth;
+            float depth = Mathf.Lerp(minDepth, maxDepth, visualDepth);
+            Vector2 center = TerrainCurve.ApplyDepth(rCam, rawPoint - camPos, depth);
 
             float aheadU = Mathf.Clamp01(phase + 0.008f * stripeDirection);
-            Vector2 aheadSurface = _placedObject.pos +
-                                   QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, aheadU);
-            Vector2 aheadBottom = _placedObject.pos +
-                                  QuicksandSurface.EvaluateByApproximateLength(Data.BottomSpline, aheadU);
-            Vector2 ahead = Vector2.Lerp(aheadSurface, aheadBottom, _flowDepth[i]);
+            Vector2 aheadFront = _placedObject.pos +
+                                 QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, aheadU);
+            Vector2 aheadRaw = aheadFront + Vector2.up * TerrainBackOffset * visualDepth;
+            Vector2 ahead = TerrainCurve.ApplyDepth(rCam, aheadRaw - camPos, depth);
             Vector2 tangent = SafeNormal(ahead - center, Vector2.right * stripeDirection);
 
-            FSprite stripe = sLeaser.sprites[i + 2];
-            stripe.SetPosition(center - camPos);
+            FSprite stripe = sLeaser.sprites[i + 3];
+            stripe.SetPosition(center);
             stripe.scaleY = _flowLength[i] *
                             Mathf.Lerp(0.75f, 1.15f, speed / 2f) *
                             Mathf.Lerp(0.85f, 1.25f, grain);
-            stripe.scaleX = (i % 3 == 0 ? 1.8f : 1.1f) * Mathf.Lerp(0.8f, 1.35f, grain);
+            stripe.scaleX = (i % 3 == 0 ? 1.6f : 1f) * Mathf.Lerp(0.8f, 1.25f, grain);
             stripe.rotation = Custom.AimFromOneVectorToAnother(center, center + tangent);
             stripe.color = i % 4 == 0 ? darkFlow : lightFlow;
-            stripe.alpha = (i % 4 == 0 ? 0.24f : 0.42f) *
-                           Mathf.Lerp(1f, 0.66f, _flowDepth[i]) *
+            stripe.alpha = (i % 4 == 0 ? 0.18f : 0.32f) *
+                           Mathf.Lerp(1f, 0.70f, visualDepth) *
                            Mathf.Lerp(0.65f, 1f, grain);
             stripe.isVisible = true;
         }
@@ -437,9 +549,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         RoomCamera rCam,
         RoomPalette palette)
     {
-        // TerrainPalette is maintained separately from RoomPalette by RoomCamera.
-        // Color selection is refreshed in DrawSprites so per-screen Terrain Fade
-        // changes immediately affect the quicksand as well.
     }
 
     public void AddToContainer(
@@ -452,15 +561,13 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         FContainer sand = newContainer ?? rCam.ReturnFContainer("Sand");
         FContainer foreground = rCam.ReturnFContainer("Foreground");
 
-        sand.AddChild(sLeaser.sprites[0]);
+        foreground.AddChild(sLeaser.sprites[0]);
+        sand.AddChild(sLeaser.sprites[1]);
         for (int i = 0; i < FlowStripeCount; i++)
         {
-            sand.AddChild(sLeaser.sprites[i + 2]);
+            sand.AddChild(sLeaser.sprites[i + 3]);
         }
-
-        // Match Watcher's TerrainCurve: stain is rendered in the foreground,
-        // while the actual terrain surface occupies the Sand layer.
-        foreground.AddChild(sLeaser.sprites[1]);
+        sand.AddChild(sLeaser.sprites[2]);
     }
 
     private static TriangleMesh.Triangle[] BuildStripTriangles()
@@ -468,12 +575,12 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[(SampleCount - 1) * 2];
         for (int i = 0; i < SampleCount - 1; i++)
         {
-            int top = i * 2;
-            int bottom = top + 1;
-            int nextTop = top + 2;
-            int nextBottom = top + 3;
-            triangles[i * 2] = new TriangleMesh.Triangle(top, bottom, nextTop);
-            triangles[i * 2 + 1] = new TriangleMesh.Triangle(nextTop, bottom, nextBottom);
+            int near = i * 2;
+            int far = near + 1;
+            int nextNear = near + 2;
+            int nextFar = near + 3;
+            triangles[i * 2] = new TriangleMesh.Triangle(near, far, nextNear);
+            triangles[i * 2 + 1] = new TriangleMesh.Triangle(nextNear, far, nextFar);
         }
 
         return triangles;
@@ -490,6 +597,34 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 room.roomSettings.TerrainWaves,
                 room.roomSettings.TerrainEdgeRadius,
                 room.roomSettings.TerrainGrain));
+
+        Vector2 sunOffset = Vector2.zero;
+        Vector2 sunlightTextureSize = rCam.sunlightTexture != null
+            ? new Vector2(rCam.sunlightTexture.width, rCam.sunlightTexture.height)
+            : Vector2.zero;
+
+        if (room.roomSettings?.placedObjects != null)
+        {
+            for (int i = 0; i < room.roomSettings.placedObjects.Count; i++)
+            {
+                PlacedObject placed = room.roomSettings.placedObjects[i];
+                if (placed != null &&
+                    placed.type == PlacedObject.Type.TerrainSunOffset &&
+                    placed.data is PlacedObject.ResizableObjectData resize)
+                {
+                    sunOffset = resize.handlePos;
+                    break;
+                }
+            }
+        }
+
+        Vector2 shaderSunOffset =
+            (sunlightTextureSize - new Vector2(room.PixelWidth, room.PixelHeight)) / 2f +
+            new Vector2(140f, -120f) +
+            sunOffset;
+        Shader.SetGlobalVector(
+            "_sunlightOffset",
+            new Vector4(shaderSunOffset.x, shaderSunOffset.y, 0f, 0f));
 
         float gooHeight = room.roomSettings.TerrainGooHeight;
         gooHeight = gooHeight == 0f
@@ -516,7 +651,7 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                rCam.game.rainWorld.Shaders.ContainsKey("SlopedTerrainStain");
     }
 
-    private static Vector2 GetSampleTangent(Vector2[] points, int index)
+    private static Vector2 GetSampleDelta(Vector2[] points, int index)
     {
         if (points == null || points.Length < 2)
         {
@@ -525,7 +660,8 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
 
         int previous = Mathf.Max(0, index - 1);
         int next = Mathf.Min(points.Length - 1, index + 1);
-        return SafeNormal(points[next] - points[previous], Vector2.right);
+        Vector2 delta = points[next] - points[previous];
+        return delta.sqrMagnitude > 0.0001f ? delta : Vector2.right;
     }
 
     private static Color GetSurfaceFallback(RoomCamera rCam)
