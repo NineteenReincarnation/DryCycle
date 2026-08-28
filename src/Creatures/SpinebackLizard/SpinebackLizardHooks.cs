@@ -32,6 +32,10 @@ internal static class SpinebackLizardHooks
         _enabled = true;
         On.StaticWorld.InitCustomTemplates += StaticWorld_InitCustomTemplates;
         On.StaticWorld.InitStaticWorld += StaticWorld_InitStaticWorld;
+        On.LizardAI.Update += LizardAI_Update;
+        On.LizardAI.AggressiveBehavior += LizardAI_AggressiveBehavior;
+        On.LizardAI.TravelPreference += LizardAI_TravelPreference;
+        On.LizardAI.IdleSpotScore += LizardAI_IdleSpotScore;
         On.LizardGraphics.ctor += LizardGraphics_ctor;
         On.LizardGraphics.DrawSprites += LizardGraphics_DrawSprites;
         On.LizardGraphics.ApplyPalette += LizardGraphics_ApplyPalette;
@@ -47,6 +51,10 @@ internal static class SpinebackLizardHooks
         _enabled = false;
         On.StaticWorld.InitCustomTemplates -= StaticWorld_InitCustomTemplates;
         On.StaticWorld.InitStaticWorld -= StaticWorld_InitStaticWorld;
+        On.LizardAI.Update -= LizardAI_Update;
+        On.LizardAI.AggressiveBehavior -= LizardAI_AggressiveBehavior;
+        On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
+        On.LizardAI.IdleSpotScore -= LizardAI_IdleSpotScore;
         On.LizardGraphics.ctor -= LizardGraphics_ctor;
         On.LizardGraphics.DrawSprites -= LizardGraphics_DrawSprites;
         On.LizardGraphics.ApplyPalette -= LizardGraphics_ApplyPalette;
@@ -217,6 +225,105 @@ internal static class SpinebackLizardHooks
             }
 
             other.relationships[spineIndex] = other.relationships[greenIndex].Duplicate();
+        }
+    }
+
+    // Rain World's LizardAI contains several direct type checks for GreenLizard in
+    // addition to reading breed parameters. Temporarily presenting the custom
+    // template as GreenLizard while those AI routines run makes Spineback inherit
+    // Green's grounded lunge rules, vulture-mask response, travel preference and
+    // floor-biased idle scoring without changing the creature's registered type.
+    private static void LizardAI_Update(On.LizardAI.orig_Update orig, LizardAI self)
+    {
+        if (!IsSpineback(self?.lizard))
+        {
+            orig(self);
+            return;
+        }
+
+        RunAsGreen(self.lizard, () => orig(self));
+    }
+
+    private static void LizardAI_AggressiveBehavior(
+        On.LizardAI.orig_AggressiveBehavior orig,
+        LizardAI self,
+        Tracker.CreatureRepresentation target,
+        float tongueChance)
+    {
+        if (!IsSpineback(self?.lizard))
+        {
+            orig(self, target, tongueChance);
+            return;
+        }
+
+        RunAsGreen(self.lizard, () => orig(self, target, tongueChance));
+    }
+
+    private static PathCost LizardAI_TravelPreference(
+        On.LizardAI.orig_TravelPreference orig,
+        LizardAI self,
+        MovementConnection connection,
+        PathCost cost)
+    {
+        if (!IsSpineback(self?.lizard))
+        {
+            return orig(self, connection, cost);
+        }
+
+        return RunAsGreen(self.lizard, () => orig(self, connection, cost));
+    }
+
+    private static float LizardAI_IdleSpotScore(
+        On.LizardAI.orig_IdleSpotScore orig,
+        LizardAI self,
+        WorldCoordinate coord)
+    {
+        if (!IsSpineback(self?.lizard))
+        {
+            return orig(self, coord);
+        }
+
+        return RunAsGreen(self.lizard, () => orig(self, coord));
+    }
+
+    private static void RunAsGreen(Lizard lizard, Action action)
+    {
+        CreatureTemplate template = lizard?.Template;
+        if (template == null)
+        {
+            action();
+            return;
+        }
+
+        CreatureTemplate.Type originalType = template.type;
+        template.type = CreatureTemplate.Type.GreenLizard;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            template.type = originalType;
+        }
+    }
+
+    private static T RunAsGreen<T>(Lizard lizard, Func<T> action)
+    {
+        CreatureTemplate template = lizard?.Template;
+        if (template == null)
+        {
+            return action();
+        }
+
+        CreatureTemplate.Type originalType = template.type;
+        template.type = CreatureTemplate.Type.GreenLizard;
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            template.type = originalType;
         }
     }
 
