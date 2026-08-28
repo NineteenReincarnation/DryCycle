@@ -10,7 +10,9 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// - sinking is always straight down on the world Y axis;
 /// - jumping/struggling is always straight up on the world Y axis;
 /// - no quicksand physics operation is allowed to add an X displacement;
-/// - while a chunk is in the quicksand band, native terrain collision is disabled.
+/// - native terrain collision is ignored inside quicksand;
+/// - the player's lower body receives a virtual floor contact so Rain World's
+///   standing/walking state still treats the sinking layer as ground.
 /// </summary>
 internal static class QuicksandSinkRateLimiter
 {
@@ -89,8 +91,9 @@ internal static class QuicksandSinkRateLimiter
             float radius = Mathf.Max(1f, chunk.rad);
             startedTouching[i] = startDepth >= -radius;
 
-            // Once a body chunk is at or immediately approaching quicksand, do not
-            // let Rain World's normal tile/terrain collision decide its motion.
+            // The quicksand band is not ordinary solid terrain. Native collision is
+            // disabled while the player update runs; BodyChunk_Update below restores
+            // only the semantic floor-contact flag needed by Player locomotion.
             collisionOverridden[i] = true;
             chunk.collideWithTerrain = false;
         }
@@ -156,6 +159,13 @@ internal static class QuicksandSinkRateLimiter
     private static void BodyChunk_Update(On.BodyChunk.orig_Update orig, BodyChunk self)
     {
         PhysicalObject owner = self?.owner;
+
+        if (owner is Player player)
+        {
+            PlayerBodyChunk_Update(orig, self, player);
+            return;
+        }
+
         if (!CanLimitLooseObject(owner) ||
             !TryFindVerticalContact(
                 self,
@@ -220,6 +230,79 @@ internal static class QuicksandSinkRateLimiter
         self.vel.y = -ObjectSinkSpeed;
     }
 
+    private static void PlayerBodyChunk_Update(
+        On.BodyChunk.orig_Update orig,
+        BodyChunk chunk,
+        Player player)
+    {
+        float radius = Mathf.Max(1f, chunk.rad);
+        bool hadQuicksandFrame = TryFindVerticalContact(
+            chunk,
+            out _,
+            out _,
+            out float startDepth,
+            out _);
+        bool startedTouching = hadQuicksandFrame && startDepth >= -radius;
+
+        bool originalTerrainCollision = chunk.collideWithTerrain;
+        if (hadQuicksandFrame)
+        {
+            chunk.collideWithTerrain = false;
+        }
+
+        try
+        {
+            orig(chunk);
+        }
+        finally
+        {
+            chunk.collideWithTerrain = originalTerrainCollision;
+        }
+
+        // Rain World's standing/body-mode logic reads BodyChunk.ContactPoint after
+        // BodyChunk.Update and before Player.UpdateBodyMode. Since quicksand must be
+        // penetrable, we cannot keep a real collision response; instead emulate only
+        // the lower-body "floor below me" semantic while the player is supported by
+        // the sinking layer.
+        if (player.bodyChunks == null ||
+            player.bodyChunks.Length < 2 ||
+            player.bodyChunks[1] != chunk ||
+            chunk.vel.y > 0.01f)
+        {
+            return;
+        }
+
+        if (!TryFindVerticalContact(
+                chunk,
+                out _,
+                out _,
+                out float currentDepth,
+                out float depthLength))
+        {
+            return;
+        }
+
+        bool touchingSurface = startedTouching || currentDepth >= -radius;
+        if (!touchingSurface || currentDepth > depthLength + radius * 0.50f)
+        {
+            return;
+        }
+
+        // Only the lower body chunk gets the virtual floor. Giving both chunks a
+        // downward contact makes Player.UpdateBodyMode choose Crawl instead of the
+        // normal standing/walking mode.
+        chunk.contactPoint.y = -1;
+
+        // Landing in quicksand should restore the same standing intent as landing on
+        // ordinary ground. Holding down still remains the player's way to crouch.
+        if (player.input == null ||
+            player.input.Length == 0 ||
+            player.input[0].y >= 0)
+        {
+            player.standing = true;
+        }
+    }
+
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
     {
         if (self == null || self.bodyChunks == null || self.bodyChunks.Length == 0)
@@ -265,6 +348,7 @@ internal static class QuicksandSinkRateLimiter
             chunk.vel.y = PlayerStruggleUpwardSpeed;
         }
 
+        self.standing = false;
         self.jumpBoost = 0f;
     }
 
