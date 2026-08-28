@@ -183,10 +183,6 @@ internal static class QuicksandZoneHooks
             return;
         }
 
-        // Lower body is hidden as soon as the player begins sinking. The upper body
-        // stays visible only while the actual PlayerGraphics head is still above the
-        // quicksand surface. Once the head itself clears the surface, every slugcat
-        // sprite goes behind Sand so the visual state agrees with the death check.
         bool headFullyCovered = IsHeadFullyCovered(self);
         MoveSpritesToSand(sLeaser, sandContainer, LowerPlayerSprites, moveToFront: false);
         MoveSpritesToSand(
@@ -310,15 +306,35 @@ internal static class QuicksandZoneHooks
             return;
         }
 
+        bool hasZone = false;
+        bool hasTerrainMask = false;
+
         for (int i = 0; i < room.updateList.Count; i++)
         {
-            if (room.updateList[i] is QuicksandZone existing &&
-                existing.PlacedObject == placedObject)
+            if (room.updateList[i] is QuicksandZone existingZone &&
+                existingZone.PlacedObject == placedObject)
             {
-                return;
+                hasZone = true;
+            }
+            else if (room.updateList[i] is QuicksandTerrainMaskSource existingMask &&
+                     existingMask.PlacedObject == placedObject)
+            {
+                hasTerrainMask = true;
             }
         }
 
-        room.AddObject(new QuicksandZone(placedObject));
+        if (!hasZone)
+        {
+            room.AddObject(new QuicksandZone(placedObject));
+        }
+
+        // TerrainCurve.Update() always creates a TerrainCurveMaskSource. The
+        // SlopedTerrainSurface shader alone is not the complete Watcher terrain
+        // pipeline; this mask is what makes sunlight/depth/edge lighting line up
+        // with the original curved terrain.
+        if (ModManager.Watcher && !hasTerrainMask)
+        {
+            room.AddObject(new QuicksandTerrainMaskSource(placedObject));
+        }
     }
 }
