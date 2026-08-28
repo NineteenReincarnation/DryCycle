@@ -92,6 +92,22 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
                 out _);
         }
 
+        // TerrainCurve.DrawSprites hides non-LocalTerrainCurve instances when the
+        // room-handle list has fewer than two entries. Our spline supplies geometry
+        // directly, so keep two internal handles solely for that native visibility
+        // guard; frontPoints/backPoints above remain authoritative.
+        handles.Clear();
+        handles.Add(new TerrainCurve.Handle(
+            frontPoints[0],
+            frontPoints[0],
+            frontPoints[0],
+            50f));
+        handles.Add(new TerrainCurve.Handle(
+            frontPoints[segments - 1],
+            frontPoints[segments - 1],
+            frontPoints[segments - 1],
+            50f));
+
         UpdateCollision();
         maskSource?.SetVertices(frontPoints, backPoints, newBottom);
     }
