@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.41";
+    public const string Version = "0.0.42";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -57,9 +57,8 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
-            QuicksandEntryBounceGuard.Disable();
+            QuicksandWeaponSettling.Disable();
             QuicksandSinkRateLimiter.Disable();
-            QuicksandRealisticPhysics.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
@@ -107,12 +106,11 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
 
-            // Keep the existing contact/weapon handling underneath, then install the
-            // baseline fixed-sink controller last so it owns the final normal motion
-            // and the final jump/struggle impulse.
-            QuicksandRealisticPhysics.Enable();
+            // QuicksandSinkRateLimiter is the single owner of player / loose-object
+            // translation. Weapon settling is intentionally separate and never edits
+            // translational motion.
             QuicksandSinkRateLimiter.Enable();
-            QuicksandEntryBounceGuard.Enable();
+            QuicksandWeaponSettling.Enable();
             QuicksandSubmersionCleanup.Enable();
 
             DewPodPlantHooks.Enable();
@@ -132,9 +130,8 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
-            QuicksandEntryBounceGuard.Disable();
+            QuicksandWeaponSettling.Disable();
             QuicksandSinkRateLimiter.Disable();
-            QuicksandRealisticPhysics.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
