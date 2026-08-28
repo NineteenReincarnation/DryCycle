@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.34";
+    public const string Version = "0.0.35";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -56,7 +56,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
-            QuicksandPhysicsHooks.Disable();
+            QuicksandRealisticPhysics.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
@@ -103,7 +103,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ThirstHooks.Enable();
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
-            QuicksandPhysicsHooks.Enable();
+            QuicksandRealisticPhysics.Enable();
             DewPodPlantHooks.Enable();
             DewPodPlantCollisionHooks.Enable();
             DewPodClassicVisualHooks.Enable();
@@ -120,7 +120,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
-            QuicksandPhysicsHooks.Disable();
+            QuicksandRealisticPhysics.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
