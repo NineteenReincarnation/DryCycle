@@ -19,9 +19,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
     private static readonly Color FallbackLightFlowColor = new(0.92f, 0.76f, 0.43f);
     private static readonly Color FallbackDarkFlowColor = new(0.50f, 0.32f, 0.17f);
 
-    // TerrainCurve.UpdateLightInfo clears and republishes these arrays every draw,
-    // even while TerrainCurve.doLighting is false. Quicksand must do the same or
-    // SlopedTerrainSurface can consume stale light data from another drawable.
     private static readonly Vector4[] EmptyTerrainLightColors = new Vector4[16];
     private static readonly Vector4[] EmptyTerrainLightParams = new Vector4[16];
 
@@ -658,51 +655,26 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         RoomCamera rCam,
         FContainer newContainer)
     {
-        sLeaser.RemoveAllSpritesFromContainer();
-
+        // Match Watcher's TerrainCurve hierarchy exactly. The terrain sprites are
+        // direct children of Sand; sLeaser.containers[0] is only the final internal
+        // container, not a wrapper around the entire terrain drawable.
         FContainer sand = newContainer ?? rCam.ReturnFContainer("Sand");
         FContainer foreground = rCam.ReturnFContainer("Foreground");
-        FContainer quicksandLayer = sLeaser.containers != null && sLeaser.containers.Length > 0
-            ? sLeaser.containers[0]
-            : null;
 
-        // TerrainCurve also puts its stain in Foreground. Quicksand is deliberately
-        // lower priority, so adjacent Watcher terrain remains the exterior skin.
         foreground.AddChild(sLeaser.sprites[0]);
-        sLeaser.sprites[0].MoveToBack();
-
-        if (quicksandLayer == null)
-        {
-            sand.AddChild(sLeaser.sprites[1]);
-            for (int i = 0; i < FlowStripeCount; i++)
-            {
-                sand.AddChild(sLeaser.sprites[i + 3]);
-            }
-            sand.AddChild(sLeaser.sprites[2]);
-
-            // Keep all quicksand Sand sprites below existing TerrainCurve children.
-            // Reverse traversal preserves quicksand's own internal ordering.
-            sLeaser.sprites[2].MoveToBack();
-            for (int i = FlowStripeCount - 1; i >= 0; i--)
-            {
-                sLeaser.sprites[i + 3].MoveToBack();
-            }
-            sLeaser.sprites[1].MoveToBack();
-            return;
-        }
-
-        sand.AddChild(quicksandLayer);
-        quicksandLayer.AddChild(sLeaser.sprites[1]);
+        sand.AddChild(sLeaser.sprites[1]);
         for (int i = 0; i < FlowStripeCount; i++)
         {
-            quicksandLayer.AddChild(sLeaser.sprites[i + 3]);
+            sand.AddChild(sLeaser.sprites[i + 3]);
         }
-        quicksandLayer.AddChild(sLeaser.sprites[2]);
+        sand.AddChild(sLeaser.sprites[2]);
 
-        // The previous implementation forced this container to the absolute front.
-        // Put it at the back of the same Sand hierarchy instead: Player lower-body
-        // sprites can still move behind it, but Watcher TerrainCurve remains above it.
-        quicksandLayer.MoveToBack();
+        if (sLeaser.containers != null &&
+            sLeaser.containers.Length > 0 &&
+            sLeaser.containers[0] != null)
+        {
+            sand.AddChild(sLeaser.containers[0]);
+        }
     }
 
     private static TriangleMesh.Triangle[] BuildStripTriangles()
