@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.46";
+    public const string Version = "0.1.47";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -60,6 +60,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
+            QuicksandLooseObjectSinkEase.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandZoneHooks.Disable();
@@ -117,6 +118,12 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandPlayerStruggleControl.EnableNativeCapture();
             QuicksandPlayerHorizontalStability.Enable();
             QuicksandSinkRateLimiter.Enable();
+
+            // Installed after the base sink hook so this outer BodyChunk pass can
+            // replace only the final loose-object downward step with a much slower,
+            // immersion-dependent settle. Player motion is unaffected.
+            QuicksandLooseObjectSinkEase.Enable();
+
             QuicksandPlayerLocomotionSupport.Enable();
             QuicksandPlayerStruggleControl.Enable();
             QuicksandWeaponSettling.Enable();
@@ -142,6 +149,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
+            QuicksandLooseObjectSinkEase.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandZoneHooks.Disable();
