@@ -98,7 +98,7 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 continue;
             }
 
-            if (contact.SignedDepth > -chunk.rad * 0.35f &&
+            if (contact.SignedDepth > -chunk.rad * 1.05f &&
                 contact.SignedDepth < contact.DepthLength + chunk.rad * 0.25f)
             {
                 return true;
@@ -143,7 +143,7 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
             for (int objectIndex = 0; objectIndex < objects.Count; objectIndex++)
             {
                 PhysicalObject physicalObject = objects[objectIndex];
-                if (physicalObject?.bodyChunks == null)
+                if (physicalObject?.bodyChunks == null || physicalObject is Player)
                 {
                     continue;
                 }
@@ -201,15 +201,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                                      Mathf.Abs(signedFlow) *
                                      viscosity *
                                      0.055f;
-                    }
-
-                    if (physicalObject is Player player &&
-                        player.input != null &&
-                        player.input.Length > 0 &&
-                        player.input[0].jmp &&
-                        surfaceImmersion > 0.25f)
-                    {
-                        chunk.vel -= contact.Inward * 0.075f * surfaceImmersion;
                     }
 
                     DisturbSurface(contact.U, chunk, viscosity);
@@ -320,9 +311,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
         {
             float u = (float)i / (SampleCount - 1);
 
-            // Keep both ends geometrically identical to adjacent TerrainCurve surfaces.
-            // The animated flow is strongest in the middle and smoothly reaches zero
-            // before either join, preventing an unavoidable normal/depth discontinuity.
             float edgeMotion = Mathf.SmoothStep(
                 0f,
                 1f,
@@ -467,7 +455,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
 
             if (useTerrainPalette)
             {
-                // These channels intentionally mirror TerrainCurve.DrawSprites.
                 surfaceMesh.verticeColors[nearIndex] = new Color(
                     0f,
                     frontDelta.x,
@@ -624,8 +611,6 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
                 _flowSpeedMultiplier[i],
                 1f);
 
-            // Fade flow markings at the two joins so the actual terrain boundary is
-            // visually indistinguishable from an adjacent TerrainCurve.
             float edgeFade = Mathf.SmoothStep(
                 0f,
                 1f,
@@ -681,24 +666,31 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
             ? sLeaser.containers[0]
             : null;
 
+        // TerrainCurve also puts its stain in Foreground. Quicksand is deliberately
+        // lower priority, so adjacent Watcher terrain remains the exterior skin.
         foreground.AddChild(sLeaser.sprites[0]);
+        sLeaser.sprites[0].MoveToBack();
 
         if (quicksandLayer == null)
         {
-            // Fallback for an already-existing SpriteLeaser created before this
-            // version: preserve the exact TerrainCurve ordering directly in Sand.
             sand.AddChild(sLeaser.sprites[1]);
             for (int i = 0; i < FlowStripeCount; i++)
             {
                 sand.AddChild(sLeaser.sprites[i + 3]);
             }
             sand.AddChild(sLeaser.sprites[2]);
+
+            // Keep all quicksand Sand sprites below existing TerrainCurve children.
+            // Reverse traversal preserves quicksand's own internal ordering.
+            sLeaser.sprites[2].MoveToBack();
+            for (int i = FlowStripeCount - 1; i >= 0; i--)
+            {
+                sLeaser.sprites[i + 3].MoveToBack();
+            }
+            sLeaser.sprites[1].MoveToBack();
             return;
         }
 
-        // The whole quicksand surface is one Sand-layer group. Because QuicksandZone
-        // runtime objects are created after Room.Loaded has created Watcher terrain,
-        // adding this group last makes quicksand the exterior skin when the two overlap.
         sand.AddChild(quicksandLayer);
         quicksandLayer.AddChild(sLeaser.sprites[1]);
         for (int i = 0; i < FlowStripeCount; i++)
@@ -706,7 +698,11 @@ internal sealed class QuicksandZone : UpdatableAndDeletable, IDrawable
             quicksandLayer.AddChild(sLeaser.sprites[i + 3]);
         }
         quicksandLayer.AddChild(sLeaser.sprites[2]);
-        quicksandLayer.MoveToFront();
+
+        // The previous implementation forced this container to the absolute front.
+        // Put it at the back of the same Sand hierarchy instead: Player lower-body
+        // sprites can still move behind it, but Watcher TerrainCurve remains above it.
+        quicksandLayer.MoveToBack();
     }
 
     private static TriangleMesh.Triangle[] BuildStripTriangles()
