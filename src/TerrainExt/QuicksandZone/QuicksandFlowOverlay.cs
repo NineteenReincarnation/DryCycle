@@ -6,7 +6,7 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 
 internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
 {
-    private const int StripeCount = 24;
+    private const int StripeCount = 16;
 
     private readonly float[] _phase = new float[StripeCount];
     private readonly float[] _depth = new float[StripeCount];
@@ -37,13 +37,15 @@ internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
         if (Zone == null ||
             Zone.slatedForDeletetion ||
             Zone.PlacedObject == null ||
-            !Zone.PlacedObject.active)
+            !Zone.PlacedObject.active ||
+            Zone.Data == null)
         {
             Destroy();
             return;
         }
 
-        _time += Mathf.Max(0.08f, Mathf.Abs(Zone.Data?.FlowSpeed ?? 0f));
+        Zone.Data.FillQuicksandIntervals(_intervals);
+        _time += Mathf.Max(0.08f, Mathf.Abs(Zone.Data.FlowSpeed));
     }
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
@@ -77,7 +79,6 @@ internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        Zone.Data.FillQuicksandIntervals(_intervals);
         if (_intervals.Count == 0)
         {
             HideAll(sLeaser);
@@ -87,6 +88,7 @@ internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
         float signedSpeed = Zone.Data.FlowSpeed;
         float direction = signedSpeed >= 0f ? 1f : -1f;
         float speed = Mathf.Max(0.05f, Mathf.Abs(signedSpeed));
+        float strength = Mathf.Clamp01(Zone.Data.FlowStrength);
         float grain = room.roomSettings.TerrainGrain;
         Color light = rCam.terrainPalette != null
             ? Color.Lerp(rCam.terrainPalette.LightDustColor, rCam.terrainPalette.LightTint, 0.22f)
@@ -120,22 +122,10 @@ internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
             Vector2 raw = surfacePoint + Vector2.up * 50f * visualDepth - camPos;
             Vector2 center = TerrainCurve.ApplyDepth(rCam, raw, depth);
 
-            float aheadU = Mathf.Clamp(
-                u + direction * Mathf.Max(0.002f, (interval.y - interval.x) * 0.012f),
-                interval.x,
-                interval.y);
-            Vector2 aheadPoint = surfacePoint + tangent * direction * 5f;
-            if (Zone.TrySampleSurfaceFrame(
-                    aheadU,
-                    out Vector2 sampledAhead,
-                    out _,
-                    out _,
-                    out _))
-            {
-                aheadPoint = sampledAhead;
-            }
-
-            Vector2 aheadRaw = aheadPoint + Vector2.up * 50f * visualDepth - camPos;
+            Vector2 aheadRaw = surfacePoint +
+                               tangent * direction * 5f +
+                               Vector2.up * 50f * visualDepth -
+                               camPos;
             Vector2 ahead = TerrainCurve.ApplyDepth(rCam, aheadRaw, depth);
             Vector2 screenTangent = SafeNormal(ahead - center, Vector2.right * direction);
 
@@ -152,6 +142,7 @@ internal sealed class QuicksandFlowOverlay : UpdatableAndDeletable, IDrawable
             stripe.color = i % 5 == 4 ? dark : light;
             stripe.alpha = (i % 5 == 4 ? 0.16f : 0.30f) *
                            Mathf.Lerp(1f, 0.72f, visualDepth) *
+                           Mathf.Lerp(0.55f, 1.15f, strength) *
                            edgeFade;
             stripe.isVisible = stripe.alpha > 0.002f;
         }
