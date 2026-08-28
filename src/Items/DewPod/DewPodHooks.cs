@@ -309,14 +309,13 @@ internal static class DewPodHooks
             return false;
         }
 
-        bool fullySubmerged = player.bodyChunks != null &&
-                              player.bodyChunks.Length >= 2 &&
-                              player.bodyChunks[0].submersion > 0.9f &&
-                              player.bodyChunks[1].submersion > 0.9f;
+        bool headSubmerged = player.bodyChunks != null &&
+                             player.bodyChunks.Length >= 1 &&
+                             player.bodyChunks[0].submersion > 0.9f;
 
-        // When the slugcat is already using DryCycle's normal submerged-drinking
-        // path, do not also drain a Dew Pod in the same input hold.
-        if (fullySubmerged && player.airInLungs < 0.999f)
+        // When the slugcat is already using DryCycle's normal head-submerged
+        // drinking path, do not also drain a Dew Pod in the same input hold.
+        if (headSubmerged && player.airInLungs < 0.999f)
         {
             return false;
         }
