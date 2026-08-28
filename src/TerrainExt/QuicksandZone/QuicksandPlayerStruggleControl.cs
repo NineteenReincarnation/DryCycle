@@ -4,52 +4,43 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Makes quicksand struggle input affect sink rate only.
+/// Temporarily replaces the old player struggle input with one reduced quicksand jump.
 ///
-/// The inner capture hook records the Player state produced by native Player.Update
-/// before QuicksandSinkRateLimiter applies its post-update support state. The outer
-/// hook restores that native state whenever Up or Jump is being used as a struggle,
-/// so struggle never locks the player into Stand/Crawl/Default.
-///
-/// Jump itself is swallowed while the player is already in quicksand. Holding Up or
-/// Jump simply changes whole-player descent from the normal sink rate to a slower
-/// world-Y descent. No horizontal impulse is generated.
+/// Up no longer changes the sink rate. Jump is allowed only while the player is still
+/// shallowly immersed, and only once during the same quicksand contact. The baseline
+/// sink controller still executes the native Player.Jump path and strips its horizontal
+/// impulse; this outer hook then replaces only the vertical launch with a small jump.
+/// The one-jump lock resets only after the player has remained outside quicksand for a
+/// short time, preventing repeated hopping across the surface.
 /// </summary>
 internal static class QuicksandPlayerStruggleControl
 {
-    private const float StruggleSinkSpeed = 0.035f;
-    private const float Epsilon = 0.000001f;
+    private const float ShallowJumpMaxImmersion = 0.20f;
+    private const float UpperChunkJumpSpeed = 2.00f;
+    private const float LowerChunkJumpSpeed = 1.70f;
+    private const float ExtraChunkJumpSpeed = 1.85f;
+    private const int ClearTicksToRearm = 12;
 
-    private sealed class NativeState
+    private sealed class JumpState
     {
-        internal bool HasValue;
-        internal bool Standing;
-        internal Player.BodyModeIndex BodyMode;
-        internal int CanJump;
+        internal bool LowJumpUsed;
+        internal int ClearTicks;
     }
 
-    private static readonly ConditionalWeakTable<Player, NativeState> NativeStates = new();
-    private static bool _captureEnabled;
+    private static readonly ConditionalWeakTable<Player, JumpState> JumpStates = new();
     private static bool _outerEnabled;
 
     /// <summary>
-    /// Must be enabled before QuicksandSinkRateLimiter so this hook sits inside it
-    /// and can see the state produced directly by native Player.Update.
+    /// Kept for Plugin hook-order compatibility. The reduced-jump controller no longer
+    /// needs an inner native-state capture hook.
     /// </summary>
     internal static void EnableNativeCapture()
     {
-        if (_captureEnabled)
-        {
-            return;
-        }
-
-        _captureEnabled = true;
-        On.Player.Update += Player_Update_CaptureNativeState;
     }
 
     /// <summary>
-    /// Must be enabled after the quicksand player support hooks so this hook is the
-    /// final owner of struggle displacement/state for the frame.
+    /// Installed after QuicksandSinkRateLimiter so this hook can replace the limiter's
+    /// legacy 1.15 Y struggle impulse with the reduced shallow jump profile.
     /// </summary>
     internal static void Enable()
     {
@@ -59,27 +50,23 @@ internal static class QuicksandPlayerStruggleControl
         }
 
         _outerEnabled = true;
-        On.Player.Update += Player_Update_StruggleOverride;
+        On.Player.Update += Player_Update;
         On.Player.Jump += Player_Jump;
     }
 
     internal static void Disable()
     {
-        if (_outerEnabled)
+        if (!_outerEnabled)
         {
-            _outerEnabled = false;
-            On.Player.Update -= Player_Update_StruggleOverride;
-            On.Player.Jump -= Player_Jump;
+            return;
         }
 
-        if (_captureEnabled)
-        {
-            _captureEnabled = false;
-            On.Player.Update -= Player_Update_CaptureNativeState;
-        }
+        _outerEnabled = false;
+        On.Player.Update -= Player_Update;
+        On.Player.Jump -= Player_Jump;
     }
 
-    private static void Player_Update_CaptureNativeState(
+    private static void Player_Update(
         On.Player.orig_Update orig,
         Player self,
         bool eu)
@@ -91,172 +78,86 @@ internal static class QuicksandPlayerStruggleControl
             return;
         }
 
-        NativeState state = NativeStates.GetValue(self, _ => new NativeState());
-        state.Standing = self.standing;
-        state.BodyMode = self.bodyMode;
-        state.CanJump = self.canJump;
-        state.HasValue = true;
-    }
-
-    private static void Player_Update_StruggleOverride(
-        On.Player.orig_Update orig,
-        Player self,
-        bool eu)
-    {
-        if (!CanTrack(self))
+        JumpState state = JumpStates.GetValue(self, _ => new JumpState());
+        if (TryGetQuicksandImmersion(self, out _))
         {
-            orig(self, eu);
+            state.ClearTicks = 0;
             return;
         }
 
-        bool wasInQuicksand = IsInQuicksand(self);
-        bool struggleRequested = HasStruggleInput(self);
-        float startAverageY = AverageChunkY(self);
-
-        orig(self, eu);
-
-        if (!wasInQuicksand ||
-            !struggleRequested ||
-            !CanTrack(self) ||
-            !IsInQuicksand(self))
+        if (!state.LowJumpUsed)
         {
+            state.ClearTicks = 0;
             return;
         }
 
-        // Restore exactly the high-level state native Player.Update produced before
-        // the baseline quicksand controller applied its supported-Stand fallback.
-        // This means struggle changes motion only; it does not choose a body mode.
-        if (NativeStates.TryGetValue(self, out NativeState nativeState) &&
-            nativeState.HasValue)
+        state.ClearTicks++;
+        if (state.ClearTicks >= ClearTicksToRearm)
         {
-            self.standing = nativeState.Standing;
-            self.bodyMode = nativeState.BodyMode;
-            self.canJump = nativeState.CanJump;
+            state.LowJumpUsed = false;
+            state.ClearTicks = 0;
         }
-
-        // Whatever the native update and baseline sink controller did internally,
-        // the final whole-player motion for a struggle frame is still a small,
-        // strictly downward world-Y step. Relative body-chunk pose is preserved.
-        float rawAverageDisplacement = AverageChunkY(self) - startAverageY;
-        float positionCorrectionY = -StruggleSinkSpeed - rawAverageDisplacement;
-        TranslatePlayerY(self, positionCorrectionY);
-
-        float velocityCorrectionY = -StruggleSinkSpeed - AverageChunkVelocityY(self);
-        AddPlayerVelocityY(self, velocityCorrectionY);
-
-        self.feetStuckPos = null;
     }
 
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
     {
-        if (IsInQuicksand(self))
+        if (!TryGetQuicksandImmersion(self, out float immersion))
         {
-            // Jump is only a struggle input in quicksand. Player_Update sees the held
-            // input and applies the reduced sink rate; no normal jump state/impulse is
-            // allowed to leak into the sand controller.
+            orig(self);
             return;
         }
 
+        JumpState state = JumpStates.GetValue(self, _ => new JumpState());
+        if (state.LowJumpUsed || immersion > ShallowJumpMaxImmersion)
+        {
+            // No struggle fallback for now: deeper/repeated jump presses simply do
+            // nothing until the player genuinely leaves this quicksand contact.
+            return;
+        }
+
+        state.LowJumpUsed = true;
+        state.ClearTicks = 0;
+
+        // Let the normal Player.Jump chain run first. QuicksandSinkRateLimiter keeps
+        // the pre-jump X velocity and removes jumpBoost; only Y is replaced below.
         orig(self);
+
+        if (self?.bodyChunks == null || self.bodyChunks.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < self.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            chunk.vel.y = i switch
+            {
+                0 => UpperChunkJumpSpeed,
+                1 => LowerChunkJumpSpeed,
+                _ => ExtraChunkJumpSpeed
+            };
+        }
+
+        self.feetStuckPos = null;
+        self.standing = false;
+        self.jumpBoost = 0f;
+        self.canJump = 0;
     }
 
-    private static bool HasStruggleInput(Player player)
+    private static bool TryGetQuicksandImmersion(Player player, out float immersion)
     {
-        return player?.input != null &&
-               player.input.Length > 0 &&
-               (player.input[0].y > 0 || player.input[0].jmp);
-    }
-
-    private static bool IsInQuicksand(Player player)
-    {
+        immersion = 0f;
         return player != null &&
                QuicksandSinkRateLimiter.TryGetVisualSink(
                    player,
                    out _,
                    out _,
-                   out float immersion) &&
+                   out immersion) &&
                immersion > 0.005f;
-    }
-
-    private static bool CanTrack(Player player)
-    {
-        return player != null &&
-               player.room != null &&
-               player.bodyChunks != null &&
-               player.bodyChunks.Length > 0;
-    }
-
-    private static float AverageChunkY(Player player)
-    {
-        float total = 0f;
-        int count = 0;
-
-        for (int i = 0; i < player.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = player.bodyChunks[i];
-            if (chunk == null)
-            {
-                continue;
-            }
-
-            total += chunk.pos.y;
-            count++;
-        }
-
-        return count > 0 ? total / count : 0f;
-    }
-
-    private static float AverageChunkVelocityY(Player player)
-    {
-        float total = 0f;
-        int count = 0;
-
-        for (int i = 0; i < player.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = player.bodyChunks[i];
-            if (chunk == null)
-            {
-                continue;
-            }
-
-            total += chunk.vel.y;
-            count++;
-        }
-
-        return count > 0 ? total / count : 0f;
-    }
-
-    private static void TranslatePlayerY(Player player, float deltaY)
-    {
-        if (Mathf.Abs(deltaY) <= Epsilon)
-        {
-            return;
-        }
-
-        for (int i = 0; i < player.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = player.bodyChunks[i];
-            if (chunk != null)
-            {
-                chunk.pos.y += deltaY;
-            }
-        }
-    }
-
-    private static void AddPlayerVelocityY(Player player, float deltaY)
-    {
-        if (Mathf.Abs(deltaY) <= Epsilon)
-        {
-            return;
-        }
-
-        for (int i = 0; i < player.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = player.bodyChunks[i];
-            if (chunk != null)
-            {
-                chunk.vel.y += deltaY;
-            }
-        }
     }
 }
