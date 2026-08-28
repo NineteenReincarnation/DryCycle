@@ -9,13 +9,22 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 internal static class QuicksandZoneHooks
 {
     private const string PlacedTypeName = "QuicksandZone";
+    private const int LayerSampleCount = 64;
+    private const float HeadCoverClearance = 8f;
 
     private sealed class PlayerLayerState
     {
         internal bool SplitActive;
     }
 
+    private sealed class ZoneLayerCache
+    {
+        internal readonly Vector2[] Surface = new Vector2[LayerSampleCount];
+        internal readonly Vector2[] Bottom = new Vector2[LayerSampleCount];
+    }
+
     private static readonly ConditionalWeakTable<PlayerGraphics, PlayerLayerState> PlayerLayerStates = new();
+    private static readonly ConditionalWeakTable<QuicksandZone, ZoneLayerCache> ZoneLayerCaches = new();
     private static readonly int[] UpperPlayerSprites = { 0, 3, 5, 6, 7, 8, 9 };
     private static readonly int[] LowerPlayerSprites = { 1, 2, 4 };
     private static bool _enabled;
@@ -174,11 +183,17 @@ internal static class QuicksandZoneHooks
             return;
         }
 
-        // Explicitly put hips/tail/legs behind the Sand layer contents. The old
-        // implementation only promoted the upper body, leaving the lower sprites in
-        // their vanilla container where they could still draw in front of quicksand.
+        // Lower body is hidden as soon as the player begins sinking. The upper body
+        // stays visible only while the actual PlayerGraphics head is still above the
+        // quicksand surface. Once the head itself clears the surface, every slugcat
+        // sprite goes behind Sand so the visual state agrees with the death check.
+        bool headFullyCovered = IsHeadFullyCovered(self);
         MoveSpritesToSand(sLeaser, sandContainer, LowerPlayerSprites, moveToFront: false);
-        MoveSpritesToSand(sLeaser, sandContainer, UpperPlayerSprites, moveToFront: true);
+        MoveSpritesToSand(
+            sLeaser,
+            sandContainer,
+            UpperPlayerSprites,
+            moveToFront: !headFullyCovered);
 
         state.SplitActive = true;
     }
@@ -232,6 +247,54 @@ internal static class QuicksandZoneHooks
             if (room.updateList[i] is QuicksandZone zone &&
                 !zone.slatedForDeletetion &&
                 zone.IntersectsPlayerForLayer(player))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsHeadFullyCovered(PlayerGraphics graphics)
+    {
+        Player player = graphics?.player;
+        Room room = player?.room;
+        if (room?.updateList == null || graphics.head == null)
+        {
+            return false;
+        }
+
+        Vector2 headPosition = graphics.head.pos;
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is not QuicksandZone zone ||
+                zone.slatedForDeletetion ||
+                zone.PlacedObject == null ||
+                !zone.PlacedObject.active ||
+                zone.PlacedObject.data is not QuicksandZoneData data ||
+                !zone.IntersectsPlayerForLayer(player))
+            {
+                continue;
+            }
+
+            ZoneLayerCache cache = ZoneLayerCaches.GetValue(zone, _ => new ZoneLayerCache());
+            QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
+
+            if (!QuicksandSurface.TryGetContact(
+                    headPosition,
+                    HeadCoverClearance + 2f,
+                    cache.Surface,
+                    cache.Bottom,
+                    out QuicksandSurface.Contact contact))
+            {
+                continue;
+            }
+
+            float headDepth = Vector2.Dot(
+                headPosition - contact.SurfacePoint,
+                contact.Inward);
+            if (headDepth >= HeadCoverClearance)
             {
                 return true;
             }
