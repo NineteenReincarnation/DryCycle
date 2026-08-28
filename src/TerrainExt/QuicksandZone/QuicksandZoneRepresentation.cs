@@ -122,7 +122,35 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
 
     public override void Update()
     {
-        base.Update();
+        bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        bool materialDeleteClick = control && Input.GetMouseButtonDown(0);
+        MaterialBoundaryHandle controlDeleteHandle = materialDeleteClick
+            ? FindNearestMaterialHandleUnderMouse()
+            : null;
+
+        // BezierSplineControl uses Ctrl + left click to delete ordinary white midpoint
+        // handles. A yellow material point can sit directly on top of one of those
+        // midpoints, so consume DevUI's left-click pulse while subnodes update when a
+        // yellow Ctrl-delete target is present. The real mouse state is restored
+        // immediately afterwards and only the yellow point is removed below.
+        bool suppressBaseMouseClick = controlDeleteHandle != null && owner != null && owner.mouseClick;
+        bool savedMouseClick = owner != null && owner.mouseClick;
+        if (suppressBaseMouseClick)
+        {
+            owner.mouseClick = false;
+        }
+
+        try
+        {
+            base.Update();
+        }
+        finally
+        {
+            if (suppressBaseMouseClick && owner != null)
+            {
+                owner.mouseClick = savedMouseClick;
+            }
+        }
 
         if (Data == null)
         {
@@ -131,44 +159,24 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
 
         bool boundariesChanged = false;
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         bool materialClick = shift && Input.GetMouseButtonDown(1);
-        bool materialDeleteClick = control && Input.GetMouseButtonDown(0);
 
         // Keep Watcher's normal spline editing untouched:
         // - Shift + left click stays owned by BezierSplineControl for white geometry points.
         // - Shift + right click adds a yellow material boundary, or deletes one under the cursor.
         // - Ctrl + left click mirrors Watcher's normal midpoint deletion gesture for yellow points.
-        MaterialBoundaryHandle deleteHandle = null;
-        float nearestDeleteDistance = float.PositiveInfinity;
-        if (materialClick || materialDeleteClick)
+        MaterialBoundaryHandle deleteHandle = controlDeleteHandle;
+        if (deleteHandle == null && materialClick)
         {
-            for (int i = 0; i < _materialHandles.Count; i++)
-            {
-                MaterialBoundaryHandle handle = _materialHandles[i];
-                if (!handle.MouseOver)
-                {
-                    continue;
-                }
-
-                float distance = Vector2.SqrMagnitude(handle.absPos - owner.mousePos);
-                if (distance < nearestDeleteDistance)
-                {
-                    nearestDeleteDistance = distance;
-                    deleteHandle = handle;
-                }
-            }
+            deleteHandle = FindNearestMaterialHandleUnderMouse();
         }
 
         if (control)
         {
-            for (int i = 0; i < _materialHandles.Count; i++)
+            MaterialBoundaryHandle hoverHandle = FindNearestMaterialHandleUnderMouse();
+            if (hoverHandle != null)
             {
-                MaterialBoundaryHandle handle = _materialHandles[i];
-                if (handle.MouseOver)
-                {
-                    handle.SetColor(MaterialDeleteHoverColor);
-                }
+                hoverHandle.SetColor(MaterialDeleteHoverColor);
             }
         }
 
@@ -310,6 +318,34 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
         MaterialBoundaryHandle handle = new(owner, this, u);
         _materialHandles.Add(handle);
         subNodes.Add(handle);
+    }
+
+    private MaterialBoundaryHandle FindNearestMaterialHandleUnderMouse()
+    {
+        if (owner == null)
+        {
+            return null;
+        }
+
+        MaterialBoundaryHandle result = null;
+        float nearestDistance = float.PositiveInfinity;
+        for (int i = 0; i < _materialHandles.Count; i++)
+        {
+            MaterialBoundaryHandle handle = _materialHandles[i];
+            if (!handle.MouseOver)
+            {
+                continue;
+            }
+
+            float distance = Vector2.SqrMagnitude(handle.absPos - owner.mousePos);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                result = handle;
+            }
+        }
+
+        return result;
     }
 
     private void RemoveBoundaryHandle(MaterialBoundaryHandle handle)
