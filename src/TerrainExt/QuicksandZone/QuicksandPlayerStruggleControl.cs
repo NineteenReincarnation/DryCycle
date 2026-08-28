@@ -79,7 +79,7 @@ internal static class QuicksandPlayerStruggleControl
         }
 
         JumpState state = JumpStates.GetValue(self, _ => new JumpState());
-        if (TryGetQuicksandImmersion(self, out _))
+        if (TryGetQuicksandState(self, out _))
         {
             state.ClearTicks = 0;
             return;
@@ -101,7 +101,7 @@ internal static class QuicksandPlayerStruggleControl
 
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
     {
-        if (!TryGetQuicksandImmersion(self, out float immersion))
+        if (!TryGetQuicksandState(self, out float immersion))
         {
             orig(self);
             return;
@@ -149,15 +149,11 @@ internal static class QuicksandPlayerStruggleControl
         self.canJump = 0;
     }
 
-    private static bool TryGetQuicksandImmersion(Player player, out float immersion)
+    private static bool TryGetQuicksandState(Player player, out float immersion)
     {
-        immersion = 0f;
-        return player != null &&
-               QuicksandSinkRateLimiter.TryGetVisualSink(
-                   player,
-                   out _,
-                   out _,
-                   out immersion) &&
-               immersion > 0.005f;
+        return QuicksandSinkRateLimiter.TryGetPlayerQuicksandState(
+            player,
+            out _,
+            out immersion);
     }
 }
