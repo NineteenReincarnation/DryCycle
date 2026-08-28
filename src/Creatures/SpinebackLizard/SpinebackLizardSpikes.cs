@@ -83,7 +83,10 @@ internal sealed class SpinebackLizardSpikes : Template
         for (int i = 0; i < SpikeCount; i++)
         {
             FSprite spike = new FSprite("LizardScaleA3");
-            spike.anchorY = 0.12f;
+            // Match the way vanilla/LizKin spine spikes are anchored: the root sits
+            // close to the bottom of the sprite and almost all visible length points
+            // away from the body surface.
+            spike.anchorY = 0.15f;
             sLeaser.sprites[startSprite + SpikeStart + i] = spike;
         }
     }
@@ -256,51 +259,71 @@ internal sealed class SpinebackLizardSpikes : Template
     {
         for (int i = 0; i < SpikeCount; i++)
         {
-            float t = Mathf.Lerp(0.015f, 0.86f, i / (float)(SpikeCount - 1));
+            float t = Mathf.Lerp(0.005f, 0.90f, i / (float)(SpikeCount - 1));
             LizardGraphics.LizardSpineData spine = lGraphics.SpinePosition(t, timeStacker);
 
-            Vector2 normal = SafeNormal(spine.perp, Vector2.up);
-            if (spine.depthRotation < 0f)
+            // Use the actual visible body surface, not spine.pos + rad. The previous
+            // version could place roots inside the body mesh. outerPos is also what
+            // Rain World's normal spine-spike cosmetics use.
+            Vector2 outward = SafeNormal(
+                spine.outerPos - spine.pos,
+                SafeNormal(spine.perp * spine.depthRotation, Vector2.up));
+            Vector2 tangent = SafeNormal(spine.dir, Vector2.right);
+
+            // Keep every normal-state thorn pointing out of the visible silhouette.
+            // A small fore/aft lean prevents them from looking like a perfect comb
+            // without flipping any of them back into the body.
+            float lean = Mathf.Lerp(-0.42f, 0.42f, _spikeVariation[i]);
+            if (t < 0.16f)
             {
-                normal = -normal;
+                lean += (i % 2 == 0) ? -0.20f : 0.20f;
             }
-            if (i % 4 == 1)
-            {
-                normal = -normal;
-            }
+            Vector2 normalDir = SafeNormal(outward + tangent * lean, outward);
 
             float hornFactor;
-            if (t < 0.13f)
+            if (t < 0.11f)
             {
-                hornFactor = Mathf.Lerp(1.28f, 1.62f, _spikeVariation[i]);
+                // Large head/neck horns are a defining thorny-devil silhouette.
+                hornFactor = Mathf.Lerp(2.75f, 3.45f, _spikeVariation[i]);
             }
-            else if (t < 0.36f)
+            else if (t < 0.32f)
             {
-                hornFactor = Mathf.Lerp(1.02f, 1.34f, _spikeVariation[i]);
+                hornFactor = Mathf.Lerp(2.05f, 2.75f, _spikeVariation[i]);
+            }
+            else if (t < 0.68f)
+            {
+                hornFactor = Mathf.Lerp(1.45f, 2.15f, _spikeVariation[i]);
             }
             else
             {
-                hornFactor = Mathf.Lerp(0.64f, 1.02f, _spikeVariation[i]);
+                hornFactor = Mathf.Lerp(1.05f, 1.70f, _spikeVariation[i]);
             }
 
-            Vector2 normalPos = spine.pos + normal * (spine.rad + 1.0f);
+            // Push the root a few pixels outside the mesh so the base cannot be
+            // swallowed by the wide body silhouette.
+            float rootLift = Mathf.Lerp(2.8f, 1.4f, t);
+            Vector2 normalPos = spine.outerPos + outward * rootLift;
 
             float radialAngle = _phase + i * (360f / SpikeCount) + _spikeVariation[i] * 9f;
             Vector2 radialDir = Custom.DegToVec(radialAngle);
-            float radialDistance = Mathf.Lerp(17.5f, 22.5f, _spikeVariation[i]) + hornFactor * 1.8f;
+            float radialDistance = Mathf.Lerp(18.5f, 24.5f, _spikeVariation[i]) + hornFactor * 2.0f;
             Vector2 ballPos = center + radialDir * radialDistance;
 
             Vector2 drawPos = Vector2.Lerp(normalPos, ballPos, ballBlend);
-            Vector2 spikeDir = SafeNormal(Vector2.Lerp(normal, radialDir, ballBlend), radialDir);
+            Vector2 spikeDir = SafeNormal(Vector2.Lerp(normalDir, radialDir, ballBlend), radialDir);
 
             FSprite spike = sLeaser.sprites[startSprite + SpikeStart + i];
             spike.x = drawPos.x - camPos.x;
             spike.y = drawPos.y - camPos.y;
-            spike.rotation = Custom.VecToDeg(spikeDir) - 90f;
+
+            // LizardScaleA sprites already point along their local +Y axis. Vanilla
+            // spine cosmetics use AimFromOneVectorToAnother directly; the old -90
+            // degree offset rotated the thorns almost along the body and hid them.
+            spike.rotation = Custom.AimFromOneVectorToAnother(-spikeDir, spikeDir);
             spike.scaleX = ((i % 2 == 0) ? 1f : -1f) *
-                           Mathf.Lerp(0.42f, 0.64f, _spikeVariation[i]);
-            spike.scaleY = hornFactor * Mathf.Lerp(0.82f, 0.98f, ballBlend);
-            spike.color = Color.Lerp(plateColor, darkColor, Mathf.Lerp(0.16f, 0.46f, t));
+                           Mathf.Lerp(0.70f, 1.05f, _spikeVariation[i]);
+            spike.scaleY = hornFactor * Mathf.Lerp(1f, 1.12f, ballBlend);
+            spike.color = Color.Lerp(plateColor, darkColor, Mathf.Lerp(0.08f, 0.28f, t));
             spike.alpha = 1f;
         }
     }
