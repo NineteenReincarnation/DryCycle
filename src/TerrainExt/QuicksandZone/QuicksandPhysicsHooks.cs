@@ -105,7 +105,7 @@ internal static class QuicksandPhysicsHooks
                 continue;
             }
 
-            ZoneCache cache = ZoneCaches.GetOrCreateValue(zone);
+            ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
             QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
 
             if (QuicksandSurface.TryGetContact(
