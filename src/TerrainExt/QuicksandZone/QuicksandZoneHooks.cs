@@ -181,10 +181,10 @@ internal static class QuicksandZoneHooks
         if (!renderState.Active)
         {
             self.AddSpritesToContainer(sand, rCam);
-            MoveDrawableBehindTerrain(self, sand);
             renderState.Active = true;
         }
 
+        MoveDrawableBehindTerrain(self, sand);
         ApplyVisualSinkOffset(self, visualOffset);
     }
 
