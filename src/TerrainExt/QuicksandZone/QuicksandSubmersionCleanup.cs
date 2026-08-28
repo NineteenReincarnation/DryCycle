@@ -3,15 +3,15 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Removes non-player creatures and carryable items after they are completely
-/// below a quicksand surface. Cleanup runs after Room.Update so no object is
-/// destroyed in the middle of its own update.
+/// Removes carryable items after they are completely below a quicksand surface.
+/// Creature death/cleanup is owned by QuicksandCreatureEscape so a creature first
+/// receives the same complete-submersion death condition as the player and is only
+/// removed after its short submerged-death cleanup delay.
 ///
 /// Realized deletion and render deletion are handled together. Rain World's
 /// UpdatableAndDeletable.Destroy() only marks the realized object for removal, so
 /// every matching RoomCamera.SpriteLeaser is cleaned and removed immediately before
-/// the object is destroyed. This prevents a fully submerged item's last sprite from
-/// remaining frozen in the Sand container for another frame or indefinitely.
+/// the object is destroyed.
 /// </summary>
 internal static class QuicksandSubmersionCleanup
 {
@@ -42,6 +42,16 @@ internal static class QuicksandSubmersionCleanup
         On.Room.Update -= Room_Update;
     }
 
+    internal static void DeleteCreatureAfterSubmersion(Creature creature)
+    {
+        if (creature == null || creature is Player || creature.slatedForDeletetion)
+        {
+            return;
+        }
+
+        DeleteSubmergedObject(creature);
+    }
+
     private static void Room_Update(On.Room.orig_Update orig, Room self)
     {
         orig(self);
@@ -63,13 +73,10 @@ internal static class QuicksandSubmersionCleanup
                 continue;
             }
 
-            // Destroy() only marks an object for deletion. Room removes it from the
-            // physical-object lists on the next update, so this does not mutate the
-            // collection while it is being iterated.
             for (int i = objects.Count - 1; i >= 0; i--)
             {
                 PhysicalObject physicalObject = objects[i];
-                if (!ShouldCleanup(physicalObject) ||
+                if (!ShouldCleanupItem(physicalObject) ||
                     !IsFullySubmergedInAnyQuicksand(physicalObject, room))
                 {
                     continue;
@@ -80,7 +87,7 @@ internal static class QuicksandSubmersionCleanup
         }
     }
 
-    private static bool ShouldCleanup(PhysicalObject physicalObject)
+    private static bool ShouldCleanupItem(PhysicalObject physicalObject)
     {
         if (physicalObject == null ||
             physicalObject.slatedForDeletetion ||
@@ -91,16 +98,9 @@ internal static class QuicksandSubmersionCleanup
             return false;
         }
 
-        // Player death/session handling stays with the existing player quicksand
-        // logic. Never remove a Player-derived AbstractCreature outright.
-        if (physicalObject is Player)
-        {
-            return false;
-        }
-
-        // Limit cleanup to actual creatures and carryable items, rather than every
-        // PhysicalObject in the room (which could include room machinery).
-        return physicalObject is Creature || physicalObject is PlayerCarryableItem;
+        // Creature lifetime is deliberately not handled here anymore. A living
+        // creature must not be Destroy()ed on its first fully submerged frame.
+        return physicalObject is PlayerCarryableItem && physicalObject is not Creature;
     }
 
     private static bool IsFullySubmergedInAnyQuicksand(
@@ -153,18 +153,12 @@ internal static class QuicksandSubmersionCleanup
                 return false;
             }
 
-            // Sinking is world-Y only. Full submersion therefore means the top of
-            // every physical chunk is below the local quicksand surface Y.
-            // Spears get extra clearance because their visible sprite extends far
-            // beyond their single small physics chunk.
             float topY = chunk.pos.y + radius + extraTopClearance;
             if (topY > surfacePoint.y - FullSubmergeClearance)
             {
                 return false;
             }
 
-            // Avoid deleting unrelated objects far below the authored quicksand band
-            // merely because they share the same X coordinate.
             if (chunk.pos.y < zoneBottomY - radius)
             {
                 return false;
@@ -178,7 +172,6 @@ internal static class QuicksandSubmersionCleanup
     {
         Room room = physicalObject?.room;
 
-        // Release anything holding this object so no creature keeps a stale grasp.
         while (physicalObject?.grabbedBy != null && physicalObject.grabbedBy.Count > 0)
         {
             Creature.Grasp grasp = physicalObject.grabbedBy[physicalObject.grabbedBy.Count - 1];
@@ -201,14 +194,7 @@ internal static class QuicksandSubmersionCleanup
             }
         }
 
-        // Remove all realized drawing immediately, before Destroy() merely marks the
-        // object for next-update cleanup. This covers both items that draw themselves
-        // and creatures/items whose SpriteLeaser belongs to a GraphicsModule.
         RemoveRenderedObject(room, physicalObject);
-
-        // Mark both realized and abstract objects for deletion. Room cleanup removes
-        // the realized object from update/physics lists and the abstract object from
-        // the room entity lists, so it will not be realized again later.
         physicalObject?.Destroy();
         physicalObject?.abstractPhysicalObject?.Destroy();
     }
@@ -236,9 +222,6 @@ internal static class QuicksandSubmersionCleanup
                     continue;
                 }
 
-                // CleanSpritesAndRemove removes every FSprite/FContainer immediately.
-                // Remove the leaser from the camera list in the same pass so the
-                // quicksand render hook cannot run once more and re-add it to Sand.
                 leaser.CleanSpritesAndRemove();
                 camera.spriteLeasers.RemoveAt(i);
             }
