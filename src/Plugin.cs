@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.49";
+    public const string Version = "0.1.50";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -30,12 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         Logger = base.Logger;
 
-        // Creature ExtEnums and StaticWorld hooks must exist before the game's
-        // initialization screen constructs creature templates and prebaked pathing.
         SpinebackLizardHooks.Enable();
-
-        // Custom SoundIDs must exist before Rain World's SoundLoader constructs its
-        // trigger array from the merged SoundEffects/Sounds.txt data.
         DewPodAudioHooks.InitializeSoundIds();
 
         On.RainWorld.PreModsInit += RainWorld_PreModsInit;
@@ -57,6 +52,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
+            QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
@@ -81,19 +77,13 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
-        // Dev Console clears its safe-spawner table during PreModsInit, so allow our
-        // optional registration to be rebuilt during the matching PostModsInit.
         SpinebackLizardDevConsoleSupport.ResetRegistration();
-
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
-        // Retry discovery here in case DryCycle's PreModsInit hook ran before an
-        // optional SlugBase assembly became visible. SlugBase JSON scanning occurs
-        // later in PostModsInit, so feature registration is still early enough.
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
@@ -112,23 +102,21 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandZoneHooks.Enable();
             QuicksandAIHazard.Enable();
 
-            // Native-state capture remains innermost. Horizontal quicksand limiting
-            // is installed before the sink controller so its post-update X correction
-            // runs before the sink controller performs its final zone/Y pass. This
-            // prevents a one-frame high-speed boundary escape from deactivating the
-            // sink state before the X limiter can absorb it.
+            // Creature AI avoidance and post-entry escape are separate layers. The
+            // escape layer owns creature motion/death once actual immersion begins.
+            QuicksandCreatureEscape.Enable();
+
             QuicksandPlayerStruggleControl.EnableNativeCapture();
             QuicksandPlayerHorizontalStability.Enable();
             QuicksandSinkRateLimiter.Enable();
-
-            // Installed after the base sink hook so this outer BodyChunk pass can
-            // replace only the final loose-object downward step with a much slower,
-            // immersion-dependent settle. Player motion is unaffected.
             QuicksandLooseObjectSinkEase.Enable();
-
             QuicksandPlayerLocomotionSupport.Enable();
             QuicksandPlayerStruggleControl.Enable();
             QuicksandWeaponSettling.Enable();
+
+            // Carryable items are still deleted by the generic submerged cleanup.
+            // Creatures are skipped there and are only removed after their dedicated
+            // complete-submersion death confirmation and short post-death delay.
             QuicksandSubmersionCleanup.Enable();
 
             DewPodPlantHooks.Enable();
@@ -148,6 +136,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
+            QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
@@ -176,9 +165,6 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.orig_PostModsInit orig,
         RainWorld self)
     {
-        // Soft dependency load order makes Dev Console install its PostModsInit hook
-        // first. Calling orig therefore lets it rebuild its built-in safe-spawner
-        // table before DryCycle appends SpinebackLizard.
         orig(self);
         SpinebackLizardDevConsoleSupport.TryRegister();
     }
