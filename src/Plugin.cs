@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.45";
+    public const string Version = "0.0.46";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -60,8 +60,8 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
-            QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
+            QuicksandPlayerHorizontalStability.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
@@ -109,13 +109,14 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
 
-            // The capture hook must sit inside the baseline sink controller so it can
-            // remember the state native Player.Update actually produced. The outer
-            // struggle hook is then installed last and makes Up/Jump affect only the
-            // final world-Y sink rate, without choosing a Player body mode.
+            // Native-state capture remains innermost. Horizontal quicksand limiting
+            // is installed before the sink controller so its post-update X correction
+            // runs before the sink controller performs its final zone/Y pass. This
+            // prevents a one-frame high-speed boundary escape from deactivating the
+            // sink state before the X limiter can absorb it.
             QuicksandPlayerStruggleControl.EnableNativeCapture();
-            QuicksandSinkRateLimiter.Enable();
             QuicksandPlayerHorizontalStability.Enable();
+            QuicksandSinkRateLimiter.Enable();
             QuicksandPlayerLocomotionSupport.Enable();
             QuicksandPlayerStruggleControl.Enable();
             QuicksandWeaponSettling.Enable();
@@ -141,8 +142,8 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandWeaponSettling.Disable();
             QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
-            QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
+            QuicksandPlayerHorizontalStability.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
