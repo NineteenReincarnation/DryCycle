@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.Items.DewPod;
 using RWCustom;
@@ -8,6 +9,14 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 internal static class QuicksandZoneHooks
 {
     private const string PlacedTypeName = "QuicksandZone";
+
+    private sealed class PlayerLayerState
+    {
+        internal bool SplitActive;
+    }
+
+    private static readonly ConditionalWeakTable<PlayerGraphics, PlayerLayerState> PlayerLayerStates = new();
+    private static readonly int[] UpperPlayerSprites = { 0, 3, 5, 6, 7, 8, 9 };
     private static bool _enabled;
 
     internal static PlacedObject.Type PlacedType { get; private set; }
@@ -27,6 +36,7 @@ internal static class QuicksandZoneHooks
             ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep += ObjectsPage_CreateObjRep;
         On.Room.Loaded += Room_Loaded;
+        On.PlayerGraphics.DrawSprites += PlayerGraphics_DrawSprites;
     }
 
     internal static void Disable()
@@ -42,6 +52,7 @@ internal static class QuicksandZoneHooks
             ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep -= ObjectsPage_CreateObjRep;
         On.Room.Loaded -= Room_Loaded;
+        On.PlayerGraphics.DrawSprites -= PlayerGraphics_DrawSprites;
 
         PlacedType?.Unregister();
         PlacedType = null;
@@ -125,6 +136,93 @@ internal static class QuicksandZoneHooks
                 EnsureRuntimeObject(self, placedObject);
             }
         }
+    }
+
+    private static void PlayerGraphics_DrawSprites(
+        On.PlayerGraphics.orig_DrawSprites orig,
+        PlayerGraphics self,
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        float timeStacker,
+        Vector2 camPos)
+    {
+        orig(self, sLeaser, rCam, timeStacker, camPos);
+
+        if (self?.player == null || sLeaser?.sprites == null || rCam?.room == null)
+        {
+            return;
+        }
+
+        PlayerLayerState state = PlayerLayerStates.GetOrCreateValue(self);
+        bool splitActive = IsPlayerTouchingQuicksand(self.player);
+
+        if (!splitActive)
+        {
+            if (state.SplitActive)
+            {
+                // Restore the character's own vanilla/MSC/Watcher container layout
+                // after leaving the zone instead of guessing every accessory layer.
+                self.AddToContainer(sLeaser, rCam, null);
+                state.SplitActive = false;
+            }
+
+            return;
+        }
+
+        FContainer sandContainer = rCam.ReturnFContainer("Sand");
+        if (sandContainer == null)
+        {
+            return;
+        }
+
+        // Keep hips, tail and legs in their normal lower layer while body, head,
+        // arms, hands and face are moved in front of this same Sand layer. The
+        // result is a stable half-submerged silhouette rather than the whole
+        // slugcat disappearing behind the opaque quicksand mesh.
+        for (int i = 0; i < UpperPlayerSprites.Length; i++)
+        {
+            int spriteIndex = UpperPlayerSprites[i];
+            if (spriteIndex < 0 || spriteIndex >= sLeaser.sprites.Length)
+            {
+                continue;
+            }
+
+            FSprite sprite = sLeaser.sprites[spriteIndex];
+            if (sprite == null)
+            {
+                continue;
+            }
+
+            if (sprite.container != sandContainer)
+            {
+                sandContainer.AddChild(sprite);
+            }
+
+            sprite.MoveToFront();
+        }
+
+        state.SplitActive = true;
+    }
+
+    private static bool IsPlayerTouchingQuicksand(Player player)
+    {
+        Room room = player?.room;
+        if (room?.updateList == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is QuicksandZone zone &&
+                !zone.slatedForDeletetion &&
+                zone.IntersectsPlayerForLayer(player))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void EnsureRuntimeObject(Room room, PlacedObject placedObject)
