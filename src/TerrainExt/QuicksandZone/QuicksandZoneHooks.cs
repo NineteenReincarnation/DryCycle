@@ -157,7 +157,7 @@ internal static class QuicksandZoneHooks
 
         if (physicalObject == null ||
             physicalObject.room != rCam.room ||
-            !QuicksandPhysicsHooks.TryGetVisualSink(
+            !QuicksandRealisticPhysics.TryGetVisualSink(
                 physicalObject,
                 out Vector2 visualOffset,
                 out _,
@@ -181,10 +181,10 @@ internal static class QuicksandZoneHooks
         if (!renderState.Active)
         {
             self.AddSpritesToContainer(sand, rCam);
+            MoveDrawableBehindTerrain(self, sand);
             renderState.Active = true;
         }
 
-        MoveDrawableBehindTerrain(self, sand);
         ApplyVisualSinkOffset(self, visualOffset);
     }
 
