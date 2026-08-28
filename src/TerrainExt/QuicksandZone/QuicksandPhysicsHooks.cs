@@ -7,24 +7,19 @@ internal static class QuicksandPhysicsHooks
 {
     private const int SampleCount = 64;
 
-    // Physics stay pinned to the quicksand surface. Sinking is a visual-only offset.
     private const float PlayerSurfaceRestRadius = 1.22f;
     private const float ObjectSurfaceRestRadius = 1.10f;
-
-    // Normal movement is intentionally almost nonexistent. Close to an edge, however,
-    // sustained outward input is allowed to turn into a slow crawl so escape is possible.
-    private const float PlayerHorizontalDistancePerTick = 0.008f;
-    private const float PlayerEdgeHorizontalDistancePerTick = 0.050f;
-    private const float PlayerEdgeEscapeBand = 24f;
-    private const float PlayerExitNudge = 10f;
-    private const int PlayerReentryCooldownTicks = 24;
-
-    private const float PlayerVisualSinkPerTick = 0.055f;
-    private const float PlayerEscapeRisePerTick = 0.090f;
+    private const float PlayerCrawlDistancePerTick = 0.022f;
+    private const float PlayerEdgeCrawlDistancePerTick = 0.095f;
+    private const float PlayerEdgeAssistDistance = 24f;
+    private const float PlayerIdleVisualSinkPerTick = 0.055f;
+    private const float PlayerStruggleVisualSinkPerTick = 0.008f;
+    private const float PlayerEdgeRecoveryPerTick = 0.11f;
     private const float ObjectVisualSinkPerTick = 0.045f;
     private const float PlayerVisualSinkLimit = 64f;
     private const float PlayerHeadVisualClearance = 8f;
     private const int PlayerDeathConfirmTicks = 8;
+    private const int ExitReentryCooldown = 24;
 
     private sealed class ZoneCache
     {
@@ -41,7 +36,7 @@ internal static class QuicksandPhysicsHooks
         internal float VisualSink;
         internal float VisualSinkLimit;
         internal int FullySubmergedTicks;
-        internal int ReentryCooldownTicks;
+        internal int ReentryCooldown;
     }
 
     private static readonly ConditionalWeakTable<QuicksandZone, ZoneCache> ZoneCaches = new();
@@ -86,8 +81,7 @@ internal static class QuicksandPhysicsHooks
             !SinkStates.TryGetValue(physicalObject, out SinkState state) ||
             !state.Active ||
             state.Zone == null ||
-            !TrySampleSurfaceFrame(
-                state.Zone,
+            !state.Zone.TrySampleSurfaceFrame(
                 state.SurfaceU,
                 out _,
                 out _,
@@ -118,12 +112,13 @@ internal static class QuicksandPhysicsHooks
 
         if (owner is not Player && owner.grabbedBy != null && owner.grabbedBy.Count > 0)
         {
-            ResetState(state, keepCooldown: false);
+            Deactivate(state, 0);
             orig(self);
             return;
         }
 
-        if (!state.Active && state.ReentryCooldownTicks <= 0 &&
+        if (!state.Active &&
+            state.ReentryCooldown <= 0 &&
             TryFindEntry(
                 owner,
                 out QuicksandZone entryZone,
@@ -141,9 +136,6 @@ internal static class QuicksandPhysicsHooks
 
         bool originalTerrainCollision = self.collideWithTerrain;
         self.collideWithTerrain = false;
-
-        // Vanilla physics can animate internally, but none of that momentum is allowed
-        // to move the trapped physical layer. Room_Update pins it back to the surface.
         self.vel *= owner is Player ? 0.015f : 0.04f;
 
         try
@@ -182,16 +174,15 @@ internal static class QuicksandPhysicsHooks
                     continue;
                 }
 
-                if (!state.Active)
+                if (state.ReentryCooldown > 0)
                 {
-                    if (state.ReentryCooldownTicks > 0)
-                    {
-                        state.ReentryCooldownTicks--;
-                    }
-                    continue;
+                    state.ReentryCooldown--;
                 }
 
-                UpdatePinnedObject(physicalObject, state);
+                if (state.Active)
+                {
+                    UpdatePinnedObject(physicalObject, state);
+                }
             }
         }
     }
@@ -205,7 +196,6 @@ internal static class QuicksandPhysicsHooks
             return false;
         }
 
-        // Shared sinking presentation is currently for the player and loose items.
         return physicalObject is Player || physicalObject is not Creature;
     }
 
@@ -222,10 +212,8 @@ internal static class QuicksandPhysicsHooks
         state.SurfaceU = Mathf.Clamp01(contact.U);
         state.VisualSink = 0f;
         state.FullySubmergedTicks = 0;
-        state.ReentryCooldownTicks = 0;
 
-        if (TrySampleSurfaceFrame(
-                zone,
+        if (zone.TrySampleSurfaceFrame(
                 state.SurfaceU,
                 out _,
                 out _,
@@ -249,10 +237,11 @@ internal static class QuicksandPhysicsHooks
             state.Zone.slatedForDeletetion ||
             state.Zone.PlacedObject == null ||
             !state.Zone.PlacedObject.active ||
+            state.Zone.Data == null ||
             state.AnchorChunkIndex < 0 ||
             state.AnchorChunkIndex >= physicalObject.bodyChunks.Length)
         {
-            ResetState(state, keepCooldown: false);
+            Deactivate(state, 0);
             return;
         }
 
@@ -260,87 +249,90 @@ internal static class QuicksandPhysicsHooks
             physicalObject.grabbedBy != null &&
             physicalObject.grabbedBy.Count > 0)
         {
-            ResetState(state, keepCooldown: false);
+            Deactivate(state, 0);
+            return;
+        }
+
+        if (!state.Zone.Data.IsQuicksand(state.SurfaceU))
+        {
+            Deactivate(state, ExitReentryCooldown);
             return;
         }
 
         BodyChunk anchor = physicalObject.bodyChunks[state.AnchorChunkIndex];
-        if (anchor == null)
-        {
-            ResetState(state, keepCooldown: false);
-            return;
-        }
-
-        if (!TrySampleSurfaceFrame(
-                state.Zone,
+        if (anchor == null ||
+            !state.Zone.TrySampleSurfaceFrame(
                 state.SurfaceU,
                 out Vector2 surfacePoint,
                 out Vector2 tangent,
                 out Vector2 inward,
                 out _))
         {
-            ResetState(state, keepCooldown: false);
+            Deactivate(state, 0);
             return;
         }
 
-        bool playerTryingToEscape = false;
+        float playerInputX = 0f;
+        float edgeRecovery = 0f;
 
         if (physicalObject is Player player)
         {
-            float inputX = player.input != null && player.input.Length > 0
+            playerInputX = player.input != null && player.input.Length > 0
                 ? player.input[0].x
                 : 0f;
 
-            if (inputX != 0f)
+            if (playerInputX != 0f &&
+                state.Zone.Data.TryGetQuicksandInterval(
+                    state.SurfaceU,
+                    out float intervalStart,
+                    out float intervalEnd))
             {
-                float surfaceLength = Mathf.Max(1f, EstimateSurfaceLength(state.Zone));
                 float tangentWorldSign = Mathf.Abs(tangent.x) > 0.05f
                     ? Mathf.Sign(tangent.x)
                     : 1f;
+                float directionU = Mathf.Sign(playerInputX * tangentWorldSign);
+                float exitU = directionU > 0f ? intervalEnd : intervalStart;
+                float surfaceLength = state.Zone.EstimateSurfaceLength();
+                float distanceToExit = Mathf.Abs(exitU - state.SurfaceU) * surfaceLength;
+                float edgeFactor = 1f - Mathf.InverseLerp(
+                    4f,
+                    PlayerEdgeAssistDistance,
+                    distanceToExit);
+                edgeFactor = Mathf.Clamp01(edgeFactor);
 
-                // Positive moveAlongU means toward u=1; negative means toward u=0.
-                float moveAlongU = inputX * tangentWorldSign;
-                float distanceToRequestedEdge = moveAlongU < 0f
-                    ? state.SurfaceU * surfaceLength
-                    : (1f - state.SurfaceU) * surfaceLength;
+                float crawlDistance = Mathf.Lerp(
+                    PlayerCrawlDistancePerTick,
+                    PlayerEdgeCrawlDistancePerTick,
+                    edgeFactor);
+                float nextU = state.SurfaceU +
+                              directionU * crawlDistance / surfaceLength;
 
-                float edgeFactor = 1f - Mathf.Clamp01(distanceToRequestedEdge / PlayerEdgeEscapeBand);
-                float moveDistance = Mathf.Lerp(
-                    PlayerHorizontalDistancePerTick,
-                    PlayerEdgeHorizontalDistancePerTick,
-                    Mathf.SmoothStep(0f, 1f, edgeFactor));
+                bool crossedBoundary = directionU > 0f
+                    ? nextU >= exitU - 0.00001f
+                    : nextU <= exitU + 0.00001f;
 
-                playerTryingToEscape = distanceToRequestedEdge <= PlayerEdgeEscapeBand;
-
-                float deltaU = moveAlongU * moveDistance / surfaceLength;
-                float nextU = state.SurfaceU + deltaU;
-
-                if (nextU <= 0f || nextU >= 1f)
+                if (crossedBoundary || !state.Zone.Data.IsQuicksand(Mathf.Clamp01(nextU)))
                 {
-                    // Actually leave the edited band instead of merely clearing the
-                    // state while still touching it. Cooldown prevents immediate
-                    // recapture by the predictive entry test on the next frame.
-                    Vector2 outward = SafeNormal(tangent, Vector2.right) * Mathf.Sign(deltaU);
-                    float nudgeDistance = Mathf.Max(
-                        PlayerExitNudge,
-                        anchor.rad * 1.8f + 4f);
-                    TranslatePhysicalObject(physicalObject, outward * nudgeDistance);
-                    SetObjectVelocity(physicalObject, outward * 0.35f);
-                    ReleaseFromSand(state, PlayerReentryCooldownTicks);
+                    ExitToTerrain(
+                        physicalObject,
+                        state,
+                        anchor,
+                        exitU,
+                        directionU);
                     return;
                 }
 
                 state.SurfaceU = Mathf.Clamp01(nextU);
+                edgeRecovery = PlayerEdgeRecoveryPerTick * edgeFactor;
 
-                if (!TrySampleSurfaceFrame(
-                        state.Zone,
+                if (!state.Zone.TrySampleSurfaceFrame(
                         state.SurfaceU,
                         out surfacePoint,
                         out tangent,
                         out inward,
                         out _))
                 {
-                    ResetState(state, keepCooldown: false);
+                    Deactivate(state, 0);
                     return;
                 }
             }
@@ -349,42 +341,66 @@ internal static class QuicksandPhysicsHooks
         float restRadius = physicalObject is Player
             ? PlayerSurfaceRestRadius
             : ObjectSurfaceRestRadius;
-        Vector2 targetAnchor = surfacePoint - inward * Mathf.Max(1f, anchor.rad) * restRadius;
-
-        // Physical placement never sinks. Only the renderer moves inward.
-        Vector2 correction = targetAnchor - anchor.pos;
-        TranslatePhysicalObject(physicalObject, correction);
+        Vector2 targetAnchor = surfacePoint -
+                               inward * Mathf.Max(1f, anchor.rad) * restRadius;
+        TranslatePhysicalObject(physicalObject, targetAnchor - anchor.pos);
         KillMomentum(physicalObject);
 
+        float sinkDelta;
         if (physicalObject is Player)
         {
-            if (playerTryingToEscape)
-            {
-                // Near an edge, sustained outward struggle slowly pulls the visible
-                // body back out of the sand so the crawl can finish before drowning.
-                state.VisualSink = Mathf.Max(
-                    0f,
-                    state.VisualSink - PlayerEscapeRisePerTick);
-                state.FullySubmergedTicks = 0;
-            }
-            else
-            {
-                state.VisualSink = Mathf.Min(
-                    state.VisualSinkLimit,
-                    state.VisualSink + PlayerVisualSinkPerTick);
-            }
+            sinkDelta = playerInputX == 0f
+                ? PlayerIdleVisualSinkPerTick
+                : PlayerStruggleVisualSinkPerTick;
+            sinkDelta -= edgeRecovery;
         }
         else
         {
-            state.VisualSink = Mathf.Min(
-                state.VisualSinkLimit,
-                state.VisualSink + ObjectVisualSinkPerTick);
+            sinkDelta = ObjectVisualSinkPerTick;
         }
+
+        state.VisualSink = Mathf.Clamp(
+            state.VisualSink + sinkDelta,
+            0f,
+            state.VisualSinkLimit);
 
         if (physicalObject is Player sinkingPlayer)
         {
             CheckPlayerVisualSubmersion(sinkingPlayer, state, surfacePoint, inward);
         }
+    }
+
+    private static void ExitToTerrain(
+        PhysicalObject physicalObject,
+        SinkState state,
+        BodyChunk anchor,
+        float boundaryU,
+        float directionU)
+    {
+        float surfaceLength = state.Zone.EstimateSurfaceLength();
+        float epsilonU = Mathf.Min(0.012f, 3f / surfaceLength);
+        float terrainU = Mathf.Clamp01(boundaryU + directionU * epsilonU);
+
+        if (!state.Zone.TrySampleSurfaceFrame(
+                terrainU,
+                out Vector2 surfacePoint,
+                out Vector2 tangent,
+                out Vector2 inward,
+                out _))
+        {
+            Deactivate(state, ExitReentryCooldown);
+            return;
+        }
+
+        float restRadius = physicalObject is Player
+            ? PlayerSurfaceRestRadius
+            : ObjectSurfaceRestRadius;
+        Vector2 targetAnchor = surfacePoint -
+                               inward * Mathf.Max(1f, anchor.rad) * restRadius +
+                               tangent * directionU * 2f;
+        TranslatePhysicalObject(physicalObject, targetAnchor - anchor.pos);
+        KillMomentum(physicalObject);
+        Deactivate(state, ExitReentryCooldown);
     }
 
     private static void CheckPlayerVisualSubmersion(
@@ -455,7 +471,7 @@ internal static class QuicksandPhysicsHooks
                 candidateZone.slatedForDeletetion ||
                 candidateZone.PlacedObject == null ||
                 !candidateZone.PlacedObject.active ||
-                candidateZone.PlacedObject.data is not QuicksandZoneData)
+                candidateZone.Data == null)
             {
                 continue;
             }
@@ -468,7 +484,8 @@ internal static class QuicksandPhysicsHooks
                         chunk,
                         candidateZone,
                         predictive: true,
-                        out QuicksandSurface.Contact candidateContact))
+                        out QuicksandSurface.Contact candidateContact) ||
+                    !candidateZone.Data.IsQuicksand(candidateContact.U))
                 {
                     continue;
                 }
@@ -498,13 +515,13 @@ internal static class QuicksandPhysicsHooks
             zone.slatedForDeletetion ||
             zone.PlacedObject == null ||
             !zone.PlacedObject.active ||
-            zone.PlacedObject.data is not QuicksandZoneData data)
+            zone.Data == null)
         {
             return false;
         }
 
         ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
-        QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
+        QuicksandSurface.SampleZone(zone.PlacedObject, zone.Data, cache.Surface, cache.Bottom);
 
         float radius = Mathf.Max(1f, chunk.rad);
         if (QuicksandSurface.TryGetContact(
@@ -549,84 +566,6 @@ internal static class QuicksandPhysicsHooks
     {
         return contact.SignedDepth >= -radius * entryMargin &&
                contact.SignedDepth <= contact.DepthLength + radius * 0.12f;
-    }
-
-    private static bool TrySampleSurfaceFrame(
-        QuicksandZone zone,
-        float u,
-        out Vector2 surfacePoint,
-        out Vector2 tangent,
-        out Vector2 inward,
-        out float depthLength)
-    {
-        surfacePoint = Vector2.zero;
-        tangent = Vector2.right;
-        inward = Vector2.down;
-        depthLength = 0f;
-
-        if (zone == null ||
-            zone.slatedForDeletetion ||
-            zone.PlacedObject == null ||
-            !zone.PlacedObject.active ||
-            zone.PlacedObject.data is not QuicksandZoneData data)
-        {
-            return false;
-        }
-
-        ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
-        QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
-
-        float scaled = Mathf.Clamp01(u) * (SampleCount - 1);
-        int segment = Mathf.Clamp(Mathf.FloorToInt(scaled), 0, SampleCount - 2);
-        float t = Mathf.Clamp01(scaled - segment);
-
-        Vector2 surfaceA = cache.Surface[segment];
-        Vector2 surfaceB = cache.Surface[segment + 1];
-        Vector2 bottomA = cache.Bottom[segment];
-        Vector2 bottomB = cache.Bottom[segment + 1];
-
-        surfacePoint = Vector2.Lerp(surfaceA, surfaceB, t);
-        Vector2 bottomPoint = Vector2.Lerp(bottomA, bottomB, t);
-        tangent = SafeNormal(surfaceB - surfaceA, Vector2.right);
-
-        Vector2 depthVector = bottomPoint - surfacePoint;
-        depthLength = depthVector.magnitude;
-        if (depthLength < 4f)
-        {
-            return false;
-        }
-
-        Vector2 geometricNormal = SafeNormal(
-            new Vector2(tangent.y, -tangent.x),
-            Vector2.down);
-        if (Vector2.Dot(geometricNormal, depthVector) < 0f)
-        {
-            geometricNormal = -geometricNormal;
-        }
-
-        inward = geometricNormal;
-        return true;
-    }
-
-    private static float EstimateSurfaceLength(QuicksandZone zone)
-    {
-        if (zone == null ||
-            zone.PlacedObject == null ||
-            zone.PlacedObject.data is not QuicksandZoneData data)
-        {
-            return 1f;
-        }
-
-        ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
-        QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
-
-        float total = 0f;
-        for (int i = 0; i < SampleCount - 1; i++)
-        {
-            total += Vector2.Distance(cache.Surface[i], cache.Surface[i + 1]);
-        }
-
-        return Mathf.Max(1f, total);
     }
 
     private static float ComputeObjectVisualSinkLimit(
@@ -700,7 +639,7 @@ internal static class QuicksandPhysicsHooks
         }
     }
 
-    private static void SetObjectVelocity(PhysicalObject physicalObject, Vector2 velocity)
+    private static void KillMomentum(PhysicalObject physicalObject)
     {
         if (physicalObject?.bodyChunks == null)
         {
@@ -711,17 +650,12 @@ internal static class QuicksandPhysicsHooks
         {
             if (physicalObject.bodyChunks[i] != null)
             {
-                physicalObject.bodyChunks[i].vel = velocity;
+                physicalObject.bodyChunks[i].vel = Vector2.zero;
             }
         }
     }
 
-    private static void KillMomentum(PhysicalObject physicalObject)
-    {
-        SetObjectVelocity(physicalObject, Vector2.zero);
-    }
-
-    private static void ReleaseFromSand(SinkState state, int cooldownTicks)
+    private static void Deactivate(SinkState state, int cooldown)
     {
         state.Active = false;
         state.Zone = null;
@@ -730,17 +664,6 @@ internal static class QuicksandPhysicsHooks
         state.VisualSink = 0f;
         state.VisualSinkLimit = 0f;
         state.FullySubmergedTicks = 0;
-        state.ReentryCooldownTicks = Mathf.Max(0, cooldownTicks);
-    }
-
-    private static void ResetState(SinkState state, bool keepCooldown)
-    {
-        int cooldown = keepCooldown ? state.ReentryCooldownTicks : 0;
-        ReleaseFromSand(state, cooldown);
-    }
-
-    private static Vector2 SafeNormal(Vector2 value, Vector2 fallback)
-    {
-        return value.sqrMagnitude > 0.0001f ? value.normalized : fallback;
+        state.ReentryCooldown = Mathf.Max(state.ReentryCooldown, cooldown);
     }
 }
