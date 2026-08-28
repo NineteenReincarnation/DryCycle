@@ -205,7 +205,7 @@ internal static class DewPodAudioHooks
         }
 
         PlayDrinkSound(room, mouthPos);
-        state.SipCooldown = Random.Range(6, 10);
+        state.SipCooldown = Random.Range(9, 15);
     }
 
     private static void UpdateUnderwaterDrinkingAudio(Room room, Player player)
@@ -240,7 +240,7 @@ internal static class DewPodAudioHooks
             : (player.firstChunk != null ? player.firstChunk.pos : Vector2.zero);
 
         PlayDrinkSound(room, mouthPos);
-        audioState.SipCooldown = Random.Range(6, 10);
+        audioState.SipCooldown = Random.Range(9, 15);
     }
 
     private static bool IsDrinkingFromHeldDewPod(Player player)
