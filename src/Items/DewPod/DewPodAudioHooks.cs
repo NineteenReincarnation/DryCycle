@@ -96,19 +96,21 @@ internal static class DewPodAudioHooks
                 ? pod.firstChunk.pos
                 : Vector2.zero;
 
-            // Organic pop + short bright impact gives the fleshy shell a readable
-            // fracture without making it sound like a glass bottle.
+            // Organic pop carries the recognizable body of the rupture sound.
             room.PlaySound(
                 SoundID.Seed_Cob_Pop,
                 pos,
                 1.08f,
                 Random.Range(0.88f, 1.02f));
 
+            // Rock_Hit_Wall is deliberately pushed far outside its normal pitch and
+            // reduced to a quiet micro-transient. At this speed/level it reads as a
+            // short fibrous shell crack layered into the pop rather than a rock hit.
             room.PlaySound(
                 SoundID.Rock_Hit_Wall,
                 pos,
-                0.68f,
-                Random.Range(1.22f, 1.42f));
+                Random.Range(0.24f, 0.34f),
+                Random.Range(1.62f, 1.92f));
         }
 
         state.WasBroken = broken;
