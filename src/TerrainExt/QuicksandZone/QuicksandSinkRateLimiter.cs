@@ -3,23 +3,23 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Limits the actual BodyChunk integration speed while a chunk is entering quicksand.
-/// Rain World's BodyChunk.Update subtracts gravity immediately before moving the chunk,
-/// so post-update drag alone still allows roughly one gravity-step of free fall every
-/// tick. This hook compensates that integration step and caps only motion into the
-/// quicksand surface normal; tangential movement and intentional movement out of the
-/// sand remain untouched.
+/// Baseline quicksand motion model.
+/// Keep the vertical/normal behaviour deliberately simple until the contact physics
+/// are stable: a fixed sink speed while moving into sand, plus a fixed outward
+/// struggle impulse when the player jumps.
 /// </summary>
 internal static class QuicksandSinkRateLimiter
 {
-    // Rain World normally updates physics at 40 Hz. These values therefore produce
-    // visibly slow sinking instead of an almost-free fall through the zone.
-    private const float PlayerSurfaceSinkSpeed = 0.18f;
-    private const float PlayerDeepSinkSpeed = 0.055f;
-    private const float ObjectSurfaceSinkSpeed = 0.085f;
-    private const float ObjectDeepSinkSpeed = 0.022f;
+    // Rain World physics runs at about 40 ticks/s.
+    // Player: 0.10 px/tick = ~4 px/s.
+    // Loose object: 0.065 px/tick = ~2.6 px/s.
+    private const float PlayerSinkSpeed = 0.10f;
+    private const float ObjectSinkSpeed = 0.065f;
 
-    private const float DetectionMarginRadii = 2.4f;
+    // Jumping in quicksand is a short struggle, not a normal jump.
+    private const float PlayerStruggleOutwardSpeed = 1.15f;
+    private const float DetectionMarginRadii = 2.0f;
+
     private static bool _enabled;
 
     internal static void Enable()
@@ -31,6 +31,7 @@ internal static class QuicksandSinkRateLimiter
 
         _enabled = true;
         On.BodyChunk.Update += BodyChunk_Update;
+        On.Player.Jump += Player_Jump;
     }
 
     internal static void Disable()
@@ -42,12 +43,15 @@ internal static class QuicksandSinkRateLimiter
 
         _enabled = false;
         On.BodyChunk.Update -= BodyChunk_Update;
+        On.Player.Jump -= Player_Jump;
     }
 
     private static void BodyChunk_Update(On.BodyChunk.orig_Update orig, BodyChunk self)
     {
         PhysicalObject owner = self?.owner;
-        if (!CanLimit(owner))
+        if (!CanLimit(owner) ||
+            (!owner.Equals(self.owner)) ||
+            (!TryFindContactFrame(self, out QuicksandZone zone, out Vector2 inward, out float signedDepth)))
         {
             orig(self);
             return;
@@ -60,46 +64,111 @@ internal static class QuicksandSinkRateLimiter
             return;
         }
 
-        // BodyChunk.Update begins with: vel.y -= owner.gravity. Predict what the game
-        // is about to integrate, clamp that velocity in the quicksand frame, then add
-        // gravity back once so the native subtraction lands on the clamped value.
-        Vector2 integratedVelocity = self.vel + Vector2.down * owner.gravity;
-        if (TryLimitInwardVelocity(
-                self,
-                owner,
-                isPlayer,
-                integratedVelocity,
-                out Vector2 limitedVelocity))
-        {
-            self.vel = limitedVelocity + Vector2.up * owner.gravity;
-        }
+        Vector2 startPos = self.pos;
+        float fixedSinkSpeed = isPlayer ? PlayerSinkSpeed : ObjectSinkSpeed;
 
         orig(self);
+
+        // Re-sample the same authored curve after the native update. If the chunk is
+        // still close to this quicksand surface, cap only displacement into the sand.
+        if (!IsUsableZone(zone) ||
+            !TrySampleAtChunk(self, zone, out Vector2 currentInward, out float currentDepth))
+        {
+            return;
+        }
+
+        // Use the current curve normal so curved quicksand still behaves correctly.
+        inward = currentInward;
+        Vector2 displacement = self.pos - startPos;
+        float inwardDisplacement = Vector2.Dot(displacement, inward);
+
+        if (inwardDisplacement > fixedSinkSpeed)
+        {
+            self.pos -= inward * (inwardDisplacement - fixedSinkSpeed);
+        }
+
+        // Keep the velocity coherent with the fixed displacement. Do not touch
+        // outward velocity: that is needed for the explicit jump/struggle action.
+        float inwardVelocity = Vector2.Dot(self.vel, inward);
+        if (inwardVelocity > fixedSinkSpeed)
+        {
+            self.vel -= inward * (inwardVelocity - fixedSinkSpeed);
+        }
     }
 
-    private static bool TryLimitInwardVelocity(
-        BodyChunk chunk,
-        PhysicalObject owner,
-        bool isPlayer,
-        Vector2 integratedVelocity,
-        out Vector2 limitedVelocity)
+    private static void Player_Jump(On.Player.orig_Jump orig, Player self)
     {
-        limitedVelocity = integratedVelocity;
-        Room room = owner.room;
+        if (self == null || self.bodyChunks == null || self.bodyChunks.Length == 0)
+        {
+            orig(self);
+            return;
+        }
+
+        bool inQuicksand = TryFindPlayerFrame(self, out Vector2 inward);
+        orig(self);
+
+        if (!inQuicksand)
+        {
+            return;
+        }
+
+        // The existing player code may generate a full normal jump. Replace only the
+        // component away from the quicksand with one fixed struggle impulse.
+        Vector2 outward = -inward;
+        for (int i = 0; i < self.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = self.bodyChunks[i];
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            float outwardSpeed = Vector2.Dot(chunk.vel, outward);
+            chunk.vel += outward * (PlayerStruggleOutwardSpeed - outwardSpeed);
+        }
+
+        // Do not let Rain World's jumpBoost turn this fixed struggle into a normal jump.
+        self.jumpBoost = 0f;
+    }
+
+    private static bool TryFindPlayerFrame(Player player, out Vector2 inward)
+    {
+        inward = Vector2.down;
+        if (player?.bodyChunks == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null && TryFindContactFrame(chunk, out _, out inward, out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryFindContactFrame(
+        BodyChunk chunk,
+        out QuicksandZone bestZone,
+        out Vector2 bestInward,
+        out float bestDepth)
+    {
+        bestZone = null;
+        bestInward = Vector2.down;
+        bestDepth = float.NegativeInfinity;
+
+        PhysicalObject owner = chunk?.owner;
+        Room room = owner?.room;
         if (room?.updateList == null)
         {
             return false;
         }
 
         float radius = Mathf.Max(1f, chunk.rad);
-        Vector2 predictedPoint = chunk.pos + integratedVelocity;
-        float bestPredictedDepth = float.NegativeInfinity;
-        QuicksandZone bestZone = null;
-        Vector2 bestSurface = Vector2.zero;
-        Vector2 bestInward = Vector2.down;
-        float bestCurrentDepth = 0f;
-        float bestDepthLength = 0f;
-
         for (int i = 0; i < room.updateList.Count; i++)
         {
             if (room.updateList[i] is not QuicksandZone zone || !IsUsableZone(zone))
@@ -107,91 +176,68 @@ internal static class QuicksandSinkRateLimiter
                 continue;
             }
 
-            float sampleX = predictedPoint.x;
-            if (sampleX < zone.startX - radius * 1.15f ||
-                sampleX > zone.endX + radius * 1.15f)
+            if (!TrySampleAtChunk(chunk, zone, out Vector2 inward, out float depth))
             {
                 continue;
             }
 
-            float u = zone.MaterialUAtWorldX(sampleX);
-            if (!zone.Data.IsQuicksand(u) ||
-                !zone.TrySampleSurfaceFrame(
-                    u,
-                    out Vector2 surfacePoint,
-                    out _,
-                    out Vector2 inward,
-                    out float depthLength))
+            if (depth < -radius * DetectionMarginRadii ||
+                depth > zone.Data.BottomDepth + radius * 0.5f)
             {
                 continue;
             }
 
-            if (inward.sqrMagnitude < 0.0001f)
+            if (depth > bestDepth)
             {
-                continue;
-            }
-
-            inward.Normalize();
-            float currentDepth = Vector2.Dot(chunk.pos - surfacePoint, inward);
-            float predictedDepth = Vector2.Dot(predictedPoint - surfacePoint, inward);
-            float inwardSpeed = Vector2.Dot(integratedVelocity, inward);
-
-            // Not moving into the material, still too far above it, or already below
-            // the authored quicksand band: leave native motion alone.
-            if (inwardSpeed <= 0f ||
-                predictedDepth < -radius ||
-                currentDepth < -radius * DetectionMarginRadii ||
-                currentDepth > depthLength + radius * 0.50f)
-            {
-                continue;
-            }
-
-            if (predictedDepth > bestPredictedDepth)
-            {
-                bestPredictedDepth = predictedDepth;
+                bestDepth = depth;
                 bestZone = zone;
-                bestSurface = surfacePoint;
                 bestInward = inward;
-                bestCurrentDepth = currentDepth;
-                bestDepthLength = depthLength;
             }
         }
 
-        if (bestZone == null)
+        return bestZone != null;
+    }
+
+    private static bool TrySampleAtChunk(
+        BodyChunk chunk,
+        QuicksandZone zone,
+        out Vector2 inward,
+        out float signedDepth)
+    {
+        inward = Vector2.down;
+        signedDepth = 0f;
+
+        float radius = Mathf.Max(1f, chunk.rad);
+        if (chunk.pos.x < zone.startX - radius * 1.15f ||
+            chunk.pos.x > zone.endX + radius * 1.15f)
         {
             return false;
         }
 
-        float immersion = Mathf.Clamp01((bestCurrentDepth + radius) / (radius * 2f));
-        float packing = Mathf.SmoothStep(0f, 1f, immersion);
-
-        float surfaceSpeed = isPlayer ? PlayerSurfaceSinkSpeed : ObjectSurfaceSinkSpeed;
-        float deepSpeed = isPlayer ? PlayerDeepSinkSpeed : ObjectDeepSinkSpeed;
-        float sinkSpeed = Mathf.Lerp(surfaceSpeed, deepSpeed, packing);
-
-        // Preserve the editor SinkStrength control, but keep it within a range that
-        // cannot turn the material back into near-free fall.
-        float sinkTuning = Mathf.Lerp(
-            0.72f,
-            1.28f,
-            Mathf.Clamp01(bestZone.Data.SinkStrength));
-        sinkSpeed *= sinkTuning;
-
-        // If the body is still just above the surface, allow exactly enough normal
-        // travel to reach it plus one slow sinking step. This absorbs high-speed
-        // impacts without making objects hover above the sand.
-        float surfaceGap = Mathf.Max(0f, -radius - bestCurrentDepth);
-        float allowedInwardSpeed = surfaceGap + sinkSpeed;
-
-        float inwardComponent = Vector2.Dot(integratedVelocity, bestInward);
-        if (inwardComponent <= allowedInwardSpeed)
+        float u = zone.MaterialUAtWorldX(chunk.pos.x);
+        if (!zone.Data.IsQuicksand(u) ||
+            !zone.TrySampleSurfaceFrame(
+                u,
+                out Vector2 surfacePoint,
+                out _,
+                out inward,
+                out float depthLength))
         {
             return false;
         }
 
-        limitedVelocity = integratedVelocity -
-                          bestInward * (inwardComponent - allowedInwardSpeed);
-        return true;
+        if (inward.sqrMagnitude < 0.0001f)
+        {
+            inward = Vector2.down;
+        }
+        else
+        {
+            inward.Normalize();
+        }
+
+        signedDepth = Vector2.Dot(chunk.pos - surfacePoint, inward);
+        return signedDepth >= -radius * DetectionMarginRadii &&
+               signedDepth <= depthLength + radius * 0.50f;
     }
 
     private static bool CanLimit(PhysicalObject owner)
