@@ -14,7 +14,9 @@ internal static class QuicksandPhysicsHooks
     private const float PlayerSurfaceSinkPerTick = 0.025f;
     private const float PlayerDeepSinkPerTick = 0.040f;
     private const float PlayerHorizontalSpeed = 0.018f;
-    private const float PlayerDeathSubmergeRadius = 0.94f;
+    private const float PlayerDeathSubmergeRadius = 1.00f;
+    private const float PlayerHeadVisualClearance = 8f;
+    private const int PlayerDeathConfirmTicks = 8;
 
     private sealed class ZoneCache
     {
@@ -29,6 +31,7 @@ internal static class QuicksandPhysicsHooks
         internal int AnchorChunkIndex = -1;
         internal float TargetSignedDepth;
         internal bool[] CollisionFlags;
+        internal int FullySubmergedTicks;
     }
 
     private static readonly ConditionalWeakTable<QuicksandZone, ZoneCache> ZoneCaches = new();
@@ -84,6 +87,7 @@ internal static class QuicksandPhysicsHooks
             state.Active = true;
             state.Zone = entryZone;
             state.AnchorChunkIndex = anchorIndex;
+            state.FullySubmergedTicks = 0;
 
             BodyChunk entryAnchor = self.bodyChunks[anchorIndex];
             float radius = Mathf.Max(1f, entryAnchor.rad);
@@ -194,7 +198,7 @@ internal static class QuicksandPhysicsHooks
             }
         }
 
-        CheckPlayerFullySubmerged(self, state.Zone);
+        CheckPlayerFullySubmerged(self, state);
 
         // Once the anchor has actually left the edited quicksand volume, restore
         // normal player physics on the next frame.
@@ -380,6 +384,32 @@ internal static class QuicksandPhysicsHooks
         return false;
     }
 
+    private static bool TryGetPointContactInZone(
+        Vector2 point,
+        float radius,
+        QuicksandZone zone,
+        out QuicksandSurface.Contact contact)
+    {
+        contact = default;
+        if (zone == null ||
+            zone.slatedForDeletetion ||
+            zone.PlacedObject == null ||
+            !zone.PlacedObject.active ||
+            zone.PlacedObject.data is not QuicksandZoneData data)
+        {
+            return false;
+        }
+
+        ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
+        QuicksandSurface.SampleZone(zone.PlacedObject, data, cache.Surface, cache.Bottom);
+        return QuicksandSurface.TryGetContact(
+            point,
+            Mathf.Max(1f, radius),
+            cache.Surface,
+            cache.Bottom,
+            out contact);
+    }
+
     private static bool TryGetQuicksandContact(
         BodyChunk chunk,
         bool predictive,
@@ -422,24 +452,35 @@ internal static class QuicksandPhysicsHooks
                contact.SignedDepth <= contact.DepthLength + radius * 0.12f;
     }
 
-    private static void CheckPlayerFullySubmerged(Player player, QuicksandZone zone)
+    private static void CheckPlayerFullySubmerged(Player player, PlayerSandState state)
     {
-        if (player == null || player.dead || player.bodyChunks == null || zone == null)
+        if (player == null ||
+            player.dead ||
+            player.bodyChunks == null ||
+            state == null ||
+            state.Zone == null)
         {
+            if (state != null)
+            {
+                state.FullySubmergedTicks = 0;
+            }
             return;
         }
 
+        // First require every physical chunk's entire collision circle to be below
+        // the surface. This is stricter than the old 0.94-radius check.
         for (int i = 0; i < player.bodyChunks.Length; i++)
         {
             BodyChunk chunk = player.bodyChunks[i];
             if (chunk == null ||
                 !TryGetContactInZone(
                     chunk,
-                    zone,
+                    state.Zone,
                     predictive: false,
                     playerMargin: true,
                     out QuicksandSurface.Contact contact))
             {
+                state.FullySubmergedTicks = 0;
                 return;
             }
 
@@ -448,11 +489,67 @@ internal static class QuicksandPhysicsHooks
                 contact.Inward);
             if (signedDepth < chunk.rad * PlayerDeathSubmergeRadius)
             {
+                state.FullySubmergedTicks = 0;
                 return;
             }
         }
 
-        player.Die();
+        // BodyChunks are not the visual top of a slugcat. PlayerGraphics.head sits
+        // several pixels above bodyChunks[0], so the old check could kill while the
+        // head sprite was still visibly above the sand. Require the actual graphics
+        // head to clear the surface as well.
+        if (player.graphicsModule is PlayerGraphics graphics && graphics.head != null)
+        {
+            if (!TryGetPointContactInZone(
+                    graphics.head.pos,
+                    PlayerHeadVisualClearance + 2f,
+                    state.Zone,
+                    out QuicksandSurface.Contact headContact))
+            {
+                state.FullySubmergedTicks = 0;
+                return;
+            }
+
+            float headDepth = Vector2.Dot(
+                graphics.head.pos - headContact.SurfacePoint,
+                headContact.Inward);
+            if (headDepth < PlayerHeadVisualClearance)
+            {
+                state.FullySubmergedTicks = 0;
+                return;
+            }
+        }
+        else
+        {
+            // Conservative fallback for frames before PlayerGraphics exists.
+            BodyChunk main = player.bodyChunks[0];
+            if (main == null ||
+                !TryGetContactInZone(
+                    main,
+                    state.Zone,
+                    predictive: false,
+                    playerMargin: true,
+                    out QuicksandSurface.Contact mainContact))
+            {
+                state.FullySubmergedTicks = 0;
+                return;
+            }
+
+            float mainDepth = Vector2.Dot(
+                main.pos - mainContact.SurfacePoint,
+                mainContact.Inward);
+            if (mainDepth < main.rad + PlayerHeadVisualClearance)
+            {
+                state.FullySubmergedTicks = 0;
+                return;
+            }
+        }
+
+        state.FullySubmergedTicks++;
+        if (state.FullySubmergedTicks >= PlayerDeathConfirmTicks)
+        {
+            player.Die();
+        }
     }
 
     private static void TranslatePlayer(Player player, Vector2 delta)
@@ -514,6 +611,7 @@ internal static class QuicksandPhysicsHooks
         state.Zone = null;
         state.AnchorChunkIndex = -1;
         state.TargetSignedDepth = 0f;
+        state.FullySubmergedTicks = 0;
     }
 
     private static void ApplyEntryResistance(BodyChunk chunk, QuicksandSurface.Contact contact)
