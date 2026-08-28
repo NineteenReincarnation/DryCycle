@@ -39,7 +39,6 @@ internal static class QuicksandCreatureEscape
     private const float MaximumCorrectionPerTick = 3.0f;
     private const float MinimumLandSupport = 0.72f;
     private const float MinimumFlySupport = 0.88f;
-    private const float ScavengerHorizontalMultiplier = 0.75f;
 
     private sealed class State
     {
@@ -61,6 +60,13 @@ internal static class QuicksandCreatureEscape
 
     private static readonly ConditionalWeakTable<Creature, State> States = new();
     private static bool _enabled;
+
+    internal static bool IsEscaping(Creature creature)
+    {
+        return creature != null &&
+               States.TryGetValue(creature, out State state) &&
+               state.Active;
+    }
 
     internal static void Enable()
     {
@@ -172,15 +178,12 @@ internal static class QuicksandCreatureEscape
             UpdateProgress(creature, state, state.CurrentDanger);
             AdvanceSupportFloor(creature, state);
 
-            if (!creature.dead)
+            if (!creature.dead &&
+                maximum >= PanicImmersion &&
+                !state.ReleasedGrasps)
             {
-                ApplyHorizontalResistance(creature, state);
-
-                if (maximum >= PanicImmersion && !state.ReleasedGrasps)
-                {
-                    creature.LoseAllGrasps();
-                    state.ReleasedGrasps = true;
-                }
+                creature.LoseAllGrasps();
+                state.ReleasedGrasps = true;
             }
 
             UpdateDeath(creature, state, fullySubmerged);
@@ -283,25 +286,6 @@ internal static class QuicksandCreatureEscape
             ? Mathf.Lerp(FlySurfaceSinkRate, FlyDeepSinkRate, t)
             : Mathf.Lerp(LandSurfaceSinkRate, LandDeepSinkRate, t);
         state.SupportDepth += state.SupportSinkRate;
-    }
-
-    private static void ApplyHorizontalResistance(Creature creature, State state)
-    {
-        if (creature is not Scavenger || state.CurrentMaxImmersion <= EnterImmersion)
-        {
-            return;
-        }
-
-        // Scavengers retain their native left/right locomotion and pose. Only the
-        // final horizontal velocity is reduced, exactly as requested for quicksand.
-        for (int i = 0; i < creature.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = creature.bodyChunks[i];
-            if (chunk != null)
-            {
-                chunk.vel.x *= ScavengerHorizontalMultiplier;
-            }
-        }
     }
 
     private static void UpdateDeath(Creature creature, State state, bool fullySubmerged)
