@@ -5,14 +5,22 @@ using UnityEngine;
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Adds curve-aware quicksand avoidance to creature pathing and, when available,
+/// Adds curve-aware quicksand avoidance to creature pathing and, when safe to do so,
 /// feeds the same hazard into the creature's native ThreatTracker.
+///
+/// Lizard ThreatTracker is deliberately not fed artificial quicksand threat points:
+/// LizardAI turns ThreatTracker utility into Behavior.Flee, whose native FleeTo()
+/// continually samples new destinations. Near a wide hazard this can make a lizard
+/// flip destinations at the edge and eventually choose a path through the sand.
+/// Lizards instead use stable path aversion, with deliberate land entry treated as
+/// an illegal connection while post-entry escape remains fully allowed outward.
 /// </summary>
 internal static class QuicksandAIHazard
 {
     private const float NearHeight = 40f;
     private const float SideMargin = 20f;
     private const float EnterDanger = 0.70f;
+    private const float OuterEdgeDangerMax = 0.48f;
     private const float DangerEpsilon = 0.04f;
     private const float SampleSpacing = 10f;
     private const int MaxSamples = 24;
@@ -68,9 +76,10 @@ internal static class QuicksandAIHazard
     {
         PathCost cost = orig(self, start, goal, connection, followingPath);
         Room room = self?.realizedRoom;
+        Creature realizedCreature = self?.creature?.realizedCreature;
 
         if (room == null ||
-            self.creature?.realizedCreature == null ||
+            realizedCreature == null ||
             cost.legality > PathCost.Legality.Unwanted ||
             !connection.startCoord.TileDefined ||
             !connection.destinationCoord.TileDefined ||
@@ -83,26 +92,44 @@ internal static class QuicksandAIHazard
         List<QuicksandZone> zones = Zones(room);
         if (zones.Count == 0) return cost;
 
-        float clearance = BodyClearance(self.creature.realizedCreature);
+        float clearance = BodyClearance(realizedCreature);
         Vector2 a = room.MiddleOfTile(connection.StartTile);
         Vector2 b = room.MiddleOfTile(connection.DestTile);
         float startDanger = Danger(zones, a, clearance);
         float endDanger = Danger(zones, b, clearance);
         float segmentDanger = SegmentDanger(zones, a, b, clearance);
+        float deepest = Mathf.Max(endDanger, segmentDanger);
+        bool escapingQuicksand = QuicksandCreatureEscape.IsEscaping(realizedCreature);
 
-        // A creature already in quicksand must always be allowed to choose a route
-        // that reduces danger. This prevents the aversion itself from trapping it.
-        if (startDanger >= EnterDanger &&
+        // Once actually immersed, never let the avoidance layer block a connection
+        // that makes the creature safer. This is based on realized immersion state,
+        // not merely the center of an AI tile near the edge.
+        if (escapingQuicksand &&
             endDanger < startDanger - DangerEpsilon &&
             segmentDanger <= startDanger + DangerEpsilon)
         {
             return cost;
         }
 
-        float deepest = Mathf.Max(endDanger, segmentDanger);
         if (deepest >= EnterDanger)
         {
             float worsening = Mathf.Max(0f, endDanger - startDanger);
+
+            // A land lizard that is still physically safe must never deliberately
+            // choose a movement connection that enters/crosses quicksand. Unwanted
+            // remains a legal PathCost and was therefore still selected when a prey
+            // target happened to be across the hazard. Actual falls are still
+            // possible, and once immersed QuicksandCreatureEscape owns the way out.
+            bool landLizard = realizedCreature is Lizard &&
+                              (realizedCreature.Template == null ||
+                               !realizedCreature.Template.canFly);
+            if (landLizard && !escapingQuicksand)
+            {
+                return cost + new PathCost(
+                    deepest * 90f + worsening * 60f,
+                    PathCost.Legality.IllegalConnection);
+            }
+
             return cost + new PathCost(
                 deepest * 90f + worsening * 60f,
                 PathCost.Legality.Unwanted);
@@ -122,7 +149,8 @@ internal static class QuicksandAIHazard
 
     private static void UpdateFear(ArtificialIntelligence ai)
     {
-        if (ai?.threatTracker == null || ai.creature?.realizedCreature?.room == null)
+        Creature realizedCreature = ai?.creature?.realizedCreature;
+        if (ai?.threatTracker == null || realizedCreature?.room == null)
         {
             if (ai != null && FearStates.TryGetValue(ai, out FearState stale))
             {
@@ -131,7 +159,20 @@ internal static class QuicksandAIHazard
             return;
         }
 
-        Room room = ai.creature.realizedCreature.room;
+        // LizardAI converts ThreatTracker utility into a randomized native FleeTo()
+        // destination. That competed with the quicksand path cost and caused edge
+        // flicker. Also suppress our environmental fear while any creature is in the
+        // dedicated post-entry escape state so that escape destination stays stable.
+        if (realizedCreature is Lizard || QuicksandCreatureEscape.IsEscaping(realizedCreature))
+        {
+            if (FearStates.TryGetValue(ai, out FearState suppressed))
+            {
+                SetSeverity(suppressed, 0f);
+            }
+            return;
+        }
+
+        Room room = realizedCreature.room;
         FearState state = FearStates.GetValue(ai, key =>
         {
             FearState created = new FearState { AI = key };
@@ -148,7 +189,7 @@ internal static class QuicksandAIHazard
 
         EnsureFearPoints(state);
         List<QuicksandZone> zones = Zones(room);
-        Vector2 creaturePos = CreaturePoint(ai.creature.realizedCreature, room);
+        Vector2 creaturePos = CreaturePoint(realizedCreature, room);
 
         if (!NearestSurface(zones, creaturePos, out QuicksandZone zone, out Vector2 surface, out float distance))
         {
@@ -156,7 +197,7 @@ internal static class QuicksandAIHazard
             return;
         }
 
-        float danger = PointDanger(zone, creaturePos, BodyClearance(ai.creature.realizedCreature));
+        float danger = PointDanger(zone, creaturePos, BodyClearance(realizedCreature));
         float proximity = 1f - Mathf.Clamp01(distance / 130f);
         if (proximity <= 0f && danger < EnterDanger)
         {
@@ -271,26 +312,46 @@ internal static class QuicksandAIHazard
 
         float x = point.x;
         float sideGap = 0f;
-        if (x < zone.startX) { sideGap = zone.startX - x; x = zone.startX; }
-        else if (x > zone.endX) { sideGap = x - zone.endX; x = zone.endX; }
+        if (x < zone.startX)
+        {
+            sideGap = zone.startX - x;
+            x = zone.startX;
+        }
+        else if (x > zone.endX)
+        {
+            sideGap = x - zone.endX;
+            x = zone.endX;
+        }
 
         float sideReach = SideMargin + clearance;
         if (sideGap > sideReach || !SampleSurface(zone, x, out Vector2 surface)) return 0f;
 
-        float sideFactor = 1f - Mathf.Clamp01(sideGap / sideReach);
         float bottomY = zone.PlacedObject.pos.y - zone.Data.BottomDepth;
         if (point.y < bottomY - clearance || point.y > surface.y + NearHeight + clearance) return 0f;
 
         float gap = point.y - surface.y;
+
+        // Outside the authored X span is only a warning band. The previous code
+        // clamped X to the edge and then treated an adjacent safe tile at/below
+        // surface height as genuinely submerged (>= EnterDanger). That turned the
+        // safe edge itself into Unwanted pathing and made lizards oscillate there.
+        if (sideGap > 0f)
+        {
+            float sideFactor = 1f - Mathf.Clamp01(sideGap / sideReach);
+            float verticalReach = NearHeight + clearance;
+            float verticalFactor = 1f - Mathf.Clamp01(Mathf.Abs(gap) / verticalReach);
+            return OuterEdgeDangerMax * sideFactor * verticalFactor;
+        }
+
         if (gap > 0f)
         {
             float near = 1f - Mathf.Clamp01(Mathf.Max(0f, gap - clearance) / NearHeight);
-            return near * 0.55f * sideFactor;
+            return near * 0.55f;
         }
 
         float depthLength = Mathf.Max(4f, surface.y - bottomY);
         float depthT = Mathf.Clamp01((-gap + clearance) / Mathf.Max(20f, depthLength * 0.35f));
-        return Mathf.Lerp(0.78f, 1f, depthT) * sideFactor;
+        return Mathf.Lerp(0.78f, 1f, depthT);
     }
 
     private static bool NearestSurface(
