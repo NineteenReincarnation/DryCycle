@@ -8,13 +8,8 @@ using UnityEngine;
 namespace DryCycle.Creatures;
 
 /// <summary>
-/// First playable Spineback Lizard prototype.
-///
-/// Baseline locomotion, AI and combat stats are cloned from Blue Lizard. The custom
-/// layer adds a sand-brown thorny silhouette and an inflate/curl defensive response:
-/// after taking damage the three lizard body chunks are pulled into a swollen ball,
-/// nearby creatures are pushed off the spikes, and repeated hits are partially
-/// absorbed while the defense is fully raised.
+/// Spineback Lizard prototype. Gameplay statistics and pathing still use Blue Lizard
+/// as the baseline, while the graphics and defensive pose are custom.
 /// </summary>
 internal static class SpinebackLizardHooks
 {
@@ -23,6 +18,11 @@ internal static class SpinebackLizardHooks
     private const float DeflateRate = 0.025f;
     private const float FullDefenseThreshold = 0.65f;
     private const int ContactCooldownFrames = 24;
+
+    private const float NormalBodyRadiusScale = 1.06f;
+    private const float DefensiveBodyRadiusScale = 1.12f;
+    private const float NormalConnectionScale = 0.92f;
+    private const float DefensiveConnectionScale = 0.54f;
 
     private sealed class DefenseState
     {
@@ -34,7 +34,14 @@ internal static class SpinebackLizardHooks
         internal readonly Dictionary<Creature, int> ContactCooldowns = new();
     }
 
+    private sealed class GraphicsState
+    {
+        internal int VanillaExtraStart;
+        internal int VanillaExtraEnd;
+    }
+
     private static readonly ConditionalWeakTable<Lizard, DefenseState> DefenseStates = new();
+    private static readonly ConditionalWeakTable<LizardGraphics, GraphicsState> GraphicsStates = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -52,6 +59,8 @@ internal static class SpinebackLizardHooks
         On.Lizard.Update += Lizard_Update;
         On.Lizard.Violence += Lizard_Violence;
         On.LizardGraphics.ctor += LizardGraphics_ctor;
+        On.LizardGraphics.DrawSprites += LizardGraphics_DrawSprites;
+        On.LizardGraphics.ApplyPalette += LizardGraphics_ApplyPalette;
     }
 
     internal static void Disable()
@@ -67,6 +76,8 @@ internal static class SpinebackLizardHooks
         On.Lizard.Update -= Lizard_Update;
         On.Lizard.Violence -= Lizard_Violence;
         On.LizardGraphics.ctor -= LizardGraphics_ctor;
+        On.LizardGraphics.DrawSprites -= LizardGraphics_DrawSprites;
+        On.LizardGraphics.ApplyPalette -= LizardGraphics_ApplyPalette;
     }
 
     internal static float GetDefenseProgress(Lizard lizard)
@@ -74,6 +85,56 @@ internal static class SpinebackLizardHooks
         return lizard != null && DefenseStates.TryGetValue(lizard, out DefenseState state)
             ? state.Progress
             : 0f;
+    }
+
+    internal static Color GetBodyColor(Lizard lizard)
+    {
+        int seed = lizard?.abstractCreature?.ID.RandomSeed ?? 0;
+        float variation = Stable01(seed + 101);
+        return Color.Lerp(
+            new Color(0.62f, 0.52f, 0.38f),
+            new Color(0.80f, 0.71f, 0.55f),
+            variation);
+    }
+
+    internal static Color GetPlateColor(Lizard lizard)
+    {
+        return Color.Lerp(
+            GetBodyColor(lizard),
+            new Color(0.88f, 0.82f, 0.67f),
+            0.48f);
+    }
+
+    internal static Color GetRustColor(Lizard lizard)
+    {
+        int seed = lizard?.abstractCreature?.ID.RandomSeed ?? 0;
+        float variation = Stable01(seed + 1907);
+        return Color.Lerp(
+            new Color(0.34f, 0.18f, 0.10f),
+            new Color(0.52f, 0.30f, 0.16f),
+            variation);
+    }
+
+    internal static Color GetDarkColor(Lizard lizard)
+    {
+        return Color.Lerp(GetRustColor(lizard), new Color(0.08f, 0.065f, 0.055f), 0.58f);
+    }
+
+    internal static Color ShadeForRoom(Lizard lizard, RoomCamera rCam, Color color)
+    {
+        if (lizard?.room == null || rCam == null)
+        {
+            return color;
+        }
+
+        float darkness = Mathf.Clamp01(lizard.room.Darkness(lizard.mainBodyChunk.pos));
+        return Color.Lerp(color, rCam.currentPalette.blackColor, darkness * 0.72f);
+    }
+
+    internal static float Stable01(int seed)
+    {
+        float value = Mathf.Sin((seed + 31) * 12.9898f) * 43758.5453f;
+        return value - Mathf.Floor(value);
     }
 
     private static bool IsSpineback(Lizard lizard)
@@ -129,11 +190,9 @@ internal static class SpinebackLizardHooks
             type = spinebackType,
             name = "Spineback Lizard",
             index = spinebackType.Index,
-            // Reuse Blue Lizard's generated pathing instead of requiring a new
-            // prebaked pathing dataset for the prototype creature.
             doPreBakedPathing = false,
             preBakedPathingAncestor = blue,
-            shortcutColor = new Color(0.68f, 0.46f, 0.22f)
+            shortcutColor = new Color(0.72f, 0.60f, 0.42f)
         };
 
         StaticWorld.creatureTemplates[spinebackType.Index] = template;
@@ -173,16 +232,11 @@ internal static class SpinebackLizardHooks
             }
         }
 
-        // A Spineback should relate to another Spineback the same way a Blue
-        // Lizard relates to another Blue Lizard, rather than inheriting the unused
-        // custom slot from the blue relationship table.
         if (spineIndex < spineback.relationships.Length && blueIndex < blue.relationships.Length)
         {
             spineback.relationships[spineIndex] = blue.relationships[blueIndex].Duplicate();
         }
 
-        // Mirror every existing creature's relationship toward Blue Lizard into
-        // its relationship toward Spineback Lizard as well.
         for (int i = 0; i < templates.Length; i++)
         {
             CreatureTemplate other = templates[i];
@@ -254,8 +308,6 @@ internal static class SpinebackLizardHooks
         DefenseState state = DefenseStates.GetOrCreateValue(self);
         InitializeState(self, state);
 
-        // The first hit still lands normally. Once the lizard has fully curled up,
-        // the inflated spiny body becomes substantially harder to damage or stun.
         float armor = Mathf.InverseLerp(FullDefenseThreshold, 1f, state.Progress);
         damage *= Mathf.Lerp(1f, 0.38f, armor);
         stunBonus *= Mathf.Lerp(1f, 0.45f, armor);
@@ -281,27 +333,108 @@ internal static class SpinebackLizardHooks
         }
 
         int seed = self.lizard.abstractCreature?.ID.RandomSeed ?? 0;
-        float variation = Stable01(seed);
-        self.lizard.effectColor = Color.Lerp(
-            new Color(0.52f, 0.30f, 0.13f),
-            new Color(0.82f, 0.62f, 0.30f),
-            variation);
+        float widthVariation = Stable01(seed + 503);
 
-        int startSprite = self.startOfExtraSprites + self.extraSprites;
-        self.AddCosmetic(startSprite, new SpinebackLizardSpikes(self, startSprite));
+        self.iVars.fatness = Mathf.Lerp(1.24f, 1.42f, widthVariation);
+        self.iVars.headSize = Mathf.Lerp(0.84f, 0.96f, Stable01(seed + 907));
+        self.iVars.tailFatness = Mathf.Lerp(0.92f, 1.08f, Stable01(seed + 1301));
+        self.iVars.tailColor = 0f;
+        self.lizard.effectColor = GetBodyColor(self.lizard);
 
-        // A second vanilla spine row makes the normal, uninflated animal visibly
-        // thornier before the custom radial crown spreads during defense.
-        int secondStart = self.startOfExtraSprites + self.extraSprites;
-        SpineSpikes dorsalSpikes = new SpineSpikes(self, secondStart)
+        int vanillaExtraStart = self.startOfExtraSprites;
+        int customStart = vanillaExtraStart + self.extraSprites;
+        GraphicsState graphicsState = GraphicsStates.GetOrCreateValue(self);
+        graphicsState.VanillaExtraStart = vanillaExtraStart;
+        graphicsState.VanillaExtraEnd = customStart;
+        self.AddCosmetic(customStart, new SpinebackLizardSpikes(self, customStart));
+    }
+
+    private static void LizardGraphics_DrawSprites(
+        On.LizardGraphics.orig_DrawSprites orig,
+        LizardGraphics self,
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        float timeStacker,
+        Vector2 camPos)
+    {
+        orig(self, sLeaser, rCam, timeStacker, camPos);
+
+        if (!IsSpineback(self?.lizard) || sLeaser?.sprites == null)
         {
-            spineLength = self.BodyAndTailLength * 0.78f,
-            sizeRangeMin = 0.42f,
-            sizeRangeMax = 1.05f,
-            sizeSkewExponent = 0.52f,
-            scaleX = 1f
-        };
-        self.AddCosmetic(secondStart, dorsalSpikes);
+            return;
+        }
+
+        Lizard lizard = self.lizard;
+        float defense = GetDefenseProgress(lizard);
+        float ballBlend = Mathf.SmoothStep(
+            0f,
+            1f,
+            Mathf.InverseLerp(0.18f, 0.78f, defense));
+        float baseAlpha = 1f - ballBlend;
+
+        Color body = ShadeForRoom(lizard, rCam, GetBodyColor(lizard));
+        Color plate = ShadeForRoom(lizard, rCam, GetPlateColor(lizard));
+        Color rust = ShadeForRoom(lizard, rCam, GetRustColor(lizard));
+        Color dark = ShadeForRoom(lizard, rCam, GetDarkColor(lizard));
+
+        self.ColorBody(sLeaser, body);
+
+        if (self.SpriteHeadStart >= 0 && self.SpriteHeadStart + 4 < sLeaser.sprites.Length)
+        {
+            sLeaser.sprites[self.SpriteHeadStart].color = body;
+            sLeaser.sprites[self.SpriteHeadStart + 1].color = plate;
+            sLeaser.sprites[self.SpriteHeadStart + 2].color = plate;
+            sLeaser.sprites[self.SpriteHeadStart + 3].color = body;
+            sLeaser.sprites[self.SpriteHeadStart + 4].color = dark;
+        }
+
+        int limbColorEnd = Math.Min(self.SpriteLimbsColorEnd, sLeaser.sprites.Length);
+        for (int i = self.SpriteLimbsColorStart; i < limbColorEnd; i++)
+        {
+            sLeaser.sprites[i].color = (i % 2 == 0) ? rust : plate;
+        }
+
+        if (GraphicsStates.TryGetValue(self, out GraphicsState graphicsState))
+        {
+            int vanillaStart = Math.Max(0, graphicsState.VanillaExtraStart);
+            int vanillaEnd = Math.Min(graphicsState.VanillaExtraEnd, sLeaser.sprites.Length);
+            for (int i = vanillaStart; i < vanillaEnd; i++)
+            {
+                if (sLeaser.sprites[i] != null)
+                {
+                    sLeaser.sprites[i].alpha = 0f;
+                }
+            }
+        }
+
+        int baseEnd = GraphicsStates.TryGetValue(self, out GraphicsState baseGraphicsState)
+            ? Math.Min(baseGraphicsState.VanillaExtraStart, sLeaser.sprites.Length)
+            : Math.Min(self.startOfExtraSprites, sLeaser.sprites.Length);
+        for (int i = 0; i < baseEnd; i++)
+        {
+            if (sLeaser.sprites[i] != null)
+            {
+                sLeaser.sprites[i].alpha *= baseAlpha;
+            }
+        }
+    }
+
+    private static void LizardGraphics_ApplyPalette(
+        On.LizardGraphics.orig_ApplyPalette orig,
+        LizardGraphics self,
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        RoomPalette palette)
+    {
+        orig(self, sLeaser, rCam, palette);
+
+        if (!IsSpineback(self?.lizard) || sLeaser?.sprites == null)
+        {
+            return;
+        }
+
+        Color body = ShadeForRoom(self.lizard, rCam, GetBodyColor(self.lizard));
+        self.ColorBody(sLeaser, body);
     }
 
     private static void InitializeState(Lizard lizard, DefenseState state)
@@ -331,13 +464,18 @@ internal static class SpinebackLizardHooks
 
         for (int i = 0; i < lizard.bodyChunks.Length && i < state.BaseRadii.Length; i++)
         {
-            lizard.bodyChunks[i].rad = state.BaseRadii[i] * Mathf.Lerp(1f, 1.58f, p);
+            lizard.bodyChunks[i].rad = state.BaseRadii[i] * Mathf.Lerp(
+                NormalBodyRadiusScale,
+                DefensiveBodyRadiusScale,
+                p);
         }
 
         for (int i = 0; i < lizard.bodyChunkConnections.Length && i < state.BaseConnectionDistances.Length; i++)
         {
-            lizard.bodyChunkConnections[i].distance =
-                state.BaseConnectionDistances[i] * Mathf.Lerp(1f, 0.24f, p);
+            lizard.bodyChunkConnections[i].distance = state.BaseConnectionDistances[i] * Mathf.Lerp(
+                NormalConnectionScale,
+                DefensiveConnectionScale,
+                p);
         }
 
         if (p <= 0.001f || lizard.bodyChunks.Length < 3)
@@ -352,8 +490,8 @@ internal static class SpinebackLizardHooks
         }
         center /= lizard.bodyChunks.Length;
 
-        float pull = Mathf.Lerp(0.035f, 0.23f, p);
-        float velocityRetention = Mathf.Lerp(0.96f, 0.52f, p);
+        float pull = Mathf.Lerp(0.012f, 0.115f, p);
+        float velocityRetention = Mathf.Lerp(0.96f, 0.62f, p);
 
         for (int i = 0; i < lizard.bodyChunks.Length; i++)
         {
@@ -363,7 +501,7 @@ internal static class SpinebackLizardHooks
 
         lizard.JawOpen = Mathf.Min(lizard.JawOpen, 1f - p);
 
-        if (p > 0.35f)
+        if (p > 0.28f)
         {
             lizard.LoseAllGrasps();
             lizard.movementAnimation = null;
@@ -386,7 +524,7 @@ internal static class SpinebackLizardHooks
         }
         center /= lizard.bodyChunks.Length;
 
-        float dangerRadius = Mathf.Lerp(24f, 36f, state.Progress);
+        float dangerRadius = Mathf.Lerp(23f, 34f, state.Progress);
 
         for (int layer = 0; layer < room.physicalObjects.Length; layer++)
         {
@@ -451,9 +589,6 @@ internal static class SpinebackLizardHooks
                     continue;
                 }
 
-                // Small stab damage makes physically forcing through the thorn crown
-                // a losing strategy without turning the prototype into an instant-kill
-                // hazard. The pushback is the primary defensive effect.
                 other.Violence(
                     lizard.mainBodyChunk,
                     away * 2.5f,
@@ -490,11 +625,5 @@ internal static class SpinebackLizardHooks
                 state.ContactCooldowns[creature]--;
             }
         }
-    }
-
-    private static float Stable01(int seed)
-    {
-        float value = Mathf.Sin((seed + 31) * 12.9898f) * 43758.5453f;
-        return value - Mathf.Floor(value);
     }
 }
