@@ -14,6 +14,7 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
     private static readonly Color TerrainLineColor = new(0.90f, 0.90f, 0.90f);
     private static readonly Color QuicksandLineColor = new(0.95f, 0.70f, 0.23f);
     private static readonly Color BottomLineColor = new(0.50f, 0.31f, 0.18f);
+    private static readonly Color MaterialPointColor = new(1f, 0.82f, 0.18f);
 
     private sealed class MaterialBoundaryHandle : Handle
     {
@@ -26,10 +27,11 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
             : base(owner, "Quicksand_MaterialBoundary", parentNode, Vector2.zero)
         {
             U = Mathf.Clamp01(u);
-            defaultColor = new Color(1f, 0.58f, 0.12f);
+            defaultColor = MaterialPointColor;
             if (fSprites.Count > 0)
             {
                 fSprites[0].scale = 0.42f;
+                fSprites[0].color = MaterialPointColor;
             }
         }
     }
@@ -127,10 +129,15 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
         }
 
         bool boundariesChanged = false;
-        bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool materialClick = shift && Input.GetMouseButtonDown(1);
 
+        // Keep Watcher's normal spline editing untouched: Shift + left click is
+        // handled by BezierSplineControl and creates the ordinary white geometry
+        // control points. Shift + right click is reserved exclusively for the
+        // yellow quicksand material boundaries.
         MaterialBoundaryHandle deleteHandle = null;
-        if (alt && owner.mouseClick)
+        if (materialClick)
         {
             for (int i = 0; i < _materialHandles.Count; i++)
             {
@@ -172,7 +179,7 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
                 boundariesChanged = true;
             }
 
-            if (alt && owner.mouseClick && owner.draggedNode == null)
+            if (materialClick && owner.draggedNode == null)
             {
                 Vector2 localMouse = owner.mousePos - absPos;
                 float u = QuicksandSurface.FindNearestU(
