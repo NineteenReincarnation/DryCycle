@@ -19,7 +19,7 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 internal static class QuicksandSinkRateLimiter
 {
     // Rain World normally updates physics at roughly 40 ticks/s.
-    private const float PlayerSinkSpeed = 0.10f;
+    private const float PlayerSinkSpeed = 0.125f;
     private const float ObjectSinkSpeed = 0.065f;
     private const float PlayerStruggleUpwardSpeed = 1.15f;
     private const float DetectionMarginRadii = 2.0f;
