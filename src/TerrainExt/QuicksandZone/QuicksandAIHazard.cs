@@ -345,7 +345,18 @@ internal static class QuicksandAIHazard
 
         if (gap > 0f)
         {
-            float near = 1f - Mathf.Clamp01(Mathf.Max(0f, gap - clearance) / NearHeight);
+            // AI coordinates represent a creature center, not its lower body edge.
+            // Once the center is within one body-clearance radius of the surface the
+            // realized body already intersects quicksand and must count as a real
+            // entry hazard. This closes the old gap where a lizard center stayed a
+            // few pixels above the curve while its body physically crossed into it.
+            if (gap <= clearance)
+            {
+                float overlap = 1f - Mathf.Clamp01(gap / Mathf.Max(1f, clearance));
+                return Mathf.Lerp(EnterDanger, 0.78f, overlap);
+            }
+
+            float near = 1f - Mathf.Clamp01((gap - clearance) / NearHeight);
             return near * 0.55f;
         }
 
