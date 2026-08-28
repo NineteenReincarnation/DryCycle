@@ -14,8 +14,19 @@ internal static class QuicksandPhysicsHooks
     private const float PlayerDeepSinkSpeed = 0.045f;
     private const float PlayerEntrySinkSpeed = 0.014f;
     private const float PlayerHorizontalSpeed = 0.018f;
-    private const float ObjectSinkSpeed = 0.035f;
-    private const float ObjectTangentialRetention = 0.08f;
+
+    // Loose items need a visibly readable immersion phase too. Their incoming fall
+    // speed is killed on approach, then the allowed terminal sink speed ramps from
+    // almost zero to a still-slow deep value over roughly one second.
+    private const float ObjectEntrySinkSpeed = 0.0025f;
+    private const float ObjectSurfaceSinkSpeed = 0.010f;
+    private const float ObjectDeepSinkSpeed = 0.020f;
+    private const float ObjectTangentialRetention = 0.04f;
+    private const float ObjectSinkPull = 0.30f;
+    private const float ObjectEntryLookAheadTicks = 2.0f;
+    private const int ObjectEntryRampTicks = 40;
+    private const int ObjectContactGraceTicks = 10;
+
     private const float PlayerSinkPull = 0.35f;
     private const float PlayerEntryLookAheadTicks = 2.5f;
     private const float PlayerInfluenceMargin = 2.35f;
@@ -91,7 +102,58 @@ internal static class QuicksandPhysicsHooks
             return false;
         }
 
+        // Players are large enough that placing the complete drawable behind the
+        // terrain at entry still leaves the upper body visibly above the front edge.
+        if (physicalObject is Player)
+        {
+            zone = state.Zone;
+            return true;
+        }
+
+        // Small items used to disappear the instant their predictive entry activated,
+        // because the renderer moved them behind TerrainCurve before they had actually
+        // penetrated the surface. Wait for real overlap and expose a physical immersion
+        // progress instead. This makes a rock visibly sit on, then enter, the sand.
+        if (physicalObject.bodyChunks == null)
+        {
+            return false;
+        }
+
+        bool penetrated = false;
+        float deepestProgress = 0f;
+        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = physicalObject.bodyChunks[i];
+            if (chunk == null ||
+                !TryGetContactInZone(
+                    chunk,
+                    state.Zone,
+                    predictive: false,
+                    out QuicksandSurface.Contact contact) ||
+                !state.Zone.Data.IsQuicksand(contact.U))
+            {
+                continue;
+            }
+
+            float radius = Mathf.Max(1f, chunk.rad);
+            if (contact.SignedDepth < -radius * 0.90f)
+            {
+                continue;
+            }
+
+            penetrated = true;
+            deepestProgress = Mathf.Max(
+                deepestProgress,
+                Mathf.Clamp01((contact.SignedDepth + radius) / (radius * 2f)));
+        }
+
+        if (!penetrated)
+        {
+            return false;
+        }
+
         zone = state.Zone;
+        progress = deepestProgress;
         return true;
     }
 
@@ -117,7 +179,7 @@ internal static class QuicksandPhysicsHooks
             state.ReentryCooldown <= 0 &&
             TryFindPlayerEntry(self, out QuicksandZone entryZone))
         {
-            Activate(state, entryZone);
+            Activate(state, entryZone, PlayerContactGraceTicks);
         }
 
         if (!state.Active)
@@ -243,16 +305,15 @@ internal static class QuicksandPhysicsHooks
             state.ReentryCooldown <= 0 &&
             TryFindEntry(owner, out QuicksandZone entryZone, out _))
         {
-            Activate(state, entryZone);
+            Activate(state, entryZone, ObjectContactGraceTicks);
         }
 
         if (!state.Active ||
-            !TryGetContactInZone(
+            !TryGetObjectInfluenceContact(
                 self,
                 state.Zone,
                 predictive: true,
-                out QuicksandSurface.Contact contact) ||
-            !state.Zone.Data.IsQuicksand(contact.U))
+                out QuicksandSurface.Contact contact))
         {
             orig(self);
             return;
@@ -260,25 +321,31 @@ internal static class QuicksandPhysicsHooks
 
         bool originalTerrainCollision = self.collideWithTerrain;
         self.collideWithTerrain = false;
-        ApplyObjectSandVelocity(self, owner, preGravity: true);
+        ApplyObjectSandVelocity(self, owner, state, contact, preGravity: true);
 
         try
         {
             orig(self);
 
             if (state.Active &&
-                TryGetContactInZone(
+                TryGetObjectInfluenceContact(
                     self,
                     state.Zone,
                     predictive: false,
-                    out QuicksandSurface.Contact currentContact) &&
-                state.Zone.Data.IsQuicksand(currentContact.U))
+                    out QuicksandSurface.Contact currentContact))
             {
-                ApplyObjectSandVelocity(self, owner, preGravity: false);
+                ApplyObjectSandVelocity(
+                    self,
+                    owner,
+                    state,
+                    currentContact,
+                    preGravity: false);
             }
             else
             {
-                self.vel *= 0.30f;
+                // Keep a newly caught object from carrying its old fall velocity
+                // through the surface while the current-contact test catches up.
+                self.vel *= 0.08f;
             }
         }
         finally
@@ -324,10 +391,25 @@ internal static class QuicksandPhysicsHooks
                     continue;
                 }
 
-                if (!IsStateValid(physicalObject, state) ||
-                    !HasQuicksandContact(physicalObject, state.Zone, predictive: false))
+                if (!IsStateValid(physicalObject, state))
                 {
                     Deactivate(state, ExitReentryCooldown);
+                    continue;
+                }
+
+                if (HasQuicksandContact(physicalObject, state.Zone, predictive: false) ||
+                    HasObjectInfluence(physicalObject, state.Zone, predictive: true))
+                {
+                    state.ContactGraceTicks = ObjectContactGraceTicks;
+                    state.EntryTicks++;
+                }
+                else
+                {
+                    state.ContactGraceTicks--;
+                    if (state.ContactGraceTicks <= 0)
+                    {
+                        Deactivate(state, ExitReentryCooldown);
+                    }
                 }
             }
         }
@@ -359,13 +441,13 @@ internal static class QuicksandPhysicsHooks
                state.Zone.Data != null;
     }
 
-    private static void Activate(SinkState state, QuicksandZone zone)
+    private static void Activate(SinkState state, QuicksandZone zone, int contactGraceTicks)
     {
         state.Active = true;
         state.Zone = zone;
         state.FullySubmergedTicks = 0;
         state.EntryTicks = 0;
-        state.ContactGraceTicks = PlayerContactGraceTicks;
+        state.ContactGraceTicks = contactGraceTicks;
     }
 
     private static void ApplyPlayerSandVelocity(
@@ -413,10 +495,32 @@ internal static class QuicksandPhysicsHooks
     private static void ApplyObjectSandVelocity(
         BodyChunk chunk,
         PhysicalObject owner,
+        SinkState state,
+        QuicksandSurface.Contact contact,
         bool preGravity)
     {
+        float deepness = Mathf.Clamp01(
+            contact.SignedDepth / Mathf.Max(1f, contact.DepthLength));
+        float targetSinkSpeed = Mathf.Lerp(
+            ObjectSurfaceSinkSpeed,
+            ObjectDeepSinkSpeed,
+            Mathf.SmoothStep(0f, 1f, deepness));
+        float entryFactor = Mathf.SmoothStep(
+            0f,
+            1f,
+            Mathf.Clamp01((float)state.EntryTicks / ObjectEntryRampTicks));
+        float sinkSpeed = Mathf.Lerp(
+            ObjectEntrySinkSpeed,
+            targetSinkSpeed,
+            entryFactor);
+
         float horizontal = chunk.vel.x * ObjectTangentialRetention;
-        float vertical = -ObjectSinkSpeed;
+
+        // As with the player, use a strong pull only to erase incoming momentum;
+        // the actual terminal velocity is intentionally tiny. A thrown rock therefore
+        // visibly settles at the surface instead of punching straight through it.
+        float dampedVertical = Mathf.Min(0f, chunk.vel.y) * 0.015f - ObjectSinkPull;
+        float vertical = Mathf.Max(dampedVertical, -sinkSpeed);
         if (preGravity)
         {
             vertical += owner.gravity;
@@ -608,10 +712,9 @@ internal static class QuicksandPhysicsHooks
             {
                 BodyChunk chunk = physicalObject.bodyChunks[chunkIndex];
                 if (chunk == null ||
-                    !TryGetContactInZone(
+                    !TryGetObjectApproachContact(
                         chunk,
                         candidateZone,
-                        predictive: true,
                         out QuicksandSurface.Contact candidateContact) ||
                     !candidateZone.Data.IsQuicksand(candidateContact.U))
                 {
@@ -628,6 +731,138 @@ internal static class QuicksandPhysicsHooks
         }
 
         return zone != null;
+    }
+
+    private static bool TryGetObjectApproachContact(
+        BodyChunk chunk,
+        QuicksandZone zone,
+        out QuicksandSurface.Contact contact)
+    {
+        contact = default;
+        if (chunk == null || zone?.Data == null)
+        {
+            return false;
+        }
+
+        if (TryGetContactInZone(
+                chunk,
+                zone,
+                predictive: false,
+                out QuicksandSurface.Contact currentContact) &&
+            zone.Data.IsQuicksand(currentContact.U))
+        {
+            contact = currentContact;
+            return true;
+        }
+
+        ZoneCache cache = ZoneCaches.GetValue(zone, _ => new ZoneCache());
+        QuicksandSurface.SampleZone(zone.PlacedObject, zone.Data, cache.Surface, cache.Bottom);
+
+        float lookAhead = ObjectEntryLookAheadTicks;
+        Vector2 predicted = chunk.pos +
+                            chunk.vel * lookAhead +
+                            Vector2.down * chunk.owner.gravity * 0.5f * lookAhead * lookAhead;
+        float radius = Mathf.Max(1f, chunk.rad);
+        float predictiveRadius = radius * 1.35f +
+                                 Mathf.Min(14f, chunk.vel.magnitude * 0.48f + 4f);
+
+        if (!QuicksandSurface.TryGetContact(
+                predicted,
+                predictiveRadius,
+                cache.Surface,
+                cache.Bottom,
+                out QuicksandSurface.Contact predictedContact) ||
+            !IsInsideEntryBand(predictedContact, radius, 1.65f) ||
+            !zone.Data.IsQuicksand(predictedContact.U))
+        {
+            return false;
+        }
+
+        Vector2 travel = predicted - chunk.pos;
+        if (Vector2.Dot(travel, predictedContact.Inward) < -0.05f)
+        {
+            return false;
+        }
+
+        contact = predictedContact;
+        return true;
+    }
+
+    private static bool TryGetObjectInfluenceContact(
+        BodyChunk chunk,
+        QuicksandZone zone,
+        bool predictive,
+        out QuicksandSurface.Contact contact)
+    {
+        contact = default;
+        if (chunk == null || zone?.Data == null)
+        {
+            return false;
+        }
+
+        Vector2 point = chunk.pos;
+        if (predictive)
+        {
+            point += chunk.vel + Vector2.down * chunk.owner.gravity;
+        }
+
+        float u = zone.MaterialUAtWorldX(point.x);
+        if (!zone.Data.IsQuicksand(u) ||
+            !zone.TrySampleSurfaceFrame(
+                u,
+                out Vector2 surfacePoint,
+                out Vector2 tangent,
+                out Vector2 inward,
+                out float depthLength))
+        {
+            return false;
+        }
+
+        float radius = Mathf.Max(1f, chunk.rad);
+        float signedDepth = Vector2.Dot(point - surfacePoint, inward);
+        if (signedDepth < -radius * 1.70f ||
+            signedDepth > depthLength + radius * 0.55f)
+        {
+            return false;
+        }
+
+        Vector2 bottomPoint = surfacePoint + inward * depthLength;
+        contact = new QuicksandSurface.Contact(
+            u,
+            surfacePoint,
+            bottomPoint,
+            tangent,
+            inward,
+            depthLength,
+            signedDepth);
+        return true;
+    }
+
+    private static bool HasObjectInfluence(
+        PhysicalObject physicalObject,
+        QuicksandZone zone,
+        bool predictive)
+    {
+        if (physicalObject?.bodyChunks == null || zone?.Data == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < physicalObject.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = physicalObject.bodyChunks[i];
+            if (chunk != null &&
+                TryGetObjectInfluenceContact(
+                    chunk,
+                    zone,
+                    predictive,
+                    out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasQuicksandContact(
