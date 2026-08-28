@@ -17,6 +17,7 @@ internal static class QuicksandZoneHooks
 
     private static readonly ConditionalWeakTable<PlayerGraphics, PlayerLayerState> PlayerLayerStates = new();
     private static readonly int[] UpperPlayerSprites = { 0, 3, 5, 6, 7, 8, 9 };
+    private static readonly int[] LowerPlayerSprites = { 1, 2, 4 };
     private static bool _enabled;
 
     internal static PlacedObject.Type PlacedType { get; private set; }
@@ -160,8 +161,6 @@ internal static class QuicksandZoneHooks
         {
             if (state.SplitActive)
             {
-                // Restore the character's own vanilla/MSC/Watcher container layout
-                // after leaving the zone instead of guessing every accessory layer.
                 self.AddToContainer(sLeaser, rCam, null);
                 state.SplitActive = false;
             }
@@ -175,13 +174,24 @@ internal static class QuicksandZoneHooks
             return;
         }
 
-        // Keep hips, tail and legs in their normal lower layer while body, head,
-        // arms, hands and face are moved in front of this same Sand layer. The
-        // result is a stable half-submerged silhouette rather than the whole
-        // slugcat disappearing behind the opaque quicksand mesh.
-        for (int i = 0; i < UpperPlayerSprites.Length; i++)
+        // Explicitly put hips/tail/legs behind the Sand layer contents. The old
+        // implementation only promoted the upper body, leaving the lower sprites in
+        // their vanilla container where they could still draw in front of quicksand.
+        MoveSpritesToSand(sLeaser, sandContainer, LowerPlayerSprites, moveToFront: false);
+        MoveSpritesToSand(sLeaser, sandContainer, UpperPlayerSprites, moveToFront: true);
+
+        state.SplitActive = true;
+    }
+
+    private static void MoveSpritesToSand(
+        RoomCamera.SpriteLeaser sLeaser,
+        FContainer sandContainer,
+        int[] spriteIndices,
+        bool moveToFront)
+    {
+        for (int i = 0; i < spriteIndices.Length; i++)
         {
-            int spriteIndex = UpperPlayerSprites[i];
+            int spriteIndex = spriteIndices[i];
             if (spriteIndex < 0 || spriteIndex >= sLeaser.sprites.Length)
             {
                 continue;
@@ -198,10 +208,15 @@ internal static class QuicksandZoneHooks
                 sandContainer.AddChild(sprite);
             }
 
-            sprite.MoveToFront();
+            if (moveToFront)
+            {
+                sprite.MoveToFront();
+            }
+            else
+            {
+                sprite.MoveToBack();
+            }
         }
-
-        state.SplitActive = true;
     }
 
     private static bool IsPlayerTouchingQuicksand(Player player)
