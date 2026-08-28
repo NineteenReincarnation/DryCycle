@@ -210,12 +210,7 @@ internal sealed class DewPodPlant : UpdatableAndDeletable, IDrawable
         return RootPos + _surfaceTangent * local.x + _surfaceNormal * local.y;
     }
 
-    private Vector2 LocalVectorToWorld(Vector2 local)
-    {
-        return _surfaceTangent * local.x + _surfaceNormal * local.y;
-    }
-
-    private float SurfaceRotation => Custom.VecToDeg(_surfaceNormal) - 90f;
+    private float SurfaceRotation => Custom.VecToDeg(_surfaceNormal);
 
     internal void SetPullInfluence(int slot, Vector2 target, float strength)
     {
