@@ -6,6 +6,7 @@ using DryCycle.Creatures;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
+using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
 
 #pragma warning disable CS0618
@@ -55,6 +56,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
             DewPodClassicVisualHooks.Disable();
@@ -99,6 +101,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
             DewPodHooks.Enable();
+            QuicksandZoneHooks.Enable();
             DewPodPlantHooks.Enable();
             DewPodPlantCollisionHooks.Enable();
             DewPodClassicVisualHooks.Enable();
@@ -115,6 +118,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
             DewPodClassicVisualHooks.Disable();
