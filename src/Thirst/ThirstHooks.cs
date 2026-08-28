@@ -113,10 +113,9 @@ internal static class ThirstHooks
             }
         }
 
-        bool fullySubmerged = self.bodyChunks != null &&
-                              self.bodyChunks.Length >= 2 &&
-                              self.bodyChunks[0].submersion > 0.9f &&
-                              self.bodyChunks[1].submersion > 0.9f;
+        bool headSubmerged = self.bodyChunks != null &&
+                             self.bodyChunks.Length >= 1 &&
+                             self.bodyChunks[0].submersion > 0.9f;
 
         if (self.dead || !self.Consious || self.input == null || self.input.Length == 0)
         {
@@ -129,7 +128,7 @@ internal static class ThirstHooks
         bool wantsToDrink = self.room != null &&
                             !self.inShortcut &&
                             self.input[0].pckp &&
-                            fullySubmerged &&
+                            headSubmerged &&
                             breathBarActive &&
                             state.Water < maxWater - 0.0001f;
 
