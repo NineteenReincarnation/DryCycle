@@ -21,7 +21,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.0.44";
+    public const string Version = "0.0.45";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -58,6 +58,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
@@ -108,13 +109,15 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Enable();
             QuicksandZoneHooks.Enable();
 
-            // QuicksandSinkRateLimiter owns player / loose-object sinking. Scheme-D
-            // keeps hard-ground ContactPoint out of player physics; the locomotion
-            // layer restores native Stand/run animation at Player method boundaries
-            // and only supplies a temporary floor contact inside PlayerGraphics.
+            // The capture hook must sit inside the baseline sink controller so it can
+            // remember the state native Player.Update actually produced. The outer
+            // struggle hook is then installed last and makes Up/Jump affect only the
+            // final world-Y sink rate, without choosing a Player body mode.
+            QuicksandPlayerStruggleControl.EnableNativeCapture();
             QuicksandSinkRateLimiter.Enable();
             QuicksandPlayerHorizontalStability.Enable();
             QuicksandPlayerLocomotionSupport.Enable();
+            QuicksandPlayerStruggleControl.Enable();
             QuicksandWeaponSettling.Enable();
             QuicksandSubmersionCleanup.Enable();
 
@@ -136,6 +139,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandWeaponSettling.Disable();
+            QuicksandPlayerStruggleControl.Disable();
             QuicksandPlayerLocomotionSupport.Disable();
             QuicksandPlayerHorizontalStability.Disable();
             QuicksandSinkRateLimiter.Disable();
