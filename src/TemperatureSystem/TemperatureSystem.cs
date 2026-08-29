@@ -18,6 +18,7 @@ internal static class TemperatureSystemRuntime
 
         _enabled = true;
         TemperatureSetsLoader.Enable();
+        TemperatureDeveloperHud.Enable();
     }
 
     internal static void Disable()
@@ -28,6 +29,7 @@ internal static class TemperatureSystemRuntime
         }
 
         _enabled = false;
+        TemperatureDeveloperHud.Disable();
         TemperatureSetsLoader.Disable();
     }
 
