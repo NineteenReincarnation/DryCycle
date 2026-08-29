@@ -304,7 +304,8 @@ internal static class TemperatureDeveloperHud
             "Base WV loss\n" +
             "Solar WV loss\n" +
             "BodyHeat WV loss\n" +
-            "Total WV loss";
+            "Total WV loss\n" +
+            "DryCycleDifficulty";
 
         ApplyPanelPosition();
         _root.isVisible = _visible;
@@ -433,7 +434,7 @@ internal static class TemperatureDeveloperHud
         {
             _playerValues.text = "--\n--\n--\n--\n--\n--\n--";
             _roomValues.text = "--\n--\n0.000\n0.000\n0.000\n0.000 / 0.000\n0.000 / 0.000\n0.000\n--\n--";
-            _thermalValues.text = "0.000 / 0.000\n0.000\n0.00000 / 0.00000 /s\n0.00000 / 0.00000 /s\n0.00000/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s";
+            _thermalValues.text = "0.000 / 0.000\n0.000\n0.00000 / 0.00000 /s\n0.00000 / 0.00000 /s\n0.00000/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s\n1.00x";
             return;
         }
 
@@ -517,10 +518,11 @@ internal static class TemperatureDeveloperHud
         float solarWaterLoss = ThermalWaterLoss.GetSolarWaterLossRate(player);
         float bodyHeatWaterLoss = ThermalWaterLoss.GetBodyHeatWaterLossRate(player);
         float totalWaterLoss = baseWaterLoss + solarWaterLoss + bodyHeatWaterLoss;
+        float dryCycleDifficulty = SlugBaseHydrationFeatures.GetDryCycleDifficulty(player);
 
         _thermalValues.text = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:0.000} / {1:0.000}\n{2:+0.000;-0.000;0.000}\n{3:0.00000} / {4:0.00000} /s\n{5:0.00000} / {6:0.00000} /s\n{7:+0.00000;-0.00000;0.00000}/s\n{8:0.000} WV/s\n{9:0.000} WV/s\n{10:0.000} WV/s\n{11:0.000} WV/s",
+            "{0:0.000} / {1:0.000}\n{2:+0.000;-0.000;0.000}\n{3:0.00000} / {4:0.00000} /s\n{5:0.00000} / {6:0.00000} /s\n{7:+0.00000;-0.00000;0.00000}/s\n{8:0.000} WV/s\n{9:0.000} WV/s\n{10:0.000} WV/s\n{11:0.000} WV/s\n{12:0.00}x",
             bodyHeat0,
             bodyHeat1,
             difference,
@@ -532,7 +534,8 @@ internal static class TemperatureDeveloperHud
             baseWaterLoss,
             solarWaterLoss,
             bodyHeatWaterLoss,
-            totalWaterLoss);
+            totalWaterLoss,
+            dryCycleDifficulty);
     }
 
     private static Player ResolveDisplayedPlayer(RainWorldGame game)
