@@ -16,12 +16,10 @@ internal static class TemperatureDeveloperHud
     private const string PositionYKey = "DryCycle.ThermalDebugPanel.Y";
 
     private const float PanelWidth = 640f;
-    private const float PanelHeight = 680f;
+    private const float PanelHeight = 700f;
     private const float TitleHeight = 44f;
     private const float EdgePadding = 8f;
 
-    // Rain World's normal UI font is bitmap-oriented. Keep it at native scale and
-    // keep the whole panel on integer Futile pixels so the glyphs remain crisp.
     private const float TextScale = 1f;
     private const float HeaderScale = 1f;
     private const float TitleScale = 1f;
@@ -29,17 +27,17 @@ internal static class TemperatureDeveloperHud
     private const float KeyColumnX = 18f;
     private const float ValueColumnX = 250f;
 
-    private const float PlayerSectionTop = 636f;
-    private const float PlayerHeaderY = 614f;
-    private const float PlayerRowsY = 586f;
+    private const float PlayerSectionTop = 656f;
+    private const float PlayerHeaderY = 634f;
+    private const float PlayerRowsY = 606f;
 
-    private const float RoomSectionTop = 446f;
-    private const float RoomHeaderY = 424f;
-    private const float RoomRowsY = 396f;
+    private const float RoomSectionTop = 466f;
+    private const float RoomHeaderY = 444f;
+    private const float RoomRowsY = 416f;
 
-    private const float ThermalSectionTop = 216f;
-    private const float ThermalHeaderY = 194f;
-    private const float ThermalRowsY = 166f;
+    private const float ThermalSectionTop = 236f;
+    private const float ThermalHeaderY = 214f;
+    private const float ThermalRowsY = 186f;
 
     private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.84f);
     private static readonly Color BorderColor = new(0.78f, 0.78f, 0.78f, 0.90f);
@@ -256,7 +254,7 @@ internal static class TemperatureDeveloperHud
             TextScale,
             FLabelAlignment.Left);
 
-        CreateLabel("THERMAL MODEL", KeyColumnX, ThermalHeaderY, HeaderColor, HeaderScale, FLabelAlignment.Left);
+        CreateLabel("THERMAL / WV", KeyColumnX, ThermalHeaderY, HeaderColor, HeaderScale, FLabelAlignment.Left);
         FLabel thermalKeys = CreateLabel(
             string.Empty,
             KeyColumnX,
@@ -287,20 +285,22 @@ internal static class TemperatureDeveloperHud
             "RoomHeat\n" +
             "SunlightIntensity\n" +
             "RoomShade\n" +
-            "LocalShade\n" +
-            "EffectiveSunlight\n" +
+            "LocalShade 0 / 1\n" +
+            "EffectiveSun 0 / 1\n" +
+            "Solar exposure\n" +
             "Gravity\n" +
-            "Water level\n" +
-            "Humidity / Wind";
+            "Water level";
 
         thermalKeys.text =
-            "BodyHeat 0\n" +
-            "BodyHeat 1\n" +
+            "BodyHeat 0 / 1\n" +
             "Difference\n" +
-            "Target flow\n" +
+            "Room cooling 0 / 1\n" +
+            "Solar heating 0 / 1\n" +
             "Internal flow\n" +
-            "Room half-life\n" +
-            "Flow HL / Conduct.";
+            "Base WV loss\n" +
+            "Solar WV loss\n" +
+            "BodyHeat WV loss\n" +
+            "Total WV loss";
 
         ApplyPanelPosition();
         _root.isVisible = _visible;
@@ -425,8 +425,8 @@ internal static class TemperatureDeveloperHud
         if (player == null)
         {
             _playerValues.text = "--\n--\n--\n--\n--\n--\n--";
-            _roomValues.text = "--\n--\n+0.000\n0.000\n0.000\n0.000\n0.000\n--\n--\n-- / --";
-            _thermalValues.text = "0.000\n0.000\n0.000\n0.00000/s\n0.00000/s\n20.0 s\n1.5 s / 0.03520/s";
+            _roomValues.text = "--\n--\n0.000\n0.000\n0.000\n0.000 / 0.000\n0.000 / 0.000\n0.000\n--\n--";
+            _thermalValues.text = "0.000 / 0.000\n0.000\n0.00000 / 0.00000 /s\n0.00000 / 0.00000 /s\n0.00000/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s\n0.000 WV/s";
             return;
         }
 
@@ -464,11 +464,11 @@ internal static class TemperatureDeveloperHud
         float roomHeat = RoomHeatFactor.GetRoomHeat(room);
         float sunlightIntensity = SolarEnvironment.GetSunlightIntensity(room);
         float roomShade = SolarEnvironment.GetRoomShade(room);
-        float localShade = SolarEnvironment.GetLocalShade(player);
-        float effectiveSunlight = SolarEnvironment.CalculateEffectiveSunlight(
-            sunlightIntensity,
-            roomShade,
-            localShade);
+        float localShade0 = SolarEnvironment.GetLocalShade(player, 0);
+        float localShade1 = SolarEnvironment.GetLocalShade(player, 1);
+        float effectiveSunlight0 = player.inShortcut ? 0f : SolarEnvironment.GetEffectiveSunlight(player, 0);
+        float effectiveSunlight1 = player.inShortcut ? 0f : SolarEnvironment.GetEffectiveSunlight(player, 1);
+        float solarExposure = ThermalWaterLoss.GetSolarExposure(player);
 
         string regionName = room?.world?.region?.name ?? "--";
         string roomName = room?.abstractRoom?.name ?? "--";
@@ -479,14 +479,17 @@ internal static class TemperatureDeveloperHud
 
         _roomValues.text = string.Format(
             CultureInfo.InvariantCulture,
-            "{0}\n{1}\n{2:+0.000;-0.000;0.000}\n{3:0.000}\n{4:0.000}\n{5:0.000}\n{6:0.000}\n{7:0.000}\n{8}\n-- / --",
+            "{0}\n{1}\n{2:+0.000;-0.000;0.000}\n{3:0.000}\n{4:0.000}\n{5:0.000} / {6:0.000}\n{7:0.000} / {8:0.000}\n{9:0.000}\n{10:0.000}\n{11}",
             regionName,
             roomName,
             roomHeat,
             sunlightIntensity,
             roomShade,
-            localShade,
-            effectiveSunlight,
+            localShade0,
+            localShade1,
+            effectiveSunlight0,
+            effectiveSunlight1,
+            solarExposure,
             gravity,
             waterLevel);
 
@@ -494,20 +497,31 @@ internal static class TemperatureDeveloperHud
         float bodyHeat0 = thermal?.BodyHeat0 ?? 0f;
         float bodyHeat1 = thermal?.BodyHeat1 ?? 0f;
         float difference = bodyHeat0 - bodyHeat1;
-        float targetFlow = difference * PlayerThermalModel.InternalConductancePerSecond;
+        float cooling0 = PlayerThermalModel.CalculateRoomCoolingRate(bodyHeat0, roomHeat);
+        float cooling1 = PlayerThermalModel.CalculateRoomCoolingRate(bodyHeat1, roomHeat);
+        float solarHeating0 = effectiveSunlight0 * PlayerThermalModel.BaseSolarHeatingRatePerSecond;
+        float solarHeating1 = effectiveSunlight1 * PlayerThermalModel.BaseSolarHeatingRatePerSecond;
         float internalFlow = thermal?.InternalHeatFlow ?? 0f;
+        float baseWaterLoss = SlugBaseHydrationFeatures.GetBaseWaterLossRateAfterStatus(player);
+        float solarWaterLoss = ThermalWaterLoss.GetSolarWaterLossRate(player);
+        float bodyHeatWaterLoss = ThermalWaterLoss.GetBodyHeatWaterLossRate(player);
+        float totalWaterLoss = baseWaterLoss + solarWaterLoss + bodyHeatWaterLoss;
 
         _thermalValues.text = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:+0.000;-0.000;0.000}\n{1:+0.000;-0.000;0.000}\n{2:+0.000;-0.000;0.000}\n{3:+0.00000;-0.00000;0.00000}/s\n{4:+0.00000;-0.00000;0.00000}/s\n{5:0.0} s\n{6:0.0} s / {7:0.00000}/s",
+            "{0:0.000} / {1:0.000}\n{2:+0.000;-0.000;0.000}\n{3:0.00000} / {4:0.00000} /s\n{5:0.00000} / {6:0.00000} /s\n{7:+0.00000;-0.00000;0.00000}/s\n{8:0.000} WV/s\n{9:0.000} WV/s\n{10:0.000} WV/s\n{11:0.000} WV/s",
             bodyHeat0,
             bodyHeat1,
             difference,
-            targetFlow,
+            cooling0,
+            cooling1,
+            solarHeating0,
+            solarHeating1,
             internalFlow,
-            PlayerThermalModel.RoomHeatHalfLifeSeconds,
-            PlayerThermalModel.InternalHeatFlowHalfLifeSeconds,
-            PlayerThermalModel.InternalConductancePerSecond);
+            baseWaterLoss,
+            solarWaterLoss,
+            bodyHeatWaterLoss,
+            totalWaterLoss);
     }
 
     private static Player ResolveDisplayedPlayer(RainWorldGame game)
