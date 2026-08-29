@@ -7,14 +7,8 @@ namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// Draggable developer overlay for player, room/environment and thermal-model data.
-///
-/// The panel is only available while Rain World's developer tools are active.
-/// Press Ctrl + Shift + T to show/hide it. Drag the title bar to reposition it;
-/// the last position is persisted with PlayerPrefs.
-///
-/// Rain World's normal UI font is bitmap-oriented. Debug text is therefore rendered
-/// at its native 1.0 scale and the whole panel is snapped to integer Futile pixels.
-/// Fractional label/container scaling made the previous version visibly blurry.
+/// The panel is available only while Rain World's developer tools are active.
+/// Ctrl + Shift + T toggles it; the title bar can be dragged and its position persists.
 /// </summary>
 internal static class TemperatureDeveloperHud
 {
@@ -22,11 +16,12 @@ internal static class TemperatureDeveloperHud
     private const string PositionYKey = "DryCycle.ThermalDebugPanel.Y";
 
     private const float PanelWidth = 640f;
-    private const float PanelHeight = 620f;
+    private const float PanelHeight = 680f;
     private const float TitleHeight = 44f;
     private const float EdgePadding = 8f;
 
-    // Keep bitmap glyphs at native scale. Do not use fractional scales here.
+    // Rain World's normal UI font is bitmap-oriented. Keep it at native scale and
+    // keep the whole panel on integer Futile pixels so the glyphs remain crisp.
     private const float TextScale = 1f;
     private const float HeaderScale = 1f;
     private const float TitleScale = 1f;
@@ -34,17 +29,17 @@ internal static class TemperatureDeveloperHud
     private const float KeyColumnX = 18f;
     private const float ValueColumnX = 250f;
 
-    private const float PlayerSectionTop = 576f;
-    private const float PlayerHeaderY = 554f;
-    private const float PlayerRowsY = 526f;
+    private const float PlayerSectionTop = 636f;
+    private const float PlayerHeaderY = 614f;
+    private const float PlayerRowsY = 586f;
 
-    private const float RoomSectionTop = 386f;
-    private const float RoomHeaderY = 364f;
-    private const float RoomRowsY = 336f;
+    private const float RoomSectionTop = 446f;
+    private const float RoomHeaderY = 424f;
+    private const float RoomRowsY = 396f;
 
-    private const float ThermalSectionTop = 196f;
-    private const float ThermalHeaderY = 174f;
-    private const float ThermalRowsY = 146f;
+    private const float ThermalSectionTop = 216f;
+    private const float ThermalHeaderY = 194f;
+    private const float ThermalRowsY = 166f;
 
     private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.84f);
     private static readonly Color BorderColor = new(0.78f, 0.78f, 0.78f, 0.90f);
@@ -290,9 +285,12 @@ internal static class TemperatureDeveloperHud
             "Region\n" +
             "Room\n" +
             "RoomHeat\n" +
+            "SunlightIntensity\n" +
+            "RoomShade\n" +
+            "LocalShade\n" +
+            "EffectiveSunlight\n" +
             "Gravity\n" +
             "Water level\n" +
-            "Shade / Sun\n" +
             "Humidity / Wind";
 
         thermalKeys.text =
@@ -427,7 +425,7 @@ internal static class TemperatureDeveloperHud
         if (player == null)
         {
             _playerValues.text = "--\n--\n--\n--\n--\n--\n--";
-            _roomValues.text = "--\n--\n+0.000\n--\n--\n-- / --\n-- / --";
+            _roomValues.text = "--\n--\n+0.000\n0.000\n0.000\n0.000\n0.000\n--\n--\n-- / --";
             _thermalValues.text = "0.000\n0.000\n0.000\n0.00000/s\n0.00000/s\n20.0 s\n1.5 s / 0.03520/s";
             return;
         }
@@ -464,6 +462,14 @@ internal static class TemperatureDeveloperHud
 
         Room room = player.room;
         float roomHeat = RoomHeatFactor.GetRoomHeat(room);
+        float sunlightIntensity = SolarEnvironment.GetSunlightIntensity(room);
+        float roomShade = SolarEnvironment.GetRoomShade(room);
+        float localShade = SolarEnvironment.GetLocalShade(player);
+        float effectiveSunlight = SolarEnvironment.CalculateEffectiveSunlight(
+            sunlightIntensity,
+            roomShade,
+            localShade);
+
         string regionName = room?.world?.region?.name ?? "--";
         string roomName = room?.abstractRoom?.name ?? "--";
         float gravity = room?.gravity ?? 0f;
@@ -473,10 +479,14 @@ internal static class TemperatureDeveloperHud
 
         _roomValues.text = string.Format(
             CultureInfo.InvariantCulture,
-            "{0}\n{1}\n{2:+0.000;-0.000;0.000}\n{3:0.000}\n{4}\n-- / --\n-- / --",
+            "{0}\n{1}\n{2:+0.000;-0.000;0.000}\n{3:0.000}\n{4:0.000}\n{5:0.000}\n{6:0.000}\n{7:0.000}\n{8}\n-- / --",
             regionName,
             roomName,
             roomHeat,
+            sunlightIntensity,
+            roomShade,
+            localShade,
+            effectiveSunlight,
             gravity,
             waterLevel);
 
@@ -602,8 +612,6 @@ internal static class TemperatureDeveloperHud
             return;
         }
 
-        // Bitmap UI must stay on whole Futile pixels. A fractional parent position
-        // makes every child glyph sample between texels and visibly softens the font.
         _root.x = Mathf.Round(_panelPosition.x);
         _root.y = Mathf.Round(_panelPosition.y);
     }
