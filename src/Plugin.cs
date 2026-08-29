@@ -22,7 +22,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.63";
+    public const string Version = "0.1.64";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
