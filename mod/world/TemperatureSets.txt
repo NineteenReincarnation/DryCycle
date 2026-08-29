@@ -3,14 +3,14 @@
 # Legacy format (still supported):
 # ROOM : RoomHeat
 #
-# Extended format:
-# ROOM : RoomHeat | SunlightIntensity | RoomShade
+# Standard extended format:
+# ROOM : RoomHeat : SunlightIntensity : RoomShade
 #
 # RoomHeat:           -1 .. 1
 # SunlightIntensity:   0 .. 1
 # RoomShade:           0 .. 1
 
 B5:
-B5_POTD01 : 1 | 0 | 0
+B5_POTD01 : 1 : 0 : 0
 
 B4:
