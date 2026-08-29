@@ -11,9 +11,9 @@ namespace DryCycle.Thirst;
 /// When SlugBase is installed, DryCycle registers custom PlayerFeatures by
 /// reflection so this assembly has no hard reference to SlugBase.dll:
 /// "WaterLossRate" (WV per second), "WaterPips" (normal hibernation
-/// requirement/cost in hydration pips), and "DryCycleDifficulty" (general
-/// DryCycle difficulty coefficient). Custom SlugBase characters can set these
-/// exact keys in their JSON. Without SlugBase, vanilla/default values are used.
+/// requirement/cost in hydration pips), and "DryCycleDifficulty" (final WV
+/// difficulty multiplier). Custom SlugBase characters can set these exact keys
+/// in their JSON. Without SlugBase, vanilla/default values are used.
 /// </summary>
 internal static class SlugBaseHydrationFeatures
 {
@@ -158,13 +158,9 @@ internal static class SlugBaseHydrationFeatures
     }
 
     /// <summary>
-    /// General DryCycle difficulty coefficient for this player.
+    /// Final DryCycle difficulty multiplier for this player.
     /// The authored SlugBase value is always clamped to [0.5, 3.0].
     /// Missing/unsupported values default to 1.0.
-    ///
-    /// This is intentionally exposed as a reusable coefficient rather than being
-    /// hard-wired into a specific subsystem here. Individual DryCycle systems can
-    /// opt into it explicitly as their difficulty behavior is defined.
     /// </summary>
     public static float GetDryCycleDifficulty(Player player)
     {
@@ -215,12 +211,16 @@ internal static class SlugBaseHydrationFeatures
     }
 
     /// <summary>
-    /// Final WV/second = existing base WV loss + direct solar loss + BodyHeat loss.
+    /// Final WV/second = (base WV loss + direct solar loss + BodyHeat loss)
+    ///                   * DryCycleDifficulty.
+    /// Difficulty is intentionally the final multiplication stage so it scales the
+    /// complete result without changing the individual source calculations.
     /// </summary>
     public static float GetTotalWaterLossRate(Player player)
     {
-        return GetBaseWaterLossRateAfterStatus(player) +
-               ThermalWaterLoss.GetTotalExtraWaterLossRate(player);
+        float rawTotal = GetBaseWaterLossRateAfterStatus(player) +
+                         ThermalWaterLoss.GetTotalExtraWaterLossRate(player);
+        return rawTotal * GetDryCycleDifficulty(player);
     }
 
     public static float GetWaterLossPerTick(Player player)
