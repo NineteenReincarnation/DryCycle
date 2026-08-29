@@ -17,6 +17,7 @@ internal static class TemperatureSetsLoader
     private const string FileName = "TemperatureSets.txt";
     private const int PollIntervalTicks = 8;
     private const int MissingFileClearPolls = 5;
+    private const int MaxAssemblyParentSearchDepth = 8;
 
     private static Dictionary<string, Dictionary<string, float>> _roomHeatByRegion =
         CreateRegionTable();
@@ -45,6 +46,8 @@ internal static class TemperatureSetsLoader
         _ticksUntilPoll = 0;
         _filePath = ResolveTemperatureSetsPath();
         ResetFileTracking();
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            $"TemperatureSets: resolved data path '{_filePath}'.");
         LoadInitialSnapshot();
         On.RainWorldGame.Update += RainWorldGame_Update;
     }
@@ -134,6 +137,8 @@ internal static class TemperatureSetsLoader
             {
                 _filePath = resolvedPath;
                 ResetFileTracking();
+                global::DryCycle.Plugin.Logger?.LogInfo(
+                    $"TemperatureSets: data path changed to '{_filePath}'.");
                 LoadInitialSnapshot();
                 return;
             }
@@ -353,6 +358,18 @@ internal static class TemperatureSetsLoader
 
     private static string ResolveTemperatureSetsPath()
     {
+        // First bind the data file to the actual mod that physically contains this
+        // DryCycle assembly. This is important during development: the plugin can be
+        // hosted by a larger region mod (for example NR.B5 / Ancient Site) whose
+        // modinfo id intentionally differs from DryCycle's BepInEx plugin GUID.
+        string assemblyOwnedPath = ResolvePathFromContainingMod();
+        if (!string.IsNullOrWhiteSpace(assemblyOwnedPath))
+        {
+            return assemblyOwnedPath;
+        }
+
+        // Legacy/standalone fallback: if DryCycle is packaged as its own active mod,
+        // continue supporting the original id-based lookup.
         if (ModManager.ActiveMods != null)
         {
             for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
@@ -364,9 +381,6 @@ internal static class TemperatureSetsLoader
                     continue;
                 }
 
-                // The authored file belongs at the mod root, exactly as requested:
-                // <modName>/world/TemperatureSets.txt. Targeted/newest locations are
-                // only fallbacks for unusual packaging layouts.
                 string rootPath = Path.Combine(mod.path, "world", FileName);
                 if (File.Exists(rootPath))
                 {
@@ -391,13 +405,55 @@ internal static class TemperatureSetsLoader
                     }
                 }
 
-                // Return the intended root path even before it exists so creating the
-                // file while the game is open will be picked up by the poller.
                 return rootPath;
             }
         }
 
         return AssetManager.ResolveFilePath("world/" + FileName);
+    }
+
+    private static string ResolvePathFromContainingMod()
+    {
+        try
+        {
+            string assemblyPath = typeof(global::DryCycle.Plugin).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(assemblyPath))
+            {
+                return null;
+            }
+
+            string assemblyDirectoryPath = Path.GetDirectoryName(Path.GetFullPath(assemblyPath));
+            if (string.IsNullOrWhiteSpace(assemblyDirectoryPath))
+            {
+                return null;
+            }
+
+            DirectoryInfo directory = new(assemblyDirectoryPath);
+            for (int depth = 0;
+                 directory != null && depth < MaxAssemblyParentSearchDepth;
+                 depth++, directory = directory.Parent)
+            {
+                // modinfo.json marks the owning Rain World mod root. Starting from
+                // e.g. Ancient Site/newest/plugins/DryCycle.dll, this walks through
+                // plugins -> newest -> Ancient Site and stops there.
+                string modInfoPath = Path.Combine(directory.FullName, "modinfo.json");
+                if (!File.Exists(modInfoPath))
+                {
+                    continue;
+                }
+
+                // Return the intended root path even if TemperatureSets.txt has not
+                // been created yet. The hot-reload poller will notice it later.
+                return Path.Combine(directory.FullName, "world", FileName);
+            }
+        }
+        catch (Exception ex)
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                $"TemperatureSets: failed to resolve owning mod from plugin path. {ex.Message}");
+        }
+
+        return null;
     }
 
     private static void ResetFileTracking()
