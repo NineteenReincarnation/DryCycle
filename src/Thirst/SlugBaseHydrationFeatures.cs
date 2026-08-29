@@ -6,12 +6,13 @@ using DryCycle.TemperatureSystem;
 namespace DryCycle.Thirst;
 
 /// <summary>
-/// Optional SlugBase compatibility for DryCycle hydration.
+/// Optional SlugBase compatibility for DryCycle character tuning.
 ///
-/// When SlugBase is installed, DryCycle registers two custom PlayerFeatures by
+/// When SlugBase is installed, DryCycle registers custom PlayerFeatures by
 /// reflection so this assembly has no hard reference to SlugBase.dll:
-/// "WaterLossRate" (WV per second) and "WaterPips" (normal hibernation
-/// requirement/cost in hydration pips). Custom SlugBase characters can set these
+/// "WaterLossRate" (WV per second), "WaterPips" (normal hibernation
+/// requirement/cost in hydration pips), and "DryCycleDifficulty" (general
+/// DryCycle difficulty coefficient). Custom SlugBase characters can set these
 /// exact keys in their JSON. Without SlugBase, vanilla/default values are used.
 /// </summary>
 internal static class SlugBaseHydrationFeatures
@@ -19,13 +20,20 @@ internal static class SlugBaseHydrationFeatures
     public const float DefaultWaterLossRate = 5f;
     public const int DefaultWaterPips = 2;
 
+    public const float DefaultDryCycleDifficulty = 1f;
+    public const float MinDryCycleDifficulty = 0.5f;
+    public const float MaxDryCycleDifficulty = 3f;
+
     private static bool _initialized;
     private static object _waterLossRateFeature;
     private static object _waterPipsFeature;
+    private static object _dryCycleDifficultyFeature;
     private static MethodInfo _waterLossTryGetPlayer;
     private static MethodInfo _waterPipsTryGetPlayer;
+    private static MethodInfo _difficultyTryGetPlayer;
     private static MethodInfo _waterLossTryGetCharacter;
     private static MethodInfo _waterPipsTryGetCharacter;
+    private static MethodInfo _difficultyTryGetCharacter;
     private static MethodInfo _slugBaseCharacterGet;
 
     public static bool Available { get; private set; }
@@ -86,21 +94,26 @@ internal static class SlugBaseHydrationFeatures
             // JSON keys with SlugBase's FeatureManager before its JSON scan.
             _waterLossRateFeature = playerFloat.Invoke(null, new object[] { "WaterLossRate" });
             _waterPipsFeature = playerInt.Invoke(null, new object[] { "WaterPips" });
+            _dryCycleDifficultyFeature = playerFloat.Invoke(null, new object[] { "DryCycleDifficulty" });
 
             _waterLossTryGetPlayer = FindTryGetMethod(_waterLossRateFeature, typeof(Player), typeof(float));
             _waterPipsTryGetPlayer = FindTryGetMethod(_waterPipsFeature, typeof(Player), typeof(int));
+            _difficultyTryGetPlayer = FindTryGetMethod(_dryCycleDifficultyFeature, typeof(Player), typeof(float));
             _waterLossTryGetCharacter = FindTryGetMethod(_waterLossRateFeature, characterType, typeof(float));
             _waterPipsTryGetCharacter = FindTryGetMethod(_waterPipsFeature, characterType, typeof(int));
+            _difficultyTryGetCharacter = FindTryGetMethod(_dryCycleDifficultyFeature, characterType, typeof(float));
 
             Available = _waterLossTryGetPlayer != null &&
                         _waterPipsTryGetPlayer != null &&
+                        _difficultyTryGetPlayer != null &&
                         _waterLossTryGetCharacter != null &&
-                        _waterPipsTryGetCharacter != null;
+                        _waterPipsTryGetCharacter != null &&
+                        _difficultyTryGetCharacter != null;
         }
         catch (Exception ex)
         {
             Available = false;
-            Plugin.Logger?.LogWarning($"SlugBase hydration compatibility disabled: {ex}");
+            Plugin.Logger?.LogWarning($"SlugBase DryCycle feature compatibility disabled: {ex}");
         }
     }
 
@@ -142,6 +155,53 @@ internal static class SlugBaseHydrationFeatures
         }
 
         return GetDefaultWaterPips(slugcat);
+    }
+
+    /// <summary>
+    /// General DryCycle difficulty coefficient for this player.
+    /// The authored SlugBase value is always clamped to [0.5, 3.0].
+    /// Missing/unsupported values default to 1.0.
+    ///
+    /// This is intentionally exposed as a reusable coefficient rather than being
+    /// hard-wired into a specific subsystem here. Individual DryCycle systems can
+    /// opt into it explicitly as their difficulty behavior is defined.
+    /// </summary>
+    public static float GetDryCycleDifficulty(Player player)
+    {
+        if (TryGetPlayerFloat(
+                _dryCycleDifficultyFeature,
+                _difficultyTryGetPlayer,
+                player,
+                out float configured))
+        {
+            return ClampDryCycleDifficulty(configured);
+        }
+
+        return DefaultDryCycleDifficulty;
+    }
+
+    public static float GetDryCycleDifficulty(SlugcatStats.Name slugcat)
+    {
+        if (TryGetCharacterFloat(
+                _dryCycleDifficultyFeature,
+                _difficultyTryGetCharacter,
+                slugcat,
+                out float configured))
+        {
+            return ClampDryCycleDifficulty(configured);
+        }
+
+        return DefaultDryCycleDifficulty;
+    }
+
+    public static float ClampDryCycleDifficulty(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+        {
+            return DefaultDryCycleDifficulty;
+        }
+
+        return Math.Max(MinDryCycleDifficulty, Math.Min(MaxDryCycleDifficulty, value));
     }
 
     /// <summary>
