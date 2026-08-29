@@ -11,23 +11,47 @@ namespace DryCycle.TemperatureSystem;
 /// The panel is only available while Rain World's developer tools are active.
 /// Press Ctrl + Shift + T to show/hide it. Drag the title bar to reposition it;
 /// the last position is persisted with PlayerPrefs.
+///
+/// Rain World's normal UI font is bitmap-oriented. Debug text is therefore rendered
+/// at its native 1.0 scale and the whole panel is snapped to integer Futile pixels.
+/// Fractional label/container scaling made the previous version visibly blurry.
 /// </summary>
 internal static class TemperatureDeveloperHud
 {
     private const string PositionXKey = "DryCycle.ThermalDebugPanel.X";
     private const string PositionYKey = "DryCycle.ThermalDebugPanel.Y";
 
-    private const float PanelWidth = 430f;
-    private const float PanelHeight = 440f;
-    private const float TitleHeight = 34f;
+    private const float PanelWidth = 640f;
+    private const float PanelHeight = 620f;
+    private const float TitleHeight = 44f;
     private const float EdgePadding = 8f;
-    private const float LabelScale = 0.62f;
 
-    private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.80f);
+    // Keep bitmap glyphs at native scale. Do not use fractional scales here.
+    private const float TextScale = 1f;
+    private const float HeaderScale = 1f;
+    private const float TitleScale = 1f;
+
+    private const float KeyColumnX = 18f;
+    private const float ValueColumnX = 250f;
+
+    private const float PlayerSectionTop = 576f;
+    private const float PlayerHeaderY = 554f;
+    private const float PlayerRowsY = 526f;
+
+    private const float RoomSectionTop = 386f;
+    private const float RoomHeaderY = 364f;
+    private const float RoomRowsY = 336f;
+
+    private const float ThermalSectionTop = 196f;
+    private const float ThermalHeaderY = 174f;
+    private const float ThermalRowsY = 146f;
+
+    private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.84f);
     private static readonly Color BorderColor = new(0.78f, 0.78f, 0.78f, 0.90f);
     private static readonly Color HeaderColor = new(1f, 1f, 0.58f, 1f);
-    private static readonly Color KeyColor = new(0.76f, 0.76f, 0.76f, 1f);
+    private static readonly Color KeyColor = new(0.78f, 0.78f, 0.78f, 1f);
     private static readonly Color ValueColor = Color.white;
+    private static readonly Color SeparatorColor = new(0.45f, 0.45f, 0.45f, 0.68f);
 
     private static bool _enabled;
     private static bool _visible;
@@ -37,16 +61,8 @@ internal static class TemperatureDeveloperHud
     private static Vector2 _dragOffset;
 
     private static FContainer _root;
-    private static FLabel _titleLabel;
-    private static FLabel _closeLabel;
-    private static FLabel _playerHeader;
-    private static FLabel _playerKeys;
     private static FLabel _playerValues;
-    private static FLabel _roomHeader;
-    private static FLabel _roomKeys;
     private static FLabel _roomValues;
-    private static FLabel _thermalHeader;
-    private static FLabel _thermalKeys;
     private static FLabel _thermalValues;
 
     internal static bool DeveloperMode => _visible;
@@ -100,8 +116,6 @@ internal static class TemperatureDeveloperHud
             SetVisible(game, !_visible);
         }
 
-        // The overlay belongs to developer mode. Turning dev tools off immediately
-        // hides it, but keeps the user's saved position for the next activation.
         if (!game.devToolsActive)
         {
             SetVisible(game, false);
@@ -164,6 +178,7 @@ internal static class TemperatureDeveloperHud
         if (_root != null)
         {
             ClampPanelToScreen();
+            ApplyPanelPosition();
             return;
         }
 
@@ -188,46 +203,81 @@ internal static class TemperatureDeveloperHud
         };
         _root.AddChild(background);
 
-        AddHorizontalLine(0f, 1.2f, BorderColor);
-        AddHorizontalLine(PanelHeight, 1.2f, BorderColor);
-        AddVerticalLine(0f, 1.2f, BorderColor);
-        AddVerticalLine(PanelWidth, 1.2f, BorderColor);
+        AddHorizontalLine(0f, 1f, BorderColor);
+        AddHorizontalLine(PanelHeight, 1f, BorderColor);
+        AddVerticalLine(0f, 1f, BorderColor);
+        AddVerticalLine(PanelWidth, 1f, BorderColor);
 
-        // Title separator + section separators.
-        AddHorizontalLine(PanelHeight - TitleHeight, 1f, new Color(0.58f, 0.58f, 0.58f, 0.78f));
-        AddHorizontalLine(276f, 1f, new Color(0.45f, 0.45f, 0.45f, 0.68f));
-        AddHorizontalLine(142f, 1f, new Color(0.45f, 0.45f, 0.45f, 0.68f));
+        AddHorizontalLine(PlayerSectionTop, 1f, SeparatorColor);
+        AddHorizontalLine(RoomSectionTop, 1f, SeparatorColor);
+        AddHorizontalLine(ThermalSectionTop, 1f, SeparatorColor);
 
-        _titleLabel = CreateLabel(
+        CreateLabel(
             "DryCycle Thermal Debug",
-            14f,
-            PanelHeight - 10f,
+            KeyColumnX,
+            PanelHeight - 12f,
             HeaderColor,
-            0.70f,
+            TitleScale,
             FLabelAlignment.Left);
 
-        _closeLabel = CreateLabel(
-            "×",
-            PanelWidth - 17f,
-            PanelHeight - 9f,
+        FLabel closeLabel = CreateLabel(
+            "X",
+            PanelWidth - 23f,
+            PanelHeight - 12f,
             Color.white,
-            0.78f,
+            TitleScale,
             FLabelAlignment.Center);
-        _closeLabel.anchorX = 0.5f;
+        closeLabel.anchorX = 0.5f;
 
-        _playerHeader = CreateLabel("PLAYER", 14f, 394f, HeaderColor, 0.64f, FLabelAlignment.Left);
-        _playerKeys = CreateLabel(string.Empty, 14f, 374f, KeyColor, LabelScale, FLabelAlignment.Left);
-        _playerValues = CreateLabel(string.Empty, 147f, 374f, ValueColor, LabelScale, FLabelAlignment.Left);
+        CreateLabel("PLAYER", KeyColumnX, PlayerHeaderY, HeaderColor, HeaderScale, FLabelAlignment.Left);
+        FLabel playerKeys = CreateLabel(
+            string.Empty,
+            KeyColumnX,
+            PlayerRowsY,
+            KeyColor,
+            TextScale,
+            FLabelAlignment.Left);
+        _playerValues = CreateLabel(
+            string.Empty,
+            ValueColumnX,
+            PlayerRowsY,
+            ValueColor,
+            TextScale,
+            FLabelAlignment.Left);
 
-        _roomHeader = CreateLabel("ROOM / ENVIRONMENT", 14f, 260f, HeaderColor, 0.64f, FLabelAlignment.Left);
-        _roomKeys = CreateLabel(string.Empty, 14f, 240f, KeyColor, LabelScale, FLabelAlignment.Left);
-        _roomValues = CreateLabel(string.Empty, 147f, 240f, ValueColor, LabelScale, FLabelAlignment.Left);
+        CreateLabel("ROOM / ENVIRONMENT", KeyColumnX, RoomHeaderY, HeaderColor, HeaderScale, FLabelAlignment.Left);
+        FLabel roomKeys = CreateLabel(
+            string.Empty,
+            KeyColumnX,
+            RoomRowsY,
+            KeyColor,
+            TextScale,
+            FLabelAlignment.Left);
+        _roomValues = CreateLabel(
+            string.Empty,
+            ValueColumnX,
+            RoomRowsY,
+            ValueColor,
+            TextScale,
+            FLabelAlignment.Left);
 
-        _thermalHeader = CreateLabel("THERMAL MODEL", 14f, 126f, HeaderColor, 0.64f, FLabelAlignment.Left);
-        _thermalKeys = CreateLabel(string.Empty, 14f, 106f, KeyColor, LabelScale, FLabelAlignment.Left);
-        _thermalValues = CreateLabel(string.Empty, 147f, 106f, ValueColor, LabelScale, FLabelAlignment.Left);
+        CreateLabel("THERMAL MODEL", KeyColumnX, ThermalHeaderY, HeaderColor, HeaderScale, FLabelAlignment.Left);
+        FLabel thermalKeys = CreateLabel(
+            string.Empty,
+            KeyColumnX,
+            ThermalRowsY,
+            KeyColor,
+            TextScale,
+            FLabelAlignment.Left);
+        _thermalValues = CreateLabel(
+            string.Empty,
+            ValueColumnX,
+            ThermalRowsY,
+            ValueColor,
+            TextScale,
+            FLabelAlignment.Left);
 
-        _playerKeys.text =
+        playerKeys.text =
             "Player\n" +
             "Slugcat\n" +
             "Position\n" +
@@ -236,7 +286,7 @@ internal static class TemperatureDeveloperHud
             "Velocity\n" +
             "Water";
 
-        _roomKeys.text =
+        roomKeys.text =
             "Region\n" +
             "Room\n" +
             "RoomHeat\n" +
@@ -245,7 +295,7 @@ internal static class TemperatureDeveloperHud
             "Shade / Sun\n" +
             "Humidity / Wind";
 
-        _thermalKeys.text =
+        thermalKeys.text =
             "BodyHeat 0\n" +
             "BodyHeat 1\n" +
             "Difference\n" +
@@ -268,8 +318,8 @@ internal static class TemperatureDeveloperHud
     {
         FLabel label = new(Custom.GetFont(), text)
         {
-            x = x,
-            y = y,
+            x = Mathf.Round(x),
+            y = Mathf.Round(y),
             anchorX = 0f,
             anchorY = 1f,
             alignment = alignment,
@@ -289,7 +339,7 @@ internal static class TemperatureDeveloperHud
             anchorX = 0f,
             anchorY = 0.5f,
             x = 0f,
-            y = y,
+            y = Mathf.Round(y),
             scaleX = PanelWidth,
             scaleY = thickness,
             color = color,
@@ -304,7 +354,7 @@ internal static class TemperatureDeveloperHud
         {
             anchorX = 0.5f,
             anchorY = 0f,
-            x = x,
+            x = Mathf.Round(x),
             y = 0f,
             scaleX = thickness,
             scaleY = PanelHeight,
@@ -326,13 +376,13 @@ internal static class TemperatureDeveloperHud
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (Contains(local, PanelWidth - 36f, PanelHeight - TitleHeight, 36f, TitleHeight))
+            if (Contains(local, PanelWidth - 48f, PanelHeight - TitleHeight, 48f, TitleHeight))
             {
                 SetVisible(game, false);
                 return;
             }
 
-            if (Contains(local, 0f, PanelHeight - TitleHeight, PanelWidth - 36f, TitleHeight))
+            if (Contains(local, 0f, PanelHeight - TitleHeight, PanelWidth - 48f, TitleHeight))
             {
                 _dragging = true;
                 _dragOffset = mouse - _panelPosition;
@@ -341,7 +391,9 @@ internal static class TemperatureDeveloperHud
 
         if (_dragging && Input.GetMouseButton(0))
         {
-            _panelPosition = mouse - _dragOffset;
+            _panelPosition = new Vector2(
+                Mathf.Round(mouse.x - _dragOffset.x),
+                Mathf.Round(mouse.y - _dragOffset.y));
             ClampPanelToScreen();
             ApplyPanelPosition();
         }
@@ -419,9 +471,6 @@ internal static class TemperatureDeveloperHud
             ? room.waterObject.fWaterLevel.ToString("0.0", CultureInfo.InvariantCulture)
             : "--";
 
-        // Shade, direct sun, humidity and wind are deliberately placeholders for now.
-        // Keeping the rows visible means future environmental branches can be wired
-        // into the panel without changing its basic layout.
         _roomValues.text = string.Format(
             CultureInfo.InvariantCulture,
             "{0}\n{1}\n{2:+0.000;-0.000;0.000}\n{3:0.000}\n{4}\n-- / --\n-- / --",
@@ -531,8 +580,8 @@ internal static class TemperatureDeveloperHud
         float defaultY = Mathf.Max(EdgePadding, Futile.screen.pixelHeight - PanelHeight - 52f);
 
         _panelPosition = new Vector2(
-            PlayerPrefs.GetFloat(PositionXKey, defaultX),
-            PlayerPrefs.GetFloat(PositionYKey, defaultY));
+            Mathf.Round(PlayerPrefs.GetFloat(PositionXKey, defaultX)),
+            Mathf.Round(PlayerPrefs.GetFloat(PositionYKey, defaultY)));
 
         ClampPanelToScreen();
     }
@@ -542,8 +591,8 @@ internal static class TemperatureDeveloperHud
         float maxX = Mathf.Max(EdgePadding, Futile.screen.pixelWidth - PanelWidth - EdgePadding);
         float maxY = Mathf.Max(EdgePadding, Futile.screen.pixelHeight - PanelHeight - EdgePadding);
 
-        _panelPosition.x = Mathf.Clamp(_panelPosition.x, EdgePadding, maxX);
-        _panelPosition.y = Mathf.Clamp(_panelPosition.y, EdgePadding, maxY);
+        _panelPosition.x = Mathf.Round(Mathf.Clamp(_panelPosition.x, EdgePadding, maxX));
+        _panelPosition.y = Mathf.Round(Mathf.Clamp(_panelPosition.y, EdgePadding, maxY));
     }
 
     private static void ApplyPanelPosition()
@@ -553,8 +602,10 @@ internal static class TemperatureDeveloperHud
             return;
         }
 
-        _root.x = _panelPosition.x;
-        _root.y = _panelPosition.y;
+        // Bitmap UI must stay on whole Futile pixels. A fractional parent position
+        // makes every child glyph sample between texels and visibly softens the font.
+        _root.x = Mathf.Round(_panelPosition.x);
+        _root.y = Mathf.Round(_panelPosition.y);
     }
 
     private static void SavePosition()
@@ -564,8 +615,8 @@ internal static class TemperatureDeveloperHud
             return;
         }
 
-        PlayerPrefs.SetFloat(PositionXKey, _panelPosition.x);
-        PlayerPrefs.SetFloat(PositionYKey, _panelPosition.y);
+        PlayerPrefs.SetFloat(PositionXKey, Mathf.Round(_panelPosition.x));
+        PlayerPrefs.SetFloat(PositionYKey, Mathf.Round(_panelPosition.y));
         PlayerPrefs.Save();
     }
 
@@ -577,16 +628,8 @@ internal static class TemperatureDeveloperHud
         }
 
         _root = null;
-        _titleLabel = null;
-        _closeLabel = null;
-        _playerHeader = null;
-        _playerKeys = null;
         _playerValues = null;
-        _roomHeader = null;
-        _roomKeys = null;
         _roomValues = null;
-        _thermalHeader = null;
-        _thermalKeys = null;
         _thermalValues = null;
     }
 }
