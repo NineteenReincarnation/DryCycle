@@ -304,7 +304,7 @@ internal static class TemperatureDeveloperHud
             "Base WV loss\n" +
             "Solar WV loss\n" +
             "BodyHeat WV loss\n" +
-            "Total WV loss\n" +
+            "Total WV loss (final)\n" +
             "DryCycleDifficulty";
 
         ApplyPanelPosition();
@@ -517,8 +517,8 @@ internal static class TemperatureDeveloperHud
         float baseWaterLoss = SlugBaseHydrationFeatures.GetBaseWaterLossRateAfterStatus(player);
         float solarWaterLoss = ThermalWaterLoss.GetSolarWaterLossRate(player);
         float bodyHeatWaterLoss = ThermalWaterLoss.GetBodyHeatWaterLossRate(player);
-        float totalWaterLoss = baseWaterLoss + solarWaterLoss + bodyHeatWaterLoss;
         float dryCycleDifficulty = SlugBaseHydrationFeatures.GetDryCycleDifficulty(player);
+        float totalWaterLoss = SlugBaseHydrationFeatures.GetTotalWaterLossRate(player);
 
         _thermalValues.text = string.Format(
             CultureInfo.InvariantCulture,
