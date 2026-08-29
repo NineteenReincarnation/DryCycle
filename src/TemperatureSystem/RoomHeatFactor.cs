@@ -4,11 +4,12 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Temperature influence: authored room base heat.
+/// Authored room environmental heat baseline.
 ///
-/// This is intentionally only one factor. It does not yet change player stats,
-/// rendering or hydration; later temperature consumers can combine this value with
-/// additional factors without changing the room-data loader.
+/// RoomHeat is not a target that automatically heats the player. The thermal model
+/// only uses it as the lower baseline for room cooling: a body node above RoomHeat
+/// can dissipate heat toward it, while a body node at or below RoomHeat receives no
+/// room-driven temperature change.
 /// </summary>
 internal static class RoomHeatFactor
 {
