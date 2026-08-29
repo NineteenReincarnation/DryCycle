@@ -8,9 +8,13 @@ namespace DryCycle.TemperatureSystem;
 /// <summary>
 /// Loads world/TemperatureSets.txt and hot-reloads it while the game is running.
 ///
-/// The loader owns only authored room-base heat. It keeps the last complete snapshot
-/// while an editor is in the middle of saving and swaps dictionaries only after the
-/// file metadata is stable across two polls.
+/// Room lines support both the original one-value format and the extended solar
+/// format:
+///   ROOM : RoomHeat
+///   ROOM : RoomHeat | SunlightIntensity | RoomShade
+///
+/// RoomHeat is clamped to [-1,1]. SunlightIntensity and RoomShade are clamped to
+/// [0,1]. Omitted solar values default to zero, preserving old files exactly.
 /// </summary>
 internal static class TemperatureSetsLoader
 {
@@ -19,7 +23,7 @@ internal static class TemperatureSetsLoader
     private const int MissingFileClearPolls = 5;
     private const int MaxAssemblyParentSearchDepth = 8;
 
-    private static Dictionary<string, Dictionary<string, float>> _roomHeatByRegion =
+    private static Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> _profilesByRegion =
         CreateRegionTable();
 
     private static bool _enabled;
@@ -61,25 +65,47 @@ internal static class TemperatureSetsLoader
 
         _enabled = false;
         On.RainWorldGame.Update -= RainWorldGame_Update;
-        _roomHeatByRegion = CreateRegionTable();
+        _profilesByRegion = CreateRegionTable();
         _filePath = string.Empty;
         ResetFileTracking();
     }
 
     internal static float GetRoomHeat(string regionName, string roomName)
     {
+        return TryGetProfile(regionName, roomName, out RoomEnvironmentProfile profile)
+            ? profile.RoomHeat
+            : RoomHeatFactor.DefaultHeat;
+    }
+
+    internal static float GetSunlightIntensity(string regionName, string roomName)
+    {
+        return TryGetProfile(regionName, roomName, out RoomEnvironmentProfile profile)
+            ? profile.SunlightIntensity
+            : RoomEnvironmentProfile.DefaultSunlightIntensity;
+    }
+
+    internal static float GetRoomShade(string regionName, string roomName)
+    {
+        return TryGetProfile(regionName, roomName, out RoomEnvironmentProfile profile)
+            ? profile.RoomShade
+            : RoomEnvironmentProfile.DefaultRoomShade;
+    }
+
+    private static bool TryGetProfile(
+        string regionName,
+        string roomName,
+        out RoomEnvironmentProfile profile)
+    {
+        profile = null;
         if (string.IsNullOrWhiteSpace(regionName) || string.IsNullOrWhiteSpace(roomName))
         {
-            return RoomHeatFactor.DefaultHeat;
+            return false;
         }
 
-        if (_roomHeatByRegion.TryGetValue(regionName.Trim(), out Dictionary<string, float> rooms) &&
-            rooms.TryGetValue(roomName.Trim(), out float heat))
-        {
-            return heat;
-        }
-
-        return RoomHeatFactor.DefaultHeat;
+        return _profilesByRegion.TryGetValue(
+                   regionName.Trim(),
+                   out Dictionary<string, RoomEnvironmentProfile> rooms) &&
+               rooms.TryGetValue(roomName.Trim(), out profile);
     }
 
     private static void RainWorldGame_Update(
@@ -107,7 +133,7 @@ internal static class TemperatureSetsLoader
     {
         if (string.IsNullOrWhiteSpace(_filePath) || !File.Exists(_filePath))
         {
-            _roomHeatByRegion = CreateRegionTable();
+            _profilesByRegion = CreateRegionTable();
             LogMissingFile();
             return;
         }
@@ -117,11 +143,11 @@ internal static class TemperatureSetsLoader
                 _filePath,
                 info.LastWriteTimeUtc,
                 info.Length,
-                out Dictionary<string, Dictionary<string, float>> snapshot,
+                out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
                 out int entryCount))
         {
             global::DryCycle.Plugin.Logger?.LogWarning(
-                $"TemperatureSets: initial load failed; room heat defaults to 0. Path: {_filePath}");
+                $"TemperatureSets: initial load failed; room environment defaults to 0. Path: {_filePath}");
             return;
         }
 
@@ -162,8 +188,6 @@ internal static class TemperatureSetsLoader
                 return;
             }
 
-            // Wait for the same changed signature twice. This avoids swapping in a
-            // half-written file when an editor saves in place instead of atomically.
             if (!_pendingSignature ||
                 writeUtc != _pendingWriteUtc ||
                 length != _pendingLength)
@@ -178,7 +202,7 @@ internal static class TemperatureSetsLoader
                     _filePath,
                     writeUtc,
                     length,
-                    out Dictionary<string, Dictionary<string, float>> snapshot,
+                    out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
                     out int entryCount))
             {
                 _pendingSignature = false;
@@ -190,8 +214,6 @@ internal static class TemperatureSetsLoader
         }
         catch (Exception ex)
         {
-            // Editing the file must never be able to break the running game. Keep the
-            // last valid snapshot and retry on the next poll.
             global::DryCycle.Plugin.Logger?.LogWarning(
                 $"TemperatureSets: hot-reload check failed, keeping previous values. {ex.Message}");
         }
@@ -201,7 +223,7 @@ internal static class TemperatureSetsLoader
         string path,
         DateTime expectedWriteUtc,
         long expectedLength,
-        out Dictionary<string, Dictionary<string, float>> snapshot,
+        out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
         out int entryCount)
     {
         snapshot = CreateRegionTable();
@@ -247,7 +269,6 @@ internal static class TemperatureSetsLoader
                 continue;
             }
 
-            // A line such as "B5:" starts/changes the current region section.
             if (right.Length == 0)
             {
                 currentRegion = left;
@@ -264,31 +285,15 @@ internal static class TemperatureSetsLoader
                 continue;
             }
 
-            if (!float.TryParse(
-                    right,
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out float parsedHeat) ||
-                float.IsNaN(parsedHeat) ||
-                float.IsInfinity(parsedHeat))
+            if (!TryParseRoomProfile(right, lineIndex, line, out RoomEnvironmentProfile profile))
             {
-                LogParseWarning(lineIndex, "invalid numeric room heat", line);
                 continue;
             }
 
-            float heat = RoomHeatFactor.ClampHeat(parsedHeat);
-            if (Math.Abs(heat - parsedHeat) > 0.0001f)
-            {
-                global::DryCycle.Plugin.Logger?.LogWarning(
-                    $"TemperatureSets line {lineIndex + 1}: {parsedHeat.ToString(CultureInfo.InvariantCulture)} " +
-                    $"is outside [-1, 1] and was clamped to {heat.ToString(CultureInfo.InvariantCulture)}.");
-            }
-
-            snapshot[currentRegion][left] = heat;
+            snapshot[currentRegion][left] = profile;
             entryCount++;
         }
 
-        // Verify that the file did not change while it was being read and parsed.
         try
         {
             FileInfo afterRead = new(path);
@@ -307,14 +312,100 @@ internal static class TemperatureSetsLoader
         return true;
     }
 
+    private static bool TryParseRoomProfile(
+        string value,
+        int lineIndex,
+        string fullLine,
+        out RoomEnvironmentProfile profile)
+    {
+        profile = null;
+        string[] fields = value.Split('|');
+        if (fields.Length > 3)
+        {
+            LogParseWarning(
+                lineIndex,
+                "too many room fields; expected RoomHeat | SunlightIntensity | RoomShade",
+                fullLine);
+            return false;
+        }
+
+        if (!TryParseFinite(fields[0], out float roomHeat))
+        {
+            LogParseWarning(lineIndex, "invalid RoomHeat", fullLine);
+            return false;
+        }
+
+        float sunlight = RoomEnvironmentProfile.DefaultSunlightIntensity;
+        float roomShade = RoomEnvironmentProfile.DefaultRoomShade;
+
+        if (fields.Length >= 2 &&
+            !string.IsNullOrWhiteSpace(fields[1]) &&
+            !TryParseFinite(fields[1], out sunlight))
+        {
+            LogParseWarning(lineIndex, "invalid SunlightIntensity", fullLine);
+            return false;
+        }
+
+        if (fields.Length >= 3 &&
+            !string.IsNullOrWhiteSpace(fields[2]) &&
+            !TryParseFinite(fields[2], out roomShade))
+        {
+            LogParseWarning(lineIndex, "invalid RoomShade", fullLine);
+            return false;
+        }
+
+        float clampedHeat = RoomHeatFactor.ClampHeat(roomHeat);
+        float clampedSunlight = RoomEnvironmentProfile.ClampUnit(sunlight);
+        float clampedRoomShade = RoomEnvironmentProfile.ClampUnit(roomShade);
+
+        LogClampIfNeeded(lineIndex, "RoomHeat", roomHeat, clampedHeat, "[-1, 1]");
+        LogClampIfNeeded(lineIndex, "SunlightIntensity", sunlight, clampedSunlight, "[0, 1]");
+        LogClampIfNeeded(lineIndex, "RoomShade", roomShade, clampedRoomShade, "[0, 1]");
+
+        profile = new RoomEnvironmentProfile(
+            clampedHeat,
+            clampedSunlight,
+            clampedRoomShade);
+        return true;
+    }
+
+    private static bool TryParseFinite(string value, out float parsed)
+    {
+        return float.TryParse(
+                   value?.Trim(),
+                   NumberStyles.Float,
+                   CultureInfo.InvariantCulture,
+                   out parsed) &&
+               !float.IsNaN(parsed) &&
+               !float.IsInfinity(parsed);
+    }
+
+    private static void LogClampIfNeeded(
+        int zeroBasedLine,
+        string field,
+        float original,
+        float clamped,
+        string range)
+    {
+        if (Math.Abs(original - clamped) <= 0.0001f)
+        {
+            return;
+        }
+
+        global::DryCycle.Plugin.Logger?.LogWarning(
+            $"TemperatureSets line {zeroBasedLine + 1}: {field} " +
+            $"{original.ToString(CultureInfo.InvariantCulture)} is outside {range} and was clamped to " +
+            $"{clamped.ToString(CultureInfo.InvariantCulture)}.");
+    }
+
     private static void ApplySnapshot(
-        Dictionary<string, Dictionary<string, float>> snapshot,
+        Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
         DateTime writeUtc,
         long length,
         int entryCount,
         bool hotReload)
     {
-        _roomHeatByRegion = snapshot;
+        _profilesByRegion = snapshot;
         _loadedWriteUtc = writeUtc;
         _loadedLength = length;
         _missingPolls = 0;
@@ -322,7 +413,7 @@ internal static class TemperatureSetsLoader
 
         string action = hotReload ? "hot-reloaded" : "loaded";
         global::DryCycle.Plugin.Logger?.LogInfo(
-            $"TemperatureSets: {action} {entryCount} room heat value(s) from '{_filePath}'.");
+            $"TemperatureSets: {action} {entryCount} room environment profile(s) from '{_filePath}'.");
     }
 
     private static void HandleMissingFile()
@@ -333,9 +424,9 @@ internal static class TemperatureSetsLoader
             return;
         }
 
-        if (_loadedLength >= 0L || _roomHeatByRegion.Count > 0)
+        if (_loadedLength >= 0L || _profilesByRegion.Count > 0)
         {
-            _roomHeatByRegion = CreateRegionTable();
+            _profilesByRegion = CreateRegionTable();
             _loadedWriteUtc = DateTime.MinValue;
             _loadedLength = -1L;
             _pendingSignature = false;
@@ -353,23 +444,17 @@ internal static class TemperatureSetsLoader
 
         _missingLogged = true;
         global::DryCycle.Plugin.Logger?.LogWarning(
-            $"TemperatureSets: '{_filePath}' was not found. All room heat values default to 0.");
+            $"TemperatureSets: '{_filePath}' was not found. Room environment values default to 0.");
     }
 
     private static string ResolveTemperatureSetsPath()
     {
-        // First bind the data file to the actual mod that physically contains this
-        // DryCycle assembly. This is important during development: the plugin can be
-        // hosted by a larger region mod (for example NR.B5 / Ancient Site) whose
-        // modinfo id intentionally differs from DryCycle's BepInEx plugin GUID.
         string assemblyOwnedPath = ResolvePathFromContainingMod();
         if (!string.IsNullOrWhiteSpace(assemblyOwnedPath))
         {
             return assemblyOwnedPath;
         }
 
-        // Legacy/standalone fallback: if DryCycle is packaged as its own active mod,
-        // continue supporting the original id-based lookup.
         if (ModManager.ActiveMods != null)
         {
             for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
@@ -433,17 +518,12 @@ internal static class TemperatureSetsLoader
                  directory != null && depth < MaxAssemblyParentSearchDepth;
                  depth++, directory = directory.Parent)
             {
-                // modinfo.json marks the owning Rain World mod root. Starting from
-                // e.g. Ancient Site/newest/plugins/DryCycle.dll, this walks through
-                // plugins -> newest -> Ancient Site and stops there.
                 string modInfoPath = Path.Combine(directory.FullName, "modinfo.json");
                 if (!File.Exists(modInfoPath))
                 {
                     continue;
                 }
 
-                // Return the intended root path even if TemperatureSets.txt has not
-                // been created yet. The hot-reload poller will notice it later.
                 return Path.Combine(directory.FullName, "world", FileName);
             }
         }
@@ -467,14 +547,15 @@ internal static class TemperatureSetsLoader
         _missingLogged = false;
     }
 
-    private static Dictionary<string, Dictionary<string, float>> CreateRegionTable()
+    private static Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> CreateRegionTable()
     {
-        return new Dictionary<string, Dictionary<string, float>>(StringComparer.OrdinalIgnoreCase);
+        return new Dictionary<string, Dictionary<string, RoomEnvironmentProfile>>(
+            StringComparer.OrdinalIgnoreCase);
     }
 
-    private static Dictionary<string, float> CreateRoomTable()
+    private static Dictionary<string, RoomEnvironmentProfile> CreateRoomTable()
     {
-        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        return new Dictionary<string, RoomEnvironmentProfile>(StringComparer.OrdinalIgnoreCase);
     }
 
     private static void LogParseWarning(int zeroBasedLine, string reason, string line)
