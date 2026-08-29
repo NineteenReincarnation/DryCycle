@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using DryCycle.Items.KingVultureSpear;
+using DryCycle.TemperatureSystem;
 
 namespace DryCycle.Thirst;
 
@@ -143,17 +144,30 @@ internal static class SlugBaseHydrationFeatures
         return GetDefaultWaterPips(slugcat);
     }
 
+    /// <summary>
+    /// The existing SlugBase-compatible base WV loss after current status effects.
+    /// Temperature losses are deliberately not multiplied by those status effects.
+    /// </summary>
+    public static float GetBaseWaterLossRateAfterStatus(Player player)
+    {
+        float multiplier = KingVultureSpearCombat.GetWaterLossMultiplier(player);
+        return GetWaterLossRate(player) * multiplier;
+    }
+
+    /// <summary>
+    /// Final WV/second = existing base WV loss + direct solar loss + BodyHeat loss.
+    /// </summary>
+    public static float GetTotalWaterLossRate(Player player)
+    {
+        return GetBaseWaterLossRateAfterStatus(player) +
+               ThermalWaterLoss.GetTotalExtraWaterLossRate(player);
+    }
+
     public static float GetWaterLossPerTick(Player player)
     {
-        float currentLossPerTick = GetWaterLossRate(player) /
-                                   ThirstConstants.WaterValuePerPip /
-                                   ThirstConstants.SimulationTicksPerSecond;
-        float multiplier = KingVultureSpearCombat.GetWaterLossMultiplier(player);
-
-        // Status effects scale the player's current loss directly: A × B.
-        // If the configured/current loss changes, the same multiplier applies to
-        // that new value instead of adding a separately calculated loss amount.
-        return currentLossPerTick * multiplier;
+        return GetTotalWaterLossRate(player) /
+               ThirstConstants.WaterValuePerPip /
+               ThirstConstants.SimulationTicksPerSecond;
     }
 
     private static int GetDefaultWaterPips(SlugcatStats.Name slugcat)
