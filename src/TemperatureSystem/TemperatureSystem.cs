@@ -18,6 +18,7 @@ internal static class TemperatureSystemRuntime
 
         _enabled = true;
         TemperatureSetsLoader.Enable();
+        SolarShadeZoneHooks.Enable();
         PlayerThermalModel.Enable();
         TemperatureDeveloperHud.Enable();
     }
@@ -32,22 +33,35 @@ internal static class TemperatureSystemRuntime
         _enabled = false;
         TemperatureDeveloperHud.Disable();
         PlayerThermalModel.Disable();
+        SolarShadeZoneHooks.Disable();
         TemperatureSetsLoader.Disable();
     }
 
-    /// <summary>
-    /// Returns the authored base heat of the room in [-1, 1]. Rooms not present in
-    /// TemperatureSets.txt return zero.
-    /// </summary>
     internal static float GetRoomHeat(Room room)
     {
         return RoomHeatFactor.GetRoomHeat(room);
     }
 
-    /// <summary>
-    /// Returns one of the player's two runtime BodyHeat values. New player objects
-    /// start at zero. Index 0 maps to BodyHeat0; any positive index maps to BodyHeat1.
-    /// </summary>
+    internal static float GetSunlightIntensity(Room room)
+    {
+        return SolarEnvironment.GetSunlightIntensity(room);
+    }
+
+    internal static float GetRoomShade(Room room)
+    {
+        return SolarEnvironment.GetRoomShade(room);
+    }
+
+    internal static float GetLocalShade(Player player)
+    {
+        return SolarEnvironment.GetLocalShade(player);
+    }
+
+    internal static float GetEffectiveSunlight(Player player)
+    {
+        return SolarEnvironment.GetEffectiveSunlight(player);
+    }
+
     internal static float GetBodyHeat(Player player, int bodyIndex)
     {
         return PlayerThermalModel.GetBodyHeat(player, bodyIndex);
