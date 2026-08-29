@@ -5,7 +5,7 @@ using DryCycle.Thirst;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Builds the developer-facing water-loss breakdown.
+/// Builds the developer-facing water-loss and thermal-state breakdown.
 ///
 /// This is deliberately separate from the HUD renderer. As temperature, activity,
 /// equipment and other hydration-loss factors are implemented, their individual
@@ -28,19 +28,24 @@ internal static class WaterLossRateDebug
         float statusMultiplier = KingVultureSpearCombat.GetWaterLossMultiplier(player);
         float roomHeat = RoomHeatFactor.GetRoomHeat(player.room);
         float temperatureMultiplier = TemperatureLossMultiplierPlaceholder;
+        PlayerThermalState thermalState = PlayerThermalModel.For(player);
 
         // Keep this equal to the real loss currently applied by ThirstHooks. The
-        // temperature multiplier is 1.0 for now, so displaying it as a placeholder
-        // does not change the effective result.
+        // temperature multiplier is 1.0 for now, so displaying the new thermal state
+        // does not change hydration yet.
         float effectiveRate = baseRate * statusMultiplier * temperatureMultiplier;
 
         return string.Format(
             CultureInfo.InvariantCulture,
-            "WV Lost = {0:0.000}/s = Base {1:0.000} x Status {2:0.000} x Temp {3:0.000} [Room {4:+0.00;-0.00;0.00}]",
+            "WV Lost = {0:0.000}/s = Base {1:0.000} x Status {2:0.000} x Temp {3:0.000} " +
+            "[Room {4:+0.00;-0.00;0.00} | Body {5:+0.000;-0.000;0.000}/{6:+0.000;-0.000;0.000} | Flow {7:+0.0000;-0.0000;0.0000}]",
             effectiveRate,
             baseRate,
             statusMultiplier,
             temperatureMultiplier,
-            roomHeat);
+            roomHeat,
+            thermalState?.BodyHeat0 ?? 0f,
+            thermalState?.BodyHeat1 ?? 0f,
+            thermalState?.InternalHeatFlow ?? 0f);
     }
 }
