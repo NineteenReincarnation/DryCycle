@@ -8,13 +8,13 @@ namespace DryCycle.TemperatureSystem;
 /// <summary>
 /// Loads world/TemperatureSets.txt and hot-reloads it while the game is running.
 ///
-/// Room lines support both the original one-value format and the extended solar
-/// format:
+/// Standard room formats:
 ///   ROOM : RoomHeat
-///   ROOM : RoomHeat | SunlightIntensity | RoomShade
+///   ROOM : RoomHeat : SunlightIntensity : RoomShade
 ///
 /// RoomHeat is clamped to [-1,1]. SunlightIntensity and RoomShade are clamped to
-/// [0,1]. Omitted solar values default to zero, preserving old files exactly.
+/// [0,1]. Omitted solar values default to zero. The former pipe-separated extended
+/// format is accepted only as a compatibility fallback for existing test files.
 /// </summary>
 internal static class TemperatureSetsLoader
 {
@@ -319,12 +319,18 @@ internal static class TemperatureSetsLoader
         out RoomEnvironmentProfile profile)
     {
         profile = null;
-        string[] fields = value.Split('|');
+
+        // The canonical format uses ':' for every field. Keep the previously used
+        // pipe form readable so existing local test files do not silently reset.
+        string[] fields = value.IndexOf(':') >= 0
+            ? value.Split(':')
+            : (value.IndexOf('|') >= 0 ? value.Split('|') : new[] { value });
+
         if (fields.Length > 3)
         {
             LogParseWarning(
                 lineIndex,
-                "too many room fields; expected RoomHeat | SunlightIntensity | RoomShade",
+                "too many room fields; expected RoomHeat : SunlightIntensity : RoomShade",
                 fullLine);
             return false;
         }
