@@ -5,42 +5,44 @@ namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// Runtime thermal state for a player. The two body-heat values correspond to the
-/// player's two primary body chunks so later local influences (sun, water, etc.) can
-/// affect them independently before internal heat transfer equalizes the difference.
+/// player's two primary body chunks so local sunlight, water and later heat sources
+/// can affect them independently before internal heat transfer equalizes them.
 /// </summary>
 internal sealed class PlayerThermalState
 {
-    // New players always start thermally neutral.
     internal float BodyHeat0 = 0f;
     internal float BodyHeat1 = 0f;
     internal float InternalHeatFlow = 0f;
 }
 
 /// <summary>
-/// Minimal dynamic body-temperature trunk.
+/// Dynamic two-node body-heat model.
 ///
-/// 1) Each body heat approaches the authored RoomHeat with a 20-second half-life.
-/// 2) A temperature difference between the two body nodes creates an internal heat
-///    flow. That heat flow itself responds with a 1.5-second half-life and transfers
-///    heat conservatively from the hotter node to the colder node.
-///
-/// This intentionally contains no sunlight, water, shade, humidity or hydration
-/// consequences yet. Those later systems can modify the two BodyHeat values without
-/// changing this core room-exchange/internal-transfer model.
+/// RoomHeat is an environmental cooling baseline, not a temperature target. A body
+/// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight adds
+/// heat directly to each body node according to that chunk's EffectiveSunlight.
+/// Internal body-to-body transfer remains conservative and smooths local differences.
 /// </summary>
 internal static class PlayerThermalModel
 {
-    internal const float RoomHeatHalfLifeSeconds = 20f;
+    internal const float MinimumBodyHeat = 0f;
+    internal const float MaximumBodyHeat = 1f;
+
+    // Agreed room-cooling model:
+    // CoolingRate = 0.0175 * max(0, BodyHeat - RoomHeat)^1.25
+    internal const float BaseCoolingCoefficient = 0.0175f;
+    internal const float CoolingExponent = 1.25f;
+
+    // Agreed solar heat input at EffectiveSunlight == 1.
+    internal const float BaseSolarHeatingRatePerSecond = 0.01f;
+
     internal const float InternalDifferenceSlowModeHalfLifeSeconds = 8f;
     internal const float InternalHeatFlowHalfLifeSeconds = 1.5f;
 
     // With the 1.5-second heat-flow response above, this conductance gives the slow
     // decay mode of the two-node system an approximately eight-second half-life.
-    // A newly created heat flow takes additional time to build from zero, by design.
     internal const float InternalConductancePerSecond = 0.03519888f;
 
-    // Rain World's gameplay simulation runs at 40 ticks per second. Use a fixed
-    // simulation step so thermal timing does not depend on render frame rate.
     private const float SimulationTicksPerSecond = 40f;
     private const float TickSeconds = 1f / SimulationTicksPerSecond;
 
@@ -67,9 +69,6 @@ internal static class PlayerThermalModel
 
         _enabled = false;
         On.Player.Update -= Player_Update;
-
-        // Runtime-only state intentionally does not persist between player objects.
-        // Re-enabling starts every newly observed player from BodyHeat 0 / 0.
         _states = new ConditionalWeakTable<Player, PlayerThermalState>();
     }
 
@@ -100,28 +99,64 @@ internal static class PlayerThermalModel
 
         PlayerThermalState state = _states.GetOrCreateValue(self);
 
-        // Room exchange pauses when there is no realized room or while travelling
-        // through a shortcut. Internal body-to-body transfer continues during that
-        // time so an existing temperature difference still relaxes naturally.
+        // Room exchange and direct solar heating stop while travelling through a
+        // shortcut. Stored body heat and internal transfer continue to exist.
         if (self.room != null && !self.inShortcut)
         {
-            ApplyRoomExchange(state, RoomHeatFactor.GetRoomHeat(self.room), TickSeconds);
+            float effectiveSunlight0 = SolarEnvironment.GetEffectiveSunlight(self, 0);
+            float effectiveSunlight1 = SolarEnvironment.GetEffectiveSunlight(self, 1);
+
+            ApplySolarHeating(
+                state,
+                effectiveSunlight0,
+                effectiveSunlight1,
+                TickSeconds);
+
+            ApplyRoomCooling(
+                state,
+                RoomHeatFactor.GetRoomHeat(self.room),
+                TickSeconds);
         }
 
         ApplyInternalTransfer(state, TickSeconds);
+        ClampBodyHeat(state);
     }
 
-    private static void ApplyRoomExchange(
+    private static void ApplySolarHeating(
+        PlayerThermalState state,
+        float effectiveSunlight0,
+        float effectiveSunlight1,
+        float deltaTime)
+    {
+        state.BodyHeat0 +=
+            RoomEnvironmentProfile.ClampUnit(effectiveSunlight0) *
+            BaseSolarHeatingRatePerSecond *
+            deltaTime;
+
+        state.BodyHeat1 +=
+            RoomEnvironmentProfile.ClampUnit(effectiveSunlight1) *
+            BaseSolarHeatingRatePerSecond *
+            deltaTime;
+    }
+
+    private static void ApplyRoomCooling(
         PlayerThermalState state,
         float roomHeat,
         float deltaTime)
     {
-        // alpha = 1 - 2^(-dt / 20)
-        // Every 20 seconds, the remaining difference to RoomHeat is halved.
-        float blend = HalfLifeBlend(deltaTime, RoomHeatHalfLifeSeconds);
+        state.BodyHeat0 -= CalculateRoomCoolingRate(state.BodyHeat0, roomHeat) * deltaTime;
+        state.BodyHeat1 -= CalculateRoomCoolingRate(state.BodyHeat1, roomHeat) * deltaTime;
+    }
 
-        state.BodyHeat0 += (roomHeat - state.BodyHeat0) * blend;
-        state.BodyHeat1 += (roomHeat - state.BodyHeat1) * blend;
+    internal static float CalculateRoomCoolingRate(float bodyHeat, float roomHeat)
+    {
+        float difference = Mathf.Max(0f, bodyHeat - roomHeat);
+        if (difference <= 0f)
+        {
+            return 0f;
+        }
+
+        return BaseCoolingCoefficient * Mathf.Pow(difference, CoolingExponent);
     }
 
     private static void ApplyInternalTransfer(
@@ -133,23 +168,20 @@ internal static class PlayerThermalModel
         float difference = state.BodyHeat0 - state.BodyHeat1;
         float targetFlow = difference * InternalConductancePerSecond;
 
-        // beta = 1 - 2^(-dt / 1.5)
-        // Internal heat flow has its own response inertia instead of snapping to the
-        // target immediately when a body-part temperature difference appears.
         float flowBlend = HalfLifeBlend(deltaTime, InternalHeatFlowHalfLifeSeconds);
         state.InternalHeatFlow +=
             (targetFlow - state.InternalHeatFlow) * flowBlend;
 
-        // Transfer is conservative: whatever node 0 loses, node 1 receives, and
-        // vice versa. Internal transfer therefore cannot change total body heat.
+        // Conservative transfer: whatever one node loses the other receives.
         float transferredHeat = state.InternalHeatFlow * deltaTime;
         state.BodyHeat0 -= transferredHeat;
         state.BodyHeat1 += transferredHeat;
+    }
 
-        // RoomHeat is currently authored in [-1, 1], so keep the initial thermal
-        // trunk normalized to the same range.
-        state.BodyHeat0 = RoomHeatFactor.ClampHeat(state.BodyHeat0);
-        state.BodyHeat1 = RoomHeatFactor.ClampHeat(state.BodyHeat1);
+    private static void ClampBodyHeat(PlayerThermalState state)
+    {
+        state.BodyHeat0 = Mathf.Clamp(state.BodyHeat0, MinimumBodyHeat, MaximumBodyHeat);
+        state.BodyHeat1 = Mathf.Clamp(state.BodyHeat1, MinimumBodyHeat, MaximumBodyHeat);
     }
 
     private static float HalfLifeBlend(float deltaTime, float halfLifeSeconds)
