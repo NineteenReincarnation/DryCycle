@@ -3,8 +3,11 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Solar-environment query layer. This deliberately stops at EffectiveSunlight;
-/// it does not yet add heat to BodyHeat or alter hydration loss.
+/// Solar-environment query layer.
+///
+/// Room-wide sunlight and shade come from TemperatureSets.txt. Local shade zones are
+/// sampled at world positions so the player's two primary body chunks can receive
+/// different sunlight when only part of the body is covered.
 /// </summary>
 internal static class SolarEnvironment
 {
@@ -22,17 +25,36 @@ internal static class SolarEnvironment
 
     internal static float GetLocalShade(Player player)
     {
-        if (player?.room?.roomSettings?.placedObjects == null)
+        if (player?.room == null)
         {
             return 0f;
         }
 
-        Vector2 samplePoint = GetPlayerBodyCenter(player);
+        return GetLocalShadeAt(player.room, GetPlayerBodyCenter(player));
+    }
+
+    internal static float GetLocalShade(Player player, int bodyIndex)
+    {
+        if (player?.room == null)
+        {
+            return 0f;
+        }
+
+        return GetLocalShadeAt(player.room, GetBodyChunkSamplePoint(player, bodyIndex));
+    }
+
+    internal static float GetLocalShadeAt(Room room, Vector2 samplePoint)
+    {
+        if (room?.roomSettings?.placedObjects == null)
+        {
+            return 0f;
+        }
+
         float remainingTransmission = 1f;
 
-        for (int i = 0; i < player.room.roomSettings.placedObjects.Count; i++)
+        for (int i = 0; i < room.roomSettings.placedObjects.Count; i++)
         {
-            PlacedObject placed = player.room.roomSettings.placedObjects[i];
+            PlacedObject placed = room.roomSettings.placedObjects[i];
             if (placed == null ||
                 !placed.active ||
                 placed.type != SolarShadeZoneHooks.PlacedType ||
@@ -48,9 +70,8 @@ internal static class SolarEnvironment
                 continue;
             }
 
-            // Each shade layer removes a fraction of the sunlight that remains after
-            // the previous layers. This keeps overlapping zones bounded and avoids
-            // simple-addition blowups.
+            // Every overlapping zone attenuates the sunlight that remains after the
+            // previous zones: LocalShade = 1 - product(1 - ZoneShade_i).
             remainingTransmission *= 1f - RoomEnvironmentProfile.ClampUnit(data.Shade);
 
             if (remainingTransmission <= 0.00001f)
@@ -69,10 +90,32 @@ internal static class SolarEnvironment
             return 0f;
         }
 
+        return GetEffectiveSunlightAt(player.room, GetPlayerBodyCenter(player));
+    }
+
+    internal static float GetEffectiveSunlight(Player player, int bodyIndex)
+    {
+        if (player?.room == null)
+        {
+            return 0f;
+        }
+
+        return GetEffectiveSunlightAt(
+            player.room,
+            GetBodyChunkSamplePoint(player, bodyIndex));
+    }
+
+    internal static float GetEffectiveSunlightAt(Room room, Vector2 samplePoint)
+    {
+        if (room == null)
+        {
+            return 0f;
+        }
+
         return CalculateEffectiveSunlight(
-            GetSunlightIntensity(player.room),
-            GetRoomShade(player.room),
-            GetLocalShade(player));
+            GetSunlightIntensity(room),
+            GetRoomShade(room),
+            GetLocalShadeAt(room, samplePoint));
     }
 
     internal static float CalculateEffectiveSunlight(
@@ -86,6 +129,20 @@ internal static class SolarEnvironment
 
         return RoomEnvironmentProfile.ClampUnit(
             sunlight * roomTransmission * localTransmission);
+    }
+
+    private static Vector2 GetBodyChunkSamplePoint(Player player, int bodyIndex)
+    {
+        if (player?.bodyChunks == null || player.bodyChunks.Length == 0)
+        {
+            return player?.mainBodyChunk?.pos ?? Vector2.zero;
+        }
+
+        int clampedIndex = bodyIndex <= 0
+            ? 0
+            : (bodyIndex >= player.bodyChunks.Length ? player.bodyChunks.Length - 1 : bodyIndex);
+
+        return player.bodyChunks[clampedIndex]?.pos ?? player.mainBodyChunk?.pos ?? Vector2.zero;
     }
 
     private static Vector2 GetPlayerBodyCenter(Player player)
