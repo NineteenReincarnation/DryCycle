@@ -7,13 +7,17 @@ namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// Draggable developer overlay for player, room/environment and thermal/WV data.
-/// The panel is available only while Rain World's developer tools are active.
-/// Ctrl + Shift + T toggles it; the title bar can be dragged and its position persists.
+/// Available only while Rain World's developer tools are active.
+/// Ctrl + Shift + T toggles the panel.
 /// </summary>
 internal static class TemperatureDeveloperHud
 {
     private const string PositionXKey = "DryCycle.ThermalDebugPanel.X";
     private const string PositionYKey = "DryCycle.ThermalDebugPanel.Y";
+
+    // Keep the version outside interpolated-string expressions. In an interpolation,
+    // the ':' in the global:: alias can be parsed as a format separator by C#.
+    private const string UiVersion = global::DryCycle.Plugin.Version;
 
     private const float PanelWidth = 640f;
     private const float PanelHeight = 700f;
@@ -39,12 +43,12 @@ internal static class TemperatureDeveloperHud
     private const float ThermalHeaderY = 214f;
     private const float ThermalRowsY = 186f;
 
-    private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.84f);
-    private static readonly Color BorderColor = new(0.78f, 0.78f, 0.78f, 0.90f);
-    private static readonly Color HeaderColor = new(1f, 1f, 0.58f, 1f);
-    private static readonly Color KeyColor = new(0.78f, 0.78f, 0.78f, 1f);
+    private static readonly Color PanelBackground = new Color(0f, 0f, 0f, 0.84f);
+    private static readonly Color BorderColor = new Color(0.78f, 0.78f, 0.78f, 0.90f);
+    private static readonly Color HeaderColor = new Color(1f, 1f, 0.58f, 1f);
+    private static readonly Color KeyColor = new Color(0.78f, 0.78f, 0.78f, 1f);
     private static readonly Color ValueColor = Color.white;
-    private static readonly Color SeparatorColor = new(0.45f, 0.45f, 0.45f, 0.68f);
+    private static readonly Color SeparatorColor = new Color(0.45f, 0.45f, 0.45f, 0.68f);
 
     private static bool _enabled;
     private static bool _visible;
@@ -163,7 +167,7 @@ internal static class TemperatureDeveloperHud
         }
 
         global::DryCycle.Plugin.Logger?.LogInfo(
-            $"Thermal debug panel: {(visible ? "ON" : "OFF")} ({global::DryCycle.Plugin.Version})");
+            "Thermal debug panel: " + (visible ? "ON" : "OFF") + " (" + UiVersion + ")");
     }
 
     private static void EnsurePanel(RainWorldGame game)
@@ -185,7 +189,7 @@ internal static class TemperatureDeveloperHud
         _root = new FContainer();
         Futile.stage.AddChild(_root);
 
-        FSprite background = new("pixel")
+        FSprite background = new FSprite("pixel")
         {
             anchorX = 0f,
             anchorY = 0f,
@@ -206,7 +210,7 @@ internal static class TemperatureDeveloperHud
         AddHorizontalLine(ThermalSectionTop, 1f, SeparatorColor);
 
         CreateLabel(
-            $"DryCycle Thermal Debug  v{global::DryCycle.Plugin.Version}",
+            "DryCycle Thermal Debug  v" + UiVersion,
             KeyColumnX,
             PanelHeight - 12f,
             HeaderColor,
@@ -306,7 +310,7 @@ internal static class TemperatureDeveloperHud
         _root.isVisible = _visible;
 
         global::DryCycle.Plugin.Logger?.LogInfo(
-            $"Thermal debug UI schema THERMAL/WV created for DryCycle {global::DryCycle.Plugin.Version}.");
+            "Thermal debug UI schema THERMAL/WV created for DryCycle " + UiVersion + ".");
     }
 
     private static FLabel CreateLabel(
@@ -317,7 +321,7 @@ internal static class TemperatureDeveloperHud
         float scale,
         FLabelAlignment alignment)
     {
-        FLabel label = new(Custom.GetFont(), text)
+        FLabel label = new FLabel(Custom.GetFont(), text)
         {
             x = Mathf.Round(x),
             y = Mathf.Round(y),
@@ -335,7 +339,7 @@ internal static class TemperatureDeveloperHud
 
     private static void AddHorizontalLine(float y, float thickness, Color color)
     {
-        FSprite line = new("pixel")
+        FSprite line = new FSprite("pixel")
         {
             anchorX = 0f,
             anchorY = 0.5f,
@@ -351,7 +355,7 @@ internal static class TemperatureDeveloperHud
 
     private static void AddVerticalLine(float x, float thickness, Color color)
     {
-        FSprite line = new("pixel")
+        FSprite line = new FSprite("pixel")
         {
             anchorX = 0.5f,
             anchorY = 0f,
@@ -372,7 +376,7 @@ internal static class TemperatureDeveloperHud
             return;
         }
 
-        Vector2 mouse = new(Futile.mousePosition.x, Futile.mousePosition.y);
+        Vector2 mouse = new Vector2(Futile.mousePosition.x, Futile.mousePosition.y);
         Vector2 local = mouse - _panelPosition;
 
         if (Input.GetMouseButtonDown(0))
@@ -469,8 +473,12 @@ internal static class TemperatureDeveloperHud
         float roomShade = SolarEnvironment.GetRoomShade(room);
         float localShade0 = SolarEnvironment.GetLocalShade(player, 0);
         float localShade1 = SolarEnvironment.GetLocalShade(player, 1);
-        float effectiveSunlight0 = player.inShortcut ? 0f : SolarEnvironment.GetEffectiveSunlight(player, 0);
-        float effectiveSunlight1 = player.inShortcut ? 0f : SolarEnvironment.GetEffectiveSunlight(player, 1);
+        float effectiveSunlight0 = player.inShortcut
+            ? 0f
+            : SolarEnvironment.GetEffectiveSunlight(player, 0);
+        float effectiveSunlight1 = player.inShortcut
+            ? 0f
+            : SolarEnvironment.GetEffectiveSunlight(player, 1);
         float solarExposure = ThermalWaterLoss.GetSolarExposure(player);
 
         string regionName = room?.world?.region?.name ?? "--";
