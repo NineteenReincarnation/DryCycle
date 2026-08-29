@@ -6,7 +6,7 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Draggable developer overlay for player, room/environment and thermal-model data.
+/// Draggable developer overlay for player, room/environment and thermal/WV data.
 /// The panel is available only while Rain World's developer tools are active.
 /// Ctrl + Shift + T toggles it; the title bar can be dragged and its position persists.
 /// </summary>
@@ -163,7 +163,7 @@ internal static class TemperatureDeveloperHud
         }
 
         global::DryCycle.Plugin.Logger?.LogInfo(
-            $"Thermal debug panel: {(visible ? "ON" : "OFF")}");
+            $"Thermal debug panel: {(visible ? "ON" : "OFF")} ({global::DryCycle.Plugin.Version})");
     }
 
     private static void EnsurePanel(RainWorldGame game)
@@ -206,7 +206,7 @@ internal static class TemperatureDeveloperHud
         AddHorizontalLine(ThermalSectionTop, 1f, SeparatorColor);
 
         CreateLabel(
-            "DryCycle Thermal Debug",
+            $"DryCycle Thermal Debug  v{global::DryCycle.Plugin.Version}",
             KeyColumnX,
             PanelHeight - 12f,
             HeaderColor,
@@ -304,6 +304,9 @@ internal static class TemperatureDeveloperHud
 
         ApplyPanelPosition();
         _root.isVisible = _visible;
+
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            $"Thermal debug UI schema THERMAL/WV created for DryCycle {global::DryCycle.Plugin.Version}.");
     }
 
     private static FLabel CreateLabel(
