@@ -105,13 +105,14 @@
       DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
       SkipUnchangedFiles="true" />
 
-    <!-- Room base-temperature data is intentionally a plain editable mod-root file.
-         Runtime hot reload reads this deployed copy directly. -->
+    <!-- TemperatureSets.txt is live-authored in the actual region mod and hot-reloaded
+         at runtime. Seed it only when the destination does not exist; never overwrite
+         a mapper's current room environment values during a Release build. -->
     <MakeDir Directories="$(GameModRootDir)/world" />
     <Copy
+      Condition="!Exists('$(GameModRootDir)/world/TemperatureSets.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.txt"
-      DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt"
-      SkipUnchangedFiles="true" />
+      DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt" />
 
     <Warning
       Condition="!Exists('$(GameModRootDir)/soundeffects/DC_DrinkWater.ogg')"
