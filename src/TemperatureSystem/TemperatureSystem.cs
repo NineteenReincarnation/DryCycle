@@ -18,6 +18,7 @@ internal static class TemperatureSystemRuntime
 
         _enabled = true;
         TemperatureSetsLoader.Enable();
+        PlayerThermalModel.Enable();
         TemperatureDeveloperHud.Enable();
     }
 
@@ -30,6 +31,7 @@ internal static class TemperatureSystemRuntime
 
         _enabled = false;
         TemperatureDeveloperHud.Disable();
+        PlayerThermalModel.Disable();
         TemperatureSetsLoader.Disable();
     }
 
@@ -40,5 +42,14 @@ internal static class TemperatureSystemRuntime
     internal static float GetRoomHeat(Room room)
     {
         return RoomHeatFactor.GetRoomHeat(room);
+    }
+
+    /// <summary>
+    /// Returns one of the player's two runtime BodyHeat values. New player objects
+    /// start at zero. Index 0 maps to BodyHeat0; any positive index maps to BodyHeat1.
+    /// </summary>
+    internal static float GetBodyHeat(Player player, int bodyIndex)
+    {
+        return PlayerThermalModel.GetBodyHeat(player, bodyIndex);
     }
 }
