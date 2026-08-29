@@ -10,18 +10,18 @@ namespace DryCycle.TemperatureSystem;
 /// DevInterface representation for a freely editable local solar-shade polygon.
 ///
 /// Controls:
-/// - drag a yellow vertex to reshape the polygon;
+/// - drag a blue vertex to reshape the polygon;
 /// - Shift + left click an edge to insert a vertex;
 /// - Ctrl + left click a vertex to delete it (minimum three vertices);
-/// - drag the Shade slider handle to author a 0..1 local shade value.
+/// - edit Shade from the attached control panel. The arrows change Shade by 0.01;
+///   Shift changes by 0.10 and Ctrl changes by 1.00 (clamped to 0..1).
 /// </summary>
 internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 {
     private const float InsertDistance = 12f;
-    private const float ShadeSliderLength = 120f;
 
-    private static readonly Color EdgeColor = new(1f, 0.78f, 0.18f);
-    private static readonly Color VertexColor = new(1f, 0.88f, 0.30f);
+    private static readonly Color EdgeColor = new(0.18f, 0.55f, 1f);
+    private static readonly Color VertexColor = new(0.35f, 0.72f, 1f);
     private static readonly Color DeleteColor = new(1f, 0.35f, 0.10f);
 
     private sealed class VertexHandle : Handle
@@ -45,9 +45,70 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         }
     }
 
+    private sealed class ShadeValueControl : IntegerControl
+    {
+        internal ShadeValueControl(
+            DevUI owner,
+            string idString,
+            DevUINode parentNode,
+            Vector2 position)
+            : base(owner, idString, parentNode, position, "Shade")
+        {
+        }
+
+        private SolarShadeZoneData Data =>
+            (parentNode?.parentNode as SolarShadeZoneRepresentation)?.pObj?.data as SolarShadeZoneData;
+
+        public override void Increment(int change)
+        {
+            SolarShadeZoneData data = Data;
+            if (data == null)
+            {
+                return;
+            }
+
+            // IntegerControl already expands its change amount with Shift/Ctrl.
+            // Treat one unit as one percentage point so ordinary clicks are 0.01.
+            data.SetShade(data.Shade + change * 0.01f);
+            Refresh();
+            parentNode?.parentNode?.Refresh();
+        }
+
+        public override void Refresh()
+        {
+            base.Refresh();
+            SolarShadeZoneData data = Data;
+            NumberLabelText = (data?.Shade ?? 0f).ToString("0.00", CultureInfo.InvariantCulture);
+        }
+    }
+
+    private sealed class ShadeControlPanel : Panel
+    {
+        internal ShadeControlPanel(
+            DevUI owner,
+            string idString,
+            DevUINode parentNode,
+            Vector2 position)
+            : base(
+                owner,
+                idString,
+                parentNode,
+                position,
+                new Vector2(220f, 48f),
+                "Shade Zone")
+        {
+            subNodes.Add(new ShadeValueControl(
+                owner,
+                "DryCycleShade_Value",
+                this,
+                new Vector2(8f, 8f)));
+        }
+    }
+
     private readonly List<VertexHandle> _vertexHandles = new();
-    private readonly SliderHandle _shadeHandle;
+    private readonly ShadeControlPanel _controlPanel;
     private readonly int _firstEdgeSprite;
+    private readonly int _panelLinkSprite;
 
     private SolarShadeZoneData Data => pObj.data as SolarShadeZoneData;
 
@@ -59,31 +120,27 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         string name)
         : base(owner, idString, parentNode, placedObject, name)
     {
-        SolarShadeZoneData data = Data;
-
-        _shadeHandle = new SliderHandle(
+        _controlPanel = new ShadeControlPanel(
             owner,
-            "DryCycleShade_Value",
+            "DryCycleShade_Panel",
             this,
-            new Vector2(-60f, -92f),
-            (data?.Shade ?? 0f) * ShadeSliderLength,
-            vertical: false,
-            drawLine: true)
-        {
-            defaultColor = EdgeColor
-        };
-        subNodes.Add(_shadeHandle);
+            new Vector2(105f, 80f));
+        subNodes.Add(_controlPanel);
 
-        fLabels.Add(new FLabel(Custom.GetFont(), string.Empty)
+        _panelLinkSprite = fSprites.Count;
+        FSprite panelLink = new("pixel")
         {
-            alignment = FLabelAlignment.Left,
-            color = EdgeColor
-        });
-        owner.placedObjectsContainer.AddChild(fLabels[1]);
+            anchorY = 0f,
+            scaleX = 1.5f,
+            color = EdgeColor,
+            alpha = 0.75f
+        };
+        fSprites.Add(panelLink);
+        owner.placedObjectsContainer.AddChild(panelLink);
 
         _firstEdgeSprite = fSprites.Count;
         RebuildVertexHandles();
-        EnsureEdgeSpriteCount(data?.Vertices.Count ?? 0);
+        EnsureEdgeSpriteCount(Data?.Vertices.Count ?? 0);
         Refresh();
     }
 
@@ -107,8 +164,6 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
             insertCandidate = TryFindNearestEdge(localMouse, out insertAfterEdge, out insertPoint);
         }
 
-        // Prevent the base Handle logic from starting a drag on the representation
-        // while a modifier-click is being consumed for polygon editing.
         bool savedMouseClick = owner != null && owner.mouseClick;
         bool suppressBaseClick = savedMouseClick && (deleteTarget != null || insertCandidate);
         if (suppressBaseClick)
@@ -179,15 +234,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
             }
         }
 
-        float previousShade = data.Shade;
-        data.SetShade(_shadeHandle.Value / ShadeSliderLength);
-        _shadeHandle.Value = data.Shade * ShadeSliderLength;
-        if (Mathf.Abs(previousShade - data.Shade) > 0.00001f)
-        {
-            changed = true;
-        }
-
-        if (changed || dragged)
+        if (changed || dragged || _controlPanel.dragged)
         {
             Refresh();
         }
@@ -229,12 +276,8 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
             DrawLine(_firstEdgeSprite + i, from, to);
         }
 
-        _shadeHandle.Value = data.Shade * ShadeSliderLength;
-        if (fLabels.Count > 1)
-        {
-            fLabels[1].text = "Shade " + data.Shade.ToString("0.00", CultureInfo.InvariantCulture);
-            MoveLabel(1, absPos + new Vector2(-64f, -112f));
-        }
+        DrawLine(_panelLinkSprite, absPos, _controlPanel.absPos);
+        _controlPanel.Refresh();
     }
 
     private void RebuildVertexHandles()
