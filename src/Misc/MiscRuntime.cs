@@ -12,6 +12,7 @@ internal static class MiscRuntime
         }
 
         PaletteNumberInput.Enable();
+        IndividualPlacedObjectViewer.Enable();
         _enabled = true;
     }
 
@@ -22,6 +23,7 @@ internal static class MiscRuntime
             return;
         }
 
+        IndividualPlacedObjectViewer.Disable();
         PaletteNumberInput.Disable();
         _enabled = false;
     }
