@@ -68,16 +68,10 @@ internal static class PaletteLighting
             return;
         }
 
-        float influence = Mathf.Clamp01(self.effect_dayNight);
-        if (influence <= 0f)
-        {
-            orig(self);
-            return;
-        }
-
-        // DryCycle owns the room's day/night palette state while the DayNight effect
-        // is active. The original method hard-codes its own dusk/night palettes and
-        // time thresholds, so running both systems would fight over paletteA/B.
+        // DryCycle day/night is a global world feature. It does not require the
+        // vanilla DayNight RoomEffect. Once WorldClock is active, DryCycle owns the
+        // room's time-of-day palette selection in every room and suppresses vanilla's
+        // hard-coded dusk/night palette timing so the two systems cannot fight.
         self.dayNightNeedsRefresh = false;
 
         CameraState state = _cameraStates.GetOrCreateValue(self);
