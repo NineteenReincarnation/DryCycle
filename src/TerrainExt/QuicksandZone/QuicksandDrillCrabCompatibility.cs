@@ -34,6 +34,18 @@ internal static class QuicksandDrillCrabCompatibility
         _enabled = true;
     }
 
+    internal static void Disable()
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        On.Watcher.DrillCrab.Update -= DrillCrab_Update;
+        _terrainQueryDepth = 0;
+        _enabled = false;
+    }
+
     private static void DrillCrab_Update(
         On.Watcher.DrillCrab.orig_Update orig,
         DrillCrab self,
