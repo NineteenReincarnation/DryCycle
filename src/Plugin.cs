@@ -66,6 +66,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandLooseObjectSinkEase.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandPlayerHorizontalStability.Disable();
+            QuicksandDrillCrabCompatibility.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
@@ -113,6 +114,7 @@ internal sealed class Plugin : BaseUnityPlugin
             // retain their authored rendering without promoting the player from
             // Midground into the globally later Sand container.
             QuicksandZoneHooks.Enable();
+            QuicksandDrillCrabCompatibility.EnsureEnabled();
             QuicksandAIHazard.Enable();
 
             // Creature AI avoidance and post-entry escape are separate layers. The
@@ -168,6 +170,7 @@ internal sealed class Plugin : BaseUnityPlugin
             QuicksandLooseObjectSinkEase.Disable();
             QuicksandSinkRateLimiter.Disable();
             QuicksandPlayerHorizontalStability.Disable();
+            QuicksandDrillCrabCompatibility.Disable();
             QuicksandZoneHooks.Disable();
             DewPodAudioHooks.Disable();
             DewPodRuntimeTuningHooks.Disable();
