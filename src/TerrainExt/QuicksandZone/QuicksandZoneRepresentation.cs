@@ -10,6 +10,8 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
     private const float FlowHandleScale = 60f;
     private const int MaterialLineSegments = 64;
     private const float MaterialInsertDistance = 12f;
+    private const float SplineHandleInsertDistance = 10f;
+    private const int SplineHandleSearchSamples = 24;
 
     private static readonly Color TerrainLineColor = new(0.90f, 0.90f, 0.90f);
     private static readonly Color QuicksandLineColor = new(0.95f, 0.70f, 0.23f);
@@ -123,7 +125,9 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
     public override void Update()
     {
         bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
         bool materialDeleteClick = control && Input.GetMouseButtonDown(0);
+        bool splineHandleInsertClick = alt && Input.GetMouseButtonDown(0);
         MaterialBoundaryHandle controlDeleteHandle = materialDeleteClick
             ? FindNearestMaterialHandleUnderMouse()
             : null;
@@ -157,14 +161,36 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
             return;
         }
 
+        // DryCycle shortcut: Alt + left click inserts a normal white spline midpoint.
+        // This is additive to Rain World's native spline behavior and deliberately
+        // leaves Shift + right click free for yellow quicksand material boundaries.
+        if (alt && owner.draggedNode == null &&
+            TryFindSplineHandleInsertion(
+                out int splineSegment,
+                out float splineSegmentT,
+                out Vector2 splinePoint,
+                out float splineDistance) &&
+            splineDistance <= SplineHandleInsertDistance)
+        {
+            _surfaceControl.ghostSprite.alpha = 0.5f;
+            _surfaceControl.ghostSprite.SetPosition(absPos + splinePoint);
+
+            if (splineHandleInsertClick)
+            {
+                _surfaceControl.SplitSegment(splineSegment, splineSegmentT);
+                _terrain?.RefreshCurve();
+            }
+        }
+
         bool boundariesChanged = false;
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         bool materialClick = shift && Input.GetMouseButtonDown(1);
 
-        // Keep Watcher's normal spline editing untouched:
-        // - Shift + left click stays owned by BezierSplineControl for white geometry points.
+        // Quicksand editing gestures:
+        // - Alt + left click inserts a white spline midpoint/handle.
+        // - Rain World's native Shift + left click remains available for spline editing.
         // - Shift + right click adds a yellow material boundary, or deletes one under the cursor.
-        // - Ctrl + left click mirrors Watcher's normal midpoint deletion gesture for yellow points.
+        // - Ctrl + left click mirrors Rain World's midpoint deletion gesture for yellow points.
         MaterialBoundaryHandle deleteHandle = controlDeleteHandle;
         if (deleteHandle == null && materialClick)
         {
@@ -269,6 +295,90 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
             Vector2 local = QuicksandSurface.EvaluateByApproximateLength(Data.SurfaceSpline, handle.U);
             handle.Move(local);
         }
+    }
+
+    private bool TryFindSplineHandleInsertion(
+        out int segment,
+        out float segmentT,
+        out Vector2 point,
+        out float distance)
+    {
+        segment = 0;
+        segmentT = 0f;
+        point = Vector2.zero;
+        distance = float.PositiveInfinity;
+
+        if (owner == null || Data?.SurfaceSpline == null)
+        {
+            return false;
+        }
+
+        BezierCurve[] curves = Data.SurfaceSpline.GetAllBeziers();
+        if (curves == null || curves.Length == 0)
+        {
+            return false;
+        }
+
+        Vector2 localMouse = owner.mousePos - absPos;
+        for (int curveIndex = 0; curveIndex < curves.Length; curveIndex++)
+        {
+            BezierCurve curve = curves[curveIndex];
+            float bestT = 0f;
+            float bestDistance = float.PositiveInfinity;
+            Vector2 bestPoint = curve.posA;
+
+            for (int sample = 0; sample <= SplineHandleSearchSamples; sample++)
+            {
+                float t = (float)sample / SplineHandleSearchSamples;
+                Vector2 candidate = Custom.Bezier(
+                    curve.posA,
+                    curve.handleA,
+                    curve.posB,
+                    curve.handleB,
+                    t);
+                float candidateDistance = Vector2.Distance(localMouse, candidate);
+                if (candidateDistance < bestDistance)
+                {
+                    bestDistance = candidateDistance;
+                    bestT = t;
+                    bestPoint = candidate;
+                }
+            }
+
+            float step = 1f / SplineHandleSearchSamples;
+            for (int refine = 0; refine < 4; refine++)
+            {
+                for (int direction = -1; direction <= 1; direction++)
+                {
+                    float t = Mathf.Clamp01(bestT + direction * step);
+                    Vector2 candidate = Custom.Bezier(
+                        curve.posA,
+                        curve.handleA,
+                        curve.posB,
+                        curve.handleB,
+                        t);
+                    float candidateDistance = Vector2.Distance(localMouse, candidate);
+                    if (candidateDistance < bestDistance)
+                    {
+                        bestDistance = candidateDistance;
+                        bestT = t;
+                        bestPoint = candidate;
+                    }
+                }
+
+                step *= 0.5f;
+            }
+
+            if (bestDistance < distance)
+            {
+                segment = curveIndex;
+                segmentT = bestT;
+                point = bestPoint;
+                distance = bestDistance;
+            }
+        }
+
+        return distance < float.PositiveInfinity;
     }
 
     private void FindOrCreateTerrain()
