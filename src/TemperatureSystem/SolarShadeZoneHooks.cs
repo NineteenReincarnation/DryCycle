@@ -6,18 +6,27 @@ namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// Registers the unified local Environment Zone in DevInterface.
-/// The underlying PlacedObject type name stays DryCycleShadeZone for save
-/// compatibility with existing rooms.
+/// New rooms use DryCycleEnvironmentZone. The former DryCycleShadeZone identifier
+/// is still recognized (without registering it in the add-object menu) so existing
+/// room files continue to load.
 /// </summary>
 internal static class SolarShadeZoneHooks
 {
-    private const string PlacedTypeName = "DryCycleShadeZone";
+    private const string PlacedTypeName = "DryCycleEnvironmentZone";
+    private const string LegacyPlacedTypeName = "DryCycleShadeZone";
     private const string DevCategoryName = "DryCycle-Temperature";
 
     private static bool _enabled;
 
     internal static PlacedObject.Type PlacedType { get; private set; }
+    internal static PlacedObject.Type LegacyPlacedType { get; private set; }
     internal static ObjectsPage.DevObjectCategories DevCategory { get; private set; }
+
+    internal static bool IsEnvironmentZoneType(PlacedObject.Type type)
+    {
+        return type != null &&
+               (type == PlacedType || type == LegacyPlacedType);
+    }
 
     internal static void Enable()
     {
@@ -28,6 +37,10 @@ internal static class SolarShadeZoneHooks
 
         _enabled = true;
         PlacedType = new PlacedObject.Type(PlacedTypeName, register: true);
+        // Do not register the legacy name: registering it would make a second
+        // obsolete button appear in DevTools. ExtEnum equality is value-based, so
+        // unregistered instances still match old serialized room objects.
+        LegacyPlacedType = new PlacedObject.Type(LegacyPlacedTypeName, register: false);
         DevCategory = new ObjectsPage.DevObjectCategories(DevCategoryName, register: true);
 
         On.PlacedObject.GenerateEmptyData += PlacedObject_GenerateEmptyData;
@@ -54,6 +67,7 @@ internal static class SolarShadeZoneHooks
 
         PlacedType?.Unregister();
         PlacedType = null;
+        LegacyPlacedType = null;
     }
 
     private static void PlacedObject_GenerateEmptyData(
@@ -62,7 +76,7 @@ internal static class SolarShadeZoneHooks
     {
         orig(self);
 
-        if (self != null && self.type == PlacedType)
+        if (self != null && IsEnvironmentZoneType(self.type))
         {
             self.data = new SolarShadeZoneData(self);
         }
@@ -73,7 +87,7 @@ internal static class SolarShadeZoneHooks
         ObjectsPage self,
         PlacedObject.Type type)
     {
-        if (type == PlacedType)
+        if (IsEnvironmentZoneType(type))
         {
             return DevCategory;
         }
@@ -87,7 +101,7 @@ internal static class SolarShadeZoneHooks
         PlacedObject.Type type,
         PlacedObject placedObject)
     {
-        if (type != PlacedType)
+        if (!IsEnvironmentZoneType(type))
         {
             orig(self, type, placedObject);
             return;
@@ -113,9 +127,9 @@ internal static class SolarShadeZoneHooks
 
         if (newlyPlaced)
         {
-            // New Environment Zones start from the authored values of this room.
-            // This makes the panel immediately reflect the room configuration before
-            // the designer types a local override.
+            // New Environment Zones start from this room's authored values.
+            // Example: RoomShade=0.25 and Humidity=-0.40 => the new panel opens
+            // with Shade 0.25 and Humidity -0.40 before any manual edit.
             Room room = self.owner?.room;
             data.SetDefaultsFromRoom(
                 SolarEnvironment.GetRoomShade(room),
