@@ -7,9 +7,9 @@ using UnityEngine;
 namespace DryCycle.Misc;
 
 /// <summary>
-/// Adds direct integer keyboard entry to all vanilla Room Settings palette number
-/// controls without replacing PaletteController itself. The stock arrows, inherited
-/// values and camera refresh behavior remain intact.
+/// Adds direct integer keyboard entry to Room Settings integer fields while preserving
+/// the stock IntegerControl arrows and appearance. Vanilla palette controls are wired
+/// automatically; custom controls can opt in through AttachIntegerInput.
 /// </summary>
 internal static class PaletteNumberInput
 {
@@ -52,8 +52,57 @@ internal static class PaletteNumberInput
         CollectPaletteControllers(self, controllers);
         for (int i = 0; i < controllers.Count; i++)
         {
-            AddInputOverlay(owner, controllers[i]);
+            AttachPaletteController(owner, controllers[i]);
         }
+    }
+
+    internal static void AttachPaletteController(DevUI owner, PaletteController controller)
+    {
+        if (controller == null || controller.controlPoint < 0 || controller.controlPoint > 3)
+        {
+            return;
+        }
+
+        AttachIntegerInput(
+            owner,
+            controller,
+            OverlayIdPrefix + controller.IDstring,
+            () => CurrentPaletteControlValueText(controller),
+            value => ApplyPaletteControlValue(owner, controller, value));
+    }
+
+    internal static void AttachIntegerInput(
+        DevUI owner,
+        IntegerControl controller,
+        string overlayId,
+        Func<string> currentValueText,
+        Action<int> applyValue)
+    {
+        if (owner == null || controller == null || string.IsNullOrEmpty(overlayId)
+            || currentValueText == null || applyValue == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < controller.subNodes.Count; i++)
+        {
+            if (controller.subNodes[i]?.IDstring == overlayId)
+            {
+                return;
+            }
+        }
+
+        // IntegerControl's stock number label is at x=140, width=36. Overlay only
+        // that label; the stock Less/More arrows remain untouched.
+        controller.subNodes.Add(new IntegerInputButton(
+            owner,
+            overlayId,
+            controller,
+            new Vector2(140f, 0f),
+            36f,
+            controller,
+            currentValueText,
+            applyValue));
     }
 
     private static void CollectPaletteControllers(DevUINode node, List<PaletteController> result)
@@ -79,53 +128,116 @@ internal static class PaletteNumberInput
         }
     }
 
-    private static void AddInputOverlay(DevUI owner, PaletteController controller)
+    private static string CurrentPaletteControlValueText(PaletteController controller)
     {
-        if (controller == null || controller.controlPoint < 0 || controller.controlPoint > 3)
+        RoomSettings roomSettings = controller?.RoomSettings;
+        if (roomSettings == null)
+        {
+            return string.Empty;
+        }
+
+        return controller.controlPoint switch
+        {
+            0 => Math.Max(0, roomSettings.Palette).ToString(CultureInfo.InvariantCulture),
+            1 => Math.Max(0, roomSettings.EffectColorA).ToString(CultureInfo.InvariantCulture),
+            2 => Math.Max(0, roomSettings.EffectColorB).ToString(CultureInfo.InvariantCulture),
+            3 => roomSettings.fadePalette == null
+                ? string.Empty
+                : Math.Max(0, roomSettings.fadePalette.palette).ToString(CultureInfo.InvariantCulture),
+            _ => string.Empty
+        };
+    }
+
+    private static void ApplyPaletteControlValue(DevUI owner, PaletteController controller, int value)
+    {
+        RoomSettings roomSettings = controller?.RoomSettings;
+        if (roomSettings == null)
         {
             return;
         }
 
-        string overlayId = OverlayIdPrefix + controller.IDstring;
-        for (int i = 0; i < controller.subNodes.Count; i++)
-        {
-            if (controller.subNodes[i]?.IDstring == overlayId)
-            {
-                return;
-            }
-        }
+        RainWorldGame game = owner?.room?.game;
+        RoomCamera camera = game?.cameras != null && game.cameras.Length > 0
+            ? game.cameras[0]
+            : null;
 
-        // IntegerControl's stock number label is at x=140, width=36. Overlay only
-        // that label; the stock Less/More arrows remain untouched.
-        controller.subNodes.Add(new PaletteNumberInputButton(
-            owner,
-            overlayId,
-            controller,
-            new Vector2(140f, 0f),
-            36f,
-            controller));
+        switch (controller.controlPoint)
+        {
+            case 0:
+                roomSettings.pal = value;
+                camera?.ChangeMainPalette(roomSettings.Palette);
+                break;
+
+            case 1:
+                roomSettings.eColA = value;
+                camera?.ApplyEffectColorsToAllPaletteTextures(
+                    roomSettings.EffectColorA,
+                    roomSettings.EffectColorB);
+                break;
+
+            case 2:
+                roomSettings.eColB = value;
+                camera?.ApplyEffectColorsToAllPaletteTextures(
+                    roomSettings.EffectColorA,
+                    roomSettings.EffectColorB);
+                break;
+
+            case 3:
+                if (roomSettings.fadePalette == null)
+                {
+                    int screenCount = owner?.room?.cameraPositions?.Length ?? 1;
+                    roomSettings.fadePalette = new RoomSettings.FadePalette(value, Math.Max(1, screenCount));
+                }
+                else
+                {
+                    roomSettings.fadePalette.palette = value;
+                }
+
+                if (camera != null)
+                {
+                    float fade = 0f;
+                    int cameraIndex = camera.currentCameraPosition;
+                    if (roomSettings.fadePalette.fades != null
+                        && cameraIndex >= 0
+                        && cameraIndex < roomSettings.fadePalette.fades.Length)
+                    {
+                        fade = roomSettings.fadePalette.fades[cameraIndex];
+                    }
+
+                    camera.ChangeFadePalette(value, fade);
+                }
+
+                controller.parentNode?.Refresh();
+                break;
+        }
     }
 
-    private sealed class PaletteNumberInputButton : Button
+    private sealed class IntegerInputButton : Button
     {
         private const int MaxDigits = 10;
 
-        private readonly PaletteController _controller;
+        private readonly IntegerControl _controller;
+        private readonly Func<string> _currentValueText;
+        private readonly Action<int> _applyValue;
         private bool _editing;
         private bool _replaceOnFirstEditKey;
         private string _buffer = string.Empty;
 
-        public PaletteNumberInputButton(
+        public IntegerInputButton(
             DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,
             float width,
-            PaletteController controller)
+            IntegerControl controller,
+            Func<string> currentValueText,
+            Action<int> applyValue)
             : base(owner, IDstring, parentNode, pos, width, "")
         {
             _controller = controller;
-            SyncFromVanillaLabel();
+            _currentValueText = currentValueText;
+            _applyValue = applyValue;
+            SyncFromController();
             ApplyVanillaColors();
         }
 
@@ -141,14 +253,13 @@ internal static class PaletteNumberInput
         {
             base.Update();
 
-            // Button normally uses red text and a red/blue hover state. This overlay
-            // is intended to look exactly like the vanilla IntegerControl number box,
-            // so force the original black-text / pale-background appearance.
+            // Button normally uses red text and hover colors. Force the stock
+            // IntegerControl appearance every frame instead.
             ApplyVanillaColors();
 
             if (!_editing)
             {
-                SyncFromVanillaLabel();
+                SyncFromController();
                 return;
             }
 
@@ -216,30 +327,10 @@ internal static class PaletteNumberInput
 
         private void BeginEdit()
         {
-            RoomSettings roomSettings = _controller?.RoomSettings;
-            if (roomSettings == null)
-            {
-                return;
-            }
-
-            _buffer = CurrentValueText(roomSettings);
+            _buffer = _currentValueText?.Invoke() ?? string.Empty;
             _replaceOnFirstEditKey = true;
             _editing = true;
             SetDisplayedText(_buffer + "_");
-        }
-
-        private string CurrentValueText(RoomSettings roomSettings)
-        {
-            return _controller.controlPoint switch
-            {
-                0 => Math.Max(0, roomSettings.Palette).ToString(CultureInfo.InvariantCulture),
-                1 => Math.Max(0, roomSettings.EffectColorA).ToString(CultureInfo.InvariantCulture),
-                2 => Math.Max(0, roomSettings.EffectColorB).ToString(CultureInfo.InvariantCulture),
-                3 => roomSettings.fadePalette == null
-                    ? string.Empty
-                    : Math.Max(0, roomSettings.fadePalette.palette).ToString(CultureInfo.InvariantCulture),
-                _ => string.Empty
-            };
         }
 
         private void Commit()
@@ -252,83 +343,18 @@ internal static class PaletteNumberInput
             _editing = false;
             _replaceOnFirstEditKey = false;
 
-            if (_controller?.RoomSettings == null || string.IsNullOrEmpty(_buffer))
+            if (string.IsNullOrEmpty(_buffer)
+                || !long.TryParse(_buffer, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
             {
                 _controller?.Refresh();
-                SyncFromVanillaLabel();
-                return;
-            }
-
-            if (!long.TryParse(_buffer, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
-            {
-                _controller.Refresh();
-                SyncFromVanillaLabel();
+                SyncFromController();
                 return;
             }
 
             int value = (int)Math.Min(int.MaxValue, Math.Max(0L, parsed));
-            ApplyValue(value);
-            _controller.Refresh();
-            SyncFromVanillaLabel();
-        }
-
-        private void ApplyValue(int value)
-        {
-            RoomSettings roomSettings = _controller.RoomSettings;
-            RainWorldGame game = owner?.room?.game;
-            RoomCamera camera = game?.cameras != null && game.cameras.Length > 0
-                ? game.cameras[0]
-                : null;
-
-            switch (_controller.controlPoint)
-            {
-                case 0:
-                    roomSettings.pal = value;
-                    camera?.ChangeMainPalette(roomSettings.Palette);
-                    break;
-
-                case 1:
-                    roomSettings.eColA = value;
-                    camera?.ApplyEffectColorsToAllPaletteTextures(
-                        roomSettings.EffectColorA,
-                        roomSettings.EffectColorB);
-                    break;
-
-                case 2:
-                    roomSettings.eColB = value;
-                    camera?.ApplyEffectColorsToAllPaletteTextures(
-                        roomSettings.EffectColorA,
-                        roomSettings.EffectColorB);
-                    break;
-
-                case 3:
-                    if (roomSettings.fadePalette == null)
-                    {
-                        int screenCount = owner?.room?.cameraPositions?.Length ?? 1;
-                        roomSettings.fadePalette = new RoomSettings.FadePalette(value, Math.Max(1, screenCount));
-                    }
-                    else
-                    {
-                        roomSettings.fadePalette.palette = value;
-                    }
-
-                    if (camera != null)
-                    {
-                        float fade = 0f;
-                        int cameraIndex = camera.currentCameraPosition;
-                        if (roomSettings.fadePalette.fades != null
-                            && cameraIndex >= 0
-                            && cameraIndex < roomSettings.fadePalette.fades.Length)
-                        {
-                            fade = roomSettings.fadePalette.fades[cameraIndex];
-                        }
-
-                        camera.ChangeFadePalette(value, fade);
-                    }
-
-                    _controller.parentNode?.Refresh();
-                    break;
-            }
+            _applyValue(value);
+            _controller?.Refresh();
+            SyncFromController();
         }
 
         private void Cancel()
@@ -336,10 +362,10 @@ internal static class PaletteNumberInput
             _editing = false;
             _replaceOnFirstEditKey = false;
             _controller?.Refresh();
-            SyncFromVanillaLabel();
+            SyncFromController();
         }
 
-        private void SyncFromVanillaLabel()
+        private void SyncFromController()
         {
             if (_controller == null)
             {
