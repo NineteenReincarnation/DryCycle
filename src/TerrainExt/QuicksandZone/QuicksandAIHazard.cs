@@ -78,6 +78,14 @@ internal static class QuicksandAIHazard
         Room room = self?.realizedRoom;
         Creature realizedCreature = self?.creature?.realizedCreature;
 
+        // Watcher DrillCrabs use TerrainManager as their actual walking surface.
+        // Quicksand is intentionally ordinary curved terrain to them, so neither
+        // path resistance nor environmental fear may distinguish it from terrain.
+        if (QuicksandDrillCrabCompatibility.IsDrillCrab(realizedCreature))
+        {
+            return cost;
+        }
+
         if (room == null ||
             realizedCreature == null ||
             cost.legality > PathCost.Legality.Unwanted ||
@@ -155,6 +163,15 @@ internal static class QuicksandAIHazard
             if (ai != null && FearStates.TryGetValue(ai, out FearState stale))
             {
                 RemoveFearPoints(stale);
+            }
+            return;
+        }
+
+        if (QuicksandDrillCrabCompatibility.IsDrillCrab(realizedCreature))
+        {
+            if (FearStates.TryGetValue(ai, out FearState drillCrabState))
+            {
+                SetSeverity(drillCrabState, 0f);
             }
             return;
         }
