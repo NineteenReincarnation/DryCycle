@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using DevInterface;
+using DryCycle.Misc;
 using UnityEngine;
 
 namespace DryCycle.DayNight;
@@ -53,31 +54,85 @@ internal static class DayNightPaletteDevUI
             new Vector2(230f, 85f),
             "DAY / NIGHT PALETTES");
 
-        panel.subNodes.Add(new PaletteController(
+        PaletteController baseController = new(
             owner,
             "DryCycle_Base_Palette",
             panel,
             new Vector2(5f, panel.size.y - 20f),
             "Base Palette: ",
-            0));
+            0);
+        panel.subNodes.Add(baseController);
+        PaletteNumberInput.AttachPaletteController(owner, baseController);
 
-        panel.subNodes.Add(new DayNightPaletteController(
+        DayNightPaletteController duskController = new(
             owner,
             "DryCycle_Dusk_Palette",
             panel,
             new Vector2(5f, panel.size.y - 40f),
             "Dusk Palette: ",
-            DayNightPaletteSlot.Dusk));
+            DayNightPaletteSlot.Dusk);
+        panel.subNodes.Add(duskController);
+        AttachDayNightInput(owner, duskController, DayNightPaletteSlot.Dusk);
 
-        panel.subNodes.Add(new DayNightPaletteController(
+        DayNightPaletteController nightController = new(
             owner,
             "DryCycle_Night_Palette",
             panel,
             new Vector2(5f, panel.size.y - 60f),
             "Night Palette: ",
-            DayNightPaletteSlot.Night));
+            DayNightPaletteSlot.Night);
+        panel.subNodes.Add(nightController);
+        AttachDayNightInput(owner, nightController, DayNightPaletteSlot.Night);
 
         self.subNodes.Add(panel);
+    }
+
+    private static void AttachDayNightInput(
+        DevUI owner,
+        DayNightPaletteController controller,
+        DayNightPaletteSlot slot)
+    {
+        PaletteNumberInput.AttachIntegerInput(
+            owner,
+            controller,
+            "DryCycle_DayNight_Number_Input_" + controller.IDstring,
+            () =>
+            {
+                RoomSettings roomSettings = owner?.room?.roomSettings;
+                DayNightPaletteSettings.Values values = DayNightPaletteSettings.Get(roomSettings);
+                int palette = slot == DayNightPaletteSlot.Dusk
+                    ? values.DuskPalette
+                    : values.NightPalette;
+                return palette.ToString(CultureInfo.InvariantCulture);
+            },
+            value =>
+            {
+                RoomSettings roomSettings = owner?.room?.roomSettings;
+                if (roomSettings == null)
+                {
+                    return;
+                }
+
+                DayNightPaletteSettings.Values values = DayNightPaletteSettings.Get(roomSettings);
+                if (slot == DayNightPaletteSlot.Dusk)
+                {
+                    values.DuskPalette = value;
+                }
+                else
+                {
+                    values.NightPalette = value;
+                }
+
+                RefreshLighting(owner);
+            });
+    }
+
+    private static void RefreshLighting(DevUI owner)
+    {
+        if (owner?.room?.game?.cameras != null && owner.room.game.cameras.Length > 0)
+        {
+            PaletteLighting.ForceRefresh(owner.room.game.cameras[0]);
+        }
     }
 
     private enum DayNightPaletteSlot
@@ -134,11 +189,7 @@ internal static class DayNightPaletteDevUI
             }
 
             Refresh();
-
-            if (owner.room.game?.cameras != null && owner.room.game.cameras.Length > 0)
-            {
-                PaletteLighting.ForceRefresh(owner.room.game.cameras[0]);
-            }
+            RefreshLighting(owner);
         }
     }
 }
