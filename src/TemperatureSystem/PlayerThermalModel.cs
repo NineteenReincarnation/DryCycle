@@ -21,14 +21,16 @@ internal sealed class PlayerThermalState
 /// RoomHeat is an environmental cooling baseline, not a temperature target. A body
 /// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight adds
 /// heat directly to each body node according to that chunk's EffectiveSunlight.
-/// Internal body-to-body transfer remains conservative and smooths local differences.
+/// Humidity modifies room-cooling efficiency only as BodyHeat rises above the
+/// heat-stress threshold. Internal body-to-body transfer remains conservative and
+/// smooths local differences.
 /// </summary>
 internal static class PlayerThermalModel
 {
     internal const float MinimumBodyHeat = 0f;
     internal const float MaximumBodyHeat = 1f;
 
-    // Agreed room-cooling model:
+    // Agreed room-cooling model before humidity correction:
     // CoolingRate = 0.0175 * max(0, BodyHeat - RoomHeat)^1.25
     internal const float BaseCoolingCoefficient = 0.0175f;
     internal const float CoolingExponent = 1.25f;
@@ -105,6 +107,8 @@ internal static class PlayerThermalModel
         {
             float effectiveSunlight0 = SolarEnvironment.GetEffectiveSunlight(self, 0);
             float effectiveSunlight1 = SolarEnvironment.GetEffectiveSunlight(self, 1);
+            float humidity0 = HumidityEnvironment.GetEffectiveHumidity(self, 0);
+            float humidity1 = HumidityEnvironment.GetEffectiveHumidity(self, 1);
 
             ApplySolarHeating(
                 state,
@@ -115,6 +119,8 @@ internal static class PlayerThermalModel
             ApplyRoomCooling(
                 state,
                 RoomHeatFactor.GetRoomHeat(self.room),
+                humidity0,
+                humidity1,
                 TickSeconds);
         }
 
@@ -142,12 +148,25 @@ internal static class PlayerThermalModel
     private static void ApplyRoomCooling(
         PlayerThermalState state,
         float roomHeat,
+        float humidity0,
+        float humidity1,
         float deltaTime)
     {
-        state.BodyHeat0 -= CalculateRoomCoolingRate(state.BodyHeat0, roomHeat) * deltaTime;
-        state.BodyHeat1 -= CalculateRoomCoolingRate(state.BodyHeat1, roomHeat) * deltaTime;
+        state.BodyHeat0 -= CalculateRoomCoolingRate(
+            state.BodyHeat0,
+            roomHeat,
+            humidity0) * deltaTime;
+
+        state.BodyHeat1 -= CalculateRoomCoolingRate(
+            state.BodyHeat1,
+            roomHeat,
+            humidity1) * deltaTime;
     }
 
+    /// <summary>
+    /// Neutral-humidity room cooling. Kept as the base-rate query for callers that
+    /// explicitly want the pre-humidity value.
+    /// </summary>
     internal static float CalculateRoomCoolingRate(float bodyHeat, float roomHeat)
     {
         float difference = Mathf.Max(0f, bodyHeat - roomHeat);
@@ -157,6 +176,25 @@ internal static class PlayerThermalModel
         }
 
         return BaseCoolingCoefficient * Mathf.Pow(difference, CoolingExponent);
+    }
+
+    /// <summary>
+    /// Final room-cooling rate after humidity correction.
+    /// </summary>
+    internal static float CalculateRoomCoolingRate(
+        float bodyHeat,
+        float roomHeat,
+        float humidity)
+    {
+        float baseRate = CalculateRoomCoolingRate(bodyHeat, roomHeat);
+        if (baseRate <= 0f)
+        {
+            return 0f;
+        }
+
+        return baseRate * HumidityEnvironment.GetBodyHeatCoolingMultiplier(
+            bodyHeat,
+            humidity);
     }
 
     private static void ApplyInternalTransfer(
