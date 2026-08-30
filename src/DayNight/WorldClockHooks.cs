@@ -117,7 +117,7 @@ internal static class WorldClockHooks
         orig(self);
     }
 
-    private static void RainMeter_Update(On.HUD.RainMeter.orig_Update orig, HUD.RainMeter self)
+    private static void RainMeter_Update(On.HUD.RainMeter.orig_Update orig, global::HUD.RainMeter self)
     {
         Player player = self?.hud?.owner as Player;
         RainCycle rainCycle = player?.abstractCreature?.world?.rainCycle;
