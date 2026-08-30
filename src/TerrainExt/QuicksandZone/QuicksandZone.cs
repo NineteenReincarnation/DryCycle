@@ -18,6 +18,22 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         RefreshCurve();
     }
 
+    public override void Update(bool eu)
+    {
+        base.Update(eu);
+
+        // LocalTerrainCurve is explicitly excluded from TerrainCurve.UpdateHandles(),
+        // because its spline owns its geometry. QuicksandZone is also spline-owned,
+        // but inherits TerrainCurve directly so vanilla TerrainHandle edits can
+        // temporarily replace its points. Detect that takeover and restore our spline.
+        // All actual TerrainCurve rendering settings (Depth, Stain, Grain, Waves,
+        // Edge Radius, Sky Fade, terrain palette, lighting, etc.) remain vanilla.
+        if (NeedsSplineGeometryRestore())
+        {
+            RefreshCurve();
+        }
+    }
+
     internal void RefreshCurve()
     {
         if (_placedObject == null || Data?.SurfaceSpline == null)
@@ -233,6 +249,25 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         }
 
         return base.GetCoverage(x, y);
+    }
+
+    private bool NeedsSplineGeometryRestore()
+    {
+        if (_placedObject == null || Data?.SurfaceSpline == null)
+        {
+            return false;
+        }
+
+        if (handles == null || handles.Count != 2)
+        {
+            return true;
+        }
+
+        Vector2 expectedStart = _placedObject.pos + Data.SurfaceSpline.posA;
+        Vector2 expectedEnd = _placedObject.pos + Data.SurfaceSpline.posB;
+
+        return Vector2.SqrMagnitude(handles[0].Middle - expectedStart) > 0.0001f ||
+               Vector2.SqrMagnitude(handles[1].Middle - expectedEnd) > 0.0001f;
     }
 
     private static Vector2 SafeNormal(Vector2 value, Vector2 fallback)
