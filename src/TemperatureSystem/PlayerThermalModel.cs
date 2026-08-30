@@ -21,16 +21,15 @@ internal sealed class PlayerThermalState
 /// RoomHeat is an environmental cooling baseline, not a temperature target. A body
 /// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight adds
 /// heat directly to each body node according to that chunk's EffectiveSunlight.
-/// Humidity modifies room-cooling efficiency only as BodyHeat rises above the
-/// heat-stress threshold. Internal body-to-body transfer remains conservative and
-/// smooths local differences.
+/// Humidity and Wetness independently modify room-cooling efficiency. Internal
+/// body-to-body transfer remains conservative and smooths local differences.
 /// </summary>
 internal static class PlayerThermalModel
 {
     internal const float MinimumBodyHeat = 0f;
     internal const float MaximumBodyHeat = 1f;
 
-    // Agreed room-cooling model before humidity correction:
+    // Agreed room-cooling model before humidity/wetness correction:
     // CoolingRate = 0.0175 * max(0, BodyHeat - RoomHeat)^1.25
     internal const float BaseCoolingCoefficient = 0.0175f;
     internal const float CoolingExponent = 1.25f;
@@ -109,6 +108,8 @@ internal static class PlayerThermalModel
             float effectiveSunlight1 = SolarEnvironment.GetEffectiveSunlight(self, 1);
             float humidity0 = HumidityEnvironment.GetEffectiveHumidity(self, 0);
             float humidity1 = HumidityEnvironment.GetEffectiveHumidity(self, 1);
+            float wetness0 = PlayerWetnessModel.GetWetness(self, 0);
+            float wetness1 = PlayerWetnessModel.GetWetness(self, 1);
 
             ApplySolarHeating(
                 state,
@@ -121,6 +122,8 @@ internal static class PlayerThermalModel
                 RoomHeatFactor.GetRoomHeat(self.room),
                 humidity0,
                 humidity1,
+                wetness0,
+                wetness1,
                 TickSeconds);
         }
 
@@ -150,22 +153,26 @@ internal static class PlayerThermalModel
         float roomHeat,
         float humidity0,
         float humidity1,
+        float wetness0,
+        float wetness1,
         float deltaTime)
     {
         state.BodyHeat0 -= CalculateRoomCoolingRate(
             state.BodyHeat0,
             roomHeat,
-            humidity0) * deltaTime;
+            humidity0,
+            wetness0) * deltaTime;
 
         state.BodyHeat1 -= CalculateRoomCoolingRate(
             state.BodyHeat1,
             roomHeat,
-            humidity1) * deltaTime;
+            humidity1,
+            wetness1) * deltaTime;
     }
 
     /// <summary>
-    /// Neutral-humidity room cooling. Kept as the base-rate query for callers that
-    /// explicitly want the pre-humidity value.
+    /// Neutral-humidity and neutral-wetness room cooling. Kept as the base-rate query
+    /// for callers that explicitly want the unmodified environmental rate.
     /// </summary>
     internal static float CalculateRoomCoolingRate(float bodyHeat, float roomHeat)
     {
@@ -179,7 +186,7 @@ internal static class PlayerThermalModel
     }
 
     /// <summary>
-    /// Final room-cooling rate after humidity correction.
+    /// Room-cooling rate after humidity correction only.
     /// </summary>
     internal static float CalculateRoomCoolingRate(
         float bodyHeat,
@@ -195,6 +202,30 @@ internal static class PlayerThermalModel
         return baseRate * HumidityEnvironment.GetBodyHeatCoolingMultiplier(
             bodyHeat,
             humidity);
+    }
+
+    /// <summary>
+    /// Final room-cooling rate after independent humidity and wetness multipliers.
+    /// Wetness does not create a direct WV-loss branch; it changes BodyHeat cooling,
+    /// which can then indirectly change BodyHeat-driven WV loss.
+    /// </summary>
+    internal static float CalculateRoomCoolingRate(
+        float bodyHeat,
+        float roomHeat,
+        float humidity,
+        float wetness)
+    {
+        float humidityAdjustedRate = CalculateRoomCoolingRate(
+            bodyHeat,
+            roomHeat,
+            humidity);
+        if (humidityAdjustedRate <= 0f)
+        {
+            return 0f;
+        }
+
+        return humidityAdjustedRate *
+               PlayerWetnessModel.GetBodyHeatCoolingMultiplier(wetness);
     }
 
     private static void ApplyInternalTransfer(
