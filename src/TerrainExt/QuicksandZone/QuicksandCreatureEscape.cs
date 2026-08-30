@@ -64,6 +64,7 @@ internal static class QuicksandCreatureEscape
     internal static bool IsEscaping(Creature creature)
     {
         return creature != null &&
+               !QuicksandDrillCrabCompatibility.IsDrillCrab(creature) &&
                States.TryGetValue(creature, out State state) &&
                state.Active;
     }
@@ -666,6 +667,7 @@ internal static class QuicksandCreatureEscape
     private static bool CanControl(Creature creature) =>
         creature != null &&
         creature is not Player &&
+        !QuicksandDrillCrabCompatibility.IsDrillCrab(creature) &&
         !creature.slatedForDeletetion &&
         creature.room != null &&
         creature.bodyChunks != null &&
