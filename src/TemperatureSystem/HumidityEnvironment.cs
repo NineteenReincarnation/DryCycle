@@ -77,7 +77,7 @@ internal static class HumidityEnvironment
             PlacedObject placed = room.roomSettings.placedObjects[i];
             if (placed == null ||
                 !placed.active ||
-                placed.type != SolarShadeZoneHooks.PlacedType ||
+                !SolarShadeZoneHooks.IsEnvironmentZoneType(placed.type) ||
                 placed.data is not SolarShadeZoneData data ||
                 data.Vertices.Count < 3)
             {
