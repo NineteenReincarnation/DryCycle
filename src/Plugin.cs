@@ -3,6 +3,7 @@ using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.Creatures;
+using DryCycle.DayNight;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
@@ -22,7 +23,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.73";
+    public const string Version = "0.1.74";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -49,6 +50,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
@@ -97,6 +99,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         try
         {
+            DayNightRuntime.Enable();
             KingVultureSpearHooks.Enable();
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
@@ -147,6 +150,7 @@ internal sealed class Plugin : BaseUnityPlugin
         }
         catch (Exception ex)
         {
+            DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
