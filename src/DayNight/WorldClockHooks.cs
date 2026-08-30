@@ -54,7 +54,7 @@ internal static class WorldClockHooks
         WorldClock clock = _clocks.GetValue(
             game,
             _ => new WorldClock(Math.Max(1, rainCycle.cycleLength)));
-        clock.SetHalfCycleLength(rainCycle.cycleLength);
+        clock.SetCycleLength(rainCycle.cycleLength);
         return clock;
     }
 
@@ -127,9 +127,9 @@ internal static class WorldClockHooks
             return;
         }
 
-        // RainMeter is allowed to see a virtual RainCycle timer only while it is
-        // drawing/updating itself. The rest of the game keeps seeing the safe legacy
-        // timer, so the HUD remains visually vanilla without re-enabling rain logic.
+        // Both halves use the full vanilla RainMeter range. Day consumes it over the
+        // full original cycleLength; night consumes the same visual range in half the
+        // real time. This keeps the HUD shape unchanged while making night 50% as long.
         int previousTimer = rainCycle.timer;
         rainCycle.timer = clock.VirtualRainTimer(rainCycle.cycleLength);
         try
