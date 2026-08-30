@@ -11,10 +11,11 @@ namespace DryCycle.TemperatureSystem;
 /// Standard room formats:
 ///   ROOM : RoomHeat
 ///   ROOM : RoomHeat : SunlightIntensity : RoomShade
+///   ROOM : RoomHeat : SunlightIntensity : RoomShade : Humidity
 ///
-/// RoomHeat is clamped to [-1,1]. SunlightIntensity and RoomShade are clamped to
-/// [0,1]. Omitted solar values default to zero. The former pipe-separated extended
-/// format is accepted only as a compatibility fallback for existing test files.
+/// RoomHeat and Humidity are clamped to [-1,1]. SunlightIntensity and RoomShade
+/// are clamped to [0,1]. Omitted values keep their neutral defaults. The former
+/// pipe-separated extended form remains readable for old local test files.
 /// </summary>
 internal static class TemperatureSetsLoader
 {
@@ -29,13 +30,8 @@ internal static class TemperatureSetsLoader
     private static bool _enabled;
     private static int _ticksUntilPoll;
     private static string _filePath = string.Empty;
-
     private static DateTime _loadedWriteUtc = DateTime.MinValue;
     private static long _loadedLength = -1L;
-
-    private static bool _pendingSignature;
-    private static DateTime _pendingWriteUtc;
-    private static long _pendingLength;
     private static int _missingPolls;
     private static bool _missingLogged;
 
@@ -52,7 +48,7 @@ internal static class TemperatureSetsLoader
         ResetFileTracking();
         global::DryCycle.Plugin.Logger?.LogInfo(
             $"TemperatureSets: resolved data path '{_filePath}'.");
-        LoadInitialSnapshot();
+        LoadSnapshot(hotReload: false);
         On.RainWorldGame.Update += RainWorldGame_Update;
     }
 
@@ -89,6 +85,13 @@ internal static class TemperatureSetsLoader
         return TryGetProfile(regionName, roomName, out RoomEnvironmentProfile profile)
             ? profile.RoomShade
             : RoomEnvironmentProfile.DefaultRoomShade;
+    }
+
+    internal static float GetHumidity(string regionName, string roomName)
+    {
+        return TryGetProfile(regionName, roomName, out RoomEnvironmentProfile profile)
+            ? profile.Humidity
+            : RoomEnvironmentProfile.DefaultHumidity;
     }
 
     private static bool TryGetProfile(
@@ -129,49 +132,31 @@ internal static class TemperatureSetsLoader
         PollForChanges();
     }
 
-    private static void LoadInitialSnapshot()
-    {
-        if (string.IsNullOrWhiteSpace(_filePath) || !File.Exists(_filePath))
-        {
-            _profilesByRegion = CreateRegionTable();
-            LogMissingFile();
-            return;
-        }
-
-        FileInfo info = new(_filePath);
-        if (!TryLoadSnapshot(
-                _filePath,
-                info.LastWriteTimeUtc,
-                info.Length,
-                out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
-                out int entryCount))
-        {
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                $"TemperatureSets: initial load failed; room environment defaults to 0. Path: {_filePath}");
-            return;
-        }
-
-        ApplySnapshot(snapshot, info.LastWriteTimeUtc, info.Length, entryCount, hotReload: false);
-    }
-
     private static void PollForChanges()
     {
         try
         {
-            string resolvedPath = ResolveTemperatureSetsPath();
-            if (!string.Equals(resolvedPath, _filePath, StringComparison.OrdinalIgnoreCase))
+            string resolved = ResolveTemperatureSetsPath();
+            if (!string.Equals(resolved, _filePath, StringComparison.OrdinalIgnoreCase))
             {
-                _filePath = resolvedPath;
+                _filePath = resolved;
                 ResetFileTracking();
                 global::DryCycle.Plugin.Logger?.LogInfo(
                     $"TemperatureSets: data path changed to '{_filePath}'.");
-                LoadInitialSnapshot();
+                LoadSnapshot(hotReload: true);
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_filePath) || !File.Exists(_filePath))
             {
-                HandleMissingFile();
+                _missingPolls++;
+                if (_missingPolls >= MissingFileClearPolls)
+                {
+                    _profilesByRegion = CreateRegionTable();
+                    _loadedWriteUtc = DateTime.MinValue;
+                    _loadedLength = -1L;
+                    LogMissingFile();
+                }
                 return;
             }
 
@@ -179,38 +164,12 @@ internal static class TemperatureSetsLoader
             _missingLogged = false;
 
             FileInfo info = new(_filePath);
-            DateTime writeUtc = info.LastWriteTimeUtc;
-            long length = info.Length;
-
-            if (writeUtc == _loadedWriteUtc && length == _loadedLength)
+            if (info.LastWriteTimeUtc == _loadedWriteUtc && info.Length == _loadedLength)
             {
-                _pendingSignature = false;
                 return;
             }
 
-            if (!_pendingSignature ||
-                writeUtc != _pendingWriteUtc ||
-                length != _pendingLength)
-            {
-                _pendingSignature = true;
-                _pendingWriteUtc = writeUtc;
-                _pendingLength = length;
-                return;
-            }
-
-            if (!TryLoadSnapshot(
-                    _filePath,
-                    writeUtc,
-                    length,
-                    out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
-                    out int entryCount))
-            {
-                _pendingSignature = false;
-                return;
-            }
-
-            ApplySnapshot(snapshot, writeUtc, length, entryCount, hotReload: true);
-            _pendingSignature = false;
+            LoadSnapshot(hotReload: true);
         }
         catch (Exception ex)
         {
@@ -219,29 +178,35 @@ internal static class TemperatureSetsLoader
         }
     }
 
-    private static bool TryLoadSnapshot(
-        string path,
-        DateTime expectedWriteUtc,
-        long expectedLength,
-        out Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
-        out int entryCount)
+    private static void LoadSnapshot(bool hotReload)
     {
-        snapshot = CreateRegionTable();
-        entryCount = 0;
+        if (string.IsNullOrWhiteSpace(_filePath) || !File.Exists(_filePath))
+        {
+            _profilesByRegion = CreateRegionTable();
+            LogMissingFile();
+            return;
+        }
+
+        FileInfo before = new(_filePath);
+        DateTime expectedWrite = before.LastWriteTimeUtc;
+        long expectedLength = before.Length;
 
         string[] lines;
         try
         {
-            lines = File.ReadAllLines(path);
+            lines = File.ReadAllLines(_filePath);
         }
         catch (Exception ex)
         {
             global::DryCycle.Plugin.Logger?.LogWarning(
-                $"TemperatureSets: cannot read '{path}', keeping previous values. {ex.Message}");
-            return false;
+                $"TemperatureSets: cannot read '{_filePath}', keeping previous values. {ex.Message}");
+            return;
         }
 
+        Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot =
+            CreateRegionTable();
         string currentRegion = null;
+        int entryCount = 0;
 
         for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
@@ -296,20 +261,30 @@ internal static class TemperatureSetsLoader
 
         try
         {
-            FileInfo afterRead = new(path);
-            if (!afterRead.Exists ||
-                afterRead.LastWriteTimeUtc != expectedWriteUtc ||
-                afterRead.Length != expectedLength)
+            FileInfo after = new(_filePath);
+            if (!after.Exists ||
+                after.LastWriteTimeUtc != expectedWrite ||
+                after.Length != expectedLength)
             {
-                return false;
+                // File changed while being read. Leave the previous snapshot in use;
+                // the next poll will retry the new stable version.
+                return;
             }
         }
         catch
         {
-            return false;
+            return;
         }
 
-        return true;
+        _profilesByRegion = snapshot;
+        _loadedWriteUtc = expectedWrite;
+        _loadedLength = expectedLength;
+        _missingPolls = 0;
+        _missingLogged = false;
+
+        string action = hotReload ? "hot-reloaded" : "loaded";
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            $"TemperatureSets: {action} {entryCount} room environment profile(s) from '{_filePath}'.");
     }
 
     private static bool TryParseRoomProfile(
@@ -320,17 +295,15 @@ internal static class TemperatureSetsLoader
     {
         profile = null;
 
-        // The canonical format uses ':' for every field. Keep the previously used
-        // pipe form readable so existing local test files do not silently reset.
         string[] fields = value.IndexOf(':') >= 0
             ? value.Split(':')
             : (value.IndexOf('|') >= 0 ? value.Split('|') : new[] { value });
 
-        if (fields.Length > 3)
+        if (fields.Length > 4)
         {
             LogParseWarning(
                 lineIndex,
-                "too many room fields; expected RoomHeat : SunlightIntensity : RoomShade",
+                "too many room fields; expected RoomHeat : SunlightIntensity : RoomShade : Humidity",
                 fullLine);
             return false;
         }
@@ -343,6 +316,7 @@ internal static class TemperatureSetsLoader
 
         float sunlight = RoomEnvironmentProfile.DefaultSunlightIntensity;
         float roomShade = RoomEnvironmentProfile.DefaultRoomShade;
+        float humidity = RoomEnvironmentProfile.DefaultHumidity;
 
         if (fields.Length >= 2 &&
             !string.IsNullOrWhiteSpace(fields[1]) &&
@@ -360,18 +334,29 @@ internal static class TemperatureSetsLoader
             return false;
         }
 
+        if (fields.Length >= 4 &&
+            !string.IsNullOrWhiteSpace(fields[3]) &&
+            !TryParseFinite(fields[3], out humidity))
+        {
+            LogParseWarning(lineIndex, "invalid Humidity", fullLine);
+            return false;
+        }
+
         float clampedHeat = RoomHeatFactor.ClampHeat(roomHeat);
         float clampedSunlight = RoomEnvironmentProfile.ClampUnit(sunlight);
         float clampedRoomShade = RoomEnvironmentProfile.ClampUnit(roomShade);
+        float clampedHumidity = RoomEnvironmentProfile.ClampSigned(humidity);
 
         LogClampIfNeeded(lineIndex, "RoomHeat", roomHeat, clampedHeat, "[-1, 1]");
         LogClampIfNeeded(lineIndex, "SunlightIntensity", sunlight, clampedSunlight, "[0, 1]");
         LogClampIfNeeded(lineIndex, "RoomShade", roomShade, clampedRoomShade, "[0, 1]");
+        LogClampIfNeeded(lineIndex, "Humidity", humidity, clampedHumidity, "[-1, 1]");
 
         profile = new RoomEnvironmentProfile(
             clampedHeat,
             clampedSunlight,
-            clampedRoomShade);
+            clampedRoomShade,
+            clampedHumidity);
         return true;
     }
 
@@ -402,55 +387,6 @@ internal static class TemperatureSetsLoader
             $"TemperatureSets line {zeroBasedLine + 1}: {field} " +
             $"{original.ToString(CultureInfo.InvariantCulture)} is outside {range} and was clamped to " +
             $"{clamped.ToString(CultureInfo.InvariantCulture)}.");
-    }
-
-    private static void ApplySnapshot(
-        Dictionary<string, Dictionary<string, RoomEnvironmentProfile>> snapshot,
-        DateTime writeUtc,
-        long length,
-        int entryCount,
-        bool hotReload)
-    {
-        _profilesByRegion = snapshot;
-        _loadedWriteUtc = writeUtc;
-        _loadedLength = length;
-        _missingPolls = 0;
-        _missingLogged = false;
-
-        string action = hotReload ? "hot-reloaded" : "loaded";
-        global::DryCycle.Plugin.Logger?.LogInfo(
-            $"TemperatureSets: {action} {entryCount} room environment profile(s) from '{_filePath}'.");
-    }
-
-    private static void HandleMissingFile()
-    {
-        _missingPolls++;
-        if (_missingPolls < MissingFileClearPolls)
-        {
-            return;
-        }
-
-        if (_loadedLength >= 0L || _profilesByRegion.Count > 0)
-        {
-            _profilesByRegion = CreateRegionTable();
-            _loadedWriteUtc = DateTime.MinValue;
-            _loadedLength = -1L;
-            _pendingSignature = false;
-        }
-
-        LogMissingFile();
-    }
-
-    private static void LogMissingFile()
-    {
-        if (_missingLogged)
-        {
-            return;
-        }
-
-        _missingLogged = true;
-        global::DryCycle.Plugin.Logger?.LogWarning(
-            $"TemperatureSets: '{_filePath}' was not found. Room environment values default to 0.");
     }
 
     private static string ResolveTemperatureSetsPath()
@@ -546,9 +482,6 @@ internal static class TemperatureSetsLoader
     {
         _loadedWriteUtc = DateTime.MinValue;
         _loadedLength = -1L;
-        _pendingSignature = false;
-        _pendingWriteUtc = DateTime.MinValue;
-        _pendingLength = -1L;
         _missingPolls = 0;
         _missingLogged = false;
     }
@@ -562,6 +495,18 @@ internal static class TemperatureSetsLoader
     private static Dictionary<string, RoomEnvironmentProfile> CreateRoomTable()
     {
         return new Dictionary<string, RoomEnvironmentProfile>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void LogMissingFile()
+    {
+        if (_missingLogged)
+        {
+            return;
+        }
+
+        _missingLogged = true;
+        global::DryCycle.Plugin.Logger?.LogWarning(
+            $"TemperatureSets: '{_filePath}' was not found. Room environment values use neutral defaults.");
     }
 
     private static void LogParseWarning(int zeroBasedLine, string reason, string line)
