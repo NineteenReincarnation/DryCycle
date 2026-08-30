@@ -11,6 +11,7 @@ internal static class DayNightRuntime
             return;
         }
 
+        DayNightPaletteSettings.Enable();
         DayNightPaletteDevUI.Enable();
         WorldClockHooks.Enable();
         PaletteLighting.Enable();
@@ -27,7 +28,7 @@ internal static class DayNightRuntime
         PaletteLighting.Disable();
         WorldClockHooks.Disable();
         DayNightPaletteDevUI.Disable();
-        DayNightPaletteSettings.Reset();
+        DayNightPaletteSettings.Disable();
         _enabled = false;
     }
 }
