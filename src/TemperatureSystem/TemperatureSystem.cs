@@ -19,6 +19,7 @@ internal static class TemperatureSystemRuntime
         _enabled = true;
         TemperatureSetsLoader.Enable();
         SolarShadeZoneHooks.Enable();
+        PlayerWetnessModel.Enable();
         PlayerThermalModel.Enable();
         TemperatureDeveloperHud.Enable();
     }
@@ -33,6 +34,7 @@ internal static class TemperatureSystemRuntime
         _enabled = false;
         TemperatureDeveloperHud.Disable();
         PlayerThermalModel.Disable();
+        PlayerWetnessModel.Disable();
         SolarShadeZoneHooks.Disable();
         TemperatureSetsLoader.Disable();
     }
@@ -80,6 +82,11 @@ internal static class TemperatureSystemRuntime
     internal static float GetHumidityBaseWaterLossMultiplier(Player player)
     {
         return HumidityEnvironment.GetBaseWaterLossMultiplier(player);
+    }
+
+    internal static float GetWetness(Player player, int bodyIndex)
+    {
+        return PlayerWetnessModel.GetWetness(player, bodyIndex);
     }
 
     internal static float GetBodyHeat(Player player, int bodyIndex)
