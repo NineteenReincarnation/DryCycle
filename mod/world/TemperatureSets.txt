@@ -4,13 +4,17 @@
 # ROOM : RoomHeat
 #
 # Standard extended format:
-# ROOM : RoomHeat : SunlightIntensity : RoomShade
+# ROOM : RoomHeat : SunlightIntensity : RoomShade : Humidity
 #
 # RoomHeat:           -1 .. 1
 # SunlightIntensity:   0 .. 1
 # RoomShade:           0 .. 1
+# Humidity:           -1 .. 1
+#                     -1 = extremely dry
+#                      0 = neutral
+#                     +1 = extremely humid
 
 B5:
-B5_POTDF01 : 0.3 : 0.2 : 0
+B5_POTDF01 : 0.3 : 0.2 : 0 : 0
 
 B4:
