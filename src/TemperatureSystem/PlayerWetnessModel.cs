@@ -35,6 +35,11 @@ internal static class PlayerWetnessModel
     internal const float HumidityAbsorptionMultiplier = 0.55f;
     internal const float CrossSignMultiplier = 1.8f;
 
+    // Wetness modifies the existing room-cooling branch rather than adding a new
+    // direct WV-loss source. Fully wet = x1.50 cooling, fully dry = x0.90 cooling.
+    internal const float MaximumWetCoolingBonus = 0.50f;
+    internal const float MaximumDryCoolingPenalty = 0.10f;
+
     // Partial water contact should wet a body chunk much faster than ambient humidity.
     // A fully submerged chunk is saturated immediately.
     internal const float PartialWaterWetRatePerSecond = 3f;
@@ -90,6 +95,23 @@ internal static class PlayerWetnessModel
         }
 
         return bodyIndex <= 0 ? state.Wetness0 : state.Wetness1;
+    }
+
+    /// <summary>
+    /// Simple signed wetness correction for room cooling:
+    /// -1 => x0.90, 0 => x1.00, +1 => x1.50.
+    /// </summary>
+    internal static float GetBodyHeatCoolingMultiplier(float wetness)
+    {
+        float w = RoomEnvironmentProfile.ClampSigned(wetness);
+        return w >= 0f
+            ? 1f + (w * MaximumWetCoolingBonus)
+            : 1f + (w * MaximumDryCoolingPenalty);
+    }
+
+    internal static float GetBodyHeatCoolingMultiplier(Player player, int bodyIndex)
+    {
+        return GetBodyHeatCoolingMultiplier(GetWetness(player, bodyIndex));
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
