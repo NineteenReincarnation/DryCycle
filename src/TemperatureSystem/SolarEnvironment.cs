@@ -5,9 +5,9 @@ namespace DryCycle.TemperatureSystem;
 /// <summary>
 /// Solar-environment query layer.
 ///
-/// Room-wide sunlight and shade come from TemperatureSets.txt. Local shade zones are
-/// sampled at world positions so the player's two primary body chunks can receive
-/// different sunlight when only part of the body is covered.
+/// Room-wide sunlight and shade come from TemperatureSets.txt. Local Environment
+/// Zones are sampled at world positions so the player's two primary body chunks can
+/// receive different sunlight when only part of the body is covered.
 /// </summary>
 internal static class SolarEnvironment
 {
@@ -57,7 +57,7 @@ internal static class SolarEnvironment
             PlacedObject placed = room.roomSettings.placedObjects[i];
             if (placed == null ||
                 !placed.active ||
-                placed.type != SolarShadeZoneHooks.PlacedType ||
+                !SolarShadeZoneHooks.IsEnvironmentZoneType(placed.type) ||
                 placed.data is not SolarShadeZoneData data ||
                 data.Vertices.Count < 3 ||
                 data.Shade <= 0f)
