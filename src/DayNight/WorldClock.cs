@@ -110,18 +110,25 @@ internal readonly struct SolarLightingState
 
 internal sealed class WorldClock
 {
+    private const float NightLengthRatio = 0.5f;
+
     private long _ticksInHalf;
-    private int _halfCycleLength;
+    private int _dayCycleLength;
+    private int _nightCycleLength;
     private bool _nightHalf;
     private long _absoluteTicks;
     private int _dayIndex;
 
-    public WorldClock(int halfCycleLength)
+    public WorldClock(int dayCycleLength)
     {
-        _halfCycleLength = Math.Max(1, halfCycleLength);
+        SetCycleLengthInternal(dayCycleLength);
     }
 
-    public int HalfCycleLength => _halfCycleLength;
+    public int DayCycleLength => _dayCycleLength;
+
+    public int NightCycleLength => _nightCycleLength;
+
+    public int CurrentHalfLength => _nightHalf ? _nightCycleLength : _dayCycleLength;
 
     public bool IsNight => _nightHalf;
 
@@ -129,10 +136,14 @@ internal sealed class WorldClock
 
     public long AbsoluteTicks => _absoluteTicks;
 
-    public float HalfProgress => Mathf.Clamp01((float)_ticksInHalf / _halfCycleLength);
+    public float HalfProgress => Mathf.Clamp01((float)_ticksInHalf / CurrentHalfLength);
 
     public float HalfRemaining => 1f - HalfProgress;
 
+    // Day and night each still occupy half of normalized solar time. They do not
+    // occupy equal real time: daytime uses 100% of vanilla cycleLength while night
+    // uses 50%. This preserves all existing solar/palette curves while making the
+    // night progress through its visual half twice as fast.
     public float DayProgress => (_nightHalf ? 0.5f : 0f) + HalfProgress * 0.5f;
 
     public SolarLightingState Lighting => SolarLightingState.FromDayProgress(DayProgress);
@@ -167,8 +178,8 @@ internal sealed class WorldClock
     }
 
     // Vanilla night creatures begin leaving dens at ~600 and several vanilla night
-    // lights use thresholds around 6000. Mapping the full night to 0..10000 keeps
-    // those systems broadly compatible without letting vanilla own the clock.
+    // lights use thresholds around 6000. Mapping the entire (shorter) night to
+    // 0..10000 preserves the original thresholds without letting vanilla own time.
     public int LegacyDayNightCounter => _nightHalf
         ? Mathf.RoundToInt(HalfProgress * 10000f)
         : 0;
@@ -182,20 +193,21 @@ internal sealed class WorldClock
             cycleLength);
     }
 
-    public void SetHalfCycleLength(int halfCycleLength)
+    public void SetCycleLength(int dayCycleLength)
     {
-        halfCycleLength = Math.Max(1, halfCycleLength);
-        if (halfCycleLength == _halfCycleLength)
+        dayCycleLength = Math.Max(1, dayCycleLength);
+        int nightCycleLength = CalculateNightLength(dayCycleLength);
+        if (dayCycleLength == _dayCycleLength && nightCycleLength == _nightCycleLength)
         {
             return;
         }
 
         float progress = HalfProgress;
-        _halfCycleLength = halfCycleLength;
-        _ticksInHalf = (long)Math.Round(progress * _halfCycleLength);
-        if (_ticksInHalf >= _halfCycleLength)
+        SetCycleLengthInternal(dayCycleLength);
+        _ticksInHalf = (long)Math.Round(progress * CurrentHalfLength);
+        if (_ticksInHalf >= CurrentHalfLength)
         {
-            _ticksInHalf = _halfCycleLength - 1;
+            _ticksInHalf = CurrentHalfLength - 1;
         }
     }
 
@@ -209,14 +221,25 @@ internal sealed class WorldClock
         _absoluteTicks += ticks;
         _ticksInHalf += ticks;
 
-        while (_ticksInHalf >= _halfCycleLength)
+        while (_ticksInHalf >= CurrentHalfLength)
         {
-            _ticksInHalf -= _halfCycleLength;
+            _ticksInHalf -= CurrentHalfLength;
             _nightHalf = !_nightHalf;
             if (!_nightHalf)
             {
                 _dayIndex++;
             }
         }
+    }
+
+    private void SetCycleLengthInternal(int dayCycleLength)
+    {
+        _dayCycleLength = Math.Max(1, dayCycleLength);
+        _nightCycleLength = CalculateNightLength(_dayCycleLength);
+    }
+
+    private static int CalculateNightLength(int dayCycleLength)
+    {
+        return Math.Max(1, Mathf.RoundToInt(dayCycleLength * NightLengthRatio));
     }
 }
