@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -14,11 +15,35 @@ internal static class DayNightPaletteSettings
     private const string NightKey = "DryCycleNightPalette";
 
     private static ConditionalWeakTable<RoomSettings, Values> _values = new();
+    private static bool _enabled;
 
     internal sealed class Values
     {
         public int DuskPalette = DefaultDuskPalette;
         public int NightPalette = DefaultNightPalette;
+    }
+
+    public static void Enable()
+    {
+        if (_enabled)
+        {
+            return;
+        }
+
+        _enabled = true;
+        On.RoomSettings.Save_string_bool += RoomSettings_Save_string_bool;
+    }
+
+    public static void Disable()
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        On.RoomSettings.Save_string_bool -= RoomSettings_Save_string_bool;
+        Reset();
+        _enabled = false;
     }
 
     public static Values Get(RoomSettings roomSettings)
@@ -36,26 +61,34 @@ internal static class DayNightPaletteSettings
         _values = new ConditionalWeakTable<RoomSettings, Values>();
     }
 
-    public static void Save(RoomSettings roomSettings)
+    private static void RoomSettings_Save_string_bool(
+        On.RoomSettings.orig_Save_string_bool orig,
+        RoomSettings self,
+        string path,
+        bool saveAsTemplate)
     {
-        if (roomSettings == null || string.IsNullOrEmpty(roomSettings.filePath))
+        orig(self, path, saveAsTemplate);
+
+        if (self == null || string.IsNullOrEmpty(path) || !File.Exists(path))
         {
             return;
         }
 
-        Values values = Get(roomSettings);
+        Values values = Get(self);
 
         try
         {
-            // Vanilla RoomSettings.Save rewrites the settings file from scratch.
-            // These DryCycle lines are appended afterwards by the DevUI save hook.
-            using StreamWriter writer = File.AppendText(roomSettings.filePath);
-            writer.WriteLine(DuskKey + ": " + values.DuskPalette.ToString(CultureInfo.InvariantCulture));
-            writer.WriteLine(NightKey + ": " + values.NightPalette.ToString(CultureInfo.InvariantCulture));
+            File.AppendAllLines(
+                path,
+                new List<string>
+                {
+                    DuskKey + ": " + values.DuskPalette.ToString(CultureInfo.InvariantCulture),
+                    NightKey + ": " + values.NightPalette.ToString(CultureInfo.InvariantCulture)
+                });
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogError($"DryCycle DayNight: failed to save palette settings for {roomSettings.name}: {ex}");
+            Plugin.Logger?.LogError($"DryCycle DayNight: failed to save palette settings for {self.name}: {ex}");
         }
     }
 
