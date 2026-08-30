@@ -210,9 +210,9 @@ internal static class FadePaletteCombiner
 
         private void SetStatus(string text)
         {
-            if (_statusLabel?.fLabels != null && _statusLabel.fLabels.Count > 0)
+            if (_statusLabel != null)
             {
-                _statusLabel.fLabels[0].text = text;
+                _statusLabel.Text = text ?? string.Empty;
             }
         }
     }
