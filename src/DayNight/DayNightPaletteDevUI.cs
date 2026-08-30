@@ -18,7 +18,6 @@ internal static class DayNightPaletteDevUI
 
         _enabled = true;
         On.DevInterface.RoomSettingsPage.ctor += RoomSettingsPage_ctor;
-        On.DevInterface.RoomSettingsPage.Signal += RoomSettingsPage_Signal;
     }
 
     public static void Disable()
@@ -29,7 +28,6 @@ internal static class DayNightPaletteDevUI
         }
 
         On.DevInterface.RoomSettingsPage.ctor -= RoomSettingsPage_ctor;
-        On.DevInterface.RoomSettingsPage.Signal -= RoomSettingsPage_Signal;
         _enabled = false;
     }
 
@@ -80,26 +78,6 @@ internal static class DayNightPaletteDevUI
             DayNightPaletteSlot.Night));
 
         self.subNodes.Add(panel);
-    }
-
-    private static void RoomSettingsPage_Signal(
-        On.DevInterface.RoomSettingsPage.orig_Signal orig,
-        RoomSettingsPage self,
-        DevUISignalType type,
-        DevUINode sender,
-        string message)
-    {
-        orig(self, type, sender, message);
-
-        if (type != DevUISignalType.ButtonClick || sender == null)
-        {
-            return;
-        }
-
-        if (sender.IDstring == "Save_Settings" || sender.IDstring == "Save_Specific")
-        {
-            DayNightPaletteSettings.Save(self.RoomSettings);
-        }
     }
 
     private enum DayNightPaletteSlot
