@@ -5,7 +5,9 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Registers the local solar-shade polygon in DevInterface.
+/// Registers the unified local Environment Zone in DevInterface.
+/// The underlying PlacedObject type name stays DryCycleShadeZone for save
+/// compatibility with existing rooms.
 /// </summary>
 internal static class SolarShadeZoneHooks
 {
@@ -91,7 +93,8 @@ internal static class SolarShadeZoneHooks
             return;
         }
 
-        if (placedObject == null)
+        bool newlyPlaced = placedObject == null;
+        if (newlyPlaced)
         {
             placedObject = new PlacedObject(type, null)
             {
@@ -102,9 +105,21 @@ internal static class SolarShadeZoneHooks
             self.RoomSettings.placedObjects.Add(placedObject);
         }
 
-        if (placedObject.data is not SolarShadeZoneData)
+        if (placedObject.data is not SolarShadeZoneData data)
         {
-            placedObject.data = new SolarShadeZoneData(placedObject);
+            data = new SolarShadeZoneData(placedObject);
+            placedObject.data = data;
+        }
+
+        if (newlyPlaced)
+        {
+            // New Environment Zones start from the authored values of this room.
+            // This makes the panel immediately reflect the room configuration before
+            // the designer types a local override.
+            Room room = self.owner?.room;
+            data.SetDefaultsFromRoom(
+                SolarEnvironment.GetRoomShade(room),
+                HumidityEnvironment.GetRoomHumidity(room));
         }
 
         PlacedObjectRepresentation representation = new SolarShadeZoneRepresentation(
@@ -112,7 +127,7 @@ internal static class SolarShadeZoneHooks
             type + "_Rep",
             self,
             placedObject,
-            "Shade Zone");
+            "Environment Zone");
 
         self.tempNodes.Add(representation);
         self.subNodes.Add(representation);
