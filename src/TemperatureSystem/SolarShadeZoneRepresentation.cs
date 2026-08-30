@@ -7,15 +7,9 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// DevInterface representation for a freely editable local solar-shade polygon.
-///
-/// Controls:
-/// - drag a blue vertex to reshape the polygon;
-/// - Shift + left click an edge to insert a vertex;
-/// - Ctrl + left click a vertex to delete it (minimum three vertices);
-/// - click the Shade value field and type the value directly from the keyboard;
-/// - Enter commits a valid 0..1 value, Escape cancels the edit.
-/// Invalid values are never written to SolarShadeZoneData and are shown in red.
+/// DevInterface representation for the unified local Environment Zone.
+/// The blue polygon carries both Shade [0,1] and Humidity [-1,1].
+/// Both values are edited by direct keyboard input.
 /// </summary>
 internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 {
@@ -26,6 +20,12 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
     private static readonly Color DeleteColor = new(1f, 0.35f, 0.10f);
     private static readonly Color InvalidColor = new(1f, 0.16f, 0.12f);
 
+    private enum ZoneField
+    {
+        Shade,
+        Humidity
+    }
+
     private sealed class VertexHandle : Handle
     {
         internal int Index;
@@ -35,7 +35,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
             DevUINode parentNode,
             int index,
             Vector2 position)
-            : base(owner, "DryCycleShade_Vertex_" + index, parentNode, position)
+            : base(owner, "DryCycleEnvironment_Vertex_" + index, parentNode, position)
         {
             Index = index;
             defaultColor = VertexColor;
@@ -48,44 +48,43 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
     }
 
     /// <summary>
-    /// A small DevInterface text field dedicated to the Shade value.
-    /// Rain World's stock IntegerControl only exposes arrow buttons, so this node
-    /// handles keyboard text directly through Unity's legacy Input.inputString.
+    /// DevInterface has no stock free-form numeric input field, so this small node
+    /// reads Unity legacy Input.inputString while focused.
     /// </summary>
-    private sealed class ShadeTextInput : DevUILabel
+    private sealed class ZoneTextInput : DevUILabel
     {
         private const int MaxInputCharacters = 12;
 
+        private readonly ZoneField _field;
         private string _draft;
         private bool _editing;
         private bool _replaceOnType;
         private bool _draftIsUncommitted;
         private float _lastKnownDataValue;
 
-        internal ShadeTextInput(
+        internal ZoneTextInput(
             DevUI owner,
             string idString,
             DevUINode parentNode,
             Vector2 position,
-            float width)
+            float width,
+            ZoneField field)
             : base(owner, idString, parentNode, position, width, string.Empty)
         {
-            float initial = Data?.Shade ?? 0f;
+            _field = field;
+            float initial = GetDataValue();
             _lastKnownDataValue = initial;
             _draft = FormatValue(initial);
-            _editing = false;
-            _replaceOnType = false;
-            _draftIsUncommitted = false;
             ApplyVisualState();
         }
 
         private SolarShadeZoneRepresentation Representation =>
             parentNode?.parentNode as SolarShadeZoneRepresentation;
 
-        private ShadeControlPanel Panel => parentNode as ShadeControlPanel;
-
         private SolarShadeZoneData Data =>
             Representation?.pObj?.data as SolarShadeZoneData;
+
+        internal bool IsDraftValid => TryParseDraft(out _);
 
         public override void Update()
         {
@@ -101,16 +100,10 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 if (MouseOver)
                 {
                     BeginEditing();
-
-                    // This click belongs to the text field, not the draggable panel
-                    // underneath it.
                     owner.mouseClick = false;
                 }
                 else if (_editing)
                 {
-                    // Clicking elsewhere behaves like leaving a normal numeric field:
-                    // valid text is committed, invalid text is left visibly red while
-                    // the previous valid data value remains active.
                     if (TryParseDraft(out float clickedAwayValue))
                     {
                         Commit(clickedAwayValue);
@@ -138,12 +131,10 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         public override void Refresh()
         {
             base.Refresh();
-
             if (!_editing && !_draftIsUncommitted)
             {
                 SyncFromDataIfChanged();
             }
-
             ApplyVisualState();
         }
 
@@ -156,7 +147,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 
             if (!_draftIsUncommitted)
             {
-                float current = Data?.Shade ?? 0f;
+                float current = GetDataValue();
                 _lastKnownDataValue = current;
                 _draft = FormatValue(current);
             }
@@ -173,19 +164,16 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.Return) ||
-                Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
-                if (TryParseDraft(out float committedValue))
+                if (TryParseDraft(out float value))
                 {
-                    Commit(committedValue);
+                    Commit(value);
                 }
                 return;
             }
 
-            bool control = Input.GetKey(KeyCode.LeftControl) ||
-                           Input.GetKey(KeyCode.RightControl);
-
+            bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (control && Input.GetKeyDown(KeyCode.A))
             {
                 _draft = string.Empty;
@@ -243,13 +231,11 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                     _replaceOnType = false;
                 }
 
-                if (_draft.Length >= MaxInputCharacters)
+                if (_draft.Length < MaxInputCharacters)
                 {
-                    continue;
+                    _draft += c;
+                    _draftIsUncommitted = true;
                 }
-
-                _draft += c;
-                _draftIsUncommitted = true;
             }
         }
 
@@ -261,12 +247,17 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 return;
             }
 
-            // TryParseDraft has already performed the range test. Do not clamp here:
-            // an invalid authored value must remain invalid/red instead of silently
-            // turning into 0 or 1.
-            data.SetShade(value);
-            _lastKnownDataValue = data.Shade;
-            _draft = FormatValue(data.Shade);
+            if (_field == ZoneField.Shade)
+            {
+                data.SetShade(value);
+            }
+            else
+            {
+                data.SetHumidity(value);
+            }
+
+            _lastKnownDataValue = GetDataValue();
+            _draft = FormatValue(_lastKnownDataValue);
             _draftIsUncommitted = false;
             _editing = false;
             _replaceOnType = false;
@@ -275,7 +266,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 
         private void CancelEditing()
         {
-            float current = Data?.Shade ?? _lastKnownDataValue;
+            float current = GetDataValue();
             _lastKnownDataValue = current;
             _draft = FormatValue(current);
             _draftIsUncommitted = false;
@@ -285,14 +276,25 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 
         private void SyncFromDataIfChanged()
         {
-            SolarShadeZoneData data = Data;
-            if (data == null || Mathf.Approximately(data.Shade, _lastKnownDataValue))
+            float current = GetDataValue();
+            if (Mathf.Approximately(current, _lastKnownDataValue))
             {
                 return;
             }
 
-            _lastKnownDataValue = data.Shade;
-            _draft = FormatValue(data.Shade);
+            _lastKnownDataValue = current;
+            _draft = FormatValue(current);
+        }
+
+        private float GetDataValue()
+        {
+            SolarShadeZoneData data = Data;
+            if (data == null)
+            {
+                return 0f;
+            }
+
+            return _field == ZoneField.Shade ? data.Shade : data.Humidity;
         }
 
         private bool TryParseDraft(out float value)
@@ -315,43 +317,18 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 return false;
             }
 
-            return value >= 0f && value <= 1f;
+            return _field == ZoneField.Shade
+                ? value >= 0f && value <= 1f
+                : value >= -1f && value <= 1f;
         }
 
         private void ApplyVisualState()
         {
             bool valid = TryParseDraft(out _);
-            ShadeControlPanel panel = Panel;
-
-            if (valid)
-            {
-                if (panel != null)
-                {
-                    panel.Title = "Shade Zone";
-                    if (panel.fLabels.Count > 0)
-                    {
-                        panel.fLabels[0].color = Color.white;
-                    }
-                }
-
-                spriteColor = _editing ? VertexColor : Color.white;
-                textColor = Color.black;
-            }
-            else
-            {
-                if (panel != null)
-                {
-                    panel.Title = "Shade Zone - INVALID (0..1)";
-                    if (panel.fLabels.Count > 0)
-                    {
-                        panel.fLabels[0].color = InvalidColor;
-                    }
-                }
-
-                spriteColor = InvalidColor;
-                textColor = Color.white;
-            }
-
+            spriteColor = valid
+                ? (_editing ? VertexColor : Color.white)
+                : InvalidColor;
+            textColor = valid ? Color.black : Color.white;
             Text = _draft + (_editing ? "|" : string.Empty);
         }
 
@@ -370,9 +347,12 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         }
     }
 
-    private sealed class ShadeControlPanel : Panel
+    private sealed class EnvironmentControlPanel : Panel
     {
-        internal ShadeControlPanel(
+        private readonly ZoneTextInput _shadeInput;
+        private readonly ZoneTextInput _humidityInput;
+
+        internal EnvironmentControlPanel(
             DevUI owner,
             string idString,
             DevUINode parentNode,
@@ -382,28 +362,63 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 idString,
                 parentNode,
                 position,
-                new Vector2(230f, 48f),
-                "Shade Zone")
+                new Vector2(270f, 78f),
+                "Environment Zone")
         {
             subNodes.Add(new DevUILabel(
                 owner,
-                "DryCycleShade_Label",
+                "DryCycleEnvironment_ShadeLabel",
                 this,
-                new Vector2(8f, 8f),
-                110f,
+                new Vector2(8f, 36f),
+                120f,
                 "Shade"));
 
-            subNodes.Add(new ShadeTextInput(
+            _shadeInput = new ZoneTextInput(
                 owner,
-                "DryCycleShade_ValueInput",
+                "DryCycleEnvironment_ShadeInput",
                 this,
-                new Vector2(122f, 8f),
-                96f));
+                new Vector2(136f, 36f),
+                120f,
+                ZoneField.Shade);
+            subNodes.Add(_shadeInput);
+
+            subNodes.Add(new DevUILabel(
+                owner,
+                "DryCycleEnvironment_HumidityLabel",
+                this,
+                new Vector2(8f, 8f),
+                120f,
+                "Humidity"));
+
+            _humidityInput = new ZoneTextInput(
+                owner,
+                "DryCycleEnvironment_HumidityInput",
+                this,
+                new Vector2(136f, 8f),
+                120f,
+                ZoneField.Humidity);
+            subNodes.Add(_humidityInput);
+        }
+
+        public override void Refresh()
+        {
+            base.Refresh();
+            bool valid = (_shadeInput?.IsDraftValid ?? true) &&
+                         (_humidityInput?.IsDraftValid ?? true);
+
+            Title = valid
+                ? "Environment Zone"
+                : "Environment Zone - INVALID";
+
+            if (fLabels.Count > 0)
+            {
+                fLabels[0].color = valid ? Color.white : InvalidColor;
+            }
         }
     }
 
     private readonly List<VertexHandle> _vertexHandles = new();
-    private readonly ShadeControlPanel _controlPanel;
+    private readonly EnvironmentControlPanel _controlPanel;
     private readonly int _firstEdgeSprite;
     private readonly int _panelLinkSprite;
 
@@ -417,9 +432,11 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         string name)
         : base(owner, idString, parentNode, placedObject, name)
     {
-        _controlPanel = new ShadeControlPanel(
+        defaultColor = VertexColor;
+
+        _controlPanel = new EnvironmentControlPanel(
             owner,
-            "DryCycleShade_Panel",
+            "DryCycleEnvironment_Panel",
             this,
             new Vector2(105f, 80f));
         subNodes.Add(_controlPanel);
