@@ -1,19 +1,20 @@
 using System;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace DryCycle.DayNight;
 
 internal static class PaletteLighting
 {
-    // Runtime RoomCamera.paletteTexture is 32x8. For the six authored terrain rows,
-    // Unity texture Y runs bottom-up: shade occupies 0..2 and sunlit 3..5. Row 6 is
-    // the rainbow/grime strip and row 7 contains sky/fog/water/control values.
-    private const int MainColumns = 30;
-    private const int ShadeRowStart = 0;
-    private const int SunRowStart = 3;
+    private sealed class CameraState
+    {
+        public int PaletteA = int.MinValue;
+        public int PaletteB = int.MinValue;
+        public float Blend = -1f;
+        public bool ForceRefresh = true;
+    }
 
-    private static readonly HashSet<RoomCamera> PendingCameras = new();
+    private static ConditionalWeakTable<RoomCamera, CameraState> _cameraStates = new();
     private static bool _enabled;
 
     public static void Enable()
@@ -25,7 +26,6 @@ internal static class PaletteLighting
 
         _enabled = true;
         On.RoomCamera.UpdateDayNightPalette += RoomCamera_UpdateDayNightPalette;
-        On.RoomCamera.ApplyPalette += RoomCamera_ApplyPalette;
     }
 
     public static void Disable()
@@ -36,264 +36,167 @@ internal static class PaletteLighting
         }
 
         On.RoomCamera.UpdateDayNightPalette -= RoomCamera_UpdateDayNightPalette;
-        On.RoomCamera.ApplyPalette -= RoomCamera_ApplyPalette;
-        PendingCameras.Clear();
+        _cameraStates = new ConditionalWeakTable<RoomCamera, CameraState>();
         _enabled = false;
+    }
+
+    public static void ForceRefresh(RoomCamera camera)
+    {
+        if (camera == null)
+        {
+            return;
+        }
+
+        CameraState state = _cameraStates.GetOrCreateValue(camera);
+        state.ForceRefresh = true;
+
+        if (camera.room?.game != null
+            && WorldClockHooks.TryGetClock(camera.room.game, out WorldClock clock))
+        {
+            ApplyAuthoredPaletteBlend(camera, clock, force: true);
+        }
     }
 
     private static void RoomCamera_UpdateDayNightPalette(
         On.RoomCamera.orig_UpdateDayNightPalette orig,
         RoomCamera self)
     {
-        if (self?.room?.game == null || !WorldClockHooks.TryGetClock(self.room.game, out WorldClock clock))
+        if (self?.room?.game == null
+            || !WorldClockHooks.TryGetClock(self.room.game, out WorldClock clock))
         {
             orig(self);
             return;
         }
 
-        // The original method swaps dusk/night palettes and therefore conflicts with
-        // fade palettes and weather palettes. DryCycle rebuilds the room's authored
-        // base/fade palette, then relights that result in place instead.
-        self.dayNightNeedsRefresh = false;
-
         float influence = Mathf.Clamp01(self.effect_dayNight);
-        if (influence <= 0f || self.paletteTexture == null)
-        {
-            return;
-        }
-
-        // Updating at 10 Hz is already much smoother than the visual rate at which a
-        // many-minute solar cycle changes, while avoiding a full sprite palette pass
-        // on every rendered frame.
-        if (self.frameCount % 4 != 0)
-        {
-            return;
-        }
-
-        PendingCameras.Add(self);
-        try
-        {
-            // ApplyFade reconstructs paletteTexture from fadeTexA/fadeTexB first, so
-            // our lighting never compounds on the previous frame's transformed data.
-            self.ApplyFade();
-        }
-        finally
-        {
-            PendingCameras.Remove(self);
-        }
-    }
-
-    private static void RoomCamera_ApplyPalette(On.RoomCamera.orig_ApplyPalette orig, RoomCamera self)
-    {
-        if (PendingCameras.Contains(self)
-            && self?.paletteTexture != null
-            && self.room?.game != null
-            && WorldClockHooks.TryGetClock(self.room.game, out WorldClock clock))
-        {
-            ApplyAdaptiveLighting(self.paletteTexture, clock.Lighting, Mathf.Clamp01(self.effect_dayNight));
-            self.paletteTexture.Apply(false);
-        }
-
-        orig(self);
-    }
-
-    private static void ApplyAdaptiveLighting(
-        Texture2D palette,
-        SolarLightingState lighting,
-        float influence)
-    {
         if (influence <= 0f)
         {
+            orig(self);
             return;
         }
 
-        // Use the palette's own sun/shade pairs as the region-specific material
-        // response. At noon the authored sun rows remain dominant; as direct sunlight
-        // fades, sun rows collapse toward their paired shade rows. This is what lets
-        // one clock work on a desert, rainforest, snowfield, or monochrome palette
-        // without hard-coded biome colors.
-        for (int depth = 0; depth < MainColumns; depth++)
+        // DryCycle owns the room's day/night palette state while the DayNight effect
+        // is active. The original method hard-codes its own dusk/night palettes and
+        // time thresholds, so running both systems would fight over paletteA/B.
+        self.dayNightNeedsRefresh = false;
+
+        CameraState state = _cameraStates.GetOrCreateValue(self);
+        if (!state.ForceRefresh && self.frameCount % 4 != 0)
         {
-            for (int tone = 0; tone < 3; tone++)
+            return;
+        }
+
+        ApplyAuthoredPaletteBlend(self, clock, state.ForceRefresh);
+        state.ForceRefresh = false;
+    }
+
+    private static void ApplyAuthoredPaletteBlend(RoomCamera camera, WorldClock clock, bool force)
+    {
+        if (camera?.room?.roomSettings == null)
+        {
+            return;
+        }
+
+        RoomSettings roomSettings = camera.room.roomSettings;
+        DayNightPaletteSettings.Values settings = DayNightPaletteSettings.Get(roomSettings);
+
+        int basePalette = Math.Max(0, roomSettings.Palette);
+        int duskPalette = Math.Max(0, settings.DuskPalette);
+        int nightPalette = Math.Max(0, settings.NightPalette);
+
+        PaletteTransition transition = PaletteTransition.FromDayProgress(
+            clock.DayProgress,
+            basePalette,
+            duskPalette,
+            nightPalette);
+
+        CameraState state = _cameraStates.GetOrCreateValue(camera);
+        if (!force
+            && state.PaletteA == transition.PaletteA
+            && state.PaletteB == transition.PaletteB
+            && Mathf.Abs(state.Blend - transition.Blend) < 0.0025f)
+        {
+            return;
+        }
+
+        state.PaletteA = transition.PaletteA;
+        state.PaletteB = transition.PaletteB;
+        state.Blend = transition.Blend;
+
+        // ChangeBothPalettes uses Rain World's native 32x16 palette loader,
+        // effect-color application, rain/dark bank interpolation and RoomPalette
+        // propagation. We only replace which authored palettes are blended and when.
+        camera.ChangeBothPalettes(
+            transition.PaletteA,
+            transition.PaletteB,
+            transition.Blend);
+    }
+
+    private readonly struct PaletteTransition
+    {
+        public readonly int PaletteA;
+        public readonly int PaletteB;
+        public readonly float Blend;
+
+        public PaletteTransition(int paletteA, int paletteB, float blend)
+        {
+            PaletteA = paletteA;
+            PaletteB = paletteB;
+            Blend = Mathf.Clamp01(blend);
+        }
+
+        public static PaletteTransition FromDayProgress(
+            float dayProgress,
+            int basePalette,
+            int duskPalette,
+            int nightPalette)
+        {
+            float p = Mathf.Repeat(dayProgress, 1f);
+
+            // Dawn begins from the same authored Dusk palette reached at the end of
+            // pre-dawn, then returns to Base. This makes the 1.0 -> 0.0 wrap seamless.
+            if (p < 0.065f)
             {
-                int shadeRow = ShadeRowStart + tone;
-                int sunRow = SunRowStart + tone;
-
-                Color baseShade = palette.GetPixel(depth, shadeRow);
-                Color baseSun = palette.GetPixel(depth, sunRow);
-
-                float surfaceGain = tone switch
-                {
-                    0 => 0.92f,
-                    1 => 1f,
-                    _ => 1.07f
-                };
-
-                Color shade = GradeColor(
-                    baseShade,
-                    Mathf.Lerp(1f, lighting.AmbientLight * surfaceGain, influence),
-                    0f,
-                    lighting.AmbientCoolness * influence,
-                    Mathf.Lerp(1f, lighting.Saturation, influence),
-                    lighting.NightFactor * 0.012f * influence);
-
-                float directResponse = Mathf.Lerp(1f, lighting.DirectLight, influence);
-                Color relitSunBase = Color.Lerp(baseShade, baseSun, directResponse);
-                float sunExposure = Mathf.Lerp(
-                    lighting.AmbientLight,
-                    1.02f * surfaceGain,
-                    lighting.DirectLight);
-
-                Color sun = GradeColor(
-                    relitSunBase,
-                    Mathf.Lerp(1f, sunExposure, influence),
-                    lighting.SunWarmth * influence,
-                    lighting.AmbientCoolness * (1f - lighting.DirectLight) * influence,
-                    Mathf.Lerp(1f, lighting.Saturation, influence),
-                    lighting.NightFactor * 0.010f * influence);
-
-                palette.SetPixel(depth, shadeRow, shade);
-                palette.SetPixel(depth, sunRow, sun);
+                float t = Smooth01(Mathf.InverseLerp(0f, 0.065f, p));
+                return new PaletteTransition(duskPalette, basePalette, t);
             }
+
+            // Stable daytime.
+            if (p < 0.420f)
+            {
+                return new PaletteTransition(basePalette, -1, 0f);
+            }
+
+            // Golden hour / sunset: authored Base -> authored Dusk.
+            if (p < 0.500f)
+            {
+                float t = Smooth01(Mathf.InverseLerp(0.420f, 0.500f, p));
+                return new PaletteTransition(basePalette, duskPalette, t);
+            }
+
+            // Blue-hour / early night: authored Dusk -> authored Night.
+            if (p < 0.600f)
+            {
+                float t = Smooth01(Mathf.InverseLerp(0.500f, 0.600f, p));
+                return new PaletteTransition(duskPalette, nightPalette, t);
+            }
+
+            // Stable night.
+            if (p < 0.920f)
+            {
+                return new PaletteTransition(nightPalette, -1, 0f);
+            }
+
+            // Pre-dawn returns Night -> Dusk, then the next day's dawn continues
+            // Dusk -> Base. No dynamic palette generation is involved at any point.
+            float preDawn = Smooth01(Mathf.InverseLerp(0.920f, 1f, p));
+            return new PaletteTransition(nightPalette, duskPalette, preDawn);
         }
 
-        GradeSpecialRow(palette, lighting, influence);
-    }
-
-    private static void GradeSpecialRow(
-        Texture2D palette,
-        SolarLightingState lighting,
-        float influence)
-    {
-        // RoomPalette semantic slots from RoomCamera.ApplyPalette:
-        // x0 sky, x1 fog, x2 black, x4..8 water family, x9 fog amount,
-        // x30 darkness. Control values are adjusted as controls, not as colors.
-        Color sky = palette.GetPixel(0, 7);
-        Color fog = palette.GetPixel(1, 7);
-
-        float horizonWarmth = Mathf.Clamp01(lighting.DawnFactor * 0.45f + lighting.DuskFactor * 0.68f);
-        float skyExposure = Mathf.Lerp(0.50f, 1.04f, 1f - lighting.NightFactor);
-        skyExposure += lighting.BlueHourFactor * 0.04f;
-
-        sky = GradeColor(
-            sky,
-            Mathf.Lerp(1f, skyExposure, influence),
-            horizonWarmth * influence,
-            lighting.AmbientCoolness * 0.75f * influence,
-            Mathf.Lerp(1f, Mathf.Lerp(0.84f, 1f, 1f - lighting.NightFactor), influence),
-            0.018f * lighting.NightFactor * influence);
-
-        fog = GradeColor(
-            fog,
-            Mathf.Lerp(1f, Mathf.Lerp(0.62f, 1f, 1f - lighting.NightFactor), influence),
-            horizonWarmth * 0.60f * influence,
-            lighting.AmbientCoolness * 0.55f * influence,
-            Mathf.Lerp(1f, lighting.Saturation, influence),
-            0.012f * lighting.NightFactor * influence);
-
-        palette.SetPixel(0, 7, sky);
-        palette.SetPixel(1, 7, fog);
-
-        for (int x = 4; x <= 8; x++)
+        private static float Smooth01(float value)
         {
-            Color water = palette.GetPixel(x, 7);
-            water = GradeColor(
-                water,
-                Mathf.Lerp(1f, Mathf.Lerp(0.58f, 1f, 1f - lighting.NightFactor), influence),
-                horizonWarmth * 0.35f * influence,
-                lighting.AmbientCoolness * 0.70f * influence,
-                Mathf.Lerp(1f, lighting.Saturation, influence),
-                0.008f * lighting.NightFactor * influence);
-            palette.SetPixel(x, 7, water);
+            float t = Mathf.Clamp01(value);
+            return t * t * (3f - 2f * t);
         }
-
-        Color darknessControl = palette.GetPixel(30, 7);
-        float baseDarkness = 1f - darknessControl.r;
-        float targetDarkness = Mathf.Clamp01(baseDarkness + lighting.NightFactor * 0.34f * influence);
-        darknessControl.r = 1f - targetDarkness;
-        palette.SetPixel(30, 7, darknessControl);
-    }
-
-    private static Color GradeColor(
-        Color source,
-        float exposure,
-        float warmth,
-        float coolness,
-        float saturation,
-        float shadowLift)
-    {
-        float alpha = source.a;
-        float luminance = Luminance(source);
-        float max = Mathf.Max(source.r, Mathf.Max(source.g, source.b));
-        float min = Mathf.Min(source.r, Mathf.Min(source.g, source.b));
-        float chroma = max - min;
-
-        // Authorial black is semantic in Rain World. If a palette cell is genuinely
-        // black, do not invent material color that does not exist in the room art.
-        if (luminance < 0.006f && chroma < 0.006f)
-        {
-            return source;
-        }
-
-        float hueProtection = SmoothStep(0.08f, 0.42f, chroma);
-        float tintInfluence = Mathf.Lerp(0.92f, 0.30f, hueProtection);
-
-        Color color = source;
-
-        // Relative white-balance style gains instead of lerping toward fixed orange
-        // or blue target colors. Saturated biome colors therefore keep their identity.
-        float warm = warmth * tintInfluence;
-        float cool = coolness * tintInfluence;
-        color.r *= 1f + warm * 0.15f - cool * 0.045f;
-        color.g *= 1f + warm * 0.035f + cool * 0.018f;
-        color.b *= 1f - warm * 0.11f + cool * 0.14f;
-
-        color.r = ToneChannel(color.r, exposure, shadowLift);
-        color.g = ToneChannel(color.g, exposure, shadowLift);
-        color.b = ToneChannel(color.b, exposure, shadowLift);
-
-        float postLuma = Luminance(color);
-        color.r = postLuma + (color.r - postLuma) * saturation;
-        color.g = postLuma + (color.g - postLuma) * saturation;
-        color.b = postLuma + (color.b - postLuma) * saturation;
-
-        color.r = Mathf.Clamp01(color.r);
-        color.g = Mathf.Clamp01(color.g);
-        color.b = Mathf.Clamp01(color.b);
-        color.a = alpha;
-        return color;
-    }
-
-    private static float ToneChannel(float value, float exposure, float shadowLift)
-    {
-        value = Mathf.Clamp01(value);
-        exposure = Mathf.Max(0.05f, exposure);
-
-        if (exposure < 1f)
-        {
-            value = Mathf.Pow(value, 1f / exposure);
-        }
-        else if (exposure > 1f)
-        {
-            value = 1f - Mathf.Pow(1f - value, exposure);
-        }
-
-        if (shadowLift > 0f)
-        {
-            value = Mathf.Lerp(value, Mathf.Sqrt(value), Mathf.Clamp01(shadowLift * 8f));
-        }
-
-        return Mathf.Clamp01(value);
-    }
-
-    private static float Luminance(Color color)
-    {
-        return color.r * 0.2126f + color.g * 0.7152f + color.b * 0.0722f;
-    }
-
-    private static float SmoothStep(float from, float to, float value)
-    {
-        float t = Mathf.InverseLerp(from, to, value);
-        return t * t * (3f - 2f * t);
     }
 }
