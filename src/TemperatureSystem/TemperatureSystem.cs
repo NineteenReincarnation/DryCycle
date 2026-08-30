@@ -1,9 +1,9 @@
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Global temperature-system entry point. Individual temperature influences live in
-/// their own factor classes so later player-stat, rendering and hydration effects can
-/// consume them without coupling file parsing to gameplay logic.
+/// Global temperature/environment-system entry point. Individual influences live in
+/// their own factor classes so gameplay systems can query them without coupling to
+/// file parsing or DevInterface implementation details.
 /// </summary>
 internal static class TemperatureSystemRuntime
 {
@@ -60,6 +60,26 @@ internal static class TemperatureSystemRuntime
     internal static float GetEffectiveSunlight(Player player)
     {
         return SolarEnvironment.GetEffectiveSunlight(player);
+    }
+
+    internal static float GetRoomHumidity(Room room)
+    {
+        return HumidityEnvironment.GetRoomHumidity(room);
+    }
+
+    internal static float GetEffectiveHumidity(Player player)
+    {
+        return HumidityEnvironment.GetEffectiveHumidity(player);
+    }
+
+    internal static float GetEffectiveHumidity(Player player, int bodyIndex)
+    {
+        return HumidityEnvironment.GetEffectiveHumidity(player, bodyIndex);
+    }
+
+    internal static float GetHumidityBaseWaterLossMultiplier(Player player)
+    {
+        return HumidityEnvironment.GetBaseWaterLossMultiplier(player);
     }
 
     internal static float GetBodyHeat(Player player, int bodyIndex)
