@@ -6,18 +6,22 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Serialized data for a local solar-shade polygon.
+/// Serialized data for the unified local environment polygon.
+/// The zone carries both local Shade [0,1] and Humidity [-1,1].
 /// Vertices are stored as offsets from the owning PlacedObject position.
 /// </summary>
 internal sealed class SolarShadeZoneData : PlacedObject.Data
 {
-    private const string VersionTag = "V1";
-    private const int FieldCount = 3;
+    private const string VersionTag = "V2";
+    private const string LegacyVersionTag = "V1";
+    private const int FieldCount = 4;
+    private const int LegacyFieldCount = 3;
     private const int MinimumVertices = 3;
 
     private readonly List<Vector2> _vertices = new();
 
     internal float Shade = 0.5f;
+    internal float Humidity = 0f;
     internal IReadOnlyList<Vector2> Vertices => _vertices;
 
     internal SolarShadeZoneData(PlacedObject owner)
@@ -29,6 +33,17 @@ internal sealed class SolarShadeZoneData : PlacedObject.Data
     internal void SetShade(float value)
     {
         Shade = RoomEnvironmentProfile.ClampUnit(value);
+    }
+
+    internal void SetHumidity(float value)
+    {
+        Humidity = RoomEnvironmentProfile.ClampSigned(value);
+    }
+
+    internal void SetDefaultsFromRoom(float roomShade, float roomHumidity)
+    {
+        SetShade(roomShade);
+        SetHumidity(roomHumidity);
     }
 
     internal void SetVertex(int index, Vector2 value)
@@ -63,19 +78,39 @@ internal sealed class SolarShadeZoneData : PlacedObject.Data
         try
         {
             string[] parts = (s ?? string.Empty).Split('~');
-            if (parts.Length < FieldCount || !string.Equals(parts[0], VersionTag, StringComparison.Ordinal))
+            if (parts.Length < LegacyFieldCount)
             {
                 return;
             }
 
-            SetShade(ParseFloat(parts[1], Shade));
-            ReadVertices(parts[2]);
-            unrecognizedAttributes = SaveUtils.PopulateUnrecognizedStringAttrs(parts, FieldCount);
+            if (string.Equals(parts[0], VersionTag, StringComparison.Ordinal))
+            {
+                if (parts.Length < FieldCount)
+                {
+                    return;
+                }
+
+                SetShade(ParseFloat(parts[1], Shade));
+                SetHumidity(ParseFloat(parts[2], Humidity));
+                ReadVertices(parts[3]);
+                unrecognizedAttributes = SaveUtils.PopulateUnrecognizedStringAttrs(parts, FieldCount);
+                return;
+            }
+
+            if (string.Equals(parts[0], LegacyVersionTag, StringComparison.Ordinal))
+            {
+                // Existing Shade Zone saves remain valid. V1 had no humidity field,
+                // so legacy zones retain neutral local humidity until edited.
+                SetShade(ParseFloat(parts[1], Shade));
+                SetHumidity(0f);
+                ReadVertices(parts[2]);
+                unrecognizedAttributes = SaveUtils.PopulateUnrecognizedStringAttrs(parts, LegacyFieldCount);
+            }
         }
         catch (Exception ex)
         {
             global::DryCycle.Plugin.Logger?.LogWarning(
-                $"Failed to parse DryCycle Shade Zone data: {ex.Message}");
+                $"Failed to parse DryCycle Environment Zone data: {ex.Message}");
             ResetDefaultVertices();
         }
     }
@@ -86,6 +121,7 @@ internal sealed class SolarShadeZoneData : PlacedObject.Data
             "~",
             VersionTag,
             Shade.ToString("0.#####", CultureInfo.InvariantCulture),
+            Humidity.ToString("0.#####", CultureInfo.InvariantCulture),
             SerializeVertices());
 
         result = SaveState.SetCustomData(this, result);
@@ -146,7 +182,9 @@ internal sealed class SolarShadeZoneData : PlacedObject.Data
 
     private static float ParseFloat(string value, float fallback)
     {
-        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
+        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed) &&
+               !float.IsNaN(parsed) &&
+               !float.IsInfinity(parsed)
             ? parsed
             : fallback;
     }
