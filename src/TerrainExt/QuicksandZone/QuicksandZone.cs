@@ -5,8 +5,13 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 
 internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
 {
+    private const float RoomEdgeSealThreshold = 8f;
+    private const float RoomEdgeSealPadding = 400f;
+
     private readonly PlacedObject _placedObject;
     private float[] _materialUAtSample = new float[0];
+    private float _authoredStartX;
+    private float _authoredEndX;
 
     internal PlacedObject PlacedObject => _placedObject;
     internal QuicksandZoneData Data => _placedObject?.data as QuicksandZoneData;
@@ -15,6 +20,7 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         : base(room)
     {
         _placedObject = placedObject;
+        QuicksandDrillCrabCompatibility.EnsureEnabled();
         RefreshCurve();
     }
 
@@ -54,14 +60,26 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         }
 
         float newBottom = origin.y - Data.BottomDepth;
-        float newStartX = curves[0].posA.x;
-        float newEndX = curves[curves.Length - 1].posB.x;
+        _authoredStartX = curves[0].posA.x;
+        _authoredEndX = curves[curves.Length - 1].posB.x;
 
-        if (newEndX <= newStartX + 1f)
+        if (_authoredEndX <= _authoredStartX + 1f)
         {
             Plugin.Logger?.LogWarning("QuicksandZone SurfaceSpline must run from left to right.");
             return;
         }
+
+        // TerrainCurve's global room mesh extends 400 px beyond either room edge.
+        // A local curve ending exactly on a room edge otherwise exposes a diagonal
+        // parallax wedge when minDepth/maxDepth separate its front and back surfaces.
+        // Only seal endpoints that are actually authored against the room boundary;
+        // ordinary local endpoints keep their exact authored span.
+        float newStartX = _authoredStartX <= RoomEdgeSealThreshold
+            ? -RoomEdgeSealPadding
+            : _authoredStartX;
+        float newEndX = _authoredEndX >= room.PixelWidth - RoomEdgeSealThreshold
+            ? room.PixelWidth + RoomEdgeSealPadding
+            : _authoredEndX;
 
         if (Mathf.Abs(newStartX - startX) > 0.001f ||
             Mathf.Abs(newEndX - endX) > 0.001f ||
@@ -83,13 +101,15 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         for (int i = 0; i < segments; i++)
         {
             float x = Mathf.Lerp(startX, endX, (float)i / Mathf.Max(1, segments - 1));
-            while (curveIndex < curves.Length - 1 && curves[curveIndex].posB.x < x)
+            float authoredX = Mathf.Clamp(x, _authoredStartX, _authoredEndX);
+
+            while (curveIndex < curves.Length - 1 && curves[curveIndex].posB.x < authoredX)
             {
                 curveIndex++;
             }
 
             BezierCurve frontCurve = curves[curveIndex];
-            float frontY = Custom.BezierYatX(frontCurve, x);
+            float frontY = Custom.BezierYatX(frontCurve, authoredX);
             frontPoints[i] = new Vector2(
                 x,
                 TerrainCurve.Normalize(frontY, -10000f));
@@ -99,13 +119,24 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
             backCurve.posB.y += 50f;
             backPoints[i] = new Vector2(
                 x,
-                TerrainCurve.Normalize(Custom.BezierYatX(backCurve, x), -10000f));
+                TerrainCurve.Normalize(Custom.BezierYatX(backCurve, authoredX), -10000f));
 
-            Vector2 localFront = frontPoints[i] - origin;
-            _materialUAtSample[i] = QuicksandSurface.FindNearestU(
-                Data.SurfaceSpline,
-                localFront,
-                out _);
+            if (x <= _authoredStartX)
+            {
+                _materialUAtSample[i] = 0f;
+            }
+            else if (x >= _authoredEndX)
+            {
+                _materialUAtSample[i] = 1f;
+            }
+            else
+            {
+                Vector2 localFront = new Vector2(authoredX, frontPoints[i].y) - origin;
+                _materialUAtSample[i] = QuicksandSurface.FindNearestU(
+                    Data.SurfaceSpline,
+                    localFront,
+                    out _);
+            }
         }
 
         // TerrainCurve.DrawSprites hides non-LocalTerrainCurve instances when the
@@ -220,7 +251,9 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
         out Vector2 normal,
         Vector2? lastCenter)
     {
-        if (Data == null || IsQuicksandAtWorldX(center.x))
+        if (Data == null ||
+            (!QuicksandDrillCrabCompatibility.TreatQuicksandAsSolidTerrain &&
+             IsQuicksandAtWorldX(center.x)))
         {
             normal = Vector2.zero;
             return center;
@@ -232,7 +265,9 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
     bool TerrainManager.ITerrain.ObstructsTile(int x, int y)
     {
         float tileCenterX = x * 20f + 10f;
-        if (Data == null || IsQuicksandAtWorldX(tileCenterX))
+        if (Data == null ||
+            (!QuicksandDrillCrabCompatibility.TreatQuicksandAsSolidTerrain &&
+             IsQuicksandAtWorldX(tileCenterX)))
         {
             return false;
         }
@@ -243,7 +278,9 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
     float TerrainManager.ITerrain.GetCoverage(int x, int y)
     {
         float tileCenterX = x * 20f + 10f;
-        if (Data == null || IsQuicksandAtWorldX(tileCenterX))
+        if (Data == null ||
+            (!QuicksandDrillCrabCompatibility.TreatQuicksandAsSolidTerrain &&
+             IsQuicksandAtWorldX(tileCenterX)))
         {
             return 0f;
         }
@@ -263,8 +300,14 @@ internal sealed class QuicksandZone : TerrainCurve, TerrainManager.ITerrain
             return true;
         }
 
-        Vector2 expectedStart = _placedObject.pos + Data.SurfaceSpline.posA;
-        Vector2 expectedEnd = _placedObject.pos + Data.SurfaceSpline.posB;
+        Vector2 expectedStart = new(
+            _authoredStartX <= RoomEdgeSealThreshold ? -RoomEdgeSealPadding : _authoredStartX,
+            frontPoints != null && frontPoints.Length > 0 ? frontPoints[0].y : 0f);
+        Vector2 expectedEnd = new(
+            _authoredEndX >= room.PixelWidth - RoomEdgeSealThreshold
+                ? room.PixelWidth + RoomEdgeSealPadding
+                : _authoredEndX,
+            frontPoints != null && frontPoints.Length > 0 ? frontPoints[frontPoints.Length - 1].y : 0f);
 
         return Vector2.SqrMagnitude(handles[0].Middle - expectedStart) > 0.0001f ||
                Vector2.SqrMagnitude(handles[1].Middle - expectedEnd) > 0.0001f;
