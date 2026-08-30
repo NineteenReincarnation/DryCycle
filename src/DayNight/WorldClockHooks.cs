@@ -7,6 +7,12 @@ namespace DryCycle.DayNight;
 
 internal static class WorldClockHooks
 {
+    // Temporary accelerated test schedule. Rain World runs gameplay at 40 ticks/sec,
+    // and vanilla RainMeter uses one pip per 1200 ticks (30 sec). Therefore a
+    // 2400-tick daytime is exactly one minute and produces exactly two HUD pips.
+    // Night remains 50% of daytime in WorldClock, so it lasts 30 seconds.
+    private const int TestDayCycleLength = 40 * 60;
+
     private static ConditionalWeakTable<RainWorldGame, WorldClock> _clocks = new();
     private static bool _enabled;
 
@@ -21,6 +27,7 @@ internal static class WorldClockHooks
         On.RainCycle.ctor += RainCycle_ctor;
         On.RainCycle.Update += RainCycle_Update;
         On.RainCycle.RainHit += RainCycle_RainHit;
+        On.HUD.RainMeter.ctor += RainMeter_ctor;
         On.HUD.RainMeter.Update += RainMeter_Update;
     }
 
@@ -34,6 +41,7 @@ internal static class WorldClockHooks
         On.RainCycle.ctor -= RainCycle_ctor;
         On.RainCycle.Update -= RainCycle_Update;
         On.RainCycle.RainHit -= RainCycle_RainHit;
+        On.HUD.RainMeter.ctor -= RainMeter_ctor;
         On.HUD.RainMeter.Update -= RainMeter_Update;
         _clocks = new ConditionalWeakTable<RainWorldGame, WorldClock>();
         _enabled = false;
@@ -55,8 +63,11 @@ internal static class WorldClockHooks
         RainWorldGame game = rainCycle.world.game;
         WorldClock clock = _clocks.GetValue(
             game,
-            _ => new WorldClock(Math.Max(1, rainCycle.cycleLength)));
-        clock.SetCycleLength(rainCycle.cycleLength);
+            _ => new WorldClock(TestDayCycleLength));
+
+        // Keep the accelerated test duration stable even though vanilla RainCycle
+        // retains its authored cycleLength as a compatibility facade.
+        clock.SetCycleLength(TestDayCycleLength);
         return clock;
     }
 
@@ -119,6 +130,35 @@ internal static class WorldClockHooks
         orig(self);
     }
 
+    private static void RainMeter_ctor(
+        On.HUD.RainMeter.orig_ctor orig,
+        global::HUD.RainMeter self,
+        global::HUD.HUD hud,
+        FContainer fContainer)
+    {
+        Player player = hud?.owner as Player;
+        RainCycle rainCycle = player?.abstractCreature?.world?.rainCycle;
+        if (rainCycle == null || !ShouldRun(rainCycle))
+        {
+            orig(self, hud, fContainer);
+            return;
+        }
+
+        // Vanilla chooses the number of RainMeter pips in its constructor from
+        // cycleLength / 1200. Expose the one-minute virtual daytime only for that
+        // construction step, then restore the real RainCycle value immediately.
+        int previousCycleLength = rainCycle.cycleLength;
+        rainCycle.cycleLength = TestDayCycleLength;
+        try
+        {
+            orig(self, hud, fContainer);
+        }
+        finally
+        {
+            rainCycle.cycleLength = previousCycleLength;
+        }
+    }
+
     private static void RainMeter_Update(On.HUD.RainMeter.orig_Update orig, global::HUD.RainMeter self)
     {
         Player player = self?.hud?.owner as Player;
@@ -129,12 +169,13 @@ internal static class WorldClockHooks
             return;
         }
 
-        // Let vanilla update visibility, placement, half-time feedback and its normal
-        // animation state using a virtual timer. Immediately afterwards, replace only
-        // the pip shape/state: elapsed daytime pips remain as hollow circles instead
-        // of shrinking away, and the night phase fills them back in in reverse order.
+        // During HUD update expose a coherent one-minute virtual RainCycle so
+        // AmountLeft, fRain and the two test pips all describe the same clock. The
+        // rest of the game continues seeing the safe compatibility RainCycle.
         int previousTimer = rainCycle.timer;
-        rainCycle.timer = clock.VirtualRainTimer(rainCycle.cycleLength);
+        int previousCycleLength = rainCycle.cycleLength;
+        rainCycle.cycleLength = TestDayCycleLength;
+        rainCycle.timer = clock.VirtualRainTimer(TestDayCycleLength);
         try
         {
             orig(self);
@@ -143,6 +184,7 @@ internal static class WorldClockHooks
         finally
         {
             rainCycle.timer = previousTimer;
+            rainCycle.cycleLength = previousCycleLength;
         }
     }
 
@@ -168,8 +210,8 @@ internal static class WorldClockHooks
                 continue;
             }
 
-            // Day follows vanilla's depletion direction. Night deliberately walks the
-            // opposite way around the Karma ring so the meter visibly reverses.
+            // Day depletes clockwise into hollow rings. Night deliberately traverses
+            // the opposite direction and fills the hollow rings back into solid pips.
             int order = clock.IsNight ? i : count - 1 - i;
             float boundary = Mathf.Clamp01(scaledProgress - order);
             boundary = boundary * boundary * (3f - 2f * boundary);
@@ -178,9 +220,8 @@ internal static class WorldClockHooks
             float hollow = clock.IsNight ? 1f - boundary : boundary;
             ApplyPipShape(circle, hollow, sizeFade);
 
-            // Rebuild the vanilla radial placement using our own hollow factor. This
-            // keeps hollow pips on the ring after vanilla would normally shrink them
-            // to zero and also retains the stock reveal/tick-pulse motion.
+            // Rebuild vanilla radial placement using our hollow factor. This keeps
+            // elapsed pips on the ring instead of allowing vanilla to shrink them out.
             float index01 = count > 1 ? (float)i / (count - 1) : 0f;
             float angle = (1f - (float)i / count)
                 * 360f
@@ -195,10 +236,6 @@ internal static class WorldClockHooks
     {
         hollow = Mathf.Clamp01(hollow);
 
-        // These are the same two visual states used by vanilla RainMeter:
-        // Circle4 is its filled dot, smallEmptyCircle is its empty ring. During the
-        // boundary transition we use the vector-circle shader path to morph smoothly
-        // between them rather than popping from one atlas graphic to the other.
         if (hollow <= 0.001f)
         {
             circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.Circle4;
