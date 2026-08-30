@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using DevInterface;
 using UnityEngine;
@@ -6,13 +7,13 @@ using UnityEngine;
 namespace DryCycle.Misc;
 
 /// <summary>
-/// Adds direct integer keyboard entry to the vanilla Room Settings "Palette" number
-/// field without replacing PaletteController itself. The original arrows, inherited
-/// palette semantics and camera refresh behavior remain intact.
+/// Adds direct integer keyboard entry to all vanilla Room Settings palette number
+/// controls without replacing PaletteController itself. The stock arrows, inherited
+/// values and camera refresh behavior remain intact.
 /// </summary>
 internal static class PaletteNumberInput
 {
-    private const string OverlayId = "DryCycle_Palette_Number_Input";
+    private const string OverlayIdPrefix = "DryCycle_Palette_Number_Input_";
     private static bool _enabled;
 
     public static void Enable()
@@ -47,55 +48,62 @@ internal static class PaletteNumberInput
     {
         orig(self, owner, IDstring, parentNode, name);
 
-        PaletteController paletteController = FindBasePaletteController(self);
-        if (paletteController == null)
+        List<PaletteController> controllers = new();
+        CollectPaletteControllers(self, controllers);
+        for (int i = 0; i < controllers.Count; i++)
+        {
+            AddInputOverlay(owner, controllers[i]);
+        }
+    }
+
+    private static void CollectPaletteControllers(DevUINode node, List<PaletteController> result)
+    {
+        if (node == null)
         {
             return;
         }
 
-        for (int i = 0; i < paletteController.subNodes.Count; i++)
+        if (node is PaletteController paletteController)
         {
-            if (paletteController.subNodes[i]?.IDstring == OverlayId)
+            result.Add(paletteController);
+        }
+
+        if (node.subNodes == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+        {
+            CollectPaletteControllers(node.subNodes[i], result);
+        }
+    }
+
+    private static void AddInputOverlay(DevUI owner, PaletteController controller)
+    {
+        if (controller == null || controller.controlPoint < 0 || controller.controlPoint > 3)
+        {
+            return;
+        }
+
+        string overlayId = OverlayIdPrefix + controller.IDstring;
+        for (int i = 0; i < controller.subNodes.Count; i++)
+        {
+            if (controller.subNodes[i]?.IDstring == overlayId)
             {
                 return;
             }
         }
 
-        // IntegerControl's stock number label is at x=140, width=36. Put the editable
-        // button directly over it. Because this node is appended last, it updates
-        // before the stock Less/More arrows; clicking an arrow while editing therefore
-        // commits the typed value first, then vanilla applies the arrow increment.
-        paletteController.subNodes.Add(new PaletteNumberInputButton(
+        // IntegerControl's stock number label is at x=140, width=36. Overlay only
+        // that label; the stock Less/More arrows remain untouched.
+        controller.subNodes.Add(new PaletteNumberInputButton(
             owner,
-            OverlayId,
-            paletteController,
+            overlayId,
+            controller,
             new Vector2(140f, 0f),
             36f,
-            paletteController));
-    }
-
-    private static PaletteController FindBasePaletteController(DevUINode node)
-    {
-        if (node is PaletteController paletteController && paletteController.controlPoint == 0)
-        {
-            return paletteController;
-        }
-
-        if (node?.subNodes == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-        {
-            PaletteController found = FindBasePaletteController(node.subNodes[i]);
-            if (found != null)
-            {
-                return found;
-            }
-        }
-
-        return null;
+            controller));
     }
 
     private sealed class PaletteNumberInputButton : Button
@@ -118,6 +126,7 @@ internal static class PaletteNumberInput
         {
             _controller = controller;
             SyncFromVanillaLabel();
+            ApplyVanillaColors();
         }
 
         public override void Clicked()
@@ -132,15 +141,17 @@ internal static class PaletteNumberInput
         {
             base.Update();
 
+            // Button normally uses red text and a red/blue hover state. This overlay
+            // is intended to look exactly like the vanilla IntegerControl number box,
+            // so force the original black-text / pale-background appearance.
+            ApplyVanillaColors();
+
             if (!_editing)
             {
                 SyncFromVanillaLabel();
                 return;
             }
 
-            // Since this overlay updates before the vanilla arrows, an outside click
-            // commits first. The clicked vanilla control can then act on the new value
-            // during the same DevUI update pass.
             if (owner != null && owner.mouseClick && !MouseOver)
             {
                 Commit();
@@ -200,9 +211,7 @@ internal static class PaletteNumberInput
                 return;
             }
 
-            // A small caret makes it explicit that the otherwise vanilla-looking
-            // number box currently owns keyboard input.
-            SetDisplayedText((_buffer.Length == 0 ? "" : _buffer) + "_");
+            SetDisplayedText((_buffer.Length == 0 ? string.Empty : _buffer) + "_");
         }
 
         private void BeginEdit()
@@ -213,10 +222,24 @@ internal static class PaletteNumberInput
                 return;
             }
 
-            _buffer = Math.Max(0, roomSettings.Palette).ToString(CultureInfo.InvariantCulture);
+            _buffer = CurrentValueText(roomSettings);
             _replaceOnFirstEditKey = true;
             _editing = true;
             SetDisplayedText(_buffer + "_");
+        }
+
+        private string CurrentValueText(RoomSettings roomSettings)
+        {
+            return _controller.controlPoint switch
+            {
+                0 => Math.Max(0, roomSettings.Palette).ToString(CultureInfo.InvariantCulture),
+                1 => Math.Max(0, roomSettings.EffectColorA).ToString(CultureInfo.InvariantCulture),
+                2 => Math.Max(0, roomSettings.EffectColorB).ToString(CultureInfo.InvariantCulture),
+                3 => roomSettings.fadePalette == null
+                    ? string.Empty
+                    : Math.Max(0, roomSettings.fadePalette.palette).ToString(CultureInfo.InvariantCulture),
+                _ => string.Empty
+            };
         }
 
         private void Commit()
@@ -243,17 +266,69 @@ internal static class PaletteNumberInput
                 return;
             }
 
-            int palette = (int)Math.Min(int.MaxValue, Math.Max(0L, parsed));
-            _controller.RoomSettings.pal = palette;
-
-            RainWorldGame game = owner?.room?.game;
-            if (game?.cameras != null && game.cameras.Length > 0 && game.cameras[0] != null)
-            {
-                game.cameras[0].ChangeMainPalette(_controller.RoomSettings.Palette);
-            }
-
+            int value = (int)Math.Min(int.MaxValue, Math.Max(0L, parsed));
+            ApplyValue(value);
             _controller.Refresh();
             SyncFromVanillaLabel();
+        }
+
+        private void ApplyValue(int value)
+        {
+            RoomSettings roomSettings = _controller.RoomSettings;
+            RainWorldGame game = owner?.room?.game;
+            RoomCamera camera = game?.cameras != null && game.cameras.Length > 0
+                ? game.cameras[0]
+                : null;
+
+            switch (_controller.controlPoint)
+            {
+                case 0:
+                    roomSettings.pal = value;
+                    camera?.ChangeMainPalette(roomSettings.Palette);
+                    break;
+
+                case 1:
+                    roomSettings.eColA = value;
+                    camera?.ApplyEffectColorsToAllPaletteTextures(
+                        roomSettings.EffectColorA,
+                        roomSettings.EffectColorB);
+                    break;
+
+                case 2:
+                    roomSettings.eColB = value;
+                    camera?.ApplyEffectColorsToAllPaletteTextures(
+                        roomSettings.EffectColorA,
+                        roomSettings.EffectColorB);
+                    break;
+
+                case 3:
+                    if (roomSettings.fadePalette == null)
+                    {
+                        int screenCount = owner?.room?.cameraPositions?.Length ?? 1;
+                        roomSettings.fadePalette = new RoomSettings.FadePalette(value, Math.Max(1, screenCount));
+                    }
+                    else
+                    {
+                        roomSettings.fadePalette.palette = value;
+                    }
+
+                    if (camera != null)
+                    {
+                        float fade = 0f;
+                        int cameraIndex = camera.currentCameraPosition;
+                        if (roomSettings.fadePalette.fades != null
+                            && cameraIndex >= 0
+                            && cameraIndex < roomSettings.fadePalette.fades.Length)
+                        {
+                            fade = roomSettings.fadePalette.fades[cameraIndex];
+                        }
+
+                        camera.ChangeFadePalette(value, fade);
+                    }
+
+                    _controller.parentNode?.Refresh();
+                    break;
+            }
         }
 
         private void Cancel()
@@ -272,6 +347,17 @@ internal static class PaletteNumberInput
             }
 
             SetDisplayedText(_controller.NumberLabelText);
+            ApplyVanillaColors();
+        }
+
+        private void ApplyVanillaColors()
+        {
+            textColor = Color.black;
+            spriteColor = Color.white;
+            if (fSprites != null && fSprites.Count > 0)
+            {
+                fSprites[0].alpha = 0.5f;
+            }
         }
 
         private void SetDisplayedText(string text)
