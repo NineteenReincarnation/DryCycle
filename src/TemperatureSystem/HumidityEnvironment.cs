@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Room/local humidity query and Base-WV correction layer.
+/// Room/local humidity query plus hydration and thermal correction rules.
 ///
 /// Humidity is signed in [-1,1]: -1 = extremely dry, 0 = neutral,
 /// +1 = extremely humid. The room value is the baseline. A unified Environment
@@ -13,6 +13,10 @@ namespace DryCycle.TemperatureSystem;
 /// </summary>
 internal static class HumidityEnvironment
 {
+    internal const float CoolingHeatStressThreshold = 0.25f;
+    internal const float MaximumDryCoolingBonus = 0.25f;
+    internal const float MaximumHumidCoolingPenalty = 0.55f;
+
     internal static float GetRoomHumidity(Room room)
     {
         GetRoomNames(room, out string regionName, out string roomName);
@@ -116,6 +120,39 @@ internal static class HumidityEnvironment
     internal static float GetBaseWaterLossMultiplier(Player player)
     {
         return GetBaseWaterLossMultiplier(GetEffectiveHumidity(player));
+    }
+
+    /// <summary>
+    /// Humidity changes room-cooling efficiency only when BodyHeat is above the
+    /// heat-stress threshold. At BodyHeat == 1, extreme dry air gives x1.25 room
+    /// cooling while extreme humidity gives x0.45. At or below BodyHeat 0.25 the
+    /// multiplier is exactly x1 so normal low-heat room exchange is unchanged.
+    /// </summary>
+    internal static float GetBodyHeatCoolingMultiplier(float bodyHeat, float humidity)
+    {
+        float heatStress = Mathf.Clamp01(
+            (bodyHeat - CoolingHeatStressThreshold) /
+            (PlayerThermalModel.MaximumBodyHeat - CoolingHeatStressThreshold));
+
+        if (heatStress <= 0f)
+        {
+            return 1f;
+        }
+
+        float h = RoomEnvironmentProfile.ClampSigned(humidity);
+        return h < 0f
+            ? 1f + (-h * MaximumDryCoolingBonus * heatStress)
+            : 1f - (h * MaximumHumidCoolingPenalty * heatStress);
+    }
+
+    internal static float GetBodyHeatCoolingMultiplier(
+        Player player,
+        int bodyIndex,
+        float bodyHeat)
+    {
+        return GetBodyHeatCoolingMultiplier(
+            bodyHeat,
+            GetEffectiveHumidity(player, bodyIndex));
     }
 
     private static bool ContainsWorldPoint(
