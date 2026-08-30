@@ -7,6 +7,7 @@ using DryCycle.DayNight;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
+using DryCycle.Misc;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
@@ -23,7 +24,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.75";
+    public const string Version = "0.1.76";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -50,6 +51,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            MiscRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
@@ -145,11 +147,13 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
             DayNightRuntime.Enable();
+            MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
         }
         catch (Exception ex)
         {
+            MiscRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
