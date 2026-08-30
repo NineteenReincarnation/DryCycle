@@ -5,6 +5,11 @@ namespace DryCycle.DayNight;
 
 internal static class WorldClockHooks
 {
+    // Temporary accelerated clock for visual testing.
+    // Rain World updates at 40 ticks per second, so 2400 ticks = 60 seconds.
+    // Night remains 50% of the day length in WorldClock, therefore 1200 ticks = 30 seconds.
+    private const int TestDayLengthTicks = 40 * 60;
+
     private static ConditionalWeakTable<RainWorldGame, WorldClock> _clocks = new();
     private static bool _enabled;
 
@@ -53,8 +58,12 @@ internal static class WorldClockHooks
         RainWorldGame game = rainCycle.world.game;
         WorldClock clock = _clocks.GetValue(
             game,
-            _ => new WorldClock(Math.Max(1, rainCycle.cycleLength)));
-        clock.SetCycleLength(rainCycle.cycleLength);
+            _ => new WorldClock(TestDayLengthTicks));
+
+        // TEMP TEST OVERRIDE: one minute of day, thirty seconds of night.
+        // Keep RainCycle.cycleLength itself untouched so vanilla compatibility state
+        // and RainMeter construction still use the save/session's authored cycle data.
+        clock.SetCycleLength(TestDayLengthTicks);
         return clock;
     }
 
@@ -127,9 +136,9 @@ internal static class WorldClockHooks
             return;
         }
 
-        // Both halves use the full vanilla RainMeter range. Day consumes it over the
-        // full original cycleLength; night consumes the same visual range in half the
-        // real time. This keeps the HUD shape unchanged while making night 50% as long.
+        // Both halves use the full vanilla RainMeter range. During this temporary
+        // accelerated test the existing ring is swept in 60 seconds by day and
+        // 30 seconds by night, without changing vanilla cycleLength itself.
         int previousTimer = rainCycle.timer;
         rainCycle.timer = clock.VirtualRainTimer(rainCycle.cycleLength);
         try
