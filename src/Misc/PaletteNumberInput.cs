@@ -104,6 +104,7 @@ internal static class PaletteNumberInput
 
         private readonly PaletteController _controller;
         private bool _editing;
+        private bool _replaceOnFirstEditKey;
         private string _buffer = string.Empty;
 
         public PaletteNumberInputButton(
@@ -159,6 +160,12 @@ internal static class PaletteNumberInput
                 char c = input[i];
                 if (c >= '0' && c <= '9')
                 {
+                    if (_replaceOnFirstEditKey)
+                    {
+                        _buffer = string.Empty;
+                        _replaceOnFirstEditKey = false;
+                    }
+
                     if (_buffer.Length < MaxDigits)
                     {
                         _buffer += c;
@@ -166,7 +173,12 @@ internal static class PaletteNumberInput
                 }
                 else if (c == '\b')
                 {
-                    if (_buffer.Length > 0)
+                    if (_replaceOnFirstEditKey)
+                    {
+                        _buffer = string.Empty;
+                        _replaceOnFirstEditKey = false;
+                    }
+                    else if (_buffer.Length > 0)
                     {
                         _buffer = _buffer.Substring(0, _buffer.Length - 1);
                     }
@@ -202,6 +214,7 @@ internal static class PaletteNumberInput
             }
 
             _buffer = Math.Max(0, roomSettings.Palette).ToString(CultureInfo.InvariantCulture);
+            _replaceOnFirstEditKey = true;
             _editing = true;
             SetDisplayedText(_buffer + "_");
         }
@@ -214,6 +227,7 @@ internal static class PaletteNumberInput
             }
 
             _editing = false;
+            _replaceOnFirstEditKey = false;
 
             if (_controller?.RoomSettings == null || string.IsNullOrEmpty(_buffer))
             {
@@ -245,6 +259,7 @@ internal static class PaletteNumberInput
         private void Cancel()
         {
             _editing = false;
+            _replaceOnFirstEditKey = false;
             _controller?.Refresh();
             SyncFromVanillaLabel();
         }
