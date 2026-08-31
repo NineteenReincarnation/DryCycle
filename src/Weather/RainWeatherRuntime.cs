@@ -150,6 +150,12 @@ internal static class RainWeatherRuntime
             StartOwnedDeathRain(self, state);
             orig(self);
 
+            // If another system already owned DeathRain, leave it completely alone.
+            if (!state.OwnsDeathRain)
+            {
+                return;
+            }
+
             // Native DeathRain remains responsible for stage selection and all of its
             // nonlinear relationships. The schedule envelope only fades the complete
             // result in/out inside the event's authored pip interval.
