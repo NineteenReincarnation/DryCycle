@@ -3,11 +3,16 @@ using RWCustom;
 namespace DryCycle.Creatures.MossySpider;
 
 /// <summary>
-/// Standard Rain World path search with two MossySpider-specific additions:
-/// Wall/Climb remain invalid, and SideExit movement continues physically beyond the
-/// screen edge before handing the creature to the off-screen shortcut system.
+/// Border-exit pathing for MossySpider.
+///
+/// MossySpider reuses Deer's pre-baked pathing slot, so its realized pather must use
+/// the same border-oriented path model rather than StandardPather's short-creature
+/// anti-loop history. A slow giant can spend many frames following the same tile
+/// connection; StandardPather marks that repeated connection Unwanted and starts
+/// choosing an equally legal connection in the opposite direction, which produced the
+/// visible left/right rocking in place.
 /// </summary>
-internal sealed class MossySpiderPather : StandardPather
+internal sealed class MossySpiderPather : BorderExitPather
 {
     private const int SideExitWalkMarginTiles = 18;
 
@@ -18,10 +23,14 @@ internal sealed class MossySpiderPather : StandardPather
         : base(ai, world, creature)
     {
         walkPastPointOfNoReturn = true;
-        savedPastConnections = 32;
-        numnerOfTimesConnectionHasToHaveBeenFollowedToBeOffLimits = 5;
-        heuristicCostFac = 30f;
-        heuristicDestFac = 1f;
+    }
+
+    public override PathCost HeuristicForCell(PathingCell cell, PathCost costToGoal)
+    {
+        // DeerPather deliberately follows the baked generation/cost field directly.
+        // Do the same so probing different points of the long torso cannot change the
+        // heuristic direction from frame to frame.
+        return costToGoal;
     }
 
     public override PathCost CheckConnectionCost(
@@ -50,35 +59,117 @@ internal sealed class MossySpiderPather : StandardPather
         return cost;
     }
 
-    internal new MovementConnection FollowPath(
+    internal MovementConnection FollowPath(
         WorldCoordinate originPos,
         bool actuallyFollowingThisPath)
     {
-        MovementConnection connection = base.FollowPath(originPos, actuallyFollowingThisPath);
+        if ((!originPos.TileDefined && !originPos.NodeDefined) || realizedRoom == null)
+        {
+            return default;
+        }
+
+        WorldCoordinate origin = RestrictedOriginPos(originPos);
+        PathingCell originCell = PathingCellAtWorldCoordinate(origin);
+        if (originCell == null)
+        {
+            return default;
+        }
+
+        if (!originCell.reachable || !originCell.possibleToGetBackFrom)
+        {
+            OutOfElement(origin);
+        }
+
+        MovementConnection chosen = default;
+        PathCost chosenTotal = new(0f, PathCost.Legality.Unallowed);
+        PathCost.Legality chosenLegality = PathCost.Legality.Unallowed;
+        int chosenGeneration = -acceptablePathAge;
+
+        int connectionIndex = 0;
+        while (true)
+        {
+            MovementConnection candidate =
+                ConnectionAtCoordinate(outGoing: true, origin, connectionIndex++);
+
+            if (candidate == default)
+            {
+                break;
+            }
+
+            if (candidate.destinationCoord.TileDefined &&
+                !Custom.InsideRect(candidate.DestTile, coveredArea))
+            {
+                continue;
+            }
+
+            PathingCell destinationCell = PathingCellAtWorldCoordinate(candidate.destinationCoord);
+            if (destinationCell == null)
+            {
+                continue;
+            }
+
+            PathCost connectionCost =
+                CheckConnectionCost(originCell, destinationCell, candidate, followingPath: true);
+
+            if (!destinationCell.possibleToGetBackFrom && !walkPastPointOfNoReturn)
+            {
+                connectionCost.legality = PathCost.Legality.Unallowed;
+            }
+
+            PathCost totalCost = destinationCell.costToGoal + connectionCost;
+            if (candidate.destinationCoord.TileDefined &&
+                destination.TileDefined &&
+                candidate.destinationCoord.Tile == destination.Tile)
+            {
+                totalCost.resistance = 0f;
+            }
+
+            // Unlike StandardPather there is intentionally no repeated-connection
+            // penalty here. A body this large may need dozens of frames to cross one
+            // 20 px tile; following the same connection is progress, not being stuck.
+            if (connectionCost.legality < chosenLegality ||
+                (connectionCost.legality == chosenLegality &&
+                 (destinationCell.generation > chosenGeneration ||
+                  (destinationCell.generation == chosenGeneration && totalCost <= chosenTotal))))
+            {
+                chosen = candidate;
+                chosenLegality = connectionCost.legality;
+                chosenGeneration = destinationCell.generation;
+                chosenTotal = totalCost;
+            }
+        }
+
+        if (chosenLegality > PathCost.Legality.Unwanted)
+        {
+            return default;
+        }
+
+        if (actuallyFollowingThisPath)
+        {
+            creatureFollowingGeneration = chosenGeneration;
+        }
 
         if (!actuallyFollowingThisPath ||
-            connection == default ||
-            connection.type != MovementConnection.MovementType.OutsideRoom ||
-            connection.destinationCoord.TileDefined)
+            chosen == default ||
+            chosen.type != MovementConnection.MovementType.OutsideRoom ||
+            chosen.destinationCoord.TileDefined)
         {
-            return connection;
+            return chosen;
         }
 
-        if (creature.realizedCreature is not MossySpider spider ||
-            realizedRoom == null ||
-            spider.shortcutDelay > 0)
+        if (creature.realizedCreature is not MossySpider spider || spider.shortcutDelay > 0)
         {
-            return connection;
+            return chosen;
         }
 
-        RWCustom.IntVector2 outward = OutwardDirection(connection);
+        IntVector2 outward = OutwardDirection(chosen);
         if (outward.x == 0 && outward.y == 0)
         {
-            return connection;
+            return chosen;
         }
 
-        // Keep walking beyond the visible room boundary so a 300 px body does not
-        // disappear while most of it is still on screen.
+        // Keep the whole long body walking beyond the visible room before handing it
+        // to SideSpace, just as DeerPather does for Rain Deer.
         if (originPos.TileDefined &&
             Custom.InsideRect(
                 originPos.Tile,
@@ -99,34 +190,39 @@ internal sealed class MossySpiderPather : StandardPather
                 1);
         }
 
-        WorldCoordinate sideDestination = BestSideDestination(connection.destinationCoord);
-        spider.AccessSideSpace(connection.destinationCoord, sideDestination);
+        WorldCoordinate sideDestination = BestSideDestination(chosen.destinationCoord);
+        spider.AccessSideSpace(chosen.destinationCoord, sideDestination);
+        if (sideDestination.room != creaturePos.room)
+        {
+            LeavingRoom();
+        }
+
         return default;
     }
 
-    private RWCustom.IntVector2 OutwardDirection(MovementConnection connection)
+    private IntVector2 OutwardDirection(MovementConnection connection)
     {
         if (connection.startCoord.x <= 0)
         {
-            return new RWCustom.IntVector2(-1, 0);
+            return new IntVector2(-1, 0);
         }
 
         if (connection.startCoord.x >= realizedRoom.TileWidth - 1)
         {
-            return new RWCustom.IntVector2(1, 0);
+            return new IntVector2(1, 0);
         }
 
         if (connection.startCoord.y <= 0)
         {
-            return new RWCustom.IntVector2(0, -1);
+            return new IntVector2(0, -1);
         }
 
         if (connection.startCoord.y >= realizedRoom.TileHeight - 1)
         {
-            return new RWCustom.IntVector2(0, 1);
+            return new IntVector2(0, 1);
         }
 
-        return new RWCustom.IntVector2(0, 0);
+        return new IntVector2(0, 0);
     }
 
     private WorldCoordinate BestSideDestination(WorldCoordinate fallback)
