@@ -4,9 +4,8 @@ using System.Collections.Generic;
 namespace DryCycle.Registration;
 
 /// <summary>
-/// DryCycle's creature registry. This is intentionally narrower than Fisobs: it
-/// handles the core lifecycle needed by our creatures and keeps unrelated sandbox,
-/// expedition and icon behavior out of the registration layer.
+/// DryCycle's creature registry. It handles the core lifecycle needed by our
+/// custom creatures while keeping sandbox, expedition and UI concerns separate.
 /// </summary>
 internal static class CreatureRegistry
 {
@@ -196,8 +195,8 @@ internal static class CreatureRegistry
             return;
         }
 
-        // This allows a custom creature that deliberately inherits a vanilla
-        // ancestor to reuse that ancestor's normal AI dispatch.
+        // A custom creature with a vanilla ancestor can still deliberately reuse
+        // that ancestor's normal AI dispatch.
         orig(self);
     }
 
