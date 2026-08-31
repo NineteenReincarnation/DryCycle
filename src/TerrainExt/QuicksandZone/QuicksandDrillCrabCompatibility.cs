@@ -19,9 +19,11 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// fallen through the non-tile quicksand surface, leaving the whole animal permanently
 /// embedded even though its feet are technically planted.
 ///
-/// Supporting feet are snapped back to the exact curve as well, because vanilla
-/// DrillCrab.Leg.LandOnGround() keeps the first penetrating Tip position returned by
-/// Contains() instead of the TerrainCurve snap point.
+/// DrillCrab leg tips are clamped to the actual quicksand surface, not merely corrected
+/// after Supporting becomes true. Vanilla landing detects penetration first and only then
+/// calls LandOnGround(), so without this post-pass a seeking/planted foot can visibly sit
+/// below the curve. The target is clamped as well so the native IK never keeps pulling a
+/// planted foot back into the material on the following frame.
 ///
 /// DrillCrabs are excluded visually from DryCycle's generic quicksand clipping: their
 /// graphics stay in their native containers because this creature walks on top of
@@ -32,6 +34,7 @@ internal static class QuicksandDrillCrabCompatibility
     private const float SurfaceCorrectionTolerance = 0.05f;
     private const float SurfaceSearchMargin = 36f;
     private const float BodyRecoveryExtraDepth = 80f;
+    private const float FootSurfaceClearance = 2.5f;
 
     [ThreadStatic]
     private static int _terrainQueryDepth;
@@ -82,10 +85,9 @@ internal static class QuicksandDrillCrabCompatibility
 
             // Legs see QuicksandZone through TerrainManager while this scope is active,
             // but BodyChunk collision never consults TerrainManager. Resolve the torso
-            // explicitly before correcting the feet so the creature gets the same
-            // one-sided surface support it receives from ordinary authored terrain.
+            // explicitly and then clamp every active leg tip/target to the same surface.
             CorrectBodyChunks(self);
-            CorrectSupportingFeet(self);
+            CorrectLegFeet(self);
         }
         finally
         {
@@ -124,16 +126,11 @@ internal static class QuicksandDrillCrabCompatibility
             float radius = Mathf.Max(1f, chunk.rad);
             float bottomPenetration = surface.y - (chunk.pos.y - radius);
 
-            // Above the curve: ordinary leg suspension owns the body height. Only the
-            // part of a BodyChunk that has crossed the quicksand surface is collision.
             if (bottomPenetration <= SurfaceCorrectionTolerance)
             {
                 continue;
             }
 
-            // Recover already-embedded crabs from saves/tests produced by the old
-            // compatibility code, but do not teleport a chunk that is genuinely below
-            // the authored quicksand volume back through the entire zone.
             float centerDepth = surface.y - chunk.pos.y;
             if (centerDepth > depthLength + radius + BodyRecoveryExtraDepth)
             {
@@ -150,13 +147,9 @@ internal static class QuicksandDrillCrabCompatibility
             Vector2 correction = snapped - chunk.pos;
             if (correction.y <= SurfaceCorrectionTolerance)
             {
-                // TerrainCurve.SnapToTerrain is vertically resolved for these left-to-
-                // right curves. A malformed/non-contact result should not alter motion.
                 continue;
             }
 
-            // Shift the interpolation history together with the current position. This
-            // makes the correction a collision response, not a one-frame visual launch.
             chunk.pos += correction;
             chunk.lastPos += correction;
             chunk.lastLastPos += correction;
@@ -182,7 +175,7 @@ internal static class QuicksandDrillCrabCompatibility
         }
     }
 
-    private static void CorrectSupportingFeet(DrillCrab crab)
+    private static void CorrectLegFeet(DrillCrab crab)
     {
         if (crab?.room == null || crab.legs == null)
         {
@@ -192,45 +185,119 @@ internal static class QuicksandDrillCrabCompatibility
         for (int i = 0; i < crab.legs.Length; i++)
         {
             DrillCrab.Leg leg = crab.legs[i];
-            if (leg == null || !leg.Supporting || leg.Tip == null)
+            if (leg == null ||
+                leg.Tip == null ||
+                leg.mode == DrillCrab.Leg.Mode.Retracting)
             {
                 continue;
             }
 
-            Vector2 foot = leg.Tip.pos;
-            if (!TryGetNearbyQuicksand(crab.room, foot, out QuicksandZone zone))
+            // Clamp the destination first. This matters while Seeking: otherwise the
+            // native IK can keep aiming several pixels inside the curve even after the
+            // current Tip has been corrected.
+            if (leg.mode == DrillCrab.Leg.Mode.Seeking)
+            {
+                ClampLegTargetToSurface(crab.room, leg);
+            }
+
+            if (!TryGetNearbyQuicksand(crab.room, leg.Tip.pos, out QuicksandZone zone) ||
+                !TryGetFootSurface(zone, leg.Tip.pos, out Vector2 desiredFoot, out Vector2 inward))
             {
                 continue;
             }
 
-            Vector2 normal;
-            Vector2 snapped = ((TerrainManager.ITerrain)zone).SnapToTerrain(
-                foot,
-                0f,
-                out normal,
-                leg.Tip.lastPos);
-
-            float correctionY = snapped.y - foot.y;
-            if (correctionY <= SurfaceCorrectionTolerance)
+            // Positive means the tip is on the material side of the desired contact
+            // plane. Keep a tiny clearance because DrillCrab's rendered foot has width;
+            // an exact center-on-curve contact still looks visually buried.
+            float penetration = Vector2.Dot(leg.Tip.pos - desiredFoot, inward);
+            if (penetration <= SurfaceCorrectionTolerance)
             {
                 continue;
             }
 
-            // Move current and previous positions together so the correction is not
-            // interpreted as an upward foot velocity on the following frame.
-            Vector2 correction = Vector2.up * correctionY;
+            Vector2 correction = -inward * penetration;
             leg.Tip.pos += correction;
             leg.Tip.lastPos += correction;
-            leg.Tip.vel.y = 0f;
 
-            // Seeking legs continue aiming at their planted target. Keep that target
-            // on/above the corrected surface instead of immediately pulling the tip
-            // back under the curve on the next IK pass.
-            if (leg.mode == DrillCrab.Leg.Mode.Seeking && leg.targetPos.y < leg.Tip.pos.y)
+            float inwardVelocity = Vector2.Dot(leg.Tip.vel, inward);
+            if (inwardVelocity > 0f)
             {
-                leg.targetPos.y = leg.Tip.pos.y;
+                leg.Tip.vel -= inward * inwardVelocity;
+            }
+
+            if (leg.Supporting)
+            {
+                leg.Tip.vel = Vector2.zero;
+            }
+
+            // A supporting DrillCrab leg normally remains in Seeking mode. Keep the
+            // planted target at least as high as the corrected contact so the next
+            // AnimateInverseKinematics pass cannot re-introduce penetration.
+            if (leg.mode == DrillCrab.Leg.Mode.Seeking)
+            {
+                ClampLegTargetToSurface(crab.room, leg);
             }
         }
+    }
+
+    private static void ClampLegTargetToSurface(Room room, DrillCrab.Leg leg)
+    {
+        if (room == null || leg == null ||
+            !TryGetNearbyQuicksand(room, leg.targetPos, out QuicksandZone zone) ||
+            !TryGetFootSurface(zone, leg.targetPos, out Vector2 desiredTarget, out Vector2 inward))
+        {
+            return;
+        }
+
+        float penetration = Vector2.Dot(leg.targetPos - desiredTarget, inward);
+        if (penetration > SurfaceCorrectionTolerance)
+        {
+            leg.targetPos -= inward * penetration;
+        }
+    }
+
+    private static bool TryGetFootSurface(
+        QuicksandZone zone,
+        Vector2 point,
+        out Vector2 desiredPoint,
+        out Vector2 inward)
+    {
+        desiredPoint = point;
+        inward = Vector2.down;
+
+        if (zone == null || zone.Data == null)
+        {
+            return false;
+        }
+
+        float u = zone.MaterialUAtWorldX(point.x);
+        if (!zone.Data.IsQuicksand(u) ||
+            !zone.TrySampleSurfaceFrame(
+                u,
+                out Vector2 surface,
+                out _,
+                out inward,
+                out _))
+        {
+            return false;
+        }
+
+        if (inward.sqrMagnitude < 0.0001f)
+        {
+            inward = Vector2.down;
+        }
+        else
+        {
+            inward.Normalize();
+        }
+
+        if (inward.y > 0f)
+        {
+            inward = -inward;
+        }
+
+        desiredPoint = surface - inward * FootSurfaceClearance;
+        return true;
     }
 
     private static bool TryGetNearbyQuicksand(
@@ -317,10 +384,6 @@ internal static class QuicksandDrillCrabCompatibility
             return;
         }
 
-        // QuicksandZoneHooks moves immersed creatures into the Sand container for
-        // curved clipping. DrillCrab is deliberately not an immersed creature, so
-        // restore the graphics module's normal layer assignment after the generic
-        // SpriteLeaser update chain has completed.
         self.AddSpritesToContainer(null, rCam);
     }
 }
