@@ -167,42 +167,62 @@ public sealed class MossySpiderGraphics : GraphicsModule
 
     private void BuildSpine(float stacker)
     {
-        Vector2 center = Vector2.zero;
         for (int i = 0; i < raw.Length; i++)
         {
             BodyChunk c = spider.bodyChunks[i];
             raw[i] = Vector2.Lerp(c.lastPos, c.pos, stacker);
-            center += raw[i];
         }
-        center /= raw.Length;
 
-        Vector2 rawAxis = raw[raw.Length - 1] - raw[0];
-        if (rawAxis.sqrMagnitude < 0.001f) rawAxis = Vector2.right;
-        float facing = rawAxis.x < 0f ? -1f : 1f;
-        Vector2 fa = rawAxis.normalized * facing;
-        float angle = Mathf.Clamp(Mathf.Atan2(fa.y, fa.x) * Mathf.Rad2Deg, -24f, 24f) * Mathf.Deg2Rad;
-        Vector2 axis = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * facing;
-        Vector2 worldUp = Custom.PerpendicularVector(axis);
-        if (worldUp.y < 0f) worldUp = -worldUp;
-
-        float half = (MossySpider.SegmentCount - 1) * MossySpider.SegmentSpacing * 0.5f + 12f;
+        // The old renderer discarded the real chunk chain, rebuilt one global straight
+        // axis and clamped that axis to +/-24 degrees. Dragging any chunk therefore made
+        // the entire visible animal snap to exactly that angle. Rain World creatures
+        // should visually inherit the local pose of their physical chunks, so sample the
+        // actual chain with a Catmull-Rom curve instead. There is no preferred world angle.
         for (int i = 0; i < Samples; i++)
         {
             float u = i / (float)(Samples - 1);
-            float h = Mathf.Clamp(Vector2.Dot(RawPoint(u) - center, worldUp), -12f, 12f) * 0.34f;
-            spine[i] = center + axis * Mathf.Lerp(-half, half, u) + worldUp * (h + Mathf.Sin(u * Mathf.PI) * 2.2f);
+            spine[i] = SmoothRawPoint(u);
         }
 
+        // Keep the endpoints physically exact and apply only one very light local
+        // smoothing pass inside the body. This removes mesh corners without turning
+        // the torso back into a rigid plank.
+        for (int i = 1; i < Samples - 1; i++)
+        {
+            Vector2 localAverage = (spine[i - 1] + spine[i] * 2f + spine[i + 1]) * 0.25f;
+            spine[i] = Vector2.Lerp(spine[i], localAverage, 0.18f);
+        }
+        spine[0] = raw[0];
+        spine[Samples - 1] = raw[raw.Length - 1];
+
+        Vector2 previousUp = Vector2.up;
         for (int i = 0; i < Samples; i++)
         {
             int a = Mathf.Max(0, i - 1);
             int b = Mathf.Min(Samples - 1, i + 1);
             Vector2 t = spine[b] - spine[a];
-            if (t.sqrMagnitude < 0.001f) t = axis;
+            if (t.sqrMagnitude < 0.001f)
+            {
+                t = i > 0 ? tangent[i - 1] : Vector2.right;
+            }
+
             tangent[i] = t.normalized;
             Vector2 n = Custom.PerpendicularVector(tangent[i]);
-            if (Vector2.Dot(n, worldUp) < 0f) n = -n;
+
+            // Pick the first normal toward world-up, then preserve normal continuity
+            // along the mesh. This prevents a local bend from flipping moss to the
+            // underside while still allowing the whole animal to rotate freely.
+            if (i == 0)
+            {
+                if (n.y < 0f) n = -n;
+            }
+            else if (Vector2.Dot(n, previousUp) < 0f)
+            {
+                n = -n;
+            }
+
             up[i] = n;
+            previousUp = n;
         }
     }
 
@@ -247,8 +267,6 @@ public sealed class MossySpiderGraphics : GraphicsModule
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
             Vector2 hip = body - n * (Bottom(u, idle) * 0.76f) + t * (front ? 3.5f : -3.5f);
 
-            // The visible foot is now the same terrain contact that physically holds
-            // the torso up. Graphics no longer performs a separate decorative raycast.
             Vector2 foot = physicalLeg.DrawFoot(timeStacker);
             if ((foot - hip).sqrMagnitude < 4f)
             {
@@ -348,11 +366,26 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    private Vector2 RawPoint(float u)
+    private Vector2 SmoothRawPoint(float u)
     {
         float x = Mathf.Clamp01(u) * (raw.Length - 1);
-        int i = Mathf.Min(raw.Length - 2, Mathf.FloorToInt(x));
-        return Vector2.Lerp(raw[i], raw[i + 1], x - i);
+        int i1 = Mathf.Clamp(Mathf.FloorToInt(x), 0, raw.Length - 1);
+        int i2 = Mathf.Min(raw.Length - 1, i1 + 1);
+        int i0 = Mathf.Max(0, i1 - 1);
+        int i3 = Mathf.Min(raw.Length - 1, i2 + 1);
+        float t = x - Mathf.Floor(x);
+
+        Vector2 p0 = raw[i0];
+        Vector2 p1 = raw[i1];
+        Vector2 p2 = raw[i2];
+        Vector2 p3 = raw[i3];
+
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return 0.5f * ((2f * p1) +
+                       (-p0 + p2) * t +
+                       (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 +
+                       (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
     }
 
     private void Point(float u, out Vector2 pos, out Vector2 t, out Vector2 n)
