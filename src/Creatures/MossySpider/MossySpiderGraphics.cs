@@ -30,6 +30,9 @@ public sealed class MossySpiderGraphics : GraphicsModule
     private readonly Vector2[] tangent = new Vector2[Samples];
     private readonly Vector2[] up = new Vector2[Samples];
 
+    private MossySpiderDorsalPlane.Frame dorsalFrame;
+    private bool dorsalFrameValid;
+
     private Color shellLow;
     private Color shellHigh;
     private Color rearLeg;
@@ -303,6 +306,11 @@ public sealed class MossySpiderGraphics : GraphicsModule
             up[i] = n;
             previousUp = n;
         }
+
+        dorsalFrameValid = MossySpiderDorsalPlane.TryGetFrame(
+            spider,
+            stacker,
+            out dorsalFrame);
     }
 
     private void DrawBody(TriangleMesh mesh, Vector2 cam, int layer)
@@ -311,44 +319,89 @@ public sealed class MossySpiderGraphics : GraphicsModule
         {
             float u0 = i / (float)(Samples - 1);
             float u1 = (i + 1) / (float)(Samples - 1);
-            float low0;
-            float high0;
-            float low1;
-            float high1;
 
-            if (layer == 0)
+            if (layer == 0 || !dorsalFrameValid)
             {
-                low0 = MossySpiderSilhouette.CarapaceLow(u0);
-                high0 = MossySpiderSilhouette.CarapaceHigh(u0);
-                low1 = MossySpiderSilhouette.CarapaceLow(u1);
-                high1 = MossySpiderSilhouette.CarapaceHigh(u1);
+                float low0;
+                float high0;
+                float low1;
+                float high1;
+
+                if (layer == 0)
+                {
+                    low0 = MossySpiderSilhouette.CarapaceLow(u0);
+                    high0 = MossySpiderSilhouette.CarapaceHigh(u0);
+                    low1 = MossySpiderSilhouette.CarapaceLow(u1);
+                    high1 = MossySpiderSilhouette.CarapaceHigh(u1);
+                }
+                else if (layer == 1)
+                {
+                    low0 = MossySpiderSilhouette.MossLow(u0) - 2f;
+                    high0 = MossySpiderSilhouette.MossShadowHigh(u0);
+                    low1 = MossySpiderSilhouette.MossLow(u1) - 2f;
+                    high1 = MossySpiderSilhouette.MossShadowHigh(u1);
+                }
+                else
+                {
+                    low0 = MossySpiderSilhouette.MossCapLow(u0);
+                    high0 = MossySpiderSilhouette.MossHigh(u0);
+                    low1 = MossySpiderSilhouette.MossCapLow(u1);
+                    high1 = MossySpiderSilhouette.MossHigh(u1);
+                }
+
+                Ribbon(
+                    mesh,
+                    i,
+                    spine[i],
+                    spine[i + 1],
+                    up[i],
+                    up[i + 1],
+                    low0,
+                    high0,
+                    low1,
+                    high1,
+                    cam);
+                continue;
             }
-            else if (layer == 1)
+
+            Vector2 top0 = DorsalTopPoint(u0);
+            Vector2 top1 = DorsalTopPoint(u1);
+            Vector2 n = dorsalFrame.Normal;
+
+            float highReference0 = MossySpiderSilhouette.MossHigh(u0);
+            float highReference1 = MossySpiderSilhouette.MossHigh(u1);
+            float lowReference0;
+            float lowReference1;
+            float visibleHigh0;
+            float visibleHigh1;
+
+            if (layer == 1)
             {
-                low0 = MossySpiderSilhouette.MossLow(u0) - 2f;
-                high0 = MossySpiderSilhouette.MossShadowHigh(u0);
-                low1 = MossySpiderSilhouette.MossLow(u1) - 2f;
-                high1 = MossySpiderSilhouette.MossShadowHigh(u1);
+                lowReference0 = MossySpiderSilhouette.MossLow(u0) - 2f;
+                lowReference1 = MossySpiderSilhouette.MossLow(u1) - 2f;
+                visibleHigh0 = MossySpiderSilhouette.MossShadowHigh(u0);
+                visibleHigh1 = MossySpiderSilhouette.MossShadowHigh(u1);
             }
             else
             {
-                low0 = MossySpiderSilhouette.MossCapLow(u0);
-                high0 = MossySpiderSilhouette.MossHigh(u0);
-                low1 = MossySpiderSilhouette.MossCapLow(u1);
-                high1 = MossySpiderSilhouette.MossHigh(u1);
+                lowReference0 = MossySpiderSilhouette.MossCapLow(u0);
+                lowReference1 = MossySpiderSilhouette.MossCapLow(u1);
+                visibleHigh0 = highReference0;
+                visibleHigh1 = highReference1;
             }
 
-            Ribbon(
+            Vector2 lowPoint0 = top0 - n * Mathf.Max(0f, highReference0 - lowReference0);
+            Vector2 lowPoint1 = top1 - n * Mathf.Max(0f, highReference1 - lowReference1);
+            Vector2 highPoint0 = top0 - n * Mathf.Max(0f, highReference0 - visibleHigh0);
+            Vector2 highPoint1 = top1 - n * Mathf.Max(0f, highReference1 - visibleHigh1);
+
+            RibbonPoints(
                 mesh,
                 i,
-                spine[i],
-                spine[i + 1],
-                up[i],
-                up[i + 1],
-                low0,
-                high0,
-                low1,
-                high1,
+                lowPoint0,
+                highPoint0,
+                lowPoint1,
+                highPoint1,
                 cam);
         }
     }
@@ -425,12 +478,10 @@ public sealed class MossySpiderGraphics : GraphicsModule
             float normalized = Mathf.Clamp01(
                 (i + 0.5f) / TuftCount + Mathf.Lerp(-0.018f, 0.018f, H(i, 23)));
             float u = Mathf.Lerp(0.13f, 0.89f, normalized);
-            Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
-            float y = MossySpiderSilhouette.MossHigh(u) +
-                      Mathf.Lerp(-2.5f, 3.5f, H(i, 24));
+            DorsalBasis(u, out Vector2 top, out Vector2 t, out Vector2 n);
 
             FSprite s = sLeaser.sprites[TuftsStart + i];
-            s.SetPosition(body + n * y - cam);
+            s.SetPosition(top + n * Mathf.Lerp(-2.5f, 3.5f, H(i, 24)) - cam);
             s.rotation = -Mathf.Atan2(t.y, t.x) * Mathf.Rad2Deg;
         }
     }
@@ -445,9 +496,13 @@ public sealed class MossySpiderGraphics : GraphicsModule
             float normalized = Mathf.Clamp01(
                 (i + 0.5f) / FringeCount + Mathf.Lerp(-0.02f, 0.02f, H(i, 31)));
             float u = Mathf.Lerp(0.12f, 0.90f, normalized);
-            Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
+            DorsalBasis(u, out Vector2 top, out Vector2 t, out Vector2 n);
 
-            Vector2 root = body + n * (MossySpiderSilhouette.MossLow(u) + 2f);
+            float inset = Mathf.Max(
+                0f,
+                MossySpiderSilhouette.MossHigh(u) -
+                (MossySpiderSilhouette.MossLow(u) + 2f));
+            Vector2 root = top - n * inset;
             float sway = Mathf.Sin(idle * 0.72f + H(i, 32) * Mathf.PI * 2f) * 0.12f;
             Vector2 tip = root +
                           (-n + t * sway).normalized * Mathf.Lerp(5f, 16f, H(i, 33));
@@ -465,9 +520,9 @@ public sealed class MossySpiderGraphics : GraphicsModule
             float normalized = Mathf.Clamp01(
                 (i + 0.5f) / GrassCount + Mathf.Lerp(-0.012f, 0.012f, H(i, 42)));
             float u = Mathf.Lerp(0.13f, 0.88f, normalized);
-            Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
+            DorsalBasis(u, out Vector2 top, out Vector2 t, out Vector2 n);
 
-            Vector2 root = body + n * (MossySpiderSilhouette.MossHigh(u) - 1f);
+            Vector2 root = top - n;
             float length = Mathf.Lerp(27f, 72f, H(i, 43)) *
                            Mathf.Lerp(0.76f, 1f, Mathf.Sin(u * Mathf.PI));
             float wind = Mathf.Sin(idle * 0.55f + H(i, 44) * Mathf.PI * 2f) * 0.09f;
@@ -481,6 +536,57 @@ public sealed class MossySpiderGraphics : GraphicsModule
             SetLine(sLeaser.sprites[Grass(i, 0)], root, bend, cam);
             SetLine(sLeaser.sprites[Grass(i, 1)], bend, tip, cam);
         }
+    }
+
+    private Vector2 DorsalTopPoint(float u)
+    {
+        u = Mathf.Clamp01(u);
+        if (!dorsalFrameValid)
+        {
+            Point(u, out Vector2 body, out _, out Vector2 n);
+            return body + n * MossySpiderSilhouette.MossHigh(u);
+        }
+
+        float startU = MossySpiderSilhouette.WalkableStartU;
+        float endU = MossySpiderSilhouette.WalkableEndU;
+        Vector2 frontTip = spine[0] + up[0] * MossySpiderSilhouette.MossHigh(0f);
+        Vector2 rearTip = spine[Samples - 1] +
+                          up[Samples - 1] * MossySpiderSilhouette.MossHigh(1f);
+
+        if (u < startU)
+        {
+            return Vector2.Lerp(frontTip, dorsalFrame.Start, u / Mathf.Max(0.001f, startU));
+        }
+
+        if (u > endU)
+        {
+            return Vector2.Lerp(
+                dorsalFrame.End,
+                rearTip,
+                (u - endU) / Mathf.Max(0.001f, 1f - endU));
+        }
+
+        return Vector2.Lerp(
+            dorsalFrame.Start,
+            dorsalFrame.End,
+            (u - startU) / Mathf.Max(0.001f, endU - startU));
+    }
+
+    private void DorsalBasis(
+        float u,
+        out Vector2 point,
+        out Vector2 t,
+        out Vector2 n)
+    {
+        point = DorsalTopPoint(u);
+        if (dorsalFrameValid)
+        {
+            t = dorsalFrame.Tangent;
+            n = dorsalFrame.Normal;
+            return;
+        }
+
+        Point(u, out _, out t, out n);
     }
 
     private Vector2 SmoothRawPoint(float u)
@@ -547,11 +653,30 @@ public sealed class MossySpiderGraphics : GraphicsModule
         float h1,
         Vector2 cam)
     {
+        RibbonPoints(
+            mesh,
+            seg,
+            p0 + n0 * l0,
+            p0 + n0 * h0,
+            p1 + n1 * l1,
+            p1 + n1 * h1,
+            cam);
+    }
+
+    private static void RibbonPoints(
+        TriangleMesh mesh,
+        int seg,
+        Vector2 low0,
+        Vector2 high0,
+        Vector2 low1,
+        Vector2 high1,
+        Vector2 cam)
+    {
         int v = seg * 4;
-        mesh.MoveVertice(v, p0 + n0 * l0 - cam);
-        mesh.MoveVertice(v + 1, p0 + n0 * h0 - cam);
-        mesh.MoveVertice(v + 2, p1 + n1 * l1 - cam);
-        mesh.MoveVertice(v + 3, p1 + n1 * h1 - cam);
+        mesh.MoveVertice(v, low0 - cam);
+        mesh.MoveVertice(v + 1, high0 - cam);
+        mesh.MoveVertice(v + 2, low1 - cam);
+        mesh.MoveVertice(v + 3, high1 - cam);
     }
 
     private static void Gradient(TriangleMesh mesh, Color low, Color high)
