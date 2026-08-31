@@ -195,6 +195,19 @@ internal sealed class WorldClock
     }
 
     /// <summary>
+    /// Initializes a newly-created DryCycle clock from elapsed vanilla RainCycle time.
+    /// This is used when the player spent time in a region where DryCycle was disabled
+    /// before entering/enabling a DryCycle region. The source vanilla cycle has no
+    /// DryCycle night half, so the imported position is intentionally daytime.
+    /// </summary>
+    public void AlignToDayElapsedTicks(long elapsedTicks)
+    {
+        _nightHalf = false;
+        _ticksInHalf = Math.Max(0L, Math.Min(elapsedTicks, _dayCycleLength - 1L));
+        _absoluteTicks = Math.Max(_absoluteTicks, _ticksInHalf);
+    }
+
+    /// <summary>
     /// A successful shelter sleep always starts a brand-new DryCycle round at the
     /// first tick of daytime, regardless of whether the previous round ended during
     /// day, dusk, night or pre-dawn. AbsoluteTicks remains monotonic bookkeeping;
