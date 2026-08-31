@@ -181,7 +181,7 @@ internal sealed class MossySpiderLeg
         float phase = Mathf.Repeat(spider.GaitCycle + Index * 0.371f, 1f);
         float gaitDue = Mathf.InverseLerp(0.76f, 1f, phase) * movement * 0.68f;
 
-        return Mathf.Max(reachUrgency, extensionUrgency, gaitDue);
+        return Mathf.Max(reachUrgency, Mathf.Max(extensionUrgency, gaitDue));
     }
 
     internal bool BeginStep(MossySpider spider, Vector2 bodyAxis)
