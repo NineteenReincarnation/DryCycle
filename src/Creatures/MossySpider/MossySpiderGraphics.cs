@@ -10,7 +10,7 @@ public sealed class MossySpiderGraphics : GraphicsModule
     private const int MossShadow = 1;
     private const int MossCap = 2;
 
-    private const int LegCount = 10;
+    private const int LegCount = MossySpider.LegCount;
     private const int LegParts = 6;
     private const int LegsStart = 3;
     private const int PlatesCount = 8;
@@ -159,7 +159,7 @@ public sealed class MossySpiderGraphics : GraphicsModule
         DrawBody((TriangleMesh)sLeaser.sprites[MossShadow], camPos, idle, 1);
         DrawBody((TriangleMesh)sLeaser.sprites[MossCap], camPos, idle, 2);
         DrawPlates(sLeaser, camPos, idle);
-        DrawLegs(sLeaser, camPos, idle);
+        DrawLegs(sLeaser, camPos, idle, timeStacker);
         DrawTufts(sLeaser, camPos, idle);
         DrawFringe(sLeaser, camPos, idle);
         DrawGrass(sLeaser, camPos, idle);
@@ -237,43 +237,55 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    private void DrawLegs(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle)
+    private void DrawLegs(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle, float timeStacker)
     {
         for (int i = 0; i < LegCount; i++)
         {
-            int station = i / 2;
+            MossySpiderLeg physicalLeg = spider.SupportLegs[i];
             bool front = FrontLeg(i);
-            float u = Mathf.Lerp(0.12f, 0.88f, station / 4f);
+            float u = physicalLeg.BodyU;
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
             Vector2 hip = body - n * (Bottom(u, idle) * 0.76f) + t * (front ? 3.5f : -3.5f);
 
-            float len = Mathf.Lerp(72f, 94f, H(i, 2));
-            float reach = Mathf.Lerp(-43f, 43f, station / 4f) + (front ? 11f : -8f) + Mathf.Lerp(-10f, 10f, H(i, 3));
-            reach += Mathf.Sin(idle * 0.42f + H(i, 4) * Mathf.PI * 2f) * 3.2f;
-            Vector2 wanted = hip - n * len + t * reach;
-            Vector2? hit = spider.room == null ? null : SharedPhysics.ExactTerrainRayTracePos(spider.room, hip, wanted);
-            Vector2 foot = hit ?? wanted;
+            // The visible foot is now the same terrain contact that physically holds
+            // the torso up. Graphics no longer performs a separate decorative raycast.
+            Vector2 foot = physicalLeg.DrawFoot(timeStacker);
+            if ((foot - hip).sqrMagnitude < 4f)
+            {
+                foot = hip - n * physicalLeg.RestLength + t * physicalLeg.ReachOffset;
+            }
 
-            float bend = ((station + (front ? 0 : 1)) % 2 == 0) ? 1f : -1f;
-            Vector2 j1 = hip - n * (len * 0.27f) + t * (reach * 0.16f + bend * 7f);
-            Vector2 knee = hip - n * (len * 0.53f) + t * (reach * 0.53f - bend * 10f);
-            Vector2 correction = foot - wanted;
-            j1 += correction * 0.08f;
-            knee += correction * 0.34f;
+            Vector2 legVector = foot - hip;
+            float distance = Mathf.Max(1f, legVector.magnitude);
+            Vector2 legDirection = legVector / distance;
+            Vector2 bendNormal = Custom.PerpendicularVector(legDirection);
+            float bend = ((physicalLeg.Station + (front ? 0 : 1)) % 2 == 0) ? 1f : -1f;
+            bendNormal *= bend;
+
+            float extension = Mathf.InverseLerp(45f, physicalLeg.MaxLength, distance);
+            float upperBend = Mathf.Lerp(18f, 10f, extension) + H(i, 5) * 5f;
+            float lowerBend = Mathf.Lerp(13f, 6f, extension) + H(i, 6) * 4f;
+
+            Vector2 j1 = hip + legVector * 0.29f + bendNormal * upperBend;
+            Vector2 knee = hip + legVector * 0.62f - bendNormal * lowerBend;
 
             SetLine(sLeaser.sprites[Leg(i, 0)], hip, j1, cam);
             SetLine(sLeaser.sprites[Leg(i, 1)], j1, knee, cam);
             SetLine(sLeaser.sprites[Leg(i, 2)], knee, foot, cam);
-            SetCircle(sLeaser.sprites[Leg(i, 3)], j1, t, cam);
+            SetCircle(sLeaser.sprites[Leg(i, 3)], j1, knee - hip, cam);
             SetCircle(sLeaser.sprites[Leg(i, 4)], knee, foot - j1, cam);
 
-            Vector2 mid = knee - j1;
-            if (mid.sqrMagnitude < 0.001f) mid = -n;
-            mid.Normalize();
-            Vector2 normal = Custom.PerpendicularVector(mid);
-            if (Vector2.Dot(normal, t) < 0f) normal = -normal;
-            Vector2 sr = Vector2.Lerp(j1, knee, 0.58f);
-            SetLine(sLeaser.sprites[Leg(i, 5)], sr, sr + normal * (8f + station * 0.8f) - n * 2f, cam);
+            Vector2 middle = knee - j1;
+            if (middle.sqrMagnitude < 0.001f) middle = -n;
+            middle.Normalize();
+            Vector2 spurNormal = Custom.PerpendicularVector(middle);
+            if (Vector2.Dot(spurNormal, t) < 0f) spurNormal = -spurNormal;
+            Vector2 spurRoot = Vector2.Lerp(j1, knee, 0.58f);
+            SetLine(
+                sLeaser.sprites[Leg(i, 5)],
+                spurRoot,
+                spurRoot + spurNormal * (8f + physicalLeg.Station * 0.8f) - n * 2f,
+                cam);
         }
     }
 
