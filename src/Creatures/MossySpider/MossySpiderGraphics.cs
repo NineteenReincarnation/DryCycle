@@ -5,7 +5,7 @@ namespace DryCycle.Creatures.MossySpider;
 
 public sealed class MossySpiderGraphics : GraphicsModule
 {
-    private const int Samples = 13;
+    private const int Samples = 21;
     private const int Carapace = 0;
     private const int MossShadow = 1;
     private const int MossCap = 2;
@@ -95,28 +95,49 @@ public sealed class MossySpiderGraphics : GraphicsModule
         AddToContainer(sLeaser, rCam, null);
     }
 
-    public override void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContainer)
+    public override void AddToContainer(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        FContainer newContainer)
     {
         sLeaser.RemoveAllSpritesFromContainer();
         FContainer c = newContainer ?? rCam.ReturnFContainer("Midground");
 
         for (int i = 0; i < LegCount; i++)
         {
-            if (!FrontLeg(i)) AddLeg(c, sLeaser, i);
+            if (!FrontLeg(i))
+            {
+                AddLeg(c, sLeaser, i);
+            }
         }
 
         c.AddChild(sLeaser.sprites[Carapace]);
-        for (int i = 0; i < PlatesCount; i++) c.AddChild(sLeaser.sprites[PlatesStart + i]);
+        for (int i = 0; i < PlatesCount; i++)
+        {
+            c.AddChild(sLeaser.sprites[PlatesStart + i]);
+        }
 
         for (int i = 0; i < LegCount; i++)
         {
-            if (FrontLeg(i)) AddLeg(c, sLeaser, i);
+            if (FrontLeg(i))
+            {
+                AddLeg(c, sLeaser, i);
+            }
         }
 
         c.AddChild(sLeaser.sprites[MossShadow]);
         c.AddChild(sLeaser.sprites[MossCap]);
-        for (int i = 0; i < TuftCount; i++) c.AddChild(sLeaser.sprites[TuftsStart + i]);
-        for (int i = 0; i < FringeCount; i++) c.AddChild(sLeaser.sprites[FringeStart + i]);
+
+        for (int i = 0; i < TuftCount; i++)
+        {
+            c.AddChild(sLeaser.sprites[TuftsStart + i]);
+        }
+
+        for (int i = 0; i < FringeCount; i++)
+        {
+            c.AddChild(sLeaser.sprites[FringeStart + i]);
+        }
+
         for (int i = 0; i < GrassCount; i++)
         {
             c.AddChild(sLeaser.sprites[Grass(i, 0)]);
@@ -124,23 +145,47 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette p)
+    public override void ApplyPalette(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        RoomPalette p)
     {
         base.ApplyPalette(sLeaser, rCam, p);
         float d = Mathf.Clamp01(p.darkness);
 
-        shellLow = Color.Lerp(new Color(0.115f, 0.085f, 0.073f), p.blackColor, 0.28f + d * 0.48f);
-        shellHigh = Color.Lerp(new Color(0.225f, 0.165f, 0.135f), p.blackColor, 0.18f + d * 0.42f);
+        shellLow = Color.Lerp(
+            new Color(0.115f, 0.085f, 0.073f),
+            p.blackColor,
+            0.28f + d * 0.48f);
+        shellHigh = Color.Lerp(
+            new Color(0.225f, 0.165f, 0.135f),
+            p.blackColor,
+            0.18f + d * 0.42f);
         rearLeg = Color.Lerp(shellLow, p.blackColor, 0.34f);
         frontLeg = Color.Lerp(shellHigh, p.blackColor, 0.18f);
         joint = Color.Lerp(shellHigh, p.blackColor, 0.08f);
-        plate = Color.Lerp(new Color(0.34f, 0.25f, 0.20f), p.blackColor, 0.34f + d * 0.34f);
-        mossLow = Color.Lerp(new Color(0.24f, 0.31f, 0.09f), p.blackColor, 0.18f + d * 0.48f);
-        moss = Color.Lerp(new Color(0.50f, 0.56f, 0.20f), p.blackColor, d * 0.40f);
-        mossHigh = Color.Lerp(new Color(0.64f, 0.66f, 0.29f), p.blackColor, 0.05f + d * 0.36f);
+        plate = Color.Lerp(
+            new Color(0.34f, 0.25f, 0.20f),
+            p.blackColor,
+            0.34f + d * 0.34f);
+        mossLow = Color.Lerp(
+            new Color(0.24f, 0.31f, 0.09f),
+            p.blackColor,
+            0.18f + d * 0.48f);
+        moss = Color.Lerp(
+            new Color(0.50f, 0.56f, 0.20f),
+            p.blackColor,
+            d * 0.40f);
+        mossHigh = Color.Lerp(
+            new Color(0.64f, 0.66f, 0.29f),
+            p.blackColor,
+            0.05f + d * 0.36f);
 
         Gradient((TriangleMesh)sLeaser.sprites[Carapace], shellLow, shellHigh);
-        Gradient((TriangleMesh)sLeaser.sprites[MossShadow], mossLow, Color.Lerp(mossLow, moss, 0.45f));
+        Gradient(
+            (TriangleMesh)sLeaser.sprites[MossShadow],
+            mossLow,
+            Color.Lerp(mossLow, moss, 0.45f));
         Gradient((TriangleMesh)sLeaser.sprites[MossCap], moss, mossHigh);
 
         for (int i = 0; i < LegCount; i++)
@@ -149,17 +194,31 @@ public sealed class MossySpiderGraphics : GraphicsModule
             sLeaser.sprites[Leg(i, 0)].color = Color.Lerp(lc, joint, 0.12f);
             sLeaser.sprites[Leg(i, 1)].color = lc;
             sLeaser.sprites[Leg(i, 2)].color = Color.Lerp(lc, p.blackColor, 0.18f);
-            sLeaser.sprites[Leg(i, 3)].color = FrontLeg(i) ? joint : Color.Lerp(joint, p.blackColor, 0.28f);
+            sLeaser.sprites[Leg(i, 3)].color = FrontLeg(i)
+                ? joint
+                : Color.Lerp(joint, p.blackColor, 0.28f);
             sLeaser.sprites[Leg(i, 4)].color = Color.Lerp(lc, p.blackColor, 0.08f);
             sLeaser.sprites[Leg(i, 5)].color = Color.Lerp(lc, p.blackColor, 0.24f);
         }
 
         for (int i = 0; i < PlatesCount; i++)
-            sLeaser.sprites[PlatesStart + i].color = Color.Lerp(plate, shellLow, H(i, 12) * 0.58f);
+        {
+            sLeaser.sprites[PlatesStart + i].color =
+                Color.Lerp(plate, shellLow, H(i, 12) * 0.58f);
+        }
+
         for (int i = 0; i < TuftCount; i++)
-            sLeaser.sprites[TuftsStart + i].color = Color.Lerp(moss, mossHigh, 0.18f + H(i, 22) * 0.48f);
+        {
+            sLeaser.sprites[TuftsStart + i].color =
+                Color.Lerp(moss, mossHigh, 0.18f + H(i, 22) * 0.48f);
+        }
+
         for (int i = 0; i < FringeCount; i++)
-            sLeaser.sprites[FringeStart + i].color = Color.Lerp(moss, mossLow, 0.45f + (i % 4) * 0.12f);
+        {
+            sLeaser.sprites[FringeStart + i].color =
+                Color.Lerp(moss, mossLow, 0.45f + (i % 4) * 0.12f);
+        }
+
         for (int i = 0; i < GrassCount; i++)
         {
             Color gc = Color.Lerp(moss, mossLow, H(i, 41) * 0.72f);
@@ -168,20 +227,27 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    public override void DrawSprites(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        float timeStacker,
+        Vector2 camPos)
     {
         base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
-        if (owner.slatedForDeletetion || owner.room != rCam.room || culled) return;
+        if (owner.slatedForDeletetion || owner.room != rCam.room || culled)
+        {
+            return;
+        }
 
         BuildSpine(timeStacker);
         float idle = Mathf.Lerp(spider.LastIdleMotion, spider.IdleMotion, timeStacker);
 
-        DrawBody((TriangleMesh)sLeaser.sprites[Carapace], camPos, idle, 0);
-        DrawBody((TriangleMesh)sLeaser.sprites[MossShadow], camPos, idle, 1);
-        DrawBody((TriangleMesh)sLeaser.sprites[MossCap], camPos, idle, 2);
-        DrawPlates(sLeaser, camPos, idle);
-        DrawLegs(sLeaser, camPos, idle, timeStacker);
-        DrawTufts(sLeaser, camPos, idle);
+        DrawBody((TriangleMesh)sLeaser.sprites[Carapace], camPos, 0);
+        DrawBody((TriangleMesh)sLeaser.sprites[MossShadow], camPos, 1);
+        DrawBody((TriangleMesh)sLeaser.sprites[MossCap], camPos, 2);
+        DrawPlates(sLeaser, camPos);
+        DrawLegs(sLeaser, camPos, timeStacker);
+        DrawTufts(sLeaser, camPos);
         DrawFringe(sLeaser, camPos, idle);
         DrawGrass(sLeaser, camPos, idle);
     }
@@ -194,19 +260,18 @@ public sealed class MossySpiderGraphics : GraphicsModule
             raw[i] = Vector2.Lerp(c.lastPos, c.pos, stacker);
         }
 
-        // The visible shell follows the physical chain. No world-angle clamp and no
-        // reconstructed rigid plank: dragging or uneven leg support bends the body.
         for (int i = 0; i < Samples; i++)
         {
-            float u = i / (float)(Samples - 1);
-            spine[i] = SmoothRawPoint(u);
+            spine[i] = SmoothRawPoint(i / (float)(Samples - 1));
         }
 
         for (int i = 1; i < Samples - 1; i++)
         {
-            Vector2 localAverage = (spine[i - 1] + spine[i] * 2f + spine[i + 1]) * 0.25f;
-            spine[i] = Vector2.Lerp(spine[i], localAverage, 0.14f);
+            Vector2 localAverage =
+                (spine[i - 1] + spine[i] * 2f + spine[i + 1]) * 0.25f;
+            spine[i] = Vector2.Lerp(spine[i], localAverage, 0.12f);
         }
+
         spine[0] = raw[0];
         spine[Samples - 1] = raw[raw.Length - 1];
 
@@ -216,13 +281,19 @@ public sealed class MossySpiderGraphics : GraphicsModule
             int a = Mathf.Max(0, i - 1);
             int b = Mathf.Min(Samples - 1, i + 1);
             Vector2 t = spine[b] - spine[a];
-            if (t.sqrMagnitude < 0.001f) t = i > 0 ? tangent[i - 1] : Vector2.right;
+            if (t.sqrMagnitude < 0.001f)
+            {
+                t = i > 0 ? tangent[i - 1] : Vector2.right;
+            }
 
             tangent[i] = t.normalized;
             Vector2 n = Custom.PerpendicularVector(tangent[i]);
             if (i == 0)
             {
-                if (n.y < 0f) n = -n;
+                if (n.y < 0f)
+                {
+                    n = -n;
+                }
             }
             else if (Vector2.Dot(n, previousUp) < 0f)
             {
@@ -234,7 +305,7 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    private void DrawBody(TriangleMesh mesh, Vector2 cam, float idle, int layer)
+    private void DrawBody(TriangleMesh mesh, Vector2 cam, int layer)
     {
         for (int i = 0; i < Samples - 1; i++)
         {
@@ -244,34 +315,48 @@ public sealed class MossySpiderGraphics : GraphicsModule
             float high0;
             float low1;
             float high1;
-            Vector2 p0 = spine[i];
-            Vector2 p1 = spine[i + 1];
 
             if (layer == 0)
             {
-                low0 = -Bottom(u0, idle); high0 = ShellTop(u0, idle);
-                low1 = -Bottom(u1, idle); high1 = ShellTop(u1, idle);
+                low0 = MossySpiderSilhouette.CarapaceLow(u0);
+                high0 = MossySpiderSilhouette.CarapaceHigh(u0);
+                low1 = MossySpiderSilhouette.CarapaceLow(u1);
+                high1 = MossySpiderSilhouette.CarapaceHigh(u1);
             }
             else if (layer == 1)
             {
-                p0 = MossPosition(u0, p0, tangent[i]);
-                p1 = MossPosition(u1, p1, tangent[i + 1]);
-                low0 = ShellTop(u0, idle) - 2f; high0 = ShellTop(u0, idle) + 8f;
-                low1 = ShellTop(u1, idle) - 2f; high1 = ShellTop(u1, idle) + 8f;
+                low0 = MossySpiderSilhouette.MossLow(u0) - 2f;
+                high0 = MossySpiderSilhouette.MossShadowHigh(u0);
+                low1 = MossySpiderSilhouette.MossLow(u1) - 2f;
+                high1 = MossySpiderSilhouette.MossShadowHigh(u1);
             }
             else
             {
-                p0 = MossPosition(u0, p0, tangent[i]);
-                p1 = MossPosition(u1, p1, tangent[i + 1]);
-                low0 = ShellTop(u0, idle) + 4f; high0 = ShellTop(u0, idle) + Cap(u0, idle) - 1.5f;
-                low1 = ShellTop(u1, idle) + 4f; high1 = ShellTop(u1, idle) + Cap(u1, idle) - 1.5f;
+                low0 = MossySpiderSilhouette.MossCapLow(u0);
+                high0 = MossySpiderSilhouette.MossHigh(u0);
+                low1 = MossySpiderSilhouette.MossCapLow(u1);
+                high1 = MossySpiderSilhouette.MossHigh(u1);
             }
 
-            Ribbon(mesh, i, p0, p1, up[i], up[i + 1], low0, high0, low1, high1, cam);
+            Ribbon(
+                mesh,
+                i,
+                spine[i],
+                spine[i + 1],
+                up[i],
+                up[i + 1],
+                low0,
+                high0,
+                low1,
+                high1,
+                cam);
         }
     }
 
-    private void DrawLegs(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle, float timeStacker)
+    private void DrawLegs(
+        RoomCamera.SpriteLeaser sLeaser,
+        Vector2 cam,
+        float timeStacker)
     {
         for (int i = 0; i < LegCount; i++)
         {
@@ -279,10 +364,11 @@ public sealed class MossySpiderGraphics : GraphicsModule
             float u = leg.BodyU;
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
 
-            // Root the visible limb under the shell, then use the actual physical
-            // appendage joints generated by MossySpiderLeg. Graphics does not invent
-            // another IK pose anymore.
-            Vector2 root = body - n * (Bottom(u, idle) * 0.72f) + t * (FrontLeg(i) ? 4f : -4f);
+            float rootHeight = Mathf.Lerp(
+                MossySpiderSilhouette.CarapaceLow(u),
+                MossySpiderSilhouette.CarapaceHigh(u),
+                0.20f);
+            Vector2 root = body + n * rootHeight + t * (FrontLeg(i) ? 4f : -4f);
             Vector2 jointA = leg.DrawSegment(0, timeStacker);
             Vector2 jointB = leg.DrawSegment(1, timeStacker);
             Vector2 foot = leg.DrawSegment(2, timeStacker);
@@ -294,10 +380,18 @@ public sealed class MossySpiderGraphics : GraphicsModule
             SetCircle(sLeaser.sprites[Leg(i, 4)], jointB, foot - jointA, cam);
 
             Vector2 middle = jointB - jointA;
-            if (middle.sqrMagnitude < 0.001f) middle = -n;
+            if (middle.sqrMagnitude < 0.001f)
+            {
+                middle = -n;
+            }
             middle.Normalize();
+
             Vector2 spurNormal = Custom.PerpendicularVector(middle);
-            if (Vector2.Dot(spurNormal, t) < 0f) spurNormal = -spurNormal;
+            if (Vector2.Dot(spurNormal, t) < 0f)
+            {
+                spurNormal = -spurNormal;
+            }
+
             Vector2 spurRoot = Vector2.Lerp(jointA, jointB, 0.58f);
             SetLine(
                 sLeaser.sprites[Leg(i, 5)],
@@ -307,59 +401,75 @@ public sealed class MossySpiderGraphics : GraphicsModule
         }
     }
 
-    private void DrawPlates(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle)
+    private void DrawPlates(RoomCamera.SpriteLeaser sLeaser, Vector2 cam)
     {
         for (int i = 0; i < PlatesCount; i++)
         {
-            float u = Mathf.Lerp(0.11f, 0.89f, (i + 0.5f) / PlatesCount);
+            float u = Mathf.Lerp(0.10f, 0.90f, (i + 0.5f) / PlatesCount);
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
             float vertical = Mathf.Lerp(
-                -Bottom(u, idle) * 0.62f,
-                ShellTop(u, idle) * 0.18f,
+                MossySpiderSilhouette.CarapaceLow(u) * 0.62f,
+                MossySpiderSilhouette.CarapaceHigh(u) * 0.20f,
                 Mathf.Lerp(0.28f, 0.72f, H(i, 13)));
+
             FSprite s = sLeaser.sprites[PlatesStart + i];
             s.SetPosition(body + n * vertical - cam);
             s.rotation = -Mathf.Atan2(t.y, t.x) * Mathf.Rad2Deg;
         }
     }
 
-    private void DrawTufts(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle)
+    private void DrawTufts(RoomCamera.SpriteLeaser sLeaser, Vector2 cam)
     {
         for (int i = 0; i < TuftCount; i++)
         {
-            float normalized = Mathf.Clamp01((i + 0.5f) / TuftCount + Mathf.Lerp(-0.018f, 0.018f, H(i, 23)));
-            float u = Mathf.Lerp(0.10f, 0.90f, normalized);
+            float normalized = Mathf.Clamp01(
+                (i + 0.5f) / TuftCount + Mathf.Lerp(-0.018f, 0.018f, H(i, 23)));
+            float u = Mathf.Lerp(0.13f, 0.89f, normalized);
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
-            float y = ShellTop(u, idle) + Cap(u, idle) - 1.5f + Mathf.Lerp(-2.5f, 3.5f, H(i, 24));
+            float y = MossySpiderSilhouette.MossHigh(u) +
+                      Mathf.Lerp(-2.5f, 3.5f, H(i, 24));
+
             FSprite s = sLeaser.sprites[TuftsStart + i];
-            s.SetPosition(MossPosition(u, body, t) + n * y - cam);
+            s.SetPosition(body + n * y - cam);
             s.rotation = -Mathf.Atan2(t.y, t.x) * Mathf.Rad2Deg;
         }
     }
 
-    private void DrawFringe(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle)
+    private void DrawFringe(
+        RoomCamera.SpriteLeaser sLeaser,
+        Vector2 cam,
+        float idle)
     {
         for (int i = 0; i < FringeCount; i++)
         {
-            float normalized = Mathf.Clamp01((i + 0.5f) / FringeCount + Mathf.Lerp(-0.02f, 0.02f, H(i, 31)));
-            float u = Mathf.Lerp(0.11f, 0.89f, normalized);
+            float normalized = Mathf.Clamp01(
+                (i + 0.5f) / FringeCount + Mathf.Lerp(-0.02f, 0.02f, H(i, 31)));
+            float u = Mathf.Lerp(0.12f, 0.90f, normalized);
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
-            Vector2 root = MossPosition(u, body, t) + n * (ShellTop(u, idle) + 5f);
+
+            Vector2 root = body + n * (MossySpiderSilhouette.MossLow(u) + 2f);
             float sway = Mathf.Sin(idle * 0.72f + H(i, 32) * Mathf.PI * 2f) * 0.12f;
-            Vector2 tip = root + (-n + t * sway).normalized * Mathf.Lerp(5f, 16f, H(i, 33));
+            Vector2 tip = root +
+                          (-n + t * sway).normalized * Mathf.Lerp(5f, 16f, H(i, 33));
             SetLine(sLeaser.sprites[FringeStart + i], root, tip, cam);
         }
     }
 
-    private void DrawGrass(RoomCamera.SpriteLeaser sLeaser, Vector2 cam, float idle)
+    private void DrawGrass(
+        RoomCamera.SpriteLeaser sLeaser,
+        Vector2 cam,
+        float idle)
     {
         for (int i = 0; i < GrassCount; i++)
         {
-            float normalized = Mathf.Clamp01((i + 0.5f) / GrassCount + Mathf.Lerp(-0.012f, 0.012f, H(i, 42)));
-            float u = Mathf.Lerp(0.08f, 0.92f, normalized);
+            float normalized = Mathf.Clamp01(
+                (i + 0.5f) / GrassCount + Mathf.Lerp(-0.012f, 0.012f, H(i, 42)));
+            float u = Mathf.Lerp(0.13f, 0.88f, normalized);
             Point(u, out Vector2 body, out Vector2 t, out Vector2 n);
-            Vector2 root = MossPosition(u, body, t) + n * (ShellTop(u, idle) + Cap(u, idle) - 1f);
-            float length = Mathf.Lerp(27f, 72f, H(i, 43)) * Mathf.Lerp(0.76f, 1f, Mathf.Sin(u * Mathf.PI));
+
+            Vector2 root = body + n * (MossySpiderSilhouette.MossHigh(u) - 1f);
+            float length = Mathf.Lerp(27f, 72f, H(i, 43)) *
+                           Mathf.Lerp(0.76f, 1f, Mathf.Sin(u * Mathf.PI));
             float wind = Mathf.Sin(idle * 0.55f + H(i, 44) * Mathf.PI * 2f) * 0.09f;
             float lean = Mathf.Lerp(-0.48f, 0.82f, H(i, 45)) + wind;
             float curve = Mathf.Lerp(-0.32f, 0.32f, H(i, 46));
@@ -367,6 +477,7 @@ public sealed class MossySpiderGraphics : GraphicsModule
             Vector2 d2 = (n + t * (lean + curve + wind * 0.6f)).normalized;
             Vector2 bend = root + d1 * (length * 0.57f);
             Vector2 tip = bend + d2 * (length * 0.43f);
+
             SetLine(sLeaser.sprites[Grass(i, 0)], root, bend, cam);
             SetLine(sLeaser.sprites[Grass(i, 1)], bend, tip, cam);
         }
@@ -399,56 +510,27 @@ public sealed class MossySpiderGraphics : GraphicsModule
         float x = Mathf.Clamp01(u) * (Samples - 1);
         int i = Mathf.Min(Samples - 2, Mathf.FloorToInt(x));
         float f = x - i;
+
         pos = Vector2.Lerp(spine[i], spine[i + 1], f);
         t = Vector2.Lerp(tangent[i], tangent[i + 1], f);
-        if (t.sqrMagnitude < 0.001f) t = Vector2.right;
+        if (t.sqrMagnitude < 0.001f)
+        {
+            t = Vector2.right;
+        }
         t.Normalize();
+
         n = Vector2.Lerp(up[i], up[i + 1], f);
-        if (n.sqrMagnitude < 0.001f) n = Vector2.up;
+        if (n.sqrMagnitude < 0.001f)
+        {
+            n = Vector2.up;
+        }
         n.Normalize();
     }
 
-    private static float MossInset(float u)
-    {
-        // Keep the dark carapace broad while pulling only the green layer inward.
-        // The ends retract more strongly so the cap reads as vegetation sitting on the
-        // shell instead of a full-width slab wrapped around it.
-        float end = 1f - Mathf.Sin(Mathf.Clamp01(u) * Mathf.PI);
-        return 4f + 16f * end * end;
-    }
-
-    private static Vector2 MossPosition(float u, Vector2 position, Vector2 localTangent)
-    {
-        if (localTangent.sqrMagnitude < 0.001f)
-        {
-            return position;
-        }
-
-        float towardCenter = u < 0.5f ? 1f : -1f;
-        return position + localTangent.normalized * (MossInset(u) * towardCenter);
-    }
-
-    private static float Profile(float u)
-    {
-        float a = Mathf.Max(0f, Mathf.Sin(Mathf.Clamp01(u) * Mathf.PI));
-        return 0.38f + 0.62f * Mathf.Pow(a, 0.58f);
-    }
-
-    private static float Bottom(float u, float idle) =>
-        Mathf.Lerp(21f, 35f, Profile(u)) + Mathf.Sin(idle * 0.48f + u * 4.2f) * 0.55f;
-
-    private static float ShellTop(float u, float idle) =>
-        Mathf.Lerp(7f, 13f, Profile(u)) + Mathf.Sin(idle * 0.43f + u * 3.1f) * 0.35f;
-
-    private static float Cap(float u, float idle) =>
-        Mathf.Lerp(13f, 25f, Profile(u)) +
-        Mathf.Sin(u * 19.1f + 0.7f) * 1.25f +
-        Mathf.Sin(u * 31.7f + 2.1f) * 0.65f +
-        Mathf.Sin(idle * 0.31f + u * 5.3f) * 0.35f;
-
     private float H(int index, int salt)
     {
-        float x = Mathf.Sin(seed * 0.0137f + index * 12.9898f + salt * 78.233f) * 43758.5453f;
+        float x = Mathf.Sin(
+            seed * 0.0137f + index * 12.9898f + salt * 78.233f) * 43758.5453f;
         return x - Mathf.Floor(x);
     }
 
@@ -475,11 +557,16 @@ public sealed class MossySpiderGraphics : GraphicsModule
     private static void Gradient(TriangleMesh mesh, Color low, Color high)
     {
         for (int i = 0; i < mesh.verticeColors.Length; i++)
+        {
             mesh.verticeColors[i] = i % 2 == 0 ? low : high;
+        }
     }
 
-    private static FSprite Line(float width) => new("pixel") { anchorY = 0f, scaleX = width };
-    private static FSprite Circle(float x, float y) => new("Circle20") { scaleX = x, scaleY = y };
+    private static FSprite Line(float width) =>
+        new("pixel") { anchorY = 0f, scaleX = width };
+
+    private static FSprite Circle(float x, float y) =>
+        new("Circle20") { scaleX = x, scaleY = y };
 
     private static void SetLine(FSprite s, Vector2 a, Vector2 b, Vector2 cam)
     {
@@ -492,16 +579,23 @@ public sealed class MossySpiderGraphics : GraphicsModule
     {
         s.SetPosition(pos - cam);
         if (dir.sqrMagnitude > 0.001f)
+        {
             s.rotation = -Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+        }
     }
 
     private static bool FrontLeg(int i) => i % 2 == 0;
     private static int Leg(int i, int part) => LegsStart + i * LegParts + part;
     private static int Grass(int i, int part) => GrassStart + i * 2 + part;
 
-    private static void AddLeg(FContainer c, RoomCamera.SpriteLeaser sLeaser, int leg)
+    private static void AddLeg(
+        FContainer c,
+        RoomCamera.SpriteLeaser sLeaser,
+        int leg)
     {
         for (int part = 0; part < LegParts; part++)
+        {
             c.AddChild(sLeaser.sprites[Leg(leg, part)]);
+        }
     }
 }
