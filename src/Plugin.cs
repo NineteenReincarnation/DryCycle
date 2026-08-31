@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.93";
+    public const string Version = "0.1.94";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -171,8 +171,13 @@ internal sealed class Plugin : BaseUnityPlugin
             WeatherScheduleRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
-            WeatherForecastHudRuntime.Enable();
+
+            // RainMeterRoundPipRuntime is the single authoritative DryCycle RainMeter
+            // renderer. WeatherForecastHudRuntime remains in source as the old split
+            // implementation but is intentionally not enabled to avoid two HUD hooks
+            // reading different schedule representations.
             RainMeterRoundPipRuntime.Enable();
+
             MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
