@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using DevInterface;
 using Fisobs.Creatures;
 using Fisobs.Core;
+using Fisobs.Sandbox;
 using UnityEngine;
 
 namespace DryCycle.Creatures.MossySpider;
