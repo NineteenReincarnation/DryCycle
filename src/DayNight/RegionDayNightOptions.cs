@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using Menu.Remix;
 using Menu.Remix.MixedUI;
@@ -141,22 +142,7 @@ internal sealed class RegionDayNightOptions : OptionInterface
 
     private void BindKnownRegions()
     {
-        List<string> regions;
-        try
-        {
-            regions = Region.GetFullRegionOrder();
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger?.LogWarning($"DryCycle failed to enumerate registered regions: {ex.Message}");
-            return;
-        }
-
-        if (regions == null)
-        {
-            return;
-        }
-
+        List<string> regions = EnumerateRegisteredRegions();
         for (int i = 0; i < regions.Count; i++)
         {
             string regionId = NormalizeRegionId(regions[i]);
@@ -188,6 +174,64 @@ internal sealed class RegionDayNightOptions : OptionInterface
 
             _regionEnabled.Add(regionId, setting);
         }
+    }
+
+    private static List<string> EnumerateRegisteredRegions()
+    {
+        List<string> regions = new();
+
+        // This gives the canonical vanilla/MSC order and also includes the normal
+        // modded-region path when Rain World's ModdedRegionsEnabled flag is active.
+        try
+        {
+            List<string> ordered = Region.GetFullRegionOrder();
+            if (ordered != null)
+            {
+                regions.AddRange(ordered);
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogWarning($"DryCycle failed to query Region.GetFullRegionOrder: {ex.Message}");
+        }
+
+        // World loading itself reads the merged World/regions.txt. Read it directly as
+        // well so official DLC (including Watcher) and active region mods are not lost
+        // behind GetFullRegionOrder's conditional ModdedRegionsEnabled branch.
+        try
+        {
+            string path = AssetManager.ResolveFilePath(
+                "World" + Path.DirectorySeparatorChar + "regions.txt");
+            if (File.Exists(path))
+            {
+                string[] lines = File.ReadAllLines(path);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i]?.Trim();
+                    if (!string.IsNullOrEmpty(line) && !line.StartsWith("#"))
+                    {
+                        regions.Add(line);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogWarning($"DryCycle failed to read the merged region registry: {ex.Message}");
+        }
+
+        List<string> unique = new();
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < regions.Count; i++)
+        {
+            string normalized = NormalizeRegionId(regions[i]);
+            if (normalized.Length > 0 && seen.Add(normalized))
+            {
+                unique.Add(normalized);
+            }
+        }
+
+        return unique;
     }
 
     private static string DisplayName(string regionId)
