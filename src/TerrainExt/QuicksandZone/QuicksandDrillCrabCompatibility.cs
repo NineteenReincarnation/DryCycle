@@ -1,40 +1,32 @@
 using System;
+using RWCustom;
 using Watcher;
 using UnityEngine;
 
 namespace DryCycle.TerrainExt.QuicksandZone;
 
 /// <summary>
-/// Watcher DrillCrabs treat QuicksandZone as ordinary curved terrain.
+/// Makes Watcher DrillCrabs treat QuicksandZone as a real one-sided walking surface.
 ///
-/// DrillCrab uses two different terrain systems:
-/// - its legs query TerrainManager.ITerrain;
-/// - its BodyChunks still use Rain World's normal BodyChunk collision path.
+/// DrillCrab uses TerrainManager for foot acquisition, but its torso BodyChunks use the
+/// normal Rain World collision path and its intermediate leg joints are pure IK points.
+/// A tip-only correction is therefore insufficient: the foot target can still be an
+/// underlying tile and the IK joints can still bend below the visible quicksand curve.
 ///
-/// QuicksandZone deliberately reports no solid TerrainManager coverage to ordinary
-/// creatures. During DrillCrab.Update we temporarily expose it as solid so the native
-/// DrillCrab leg controller can acquire footholds. After the native update we also
-/// resolve the two torso BodyChunks against the same curve. Without that second pass,
-/// supporting legs can reduce DrillCrab gravity to zero only after the torso has already
-/// fallen through the non-tile quicksand surface, leaving the whole animal permanently
-/// embedded even though its feet are technically planted.
-///
-/// DrillCrab leg tips are clamped to the actual quicksand surface, not merely corrected
-/// after Supporting becomes true. Vanilla landing detects penetration first and only then
-/// calls LandOnGround(), so without this post-pass a seeking/planted foot can visibly sit
-/// below the curve. The target is clamped as well so the native IK never keeps pulling a
-/// planted foot back into the material on the following frame.
-///
-/// DrillCrabs are excluded visually from DryCycle's generic quicksand clipping: their
-/// graphics stay in their native containers because this creature walks on top of
-/// quicksand rather than being rendered as an immersed creature.
+/// During DrillCrab.Update the quicksand curve is exposed to TerrainManager. After the
+/// vanilla update we resolve torso penetration, replace any foot target below quicksand
+/// with the first quicksand surface at that X, rebuild the native leg IK around the
+/// corrected tip, and finally keep every rendered leg joint on the air side of the curve.
 /// </summary>
 internal static class QuicksandDrillCrabCompatibility
 {
     private const float SurfaceCorrectionTolerance = 0.05f;
     private const float SurfaceSearchMargin = 36f;
     private const float BodyRecoveryExtraDepth = 80f;
-    private const float FootSurfaceClearance = 2.5f;
+    private const float FootSurfaceClearance = 4f;
+    private const float LegSegmentClearance = 7f;
+    private const float FootAttachDistance = 12f;
+    private const int SurfaceRaySamples = 64;
 
     [ThreadStatic]
     private static int _terrainQueryDepth;
@@ -82,12 +74,8 @@ internal static class QuicksandDrillCrabCompatibility
         try
         {
             orig(self, eu);
-
-            // Legs see QuicksandZone through TerrainManager while this scope is active,
-            // but BodyChunk collision never consults TerrainManager. Resolve the torso
-            // explicitly and then clamp every active leg tip/target to the same surface.
             CorrectBodyChunks(self);
-            CorrectLegFeet(self);
+            CorrectLegs(self);
         }
         finally
         {
@@ -125,7 +113,6 @@ internal static class QuicksandDrillCrabCompatibility
 
             float radius = Mathf.Max(1f, chunk.rad);
             float bottomPenetration = surface.y - (chunk.pos.y - radius);
-
             if (bottomPenetration <= SurfaceCorrectionTolerance)
             {
                 continue;
@@ -175,7 +162,7 @@ internal static class QuicksandDrillCrabCompatibility
         }
     }
 
-    private static void CorrectLegFeet(DrillCrab crab)
+    private static void CorrectLegs(DrillCrab crab)
     {
         if (crab?.room == null || crab.legs == null)
         {
@@ -187,117 +174,401 @@ internal static class QuicksandDrillCrabCompatibility
             DrillCrab.Leg leg = crab.legs[i];
             if (leg == null ||
                 leg.Tip == null ||
+                leg.segments == null ||
                 leg.mode == DrillCrab.Leg.Mode.Retracting)
             {
                 continue;
             }
 
-            // Clamp the destination first. This matters while Seeking: otherwise the
-            // native IK can keep aiming several pixels inside the curve even after the
-            // current Tip has been corrected.
+            // ExactTerrainRayTracePos only supplies normal room terrain. If the scan is
+            // currently over a QuicksandZone with no useful tile underneath, explicitly
+            // acquire the first quicksand crossing so the leg does not continue downward.
+            if (leg.mode == DrillCrab.Leg.Mode.Scanning)
+            {
+                TrySeedScanningTarget(crab.room, leg);
+            }
+
+            // A vanilla scan may already have found an underlying solid tile. Quicksand
+            // is the first walkable surface, so replace that deep target by the surface
+            // at the same X regardless of how far below the authored band the tile was.
             if (leg.mode == DrillCrab.Leg.Mode.Seeking)
             {
                 ClampLegTargetToSurface(crab.room, leg);
             }
 
-            if (!TryGetNearbyQuicksand(crab.room, leg.Tip.pos, out QuicksandZone zone) ||
-                !TryGetFootSurface(zone, leg.Tip.pos, out Vector2 desiredFoot, out Vector2 inward))
+            CorrectLegTip(crab.room, leg);
+
+            if (leg.mode == DrillCrab.Leg.Mode.Seeking &&
+                TryGetQuicksandSurfaceAtX(
+                    crab.room,
+                    leg.targetPos.x,
+                    out _,
+                    out Vector2 targetSurface,
+                    out Vector2 targetInward))
             {
-                continue;
+                Vector2 desiredTarget = targetSurface - targetInward * FootSurfaceClearance;
+                leg.targetPos = desiredTarget;
+
+                // Because the corrected target is deliberately on the air side of the
+                // curve, vanilla Contains() no longer needs to observe penetration to
+                // establish support. Attach when the seeking tip reaches that contact.
+                if (!leg.Supporting &&
+                    Vector2.Distance(leg.Tip.pos, desiredTarget) <= FootAttachDistance)
+                {
+                    leg.Tip.pos = desiredTarget;
+                    leg.Tip.lastPos = desiredTarget;
+                    leg.Tip.vel = Vector2.zero;
+                    leg.Supporting = true;
+                }
             }
 
-            // Positive means the tip is on the material side of the desired contact
-            // plane. Keep a tiny clearance because DrillCrab's rendered foot has width;
-            // an exact center-on-curve contact still looks visually buried.
-            float penetration = Vector2.Dot(leg.Tip.pos - desiredFoot, inward);
-            if (penetration <= SurfaceCorrectionTolerance)
+            if (leg.Supporting &&
+                TryGetQuicksandSurfaceAtX(
+                    crab.room,
+                    leg.Tip.pos.x,
+                    out _,
+                    out Vector2 plantedSurface,
+                    out Vector2 plantedInward))
             {
-                continue;
-            }
-
-            Vector2 correction = -inward * penetration;
-            leg.Tip.pos += correction;
-            leg.Tip.lastPos += correction;
-
-            float inwardVelocity = Vector2.Dot(leg.Tip.vel, inward);
-            if (inwardVelocity > 0f)
-            {
-                leg.Tip.vel -= inward * inwardVelocity;
-            }
-
-            if (leg.Supporting)
-            {
+                Vector2 planted = plantedSurface - plantedInward * FootSurfaceClearance;
+                leg.Tip.pos = planted;
+                leg.Tip.lastPos = planted;
                 leg.Tip.vel = Vector2.zero;
+                if (leg.mode == DrillCrab.Leg.Mode.Seeking)
+                {
+                    leg.targetPos = planted;
+                }
             }
 
-            // A supporting DrillCrab leg normally remains in Seeking mode. Keep the
-            // planted target at least as high as the corrected contact so the next
-            // AnimateInverseKinematics pass cannot re-introduce penetration.
-            if (leg.mode == DrillCrab.Leg.Mode.Seeking)
-            {
-                ClampLegTargetToSurface(crab.room, leg);
-            }
+            // Vanilla DoInverseKinematics ran before the post-pass above, so correcting
+            // only Tip leaves the intermediate segments at their old below-surface pose.
+            // Re-run the creature's own IK using the corrected foot, then constrain every
+            // rendered joint to the air side of quicksand.
+            RebuildLegInverseKinematics(crab, leg);
+            ClampLegSegmentsToSurface(crab.room, leg);
+        }
+    }
+
+    private static void CorrectLegTip(Room room, DrillCrab.Leg leg)
+    {
+        if (!TryGetQuicksandSurfaceAtX(
+                room,
+                leg.Tip.pos.x,
+                out _,
+                out Vector2 surface,
+                out Vector2 inward))
+        {
+            return;
+        }
+
+        Vector2 desired = surface - inward * FootSurfaceClearance;
+        float penetration = Vector2.Dot(leg.Tip.pos - desired, inward);
+        if (penetration <= SurfaceCorrectionTolerance)
+        {
+            return;
+        }
+
+        Vector2 correction = -inward * penetration;
+        leg.Tip.pos += correction;
+        leg.Tip.lastPos += correction;
+
+        float inwardVelocity = Vector2.Dot(leg.Tip.vel, inward);
+        if (inwardVelocity > 0f)
+        {
+            leg.Tip.vel -= inward * inwardVelocity;
         }
     }
 
     private static void ClampLegTargetToSurface(Room room, DrillCrab.Leg leg)
     {
         if (room == null || leg == null ||
-            !TryGetNearbyQuicksand(room, leg.targetPos, out QuicksandZone zone) ||
-            !TryGetFootSurface(zone, leg.targetPos, out Vector2 desiredTarget, out Vector2 inward))
+            !TryGetQuicksandSurfaceAtX(
+                room,
+                leg.targetPos.x,
+                out _,
+                out Vector2 surface,
+                out Vector2 inward))
         {
             return;
         }
 
-        float penetration = Vector2.Dot(leg.targetPos - desiredTarget, inward);
-        if (penetration > SurfaceCorrectionTolerance)
+        leg.targetPos = surface - inward * FootSurfaceClearance;
+    }
+
+    private static void RebuildLegInverseKinematics(DrillCrab crab, DrillCrab.Leg leg)
+    {
+        if (leg.Limp || leg.Tip == null || leg.segments == null || leg.segments.Length == 0)
         {
-            leg.targetPos -= inward * penetration;
+            return;
+        }
+
+        float flattened = Custom.SCurve(leg.flatten, 2f);
+        float flip = Mathf.Sin(
+            (leg.side * 0.4f + 0.75f * crab.flip) * Mathf.PI / 2f) *
+            (1f - flattened * 0.8f);
+        float extended = Mathf.Clamp01(Vector2.Distance(leg.Tip.pos, leg.anchor) /
+                                        Mathf.Max(1f, leg.maxLength));
+
+        leg.DoInverseKinematics(flip, extended);
+
+        for (int i = 0; i < leg.segments.Length - 1; i++)
+        {
+            leg.segments[i].vel = leg.segments[i].pos - leg.segments[i].lastPos;
         }
     }
 
-    private static bool TryGetFootSurface(
-        QuicksandZone zone,
-        Vector2 point,
-        out Vector2 desiredPoint,
-        out Vector2 inward)
+    private static void ClampLegSegmentsToSurface(Room room, DrillCrab.Leg leg)
     {
-        desiredPoint = point;
-        inward = Vector2.down;
+        for (int i = 0; i < leg.segments.Length; i++)
+        {
+            DrillCrab.Leg.Segment segment = leg.segments[i];
+            if (segment == null ||
+                !TryGetQuicksandSurfaceAtX(
+                    room,
+                    segment.pos.x,
+                    out _,
+                    out Vector2 surface,
+                    out Vector2 inward))
+            {
+                continue;
+            }
 
-        if (zone == null || zone.Data == null)
+            float clearance = i == leg.segments.Length - 1
+                ? FootSurfaceClearance
+                : LegSegmentClearance;
+            Vector2 desired = surface - inward * clearance;
+            float penetration = Vector2.Dot(segment.pos - desired, inward);
+            if (penetration <= SurfaceCorrectionTolerance)
+            {
+                continue;
+            }
+
+            Vector2 correction = -inward * penetration;
+            segment.pos += correction;
+            segment.lastPos += correction;
+
+            float inwardVelocity = Vector2.Dot(segment.vel, inward);
+            if (inwardVelocity > 0f)
+            {
+                segment.vel -= inward * inwardVelocity;
+            }
+        }
+
+        if (leg.Supporting)
+        {
+            leg.Tip.vel = Vector2.zero;
+        }
+    }
+
+    private static void TrySeedScanningTarget(Room room, DrillCrab.Leg leg)
+    {
+        if (room == null || leg == null || leg.scanFrom == Vector2.zero)
+        {
+            return;
+        }
+
+        Vector2 rayEnd = leg.scanFrom +
+                         Custom.RotateAroundOrigo(Vector2.down * leg.maxLength, leg.IdealAngle);
+        if (TryFindFirstQuicksandIntersection(
+                room,
+                leg.scanFrom,
+                rayEnd,
+                out Vector2 surfacePoint,
+                out Vector2 inward))
+        {
+            leg.SetTarget(surfacePoint - inward * FootSurfaceClearance);
+        }
+    }
+
+    private static bool TryFindFirstQuicksandIntersection(
+        Room room,
+        Vector2 rayStart,
+        Vector2 rayEnd,
+        out Vector2 bestPoint,
+        out Vector2 bestInward)
+    {
+        bestPoint = Vector2.zero;
+        bestInward = Vector2.down;
+        if (room?.updateList == null)
         {
             return false;
         }
 
-        float u = zone.MaterialUAtWorldX(point.x);
-        if (!zone.Data.IsQuicksand(u) ||
-            !zone.TrySampleSurfaceFrame(
-                u,
-                out Vector2 surface,
-                out _,
-                out inward,
-                out _))
+        bool found = false;
+        float bestRayT = float.PositiveInfinity;
+
+        for (int i = 0; i < room.updateList.Count; i++)
         {
+            if (room.updateList[i] is not QuicksandZone zone || !IsUsableZone(zone))
+            {
+                continue;
+            }
+
+            Vector2 previous = Vector2.zero;
+            float previousU = 0f;
+            bool havePrevious = false;
+
+            for (int sample = 0; sample <= SurfaceRaySamples; sample++)
+            {
+                float u = sample / (float)SurfaceRaySamples;
+                if (!zone.Data.IsQuicksand(u) ||
+                    !zone.TrySampleSurfaceFrame(
+                        u,
+                        out Vector2 surface,
+                        out _,
+                        out Vector2 inward,
+                        out _))
+                {
+                    havePrevious = false;
+                    continue;
+                }
+
+                if (havePrevious &&
+                    TrySegmentIntersection(
+                        rayStart,
+                        rayEnd,
+                        previous,
+                        surface,
+                        out float rayT,
+                        out Vector2 intersection) &&
+                    rayT < bestRayT)
+                {
+                    float hitU = Mathf.Lerp(previousU, u, 0.5f);
+                    zone.TrySampleSurfaceFrame(
+                        hitU,
+                        out _,
+                        out _,
+                        out Vector2 hitInward,
+                        out _);
+                    if (hitInward.sqrMagnitude < 0.0001f)
+                    {
+                        hitInward = Vector2.down;
+                    }
+                    else
+                    {
+                        hitInward.Normalize();
+                    }
+                    if (hitInward.y > 0f)
+                    {
+                        hitInward = -hitInward;
+                    }
+
+                    bestRayT = rayT;
+                    bestPoint = intersection;
+                    bestInward = hitInward;
+                    found = true;
+                }
+
+                previous = surface;
+                previousU = u;
+                havePrevious = true;
+            }
+        }
+
+        return found;
+    }
+
+    private static bool TrySegmentIntersection(
+        Vector2 a,
+        Vector2 b,
+        Vector2 c,
+        Vector2 d,
+        out float rayT,
+        out Vector2 point)
+    {
+        Vector2 r = b - a;
+        Vector2 s = d - c;
+        float denominator = Cross(r, s);
+        if (Mathf.Abs(denominator) < 0.0001f)
+        {
+            rayT = 0f;
+            point = Vector2.zero;
             return false;
         }
 
-        if (inward.sqrMagnitude < 0.0001f)
+        Vector2 ca = c - a;
+        float t = Cross(ca, s) / denominator;
+        float u = Cross(ca, r) / denominator;
+        if (t < 0f || t > 1f || u < 0f || u > 1f)
         {
-            inward = Vector2.down;
-        }
-        else
-        {
-            inward.Normalize();
-        }
-
-        if (inward.y > 0f)
-        {
-            inward = -inward;
+            rayT = 0f;
+            point = Vector2.zero;
+            return false;
         }
 
-        desiredPoint = surface - inward * FootSurfaceClearance;
+        rayT = t;
+        point = a + r * t;
         return true;
+    }
+
+    private static float Cross(Vector2 a, Vector2 b)
+    {
+        return a.x * b.y - a.y * b.x;
+    }
+
+    private static bool TryGetQuicksandSurfaceAtX(
+        Room room,
+        float worldX,
+        out QuicksandZone bestZone,
+        out Vector2 bestSurface,
+        out Vector2 bestInward)
+    {
+        bestZone = null;
+        bestSurface = Vector2.zero;
+        bestInward = Vector2.down;
+        if (room?.updateList == null)
+        {
+            return false;
+        }
+
+        float highestSurface = float.NegativeInfinity;
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is not QuicksandZone zone ||
+                !IsUsableZone(zone) ||
+                worldX < zone.startX ||
+                worldX > zone.endX)
+            {
+                continue;
+            }
+
+            float u = zone.MaterialUAtWorldX(worldX);
+            if (!zone.Data.IsQuicksand(u) ||
+                !zone.TrySampleSurfaceFrame(
+                    u,
+                    out Vector2 surface,
+                    out _,
+                    out Vector2 inward,
+                    out _))
+            {
+                continue;
+            }
+
+            if (surface.y <= highestSurface)
+            {
+                continue;
+            }
+
+            if (inward.sqrMagnitude < 0.0001f)
+            {
+                inward = Vector2.down;
+            }
+            else
+            {
+                inward.Normalize();
+            }
+            if (inward.y > 0f)
+            {
+                inward = -inward;
+            }
+
+            highestSurface = surface.y;
+            bestZone = zone;
+            bestSurface = surface;
+            bestInward = inward;
+        }
+
+        return bestZone != null;
     }
 
     private static bool TryGetNearbyQuicksand(
@@ -315,10 +586,7 @@ internal static class QuicksandDrillCrabCompatibility
         for (int i = 0; i < room.updateList.Count; i++)
         {
             if (room.updateList[i] is not QuicksandZone zone ||
-                zone.slatedForDeletetion ||
-                zone.PlacedObject == null ||
-                !zone.PlacedObject.active ||
-                zone.Data == null ||
+                !IsUsableZone(zone) ||
                 point.x < zone.startX ||
                 point.x > zone.endX)
             {
@@ -353,6 +621,15 @@ internal static class QuicksandDrillCrabCompatibility
         }
 
         return bestZone != null;
+    }
+
+    private static bool IsUsableZone(QuicksandZone zone)
+    {
+        return zone != null &&
+               !zone.slatedForDeletetion &&
+               zone.PlacedObject != null &&
+               zone.PlacedObject.active &&
+               zone.Data != null;
     }
 
     private static void SpriteLeaser_Update(
