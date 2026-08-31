@@ -17,7 +17,7 @@ internal static class WeatherForecastHudRuntime
 {
     private const float GameTicksPerSecond = 40f;
     private const float FillDiameterPixels = 5.30f;
-    private const int MaxDripGlyphs = 3;
+    private const int MaxDripGlyphs = 2;
 
     private sealed class DripGlyph
     {
@@ -74,11 +74,15 @@ internal static class WeatherForecastHudRuntime
     private sealed class ForecastPipVisual
     {
         private readonly FSprite _fill;
+        private readonly FSprite _whiteRing;
         private readonly DripGlyph[] _drips;
         private readonly float _fillBaseScale;
+        private bool _layeringConfirmed;
 
         internal ForecastPipVisual(RainWorld rainWorld, FContainer container, FSprite whiteRing)
         {
+            _whiteRing = whiteRing;
+
             // Circle20 is a genuine round atlas element, unlike using tiny Circle4 as
             // a colored center where pixel geometry can read as a diamond. Keep a
             // circular fallback for unusually stripped atlas setups.
@@ -97,17 +101,18 @@ internal static class WeatherForecastHudRuntime
                 isVisible = false
             };
             container.AddChild(_fill);
-            if (whiteRing != null)
-            {
-                _fill.MoveBehindOtherNode(whiteRing);
-            }
 
             _drips = new DripGlyph[MaxDripGlyphs];
             for (int i = 0; i < _drips.Length; i++)
             {
                 _drips[i] = new DripGlyph(rainWorld, container);
-                _drips[i].PutBehind(whiteRing);
             }
+
+            // Do this once now and once on first draw. The second pass makes layering
+            // independent of MonoMod hook ordering: all legacy test sprites are known
+            // to exist by then, so our true circle ends immediately behind the ring.
+            EnsureLayering();
+            _layeringConfirmed = false;
         }
 
         internal void Draw(
@@ -118,6 +123,8 @@ internal static class WeatherForecastHudRuntime
             float animationSeconds,
             int pipSeed)
         {
+            EnsureLayering();
+
             WeatherForecastVisualStyle style = WeatherForecastVisualCatalog.Get(kind);
             float visibility = Mathf.Clamp01(hudFade * solid);
             if (kind == WeatherForecastVisualKind.None || visibility <= 0.001f)
@@ -166,7 +173,6 @@ internal static class WeatherForecastHudRuntime
             int pipSeed)
         {
             int count = Math.Min(style.DripCount, _drips.Length);
-            bool fast = style.Animation == WeatherForecastAnimation.FastDrip;
 
             for (int i = 0; i < _drips.Length; i++)
             {
@@ -207,15 +213,17 @@ internal static class WeatherForecastHudRuntime
                 drip.Head.SetPosition(new Vector2(x, y));
                 drip.Tail.SetPosition(new Vector2(
                     x,
-                    y + (fast ? 0.63f : 0.52f) + (1f - phase) * 0.18f));
+                    y + 0.52f + (1f - phase) * 0.18f));
+
+                // HeavyRain and BulletRain use exactly the same droplet geometry.
+                // BulletRain differs only through DripCyclesPerSecond in the catalog.
+                float headRadiusX = 0.54f * envelope;
+                float headRadiusY = 0.78f * envelope;
+                float tailRadiusX = 0.19f * envelope;
+                float tailRadiusY = 0.54f * envelope;
 
                 // VectorCircle's reference scale is radius / 8. The paired ellipses
                 // form a readable teardrop at only a few screen pixels.
-                float headRadiusX = (fast ? 0.48f : 0.54f) * envelope;
-                float headRadiusY = (fast ? 0.70f : 0.78f) * envelope;
-                float tailRadiusX = (fast ? 0.16f : 0.19f) * envelope;
-                float tailRadiusY = (fast ? 0.72f : 0.54f) * envelope;
-
                 drip.Head.scaleX = headRadiusX / 8f;
                 drip.Head.scaleY = headRadiusY / 8f;
                 drip.Tail.scaleX = tailRadiusX / 8f;
@@ -225,6 +233,22 @@ internal static class WeatherForecastHudRuntime
                 drip.Head.isVisible = true;
                 drip.Tail.isVisible = true;
             }
+        }
+
+        private void EnsureLayering()
+        {
+            if (_layeringConfirmed || _whiteRing == null)
+            {
+                return;
+            }
+
+            _fill.MoveBehindOtherNode(_whiteRing);
+            for (int i = 0; i < _drips.Length; i++)
+            {
+                _drips[i].PutBehind(_whiteRing);
+            }
+
+            _layeringConfirmed = true;
         }
 
         internal void Hide()
@@ -430,7 +454,10 @@ internal static class WeatherForecastHudRuntime
 
             ForecastPipVisual visual = state.Pips[index];
             global::HUD.HUDCircle circle = meter.circles[index];
-            if (visual == null || circle == null ||
+            if (visual == null ||
+                circle == null ||
+                circle.sprite == null ||
+                !circle.sprite.isVisible ||
                 !TryGetMarker(game, phase, chronologicalPip, out WeatherForecastVisualKind kind))
             {
                 visual?.Hide();
