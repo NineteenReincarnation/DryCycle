@@ -64,16 +64,10 @@ internal static class PaletteLighting
         if (self?.room?.world == null
             || !WorldClockHooks.TryGetClock(self.room.world, out WorldClock clock))
         {
-            // Region-level opt-out: do not suppress or replace Rain World's own
-            // DayNight palette logic. This also covers DLC/mod-specific behavior.
             orig(self);
             return;
         }
 
-        // DryCycle day/night is a region-gated world feature. It does not require the
-        // vanilla DayNight RoomEffect. While enabled for this region, DryCycle owns
-        // the room's time-of-day palette selection and suppresses vanilla's hard-coded
-        // dusk/night palette timing so the two systems cannot fight.
         self.dayNightNeedsRefresh = false;
 
         CameraState state = _cameraStates.GetOrCreateValue(self);
@@ -119,9 +113,6 @@ internal static class PaletteLighting
         state.PaletteB = transition.PaletteB;
         state.Blend = transition.Blend;
 
-        // ChangeBothPalettes uses Rain World's native 32x16 palette loader,
-        // effect-color application, rain/dark bank interpolation and RoomPalette
-        // propagation. We only replace which authored palettes are blended and when.
         camera.ChangeBothPalettes(
             transition.PaletteA,
             transition.PaletteB,
@@ -149,44 +140,38 @@ internal static class PaletteLighting
         {
             float p = Mathf.Repeat(dayProgress, 1f);
 
-            // Dawn begins from the same authored Dusk palette reached at the end of
-            // pre-dawn, then returns to Base. This makes the 1.0 -> 0.0 wrap seamless.
-            if (p < 0.065f)
-            {
-                float t = Smooth01(Mathf.InverseLerp(0f, 0.065f, p));
-                return new PaletteTransition(duskPalette, basePalette, t);
-            }
-
-            // Stable daytime.
+            // A DryCycle phase begins in real daytime. The previous implementation
+            // started p=0 on the authored Dusk palette and spent the opening segment
+            // blending Dusk -> Base, which made a fresh cycle look like night/dawn.
+            // Day now begins immediately on Base; sunrise is handled at the END of
+            // the preceding night so the 1.0 -> 0.0 wrap is still continuous.
             if (p < 0.420f)
             {
                 return new PaletteTransition(basePalette, -1, 0f);
             }
 
-            // Golden hour / sunset: authored Base -> authored Dusk.
             if (p < 0.500f)
             {
                 float t = Smooth01(Mathf.InverseLerp(0.420f, 0.500f, p));
                 return new PaletteTransition(basePalette, duskPalette, t);
             }
 
-            // Blue-hour / early night: authored Dusk -> authored Night.
             if (p < 0.600f)
             {
                 float t = Smooth01(Mathf.InverseLerp(0.500f, 0.600f, p));
                 return new PaletteTransition(duskPalette, nightPalette, t);
             }
 
-            // Stable night.
             if (p < 0.920f)
             {
                 return new PaletteTransition(nightPalette, -1, 0f);
             }
 
-            // Pre-dawn returns Night -> Dusk, then the next day's dawn continues
-            // Dusk -> Base. No dynamic palette generation is involved at any point.
+            // Pre-dawn now transitions all the way from Night -> Base. At p=1 the
+            // blend is Base, and p=0 of the next daytime is also Base, so there is no
+            // dark opening period and no palette discontinuity at the wrap.
             float preDawn = Smooth01(Mathf.InverseLerp(0.920f, 1f, p));
-            return new PaletteTransition(nightPalette, duskPalette, preDawn);
+            return new PaletteTransition(nightPalette, basePalette, preDawn);
         }
 
         private static float Smooth01(float value)
