@@ -72,11 +72,31 @@ internal sealed class MossySpiderAbstractAI : AbstractCreatureAI
         retargetCounter = 0;
     }
 
+    internal void OnRealizedRoomEntered(int roomIndex)
+    {
+        // sideAccessNodes are node-only coordinates. Reaching the destination room via
+        // SideSpace means that migration leg is complete. Pick the next node now, before
+        // the realized pather gets a chance to steer back toward the entry border.
+        if (roamTarget.HasValue && roamTarget.Value.room == roomIndex)
+        {
+            PickNewTarget();
+        }
+    }
+
     private bool TargetReached()
     {
         if (!roamTarget.HasValue)
         {
             return true;
+        }
+
+        // While realized, parent.pos can retain an abstract node even when the physical
+        // body is hundreds of pixels away from that border. Treating matching node IDs
+        // as arrival caused the target to be replaced repeatedly and made the creature
+        // alternate left/right. Realized arrival is handled by NewRoom instead.
+        if (parent.realizedCreature != null)
+        {
+            return false;
         }
 
         WorldCoordinate target = roamTarget.Value;
