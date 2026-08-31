@@ -1,22 +1,23 @@
 using System;
+using System.Runtime.CompilerServices;
 using DryCycle.Weather.Scheduling;
 
 namespace DryCycle.DayNight;
 
 /// <summary>
 /// Keeps DryCycle's game-wide clock continuous across World/Region replacements.
-/// Rain World creates a new RainCycle for the destination World and later copies the
-/// old RainCycle fields into it. DryCycle therefore never creates a second regional
-/// clock: the existing RainWorldGame clock remains authoritative and the destination
-/// region only swaps its climate schedule around the already-elapsed phase time.
-///
-/// If the player temporarily enters a region where DryCycle is disabled, vanilla owns
-/// that region completely. When a DryCycle clock already exists we shadow-advance it
-/// from vanilla RainCycle timer deltas without writing anything back to that region,
-/// so re-entering an enabled region does not resume stale time.
+/// Enabled regions use the DryCycle clock directly. Disabled regions keep vanilla
+/// RainCycle behavior, while a previously-created DryCycle clock shadow-advances from
+/// the vanilla timer so elapsed time is not lost when the player crosses back.
 /// </summary>
 internal static class WorldClockRegionContinuityRuntime
 {
+    private sealed class RainCycleGateState
+    {
+        internal bool WasDisabled;
+    }
+
+    private static ConditionalWeakTable<RainCycle, RainCycleGateState> _gateStates = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -40,6 +41,7 @@ internal static class WorldClockRegionContinuityRuntime
 
         On.RainCycle.Update -= RainCycle_Update;
         On.OverWorld.WorldLoaded -= OverWorld_WorldLoaded;
+        _gateStates = new ConditionalWeakTable<RainCycle, RainCycleGateState>();
         _enabled = false;
     }
 
@@ -47,23 +49,41 @@ internal static class WorldClockRegionContinuityRuntime
         On.RainCycle.orig_Update orig,
         RainCycle self)
     {
-        WorldClock clock = null;
-        bool shadowOnly = self?.world?.game != null &&
-                          self.world.game.IsStorySession &&
-                          !RegionDayNightOptions.IsEnabled(self.world) &&
-                          WorldClockHooks.TryGetClock(self.world.game, out clock);
+        if (self?.world?.game == null || !self.world.game.IsStorySession)
+        {
+            orig(self);
+            return;
+        }
 
-        int beforeTimer = shadowOnly ? self.timer : 0;
+        bool disabled = !RegionDayNightOptions.IsEnabled(self.world);
+        bool hasClock = WorldClockHooks.TryGetClock(self.world.game, out WorldClock clock);
+        RainCycleGateState gateState = _gateStates.GetOrCreateValue(self);
+
+        // If a running RainCycle changes from DryCycle ownership to vanilla ownership
+        // (region gate or live Remix toggle), seed vanilla with the SAME phase progress
+        // instead of exposing DryCycle's deliberately fixed safe facade timer.
+        if (disabled && hasClock && !gateState.WasDisabled)
+        {
+            AlignVanillaTimerToClock(self, clock);
+        }
+
+        int beforeTimer = disabled && hasClock ? self.timer : 0;
         orig(self);
 
-        if (!shadowOnly || clock == null)
+        gateState.WasDisabled = disabled;
+
+        if (!disabled || !hasClock || clock == null)
         {
             return;
         }
 
-        // This is observation only: no RainCycle fields are changed, so the disabled
-        // region keeps its exact vanilla/DLC/mod behavior. The hidden global clock
-        // simply consumes the same forward gameplay ticks.
+        // Match the enabled-region loading rule: gate/world loading must not consume
+        // hidden DryCycle time while the player is not actually in live gameplay.
+        if (!WorldClockHooks.HasLiveGameplay(self.world.game))
+        {
+            return;
+        }
+
         int advanced = Math.Max(0, self.timer - beforeTimer);
         if (advanced <= 0)
         {
@@ -82,23 +102,51 @@ internal static class WorldClockRegionContinuityRuntime
         orig(self, warpUsed);
 
         World destination = self?.activeWorld;
-        if (destination?.game == null || !destination.game.IsStorySession)
+        if (destination?.game == null ||
+            !destination.game.IsStorySession ||
+            destination.rainCycle == null)
         {
             return;
         }
 
-        // Vanilla has now finished copying the source RainCycle fields into the
-        // destination World. Re-apply that final cycle length to the existing global
-        // clock before scheduling, while SetCycleLength preserves the elapsed phase.
-        if (destination.rainCycle != null &&
-            WorldClockHooks.TryGetClock(destination.game, out WorldClock clock))
+        if (RegionDayNightOptions.IsEnabled(destination))
         {
-            clock.SetCycleLength(Math.Max(1, destination.rainCycle.cycleLength));
+            // A destination world may be the first DryCycle-enabled region visited in
+            // this RainWorldGame. Ensure a clock exists and import the copied vanilla
+            // timer if necessary; GetOrCreate handles that bootstrap path.
+            if (WorldClockHooks.TryEnsureClock(destination.rainCycle, out WorldClock clock))
+            {
+                clock.SetCycleLength(Math.Max(1, destination.rainCycle.cycleLength));
+            }
+
+            WeatherScheduleRuntime.Synchronize(destination);
+            return;
         }
 
-        // Do not carry the previous region's weather table through a gate. The global
-        // clock is intentionally retained, but the destination profile is scheduled
-        // against the current HalfProgress immediately after the World swap.
-        WeatherScheduleRuntime.Synchronize(destination);
+        // Enabled -> disabled is the inverse boundary. Vanilla must receive the actual
+        // elapsed phase position, not the safe midpoint RainCycle value that DryCycle
+        // keeps while it owns the source region.
+        if (WorldClockHooks.TryGetClock(destination.game, out WorldClock hiddenClock))
+        {
+            hiddenClock.SetCycleLength(Math.Max(1, destination.rainCycle.cycleLength));
+            AlignVanillaTimerToClock(destination.rainCycle, hiddenClock);
+        }
+    }
+
+    private static void AlignVanillaTimerToClock(RainCycle rainCycle, WorldClock clock)
+    {
+        if (rainCycle == null || clock == null)
+        {
+            return;
+        }
+
+        int length = Math.Max(1, rainCycle.cycleLength);
+        rainCycle.timer = Mathf.Clamp(clock.VirtualRainTimer(length), 0, Math.Max(0, length - 1));
+        rainCycle.deathRainHasHit = false;
+
+        // Vanilla's own dayNightCounter normally does not begin until after its rain
+        // timer reaches sunset/death-rain territory. Do not leak DryCycle's night-half
+        // 0..10000 compatibility counter into a region whose switch is disabled.
+        rainCycle.dayNightCounter = 0;
     }
 }
