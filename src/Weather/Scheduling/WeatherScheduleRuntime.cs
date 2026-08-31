@@ -327,19 +327,26 @@ internal static class WeatherScheduleRuntime
         {
             uint hash = 2166136261u;
             int saveSeed = 0;
+            int saveCycle = 0;
             try
             {
                 if (game?.GetStorySession?.saveState != null)
                 {
                     saveSeed = game.GetStorySession.saveState.seed;
+                    saveCycle = game.GetStorySession.saveState.cycleNumber;
                 }
             }
             catch
             {
                 saveSeed = 0;
+                saveCycle = 0;
             }
 
+            // saveSeed distinguishes save files; saveCycle makes a fresh shelter cycle
+            // roll a new forecast; DayIndex then distinguishes continuous DryCycle days
+            // that pass without a shelter reload.
             AddInt(ref hash, saveSeed);
+            AddInt(ref hash, saveCycle);
             AddInt(ref hash, dayIndex);
             AddInt(ref hash, (int)phase);
 
