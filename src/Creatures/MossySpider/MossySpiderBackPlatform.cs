@@ -1,34 +1,36 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace DryCycle.Creatures.MossySpider;
 
 /// <summary>
-/// Turns the moss-covered dorsal surface into a one-way moving floor for players.
+/// Makes the moss-covered dorsal surface a one-way moving floor for players.
 ///
-/// This deliberately hooks BodyChunk.CheckVerticalCollision instead of applying a
-/// Player.Update position lock. Rain World's ordinary floor semantics therefore stay
-/// authoritative: a player only lands while approaching the surface from above, the
-/// contacting BodyChunk receives ContactPoint.y == -1, upward jumps are untouched, and
-/// goThroughFloors still lets the player drop through.
-///
-/// Horizontal carrying is handled separately from collision. When the MossySpider has
-/// already updated this frame, the material-point displacement of the back is added to
-/// the player's intended X position. When the spider updates later, BodyChunk's native
-/// MoveWithOtherObject / Room.chunkGlue path carries the player after the carrier moves.
-/// This keeps an idle player riding with the creature without welding player velocity to
-/// the MossySpider or preventing ordinary walking on top of it.
+/// The first contact is resolved inside BodyChunk.CheckVerticalCollision, matching Rain
+/// World's ordinary floor semantics. A small per-BodyChunk rider state then keeps an
+/// already-standing player attached across carrier update order, small downward body
+/// motions and the curved transition between dorsal samples. Jumping or dropping through
+/// immediately releases that state.
 /// </summary>
 internal static class MossySpiderBackPlatform
 {
-    private const float WalkableStartU = 0.08f;
-    private const float WalkableEndU = 0.92f;
-    private const int SurfaceSearchSamples = 32;
+    private const int SurfaceSearchSamples = 96;
     private const float SurfaceClearance = 1.5f;
-    private const float ContactTolerance = 4f;
-    private const float PreviousSideTolerance = 3f;
-    private const float MinimumStandableNormalY = 0.55f;
+    private const float ContactTolerance = 5f;
+    private const float PreviousSideTolerance = 4f;
+    private const float MinimumStandableNormalY = 0.48f;
+    private const float RideRetentionAbove = 18f;
+    private const float RideRetentionBelow = 10f;
+    private const float NearUSearchRadius = 0.12f;
+    private const float NearUSearchMaxX = 16f;
+    private const float JumpReleaseRelativeSpeed = 1.15f;
 
-    private static bool _enabled;
+    private sealed class RiderState
+    {
+        internal bool Active;
+        internal MossySpider Spider;
+        internal float U;
+    }
 
     private readonly struct BackContact
     {
@@ -55,6 +57,9 @@ internal static class MossySpiderBackPlatform
             CarrierChunk = carrierChunk;
         }
     }
+
+    private static readonly ConditionalWeakTable<BodyChunk, RiderState> RiderStates = new();
+    private static bool _enabled;
 
     internal static void Enable()
     {
@@ -91,57 +96,95 @@ internal static class MossySpiderBackPlatform
             return;
         }
 
-        // CheckVerticalCollision is called after BodyChunk has already integrated vel
-        // into pos. Keep that uncorrected position: it is the player's intended motion
-        // this frame and is what we should preserve while adding carrier displacement.
+        RiderState rider = RiderStates.GetOrCreateValue(self);
+        if (rider.Active && !ValidSpider(rider.Spider, player.room))
+        {
+            Deactivate(rider);
+        }
+
+        // BodyChunk.Update has already integrated velocity into pos before this method.
+        // Preserve that uncorrected position so walking input is not lost when carrier
+        // displacement is added later.
         Vector2 intendedPos = self.pos;
         Vector2 previousPos = self.lastPos;
         float terrainRadius = self.TerrainRad;
 
         orig(self);
 
-        // Treat the dorsal surface as a one-way Floor tile, not as solid creature
-        // collision. Player's ordinary drop-through state therefore remains valid.
-        if (self.goThroughFloors || player.room == null)
+        if (self.goThroughFloors || player.room == null || player.enteringShortCut.HasValue)
         {
+            Deactivate(rider);
             return;
         }
 
         float previousBottom = previousPos.y - terrainRadius;
         float intendedBottom = intendedPos.y - terrainRadius;
 
-        if (!TryFindBackContact(
+        bool found = TryFindBackContact(
+            player.room,
+            intendedPos.x,
+            previousBottom,
+            intendedBottom,
+            out BackContact contact);
+
+        // CheckVerticalCollision's normal from-above crossing test is ideal for landing,
+        // but is not enough for a moving creature. If the back moves downward several
+        // pixels between frames, a stationary player can be above it without technically
+        // crossing it. Retain the previous ride contact through that small separation.
+        if (!found && rider.Active)
+        {
+            found = TryRetainBackContact(
+                rider,
                 player.room,
                 intendedPos.x,
                 previousBottom,
                 intendedBottom,
-                out BackContact contact))
-        {
-            return;
+                out contact);
         }
 
-        float targetCenterY = contact.CurrentPoint.y + terrainRadius + SurfaceClearance;
-
-        // Native tile/TerrainCurve collision may already have landed this BodyChunk on
-        // something above the MossySpider. Never pull a player down through real terrain
-        // merely because a back surface also exists below the same X coordinate.
-        if (self.contactPoint.y == -1 && self.pos.y > targetCenterY + ContactTolerance)
+        if (!found)
         {
+            Deactivate(rider);
             return;
         }
 
         Vector2 platformVelocity = contact.CurrentPoint - contact.PreviousPoint;
         Vector2 relativeVelocity = self.vel - platformVelocity;
+
+        // A deliberate upward jump must leave the one-way platform. The retained rider
+        // state is only for passive separation caused by the carrier moving under the
+        // player, never for pinning an ascending player to the moss.
+        if (rider.Active &&
+            Vector2.Dot(relativeVelocity, contact.Normal) > JumpReleaseRelativeSpeed &&
+            intendedBottom >= contact.CurrentPoint.y - 1f)
+        {
+            Deactivate(rider);
+            return;
+        }
+
+        float targetCenterY = contact.CurrentPoint.y + terrainRadius + SurfaceClearance;
+
+        // If native collision already found a real floor clearly above the MossySpider,
+        // keep the real floor. This prevents the moving platform from pulling the player
+        // down through room terrain where both surfaces overlap in X.
+        if (self.contactPoint.y == -1 && self.pos.y > targetCenterY + ContactTolerance)
+        {
+            Deactivate(rider);
+            return;
+        }
+
         float intoBack = Vector2.Dot(relativeVelocity, contact.Normal);
         if (intoBack < 0f)
         {
-            // Equivalent to the normal-removal part of BodyChunk's TerrainCurve floor
-            // response, but in the platform's moving reference frame.
             self.vel -= contact.Normal * intoBack;
         }
 
         self.pos.y = targetCenterY;
         self.contactPoint.y = -1;
+
+        rider.Active = true;
+        rider.Spider = contact.Spider;
+        rider.U = contact.U;
 
         CarryWithBack(self, intendedPos, targetCenterY, contact);
     }
@@ -158,9 +201,6 @@ internal static class MossySpiderBackPlatform
             return;
         }
 
-        // PhysicalObject calls base.Update(eu) only after its BodyChunks have updated,
-        // so playerChunk.owner.evenUpdate still contains the PREVIOUS frame here. The
-        // game's current evenUpdate is the authoritative update-order marker.
         bool currentEu = playerChunk.owner.room?.game != null
             ? playerChunk.owner.room.game.evenUpdate
             : !playerChunk.owner.evenUpdate;
@@ -168,25 +208,17 @@ internal static class MossySpiderBackPlatform
 
         if (carrierAlreadyUpdated)
         {
-            // The precise dorsal material point includes torso bending, not merely the
-            // nearest BodyChunk translation. Use that exact displacement when available.
             float carryX = contact.CurrentPoint.x - contact.PreviousPoint.x;
             playerChunk.pos.x = intendedPos.x + carryX;
             playerChunk.pos.y = targetCenterY;
             return;
         }
 
-        // The carrier has not updated yet. BodyChunk.MoveWithOtherObject is designed for
-        // exactly this update-order problem: Room.chunkGlue applies this stored relative
-        // position after the MossySpider has moved later in the room update.
         Vector2 relativePosition = new(
             intendedPos.x - carrier.pos.x,
             targetCenterY - carrier.pos.y);
 
-        playerChunk.MoveWithOtherObject(
-            currentEu,
-            carrier,
-            relativePosition);
+        playerChunk.MoveWithOtherObject(currentEu, carrier, relativePosition);
     }
 
     private static bool TryFindBackContact(
@@ -207,11 +239,7 @@ internal static class MossySpiderBackPlatform
 
         for (int i = 0; i < room.updateList.Count; i++)
         {
-            if (room.updateList[i] is not MossySpider spider ||
-                spider.slatedForDeletetion ||
-                spider.room != room ||
-                spider.bodyChunks == null ||
-                spider.bodyChunks.Length < 2)
+            if (room.updateList[i] is not MossySpider spider || !ValidSpider(spider, room))
             {
                 continue;
             }
@@ -227,15 +255,6 @@ internal static class MossySpiderBackPlatform
                 continue;
             }
 
-            if (normal.y < MinimumStandableNormalY)
-            {
-                continue;
-            }
-
-            // One-way vertical collision: last frame the player's bottom must not have
-            // been meaningfully below this same material point, and this frame the
-            // integrated bottom must have reached/crossed it. This mirrors the essential
-            // from-above test inside BodyChunk.CheckVerticalCollision.
             float previousRelative = previousBottom - previousPoint.y;
             float currentRelative = intendedBottom - currentPoint.y;
             if (previousRelative < -PreviousSideTolerance ||
@@ -244,30 +263,74 @@ internal static class MossySpiderBackPlatform
                 continue;
             }
 
-            // If several folded pieces overlap the same world X, stand on the highest
-            // dorsal surface rather than being snapped through it to a lower segment.
             if (found && currentPoint.y <= bestSurfaceY)
             {
                 continue;
             }
 
-            int carrierIndex = Mathf.Clamp(
-                Mathf.RoundToInt(u * (spider.bodyChunks.Length - 1)),
-                0,
-                spider.bodyChunks.Length - 1);
-
             bestSurfaceY = currentPoint.y;
-            bestContact = new BackContact(
-                spider,
-                currentPoint,
-                previousPoint,
-                normal,
-                u,
-                spider.bodyChunks[carrierIndex]);
+            bestContact = MakeContact(spider, u, currentPoint, previousPoint, normal);
             found = true;
         }
 
         return found;
+    }
+
+    private static bool TryRetainBackContact(
+        RiderState rider,
+        Room room,
+        float worldX,
+        float previousBottom,
+        float intendedBottom,
+        out BackContact contact)
+    {
+        contact = default;
+        MossySpider spider = rider.Spider;
+        if (!ValidSpider(spider, room))
+        {
+            return false;
+        }
+
+        bool found = TrySurfaceAtX(
+            spider,
+            worldX,
+            out float u,
+            out Vector2 currentPoint,
+            out Vector2 previousPoint,
+            out Vector2 normal);
+
+        // A sharply bent torso can make the sampled dorsal curve locally vertical in X.
+        // Preserve contact around the previous material coordinate instead of creating a
+        // one-frame hole in the platform at that bend.
+        if (!found)
+        {
+            found = TrySurfaceNearU(
+                spider,
+                rider.U,
+                worldX,
+                out u,
+                out currentPoint,
+                out previousPoint,
+                out normal);
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        float currentRelative = intendedBottom - currentPoint.y;
+        float previousRelative = previousBottom - previousPoint.y;
+
+        if (currentRelative > RideRetentionAbove ||
+            currentRelative < -RideRetentionBelow ||
+            previousRelative < -RideRetentionBelow)
+        {
+            return false;
+        }
+
+        contact = MakeContact(spider, u, currentPoint, previousPoint, normal);
+        return true;
     }
 
     private static bool TrySurfaceAtX(
@@ -283,7 +346,7 @@ internal static class MossySpiderBackPlatform
         previousPoint = Vector2.zero;
         bestNormal = Vector2.up;
 
-        float previousU = WalkableStartU;
+        float previousU = MossySpiderSilhouette.WalkableStartU;
         Vector2 segmentA = BackPoint(spider, previousU, previousFrame: false);
         bool found = false;
         float highestY = float.NegativeInfinity;
@@ -291,14 +354,14 @@ internal static class MossySpiderBackPlatform
         for (int i = 1; i <= SurfaceSearchSamples; i++)
         {
             float u = Mathf.Lerp(
-                WalkableStartU,
-                WalkableEndU,
+                MossySpiderSilhouette.WalkableStartU,
+                MossySpiderSilhouette.WalkableEndU,
                 i / (float)SurfaceSearchSamples);
             Vector2 segmentB = BackPoint(spider, u, previousFrame: false);
 
             float minX = Mathf.Min(segmentA.x, segmentB.x);
             float maxX = Mathf.Max(segmentA.x, segmentB.x);
-            if (worldX >= minX - 0.01f && worldX <= maxX + 0.01f)
+            if (worldX >= minX - 0.05f && worldX <= maxX + 0.05f)
             {
                 float dx = segmentB.x - segmentA.x;
                 float t = Mathf.Abs(dx) > 0.001f
@@ -307,7 +370,10 @@ internal static class MossySpiderBackPlatform
 
                 float candidateU = Mathf.Lerp(previousU, u, t);
                 Vector2 candidatePoint = Vector2.Lerp(segmentA, segmentB, t);
-                Vector2 candidateNormal = BackNormal(spider, candidateU, previousFrame: false);
+                Vector2 candidateNormal = BackNormal(
+                    spider,
+                    candidateU,
+                    previousFrame: false);
 
                 if (candidateNormal.y >= MinimumStandableNormalY &&
                     (!found || candidatePoint.y > highestY))
@@ -328,34 +394,115 @@ internal static class MossySpiderBackPlatform
         return found;
     }
 
-    private static Vector2 BackPoint(MossySpider spider, float u, bool previousFrame)
+    private static bool TrySurfaceNearU(
+        MossySpider spider,
+        float centerU,
+        float worldX,
+        out float bestU,
+        out Vector2 bestPoint,
+        out Vector2 previousPoint,
+        out Vector2 bestNormal)
+    {
+        bestU = 0f;
+        bestPoint = Vector2.zero;
+        previousPoint = Vector2.zero;
+        bestNormal = Vector2.up;
+
+        float start = Mathf.Max(
+            MossySpiderSilhouette.WalkableStartU,
+            centerU - NearUSearchRadius);
+        float end = Mathf.Min(
+            MossySpiderSilhouette.WalkableEndU,
+            centerU + NearUSearchRadius);
+
+        bool found = false;
+        float bestXDistance = float.PositiveInfinity;
+
+        for (int i = 0; i <= 24; i++)
+        {
+            float u = Mathf.Lerp(start, end, i / 24f);
+            Vector2 point = BackPoint(spider, u, previousFrame: false);
+            float xDistance = Mathf.Abs(point.x - worldX);
+            if (xDistance > NearUSearchMaxX || xDistance >= bestXDistance)
+            {
+                continue;
+            }
+
+            Vector2 normal = BackNormal(spider, u, previousFrame: false);
+            if (normal.y < MinimumStandableNormalY)
+            {
+                continue;
+            }
+
+            found = true;
+            bestXDistance = xDistance;
+            bestU = u;
+            bestPoint = point;
+            previousPoint = BackPoint(spider, u, previousFrame: true);
+            bestNormal = normal;
+        }
+
+        return found;
+    }
+
+    private static BackContact MakeContact(
+        MossySpider spider,
+        float u,
+        Vector2 currentPoint,
+        Vector2 previousPoint,
+        Vector2 normal)
+    {
+        int carrierIndex = Mathf.Clamp(
+            Mathf.RoundToInt(u * (spider.bodyChunks.Length - 1)),
+            0,
+            spider.bodyChunks.Length - 1);
+
+        return new BackContact(
+            spider,
+            currentPoint,
+            previousPoint,
+            normal,
+            u,
+            spider.bodyChunks[carrierIndex]);
+    }
+
+    private static Vector2 BackPoint(
+        MossySpider spider,
+        float u,
+        bool previousFrame)
     {
         Vector2 body = SmoothBodyPoint(spider, u, previousFrame);
-        Vector2 tangent = BackTangent(spider, u, previousFrame);
-        Vector2 normal = PerpendicularUp(tangent);
-        float idle = previousFrame ? spider.LastIdleMotion : spider.IdleMotion;
-
-        float towardCenter = u < 0.5f ? 1f : -1f;
-        Vector2 mossPosition = body + tangent * (MossInset(u) * towardCenter);
-        float height = ShellTop(u, idle) + Cap(u, idle) - 1.5f;
-        return mossPosition + normal * height;
+        Vector2 bodyTangent = BodyTangent(spider, u, previousFrame);
+        Vector2 bodyNormal = PerpendicularUp(bodyTangent);
+        return body + bodyNormal * MossySpiderSilhouette.MossHigh(u);
     }
 
-    private static Vector2 BackNormal(MossySpider spider, float u, bool previousFrame)
+    private static Vector2 BackNormal(
+        MossySpider spider,
+        float u,
+        bool previousFrame)
     {
-        return PerpendicularUp(BackTangent(spider, u, previousFrame));
+        const float delta = 0.006f;
+        float beforeU = Mathf.Max(MossySpiderSilhouette.WalkableStartU, u - delta);
+        float afterU = Mathf.Min(MossySpiderSilhouette.WalkableEndU, u + delta);
+        Vector2 tangent = BackPoint(spider, afterU, previousFrame) -
+                          BackPoint(spider, beforeU, previousFrame);
+        return PerpendicularUp(tangent);
     }
 
-    private static Vector2 BackTangent(MossySpider spider, float u, bool previousFrame)
+    private static Vector2 BodyTangent(
+        MossySpider spider,
+        float u,
+        bool previousFrame)
     {
         const float delta = 0.0125f;
         Vector2 before = SmoothBodyPoint(
             spider,
-            Mathf.Max(WalkableStartU, u - delta),
+            Mathf.Max(0f, u - delta),
             previousFrame);
         Vector2 after = SmoothBodyPoint(
             spider,
-            Mathf.Min(WalkableEndU, u + delta),
+            Mathf.Min(1f, u + delta),
             previousFrame);
 
         Vector2 tangent = after - before;
@@ -366,15 +513,13 @@ internal static class MossySpiderBackPlatform
             tangent = ChunkPoint(last, previousFrame) - ChunkPoint(first, previousFrame);
         }
 
-        if (tangent.sqrMagnitude < 0.0001f)
-        {
-            tangent = Vector2.right;
-        }
-
-        return tangent.normalized;
+        return tangent.sqrMagnitude > 0.0001f ? tangent.normalized : Vector2.right;
     }
 
-    private static Vector2 SmoothBodyPoint(MossySpider spider, float u, bool previousFrame)
+    private static Vector2 SmoothBodyPoint(
+        MossySpider spider,
+        float u,
+        bool previousFrame)
     {
         int count = spider.bodyChunks.Length;
         float x = Mathf.Clamp01(u) * (count - 1);
@@ -410,38 +555,22 @@ internal static class MossySpiderBackPlatform
             normal = -normal;
         }
 
-        if (normal.sqrMagnitude < 0.0001f)
-        {
-            return Vector2.up;
-        }
-
-        return normal.normalized;
+        return normal.sqrMagnitude > 0.0001f ? normal.normalized : Vector2.up;
     }
 
-    // Keep the collision surface in sync with MossySpiderGraphics' green cap profile.
-    private static float MossInset(float u)
+    private static bool ValidSpider(MossySpider spider, Room room)
     {
-        float end = 1f - Mathf.Sin(Mathf.Clamp01(u) * Mathf.PI);
-        return 4f + 16f * end * end;
+        return spider != null &&
+               !spider.slatedForDeletetion &&
+               spider.room == room &&
+               spider.bodyChunks != null &&
+               spider.bodyChunks.Length >= 2;
     }
 
-    private static float Profile(float u)
+    private static void Deactivate(RiderState rider)
     {
-        float a = Mathf.Max(0f, Mathf.Sin(Mathf.Clamp01(u) * Mathf.PI));
-        return 0.38f + 0.62f * Mathf.Pow(a, 0.58f);
-    }
-
-    private static float ShellTop(float u, float idle)
-    {
-        return Mathf.Lerp(7f, 13f, Profile(u)) +
-               Mathf.Sin(idle * 0.43f + u * 3.1f) * 0.35f;
-    }
-
-    private static float Cap(float u, float idle)
-    {
-        return Mathf.Lerp(13f, 25f, Profile(u)) +
-               Mathf.Sin(u * 19.1f + 0.7f) * 1.25f +
-               Mathf.Sin(u * 31.7f + 2.1f) * 0.65f +
-               Mathf.Sin(idle * 0.31f + u * 5.3f) * 0.35f;
+        rider.Active = false;
+        rider.Spider = null;
+        rider.U = 0f;
     }
 }
