@@ -18,12 +18,15 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
             Type,
             "Mossy Spider")
         {
-            // Layer 1 / module 1: MossySpider owns an independent AIMap pathing type.
-            // Realized behavior modules and MovementConnections are intentionally
-            // still left for their dedicated design passes.
+            // Layer 1 / module 1. MossySpider has its own CreatureTemplate and AI,
+            // but reuses Deer's already-baked AI-map slot as the room-data baseline.
+            // Adding a new doPreBakedPathing entry here would change
+            // StaticWorld.preBakedPathingCreatures.Length and make existing room AI
+            // heat-map strings one entry too short during story-mode loading.
             HasAI = true,
             RequireAIMap = true,
-            DoPreBakedPathing = true,
+            DoPreBakedPathing = false,
+            PreBakedPathingAncestorType = CreatureTemplate.Type.Deer,
             BaseDamageResistance = 8f,
             BaseStunResistance = 3f
         };
