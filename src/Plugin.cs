@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.92";
+    public const string Version = "0.1.93";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -75,6 +75,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
+            ShelterCycleResetRuntime.Disable();
             WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
@@ -166,6 +167,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RegionClimateRegistry.Reload();
             DayNightRuntime.Enable();
             WorldClockRegionContinuityRuntime.Enable();
+            ShelterCycleResetRuntime.Enable();
             WeatherScheduleRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
@@ -183,6 +185,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
+            ShelterCycleResetRuntime.Disable();
             WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
