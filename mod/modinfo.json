@@ -1,12 +1,12 @@
 {
-  "id": "Anno",
-  "name": "DryCycle",
-  "version": "0.1.65",
-  "authors": "NineteenReincarnation",
-  "description": "Adds hydration as an additional Rain World survival resource.",
-  "target_game_version": "v1.11.8",
-  "requirements": [],
-  "requirements_names": [],
-  "tags": [],
-  "checksum_override_version": false
+	"id": "NR.B5",
+	"name": "Ancient Site",
+	"version": "0.1",
+	"hide_version": false,
+	"authors": "NR",
+	"description": "CBM.",
+    "requirements": [ "regionkit", "crs", "NR.SlugcatKarmicArmor", "watcher", "t1ws.moreflora", "customslugcatutils"],
+    "requirement_names": [ "RegionKit", "Custom Regions Support", "Slugcat KarmicArmor", "The Watcher", "More Flora", "Custom Slugcat Utils"],
+	"tags": [ "Regions" ],
+	"checksum_override_version": false
 }
