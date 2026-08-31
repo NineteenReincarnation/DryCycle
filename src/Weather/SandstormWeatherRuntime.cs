@@ -136,14 +136,16 @@ internal static class SandstormWeatherRuntime
         if (!WorldClockHooks.TestScheduleEnabled ||
             !ModManager.Watcher ||
             self?.game == null ||
-            !self.game.IsStorySession)
+            self.world == null ||
+            !self.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(self.world))
         {
             return;
         }
 
         // Watcher normally only creates this object for SurfaceSandstorm rooms or
-        // DangerType.Sandstorm. The temporary test schedule is global, so keep one
-        // dormant Sandstorm object in every realized story room only while testing.
+        // DangerType.Sandstorm. The temporary test schedule is global only across
+        // regions that explicitly have DryCycle day/night enabled.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
@@ -237,6 +239,8 @@ internal static class SandstormWeatherRuntime
     {
         if (!TryGetClock(self, out _))
         {
+            // Region opt-out must restore Watcher's original behavior completely,
+            // including its native disaster-sandstorm exposure rules.
             orig(self, amount);
             return;
         }
@@ -246,7 +250,8 @@ internal static class SandstormWeatherRuntime
         // player. DryCycle keeps the local exposure mask authoritative at every storm
         // strength: wind and lethality must reach a body through open terrain.
         // This protection is a real DryCycle behavior, not a temporary test feature,
-        // so it intentionally remains active when TestScheduleEnabled is false.
+        // so it intentionally remains active when TestScheduleEnabled is false as
+        // long as DryCycle itself is enabled for the region.
         if (self.room?.physicalObjects == null)
         {
             return;
@@ -375,6 +380,6 @@ internal static class SandstormWeatherRuntime
         clock = null;
         return storm?.room?.world?.game != null &&
                storm.room.world.game.IsStorySession &&
-               WorldClockHooks.TryGetClock(storm.room.world.game, out clock);
+               WorldClockHooks.TryGetClock(storm.room.world, out clock);
     }
 }
