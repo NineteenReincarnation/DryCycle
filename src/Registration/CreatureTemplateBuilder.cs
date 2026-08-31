@@ -3,9 +3,9 @@ using System.Collections.Generic;
 namespace DryCycle.Registration;
 
 /// <summary>
-/// Small DryCycle-owned replacement for the part of Fisobs' CreatureFormula that
-/// we actually need. It deliberately creates fresh resistance lists per build and
-/// leaves creature-specific fields available for explicit configuration afterwards.
+/// Small DryCycle-owned helper for building custom CreatureTemplate instances.
+/// It creates fresh resistance lists per build and leaves creature-specific fields
+/// available for explicit configuration afterwards.
 /// </summary>
 internal sealed class CreatureTemplateBuilder
 {
