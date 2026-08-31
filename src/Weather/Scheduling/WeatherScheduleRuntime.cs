@@ -102,7 +102,7 @@ internal static class WeatherScheduleRuntime
             return 0f;
         }
 
-        long phaseTicks = clock.TicksInHalf;
+        long phaseTicks = CurrentPhaseTicks(clock);
         for (int i = 0; i < state.Schedule.Events.Count; i++)
         {
             ScheduledWeatherEvent scheduled = state.Schedule.Events[i];
@@ -195,7 +195,7 @@ internal static class WeatherScheduleRuntime
         state.Schedule = schedule;
 
         WeatherForecastTimeline.SetPhaseSchedule(world.game, schedule);
-        LogSchedule(regionId, schedule, clock.TicksInHalf);
+        LogSchedule(regionId, schedule, CurrentPhaseTicks(clock));
     }
 
     private static WeatherPhaseSchedule BuildSchedule(
@@ -304,6 +304,17 @@ internal static class WeatherScheduleRuntime
         float fadeOut = Math.Min(1f, (float)(duration - local) / fadeTicks);
         float t = Math.Max(0f, Math.Min(fadeIn, fadeOut));
         return t * t * (3f - 2f * t);
+    }
+
+    private static long CurrentPhaseTicks(WorldClock clock)
+    {
+        if (clock == null)
+        {
+            return 0;
+        }
+
+        return (long)Math.Round(
+            Math.Max(0f, Math.Min(1f, clock.HalfProgress)) * clock.CurrentHalfLength);
     }
 
     private static int BuildSeed(
