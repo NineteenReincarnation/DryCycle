@@ -38,22 +38,25 @@ internal sealed class MossySpiderLeg
         Limp
     }
 
-    private const float MinimumGroundDrop = 28f;
-    private const float StepLead = 46f;
-    private const float TipMaxSpeed = 18f;
-    private const float TipAcceleration = 0.24f;
-    private const float SupportValidationLift = 18f;
-    private const float SupportValidationDrop = 34f;
+    // A collapsed MossySpider must still be able to find the floor and stand back up.
+    // The old 28 px minimum rejected the ground once the belly was already close to it,
+    // leaving every leg permanently in Scanning while the torso stayed prone.
+    private const float MinimumGroundDrop = 6f;
+    private const float StepLead = 60f;
+    private const float TipMaxSpeed = 22f;
+    private const float TipAcceleration = 0.26f;
+    private const float SupportValidationLift = 22f;
+    private const float SupportValidationDrop = 42f;
 
     private static readonly float[] SearchOffsets =
     [
         0f,
-        -18f,
-        18f,
-        -38f,
-        38f,
-        -58f,
-        58f
+        -22f,
+        22f,
+        -46f,
+        46f,
+        -72f,
+        72f
     ];
 
     private readonly Segment[] segments;
@@ -195,18 +198,18 @@ internal sealed class MossySpiderLeg
         float desiredReach = ReachOffset + move * StepLead;
         float currentReach = Vector2.Dot(fromAnchor, bodyAxis);
 
-        if (extension > MaxLength * 0.88f)
+        if (extension > MaxLength * 0.86f)
         {
             return true;
         }
 
-        if (Mathf.Abs(currentReach - desiredReach) > 48f)
+        if (Mathf.Abs(currentReach - desiredReach) > 56f)
         {
             return true;
         }
 
         float phase = Mathf.Repeat(spider.GaitCycle + Index * 0.173f, 1f);
-        return Mathf.Abs(move) > 0.2f && phase > 0.86f;
+        return Mathf.Abs(move) > 0.2f && phase > 0.84f;
     }
 
     internal bool StartStep(MossySpider spider, Vector2 bodyAxis)
@@ -220,10 +223,8 @@ internal sealed class MossySpiderLeg
         scanCounter = 0;
         Support = 0f;
 
-        // DrillCrab kicks the free tip away from its old support before scanning. A
-        // small lift here keeps the MossySpider foot visibly clear of the terrain and
-        // prevents an immediate reattach to the same pixel.
-        tipVelocity += Vector2.up * 5.5f + bodyAxis * (Mathf.Sign(Vector2.Dot(spider.MoveDirection, bodyAxis)) * 3f);
+        tipVelocity += Vector2.up * 7f +
+                       bodyAxis * (Mathf.Sign(Vector2.Dot(spider.MoveDirection, bodyAxis)) * 4f);
         return true;
     }
 
@@ -234,16 +235,15 @@ internal sealed class MossySpiderLeg
             return;
         }
 
-        // The foot is fixed in world space. Supporting legs reduce global gravity in
-        // MossySpider.cs (DrillCrab style), while this local momentum restores the
-        // preferred body height (Deer tentacle style). It is deliberately almost
-        // vertical so planted feet do not cancel the AI's horizontal migration drive.
         float currentHeight = Mathf.Max(0f, anchor.y - FootPos.y);
         float error = StandHeight - currentHeight;
         Vector2 localVelocity = spider.BodyVelocityAt(BodyU);
 
-        float upward = 0.24f + error * 0.055f - localVelocity.y * 0.34f;
-        upward = Mathf.Clamp(upward, -0.45f, 2.65f) * Support * supportFactor;
+        // Long legs must be able to recover the animal from a belly-down state, not
+        // merely maintain an already-correct pose. The high-error branch is therefore
+        // deliberately stronger, then damps quickly near the desired stance height.
+        float upward = 0.30f + error * 0.052f - localVelocity.y * 0.36f;
+        upward = Mathf.Clamp(upward, -0.55f, 3.45f) * Support * supportFactor;
         spider.ApplyMomentumAt(BodyU, Vector2.up * upward);
     }
 
@@ -260,8 +260,8 @@ internal sealed class MossySpiderLeg
     private Vector2 PhysicalHip(MossySpider spider, Vector2 bodyAxis)
     {
         Vector2 point = spider.BodyPointAt(BodyU);
-        float pairOffset = Layer == 0 ? -6f : 6f;
-        return point + Vector2.down * 18f + bodyAxis * pairOffset;
+        float pairOffset = Layer == 0 ? -8f : 8f;
+        return point + Vector2.down * 20f + bodyAxis * pairOffset;
     }
 
     private void UpdateSupporting(MossySpider spider, Vector2 bodyAxis)
@@ -286,13 +286,11 @@ internal sealed class MossySpiderLeg
             return;
         }
 
-        // Keep X locked as a true world-space foothold. Only allow tiny Y correction
-        // so moving/curved terrain does not detach a leg every frame.
         Vector2 tip = FootPos;
         tip.y = Mathf.Lerp(tip.y, ground.Value.y, 0.18f);
         segments[segments.Length - 1].pos = tip;
         tipVelocity = Vector2.zero;
-        Support = Mathf.MoveTowards(Support, 1f, 0.16f);
+        Support = Mathf.MoveTowards(Support, 1f, 0.18f);
         AnimateInverseKinematics(tip, bodyAxis);
     }
 
@@ -308,8 +306,6 @@ internal sealed class MossySpiderLeg
             return;
         }
 
-        // No support in reach: keep a free appendage moving under physics rather than
-        // teleporting the foot under the body. It will keep scanning on later frames.
         AnimateFreeTip(spider, bodyAxis);
     }
 
@@ -319,31 +315,27 @@ internal sealed class MossySpiderLeg
         Vector2 toTarget = targetPos - tip;
         float distance = toTarget.magnitude;
 
-        if (distance < 7f)
+        if (distance < 8f)
         {
             LandOnGround(targetPos, bodyAxis);
             return;
         }
 
         Vector2 desiredVelocity = distance > 0.001f
-            ? toTarget / distance * Mathf.Min(TipMaxSpeed, 4f + distance * 0.18f)
+            ? toTarget / distance * Mathf.Min(TipMaxSpeed, 5f + distance * 0.18f)
             : Vector2.zero;
 
-        // Early in the seek, retain an upward component so the foot follows a real
-        // swing instead of scraping straight across the floor.
-        if (distance > 35f)
+        if (distance > 42f)
         {
-            desiredVelocity.y += 2.2f;
+            desiredVelocity.y += 2.8f;
         }
 
         tipVelocity = Vector2.Lerp(tipVelocity, desiredVelocity, TipAcceleration);
         tipVelocity *= 0.94f;
         Vector2 next = tip + tipVelocity;
 
-        // If the moving tip hits authored terrain close to its intended target, attach
-        // there immediately, like DrillCrab.Leg.LandOnGround().
         Vector2? hit = SharedPhysics.ExactTerrainRayTracePos(spider.room, tip, next);
-        if (hit.HasValue && Vector2.Distance(hit.Value, targetPos) < 30f)
+        if (hit.HasValue && Vector2.Distance(hit.Value, targetPos) < 34f)
         {
             LandOnGround(hit.Value, bodyAxis);
             return;
@@ -352,7 +344,7 @@ internal sealed class MossySpiderLeg
         segments[segments.Length - 1].pos = next;
         AnimateInverseKinematics(next, bodyAxis);
 
-        if (Vector2.Distance(anchor, next) > MaxLength * 1.08f || scanCounter > 90)
+        if (Vector2.Distance(anchor, next) > MaxLength * 1.08f || scanCounter > 100)
         {
             mode = Mode.Scanning;
             scanCounter = 0;
@@ -366,7 +358,7 @@ internal sealed class MossySpiderLeg
         targetPos = point;
         tipVelocity = Vector2.zero;
         mode = Mode.Supporting;
-        Support = Mathf.Max(Support, 0.30f);
+        Support = Mathf.Max(Support, 0.34f);
         scanCounter = 0;
         AnimateInverseKinematics(point, bodyAxis);
     }
@@ -376,7 +368,7 @@ internal sealed class MossySpiderLeg
         mode = Mode.Scanning;
         Support = 0f;
         scanCounter = 0;
-        tipVelocity += Vector2.up * 2f;
+        tipVelocity += Vector2.up * 2.5f;
     }
 
     private bool TryFindGroundTarget(MossySpider spider, Vector2 bodyAxis, out Vector2 target)
@@ -389,8 +381,8 @@ internal sealed class MossySpiderLeg
         for (int i = 0; i < SearchOffsets.Length; i++)
         {
             Vector2 sample = desired + bodyAxis * SearchOffsets[i];
-            Vector2 start = new(sample.x, anchor.y + 26f);
-            Vector2 end = new(sample.x, anchor.y - MaxLength - 26f);
+            Vector2 start = new(sample.x, anchor.y + 30f);
+            Vector2 end = new(sample.x, anchor.y - MaxLength - 30f);
             Vector2? hit = SharedPhysics.ExactTerrainRayTracePos(spider.room, start, end);
 
             if (!hit.HasValue)
@@ -405,9 +397,9 @@ internal sealed class MossySpiderLeg
                 continue;
             }
 
-            float score = Mathf.Abs(SearchOffsets[i]) * 0.55f +
-                          Mathf.Abs(drop - StandHeight) * 0.24f +
-                          Mathf.Abs(Vector2.Dot(hit.Value - desired, bodyAxis)) * 0.18f;
+            float score = Mathf.Abs(SearchOffsets[i]) * 0.48f +
+                          Mathf.Abs(drop - StandHeight) * 0.20f +
+                          Mathf.Abs(Vector2.Dot(hit.Value - desired, bodyAxis)) * 0.15f;
 
             if (score < bestScore)
             {
@@ -438,8 +430,8 @@ internal sealed class MossySpiderLeg
             : bodyAxis;
 
         Vector2 tip = anchor +
-                      forward * (-stroke * 42f + ReachOffset * 0.18f) +
-                      Vector2.down * (StandHeight * 0.52f + recovery * 16f);
+                      forward * (-stroke * 54f + ReachOffset * 0.18f) +
+                      Vector2.down * (StandHeight * 0.54f + recovery * 20f);
 
         targetPos = tip;
         segments[segments.Length - 1].pos = Vector2.Lerp(FootPos, tip, 0.23f);
@@ -450,7 +442,7 @@ internal sealed class MossySpiderLeg
     {
         Vector2 freeTarget = DesiredGroundPoint(spider, bodyAxis, StepLead * 0.35f);
         Vector2 tip = FootPos;
-        Vector2 force = Vector2.ClampMagnitude((freeTarget - tip) * 0.035f, 1.8f);
+        Vector2 force = Vector2.ClampMagnitude((freeTarget - tip) * 0.035f, 2.2f);
         tipVelocity += force;
         tipVelocity.y -= spider.room.gravity * 0.16f;
         tipVelocity *= 0.92f;
@@ -473,14 +465,12 @@ internal sealed class MossySpiderLeg
         Vector2 direction = legVector / length;
         Vector2 bendNormal = Custom.PerpendicularVector(direction);
 
-        // Near/far legs bend to opposite silhouettes. Alternate stations reverse the
-        // secondary bend so ten legs do not overlap into one repeated zig-zag.
         float bendSign = ((Station + Layer) % 2 == 0) ? 1f : -1f;
         bendNormal *= bendSign;
 
         float extension = Mathf.Clamp01(length / MaxLength);
-        float upperBend = Mathf.Lerp(34f, 14f, extension);
-        float lowerBend = Mathf.Lerp(24f, 9f, extension);
+        float upperBend = Mathf.Lerp(48f, 18f, extension);
+        float lowerBend = Mathf.Lerp(36f, 12f, extension);
 
         Vector2 jointA = anchor + legVector * 0.30f + bendNormal * upperBend;
         Vector2 jointB = anchor + legVector * 0.64f - bendNormal * lowerBend;
