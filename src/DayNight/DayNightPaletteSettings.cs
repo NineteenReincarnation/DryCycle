@@ -78,18 +78,52 @@ internal static class DayNightPaletteSettings
 
         try
         {
-            File.AppendAllLines(
-                path,
-                new List<string>
+            // RoomSettings.Save rewrites the vanilla file, but existing DryCycle lines
+            // can survive/accumulate through repeated DevUI saves depending on the
+            // surrounding mod stack. Remove every previous instance and write exactly
+            // one authoritative pair so the file remains stable over long editing
+            // sessions and Load never depends on duplicate-key ordering.
+            string[] original = File.ReadAllLines(path);
+            List<string> rewritten = new(original.Length + 2);
+            for (int i = 0; i < original.Length; i++)
+            {
+                string line = original[i];
+                if (IsDryCyclePaletteLine(line))
                 {
-                    DuskKey + ": " + values.DuskPalette.ToString(CultureInfo.InvariantCulture),
-                    NightKey + ": " + values.NightPalette.ToString(CultureInfo.InvariantCulture)
-                });
+                    continue;
+                }
+
+                rewritten.Add(line);
+            }
+
+            rewritten.Add(
+                DuskKey + ": " + values.DuskPalette.ToString(CultureInfo.InvariantCulture));
+            rewritten.Add(
+                NightKey + ": " + values.NightPalette.ToString(CultureInfo.InvariantCulture));
+            File.WriteAllLines(path, rewritten);
         }
         catch (Exception ex)
         {
             Plugin.Logger?.LogError($"DryCycle DayNight: failed to save palette settings for {self.name}: {ex}");
         }
+    }
+
+    private static bool IsDryCyclePaletteLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        int separator = line.IndexOf(':');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        string key = line.Substring(0, separator).Trim();
+        return string.Equals(key, DuskKey, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(key, NightKey, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Values Load(RoomSettings roomSettings)
