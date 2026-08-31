@@ -19,8 +19,6 @@
   <PropertyGroup>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
-    <FisobsDll Condition="'$(FisobsDll)' == '' and Exists('$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/fisobs/plugins/Fisobs.dll')">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/fisobs/plugins/Fisobs.dll</FisobsDll>
-    <FisobsDll Condition="'$(FisobsDll)' == '' and Exists('$(RainWorldDir)/BepInEx/plugins/Fisobs.dll')">$(RainWorldDir)/BepInEx/plugins/Fisobs.dll</FisobsDll>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -36,10 +34,6 @@
          is reflection-based and therefore remains an optional runtime integration. -->
     <Reference Include="BepInEx">
       <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Fisobs">
-      <HintPath>$(FisobsDll)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="PUBLIC-Assembly-CSharp">
@@ -84,7 +78,6 @@
 
   <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
     <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Application/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
-    <Error Condition="'$(FisobsDll)' == '' or !Exists('$(FisobsDll)')" Text="Fisobs.dll not found. Install Fisobs or pass -p:FisobsDll=&quot;.../Fisobs.dll&quot;." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll')" Text="PUBLIC-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/utils." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll')" Text="HOOKS-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/plugins." />
