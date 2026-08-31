@@ -18,11 +18,8 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
             Type,
             "Mossy Spider")
         {
-            // Layer 1 / module 1. MossySpider has its own CreatureTemplate and AI,
-            // but reuses Deer's already-baked AI-map slot as the room-data baseline.
-            // Adding a new doPreBakedPathing entry here would change
-            // StaticWorld.preBakedPathingCreatures.Length and make existing room AI
-            // heat-map strings one entry too short during story-mode loading.
+            // MossySpider owns its AI behavior while reusing Deer's existing pre-baked
+            // AI-map slot so ordinary installed room files remain load-compatible.
             HasAI = true,
             RequireAIMap = true,
             DoPreBakedPathing = false,
@@ -31,10 +28,7 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
             BaseStunResistance = 3f
         };
 
-        // Layer 1 / module 2: exact AI tile accessibility.
-        // MossySpider is a Deer-like giant walker: its body may occupy open Air,
-        // Corridor and Ceiling-classified space while its legs find support below.
-        // It does not use climbable poles/beams or vertical Wall paths.
+        // Body-space accessibility: everything except Wall, Climb and Solid is usable.
         builder
             .SetExactTileResistance(AItile.Accessibility.OffScreen, 1f, PathCost.Legality.Allowed)
             .SetExactTileResistance(AItile.Accessibility.Floor, 1f, PathCost.Legality.Allowed)
@@ -45,14 +39,29 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
             .SetExactTileResistance(AItile.Accessibility.Ceiling, 1f, PathCost.Legality.Allowed)
             .SetExactTileResistance(AItile.Accessibility.Air, 1f, PathCost.Legality.Allowed)
             .SetExactTileResistance(AItile.Accessibility.Solid, 100f, PathCost.Legality.SolidTile)
-            .SetExactTileResistance(AItile.Accessibility.Sand, 1f, PathCost.Legality.Allowed);
+            .SetExactTileResistance(AItile.Accessibility.Sand, 1f, PathCost.Legality.Allowed)
+
+            // The creature migrates through side/off-screen space like a large walker.
+            // It does not use ordinary shortcuts, dens or pole/wall-specific movement.
+            .AddConnectionResistance(MovementConnection.MovementType.Standard, 1f)
+            .AddConnectionResistance(MovementConnection.MovementType.OpenDiagonal, 1f)
+            .AddConnectionResistance(MovementConnection.MovementType.OutsideRoom, 1f)
+            .AddConnectionResistance(MovementConnection.MovementType.SideHighway, 1f)
+            .AddConnectionResistance(MovementConnection.MovementType.OffScreenMovement, 1f)
+            .AddConnectionResistance(MovementConnection.MovementType.BetweenRooms, 1f);
 
         CreatureTemplate template = builder.Build();
 
-        // Abstract movement and actual MovementConnection rules are deliberately
-        // not enabled yet; those belong to later modules.
+        // Custom AbstractAI owns migration; keep automatic generic roaming disabled.
         template.canAutoAbstractPath = false;
-        template.offScreenSpeed = 0f;
+        template.roamInRoomChance = 0f;
+        template.roamBetweenRoomsChance = 0f;
+        template.offScreenSpeed = 0.55f;
+        template.abstractedLaziness = 60;
+        template.doesNotUseDens = true;
+        template.hibernateOffScreen = false;
+        template.forbidStandardShortcutEntry = true;
+
         template.bodySize = 12f;
         template.grasps = 0;
         template.visualRadius = 700f;
@@ -60,17 +69,15 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
         template.dangerousToPlayer = 0f;
         template.communityInfluence = 0f;
 
-        // Water has the same AI path cost as land. Locomotion will later decide the
-        // physical mode continuously: shallow water = legs walk on the bottom;
-        // deep water = moss-covered dorsal body floats at the surface and legs paddle.
+        // Water is path-cost neutral. Shallow water stays in walking mode; deep water
+        // switches locomotion to dorsal flotation plus leg paddling.
         template.waterRelationship = CreatureTemplate.WaterRelationship.Amphibious;
         template.canSwim = true;
         template.waterPathingResistance = 1f;
         template.canFly = false;
 
-        // AImap normally lets swimmers enter any non-solid water tile even if that
-        // tile's Accessibility is otherwise illegal. Preserve the agreed exception:
-        // Wall and Climb remain unavailable even when they are submerged.
+        // Preserve the explicit Wall / Climb exclusion even under the vanilla swimmer
+        // fallback that otherwise makes many submerged non-solid tiles traversable.
         template.isTooCloseToTerrain = MossySpiderTileAccessibilityOverride;
 
         template.meatPoints = 12;
@@ -91,7 +98,6 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
         if (accessibility == AItile.Accessibility.Climb ||
             accessibility == AItile.Accessibility.Wall)
         {
-            // AImap.IsTooCloseToTerrain interprets 1 as an explicit inaccessible tile.
             return 1;
         }
 
@@ -101,6 +107,16 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
     internal override Creature CreateRealizedCreature(AbstractCreature abstractCreature)
     {
         return new MossySpider(abstractCreature, abstractCreature.world);
+    }
+
+    internal override AbstractCreatureAI CreateAbstractAI(AbstractCreature abstractCreature)
+    {
+        return new MossySpiderAbstractAI(abstractCreature.world, abstractCreature);
+    }
+
+    internal override ArtificialIntelligence CreateRealizedAI(AbstractCreature abstractCreature)
+    {
+        return new MossySpiderAI(abstractCreature, abstractCreature.world);
     }
 
     internal override IEnumerable<string> WorldFileAliases()
