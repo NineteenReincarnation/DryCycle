@@ -25,9 +25,16 @@ namespace DryCycle;
 [BepInDependency("slime-cubed.devconsole", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
+    // BepInEx plugin identity. Keep this stable so existing plugin-level state is not
+    // silently moved to a different BepInEx GUID.
     public const string ModId = "Anno";
+
+    // Rain World's Remix/ModManager identity comes from Ancient Site's modinfo.json.
+    // MachineConnector.SetRegisteredOI must use this exact ID rather than the BepInEx GUID.
+    public const string RainWorldModId = "NR.B5";
+
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.86";
+    public const string Version = "0.1.87";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
