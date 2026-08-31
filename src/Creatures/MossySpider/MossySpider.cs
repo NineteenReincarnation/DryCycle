@@ -9,6 +9,8 @@ public sealed class MossySpider : Creature
     internal const float SegmentSpacing = 44f;
     internal const int LegCount = 10;
 
+    private const int MaximumSimultaneousSteps = 3;
+
     private static readonly float[] SegmentRadii =
     [
         23f,
@@ -31,6 +33,8 @@ public sealed class MossySpider : Creature
 
     internal float SwimFactor { get; private set; }
 
+    internal float GaitCycle { get; private set; }
+
     public BodyChunk MiddleChunk => bodyChunks[SegmentCount / 2];
 
     public MossySpider(AbstractCreature abstractCreature, World world) : base(abstractCreature, world)
@@ -43,11 +47,15 @@ public sealed class MossySpider : Creature
             bodyChunks[i] = new BodyChunk(this, i, Vector2.zero, SegmentRadii[i], mass);
         }
 
+        // Rain World bodies are usually chains whose pose is produced by muscles,
+        // terrain and appendages. The previous MossySpider triangulated every chunk
+        // with second- and third-neighbour Normal constraints; that mathematically
+        // locked the chain into a rigid bar. Keep the real skeleton local instead:
+        // adjacent chunks hold length, while weak Push braces only stop catastrophic
+        // folding and do not try to preserve a straight angle.
         int adjacentCount = SegmentCount - 1;
-        int secondNeighbourCount = SegmentCount - 2;
-        int thirdNeighbourCount = SegmentCount - 3;
-        bodyChunkConnections = new BodyChunkConnection[
-            adjacentCount + secondNeighbourCount + thirdNeighbourCount];
+        int bendLimiterCount = SegmentCount - 2;
+        bodyChunkConnections = new BodyChunkConnection[adjacentCount + bendLimiterCount];
 
         int connection = 0;
         for (int i = 0; i < SegmentCount - 1; i++)
@@ -66,28 +74,29 @@ public sealed class MossySpider : Creature
             bodyChunkConnections[connection++] = new BodyChunkConnection(
                 bodyChunks[i],
                 bodyChunks[i + 2],
-                SegmentSpacing * 2f,
-                BodyChunkConnection.Type.Normal,
-                0.90f,
+                SegmentSpacing * 1.50f,
+                BodyChunkConnection.Type.Push,
+                0.36f,
                 -1f);
         }
 
-        for (int i = 0; i < SegmentCount - 3; i++)
+        // Push braces assign rotationChunk as a side effect; restore local neighbours
+        // so body orientation continues to describe the actual chain rather than a
+        // two-segment diagonal brace.
+        int middle = SegmentCount / 2;
+        for (int i = 0; i < SegmentCount; i++)
         {
-            bodyChunkConnections[connection++] = new BodyChunkConnection(
-                bodyChunks[i],
-                bodyChunks[i + 3],
-                SegmentSpacing * 3f,
-                BodyChunkConnection.Type.Normal,
-                0.58f,
-                -1f);
+            bodyChunks[i].rotationChunk = bodyChunks[
+                i < middle
+                    ? i + 1
+                    : Mathf.Max(0, i - 1)];
         }
 
         SupportLegs = new MossySpiderLeg[LegCount];
         for (int station = 0; station < 5; station++)
         {
             float stationT = station / 4f;
-            float bodyU = Mathf.Lerp(0.12f, 0.88f, stationT);
+            float bodyU = Mathf.Lerp(0.10f, 0.90f, stationT);
             int baseChunk = Mathf.Clamp(
                 Mathf.RoundToInt(bodyU * (SegmentCount - 1)),
                 1,
@@ -96,9 +105,16 @@ public sealed class MossySpider : Creature
             for (int layer = 0; layer < 2; layer++)
             {
                 int leg = station * 2 + layer;
-                float restLength = 82f + Mathf.Sin(stationT * Mathf.PI) * 7f + (layer == 0 ? 2f : -2f);
-                float maxLength = restLength + 31f;
-                float reach = Mathf.Lerp(-38f, 38f, stationT) + (layer == 0 ? 14f : -10f);
+                float restLength = 88f + Mathf.Sin(stationT * Mathf.PI) * 8f +
+                                   (layer == 0 ? 2f : -2f);
+                float maxLength = 150f + Mathf.Sin(stationT * Mathf.PI) * 8f;
+
+                // Two legs at each station fan in different fore/aft directions. In
+                // side view this produces the broad arthropod stance from the design
+                // instead of ten nearly vertical lines stacked under the belly.
+                float stationFan = Mathf.Lerp(-46f, 46f, stationT);
+                float pairFan = layer == 0 ? -20f : 20f;
+                float reach = stationFan + pairFan;
 
                 SupportLegs[leg] = new MossySpiderLeg(
                     leg,
@@ -111,10 +127,10 @@ public sealed class MossySpider : Creature
             }
         }
 
-        airFriction = 0.995f;
+        airFriction = 0.997f;
         gravity = 0.90f;
         bounce = 0.03f;
-        surfaceFriction = 0.88f;
+        surfaceFriction = 0.82f;
         collisionLayer = 1;
         waterFriction = 0.96f;
         buoyancy = 0.62f;
@@ -138,6 +154,7 @@ public sealed class MossySpider : Creature
 
         MoveDirection = Vector2.zero;
         SwimFactor = 0f;
+        GaitCycle = 0f;
         ResetSupportLegs();
     }
 
@@ -146,6 +163,7 @@ public sealed class MossySpider : Creature
         base.NewRoom(newRoom);
         MoveDirection = Vector2.zero;
         SwimFactor = 0f;
+        GaitCycle = 0f;
         ResetSupportLegs();
     }
 
@@ -160,9 +178,8 @@ public sealed class MossySpider : Creature
     {
         base.Update(eu);
 
-        // MossySpider does not seek shelter from lethal rain. Resetting the rain-death
-        // accumulator each creature tick prevents death-rain lethality from building up,
-        // while the physical rain forces and stun effects remain intact.
+        // Lethal rain can still hit, push and stun this animal, but it does not build
+        // the rainDeath accumulator that normally kills exposed creatures.
         rainDeath = 0f;
 
         LastIdleMotion = IdleMotion;
@@ -177,7 +194,20 @@ public sealed class MossySpider : Creature
 
         if (room != null)
         {
+            if (Consious && !dead)
+            {
+                // Resolve this frame's path intent before the feet update. New steps
+                // therefore lead the current movement direction rather than reacting
+                // one full body-length after the torso has already slid away.
+                UpdateLocomotion();
+            }
+            else
+            {
+                MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.15f);
+            }
+
             Vector2 bodyAxis = PhysicalBodyAxis();
+            UpdateGaitClock(bodyAxis);
 
             for (int i = 0; i < SupportLegs.Length; i++)
             {
@@ -188,9 +218,13 @@ public sealed class MossySpider : Creature
 
             if (Consious && !dead)
             {
-                // Shallow water remains ordinary leg-supported walking. Once most feet
-                // cannot reach the bottom, support fades and the dorsal float controller
-                // takes over continuously rather than through a hard state switch.
+                if (SwimFactor < 0.58f)
+                {
+                    ScheduleGroundSteps(bodyAxis);
+                }
+
+                // Shallow water is still ordinary leg-supported locomotion. Support
+                // fades only after bottom contact is genuinely being lost.
                 float groundSupportFactor = 1f - Mathf.SmoothStep(0.55f, 0.92f, SwimFactor);
                 if (groundSupportFactor > 0.001f)
                 {
@@ -203,15 +237,11 @@ public sealed class MossySpider : Creature
                     }
                 }
 
-                UpdateLocomotion();
-            }
-            else
-            {
-                MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.15f);
+                ApplyDorsalFloat();
             }
         }
 
-        StabilizeTorso();
+        ApplyTorsoMuscles();
         rainDeath = 0f;
     }
 
@@ -248,8 +278,9 @@ public sealed class MossySpider : Creature
 
         if (move == default)
         {
-            // A large body can momentarily put its center outside an accessible tile;
-            // try two inner torso chunks before declaring that the path is unavailable.
+            // A long flexible body can briefly put its middle chunk on an AI tile that
+            // is worse than the tiles under either inner end. Try both inner anchors
+            // before declaring that the migration path is unavailable.
             move = AI.Pather.FollowPath(
                 room.GetWorldCoordinate(bodyChunks[1].pos),
                 actuallyFollowingThisPath: true);
@@ -277,8 +308,8 @@ public sealed class MossySpider : Creature
 
         if (SwimFactor < 0.55f)
         {
-            // Ground locomotion is driven mostly horizontally. Legs and terrain contact
-            // determine body height; the AI is not allowed to turn Air pathing into flight.
+            // Air is legal for the AI center, but ground locomotion never turns that
+            // fact into flight. Terrain and leg contacts own vertical body placement.
             desired.y *= 0.18f;
             if (desired.sqrMagnitude > 0.001f)
             {
@@ -286,10 +317,14 @@ public sealed class MossySpider : Creature
             }
         }
 
-        MoveDirection = Vector2.Lerp(MoveDirection, desired, 0.09f);
+        MoveDirection = Vector2.Lerp(MoveDirection, desired, 0.11f);
 
-        float drive = Mathf.Lerp(0.030f, 0.047f, SwimFactor);
-        float maxHorizontalSpeed = Mathf.Lerp(1.20f, 1.55f, SwimFactor);
+        // Rain World large creatures generally push their torso toward the pather's
+        // desired direction while appendages decide how that motion is supported.
+        // Once planted feet are no longer horizontal springs, this small drive is able
+        // to translate the body and naturally forces old feet to take another step.
+        float drive = Mathf.Lerp(0.043f, 0.055f, SwimFactor);
+        float maxHorizontalSpeed = Mathf.Lerp(1.40f, 1.65f, SwimFactor);
         for (int i = 0; i < bodyChunks.Length; i++)
         {
             BodyChunk chunk = bodyChunks[i];
@@ -301,8 +336,67 @@ public sealed class MossySpider : Creature
                 chunk.vel.y += MoveDirection.y * drive * 0.52f * SwimFactor;
             }
         }
+    }
 
-        ApplyDorsalFloat();
+    private void UpdateGaitClock(Vector2 bodyAxis)
+    {
+        float movement = Mathf.Clamp01(Mathf.Abs(Vector2.Dot(MoveDirection, bodyAxis)));
+        float advance = Mathf.Lerp(0.001f, 0.019f, movement);
+        GaitCycle = Mathf.Repeat(GaitCycle + advance, 1f);
+    }
+
+    private void ScheduleGroundSteps(Vector2 bodyAxis)
+    {
+        int stepping = 0;
+        for (int i = 0; i < SupportLegs.Length; i++)
+        {
+            if (SupportLegs[i].Stepping)
+            {
+                stepping++;
+            }
+        }
+
+        while (stepping < MaximumSimultaneousSteps)
+        {
+            int best = -1;
+            float bestUrgency = 0.48f;
+
+            for (int i = 0; i < SupportLegs.Length; i++)
+            {
+                MossySpiderLeg leg = SupportLegs[i];
+                if (leg.Stepping || !leg.Planted || StationHasSteppingLeg(leg.Station))
+                {
+                    continue;
+                }
+
+                float urgency = leg.StepUrgency(this, bodyAxis);
+                if (urgency > bestUrgency)
+                {
+                    bestUrgency = urgency;
+                    best = i;
+                }
+            }
+
+            if (best < 0 || !SupportLegs[best].BeginStep(this, bodyAxis))
+            {
+                break;
+            }
+
+            stepping++;
+        }
+    }
+
+    private bool StationHasSteppingLeg(int station)
+    {
+        for (int i = 0; i < SupportLegs.Length; i++)
+        {
+            if (SupportLegs[i].Station == station && SupportLegs[i].Stepping)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void UpdateSwimFactor()
@@ -329,8 +423,6 @@ public sealed class MossySpider : Creature
         }
         averageSubmersion /= bodyChunks.Length;
 
-        // Deep water is defined by loss of bottom support, not by a hard water-depth
-        // number. A partially submerged body with several planted feet is still walking.
         float waterFactor = Mathf.InverseLerp(0.12f, 0.55f, averageSubmersion);
         float supportLoss = Mathf.InverseLerp(5f, 1f, planted);
         float target = Mathf.Clamp01(waterFactor * supportLoss);
@@ -358,29 +450,26 @@ public sealed class MossySpider : Creature
         }
     }
 
-    private void StabilizeTorso()
+    private void ApplyTorsoMuscles()
     {
+        if (bodyChunks == null || bodyChunks.Length < 3)
+        {
+            return;
+        }
+
+        // Local, weak muscle tone only. There is deliberately no end-to-end leveling
+        // force and no triangulated length constraint: each section may rotate over
+        // slopes, impacts and uneven leg supports just like other Rain World bodies.
         for (int i = 0; i < bodyChunks.Length; i++)
         {
-            bodyChunks[i].vel.x *= SwimFactor > 0.5f ? 0.996f : 0.991f;
+            bodyChunks[i].vel.x *= SwimFactor > 0.5f ? 0.998f : 0.996f;
         }
 
         for (int i = 1; i < bodyChunks.Length - 1; i++)
         {
-            Vector2 target = (bodyChunks[i - 1].pos + bodyChunks[i + 1].pos) * 0.5f;
-            bodyChunks[i].vel += (target - bodyChunks[i].pos) * 0.016f;
-        }
-
-        float endHeightDifference = Mathf.Clamp(
-            bodyChunks[SegmentCount - 1].pos.y - bodyChunks[0].pos.y,
-            -100f,
-            100f);
-
-        float bodyHalf = (SegmentCount - 1) * 0.5f;
-        for (int i = 0; i < bodyChunks.Length; i++)
-        {
-            float normalized = (i - bodyHalf) / bodyHalf;
-            bodyChunks[i].vel.y -= endHeightDifference * normalized * 0.0034f;
+            Vector2 midpoint = (bodyChunks[i - 1].pos + bodyChunks[i + 1].pos) * 0.5f;
+            Vector2 error = midpoint - bodyChunks[i].pos;
+            bodyChunks[i].vel += Vector2.ClampMagnitude(error, 24f) * 0.0032f;
         }
     }
 
@@ -411,7 +500,10 @@ public sealed class MossySpider : Creature
             return Vector2.right;
         }
 
-        axis.y *= 0.22f;
+        // Legs should follow a sloping torso, but not point into the sky because one
+        // end was briefly kicked upward. Keep some Y rather than flattening it almost
+        // completely as the previous rigid-body workaround did.
+        axis.y *= 0.45f;
         if (axis.sqrMagnitude < 0.001f)
         {
             return Vector2.right;
