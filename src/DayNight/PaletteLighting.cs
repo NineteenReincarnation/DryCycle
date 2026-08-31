@@ -54,6 +54,7 @@ internal static class PaletteLighting
             && WorldClockHooks.TryGetClock(camera.room.world, out WorldClock clock))
         {
             ApplyAuthoredPaletteBlend(camera, clock, force: true);
+            state.ForceRefresh = false;
         }
     }
 
@@ -61,16 +62,31 @@ internal static class PaletteLighting
         On.RoomCamera.orig_UpdateDayNightPalette orig,
         RoomCamera self)
     {
+        CameraState state = self == null
+            ? null
+            : _cameraStates.GetOrCreateValue(self);
+
         if (self?.room?.world == null
             || !WorldClockHooks.TryGetClock(self.room.world, out WorldClock clock))
         {
+            // Vanilla/DLC/mod logic is about to own the actual camera palette. Invalidate
+            // DryCycle's numeric cache now, otherwise returning to an enabled region can
+            // incorrectly compare against the OLD DryCycle values and skip reapplying
+            // them even though the camera was changed while DryCycle was inactive.
+            if (state != null)
+            {
+                state.PaletteA = int.MinValue;
+                state.PaletteB = int.MinValue;
+                state.Blend = -1f;
+                state.ForceRefresh = true;
+            }
+
             orig(self);
             return;
         }
 
         self.dayNightNeedsRefresh = false;
 
-        CameraState state = _cameraStates.GetOrCreateValue(self);
         if (!state.ForceRefresh && self.frameCount % 4 != 0)
         {
             return;
@@ -140,11 +156,6 @@ internal static class PaletteLighting
         {
             float p = Mathf.Repeat(dayProgress, 1f);
 
-            // A DryCycle phase begins in real daytime. The previous implementation
-            // started p=0 on the authored Dusk palette and spent the opening segment
-            // blending Dusk -> Base, which made a fresh cycle look like night/dawn.
-            // Day now begins immediately on Base; sunrise is handled at the END of
-            // the preceding night so the 1.0 -> 0.0 wrap is still continuous.
             if (p < 0.420f)
             {
                 return new PaletteTransition(basePalette, -1, 0f);
@@ -167,9 +178,6 @@ internal static class PaletteLighting
                 return new PaletteTransition(nightPalette, -1, 0f);
             }
 
-            // Pre-dawn now transitions all the way from Night -> Base. At p=1 the
-            // blend is Base, and p=0 of the next daytime is also Base, so there is no
-            // dark opening period and no palette discontinuity at the wrap.
             float preDawn = Smooth01(Mathf.InverseLerp(0.920f, 1f, p));
             return new PaletteTransition(nightPalette, basePalette, preDawn);
         }
