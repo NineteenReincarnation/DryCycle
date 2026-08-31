@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using DryCycle.Weather.Scheduling;
+using UnityEngine;
 
 namespace DryCycle.DayNight;
 
