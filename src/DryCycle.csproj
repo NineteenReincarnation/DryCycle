@@ -105,14 +105,17 @@
       DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
       SkipUnchangedFiles="true" />
 
-    <!-- TemperatureSets.txt is live-authored in the actual region mod and hot-reloaded
-         at runtime. Seed it only when the destination does not exist; never overwrite
-         a mapper's current room environment values during a Release build. -->
+    <!-- These world text files are live-authored in the actual region mod. Seed them
+         only when missing; never overwrite mapper/weather tuning during a build. -->
     <MakeDir Directories="$(GameModRootDir)/world" />
     <Copy
       Condition="!Exists('$(GameModRootDir)/world/TemperatureSets.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.txt"
       DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt" />
+    <Copy
+      Condition="!Exists('$(GameModRootDir)/world/RegionClimate.txt')"
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/RegionClimate.txt"
+      DestinationFiles="$(GameModRootDir)/world/RegionClimate.txt" />
 
     <Warning
       Condition="!Exists('$(GameModRootDir)/soundeffects/DC_DrinkWater.ogg')"
