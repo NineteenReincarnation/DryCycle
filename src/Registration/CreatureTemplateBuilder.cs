@@ -13,6 +13,7 @@ internal sealed class CreatureTemplateBuilder
     private readonly CreatureTemplate _ancestor;
     private readonly List<TileTypeResistance> _tileResistances = new();
     private readonly List<TileConnectionResistance> _connectionResistances = new();
+    private readonly Dictionary<AItile.Accessibility, PathCost> _exactTileResistances = new();
 
     internal CreatureTemplateBuilder(
         CreatureTemplate.Type type,
@@ -50,6 +51,21 @@ internal sealed class CreatureTemplateBuilder
         return this;
     }
 
+    /// <summary>
+    /// Applies a tile preference after CreatureTemplate's constructor has performed
+    /// its vanilla max-accessibility normalization. This is required for custom
+    /// creatures whose legal accessibility set is intentionally non-monotonic, such
+    /// as MossySpider allowing Air while explicitly rejecting Climb and Wall.
+    /// </summary>
+    internal CreatureTemplateBuilder SetExactTileResistance(
+        AItile.Accessibility accessibility,
+        float resistance,
+        PathCost.Legality legality)
+    {
+        _exactTileResistances[accessibility] = new PathCost(resistance, legality);
+        return this;
+    }
+
     internal CreatureTemplateBuilder AddConnectionResistance(
         MovementConnection.MovementType movementType,
         float resistance,
@@ -77,6 +93,39 @@ internal sealed class CreatureTemplateBuilder
             instantDeathDamageLimit = InstantDeathDamageLimit
         };
 
+        ApplyExactTileResistances(template);
         return template;
+    }
+
+    private void ApplyExactTileResistances(CreatureTemplate template)
+    {
+        if (_exactTileResistances.Count == 0)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<AItile.Accessibility, PathCost> pair in _exactTileResistances)
+        {
+            template.pathingPreferencesTiles[(int)pair.Key] = pair.Value;
+        }
+
+        // CreatureTemplate normally derives this before its accessibility hierarchy
+        // normalization. Recalculate it from the final exact table so pre-baked AI
+        // mapping sees the custom creature's real accessibility envelope.
+        int maxAccessibleTerrain = 0;
+        for (int i = 0; i < template.pathingPreferencesTiles.Length; i++)
+        {
+            if (i == (int)AItile.Accessibility.Sand)
+            {
+                continue;
+            }
+
+            if (template.pathingPreferencesTiles[i].legality == PathCost.Legality.Allowed)
+            {
+                maxAccessibleTerrain = i;
+            }
+        }
+
+        template.maxAccessibleTerrain = maxAccessibleTerrain;
     }
 }
