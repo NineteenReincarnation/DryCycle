@@ -94,8 +94,9 @@ internal static class RainWeatherRuntime
         }
 
         // Region weather needs the same renderer/shelter mask/sounds as authored
-        // Rain rooms. Keep this object dormant until a scheduled Rain event becomes
-        // active; no RoomSettings DangerType is permanently changed.
+        // Rain rooms. This object is explicitly marked as DryCycle-owned so it can be
+        // kept fully dormant whenever no scheduled rain is active or the region opts
+        // out; native/authored RoomRain objects are never suppressed by that rule.
         RoomRain roomRain = new(self.game.globalRain, self)
         {
             dangerType = RoomRain.DangerType.Rain
@@ -157,8 +158,8 @@ internal static class RainWeatherRuntime
             }
 
             // Native DeathRain remains responsible for stage selection and all of its
-            // nonlinear relationships. The schedule envelope only fades the complete
-            // result in/out inside the event's authored pip interval.
+            // nonlinear relationships. The schedule envelope fades the complete native
+            // output through the extra lead-in/tail windows defined by the scheduler.
             self.Intensity *= death;
             self.RumbleSound *= death;
             self.ScreenShake *= death;
@@ -204,6 +205,20 @@ internal static class RainWeatherRuntime
     {
         Room room = self?.room;
         World world = room?.world;
+        bool synthetic = self != null && _syntheticRoomRain.TryGetValue(self, out _);
+
+        // A DryCycle-created RoomRain must never become a hidden source of vanilla
+        // rain after this region's DryCycle switch is turned off. Native RoomRain is
+        // deliberately not touched here and runs through orig exactly as authored.
+        if (synthetic &&
+            (world == null ||
+             !world.game.IsStorySession ||
+             !RegionDayNightOptions.IsEnabled(world)))
+        {
+            QuiesceSyntheticRoomRain(self);
+            return;
+        }
+
         if (world == null ||
             !RegionDayNightOptions.IsEnabled(world) ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock))
@@ -229,7 +244,16 @@ internal static class RainWeatherRuntime
 
         if (rain <= 0.0001f)
         {
-            orig(self, eu);
+            if (synthetic)
+            {
+                QuiesceSyntheticRoomRain(self);
+            }
+            else
+            {
+                // An authored/native RoomRain remains fully owned by the room whenever
+                // DryCycle has no active regional rain event.
+                orig(self, eu);
+            }
             return;
         }
 
@@ -239,9 +263,14 @@ internal static class RainWeatherRuntime
         // Region weather should be visible in rooms that did not author a local rain
         // intensity. This override exists only for the duration of RoomRain.Update.
         room.roomSettings.rInts = 1f;
-        if (_syntheticRoomRain.TryGetValue(self, out _))
+        if (synthetic)
         {
             self.dangerType = RoomRain.DangerType.Rain;
+        }
+        else if (self.dangerType == RoomRain.DangerType.Flood)
+        {
+            // Preserve an authored flood while adding the scheduled regional rain.
+            self.dangerType = RoomRain.DangerType.FloodAndRain;
         }
 
         try
@@ -252,6 +281,62 @@ internal static class RainWeatherRuntime
         {
             room.roomSettings.rInts = previousRainIntensity;
             self.dangerType = previousDanger;
+        }
+    }
+
+    private static void QuiesceSyntheticRoomRain(RoomRain rain)
+    {
+        if (rain == null)
+        {
+            return;
+        }
+
+        rain.intensity = 0f;
+        rain.lastIntensity = 0f;
+
+        if (rain.bulletDrips != null)
+        {
+            for (int i = rain.bulletDrips.Count - 1; i >= 0; i--)
+            {
+                rain.bulletDrips[i]?.Destroy();
+            }
+            rain.bulletDrips.Clear();
+        }
+
+        if (rain.normalRainSound != null)
+        {
+            rain.normalRainSound.Volume = 0f;
+            rain.normalRainSound.Update();
+        }
+        if (rain.heavyRainSound != null)
+        {
+            rain.heavyRainSound.Volume = 0f;
+            rain.heavyRainSound.Update();
+        }
+        if (rain.deathRainSound != null)
+        {
+            rain.deathRainSound.Volume = 0f;
+            rain.deathRainSound.Update();
+        }
+        if (rain.rumbleSound != null)
+        {
+            rain.rumbleSound.Volume = 0f;
+            rain.rumbleSound.Update();
+        }
+        if (rain.floodingSound != null)
+        {
+            rain.floodingSound.Volume = 0f;
+            rain.floodingSound.Update();
+        }
+        if (rain.distantDeathRainSound != null)
+        {
+            rain.distantDeathRainSound.Volume = 0f;
+            rain.distantDeathRainSound.Update();
+        }
+        if (rain.SCREENSHAKESOUND != null)
+        {
+            rain.SCREENSHAKESOUND.Volume = 0f;
+            rain.SCREENSHAKESOUND.Update();
         }
     }
 
