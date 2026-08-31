@@ -9,16 +9,11 @@ namespace DryCycle.DayNight;
 
 internal static class WorldClockHooks
 {
-    // Master switch for the temporary accelerated test schedule. Keep this code path
-    // intact after the systems are finished; switching this to false returns the
-    // WorldClock daytime to the authored RainCycle.cycleLength and disables the fixed
-    // second/fourth-pip weather test forecast without deleting any test code.
-    internal static bool TestScheduleEnabled = true;
+    // Retained diagnostic switch. Production uses the authored RainCycle length and
+    // RegionClimate scheduler; set true only when the old five-pip fixed test is
+    // deliberately needed again.
+    internal static bool TestScheduleEnabled = false;
 
-    // Temporary accelerated test schedule. Rain World runs gameplay at 40 ticks/sec
-    // and vanilla RainMeter uses one pip per 1200 ticks (30 sec). A 6000-tick day is
-    // therefore 2.5 minutes and gives exactly five daytime pips. Night remains 50%
-    // of daytime, so the current test night is 75 seconds.
     internal const int TestDayCycleLength = 40 * 150;
 
     private sealed class WeatherPipState
@@ -112,8 +107,6 @@ internal static class WorldClockHooks
             game,
             _ => new WorldClock(dayCycleLength));
 
-        // Test mode forces the accelerated 2.5-minute day. Production mode follows
-        // the authored vanilla cycle length while preserving DryCycle's 50% night.
         clock.SetCycleLength(dayCycleLength);
         return clock;
     }
@@ -148,29 +141,66 @@ internal static class WorldClockHooks
         WorldClock clock = GetOrCreate(self);
         int safeTimer = SafeLegacyTimer(self);
 
-        // Vanilla RainCycle remains alive as a compatibility facade, but it no
-        // longer carries world time. Keeping it away from TimeUntilRain == 0 also
-        // prevents vanilla rain approach shake/darkening/AI panic from leaking into
-        // the new day/night clock.
         self.timer = safeTimer;
         self.deathRainHasHit = false;
 
         orig(self);
 
         int advanced = Math.Max(0, self.timer - safeTimer);
-        clock.Advance(advanced);
+
+        // RainCycle begins updating before a heavily modded story session has a
+        // realized player/camera room. Counting those loading frames used to consume
+        // one or more half-minute pips before the player could even see the HUD, and
+        // could also make a scheduled event finish during loading. World time begins
+        // only once gameplay is actually live. Region/world loading then freezes time
+        // rather than secretly advancing it.
+        if (advanced > 0 && HasLiveGameplay(self.world.game))
+        {
+            clock.Advance(advanced);
+        }
 
         self.timer = safeTimer;
         self.deathRainHasHit = false;
         self.dayNightCounter = clock.LegacyDayNightCounter;
     }
 
+    private static bool HasLiveGameplay(RainWorldGame game)
+    {
+        if (game == null || game.Players == null || game.Players.Count == 0)
+        {
+            return false;
+        }
+
+        bool realizedPlayer = false;
+        for (int i = 0; i < game.Players.Count; i++)
+        {
+            if (game.Players[i]?.realizedCreature is Player)
+            {
+                realizedPlayer = true;
+                break;
+            }
+        }
+
+        if (!realizedPlayer || game.cameras == null || game.cameras.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < game.cameras.Length; i++)
+        {
+            if (game.cameras[i]?.room != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static void RainCycle_RainHit(On.RainCycle.orig_RainHit orig, RainCycle self)
     {
         if (ShouldRun(self))
         {
-            // End-of-cycle death rain belongs to the old one-shot cycle model.
-            // Weather/hazards are injected separately by DryCycle's weather layer.
             return;
         }
 
@@ -191,9 +221,6 @@ internal static class WorldClockHooks
             return;
         }
 
-        // Vanilla chooses the number of RainMeter pips in its constructor from
-        // cycleLength. Test mode exposes the five-pip 2.5-minute daytime; when the
-        // switch is false this simply uses the authored cycle length unchanged.
         int previousCycleLength = rainCycle.cycleLength;
         rainCycle.cycleLength = DayCycleLengthFor(rainCycle);
         try
@@ -223,9 +250,6 @@ internal static class WorldClockHooks
             return;
         }
 
-        // During HUD update expose a virtual RainCycle that follows the same daytime
-        // length as WorldClock. In test mode that is five pips; in production mode it
-        // follows the authored RainCycle.cycleLength.
         int previousTimer = rainCycle.timer;
         int previousCycleLength = rainCycle.cycleLength;
         int dayCycleLength = DayCycleLengthFor(rainCycle);
@@ -282,18 +306,13 @@ internal static class WorldClockHooks
 
             circle.forceColor = null;
 
-            // Day depletes clockwise into hollow rings. Night deliberately traverses
-            // the opposite direction and fills the hollow rings back into solid pips.
             int order = clock.IsNight ? i : count - 1 - i;
             float boundary = Mathf.Clamp01(scaledProgress - order);
             boundary = boundary * boundary * (3f - 2f * boundary);
 
-            // hollow=0 -> solid pip, hollow=1 -> empty ring.
             float hollow = clock.IsNight ? 1f - boundary : boundary;
             ApplyPipShape(circle, hollow, sizeFade);
 
-            // Rebuild vanilla radial placement using our hollow factor. This keeps
-            // elapsed pips on the ring instead of allowing vanilla to shrink them out.
             float index01 = count > 1 ? (float)i / (count - 1) : 0f;
             float angle = (1f - (float)i / count)
                 * 360f
@@ -326,9 +345,6 @@ internal static class WorldClockHooks
         float hudFade = Mathf.Clamp01(meter.fade);
         float sizeFade = hudFade * hudFade;
 
-        // Chronological pip 1 is the first 30 seconds of daytime and corresponds to
-        // the last RainMeter array element because vanilla lays the pips around the
-        // karma ring in reverse timer order.
         for (int chronologicalPip = 1; chronologicalPip <= count; chronologicalPip++)
         {
             if (!SandstormWeatherRuntime.TryGetForecastColor(chronologicalPip, out Color fillColor))
@@ -354,9 +370,6 @@ internal static class WorldClockHooks
             hollow = hollow * hollow * (3f - 2f * hollow);
             float solid = 1f - hollow;
 
-            // Forecast pips are drawn as a colored solid center with an independent
-            // white outline. Once their daytime interval has elapsed only the white
-            // hollow ring remains, matching the normal day depletion language.
             circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.smallEmptyCircle;
             circle.snapRad = 3f;
             circle.snapThickness = 1f;
@@ -509,9 +522,6 @@ internal static class WorldClockHooks
     private static int SafeLegacyTimer(RainCycle rainCycle)
     {
         int length = Math.Max(1, rainCycle.cycleLength);
-
-        // Keep at least 3000 ticks between the compatibility timer and vanilla rain
-        // onset. For very short custom cycles, use the midpoint instead.
         int latestSafe = Math.Max(0, length - 3000);
         return Math.Min(length / 2, latestSafe);
     }
