@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace DryCycle.Registration;
@@ -32,6 +33,14 @@ internal sealed class CreatureTemplateBuilder
     internal bool RequireAIMap { get; set; }
 
     internal bool DoPreBakedPathing { get; set; }
+
+    /// <summary>
+    /// Reuses an existing vanilla pre-baked AI-map slot without making this custom
+    /// creature add a new entry to StaticWorld.preBakedPathingCreatures. This is the
+    /// safe choice for normal installed room files, whose serialized AI heat maps were
+    /// baked against the vanilla pre-baked creature count.
+    /// </summary>
+    internal CreatureTemplate.Type PreBakedPathingAncestorType { get; set; }
 
     internal float BaseDamageResistance { get; set; } = 1f;
 
@@ -77,6 +86,23 @@ internal sealed class CreatureTemplateBuilder
 
     internal CreatureTemplate Build()
     {
+        if (DoPreBakedPathing && PreBakedPathingAncestorType != null)
+        {
+            throw new InvalidOperationException(
+                "A CreatureTemplate cannot both own a pre-baked pathing slot and inherit one.");
+        }
+
+        CreatureTemplate preBakedPathingAncestor = null;
+        if (PreBakedPathingAncestorType != null)
+        {
+            preBakedPathingAncestor = StaticWorld.GetCreatureTemplate(PreBakedPathingAncestorType);
+            if (preBakedPathingAncestor == null || !preBakedPathingAncestor.doPreBakedPathing)
+            {
+                throw new InvalidOperationException(
+                    $"Pre-baked pathing ancestor {PreBakedPathingAncestorType.value} is unavailable or does not own a pre-baked pathing slot.");
+            }
+        }
+
         CreatureTemplate template = new(
             _type,
             _ancestor,
@@ -86,8 +112,9 @@ internal sealed class CreatureTemplateBuilder
         {
             name = Name,
             AI = HasAI,
-            requireAImap = RequireAIMap,
+            requireAImap = RequireAIMap || preBakedPathingAncestor != null,
             doPreBakedPathing = DoPreBakedPathing,
+            preBakedPathingAncestor = preBakedPathingAncestor,
             baseDamageResistance = BaseDamageResistance,
             baseStunResistance = BaseStunResistance,
             instantDeathDamageLimit = InstantDeathDamageLimit
@@ -110,8 +137,8 @@ internal sealed class CreatureTemplateBuilder
         }
 
         // CreatureTemplate normally derives this before its accessibility hierarchy
-        // normalization. Recalculate it from the final exact table so pre-baked AI
-        // mapping sees the custom creature's real accessibility envelope.
+        // normalization. Recalculate it from the final exact table so later runtime
+        // accessibility checks see the custom creature's real accessibility envelope.
         int maxAccessibleTerrain = 0;
         for (int i = 0; i < template.pathingPreferencesTiles.Length; i++)
         {
