@@ -5,15 +5,12 @@ namespace DryCycle.Creatures.MossySpider;
 
 public sealed class MossySpider : Creature
 {
-    // MossySpider keeps four real torso masses. They are a flexible body, not a rigid
-    // plank and not a two-point proxy. The visible moss slab follows these chunks, while
-    // ten independent appendages carry the weight like Deer/DrillCrab-style limbs.
     internal const int SegmentCount = 4;
     internal const float SegmentSpacing = 78f;
     internal const int LegCount = 10;
 
     private const float UnsupportedGravity = 0.90f;
-    private const float SupportedGravity = 0.045f;
+    private const float SupportedGravity = 0.040f;
     private const int MinimumStableFeet = 5;
     private const int MaximumSteppingLegs = 2;
 
@@ -31,6 +28,15 @@ public sealed class MossySpider : Creature
         6.6f,
         6.6f,
         5.6f
+    ];
+
+    private static readonly Vector2[] PathProbeDirections =
+    [
+        Vector2.zero,
+        Vector2.left,
+        Vector2.right,
+        Vector2.up,
+        Vector2.down
     ];
 
     public float IdleMotion;
@@ -77,9 +83,8 @@ public sealed class MossySpider : Creature
             bodyChunks[i].defaultRestrictInRoomRange = 2000f;
         }
 
-        // Only adjacent Normal connections define the physical skeleton. There are no
-        // diagonal triangles, no second-neighbour distance braces and no world-angle
-        // constraints. This allows the body to bend and rotate naturally when dragged.
+        // Four real masses remain in the torso. Only adjacent length constraints are
+        // used; posture is produced by appendage support plus weak local muscle tone.
         bodyChunkConnections = new BodyChunkConnection[SegmentCount - 1];
         for (int i = 0; i < SegmentCount - 1; i++)
         {
@@ -97,23 +102,22 @@ public sealed class MossySpider : Creature
         bodyChunks[2].rotationChunk = bodyChunks[1];
         bodyChunks[3].rotationChunk = bodyChunks[2];
 
-        // Five stations span the whole torso. The old outer legs were aimed almost a
-        // hundred pixels farther outward than their anchors, so the end stations often
-        // missed ordinary platforms and both end chunks sagged. Keep the resting fan
-        // modest; walking lead is added dynamically by the leg controller instead.
+        // The concept has very long walking legs. The previous ~108 px stance made the
+        // carapace look almost ground-bound. Raise the natural stance to ~150 px and
+        // give each leg enough extra reach to cross broken terrain without stretching.
         SupportLegs = new MossySpiderLeg[LegCount];
         for (int station = 0; station < 5; station++)
         {
             float stationT = station / 4f;
             float bodyU = Mathf.Lerp(0.04f, 0.96f, stationT);
-            float standHeight = 108f + Mathf.Sin(stationT * Mathf.PI) * 8f;
-            float maxLength = 172f + Mathf.Sin(stationT * Mathf.PI) * 10f;
-            float stationFan = Mathf.Lerp(-18f, 18f, stationT);
+            float standHeight = 148f + Mathf.Sin(stationT * Mathf.PI) * 14f;
+            float maxLength = 226f + Mathf.Sin(stationT * Mathf.PI) * 16f;
+            float stationFan = Mathf.Lerp(-24f, 24f, stationT);
 
             for (int layer = 0; layer < 2; layer++)
             {
                 int legIndex = station * 2 + layer;
-                float pairFan = layer == 0 ? -23f : 23f;
+                float pairFan = layer == 0 ? -29f : 29f;
 
                 SupportLegs[legIndex] = new MossySpiderLeg(
                     legIndex,
@@ -129,7 +133,7 @@ public sealed class MossySpider : Creature
         airFriction = 0.999f;
         gravity = UnsupportedGravity;
         bounce = 0.05f;
-        surfaceFriction = 0.38f;
+        surfaceFriction = 0.34f;
         collisionLayer = 1;
         waterFriction = 0.96f;
         buoyancy = 0.70f;
@@ -140,9 +144,10 @@ public sealed class MossySpider : Creature
     {
         base.PlaceInRoom(placeRoom);
 
-        // Deploy above the spawn tile so all five leg stations get time to acquire
-        // terrain before the belly reaches the floor.
-        Vector2 center = placeRoom.MiddleOfTile(abstractCreature.pos.Tile) + Vector2.up * 116f;
+        // Spawn near the intended long-legged stance so feet can acquire terrain before
+        // the broad belly reaches the floor. If it does collapse, MossySpiderLeg can now
+        // reacquire terrain even from a very small hip-to-ground distance and stand up.
+        Vector2 center = placeRoom.MiddleOfTile(abstractCreature.pos.Tile) + Vector2.up * 156f;
         float half = (SegmentCount - 1) * 0.5f;
 
         for (int i = 0; i < bodyChunks.Length; i++)
@@ -199,8 +204,6 @@ public sealed class MossySpider : Creature
         Vector2 bodyAxis = PhysicalBodyAxis();
         UpdateGaitClock(bodyAxis);
 
-        // Appendages establish contacts first, then those contacts determine how much
-        // weight the torso is carrying this frame.
         for (int i = 0; i < SupportLegs.Length; i++)
         {
             SupportLegs[i].Update(this, bodyAxis);
@@ -308,31 +311,18 @@ public sealed class MossySpider : Creature
             return;
         }
 
-        MovementConnection move = AI.Pather.FollowPath(
-            room.GetWorldCoordinate(BodyCenter),
-            actuallyFollowingThisPath: true);
-
-        if (move == default)
-        {
-            move = AI.Pather.FollowPath(
-                room.GetWorldCoordinate(bodyChunks[1].pos),
-                actuallyFollowingThisPath: true);
-        }
-
-        if (move == default)
-        {
-            move = AI.Pather.FollowPath(
-                room.GetWorldCoordinate(bodyChunks[2].pos),
-                actuallyFollowingThisPath: true);
-        }
-
+        MovementConnection move = FindPathConnection();
         if (move == default || !move.destinationCoord.TileDefined)
         {
-            MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.10f);
+            MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.08f);
             return;
         }
 
-        Vector2 desired = room.MiddleOfTile(move.destinationCoord) - BodyCenter;
+        // Large Rain World creatures do not steer at a one-tile target. Deer explicitly
+        // looks several Standard connections ahead. Do the same here so the migration
+        // drive has a stable forward direction instead of alternating around one cell.
+        WorldCoordinate steeringDestination = LookAhead(move.destinationCoord);
+        Vector2 desired = room.MiddleOfTile(steeringDestination) - BodyCenter;
         if (desired.sqrMagnitude > 0.001f)
         {
             desired.Normalize();
@@ -340,18 +330,23 @@ public sealed class MossySpider : Creature
 
         if (SwimFactor < 0.55f)
         {
-            desired.y *= 0.12f;
+            // Air is legal to pathing, but appendages own terrestrial height.
+            desired.y *= 0.10f;
             if (desired.sqrMagnitude > 0.001f)
             {
                 desired.Normalize();
             }
         }
 
-        MoveDirection = Vector2.Lerp(MoveDirection, desired, 0.10f);
+        MoveDirection = Vector2.Lerp(MoveDirection, desired, 0.14f);
 
-        float supportDrive = Mathf.Lerp(0.22f, 1f, GroundSupport);
-        float drive = Mathf.Lerp(0.050f * supportDrive, 0.064f, SwimFactor);
-        float maxHorizontalSpeed = Mathf.Lerp(1.28f, 1.65f, SwimFactor);
+        // The old 0.011-0.05 effective ground drive was weaker than belly/floor friction
+        // whenever the animal had not yet achieved full leg support, producing the
+        // visible "walking in place" state. Keep locomotion slow by limiting terminal
+        // speed, not by making the drive too weak to translate the chassis.
+        float supportDrive = Mathf.Lerp(0.58f, 1f, GroundSupport);
+        float drive = Mathf.Lerp(0.078f * supportDrive, 0.072f, SwimFactor);
+        float maxHorizontalSpeed = Mathf.Lerp(1.55f, 1.80f, SwimFactor);
 
         for (int i = 0; i < bodyChunks.Length; i++)
         {
@@ -366,12 +361,79 @@ public sealed class MossySpider : Creature
         }
     }
 
+    private MovementConnection FindPathConnection()
+    {
+        MovementConnection move = AI.Pather.FollowPath(
+            room.GetWorldCoordinate(BodyCenter),
+            actuallyFollowingThisPath: true);
+
+        if (move != default)
+        {
+            return move;
+        }
+
+        // The center of a huge body often sits on a different AI cell than its feet.
+        // Deer solves this by probing around several BodyChunks. Probe all four torso
+        // masses at increasing radii before concluding that the pather has no route.
+        for (int ring = 0; ring < 3; ring++)
+        {
+            float radius = 20f * (ring + 1);
+            for (int chunkIndex = 0; chunkIndex < bodyChunks.Length; chunkIndex++)
+            {
+                for (int dirIndex = 0; dirIndex < PathProbeDirections.Length; dirIndex++)
+                {
+                    Vector2 probe = bodyChunks[chunkIndex].pos +
+                                    PathProbeDirections[dirIndex] * radius;
+                    move = AI.Pather.FollowPath(
+                        room.GetWorldCoordinate(probe),
+                        actuallyFollowingThisPath: true);
+
+                    if (move != default)
+                    {
+                        return move;
+                    }
+                }
+            }
+        }
+
+        return default;
+    }
+
+    private WorldCoordinate LookAhead(WorldCoordinate start)
+    {
+        WorldCoordinate destination = start;
+        if (!destination.TileDefined || destination.room != room.abstractRoom.index)
+        {
+            return destination;
+        }
+
+        for (int i = 0; i < 10; i++)
+        {
+            MovementConnection next = AI.Pather.FollowPath(
+                destination,
+                actuallyFollowingThisPath: false);
+
+            if (next == default ||
+                !next.destinationCoord.TileDefined ||
+                next.destinationCoord.room != room.abstractRoom.index ||
+                (next.type != MovementConnection.MovementType.Standard &&
+                 next.type != MovementConnection.MovementType.OpenDiagonal))
+            {
+                break;
+            }
+
+            destination = next.destinationCoord;
+        }
+
+        return destination;
+    }
+
     private void UpdateGaitClock(Vector2 bodyAxis)
     {
         float movement = Mathf.Clamp01(Mathf.Abs(Vector2.Dot(MoveDirection, bodyAxis)));
-        float actual = Mathf.Clamp01(Mathf.Abs(BodyVelocityAt(0.5f).x) / 1.2f);
+        float actual = Mathf.Clamp01(Mathf.Abs(BodyVelocityAt(0.5f).x) / 1.4f);
         GaitCycle = Mathf.Repeat(
-            GaitCycle + Mathf.Lerp(0.001f, 0.017f, Mathf.Max(movement * 0.6f, actual)),
+            GaitCycle + Mathf.Lerp(0.001f, 0.018f, Mathf.Max(movement * 0.6f, actual)),
             1f);
     }
 
@@ -399,7 +461,7 @@ public sealed class MossySpider : Creature
         }
 
         stepCounter++;
-        if (stepCounter < 8)
+        if (stepCounter < 7)
         {
             return;
         }
@@ -448,9 +510,9 @@ public sealed class MossySpider : Creature
         float groundFactor = 1f - Mathf.SmoothStep(0.48f, 0.90f, SwimFactor);
         supportTarget *= groundFactor;
 
-        GroundSupport = Mathf.Lerp(GroundSupport, supportTarget, 0.22f);
+        GroundSupport = Mathf.Lerp(GroundSupport, supportTarget, 0.24f);
         gravity = Mathf.Lerp(UnsupportedGravity, SupportedGravity, GroundSupport);
-        airFriction = Mathf.Lerp(0.999f, 0.965f, GroundSupport);
+        airFriction = Mathf.Lerp(0.999f, 0.972f, GroundSupport);
 
         if (groundFactor <= 0.001f)
         {
@@ -513,11 +575,9 @@ public sealed class MossySpider : Creature
 
     private void ApplyBodyMuscleTone()
     {
-        // This is curvature resistance in the creature's own frame, not a preferred
-        // world angle. A completely rotated straight body has zero error. Only local
-        // bending generates force, so dragging or sloped terrain can still rotate and
-        // flex the entire creature naturally.
-        float tone = Mathf.Lerp(0.006f, 0.014f, GroundSupport);
+        // Curvature resistance only; there is no preferred world angle. This keeps a
+        // broad living torso from folding sharply while preserving free overall rotation.
+        float tone = Mathf.Lerp(0.005f, 0.011f, GroundSupport);
 
         for (int i = 1; i < bodyChunks.Length - 1; i++)
         {
@@ -530,8 +590,8 @@ public sealed class MossySpider : Creature
             Vector2 correction = error * tone;
 
             middle.vel += correction;
-            left.vel -= correction * 0.35f;
-            right.vel -= correction * 0.35f;
+            left.vel -= correction * 0.30f;
+            right.vel -= correction * 0.30f;
         }
     }
 
