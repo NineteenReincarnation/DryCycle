@@ -114,19 +114,9 @@ internal sealed class RegionClimateProfile
 }
 
 /// <summary>
-/// Strict loader for World/RegionClimate.txt.
-///
-/// Grammar used by the live scheduling sections:
-/// 0 tabs: [Weather] / [DangerType]
-/// 1 tab : RegionId:
-/// 2 tabs: WeatherFamily : chance OR DangerType : chance
-/// 3 tabs: WeatherVariant : chance
-///
-/// A chance is an independent 0..100 percentage. A trailing '%' is optional.
-/// // starts a line comment. Spaces are deliberately not treated as indentation;
-/// the authored format requires literal tabs so malformed hierarchy is visible.
-/// defaultWeather/defaultDangerType are accepted as reserved sections but are not
-/// applied until their inheritance semantics are authored explicitly.
+/// Strict loader for Ancient Site/world/RegionClimate.txt.
+/// 0 tabs: section, 1 tab: region, 2 tabs: family/danger, 3 tabs: variant.
+/// Probabilities are independent 0..100 rolls; // begins a comment.
 /// </summary>
 internal static class RegionClimateRegistry
 {
@@ -152,21 +142,35 @@ internal static class RegionClimateRegistry
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
             Plugin.Logger?.LogWarning(
-                "DryCycle weather climate file was not found at World/RegionClimate.txt.");
+                "DryCycle weather climate file was not found. Expected Ancient Site/world/RegionClimate.txt.");
             return;
         }
 
-        LoadedPath = path;
-        Parse(File.ReadAllLines(path));
+        try
+        {
+            LoadedPath = Path.GetFullPath(path);
+            Parse(File.ReadAllLines(path));
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle failed reading RegionClimate.txt from '{path}': {ex}");
+            Profiles.Clear();
+            LoadedPath = null;
+            return;
+        }
 
         Plugin.Logger?.LogInfo(
-            $"DryCycle loaded {Profiles.Count} region climate profile(s) from '{path}'.");
+            $"DryCycle loaded {Profiles.Count} region climate profile(s) from '{LoadedPath}'.");
 
         if (Profiles.TryGetValue("SU", out RegionClimateProfile su))
         {
-            Plugin.Logger?.LogInfo(
-                $"DryCycle SU climate ready: {su.Weather.Count} weather family/families, " +
-                $"{su.DangerTypes.Count} danger type(s).");
+            LogProfile(su);
+        }
+        else
+        {
+            Plugin.Logger?.LogWarning(
+                "DryCycle RegionClimate.txt loaded, but no [Weather]/[DangerType] SU profile was parsed.");
         }
     }
 
@@ -195,6 +199,48 @@ internal static class RegionClimateRegistry
 
     private static string ResolveClimatePath()
     {
+        // First prefer the exact active Ancient Site mod root requested by the author.
+        // AssetManager can resolve merged/versioned assets, but RegionClimate.txt is
+        // intentionally a live-authored mod file and should not depend on merge-cache
+        // behavior to be discoverable.
+        try
+        {
+            if (ModManager.ActiveMods != null)
+            {
+                for (int i = 0; i < ModManager.ActiveMods.Count; i++)
+                {
+                    ModManager.Mod mod = ModManager.ActiveMods[i];
+                    if (mod == null ||
+                        !string.Equals(mod.id, Plugin.RainWorldModId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string[] directCandidates =
+                    {
+                        Path.Combine(mod.path, "world", "RegionClimate.txt"),
+                        Path.Combine(mod.NewestPath, "world", "RegionClimate.txt"),
+                        Path.Combine(mod.TargetedPath, "world", "RegionClimate.txt"),
+                        Path.Combine(mod.basePath ?? string.Empty, "world", "RegionClimate.txt")
+                    };
+
+                    for (int candidateIndex = 0; candidateIndex < directCandidates.Length; candidateIndex++)
+                    {
+                        string candidate = directCandidates[candidateIndex];
+                        if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle failed direct Ancient Site RegionClimate lookup: {ex.Message}");
+        }
+
         string[] assetPaths =
         {
             "World/RegionClimate.txt",
@@ -426,5 +472,34 @@ internal static class RegionClimateRegistry
     {
         Plugin.Logger?.LogWarning(
             $"DryCycle RegionClimate.txt line {zeroBasedLine + 1}: {message}.");
+    }
+
+    private static void LogProfile(RegionClimateProfile profile)
+    {
+        Plugin.Logger?.LogInfo(
+            $"DryCycle climate {profile.RegionId}: " +
+            $"weatherFamilies={profile.Weather.Count}, dangerTypes={profile.DangerTypes.Count}.");
+
+        for (int i = 0; i < profile.Weather.Count; i++)
+        {
+            WeatherFamilyClimateEntry family = profile.Weather[i];
+            Plugin.Logger?.LogInfo(
+                $"  Weather {family.Id}: {family.ChancePercent:0.##}% " +
+                $"({family.Variants.Count} variant(s))");
+
+            for (int j = 0; j < family.Variants.Count; j++)
+            {
+                ClimateChanceEntry variant = family.Variants[j];
+                Plugin.Logger?.LogInfo(
+                    $"    Variant {variant.Id}: {variant.ChancePercent:0.##}%");
+            }
+        }
+
+        for (int i = 0; i < profile.DangerTypes.Count; i++)
+        {
+            ClimateChanceEntry danger = profile.DangerTypes[i];
+            Plugin.Logger?.LogInfo(
+                $"  Danger {danger.Id}: {danger.ChancePercent:0.##}%");
+        }
     }
 }
