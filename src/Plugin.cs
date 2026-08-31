@@ -27,16 +27,10 @@ namespace DryCycle;
 [BepInDependency("slime-cubed.devconsole", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
-    // BepInEx plugin identity. Keep this stable so existing plugin-level state is not
-    // silently moved to a different BepInEx GUID.
     public const string ModId = "Anno";
-
-    // Rain World's Remix/ModManager identity comes from Ancient Site's modinfo.json.
-    // MachineConnector.SetRegisteredOI must use this exact ID rather than the BepInEx GUID.
     public const string RainWorldModId = "NR.B5";
-
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.90";
+    public const string Version = "0.1.91";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -126,10 +120,6 @@ internal sealed class Plugin : BaseUnityPlugin
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
-        // MachineConnector has rebuilt its active-mod option registry by this point.
-        // Register on every mods-init pass so newly registered DLC/mod regions are
-        // reflected in the dynamic region toggle list even when runtime systems are
-        // already initialized.
         RegionDayNightOptions.Register();
 
         if (_initialized)
@@ -147,35 +137,18 @@ internal sealed class Plugin : BaseUnityPlugin
             TemperatureSystemRuntime.Enable();
             DewPodHooks.Enable();
 
-            // Keep PlayerGraphics in its native Rain World containers. The generic
-            // quicksand render hook already excludes Player, so TerrainCurve/Sand can
-            // retain their authored rendering without promoting the player from
-            // Midground into the globally later Sand container.
             QuicksandZoneHooks.Enable();
             QuicksandDrillCrabCompatibility.EnsureEnabled();
             QuicksandAIHazard.Enable();
-
-            // Creature AI avoidance and post-entry escape are separate layers. The
-            // escape layer supplies a sinking virtual soft floor so native creature
-            // locomotion keeps ownership of turning, pose, legs and flight.
             QuicksandCreatureEscape.Enable();
-
             QuicksandPlayerStruggleControl.EnableNativeCapture();
             QuicksandPlayerHorizontalStability.Enable();
             QuicksandSinkRateLimiter.Enable();
             QuicksandLooseObjectSinkEase.Enable();
             QuicksandPlayerLocomotionSupport.Enable();
             QuicksandPlayerStruggleControl.Enable();
-
-            // The shore layer is installed last among Player.Update hooks. It blocks
-            // deep sideways leakage while shallow movement and a real upward jump
-            // retain an escape window, without creating wall/floor ContactPoints.
             QuicksandPlayerShoreConstraint.Enable();
             QuicksandWeaponSettling.Enable();
-
-            // Carryable items are still deleted by the generic submerged cleanup.
-            // Creatures are skipped there and are only removed after their dedicated
-            // complete-submersion death confirmation and short post-death delay.
             QuicksandSubmersionCleanup.Enable();
 
             DewPodPlantHooks.Enable();
@@ -187,10 +160,8 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
 
-            // The old accelerated 2.5-minute schedule remains in source for future
-            // diagnostics, but production weather no longer uses it. Day length now
-            // follows the authored RainCycle.cycleLength and RegionClimate drives all
-            // scheduled weather/danger events.
+            // Keep the old fixed five-pip diagnostic path in source, but production
+            // always uses the authored cycle length and RegionClimate schedules.
             WorldClockHooks.TestScheduleEnabled = false;
             RegionClimateRegistry.Reload();
             DayNightRuntime.Enable();
