@@ -27,7 +27,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.84";
+    public const string Version = "0.1.85";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -111,6 +111,12 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
+
+        // MachineConnector has rebuilt its active-mod option registry by this point.
+        // Register on every mods-init pass so newly registered DLC/mod regions are
+        // reflected in the dynamic region toggle list even when runtime systems are
+        // already initialized.
+        RegionDayNightOptions.Register();
 
         if (_initialized)
         {
