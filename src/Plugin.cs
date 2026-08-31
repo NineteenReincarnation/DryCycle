@@ -44,6 +44,7 @@ internal sealed class Plugin : BaseUnityPlugin
         }
 
         DryCycleContent.Enable();
+        MossySpiderBackPlatform.Enable();
         SpinebackLizardHooks.Enable();
         DewPodAudioHooks.InitializeSoundIds();
 
@@ -58,6 +59,7 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         DryCycleContent.Disable();
+        MossySpiderBackPlatform.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
