@@ -49,23 +49,33 @@ internal readonly struct ItemSaveData
 
     internal string[] RawFields { get; }
 
-    internal static bool TryParse(string serialized, out AbstractPhysicalObject.AbstractObjectType type, out ItemSaveData data)
+    internal static bool TryGetType(
+        string serialized,
+        out AbstractPhysicalObject.AbstractObjectType type)
     {
         type = null;
-        data = default;
-
         if (string.IsNullOrEmpty(serialized))
         {
             return false;
         }
 
         string[] fields = serialized.Split(new[] { "<oA>" }, StringSplitOptions.None);
-        if (fields.Length < 3)
+        if (fields.Length < 2 || string.IsNullOrEmpty(fields[1]))
         {
             return false;
         }
 
         type = new AbstractPhysicalObject.AbstractObjectType(fields[1]);
+        return true;
+    }
+
+    internal static ItemSaveData Parse(string serialized)
+    {
+        string[] fields = serialized.Split(new[] { "<oA>" }, StringSplitOptions.None);
+        if (fields.Length < 3)
+        {
+            throw new FormatException("Custom item save data does not contain the required fields.");
+        }
 
         string idField = fields[0];
         int rippleLayer = 0;
@@ -82,7 +92,6 @@ internal readonly struct ItemSaveData
         WorldCoordinate position = WorldCoordinate.FromString(fields[2]);
         string customData = fields.Length > 3 ? fields[3] : string.Empty;
 
-        data = new ItemSaveData(id, position, customData, rippleLayer, fields);
-        return true;
+        return new ItemSaveData(id, position, customData, rippleLayer, fields);
     }
 }
