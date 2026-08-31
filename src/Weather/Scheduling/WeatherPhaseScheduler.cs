@@ -13,10 +13,15 @@ namespace DryCycle.Weather.Scheduling;
 /// - Weather duration: weighted 2..5 pips, alpha 0.68;
 /// - DangerType duration: weighted 2..4 pips, alpha 0.5;
 /// - DangerType may not start in the first 4 pips of the phase;
+/// - DeathRain additionally owns a 15-second pre-roll and a 15-second tail outside
+///   its authored 2..4 full pips. Its full-strength cells therefore begin only after
+///   that transition can fit beyond the protected opening, and its tail must finish
+///   before the phase ends;
 /// - no events overlap;
-/// - every pair of neighboring events must have at least 2 completely empty pips
-///   between them. Larger gaps (3, 4, 5, ...) are valid and naturally occur because
-///   start positions are randomized;
+/// - every pair of neighboring effects must have at least 2 completely empty pips
+///   between them. Because DeathRain extends half a pip outside its authored cells,
+///   any nominal gap adjacent to DeathRain is raised to 3 full pips so the actual
+///   post-transition empty time is still at least 2 pips;
 /// - if the selected events cannot fit, randomly cancel one and retry until the
 ///   remaining set has a legal layout.
 /// </summary>
@@ -25,6 +30,7 @@ internal static class WeatherPhaseScheduler
     internal const int PipTicks = 1200;
     internal const int MinimumGapPips = 2;
     internal const int DangerProtectedOpeningPips = 4;
+    internal const int DeathRainTransitionTicks = PipTicks / 2;
 
     internal const int DayMaxWeatherEvents = 2;
     internal const int DayMaxDangerEvents = 1;
@@ -145,6 +151,21 @@ internal static class WeatherPhaseScheduler
     internal static int FullPipsFromTicks(int ticks)
     {
         return Math.Max(0, ticks) / PipTicks;
+    }
+
+    internal static bool HasDeathRainTransition(WeatherScheduleCandidate candidate)
+    {
+        if (candidate == null || candidate.Kind != WeatherScheduleEventKind.DangerType)
+        {
+            return false;
+        }
+
+        string normalized = candidate.Id?.Trim()
+            .Replace("_", string.Empty)
+            .Replace("-", string.Empty)
+            .ToUpperInvariant();
+
+        return normalized == "DEATHRAIN" || normalized == "RAIN";
     }
 
     private static int ChooseWeightedDurationPips(
@@ -283,10 +304,28 @@ internal static class WeatherPhaseScheduler
         }
 
         PendingEvent pending = searchOrder[eventIndex];
+        bool deathRainTransition = HasDeathRainTransition(pending.Candidate);
+
         int earliestStart = pending.Candidate.Kind == WeatherScheduleEventKind.DangerType
             ? DangerProtectedOpeningPips
             : 0;
-        int latestStart = phasePipCount - pending.DurationPips;
+
+        // DeathRain begins fading in half a pip before its first full-strength cell.
+        // Since starts are integer pip boundaries, moving the full-strength start one
+        // additional pip later is the first placement that keeps the entire pre-roll
+        // outside the protected first four pips.
+        if (deathRainTransition)
+        {
+            earliestStart = Math.Max(
+                earliestStart,
+                DangerProtectedOpeningPips + 1);
+        }
+
+        // Reserve one trailing integer cell for DeathRain. Its actual fade-out only
+        // consumes the first half of that cell, but this guarantees the complete
+        // 15-second tail finishes before Day/Night switches phase.
+        int trailingReservePips = deathRainTransition ? 1 : 0;
+        int latestStart = phasePipCount - pending.DurationPips - trailingReservePips;
 
         if (latestStart < earliestStart)
         {
@@ -296,7 +335,11 @@ internal static class WeatherPhaseScheduler
         List<int> starts = new(latestStart - earliestStart + 1);
         for (int start = earliestStart; start <= latestStart; start++)
         {
-            if (CanPlace(start, pending.DurationPips, placed))
+            if (CanPlace(
+                    pending.Candidate,
+                    start,
+                    pending.DurationPips,
+                    placed))
             {
                 starts.Add(start);
             }
@@ -329,6 +372,7 @@ internal static class WeatherPhaseScheduler
     }
 
     private static bool CanPlace(
+        WeatherScheduleCandidate candidate,
         int startPip,
         int durationPips,
         List<ScheduledWeatherEvent> placed)
@@ -338,12 +382,11 @@ internal static class WeatherPhaseScheduler
         for (int i = 0; i < placed.Count; i++)
         {
             ScheduledWeatherEvent other = placed[i];
+            int requiredGap = RequiredNominalGapPips(candidate, other?.Candidate);
 
             if (endPipExclusive <= other.StartPip)
             {
-                // The complete empty interval between the two events may be 2, 3,
-                // 4, 5... pips. Only gaps smaller than 2 are rejected.
-                if (other.StartPip - endPipExclusive < MinimumGapPips)
+                if (other.StartPip - endPipExclusive < requiredGap)
                 {
                     return false;
                 }
@@ -353,7 +396,7 @@ internal static class WeatherPhaseScheduler
 
             if (other.EndPipExclusive <= startPip)
             {
-                if (startPip - other.EndPipExclusive < MinimumGapPips)
+                if (startPip - other.EndPipExclusive < requiredGap)
                 {
                     return false;
                 }
@@ -366,6 +409,19 @@ internal static class WeatherPhaseScheduler
         }
 
         return true;
+    }
+
+    private static int RequiredNominalGapPips(
+        WeatherScheduleCandidate a,
+        WeatherScheduleCandidate b)
+    {
+        // A DeathRain transition occupies half a pip outside the authored block. With
+        // integer placement, a nominal 3-pip gap is the smallest value that leaves at
+        // least the required 2 complete pips after subtracting that half-pip tail or
+        // pre-roll. Other event pairs keep the ordinary >=2-pip rule.
+        return HasDeathRainTransition(a) || HasDeathRainTransition(b)
+            ? MinimumGapPips + 1
+            : MinimumGapPips;
     }
 
     private static void Shuffle<T>(List<T> list, Random random)
