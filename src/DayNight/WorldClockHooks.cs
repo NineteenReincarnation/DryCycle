@@ -9,6 +9,12 @@ namespace DryCycle.DayNight;
 
 internal static class WorldClockHooks
 {
+    // Master switch for the temporary accelerated test schedule. Keep this code path
+    // intact after the systems are finished; switching this to false returns the
+    // WorldClock daytime to the authored RainCycle.cycleLength and disables the fixed
+    // second/fourth-pip weather test forecast without deleting any test code.
+    internal static bool TestScheduleEnabled = true;
+
     // Temporary accelerated test schedule. Rain World runs gameplay at 40 ticks/sec
     // and vanilla RainMeter uses one pip per 1200 ticks (30 sec). A 6000-tick day is
     // therefore 2.5 minutes and gives exactly five daytime pips. Night remains 50%
@@ -78,16 +84,27 @@ internal static class WorldClockHooks
         return rainCycle?.world?.game != null && rainCycle.world.game.IsStorySession;
     }
 
+    private static int DayCycleLengthFor(RainCycle rainCycle)
+    {
+        if (TestScheduleEnabled)
+        {
+            return TestDayCycleLength;
+        }
+
+        return Math.Max(1, rainCycle?.cycleLength ?? TestDayCycleLength);
+    }
+
     private static WorldClock GetOrCreate(RainCycle rainCycle)
     {
         RainWorldGame game = rainCycle.world.game;
+        int dayCycleLength = DayCycleLengthFor(rainCycle);
         WorldClock clock = _clocks.GetValue(
             game,
-            _ => new WorldClock(TestDayCycleLength));
+            _ => new WorldClock(dayCycleLength));
 
-        // Keep the accelerated test duration stable even though vanilla RainCycle
-        // retains its authored cycleLength as a compatibility facade.
-        clock.SetCycleLength(TestDayCycleLength);
+        // Test mode forces the accelerated 2.5-minute day. Production mode follows
+        // the authored vanilla cycle length while preserving DryCycle's 50% night.
+        clock.SetCycleLength(dayCycleLength);
         return clock;
     }
 
@@ -165,14 +182,17 @@ internal static class WorldClockHooks
         }
 
         // Vanilla chooses the number of RainMeter pips in its constructor from
-        // cycleLength / 1200. Expose the 2.5-minute virtual daytime only for that
-        // construction step, then restore the real RainCycle value immediately.
+        // cycleLength. Test mode exposes the five-pip 2.5-minute daytime; when the
+        // switch is false this simply uses the authored cycle length unchanged.
         int previousCycleLength = rainCycle.cycleLength;
-        rainCycle.cycleLength = TestDayCycleLength;
+        rainCycle.cycleLength = DayCycleLengthFor(rainCycle);
         try
         {
             orig(self, hud, fContainer);
-            CreateWeatherPipState(self, fContainer);
+            if (TestScheduleEnabled)
+            {
+                CreateWeatherPipState(self, fContainer);
+            }
         }
         finally
         {
@@ -192,13 +212,14 @@ internal static class WorldClockHooks
             return;
         }
 
-        // During HUD update expose a coherent five-pip virtual RainCycle so AmountLeft,
-        // fRain and the test meter all describe the same WorldClock daytime. The rest
-        // of the game continues seeing the safe compatibility RainCycle.
+        // During HUD update expose a virtual RainCycle that follows the same daytime
+        // length as WorldClock. In test mode that is five pips; in production mode it
+        // follows the authored RainCycle.cycleLength.
         int previousTimer = rainCycle.timer;
         int previousCycleLength = rainCycle.cycleLength;
-        rainCycle.cycleLength = TestDayCycleLength;
-        rainCycle.timer = clock.VirtualRainTimer(TestDayCycleLength);
+        int dayCycleLength = DayCycleLengthFor(rainCycle);
+        rainCycle.cycleLength = dayCycleLength;
+        rainCycle.timer = clock.VirtualRainTimer(dayCycleLength);
         try
         {
             orig(self);
@@ -289,7 +310,7 @@ internal static class WorldClockHooks
             }
         }
 
-        if (clock.IsNight)
+        if (!TestScheduleEnabled || clock.IsNight)
         {
             return;
         }
@@ -349,7 +370,10 @@ internal static class WorldClockHooks
 
     private static void CreateWeatherPipState(global::HUD.RainMeter meter, FContainer container)
     {
-        if (meter?.circles == null || container == null || _weatherPips.TryGetValue(meter, out _))
+        if (!TestScheduleEnabled ||
+            meter?.circles == null ||
+            container == null ||
+            _weatherPips.TryGetValue(meter, out _))
         {
             return;
         }
