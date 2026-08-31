@@ -79,9 +79,19 @@ internal static class WorldClockHooks
         return game != null && _clocks.TryGetValue(game, out clock);
     }
 
+    public static bool TryGetClock(World world, out WorldClock clock)
+    {
+        clock = null;
+        return world?.game != null &&
+               RegionDayNightOptions.IsEnabled(world) &&
+               _clocks.TryGetValue(world.game, out clock);
+    }
+
     private static bool ShouldRun(RainCycle rainCycle)
     {
-        return rainCycle?.world?.game != null && rainCycle.world.game.IsStorySession;
+        return rainCycle?.world?.game != null &&
+               rainCycle.world.game.IsStorySession &&
+               RegionDayNightOptions.IsEnabled(rainCycle.world);
     }
 
     private static int DayCycleLengthFor(RainCycle rainCycle)
@@ -206,8 +216,9 @@ internal static class WorldClockHooks
         RainCycle rainCycle = player?.abstractCreature?.world?.rainCycle;
         if (rainCycle == null ||
             !ShouldRun(rainCycle) ||
-            !TryGetClock(rainCycle.world.game, out WorldClock clock))
+            !TryGetClock(rainCycle.world, out WorldClock clock))
         {
+            ReleaseCustomHudOverrides(self);
             orig(self);
             return;
         }
@@ -302,13 +313,7 @@ internal static class WorldClockHooks
             return;
         }
 
-        for (int i = 0; i < state.Fills.Length; i++)
-        {
-            if (state.Fills[i] != null)
-            {
-                state.Fills[i].isVisible = false;
-            }
-        }
+        HideWeatherPips(state);
 
         if (!TestScheduleEnabled || clock.IsNight)
         {
@@ -412,6 +417,48 @@ internal static class WorldClockHooks
 
         _weatherPips.Add(meter, state);
         LiveWeatherPips.Add(state);
+    }
+
+    private static void ReleaseCustomHudOverrides(global::HUD.RainMeter meter)
+    {
+        if (meter == null)
+        {
+            return;
+        }
+
+        if (_weatherPips.TryGetValue(meter, out WeatherPipState state))
+        {
+            HideWeatherPips(state);
+        }
+
+        if (meter.circles == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < meter.circles.Length; i++)
+        {
+            if (meter.circles[i] != null)
+            {
+                meter.circles[i].forceColor = null;
+            }
+        }
+    }
+
+    private static void HideWeatherPips(WeatherPipState state)
+    {
+        if (state?.Fills == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < state.Fills.Length; i++)
+        {
+            if (state.Fills[i] != null)
+            {
+                state.Fills[i].isVisible = false;
+            }
+        }
     }
 
     private static void ClearWeatherPipState(WeatherPipState state)
