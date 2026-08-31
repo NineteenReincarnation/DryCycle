@@ -53,7 +53,6 @@ internal readonly struct SolarLightingState
     {
         dayProgress = Mathf.Repeat(dayProgress, 1f);
 
-        // Dawn = 0.0, noon = 0.25, dusk = 0.5, midnight = 0.75.
         float sunElevation = Mathf.Sin(dayProgress * Mathf.PI * 2f);
         float daylight = SmoothStep(-0.16f, 0.20f, sunElevation);
         float directLight = Mathf.Pow(Mathf.Clamp01(sunElevation), 0.58f);
@@ -64,14 +63,9 @@ internal readonly struct SolarLightingState
         float horizonFactor = Mathf.Max(dawnFactor, duskFactor);
         float blueHourFactor = horizonFactor * (1f - directLight) * 0.95f;
 
-        // The sun warms strongly only while it is near the horizon. Dusk is allowed
-        // to be a little warmer than dawn, but both remain relative corrections;
-        // the room palette still owns the region's actual hue identity.
         float sunWarmth = Mathf.Clamp01(dawnFactor * 0.55f + duskFactor * 0.90f) * daylight;
         float ambientCoolness = Mathf.Clamp01(nightFactor * 0.72f + blueHourFactor * 0.48f);
 
-        // Preserve readable silhouettes at night. Ambient light never reaches zero;
-        // the palette lighting layer will still deepen the room through darkness.
         float ambientLight = Mathf.Lerp(0.43f, 1f, daylight);
         ambientLight += horizonFactor * 0.05f;
         ambientLight = Mathf.Clamp01(ambientLight);
@@ -140,10 +134,6 @@ internal sealed class WorldClock
 
     public float HalfRemaining => 1f - HalfProgress;
 
-    // Day and night each still occupy half of normalized solar time. They do not
-    // occupy equal real time: daytime uses 100% of vanilla cycleLength while night
-    // uses 50%. This preserves all existing solar/palette curves while making the
-    // night progress through its visual half twice as fast.
     public float DayProgress => (_nightHalf ? 0.5f : 0f) + HalfProgress * 0.5f;
 
     public SolarLightingState Lighting => SolarLightingState.FromDayProgress(DayProgress);
@@ -153,11 +143,10 @@ internal sealed class WorldClock
         get
         {
             float p = DayProgress;
-            if (p < 0.065f)
-            {
-                return WorldClockPhase.Dawn;
-            }
 
+            // A new DryCycle daytime begins as Day, not Dawn. Pre-dawn belongs to
+            // the tail of the previous night and PaletteLighting reaches Base before
+            // the 1.0 -> 0.0 wrap.
             if (p < 0.42f)
             {
                 return WorldClockPhase.Day;
@@ -177,9 +166,6 @@ internal sealed class WorldClock
         }
     }
 
-    // Vanilla night creatures begin leaving dens at ~600 and several vanilla night
-    // lights use thresholds around 6000. Mapping the entire (shorter) night to
-    // 0..10000 preserves the original thresholds without letting vanilla own time.
     public int LegacyDayNightCounter => _nightHalf
         ? Mathf.RoundToInt(HalfProgress * 10000f)
         : 0;
