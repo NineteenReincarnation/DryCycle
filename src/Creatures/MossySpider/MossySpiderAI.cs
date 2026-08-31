@@ -25,6 +25,12 @@ internal sealed class MossySpiderAI : ArtificialIntelligence
 
     internal Behavior CurrentBehavior { get; private set; }
 
+    public override void NewRoom(Room room)
+    {
+        base.NewRoom(room);
+        SyncMigrationDestination(force: true);
+    }
+
     public override void Update()
     {
         base.Update();
@@ -38,14 +44,47 @@ internal sealed class MossySpiderAI : ArtificialIntelligence
         if (creature.abstractAI is MossySpiderAbstractAI abstractAI)
         {
             abstractAI.AbstractBehavior(1);
+
+            // The abstract destination is the ecological migration target, while the
+            // realized PathFinder owns the actual in-room heat map. PathFinder can reset
+            // its destination when a room is realized/newly entered, so keep the two
+            // explicitly synchronized instead of assuming one SetDestination call will
+            // survive every room transition.
+            SyncMigrationDestination(force: false);
+
+            // A creature spawned by DevConsole can begin on a local tile with no useful
+            // abstract node. If that leaves the pather targeting its own position, ask
+            // the abstract layer for a new side-access target immediately rather than
+            // spending the whole session in Waiting.
+            if (Pather.GetDestination.CompareDisregardingTile(creature.pos))
+            {
+                abstractAI.ForceRetarget();
+                abstractAI.AbstractBehavior(1);
+                SyncMigrationDestination(force: true);
+            }
         }
 
-        WorldCoordinate destination = pathFinder.GetDestination;
+        WorldCoordinate destination = Pather.GetDestination;
         CurrentBehavior = destination.room != creature.pos.room ||
                           destination.TileDefined ||
                           destination.NodeDefined
             ? Behavior.Roaming
             : Behavior.Waiting;
+    }
+
+    private void SyncMigrationDestination(bool force)
+    {
+        if (creature.abstractAI is not MossySpiderAbstractAI abstractAI ||
+            !abstractAI.RoamTarget.HasValue)
+        {
+            return;
+        }
+
+        WorldCoordinate target = abstractAI.RoamTarget.Value;
+        if (force || !Pather.GetDestination.CompareDisregardingTile(target))
+        {
+            SetDestination(target);
+        }
     }
 
     public override PathCost TravelPreference(MovementConnection connection, PathCost cost)
