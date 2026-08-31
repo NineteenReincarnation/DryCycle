@@ -5,11 +5,10 @@ namespace DryCycle.Creatures.MossySpider;
 /// <summary>
 /// Physical support state for one MossySpider leg.
 ///
-/// The leg is anchored to a real torso BodyChunk, but the leg segments themselves are
-/// intentionally not BodyChunks. A ten-leg creature built from multi-chunk leg chains
-/// would be extremely unstable and expensive. Instead, each leg owns a terrain foot
-/// contact and applies spring support back into its base torso chunk, similar in spirit
-/// to Rain World's large procedural-legged creatures.
+/// Legs are anchored to real torso BodyChunks, while the leg segments themselves stay
+/// procedural. Grounded legs act as spring supports; in deep water the same procedural
+/// foot target transitions into a paddling stroke instead of searching endlessly for
+/// unreachable terrain.
 /// </summary>
 internal sealed class MossySpiderLeg
 {
@@ -78,6 +77,32 @@ internal sealed class MossySpiderLeg
         }
 
         Vector2 hip = PhysicalHip(spider);
+
+        // Once the body is clearly in deep-water mode, stop treating the leg as a
+        // bottom-seeking strut. The alternating phase produces the visual/physical
+        // paddling posture while torso propulsion remains owned by MossySpider.cs.
+        if (spider.SwimFactor > 0.58f)
+        {
+            float phase = spider.IdleMotion * 1.55f +
+                          Index * 1.37f +
+                          (Index % 2 == 0 ? 0f : Mathf.PI * 0.72f);
+
+            float stroke = Mathf.Sin(phase);
+            float recovery = Mathf.Cos(phase);
+            Vector2 forward = spider.MoveDirection.sqrMagnitude > 0.01f
+                ? spider.MoveDirection.normalized
+                : bodyAxis;
+
+            DesiredFootPos = hip +
+                             forward * (-stroke * 30f + ReachOffset * 0.28f) +
+                             Vector2.down * (RestLength * 0.48f + recovery * 12f);
+
+            FootPos = Vector2.Lerp(FootPos, DesiredFootPos, 0.20f);
+            Planted = false;
+            Support = Mathf.MoveTowards(Support, 0f, 0.22f);
+            return;
+        }
+
         Vector2 searchStart = hip + Vector2.up * 5f + bodyAxis * (ReachOffset * 0.12f);
         DesiredFootPos = hip + bodyAxis * ReachOffset + Vector2.down * MaxLength;
 
@@ -99,8 +124,6 @@ internal sealed class MossySpiderLeg
             }
             else
             {
-                // Ground is normally static, so this mostly removes one-pixel raycast
-                // jitter while still following moving/edited terrain reasonably fast.
                 FootPos = Vector2.Lerp(FootPos, hit, 0.35f);
             }
 
@@ -115,9 +138,9 @@ internal sealed class MossySpiderLeg
         }
     }
 
-    internal void ApplySupport(MossySpider spider)
+    internal void ApplySupport(MossySpider spider, float supportFactor = 1f)
     {
-        if (Support <= 0.001f || !Planted)
+        if (Support <= 0.001f || !Planted || supportFactor <= 0.001f)
         {
             return;
         }
@@ -125,23 +148,18 @@ internal sealed class MossySpiderLeg
         BodyChunk chunk = BaseChunk(spider);
         Vector2 hip = PhysicalHip(spider);
 
-        // A pair of legs is attached to each of five torso stations. At neutral
-        // extension each leg contributes roughly half of the creature's local gravity;
-        // compression adds extra lift and vertical velocity supplies damping.
         float height = Mathf.Max(0f, hip.y - FootPos.y);
         float compression = RestLength - height;
         float verticalForce = 0.46f + compression * 0.045f - chunk.vel.y * 0.15f;
-        verticalForce = Mathf.Clamp(verticalForce, -0.22f, 1.18f) * Support;
+        verticalForce = Mathf.Clamp(verticalForce, -0.22f, 1.18f) * Support * supportFactor;
         chunk.vel.y += verticalForce;
 
-        // Keep a planted leg from behaving like a frictionless telescoping strut.
-        // This is deliberately weak; actual walking propulsion belongs to locomotion.
         float horizontalError = FootPos.x - (hip.x + ReachOffset * 0.45f);
         float horizontalForce = Mathf.Clamp(
             horizontalError * 0.006f - chunk.vel.x * 0.035f,
             -0.22f,
             0.22f);
-        chunk.vel.x += horizontalForce * Support;
+        chunk.vel.x += horizontalForce * Support * supportFactor;
     }
 
     internal Vector2 DrawFoot(float timeStacker) =>
