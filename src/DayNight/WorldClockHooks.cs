@@ -82,6 +82,18 @@ internal static class WorldClockHooks
                _clocks.TryGetValue(world.game, out clock);
     }
 
+    internal static bool TryEnsureClock(RainCycle rainCycle, out WorldClock clock)
+    {
+        clock = null;
+        if (!ShouldRun(rainCycle))
+        {
+            return false;
+        }
+
+        clock = GetOrCreate(rainCycle);
+        return clock != null;
+    }
+
     private static bool ShouldRun(RainCycle rainCycle)
     {
         return rainCycle?.world?.game != null &&
@@ -103,12 +115,54 @@ internal static class WorldClockHooks
     {
         RainWorldGame game = rainCycle.world.game;
         int dayCycleLength = DayCycleLengthFor(rainCycle);
-        WorldClock clock = _clocks.GetValue(
-            game,
-            _ => new WorldClock(dayCycleLength));
+
+        if (!_clocks.TryGetValue(game, out WorldClock clock))
+        {
+            clock = new WorldClock(dayCycleLength);
+
+            // A clock can first come into existence after the player has already spent
+            // time in a region whose DryCycle switch is off. Import that vanilla phase
+            // progress instead of silently restarting at Base/0 when DryCycle becomes
+            // active for the first time.
+            long initialElapsed = InitialElapsedTicks(rainCycle, dayCycleLength);
+            if (initialElapsed > 0)
+            {
+                clock.AlignToDayElapsedTicks(initialElapsed);
+            }
+
+            _clocks.Add(game, clock);
+        }
 
         clock.SetCycleLength(dayCycleLength);
         return clock;
+    }
+
+    private static long InitialElapsedTicks(RainCycle target, int targetLength)
+    {
+        if (target?.world?.game == null)
+        {
+            return 0;
+        }
+
+        RainCycle source = target.world.game.world?.rainCycle;
+        if (source != null &&
+            !ReferenceEquals(source, target) &&
+            source.world != null &&
+            !RegionDayNightOptions.IsEnabled(source.world))
+        {
+            float sourceProgress = Mathf.Clamp01(
+                source.timer / (float)Math.Max(1, source.cycleLength));
+            return (long)Math.Round(sourceProgress * Math.Max(1, targetLength));
+        }
+
+        if (target.timer <= 0)
+        {
+            return 0;
+        }
+
+        float progress = Mathf.Clamp01(
+            target.timer / (float)Math.Max(1, target.cycleLength));
+        return (long)Math.Round(progress * Math.Max(1, targetLength));
     }
 
     private static void RainCycle_ctor(
@@ -164,7 +218,7 @@ internal static class WorldClockHooks
         self.dayNightCounter = clock.LegacyDayNightCounter;
     }
 
-    private static bool HasLiveGameplay(RainWorldGame game)
+    internal static bool HasLiveGameplay(RainWorldGame game)
     {
         if (game == null || game.Players == null || game.Players.Count == 0)
         {
