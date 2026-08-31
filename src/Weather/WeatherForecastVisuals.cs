@@ -103,13 +103,16 @@ internal static class WeatherForecastVisualCatalog
                 dripCyclesPerSecond: 0.78f,
                 dripTravelPixels: 7.4f),
 
+            // BulletRain is deliberately the same visual object as HeavyRain. The
+            // only semantic change requested is faster dripping, so count, shape,
+            // travel and color stay identical and only the playback rate changes.
             WeatherForecastVisualKind.BulletRain => new WeatherForecastVisualStyle(
                 HeavyRainColor,
                 RainDropColor,
                 WeatherForecastAnimation.FastDrip,
-                dripCount: 3,
+                dripCount: 2,
                 dripCyclesPerSecond: 1.72f,
-                dripTravelPixels: 9.0f),
+                dripTravelPixels: 7.4f),
 
             WeatherForecastVisualKind.DeathRain => new WeatherForecastVisualStyle(
                 HeavyRainColor,
