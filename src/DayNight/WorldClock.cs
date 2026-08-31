@@ -144,9 +144,6 @@ internal sealed class WorldClock
         {
             float p = DayProgress;
 
-            // A new DryCycle daytime begins as Day, not Dawn. Pre-dawn belongs to
-            // the tail of the previous night and PaletteLighting reaches Base before
-            // the 1.0 -> 0.0 wrap.
             if (p < 0.42f)
             {
                 return WorldClockPhase.Day;
@@ -194,6 +191,22 @@ internal sealed class WorldClock
         if (_ticksInHalf >= CurrentHalfLength)
         {
             _ticksInHalf = CurrentHalfLength - 1;
+        }
+    }
+
+    /// <summary>
+    /// A successful shelter sleep always starts a brand-new DryCycle round at the
+    /// first tick of daytime, regardless of whether the previous round ended during
+    /// day, dusk, night or pre-dawn. AbsoluteTicks remains monotonic bookkeeping;
+    /// phase-local time and the scheduling day index are the values that restart.
+    /// </summary>
+    public void ResetToDayStart(bool advanceDayIndex = true)
+    {
+        _ticksInHalf = 0;
+        _nightHalf = false;
+        if (advanceDayIndex)
+        {
+            _dayIndex++;
         }
     }
 
