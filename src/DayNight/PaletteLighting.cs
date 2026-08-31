@@ -50,8 +50,8 @@ internal static class PaletteLighting
         CameraState state = _cameraStates.GetOrCreateValue(camera);
         state.ForceRefresh = true;
 
-        if (camera.room?.game != null
-            && WorldClockHooks.TryGetClock(camera.room.game, out WorldClock clock))
+        if (camera.room?.world != null
+            && WorldClockHooks.TryGetClock(camera.room.world, out WorldClock clock))
         {
             ApplyAuthoredPaletteBlend(camera, clock, force: true);
         }
@@ -61,17 +61,19 @@ internal static class PaletteLighting
         On.RoomCamera.orig_UpdateDayNightPalette orig,
         RoomCamera self)
     {
-        if (self?.room?.game == null
-            || !WorldClockHooks.TryGetClock(self.room.game, out WorldClock clock))
+        if (self?.room?.world == null
+            || !WorldClockHooks.TryGetClock(self.room.world, out WorldClock clock))
         {
+            // Region-level opt-out: do not suppress or replace Rain World's own
+            // DayNight palette logic. This also covers DLC/mod-specific behavior.
             orig(self);
             return;
         }
 
-        // DryCycle day/night is a global world feature. It does not require the
-        // vanilla DayNight RoomEffect. Once WorldClock is active, DryCycle owns the
-        // room's time-of-day palette selection in every room and suppresses vanilla's
-        // hard-coded dusk/night palette timing so the two systems cannot fight.
+        // DryCycle day/night is a region-gated world feature. It does not require the
+        // vanilla DayNight RoomEffect. While enabled for this region, DryCycle owns
+        // the room's time-of-day palette selection and suppresses vanilla's hard-coded
+        // dusk/night palette timing so the two systems cannot fight.
         self.dayNightNeedsRefresh = false;
 
         CameraState state = _cameraStates.GetOrCreateValue(self);
