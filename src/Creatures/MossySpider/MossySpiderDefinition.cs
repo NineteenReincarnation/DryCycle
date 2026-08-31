@@ -65,6 +65,11 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
         template.waterPathingResistance = 1f;
         template.canFly = false;
 
+        // AImap normally lets swimmers enter any non-solid water tile even if that
+        // tile's Accessibility is otherwise illegal. Preserve the agreed exception:
+        // Wall and Climb remain unavailable even when they are submerged.
+        template.isTooCloseToTerrain = MossySpiderTileAccessibilityOverride;
+
         template.meatPoints = 12;
         template.countsAsAKill = 1;
         template.shortcutColor = MossColor;
@@ -73,6 +78,21 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
         template.deliciousness = 0.1f;
 
         return template;
+    }
+
+    private static int MossySpiderTileAccessibilityOverride(
+        AImap aiMap,
+        RWCustom.IntVector2 position)
+    {
+        AItile.Accessibility accessibility = aiMap.getAItile(position).acc;
+        if (accessibility == AItile.Accessibility.Climb ||
+            accessibility == AItile.Accessibility.Wall)
+        {
+            // AImap.IsTooCloseToTerrain interprets 1 as an explicit inaccessible tile.
+            return 1;
+        }
+
+        return 0;
     }
 
     internal override Creature CreateRealizedCreature(AbstractCreature abstractCreature)
