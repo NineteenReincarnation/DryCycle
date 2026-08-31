@@ -11,6 +11,7 @@ using DryCycle.Misc;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
+using DryCycle.Weather;
 
 #pragma warning disable CS0618
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
@@ -24,7 +25,7 @@ internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.80";
+    public const string Version = "0.1.81";
 
     internal new static ManualLogSource Logger;
     private static bool _initialized;
@@ -52,6 +53,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             MiscRuntime.Disable();
+            SandstormWeatherRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
@@ -149,6 +151,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
             DayNightRuntime.Enable();
+            SandstormWeatherRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
@@ -156,6 +159,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             MiscRuntime.Disable();
+            SandstormWeatherRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
