@@ -47,10 +47,11 @@ internal static class WorldClockRegionContinuityRuntime
         On.RainCycle.orig_Update orig,
         RainCycle self)
     {
+        WorldClock clock = null;
         bool shadowOnly = self?.world?.game != null &&
                           self.world.game.IsStorySession &&
                           !RegionDayNightOptions.IsEnabled(self.world) &&
-                          WorldClockHooks.TryGetClock(self.world.game, out WorldClock clock);
+                          WorldClockHooks.TryGetClock(self.world.game, out clock);
 
         int beforeTimer = shadowOnly ? self.timer : 0;
         orig(self);
@@ -84,6 +85,15 @@ internal static class WorldClockRegionContinuityRuntime
         if (destination?.game == null || !destination.game.IsStorySession)
         {
             return;
+        }
+
+        // Vanilla has now finished copying the source RainCycle fields into the
+        // destination World. Re-apply that final cycle length to the existing global
+        // clock before scheduling, while SetCycleLength preserves the elapsed phase.
+        if (destination.rainCycle != null &&
+            WorldClockHooks.TryGetClock(destination.game, out WorldClock clock))
+        {
+            clock.SetCycleLength(Math.Max(1, destination.rainCycle.cycleLength));
         }
 
         // Do not carry the previous region's weather table through a gate. The global
