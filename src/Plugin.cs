@@ -34,7 +34,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string RainWorldModId = "NR.B5";
 
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.88";
+    public const string Version = "0.1.89";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -74,6 +74,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             MiscRuntime.Disable();
+            RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             DayNightRuntime.Disable();
@@ -183,6 +184,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DayNightRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             WeatherForecastHudRuntime.Enable();
+            RainMeterRoundPipRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
@@ -190,6 +192,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             MiscRuntime.Disable();
+            RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             DayNightRuntime.Disable();
