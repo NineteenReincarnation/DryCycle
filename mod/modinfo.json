@@ -5,8 +5,8 @@
   "authors": "NineteenReincarnation",
   "description": "Adds hydration as an additional Rain World survival resource.",
   "target_game_version": "v1.11.8",
-  "requirements": ["fisobs"],
-  "requirements_names": ["Fisobs"],
+  "requirements": [],
+  "requirements_names": [],
   "tags": [],
   "checksum_override_version": false
 }
