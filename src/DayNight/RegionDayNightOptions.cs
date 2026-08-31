@@ -28,11 +28,15 @@ internal sealed class RegionDayNightOptions : OptionInterface
         _instance ??= new RegionDayNightOptions();
         _instance.BindKnownRegions();
 
-        if (!MachineConnector.SetRegisteredOI(Plugin.ModId, _instance))
+        // MachineConnector keys option interfaces by Rain World's modinfo.json ID,
+        // not by the BepInEx plugin GUID. DryCycle is shipped inside Ancient Site,
+        // whose actual Rain World mod ID is NR.B5.
+        if (!MachineConnector.SetRegisteredOI(Plugin.RainWorldModId, _instance))
         {
             Plugin.Logger?.LogWarning(
-                "DryCycle could not register its Remix option interface; " +
-                "region day/night settings will use their default enabled state.");
+                $"DryCycle could not register its Remix option interface for " +
+                $"Rain World mod '{Plugin.RainWorldModId}'; region day/night settings " +
+                "will use their default enabled state.");
         }
     }
 
