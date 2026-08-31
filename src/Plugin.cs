@@ -14,6 +14,8 @@ using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
 using DryCycle.Weather;
+using DryCycle.Weather.Climate;
+using DryCycle.Weather.Scheduling;
 
 #pragma warning disable CS0618
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
@@ -34,7 +36,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string RainWorldModId = "NR.B5";
 
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.89";
+    public const string Version = "0.1.90";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -76,7 +78,10 @@ internal sealed class Plugin : BaseUnityPlugin
             MiscRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            WeatherScheduleRuntime.Disable();
+            WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
@@ -181,8 +186,18 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
+
+            // The old accelerated 2.5-minute schedule remains in source for future
+            // diagnostics, but production weather no longer uses it. Day length now
+            // follows the authored RainCycle.cycleLength and RegionClimate drives all
+            // scheduled weather/danger events.
+            WorldClockHooks.TestScheduleEnabled = false;
+            RegionClimateRegistry.Reload();
             DayNightRuntime.Enable();
+            WorldClockRegionContinuityRuntime.Enable();
+            WeatherScheduleRuntime.Enable();
             SandstormWeatherRuntime.Enable();
+            RainWeatherRuntime.Enable();
             WeatherForecastHudRuntime.Enable();
             RainMeterRoundPipRuntime.Enable();
             MiscRuntime.Enable();
@@ -194,7 +209,10 @@ internal sealed class Plugin : BaseUnityPlugin
             MiscRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            WeatherScheduleRuntime.Disable();
+            WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
             HydrationWeakness.Disable();
