@@ -257,6 +257,8 @@ internal static class RainMeterRoundPipRuntime
     {
         internal readonly global::HUD.RainMeter Meter;
         internal readonly FContainer Container;
+        internal readonly int OriginalCircleCount;
+        internal readonly int OriginalTimePerCircle;
         internal ForecastPipVisual[] Pips;
         internal int AnimationTicks;
 
@@ -267,6 +269,8 @@ internal static class RainMeterRoundPipRuntime
         {
             Meter = meter;
             Container = container;
+            OriginalCircleCount = meter?.circles?.Length ?? 0;
+            OriginalTimePerCircle = meter?.timePerCircle ?? WeatherPhaseScheduler.PipTicks;
             Pips = pips;
         }
     }
@@ -303,6 +307,7 @@ internal static class RainMeterRoundPipRuntime
 
         for (int i = LiveStates.Count - 1; i >= 0; i--)
         {
+            RestoreVanillaState(LiveStates[i]);
             RemoveState(LiveStates[i]);
         }
 
@@ -335,16 +340,33 @@ internal static class RainMeterRoundPipRuntime
         On.HUD.RainMeter.orig_Update orig,
         global::HUD.RainMeter self)
     {
+        MeterState state = null;
+        if (self != null)
+        {
+            _states.TryGetValue(self, out state);
+        }
+
+        World world = null;
+        WorldClock clock = null;
+        bool dryCycle = state != null &&
+                        TryGetContext(self, out world, out clock);
+        if (!dryCycle)
+        {
+            // Region-level disable must truly return to vanilla. Undo capacity,
+            // visibility and time-per-circle changes before the vanilla update runs.
+            RestoreVanillaState(state);
+        }
+
         orig(self);
 
-        if (self == null || !_states.TryGetValue(self, out MeterState state))
+        if (state == null)
         {
             return;
         }
 
         state.AnimationTicks++;
 
-        if (!TryGetContext(self, out World world, out WorldClock clock))
+        if (!dryCycle)
         {
             HideForecasts(state);
             return;
@@ -359,42 +381,41 @@ internal static class RainMeterRoundPipRuntime
         global::HUD.RainMeter self,
         float timeStacker)
     {
-        World world = null;
-        WorldClock clock = null;
-        WeatherPhaseSchedule schedule = null;
-
-        if (self != null &&
-            _states.TryGetValue(self, out MeterState existingState) &&
-            TryGetContext(self, out world, out clock))
-        {
-            EnsureCapacity(existingState, FullDayPipCount(clock));
-            WeatherScheduleRuntime.Synchronize(world);
-            if (WeatherScheduleRuntime.TryGetCurrentSchedule(
-                    world,
-                    out WeatherPhaseSchedule current) &&
-                current != null &&
-                current.Phase == CurrentPhase(clock))
-            {
-                schedule = current;
-            }
-        }
-
-        orig(self, timeStacker);
-
         MeterState state = null;
         if (self != null)
         {
             _states.TryGetValue(self, out state);
         }
 
-        if (state == null ||
-            world == null ||
-            clock == null ||
-            !RegionDayNightOptions.IsEnabled(world))
+        World world = null;
+        WorldClock clock = null;
+        WeatherPhaseSchedule schedule = null;
+        bool dryCycle = state != null &&
+                        TryGetContext(self, out world, out clock);
+
+        if (!dryCycle)
         {
+            // Also restore before Draw: a region gate can swap World between the last
+            // Update and this frame, and vanilla must not render DryCycle-expanded or
+            // hidden circles even for one frame.
+            RestoreVanillaState(state);
+            orig(self, timeStacker);
             HideForecasts(state);
             return;
         }
+
+        EnsureCapacity(state, FullDayPipCount(clock));
+        WeatherScheduleRuntime.Synchronize(world);
+        if (WeatherScheduleRuntime.TryGetCurrentSchedule(
+                world,
+                out WeatherPhaseSchedule current) &&
+            current != null &&
+            current.Phase == CurrentPhase(clock))
+        {
+            schedule = current;
+        }
+
+        orig(self, timeStacker);
 
         // WorldClockHooks also customizes the same HUD circles during Update. Reapply
         // the authoritative 1200-tick phase layout here before the final circle Draw,
@@ -739,6 +760,59 @@ internal static class RainMeterRoundPipRuntime
         }
 
         return false;
+    }
+
+    private static void RestoreVanillaState(MeterState state)
+    {
+        global::HUD.RainMeter meter = state?.Meter;
+        if (meter?.circles == null)
+        {
+            return;
+        }
+
+        int originalCount = Math.Max(0, state.OriginalCircleCount);
+        if (meter.circles.Length > originalCount)
+        {
+            // Remove only circles introduced by DryCycle. The original objects remain
+            // untouched so vanilla/MSC/mod HUD behavior can continue normally.
+            for (int i = originalCount; i < meter.circles.Length; i++)
+            {
+                if (state.Pips != null && i < state.Pips.Length)
+                {
+                    state.Pips[i]?.Remove();
+                }
+
+                meter.circles[i]?.ClearSprite();
+            }
+
+            global::HUD.HUDCircle[] restoredCircles =
+                new global::HUD.HUDCircle[originalCount];
+            Array.Copy(meter.circles, restoredCircles, originalCount);
+            meter.circles = restoredCircles;
+
+            ForecastPipVisual[] restoredPips = new ForecastPipVisual[originalCount];
+            if (state.Pips != null)
+            {
+                Array.Copy(
+                    state.Pips,
+                    restoredPips,
+                    Math.Min(originalCount, state.Pips.Length));
+            }
+            state.Pips = restoredPips;
+        }
+
+        meter.timePerCircle = state.OriginalTimePerCircle;
+        for (int i = 0; i < meter.circles.Length; i++)
+        {
+            global::HUD.HUDCircle circle = meter.circles[i];
+            if (circle == null)
+            {
+                continue;
+            }
+
+            circle.visible = true;
+            circle.forceColor = null;
+        }
     }
 
     private static void HideForecasts(MeterState state)
