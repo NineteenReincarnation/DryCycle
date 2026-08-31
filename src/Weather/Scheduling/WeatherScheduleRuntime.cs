@@ -285,6 +285,11 @@ internal static class WeatherScheduleRuntime
 
     private static float EventEnvelope(ScheduledWeatherEvent scheduled, long phaseTicks)
     {
+        if (WeatherPhaseScheduler.HasDeathRainTransition(scheduled?.Candidate))
+        {
+            return DeathRainEnvelope(scheduled, phaseTicks);
+        }
+
         long start = (long)scheduled.StartPip * WeatherPhaseScheduler.PipTicks;
         long end = (long)scheduled.EndPipExclusive * WeatherPhaseScheduler.PipTicks;
         if (phaseTicks < start || phaseTicks >= end)
@@ -302,7 +307,58 @@ internal static class WeatherScheduleRuntime
 
         float fadeIn = Math.Min(1f, (float)local / fadeTicks);
         float fadeOut = Math.Min(1f, (float)(duration - local) / fadeTicks);
-        float t = Math.Max(0f, Math.Min(fadeIn, fadeOut));
+        return Smooth01(Math.Max(0f, Math.Min(fadeIn, fadeOut)));
+    }
+
+    private static float DeathRainEnvelope(
+        ScheduledWeatherEvent scheduled,
+        long phaseTicks)
+    {
+        if (scheduled == null)
+        {
+            return 0f;
+        }
+
+        long mainStart = (long)scheduled.StartPip * WeatherPhaseScheduler.PipTicks;
+        long mainEnd = (long)scheduled.EndPipExclusive * WeatherPhaseScheduler.PipTicks;
+        long transition = WeatherPhaseScheduler.DeathRainTransitionTicks;
+        long effectStart = mainStart - transition;
+        long effectEnd = mainEnd + transition;
+
+        if (phaseTicks < effectStart || phaseTicks >= effectEnd)
+        {
+            return 0f;
+        }
+
+        // The 15-second lead-in exists outside the authored DeathRain cells. It rises
+        // smoothly from zero and reaches exactly 1.0 at the first DeathRain pip, so
+        // none of the scheduled 2..4 danger pips are consumed by ramp-up time.
+        if (phaseTicks < mainStart)
+        {
+            float t = transition <= 0
+                ? 1f
+                : (phaseTicks - effectStart) / (float)transition;
+            return Smooth01(t);
+        }
+
+        // Every authored DeathRain cell represents full schedule intensity. Native
+        // DeathRain still controls its own nonlinear internal stages underneath this
+        // multiplier; the scheduler no longer fades those cells down at their edges.
+        if (phaseTicks < mainEnd)
+        {
+            return 1f;
+        }
+
+        // Symmetric extra 15-second tail after the last authored cell.
+        float tail = transition <= 0
+            ? 0f
+            : (effectEnd - phaseTicks) / (float)transition;
+        return Smooth01(tail);
+    }
+
+    private static float Smooth01(float value)
+    {
+        float t = Math.Max(0f, Math.Min(1f, value));
         return t * t * (3f - 2f * t);
     }
 
@@ -393,7 +449,13 @@ internal static class WeatherScheduleRuntime
 
         for (int i = 0; i < schedule.Events.Count; i++)
         {
-            Plugin.Logger?.LogInfo($"  {schedule.Events[i]}");
+            ScheduledWeatherEvent scheduled = schedule.Events[i];
+            Plugin.Logger?.LogInfo($"  {scheduled}");
+            if (WeatherPhaseScheduler.HasDeathRainTransition(scheduled?.Candidate))
+            {
+                Plugin.Logger?.LogInfo(
+                    "    DeathRain transition: -15s lead-in, full intensity on authored pips, +15s tail.");
+            }
         }
     }
 }
