@@ -78,7 +78,7 @@ internal static class SandstormWeatherRuntime
 
     internal static WeatherSample Evaluate(WorldClock clock)
     {
-        if (clock == null || clock.IsNight)
+        if (!WorldClockHooks.TestScheduleEnabled || clock == null || clock.IsNight)
         {
             return default;
         }
@@ -97,6 +97,12 @@ internal static class SandstormWeatherRuntime
 
     internal static bool TryGetForecastColor(int chronologicalPip, out Color color)
     {
+        if (!WorldClockHooks.TestScheduleEnabled)
+        {
+            color = Color.white;
+            return false;
+        }
+
         if (chronologicalPip == NormalWeatherPip)
         {
             color = NormalForecastColor;
@@ -127,7 +133,8 @@ internal static class SandstormWeatherRuntime
     {
         orig(self);
 
-        if (!ModManager.Watcher ||
+        if (!WorldClockHooks.TestScheduleEnabled ||
+            !ModManager.Watcher ||
             self?.game == null ||
             !self.game.IsStorySession)
         {
@@ -135,8 +142,8 @@ internal static class SandstormWeatherRuntime
         }
 
         // Watcher normally only creates this object for SurfaceSandstorm rooms or
-        // DangerType.Sandstorm. DryCycle weather is global, so keep one dormant
-        // Sandstorm object in every realized story room and drive it from WorldClock.
+        // DangerType.Sandstorm. The temporary test schedule is global, so keep one
+        // dormant Sandstorm object in every realized story room only while testing.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
@@ -164,7 +171,8 @@ internal static class SandstormWeatherRuntime
         Sandstorm self,
         bool eu)
     {
-        if (!TryGetClock(self, out WorldClock clock))
+        if (!WorldClockHooks.TestScheduleEnabled ||
+            !TryGetClock(self, out WorldClock clock))
         {
             orig(self, eu);
             return;
@@ -237,6 +245,8 @@ internal static class SandstormWeatherRuntime
         // 1 as GlobalIntensity rises, which eventually makes walls stop protecting the
         // player. DryCycle keeps the local exposure mask authoritative at every storm
         // strength: wind and lethality must reach a body through open terrain.
+        // This protection is a real DryCycle behavior, not a temporary test feature,
+        // so it intentionally remains active when TestScheduleEnabled is false.
         if (self.room?.physicalObjects == null)
         {
             return;
