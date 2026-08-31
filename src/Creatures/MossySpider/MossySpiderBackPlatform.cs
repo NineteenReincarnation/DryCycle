@@ -158,7 +158,14 @@ internal static class MossySpiderBackPlatform
             return;
         }
 
-        bool carrierAlreadyUpdated = carrier.owner.evenUpdate == playerChunk.owner.evenUpdate;
+        // PhysicalObject calls base.Update(eu) only after its BodyChunks have updated,
+        // so playerChunk.owner.evenUpdate still contains the PREVIOUS frame here. The
+        // game's current evenUpdate is the authoritative update-order marker.
+        bool currentEu = playerChunk.owner.room?.game != null
+            ? playerChunk.owner.room.game.evenUpdate
+            : !playerChunk.owner.evenUpdate;
+        bool carrierAlreadyUpdated = carrier.owner.evenUpdate == currentEu;
+
         if (carrierAlreadyUpdated)
         {
             // The precise dorsal material point includes torso bending, not merely the
@@ -177,7 +184,7 @@ internal static class MossySpiderBackPlatform
             targetCenterY - carrier.pos.y);
 
         playerChunk.MoveWithOtherObject(
-            playerChunk.owner.evenUpdate,
+            currentEu,
             carrier,
             relativePosition);
     }
@@ -354,8 +361,9 @@ internal static class MossySpiderBackPlatform
         Vector2 tangent = after - before;
         if (tangent.sqrMagnitude < 0.0001f)
         {
-            tangent = spider.bodyChunks[spider.bodyChunks.Length - 1].pos -
-                      spider.bodyChunks[0].pos;
+            BodyChunk first = spider.bodyChunks[0];
+            BodyChunk last = spider.bodyChunks[spider.bodyChunks.Length - 1];
+            tangent = ChunkPoint(last, previousFrame) - ChunkPoint(first, previousFrame);
         }
 
         if (tangent.sqrMagnitude < 0.0001f)
