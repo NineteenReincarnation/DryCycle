@@ -3,14 +3,14 @@ using UnityEngine;
 namespace DryCycle.Creatures.MossySpider;
 
 /// <summary>
-/// Shared side-profile used by both MossySpiderGraphics and the moving dorsal platform.
-/// Keeping these values in one place prevents the visible moss and the walkable surface
-/// from drifting apart.
+/// Shared side-profile values used by MossySpiderGraphics and the dorsal platform.
+/// The torso may flex, but the actual walkable moss surface is supplied by
+/// MossySpiderDorsalPlane as one continuous straight plane.
 /// </summary>
 internal static class MossySpiderSilhouette
 {
-    internal const float WalkableStartU = 0.10f;
-    internal const float WalkableEndU = 0.94f;
+    internal const float WalkableStartU = 0.08f;
+    internal const float WalkableEndU = 0.95f;
 
     internal static float CarapaceLow(float u)
     {
@@ -28,11 +28,6 @@ internal static class MossySpiderSilhouette
         return BlendEnds(u, -25f, body, 2f, 0.18f, 0.84f);
     }
 
-    /// <summary>
-    /// Bottom edge of the green moss mass. The front remains attached to the low nose
-    /// for longer, then rises into the broad body; the rear stays almost flat before
-    /// tapering to a point.
-    /// </summary>
     internal static float MossLow(float u)
     {
         u = Mathf.Clamp01(u);
@@ -41,17 +36,26 @@ internal static class MossySpiderSilhouette
     }
 
     /// <summary>
-    /// Top edge drawn from the user's marked silhouette: a steep rounded front rise,
-    /// long nearly-flat dorsal plateau, then a smooth rear fall into a narrow point.
+    /// Thickness reference for the moss layer. The visible dorsal edge itself is drawn
+    /// by MossySpiderDorsalPlane, so the middle section is deliberately constant rather
+    /// than carrying the old sine-shaped hump.
     /// </summary>
     internal static float MossHigh(float u)
     {
         u = Mathf.Clamp01(u);
+        const float plateau = MossySpiderDorsalPlane.SurfaceHeight;
 
-        float plateauShape = Mathf.Sin(Mathf.Clamp01((u - 0.20f) / 0.58f) * Mathf.PI);
-        float plateau = 39.5f + Mathf.Max(0f, plateauShape) * 2.2f;
+        if (u < 0.20f)
+        {
+            return Mathf.Lerp(-25f, plateau, u / 0.20f);
+        }
 
-        return BlendEnds(u, -25f, plateau, 3f, 0.24f, 0.72f);
+        if (u > 0.80f)
+        {
+            return Mathf.Lerp(plateau, 3f, (u - 0.80f) / 0.20f);
+        }
+
+        return plateau;
     }
 
     internal static float MossShadowHigh(float u)
