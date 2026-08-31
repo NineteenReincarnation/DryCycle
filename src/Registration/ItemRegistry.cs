@@ -52,7 +52,7 @@ internal static class ItemRegistry
         World world,
         string serialized)
     {
-        if (!ItemSaveData.TryParse(serialized, out AbstractPhysicalObject.AbstractObjectType type, out ItemSaveData saveData) ||
+        if (!ItemSaveData.TryGetType(serialized, out AbstractPhysicalObject.AbstractObjectType type) ||
             !Definitions.TryGetValue(type, out ItemDefinition definition))
         {
             return orig(world, serialized);
@@ -60,6 +60,7 @@ internal static class ItemRegistry
 
         try
         {
+            ItemSaveData saveData = ItemSaveData.Parse(serialized);
             AbstractPhysicalObject result = definition.Parse(world, saveData);
             if (result == null)
             {
