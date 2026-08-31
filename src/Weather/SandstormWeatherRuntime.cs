@@ -1,5 +1,7 @@
 using System;
 using DryCycle.DayNight;
+using DryCycle.Weather.Climate;
+using DryCycle.Weather.Scheduling;
 using RWCustom;
 using UnityEngine;
 using Watcher;
@@ -7,13 +9,13 @@ using Watcher;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Temporary WorldClock-driven sandstorm schedule used while the weather layer is
-/// being built. The actual storm renderer, sound and wind simulation remain Watcher's
-/// native Sandstorm; DryCycle only supplies the time envelope and changes hazardous
-/// exposure so solid terrain can shelter creatures from the lethal storm.
+/// WorldClock-driven Watcher sandstorm bridge. DryCycle schedules the event while
+/// Watcher's native Sandstorm remains responsible for rendering, sound, wind and its
+/// nonlinear hazard progression. Solid terrain remains valid disaster shelter.
 /// </summary>
 internal static class SandstormWeatherRuntime
 {
+    // Retained only for the disabled legacy test schedule.
     internal const int RainMeterPipTicks = 1200;
     internal const int NormalWeatherPip = 2;
     internal const int HazardWeatherPip = 4;
@@ -76,22 +78,45 @@ internal static class SandstormWeatherRuntime
         _enabled = false;
     }
 
-    internal static WeatherSample Evaluate(WorldClock clock)
+    internal static WeatherSample Evaluate(World world, WorldClock clock)
     {
-        if (!WorldClockHooks.TestScheduleEnabled || clock == null || clock.IsNight)
+        if (clock == null)
         {
             return default;
         }
 
-        float dayTicks = clock.HalfProgress * clock.DayCycleLength;
-        float normal = EventEnvelope(
-            dayTicks,
-            NormalWeatherPip * RainMeterPipTicks,
-            HalfPipTicks);
-        float hazard = EventEnvelope(
-            dayTicks,
-            HazardWeatherPip * RainMeterPipTicks,
-            HalfPipTicks);
+        if (WorldClockHooks.TestScheduleEnabled)
+        {
+            if (clock.IsNight)
+            {
+                return default;
+            }
+
+            float dayTicks = clock.HalfProgress * clock.DayCycleLength;
+            float normalTest = EventEnvelope(
+                dayTicks,
+                NormalWeatherPip * RainMeterPipTicks,
+                HalfPipTicks);
+            float hazardTest = EventEnvelope(
+                dayTicks,
+                HazardWeatherPip * RainMeterPipTicks,
+                HalfPipTicks);
+            return new WeatherSample(normalTest, hazardTest);
+        }
+
+        float normal = WeatherScheduleRuntime.GetIntensity(
+            world,
+            clock,
+            WeatherScheduleEventKind.Weather,
+            "SandStorm",
+            "Sandstorm");
+        float hazard = WeatherScheduleRuntime.GetIntensity(
+            world,
+            clock,
+            WeatherScheduleEventKind.DangerType,
+            "SandStorm",
+            "Sandstorm",
+            "DeathSandStorm");
         return new WeatherSample(normal, hazard);
     }
 
@@ -133,19 +158,30 @@ internal static class SandstormWeatherRuntime
     {
         orig(self);
 
-        if (!WorldClockHooks.TestScheduleEnabled ||
-            !ModManager.Watcher ||
+        if (!ModManager.Watcher ||
             self?.game == null ||
-            self.world == null ||
+            self.world?.region == null ||
             !self.game.IsStorySession ||
             !RegionDayNightOptions.IsEnabled(self.world))
         {
             return;
         }
 
-        // Watcher normally only creates this object for SurfaceSandstorm rooms or
-        // DangerType.Sandstorm. The temporary test schedule is global only across
-        // regions that explicitly have DryCycle day/night enabled.
+        string regionId = self.world.region.name;
+        bool scheduledRegion =
+            RegionClimateRegistry.RegionCanUseWeather(regionId, "SandStorm") ||
+            RegionClimateRegistry.RegionCanUseWeather(regionId, "Sandstorm") ||
+            RegionClimateRegistry.RegionCanUseDanger(regionId, "SandStorm") ||
+            RegionClimateRegistry.RegionCanUseDanger(regionId, "Sandstorm") ||
+            RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathSandStorm");
+
+        if (!WorldClockHooks.TestScheduleEnabled && !scheduledRegion)
+        {
+            return;
+        }
+
+        // Keep a dormant native Sandstorm object ready in regions that can schedule
+        // the event. It has no effect between scheduled intervals.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
@@ -173,14 +209,20 @@ internal static class SandstormWeatherRuntime
         Sandstorm self,
         bool eu)
     {
-        if (!WorldClockHooks.TestScheduleEnabled ||
-            !TryGetClock(self, out WorldClock clock))
+        if (!TryGetClock(self, out WorldClock clock))
         {
             orig(self, eu);
             return;
         }
 
-        WeatherSample sample = Evaluate(clock);
+        WeatherScheduleRuntime.Synchronize(self.room.world);
+        WeatherSample sample = Evaluate(self.room.world, clock);
+        if (!sample.Active)
+        {
+            orig(self, eu);
+            return;
+        }
+
         RainCycle rainCycle = self.room.world.rainCycle;
         RoomSettings settings = self.room.roomSettings;
         if (rainCycle == null || settings == null)
@@ -192,7 +234,7 @@ internal static class SandstormWeatherRuntime
         // The hazardous storm must still have a terrain exposure mask. Watcher's
         // original DangerType path can skip mask generation because GlobalIntensity
         // is assigned after the SurfaceIntensity mask check.
-        if (sample.Active && self.surfaceMask == null)
+        if (self.surfaceMask == null)
         {
             self.GenerateSurfaceMask();
         }
@@ -203,10 +245,8 @@ internal static class SandstormWeatherRuntime
         RoomSettings previousOverrideSettings = _effectOverrideSettings;
         float previousSurfaceOverride = _surfaceEffectOverride;
 
-        // Compress Watcher's native -400..2800 danger progression into the hazard
-        // envelope. This preserves its native ScreenShake, GlobalIntensity^2.2 and
-        // late lethality relationships while allowing the same curve to play backward
-        // during the half-pip fade-out.
+        // Compress Watcher's native -400..2800 danger progression into the scheduled
+        // hazard envelope. This preserves native shake/global intensity/lethality.
         int syntheticDangerTime = Mathf.RoundToInt(Mathf.Lerp(
             Sandstorm.buildupStartTime,
             Sandstorm.lethalMaxTime,
@@ -239,8 +279,7 @@ internal static class SandstormWeatherRuntime
     {
         if (!TryGetClock(self, out _))
         {
-            // Region opt-out must restore Watcher's original behavior completely,
-            // including its native disaster-sandstorm exposure rules.
+            // Region opt-out restores Watcher's original behavior completely.
             orig(self, amount);
             return;
         }
@@ -249,9 +288,6 @@ internal static class SandstormWeatherRuntime
         // 1 as GlobalIntensity rises, which eventually makes walls stop protecting the
         // player. DryCycle keeps the local exposure mask authoritative at every storm
         // strength: wind and lethality must reach a body through open terrain.
-        // This protection is a real DryCycle behavior, not a temporary test feature,
-        // so it intentionally remains active when TestScheduleEnabled is false as
-        // long as DryCycle itself is enabled for the region.
         if (self.room?.physicalObjects == null)
         {
             return;
@@ -303,9 +339,6 @@ internal static class SandstormWeatherRuntime
                         push *= 0.75f;
                     }
 
-                    // Unlike Watcher DangerType.Sandstorm, GlobalIntensity never
-                    // bypasses this value. A wall shadow therefore remains a valid
-                    // shelter even at maximum disaster intensity.
                     push *= exposure;
 
                     if (bodyChunk.ContactPoint.y < 0 &&
@@ -369,8 +402,6 @@ internal static class SandstormWeatherRuntime
 
     private static float LethalExposure(float surfaceExposure)
     {
-        // The mask is deliberately smoothed by Watcher. Give the deep part of a wind
-        // shadow a true zero-damage shelter while retaining a gradual edge transition.
         float t = Mathf.InverseLerp(0.18f, 0.78f, surfaceExposure);
         return t * t * (3f - 2f * t);
     }
