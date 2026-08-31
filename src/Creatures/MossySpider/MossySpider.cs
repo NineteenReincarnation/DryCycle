@@ -1,3 +1,4 @@
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Creatures.MossySpider;
@@ -24,6 +25,12 @@ public sealed class MossySpider : Creature
 
     internal MossySpiderLeg[] SupportLegs { get; }
 
+    internal MossySpiderAI AI => abstractCreature?.abstractAI?.RealAI as MossySpiderAI;
+
+    internal Vector2 MoveDirection { get; private set; }
+
+    internal float SwimFactor { get; private set; }
+
     public BodyChunk MiddleChunk => bodyChunks[SegmentCount / 2];
 
     public MossySpider(AbstractCreature abstractCreature, World world) : base(abstractCreature, world)
@@ -36,9 +43,6 @@ public sealed class MossySpider : Creature
             bodyChunks[i] = new BodyChunk(this, i, Vector2.zero, SegmentRadii[i], mass);
         }
 
-        // The physical core is a braced platform rather than a free worm chain.
-        // Adjacent links carry collision forces; second- and third-neighbour chords
-        // resist local folding until the real multi-leg locomotion system is added.
         int adjacentCount = SegmentCount - 1;
         int secondNeighbourCount = SegmentCount - 2;
         int thirdNeighbourCount = SegmentCount - 3;
@@ -79,10 +83,6 @@ public sealed class MossySpider : Creature
                 -1f);
         }
 
-        // Ten actual support legs, arranged as two legs at five torso stations. Each
-        // leg is anchored to a real BodyChunk base, owns a terrain foot contact, and
-        // pushes support force back into that base chunk. The visual leg segments are
-        // not extra BodyChunks; that would make a ten-legged creature unstable.
         SupportLegs = new MossySpiderLeg[LegCount];
         for (int station = 0; station < 5; station++)
         {
@@ -136,12 +136,16 @@ public sealed class MossySpider : Creature
             chunk.vel = Vector2.zero;
         }
 
+        MoveDirection = Vector2.zero;
+        SwimFactor = 0f;
         ResetSupportLegs();
     }
 
     public override void NewRoom(Room newRoom)
     {
         base.NewRoom(newRoom);
+        MoveDirection = Vector2.zero;
+        SwimFactor = 0f;
         ResetSupportLegs();
     }
 
@@ -156,6 +160,11 @@ public sealed class MossySpider : Creature
     {
         base.Update(eu);
 
+        // MossySpider does not seek shelter from lethal rain. Resetting the rain-death
+        // accumulator each creature tick prevents death-rain lethality from building up,
+        // while the physical rain forces and stun effects remain intact.
+        rainDeath = 0f;
+
         LastIdleMotion = IdleMotion;
         IdleMotion += 0.013f;
         if (IdleMotion > 10000f)
@@ -164,33 +173,196 @@ public sealed class MossySpider : Creature
             LastIdleMotion -= 10000f;
         }
 
+        AI?.Update();
+
         if (room != null)
         {
             Vector2 bodyAxis = PhysicalBodyAxis();
 
-            // Contact search and support are creature physics, not graphics. This is
-            // the missing layer that previously made the torso simply lie on the floor
-            // while the rendered legs appeared underneath it.
             for (int i = 0; i < SupportLegs.Length; i++)
             {
                 SupportLegs[i].UpdateContact(this, bodyAxis);
             }
 
+            UpdateSwimFactor();
+
             if (Consious && !dead)
             {
-                for (int i = 0; i < SupportLegs.Length; i++)
+                // Shallow water remains ordinary leg-supported walking. Once most feet
+                // cannot reach the bottom, support fades and the dorsal float controller
+                // takes over continuously rather than through a hard state switch.
+                float groundSupportFactor = 1f - Mathf.SmoothStep(0.55f, 0.92f, SwimFactor);
+                if (groundSupportFactor > 0.001f)
                 {
-                    SupportLegs[i].ApplySupport(this);
+                    for (int i = 0; i < SupportLegs.Length; i++)
+                    {
+                        if (SupportLegs[i].Planted)
+                        {
+                            SupportLegs[i].ApplySupport(this, groundSupportFactor);
+                        }
+                    }
                 }
+
+                UpdateLocomotion();
+            }
+            else
+            {
+                MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.15f);
             }
         }
 
-        // AI/locomotion is not authored yet. Keep the test body calm and broadly
-        // horizontal. Leg support now owns the vertical standing height; this block
-        // only prevents the braced torso from turning into a vertical worm.
+        StabilizeTorso();
+        rainDeath = 0f;
+    }
+
+    internal void AccessSideSpace(WorldCoordinate start, WorldCoordinate destination)
+    {
+        if (room?.game?.shortcuts == null)
+        {
+            return;
+        }
+
+        room.game.shortcuts.CreatureTakeFlight(
+            this,
+            AbstractRoomNode.Type.SideExit,
+            start,
+            destination);
+    }
+
+    private void UpdateLocomotion()
+    {
+        if (room == null || AI?.Pather == null)
+        {
+            MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.12f);
+            return;
+        }
+
+        MovementConnection move = AI.Pather.FollowPath(
+            room.GetWorldCoordinate(MiddleChunk.pos),
+            actuallyFollowingThisPath: true);
+
+        if (room == null)
+        {
+            return;
+        }
+
+        if (move == default)
+        {
+            // A large body can momentarily put its center outside an accessible tile;
+            // try two inner torso chunks before declaring that the path is unavailable.
+            move = AI.Pather.FollowPath(
+                room.GetWorldCoordinate(bodyChunks[1].pos),
+                actuallyFollowingThisPath: true);
+
+            if (move == default)
+            {
+                move = AI.Pather.FollowPath(
+                    room.GetWorldCoordinate(bodyChunks[SegmentCount - 2].pos),
+                    actuallyFollowingThisPath: true);
+            }
+        }
+
+        if (room == null || move == default || !move.destinationCoord.TileDefined)
+        {
+            MoveDirection = Vector2.Lerp(MoveDirection, Vector2.zero, 0.10f);
+            return;
+        }
+
+        Vector2 target = room.MiddleOfTile(move.destinationCoord);
+        Vector2 desired = target - MiddleChunk.pos;
+        if (desired.sqrMagnitude > 0.001f)
+        {
+            desired.Normalize();
+        }
+
+        if (SwimFactor < 0.55f)
+        {
+            // Ground locomotion is driven mostly horizontally. Legs and terrain contact
+            // determine body height; the AI is not allowed to turn Air pathing into flight.
+            desired.y *= 0.18f;
+            if (desired.sqrMagnitude > 0.001f)
+            {
+                desired.Normalize();
+            }
+        }
+
+        MoveDirection = Vector2.Lerp(MoveDirection, desired, 0.09f);
+
+        float drive = Mathf.Lerp(0.030f, 0.047f, SwimFactor);
+        float maxHorizontalSpeed = Mathf.Lerp(1.20f, 1.55f, SwimFactor);
         for (int i = 0; i < bodyChunks.Length; i++)
         {
-            bodyChunks[i].vel.x *= 0.988f;
+            BodyChunk chunk = bodyChunks[i];
+            chunk.vel.x += MoveDirection.x * drive;
+            chunk.vel.x = Mathf.Clamp(chunk.vel.x, -maxHorizontalSpeed, maxHorizontalSpeed);
+
+            if (SwimFactor > 0.05f)
+            {
+                chunk.vel.y += MoveDirection.y * drive * 0.52f * SwimFactor;
+            }
+        }
+
+        ApplyDorsalFloat();
+    }
+
+    private void UpdateSwimFactor()
+    {
+        if (room == null || !room.water)
+        {
+            SwimFactor = Mathf.MoveTowards(SwimFactor, 0f, 0.04f);
+            return;
+        }
+
+        int planted = 0;
+        for (int i = 0; i < SupportLegs.Length; i++)
+        {
+            if (SupportLegs[i].Planted)
+            {
+                planted++;
+            }
+        }
+
+        float averageSubmersion = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            averageSubmersion += bodyChunks[i].submersion;
+        }
+        averageSubmersion /= bodyChunks.Length;
+
+        // Deep water is defined by loss of bottom support, not by a hard water-depth
+        // number. A partially submerged body with several planted feet is still walking.
+        float waterFactor = Mathf.InverseLerp(0.12f, 0.55f, averageSubmersion);
+        float supportLoss = Mathf.InverseLerp(5f, 1f, planted);
+        float target = Mathf.Clamp01(waterFactor * supportLoss);
+        SwimFactor = Mathf.MoveTowards(SwimFactor, target, 0.025f);
+    }
+
+    private void ApplyDorsalFloat()
+    {
+        if (room == null || !room.water || SwimFactor <= 0.001f)
+        {
+            return;
+        }
+
+        float surface = room.FloatWaterLevel(MiddleChunk.pos);
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            float dorsalTop = chunk.pos.y + chunk.rad * 0.55f + 22f;
+            float error = surface + 2f - dorsalTop;
+            float correction = Mathf.Clamp(
+                error * 0.012f - chunk.vel.y * 0.070f,
+                -0.34f,
+                0.52f);
+            chunk.vel.y += correction * SwimFactor;
+        }
+    }
+
+    private void StabilizeTorso()
+    {
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            bodyChunks[i].vel.x *= SwimFactor > 0.5f ? 0.996f : 0.991f;
         }
 
         for (int i = 1; i < bodyChunks.Length - 1; i++)
@@ -239,9 +411,6 @@ public sealed class MossySpider : Creature
             return Vector2.right;
         }
 
-        // Standing/foothold search is primarily horizontal. Preserve a little slope
-        // information without letting a temporarily vertical torso make the feet search
-        // sideways into walls.
         axis.y *= 0.22f;
         if (axis.sqrMagnitude < 0.001f)
         {
