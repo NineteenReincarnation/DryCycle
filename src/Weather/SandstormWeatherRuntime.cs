@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.Scheduling;
@@ -26,12 +27,17 @@ internal static class SandstormWeatherRuntime
     internal static readonly Color NormalForecastColor = new(0.90f, 0.76f, 0.42f);
     internal static readonly Color HazardForecastColor = new(0.66f, 0.44f, 0.16f);
 
+    private sealed class SyntheticSandstormMarker
+    {
+    }
+
     [ThreadStatic]
     private static RoomSettings _effectOverrideSettings;
 
     [ThreadStatic]
     private static float _surfaceEffectOverride;
 
+    private static ConditionalWeakTable<Sandstorm, SyntheticSandstormMarker> _syntheticSandstorms = new();
     private static bool _enabled;
 
     internal readonly struct WeatherSample
@@ -75,6 +81,7 @@ internal static class SandstormWeatherRuntime
         On.Watcher.Sandstorm.AffectObjects -= Sandstorm_AffectObjects;
         _effectOverrideSettings = null;
         _surfaceEffectOverride = 0f;
+        _syntheticSandstorms = new ConditionalWeakTable<Sandstorm, SyntheticSandstormMarker>();
         _enabled = false;
     }
 
@@ -181,11 +188,13 @@ internal static class SandstormWeatherRuntime
         }
 
         // Keep a dormant native Sandstorm object ready in regions that can schedule
-        // the event. It has no effect between scheduled intervals.
+        // the event. Mark only the object DryCycle actually creates; an authored
+        // SurfaceSandstorm/DangerType object must retain its original lifecycle.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
             self.AddObject(self.sandstorm);
+            _syntheticSandstorms.Add(self.sandstorm, new SyntheticSandstormMarker());
         }
     }
 
@@ -209,6 +218,18 @@ internal static class SandstormWeatherRuntime
         Sandstorm self,
         bool eu)
     {
+        bool synthetic = self != null && _syntheticSandstorms.TryGetValue(self, out _);
+        World world = self?.room?.world;
+
+        if (synthetic &&
+            (world?.game == null ||
+             !world.game.IsStorySession ||
+             !RegionDayNightOptions.IsEnabled(world)))
+        {
+            QuiesceSyntheticSandstorm(self);
+            return;
+        }
+
         if (!TryGetClock(self, out WorldClock clock))
         {
             orig(self, eu);
@@ -219,7 +240,14 @@ internal static class SandstormWeatherRuntime
         WeatherSample sample = Evaluate(self.room.world, clock);
         if (!sample.Active)
         {
-            orig(self, eu);
+            if (synthetic)
+            {
+                QuiesceSyntheticSandstorm(self);
+            }
+            else
+            {
+                orig(self, eu);
+            }
             return;
         }
 
@@ -272,14 +300,64 @@ internal static class SandstormWeatherRuntime
         }
     }
 
+    private static void QuiesceSyntheticSandstorm(Sandstorm storm)
+    {
+        if (storm == null)
+        {
+            return;
+        }
+
+        storm.SurfaceIntensity = 0f;
+        storm.GlobalIntensity = 0f;
+        storm.ScreenShake = 0f;
+        storm.lethality = 0f;
+        storm.pushIntensity = 0f;
+        storm.targetPushIntensity = 0f;
+        storm.windScroll = Vector2.zero;
+        storm.lastWindScroll = Vector2.zero;
+        storm.windVel = Sandstorm.minWindSpeed * storm.globalWindDir;
+        storm.targetWindVel = storm.windVel;
+
+        if (storm.windLoop != null)
+        {
+            storm.windLoop.Volume = 0f;
+            storm.windLoop.Update();
+        }
+        if (storm.sandLoop != null)
+        {
+            storm.sandLoop.Volume = 0f;
+            storm.sandLoop.Update();
+        }
+        if (storm.rumbleLoop != null)
+        {
+            storm.rumbleLoop.Volume = 0f;
+            storm.rumbleLoop.Update();
+        }
+        if (storm.screenShakeLoop != null)
+        {
+            storm.screenShakeLoop.Volume = 0f;
+            storm.screenShakeLoop.Update();
+        }
+    }
+
     private static void Sandstorm_AffectObjects(
         On.Watcher.Sandstorm.orig_AffectObjects orig,
         Sandstorm self,
         float amount)
     {
+        if (self != null &&
+            _syntheticSandstorms.TryGetValue(self, out _) &&
+            (self.room?.world?.game == null ||
+             !self.room.world.game.IsStorySession ||
+             !RegionDayNightOptions.IsEnabled(self.room.world)))
+        {
+            return;
+        }
+
         if (!TryGetClock(self, out _))
         {
-            // Region opt-out restores Watcher's original behavior completely.
+            // Region opt-out restores Watcher's original behavior completely for
+            // native/authored storms. Synthetic storms were already caught above.
             orig(self, amount);
             return;
         }
