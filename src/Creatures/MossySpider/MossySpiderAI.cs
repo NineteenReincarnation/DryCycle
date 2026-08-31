@@ -28,6 +28,15 @@ internal sealed class MossySpiderAI : ArtificialIntelligence
     public override void NewRoom(Room room)
     {
         base.NewRoom(room);
+
+        if (creature.abstractAI is MossySpiderAbstractAI abstractAI)
+        {
+            // When SideSpace has delivered us to the node that was the migration goal,
+            // choose the next side node before rebuilding the in-room path. Otherwise
+            // the new room can immediately path back toward the border it just entered.
+            abstractAI.OnRealizedRoomEntered(room.abstractRoom.index);
+        }
+
         SyncMigrationDestination(force: true);
     }
 
@@ -44,24 +53,7 @@ internal sealed class MossySpiderAI : ArtificialIntelligence
         if (creature.abstractAI is MossySpiderAbstractAI abstractAI)
         {
             abstractAI.AbstractBehavior(1);
-
-            // The abstract destination is the ecological migration target, while the
-            // realized PathFinder owns the actual in-room heat map. PathFinder can reset
-            // its destination when a room is realized/newly entered, so keep the two
-            // explicitly synchronized instead of assuming one SetDestination call will
-            // survive every room transition.
             SyncMigrationDestination(force: false);
-
-            // A creature spawned by DevConsole can begin on a local tile with no useful
-            // abstract node. If that leaves the pather targeting its own position, ask
-            // the abstract layer for a new side-access target immediately rather than
-            // spending the whole session in Waiting.
-            if (Pather.GetDestination.CompareDisregardingTile(creature.pos))
-            {
-                abstractAI.ForceRetarget();
-                abstractAI.AbstractBehavior(1);
-                SyncMigrationDestination(force: true);
-            }
         }
 
         WorldCoordinate destination = Pather.GetDestination;
