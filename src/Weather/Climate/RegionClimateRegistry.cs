@@ -5,7 +5,7 @@ using System.IO;
 
 namespace DryCycle.Weather.Climate;
 
-internal sealed class ClimateChanceEntry
+internal class ClimateChanceEntry
 {
     internal string Id { get; }
     internal float ChancePercent { get; }
