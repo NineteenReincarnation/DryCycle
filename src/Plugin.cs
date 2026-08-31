@@ -9,11 +9,11 @@ using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Misc;
+using DryCycle.Registration;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
 using DryCycle.Weather;
-using Fisobs.Core;
 
 #pragma warning disable CS0618
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
@@ -22,28 +22,28 @@ using Fisobs.Core;
 namespace DryCycle;
 
 [BepInPlugin(ModId, ModName, Version)]
-[BepInDependency("io.github.dual.fisobs")]
 [BepInDependency("slime-cubed.devconsole", BepInDependency.DependencyFlags.SoftDependency)]
 internal sealed class Plugin : BaseUnityPlugin
 {
     public const string ModId = "Anno";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.82";
+    public const string Version = "0.1.83";
 
     internal new static ManualLogSource Logger;
-    private static bool _creaturesRegistered;
+    private static bool _contentRegistered;
     private static bool _initialized;
 
     public void OnEnable()
     {
         Logger = base.Logger;
 
-        if (!_creaturesRegistered)
+        if (!_contentRegistered)
         {
-            Content.Register(new MossySpiderCritob());
-            _creaturesRegistered = true;
+            DryCycleContent.Register(new MossySpiderDefinition());
+            _contentRegistered = true;
         }
 
+        DryCycleContent.Enable();
         SpinebackLizardHooks.Enable();
         DewPodAudioHooks.InitializeSoundIds();
 
@@ -57,6 +57,7 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
+        DryCycleContent.Disable();
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
 
@@ -114,6 +115,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         try
         {
+            DryCycleContent.LoadResources(self);
             KingVultureSpearHooks.Enable();
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
