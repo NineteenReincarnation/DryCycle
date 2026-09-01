@@ -17,13 +17,13 @@ namespace DryCycle.Weather;
 /// </summary>
 internal static class SandstormWeatherRuntime
 {
-    // Retained only for the disabled legacy test schedule.
     internal const int RainMeterPipTicks = 1200;
     internal const int NormalWeatherPip = 2;
     internal const int HazardWeatherPip = 4;
 
     private const int HalfPipTicks = RainMeterPipTicks / 2;
     private const int SyntheticCycleLength = 10000;
+    private const float Epsilon = 0.0001f;
 
     internal static readonly Color NormalForecastColor = new(0.90f, 0.76f, 0.42f);
     internal static readonly Color HazardForecastColor = new(0.66f, 0.44f, 0.16f);
@@ -52,7 +52,7 @@ internal static class SandstormWeatherRuntime
             Hazard = Mathf.Clamp01(hazard);
         }
 
-        internal bool Active => Normal > 0.0001f || Hazard > 0.0001f;
+        internal bool Active => Normal > Epsilon || Hazard > Epsilon;
     }
 
     internal static void Enable()
@@ -188,8 +188,6 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        // Keep a dormant native Watcher renderer ready only when no authored/default
-        // Sandstorm object already exists. The marker identifies DryCycle ownership.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
@@ -232,8 +230,6 @@ internal static class SandstormWeatherRuntime
 
         if (!TryGetClock(self, out WorldClock clock))
         {
-            // Native/authored storms return completely to Watcher outside DryCycle
-            // regions. Synthetic storms were already caught and silenced above.
             orig(self, eu);
             return;
         }
@@ -248,14 +244,20 @@ internal static class SandstormWeatherRuntime
             }
             else if (IsDefaultDangerSandstorm(self))
             {
-                // DryCycle owns DangerType timing. Run Watcher's native update at its
-                // pre-buildup neutral time so an authored SurfaceSandstorm still works,
-                // but the room's default global disaster cannot start on RainCycle time.
-                RunDefaultDangerSurfaceOnly(orig, self, eu);
+                if (HasAuthoredSurfaceSandstorm(self))
+                {
+                    RunDefaultDangerSurfaceOnly(orig, self, eu);
+                }
+                else
+                {
+                    // Watcher's Update keeps windLoop.Volume at 1 even at the neutral
+                    // pre-buildup time. With no authored surface effect, bypass it
+                    // entirely so an intercepted default DangerType is truly dormant.
+                    QuiesceSandstorm(self);
+                }
             }
             else
             {
-                // Pure room-authored SurfaceSandstorm remains fully native.
                 orig(self, eu);
             }
             return;
@@ -287,8 +289,6 @@ internal static class SandstormWeatherRuntime
         RoomSettings previousOverrideSettings = _effectOverrideSettings;
         float previousSurfaceOverride = _surfaceEffectOverride;
 
-        // Compress Watcher's native -400..2800 disaster curve into DryCycle's 0..1
-        // schedule envelope while preserving Watcher's native shake and lethality curve.
         int syntheticDangerTime = Mathf.RoundToInt(Mathf.Lerp(
             Sandstorm.buildupStartTime,
             Sandstorm.lethalMaxTime,
@@ -321,6 +321,13 @@ internal static class SandstormWeatherRuntime
                storm.room.roomSettings.DangerType == WatcherEnums.WatcherDangerType.Sandstorm;
     }
 
+    private static bool HasAuthoredSurfaceSandstorm(Sandstorm storm)
+    {
+        return storm?.room?.roomSettings != null &&
+               storm.room.roomSettings.GetEffectAmount(
+                   WatcherEnums.RoomEffectType.SurfaceSandstorm) > Epsilon;
+    }
+
     private static void RunDefaultDangerSurfaceOnly(
         On.Watcher.Sandstorm.orig_Update orig,
         Sandstorm storm,
@@ -336,8 +343,6 @@ internal static class SandstormWeatherRuntime
         int previousTimer = rainCycle.timer;
         try
         {
-            // At buildupStartTime Watcher has zero GlobalIntensity/ScreenShake/lethality,
-            // while SurfaceSandstorm is still read at its authored value.
             rainCycle.timer = rainCycle.cycleLength + Sandstorm.buildupStartTime;
             orig(storm, eu);
         }
@@ -407,11 +412,9 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        // Only scheduled DangerType sandstorms use DryCycle's wall-shelter lethality
-        // mask. Scheduled/room-authored SurfaceSandstorm keeps native object physics.
         WeatherScheduleRuntime.Synchronize(self.room.world);
         WeatherSample sample = Evaluate(self.room.world, clock);
-        if (sample.Hazard <= 0.0001f)
+        if (sample.Hazard <= Epsilon)
         {
             orig(self, amount);
             return;
