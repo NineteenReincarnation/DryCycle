@@ -23,15 +23,15 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
     private const int PressureIterations = 36;
     private const int MaxPlayerImpulses = 4;
     private const int MaxBlastImpulses = 4;
-    private const float BlastClearDecayPerSecond = 0.62f;
+    private const float BlastClearDecayPerSecond = 0.14f;
 
-    // Blast tuning is intentionally centralized. Velocity is exactly five times the
-    // previous implementation. Radius is scaled by 2.30, so the physically carved area
-    // is 2.30^2 = 5.29 times larger before terrain occlusion. Compression is also five
-    // times stronger so displaced fog reads as an actual pressure front rather than a
-    // faint density ripple.
+    // Blast tuning is intentionally centralized. Radius stays at 2.30x, so the
+    // physically carved area remains about 5.29 times larger than the first
+    // implementation. Velocity is now 3x the original implementation while the
+    // compression front remains 5x, keeping the blast forceful without throwing the
+    // clear field across the room too quickly.
     private const float BlastRadiusMultiplier = 2.30f;
-    private const float BlastVelocityMultiplier = 5.00f;
+    private const float BlastVelocityMultiplier = 3.00f;
     private const float BlastCompressionMultiplier = 5.00f;
 
     private readonly Room _room;
@@ -472,9 +472,8 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
                 (scavengerBomb ? 1.18f : 1.30f) *
                 BlastRadiusMultiplier;
 
-            // Keep the bomb/spear hierarchy, but deliberately make the interaction
-            // dramatically stronger than the first implementation. The 2.30 radius
-            // scale gives 5.29x carved area, and velocity/compression are both 5x.
+            // Keep the bomb/spear hierarchy while separating the three desired scales:
+            // 5.29x carved area, 3x radial velocity and 5x compression-ring strength.
             float impulsePxPerSecond =
                 (scavengerBomb ? 620f : 360f) *
                 BlastVelocityMultiplier;
