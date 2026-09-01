@@ -9,11 +9,9 @@ namespace DryCycle.Weather;
 
 /// <summary>
 /// Separates DryCycle's scheduled HeavyRain from authored RoomEffect.HeavyRain.
-///
-/// Authored room HeavyRain remains completely native, including ThrowAroundObjects,
-/// rainDeath and Die(). DryCycle HeavyRain keeps the native-looking rain intensity,
-/// sound and screen shake, but its extra contribution is removed from the native
-/// ThrowAroundObjects pass and replaced with a nonlethal player traversal pressure.
+/// Authored HeavyRain keeps native ThrowAroundObjects/rainDeath/Die behavior.
+/// Scheduled HeavyRain contributes visuals, sound, shake and nonlethal traversal
+/// pressure, but its contribution is removed from native lethal rain physics.
 /// </summary>
 internal static class ScheduledHeavyRainTraversalRuntime
 {
@@ -21,14 +19,11 @@ internal static class ScheduledHeavyRainTraversalRuntime
     private const float FullHorizontalVelocityRetention = 0.965f;
     private const float FullAirDownwardAcceleration = 0.22f;
     private const float FullClimbVelocityRetention = 0.88f;
+    private const float FullScheduledHeavyRainIntensity = 1.2f;
 
     private sealed class GlobalState
     {
         internal float NativeIntensity;
-        internal float NativeRumbleSound;
-        internal float NativeScreenShake;
-        internal float NativeMicroScreenShake;
-        internal float NativeBulletRainDensity;
         internal float ScheduledHeavy;
     }
 
@@ -79,10 +74,9 @@ internal static class ScheduledHeavyRainTraversalRuntime
         On.GlobalRain.orig_Update orig,
         GlobalRain self)
     {
-        // RainWeatherRuntime still owns all scheduled-rain routing. For this one call,
-        // however, its HeavyRain effect override is disabled so the native GlobalRain
-        // pass establishes exactly what the room itself (and other native systems)
-        // would have produced without DryCycle's scheduled HeavyRain.
+        // Establish the native/authored HeavyRain baseline first. RainWeatherRuntime's
+        // scheduled HeavyRain RoomEffect override is suppressed only for this nested
+        // GlobalRain update; LightRain and foreign/native systems remain untouched.
         bool previousSuppression = RainWeatherRuntime.SuppressScheduledHeavyOverride;
         RainWeatherRuntime.SuppressScheduledHeavyOverride = true;
         try
@@ -101,10 +95,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
 
         GlobalState state = _globalStates.GetOrCreateValue(self);
         state.NativeIntensity = self.Intensity;
-        state.NativeRumbleSound = self.RumbleSound;
-        state.NativeScreenShake = self.ScreenShake;
-        state.NativeMicroScreenShake = self.MicroScreenShake;
-        state.NativeBulletRainDensity = self.bulletRainDensity;
         state.ScheduledHeavy = 0f;
 
         World world = self.game?.world;
@@ -127,8 +117,7 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // A native/foreign DeathRain remains authoritative. The scheduler normally
-        // prevents overlap, but this also protects compatibility with other mods.
+        // Native/foreign DeathRain remains authoritative if another system owns one.
         if (self.deathRain != null)
         {
             return;
@@ -139,16 +128,17 @@ internal static class ScheduledHeavyRainTraversalRuntime
 
         if (heavy > 0.0001f)
         {
-            float scheduledIntensity = (1f + heavy * 4f) * 0.24f;
+            // HeavyRain's native full RoomEffect intensity is 1.2. The DryCycle event
+            // envelope is an outer intensity envelope, so fade the final contribution
+            // from 0 -> 1.2 rather than feeding the envelope into (1 + H*4)*0.24,
+            // which incorrectly jumps to 0.24 as soon as H becomes nonzero.
+            float scheduledIntensity = FullScheduledHeavyRainIntensity * heavy;
             self.Intensity = Math.Max(self.Intensity, scheduledIntensity);
             self.RumbleSound = Math.Max(self.RumbleSound, heavy * 0.2f);
             self.ScreenShake = Math.Max(self.ScreenShake, heavy);
         }
         else if (reducedToLight > 0.0001f)
         {
-            // Match Watcher's passive-rain reduction behavior: at >= 0.5 the HeavyRain
-            // channel is converted into a weaker LightRain-style intensity instead of
-            // silently disappearing.
             self.Intensity = Math.Max(self.Intensity, reducedToLight * 0.24f);
         }
     }
@@ -164,9 +154,10 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // Capture the room's state before RainWeatherRuntime temporarily changes it for
-        // regional weather rendering. These authored values are used only during the
-        // native physical ThrowAroundObjects call below.
+        // Dedicated DryCycle carriers/default DangerTypes are intercepted by their
+        // outer takeover runtimes. This wrapper remains for native/foreign RoomRain
+        // objects that still execute vanilla Update while scheduled HeavyRain raises
+        // GlobalRain.Intensity.
         RoomRainState state = _roomStates.GetOrCreateValue(self);
         state.AuthoredRainIntensity = self.room?.roomSettings?.rInts;
         state.AuthoredDangerType = self.dangerType;
@@ -196,12 +187,13 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // During the physical ThrowAroundObjects call, restore only the authored/native
-        // inputs. Therefore authored HeavyRain still pushes, stuns, raises rainDeath
-        // and kills exactly as before; only DryCycle's additional HeavyRain is absent.
+        // Run the native physical pass only with the intensity that existed before
+        // DryCycle added Scheduled HeavyRain. Room-authored HeavyRain therefore keeps
+        // its native push, stun, rainDeath and lethality; the scheduled contribution
+        // never enters that lethal pass.
         float scheduledIntensity = self.globalRain.Intensity;
-        float? scheduledRoomRainIntensity = self.room?.roomSettings?.rInts;
-        RoomRain.DangerType scheduledDangerType = self.dangerType;
+        float? currentRainIntensity = self.room?.roomSettings?.rInts;
+        RoomRain.DangerType currentDangerType = self.dangerType;
 
         self.globalRain.Intensity = globalState.NativeIntensity;
         if (self.room?.roomSettings != null)
@@ -219,9 +211,9 @@ internal static class ScheduledHeavyRainTraversalRuntime
             self.globalRain.Intensity = scheduledIntensity;
             if (self.room?.roomSettings != null)
             {
-                self.room.roomSettings.rInts = scheduledRoomRainIntensity;
+                self.room.roomSettings.rInts = currentRainIntensity;
             }
-            self.dangerType = scheduledDangerType;
+            self.dangerType = currentDangerType;
         }
     }
 
@@ -282,9 +274,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return false;
         }
 
-        // Terrain exposure uses the same rainReach mask as native RoomRain. A roof or
-        // solid overhang therefore removes DryCycle's traversal penalty, while open sky
-        // receives the full pressure. This does not read RoomEffect.HeavyRain at all.
         RoomRain rain = room.roomRain;
         if (rain?.rainReach == null || rain.rainReach.Length == 0)
         {
@@ -358,10 +347,8 @@ internal static class ScheduledHeavyRainTraversalRuntime
                 continue;
             }
 
-            // HeavyRain should shorten jumps, not turn an ordinary fall into lethal
-            // impact damage. Apply full pressure while the player is still rising and
-            // only a small apex pressure close to zero vertical velocity. Once a body
-            // chunk is already descending normally, add no further downward speed.
+            // Suppress ascent and the jump apex without continuously accelerating an
+            // already-falling player into a lethal terrain impact.
             if (chunk.vel.y > 0f)
             {
                 chunk.vel.y -= down;
