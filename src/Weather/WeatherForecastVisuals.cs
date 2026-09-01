@@ -18,7 +18,9 @@ internal enum WeatherForecastVisualKind
     DeathSandStorm,
     LightRain,
     HeavyRain,
-    DeathRain
+    DeathRain,
+    Fog,
+    DenseFog
 }
 
 internal enum WeatherForecastAnimation
@@ -75,6 +77,12 @@ internal static class WeatherForecastVisualCatalog
     internal static readonly Color HeavyRainColor = new(0.08f, 0.25f, 0.57f);
     internal static readonly Color RainDropColor = new(0.62f, 0.86f, 1.00f);
 
+    // Fog family: both variants stay in the same desaturated cyan-grey hue. Density
+    // is communicated primarily through luminance so the pair reads as one weather
+    // family without colliding with Rain's saturated blues or Sandstorm's ochres.
+    internal static readonly Color FogColor = new(168f / 255f, 186f / 255f, 189f / 255f);
+    internal static readonly Color DenseFogColor = new(82f / 255f, 99f / 255f, 102f / 255f);
+
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
     {
         return kind switch
@@ -107,6 +115,16 @@ internal static class WeatherForecastVisualCatalog
                 RainDropColor,
                 WeatherForecastAnimation.VerticalShake,
                 shakeAmplitudePixels: 1.35f),
+
+            WeatherForecastVisualKind.Fog => new WeatherForecastVisualStyle(
+                FogColor,
+                FogColor,
+                WeatherForecastAnimation.Static),
+
+            WeatherForecastVisualKind.DenseFog => new WeatherForecastVisualStyle(
+                DenseFogColor,
+                DenseFogColor,
+                WeatherForecastAnimation.Static),
 
             _ => new WeatherForecastVisualStyle(
                 Color.clear,
@@ -146,6 +164,14 @@ internal static class WeatherForecastVisualCatalog
 
             case "DEATHRAIN":
                 visualKind = WeatherForecastVisualKind.DeathRain;
+                return true;
+
+            case "FOG" when eventKind == WeatherScheduleEventKind.Weather:
+                visualKind = WeatherForecastVisualKind.Fog;
+                return true;
+
+            case "DENSEFOG" when eventKind == WeatherScheduleEventKind.Weather:
+                visualKind = WeatherForecastVisualKind.DenseFog;
                 return true;
 
             case "SANDSTORM":
