@@ -55,9 +55,6 @@ Shader "DryCycle/FogComposite"
                 uniform int _DryCycleAwarenessCount;
                 uniform float4 _DryCycleAwareness[4];
 
-                static const float BlastWaveDistanceScale = 1024.0;
-                static const float BlastWaveLifetime = 0.62;
-
                 struct v2f
                 {
                     float4 pos : SV_POSITION;
@@ -109,6 +106,18 @@ Shader "DryCycle/FogComposite"
                     return saturate(encoded * 1.34);
                 }
 
+                float LevelSurfaceMask(float2 levelUV)
+                {
+                    float3 level = tex2D(
+                        _LevelTex,
+                        saturate(levelUV)).rgb;
+                    float empty =
+                        step(0.999, level.r) *
+                        step(0.999, level.g) *
+                        step(0.999, level.b);
+                    return 1.0 - empty;
+                }
+
                 float4 SampleVolume(float3 p)
                 {
                     if (_DryCycleHasNoise3D > 0.5)
@@ -155,9 +164,6 @@ Shader "DryCycle/FogComposite"
 
                 float4 BlastClearTap(float2 roomUV, float2 offsetPx)
                 {
-                    // The explosion-clear field is an atmospheric screen/room field, not
-                    // momentum. It is intentionally sampled through terrain so a blast can
-                    // clear mist drawn over a wall and continue onto the other side.
                     return SampleFogState(OffsetRoomUV(roomUV, offsetPx));
                 }
 
@@ -176,8 +182,6 @@ Shader "DryCycle/FogComposite"
                         _DryCycleFogObstacleTex,
                         midUv).r;
 
-                    // R is actual fluid mass and therefore still cannot be reconstructed
-                    // through a wall. This restriction applies only to R, never to G.
                     float blocked = max(
                         step(0.5, sampleSolid),
                         step(0.5, midSolid));
@@ -191,7 +195,8 @@ Shader "DryCycle/FogComposite"
 
                 float4 EvaluateBlastBoundary(
                     float2 roomUV,
-                    float2 worldPx)
+                    float2 worldPx,
+                    float levelSurfaceMask)
                 {
                     if (_DryCycleHasFluid <= 0.5)
                         return 0.0;
@@ -202,9 +207,14 @@ Shader "DryCycle/FogComposite"
                         saturate(roomUV)).r;
                     float solidMask = step(0.5, centerSolid);
 
-                    // G uses an obstacle-independent reconstruction. This is what makes
-                    // wall surfaces and open air share one continuous explosion clearing
-                    // shape instead of being cut apart at tile boundaries.
+                    // Collision terrain alone is not enough to identify a rendered room
+                    // surface. LevelTexture contains extra depth/decal geometry that may
+                    // occupy non-solid tiles. During blast recovery those pixels must use
+                    // the same surface-G fog semantics as the primary room art.
+                    float surfaceMask = max(
+                        solidMask,
+                        saturate(levelSurfaceMask));
+
                     float4 gxP = BlastClearTap(roomUV, float2(8.0, 0.0));
                     float4 gxM = BlastClearTap(roomUV, float2(-8.0, 0.0));
                     float4 gyP = BlastClearTap(roomUV, float2(0.0, 8.0));
@@ -215,7 +225,6 @@ Shader "DryCycle/FogComposite"
                         gyP.g - gyM.g) * 0.5;
                     float clearGradientLength = length(clearGradient);
 
-                    // R obtains its own terrain-aware normal for actual fluid entrainment.
                     float dxP = BlastAirDensityTap(
                         roomUV, float2(8.0, 0.0), center.r, centerSolid);
                     float dxM = BlastAirDensityTap(
@@ -242,15 +251,13 @@ Shader "DryCycle/FogComposite"
                     float2 preferredGradient = lerp(
                         densityGradient,
                         clearGradient,
-                        solidMask);
+                        surfaceMask);
                     float preferredLength = length(preferredGradient);
                     float2 normal = preferredLength > 0.0005
                         ? preferredGradient / preferredLength
                         : fallbackNormal;
                     float2 tangent = float2(-normal.y, normal.x);
 
-                    // Unblocked G taps at several scales create a smooth wall crossing and
-                    // also expose the diffusion-driven recovery of the wall clear field.
                     float4 gnP = BlastClearTap(roomUV, normal * 22.0);
                     float4 gnM = BlastClearTap(roomUV, normal * -22.0);
                     float4 gtP = BlastClearTap(roomUV, tangent * 16.0);
@@ -265,7 +272,6 @@ Shader "DryCycle/FogComposite"
                         (gwP.g + gwM.g) * 0.07;
                     permissionRaw = saturate(permissionRaw);
 
-                    // Actual air density is reconstructed only along unobstructed paths.
                     float dnP = BlastAirDensityTap(
                         roomUV, normal * 22.0, center.r, centerSolid);
                     float dnM = BlastAirDensityTap(
@@ -309,7 +315,7 @@ Shader "DryCycle/FogComposite"
                     float edgeContrast = lerp(
                         densityContrast,
                         clearContrast,
-                        solidMask);
+                        surfaceMask);
 
                     reconstructedDensity +=
                         ((broadNoise - 0.5) * 0.11 +
@@ -332,22 +338,14 @@ Shader "DryCycle/FogComposite"
                         bodyDeficit,
                         coreDeficit * 0.94));
 
-                    // Terrain has R=0 by definition, so using R there would incorrectly
-                    // turn every cleared wall into a permanent hard vacuum edge. Wall fog
-                    // instead follows the diffusing G field itself. The sub-linear power
-                    // preserves a clear centre while giving the perimeter a wide shoulder.
                     float surfaceCavity = pow(
                         permissionRaw,
                         0.72);
                     float cavity = lerp(
                         airCavity,
                         surfaceCavity,
-                        solidMask);
+                        surfaceMask);
 
-                    // Slow, broad modulation affects only the transition zone. On walls it
-                    // follows the G gradient, so as neighbour diffusion erodes the clear
-                    // patch the rendered fog visibly spreads inward/outward instead of
-                    // fading as a static polygon.
                     float boundaryNoise = lerp(
                         0.88,
                         1.12,
@@ -359,52 +357,16 @@ Shader "DryCycle/FogComposite"
                         transitionBand *
                         (0.42 + edgeContrast * 0.96) *
                         boundaryNoise *
-                        lerp(permission, saturate(permissionRaw * 1.35), solidMask));
+                        lerp(
+                            permission,
+                            saturate(permissionRaw * 1.35),
+                            surfaceMask));
 
                     return float4(
                         saturate(cavity),
                         mixingLayer,
                         saturate(permissionRaw),
                         saturate(reconstructedDensity));
-                }
-
-                float BlastWaveRadiusPx(float ageSeconds)
-                {
-                    float age = max(0.0, ageSeconds);
-                    return (1250.0 * age) / (1.0 + age * 0.85);
-                }
-
-                float SampleBlastWaveReveal(float2 roomUV)
-                {
-                    if (_DryCycleHasFluid <= 0.5)
-                        return 0.0;
-
-                    float4 state = SampleFogState(roomUV);
-                    float waveLife = state.a;
-                    if (waveLife <= 0.0001)
-                        return 0.0;
-
-                    float waveAge = max(
-                        0.0,
-                        BlastWaveLifetime - waveLife);
-                    float waveRadiusPx = BlastWaveRadiusPx(waveAge);
-                    float waveDistancePx =
-                        state.b * BlastWaveDistanceScale;
-
-                    float frontWidth = lerp(
-                        18.0,
-                        34.0,
-                        saturate(waveAge / 0.42));
-                    float front = 1.0 - smoothstep(
-                        waveRadiusPx - frontWidth,
-                        waveRadiusPx + frontWidth * 1.12,
-                        waveDistancePx);
-
-                    float handoff = smoothstep(
-                        0.02,
-                        0.14,
-                        waveLife);
-                    return saturate(front * handoff);
                 }
 
                 float2 FluidGradient(float2 roomUV)
@@ -794,8 +756,9 @@ Shader "DryCycle/FogComposite"
                     float2 roomUV = RoomUV(screenUV);
                     float2 worldPx =
                         roomUV * _DryCycleRoomSizePx;
-                    float pseudoDepth =
-                        DecodePseudoDepth(LevelUV(screenUV));
+                    float2 levelUV = LevelUV(screenUV);
+                    float pseudoDepth = DecodePseudoDepth(levelUV);
+                    float levelSurfaceMask = LevelSurfaceMask(levelUV);
 
                     float4 scene = tex2Dproj(
                         _GrabTexture,
@@ -814,19 +777,36 @@ Shader "DryCycle/FogComposite"
                             frac(_DryCycleFogTime * 0.0089)));
                     float jitter = tex2D(_NoiseTex2, jitterUv).r;
 
+                    // Resolve blast recovery before volume integration. Any actual
+                    // LevelTexture pixel (including second/decorative layers with no
+                    // collision tile) is treated as a rendered room surface.
+                    float4 blastBoundary = EvaluateBlastBoundary(
+                        roomUV,
+                        worldPx,
+                        levelSurfaceMask);
+                    float physicalBlastClear = blastBoundary.x;
+                    float edgeMixing = blastBoundary.y;
+
+                    // While blast permission still exists, collapse LevelTexture depth
+                    // variants onto one atmospheric surface depth. This prevents the
+                    // recovery phase from exposing palette/depth layers as separately
+                    // fogged cutouts. Once G is nearly gone, the original pseudo-depth
+                    // smoothly returns and normal room rendering is unchanged.
+                    float surfaceRecovery =
+                        levelSurfaceMask *
+                        smoothstep(0.012, 0.18, blastBoundary.z);
+                    float fogPseudoDepth = lerp(
+                        pseudoDepth,
+                        0.68,
+                        surfaceRecovery);
+
                     float2 densityData = VisualFogDensity(
                         roomUV,
                         worldPx,
-                        pseudoDepth,
+                        fogPseudoDepth,
                         jitter);
                     float visualDensity = densityData.x;
                     float turbulence = densityData.y;
-
-                    float4 blastBoundary = EvaluateBlastBoundary(
-                        roomUV,
-                        worldPx);
-                    float physicalBlastClear = blastBoundary.x;
-                    float edgeMixing = blastBoundary.y;
 
                     visualDensity = saturate(
                         visualDensity +
@@ -837,7 +817,7 @@ Shader "DryCycle/FogComposite"
                     float depthFactor = lerp(
                         0.84,
                         1.31,
-                        pseudoDepth);
+                        fogPseudoDepth);
                     float extinction =
                         fog * 1.08 +
                         dense * 6.32;
@@ -880,9 +860,6 @@ Shader "DryCycle/FogComposite"
                     float blastReveal = pow(
                         saturate(physicalBlastClear),
                         1.10);
-                    // B/A only drive the R/G evacuation front in compute. They are not
-                    // rendered as a second reveal layer, which avoids a visible circular
-                    // pressure-wave line while preserving the expanding clear cavity.
                     float physicalReveal = 1.0 -
                         (1.0 - lightReveal) *
                         (1.0 - blastReveal);
