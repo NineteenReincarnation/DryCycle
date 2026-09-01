@@ -14,10 +14,6 @@ Shader "DryCycle/FogComposite"
 
         SubShader
         {
-            // Anonymous GrabPass is intentional. A named grab can be reused by later
-            // RoomCamera composites in the same frame; split-screen/Jolly cameras need
-            // their own current scene capture. ComputeGrabScreenPos handles Unity's
-            // inverted render-texture projection correctly.
             GrabPass { }
 
             Pass
@@ -90,9 +86,6 @@ Shader "DryCycle/FogComposite"
 
                 float2 RoomUV(float2 screenUV)
                 {
-                    // Rain World publishes camera origin and visible span normalized to
-                    // the current room. Using this instead of screen-space UV anchors fog
-                    // in the world when the camera pans or changes camera position.
                     return _camInRoomRect.xy + screenUV * _camInRoomRect.zw;
                 }
 
@@ -121,9 +114,6 @@ Shader "DryCycle/FogComposite"
                     if (_DryCycleHasNoise3D > 0.5)
                         return tex3D(_DryCycleFogNoise3D, frac(p));
 
-                    // Compatibility path when compute/3D textures are unavailable.
-                    // Z-dependent offsets synthesize pseudo-volume structure from Rain
-                    // World's global 2D noise textures instead of flat texture scrolling.
                     float2 aUv = p.xy + float2(p.z * 0.173, p.z * -0.119);
                     float2 bUv = p.yz + float2(p.x * -0.137, p.x * 0.091);
                     float a = tex2D(_NoiseTex, frac(aUv)).r;
@@ -136,51 +126,192 @@ Shader "DryCycle/FogComposite"
                         c);
                 }
 
+                float4 SampleFogState(float2 roomUV)
+                {
+                    return tex2D(
+                        _DryCycleFogDensityTex,
+                        saturate(roomUV));
+                }
+
                 float SampleFluid(float2 roomUV)
                 {
-                    float d = tex2D(
-                        _DryCycleFogDensityTex,
-                        saturate(roomUV)).r;
+                    float d = SampleFogState(roomUV).r;
                     return lerp(0.68, d, _DryCycleHasFluid);
                 }
 
                 float SampleBlastClear(float2 roomUV)
                 {
-                    // R can be thinned by ordinary fluid motion and player wakes. G is
-                    // authored only by recognized ExplosiveSpear/ScavengerBomb blasts,
-                    // so only G is allowed to relax gameplay extinction below.
-                    float clear = tex2D(
-                        _DryCycleFogDensityTex,
-                        saturate(roomUV)).g;
+                    float clear = SampleFogState(roomUV).g;
                     return saturate(clear * _DryCycleHasFluid);
                 }
 
-                float SampleBlastClearSmooth(float2 roomUV)
+                float4 BlastBoundaryTap(
+                    float2 roomUV,
+                    float2 offsetPx,
+                    float4 centerState,
+                    float centerSolid)
                 {
-                    // G lives on the ~4px fluid grid. A small world-space reconstruction
-                    // filter removes visible cell stair-stepping without blurring the R
-                    // density simulation or normal fog. Six pixels is still far below a
-                    // Rain World terrain tile, so wall-separated cavities do not smear
-                    // across ordinary 20px solids.
-                    float2 o = 6.0 /
+                    float2 offsetUv = offsetPx /
                         max(_DryCycleRoomSizePx, float2(1.0, 1.0));
-                    float clear =
-                        SampleBlastClear(roomUV) * 0.28;
-                    clear += SampleBlastClear(
-                        roomUV + float2(o.x, 0.0)) * 0.12;
-                    clear += SampleBlastClear(
-                        roomUV - float2(o.x, 0.0)) * 0.12;
-                    clear += SampleBlastClear(
-                        roomUV + float2(0.0, o.y)) * 0.12;
-                    clear += SampleBlastClear(
-                        roomUV - float2(0.0, o.y)) * 0.12;
-                    clear += SampleBlastClear(roomUV + o) * 0.06;
-                    clear += SampleBlastClear(roomUV - o) * 0.06;
-                    clear += SampleBlastClear(
-                        roomUV + float2(o.x, -o.y)) * 0.06;
-                    clear += SampleBlastClear(
-                        roomUV + float2(-o.x, o.y)) * 0.06;
-                    return saturate(clear);
+                    float2 sampleUv = saturate(roomUV + offsetUv);
+                    float2 midUv = saturate(roomUV + offsetUv * 0.5);
+                    float sampleSolid = tex2D(
+                        _DryCycleFogObstacleTex,
+                        sampleUv).r;
+                    float midSolid = tex2D(
+                        _DryCycleFogObstacleTex,
+                        midUv).r;
+
+                    // Never use the soft boundary reconstruction to see through terrain.
+                    // Open-air taps stop when either the midpoint or receiver enters a
+                    // solid tile; wall-surface taps only mix with the same material side.
+                    float openBlocked = max(
+                        step(0.5, midSolid),
+                        step(0.5, sampleSolid));
+                    float solidBlocked = step(
+                        0.40,
+                        abs(sampleSolid - centerSolid));
+                    float blocked = lerp(
+                        openBlocked,
+                        solidBlocked,
+                        step(0.5, centerSolid));
+
+                    float4 sampleState = SampleFogState(sampleUv);
+                    return lerp(sampleState, centerState, blocked);
+                }
+
+                float4 EvaluateBlastBoundary(
+                    float2 roomUV,
+                    float2 worldPx)
+                {
+                    if (_DryCycleHasFluid <= 0.5)
+                        return 0.0;
+
+                    float4 center = SampleFogState(roomUV);
+                    float centerSolid = tex2D(
+                        _DryCycleFogObstacleTex,
+                        saturate(roomUV)).r;
+
+                    // First scale: resolve the local edge normal at about two fluid cells.
+                    float4 xp = BlastBoundaryTap(
+                        roomUV, float2(8.0, 0.0), center, centerSolid);
+                    float4 xm = BlastBoundaryTap(
+                        roomUV, float2(-8.0, 0.0), center, centerSolid);
+                    float4 yp = BlastBoundaryTap(
+                        roomUV, float2(0.0, 8.0), center, centerSolid);
+                    float4 ym = BlastBoundaryTap(
+                        roomUV, float2(0.0, -8.0), center, centerSolid);
+
+                    float nearDensity =
+                        (xp.r + xm.r + yp.r + ym.r) * 0.25;
+                    float2 gradient = float2(
+                        xp.r - xm.r,
+                        yp.r - ym.r) * 0.5;
+                    float gradientLength = length(gradient);
+
+                    // If the density is locally flat, pick a stable low-frequency
+                    // direction rather than introducing a fixed axis into the blur.
+                    float directionNoise = tex2D(
+                        _NoiseTex,
+                        frac(worldPx / 310.0 + 0.173)).r * 6.2831853;
+                    float2 fallbackNormal = float2(
+                        cos(directionNoise),
+                        sin(directionNoise));
+                    float2 normal = gradientLength > 0.0005
+                        ? gradient / gradientLength
+                        : fallbackNormal;
+                    float2 tangent = float2(-normal.y, normal.x);
+
+                    // Second scale: sample across the edge normal and along the shear
+                    // direction. These wider taps make the mixing layer tens of pixels
+                    // wide while the obstacle-aware tap keeps it from bleeding through walls.
+                    float4 np = BlastBoundaryTap(
+                        roomUV, normal * 22.0, center, centerSolid);
+                    float4 nm = BlastBoundaryTap(
+                        roomUV, normal * -22.0, center, centerSolid);
+                    float4 tp = BlastBoundaryTap(
+                        roomUV, tangent * 15.0, center, centerSolid);
+                    float4 tm = BlastBoundaryTap(
+                        roomUV, tangent * -15.0, center, centerSolid);
+
+                    float normalMean = (np.r + nm.r) * 0.5;
+                    float tangentMean = (tp.r + tm.r) * 0.5;
+                    float farDensity =
+                        normalMean * 0.66 +
+                        tangentMean * 0.34;
+
+                    float permission =
+                        center.g * 0.28 +
+                        (xp.g + xm.g + yp.g + ym.g) * 0.10 +
+                        (np.g + nm.g + tp.g + tm.g) * 0.08;
+                    permission = smoothstep(
+                        0.035,
+                        0.22,
+                        saturate(permission));
+
+                    // Multi-scale reconstruction: the centre keeps the empty core crisp
+                    // enough to read as evacuated air, while the two neighbourhood scales
+                    // create a broad physical mixing layer instead of an alpha feather.
+                    float reconstructedDensity =
+                        center.r * 0.44 +
+                        nearDensity * 0.34 +
+                        farDensity * 0.22;
+
+                    float edgeContrast = saturate(
+                        gradientLength * 3.0 +
+                        abs(farDensity - center.r) * 1.75 +
+                        abs(normalMean - tangentMean) * 0.85);
+
+                    // Low-frequency, slowly moving erosion only affects the mixing zone.
+                    // It produces broad fog tongues and scallops; there is deliberately no
+                    // high-frequency pixel noise that could recreate the old jagged edge.
+                    float broadNoise = tex2D(
+                        _NoiseTex,
+                        frac(worldPx / 250.0 +
+                        float2(
+                            _DryCycleFogTime * 0.0014,
+                            _DryCycleFogTime * -0.0007))).r;
+                    float midNoise = tex2D(
+                        _NoiseTex2,
+                        frac(worldPx.yx / 118.0 +
+                        float2(
+                            _DryCycleFogTime * -0.0018,
+                            _DryCycleFogTime * 0.0011) + 0.37)).g;
+                    float densityWarp =
+                        (broadNoise - 0.5) * 0.11 +
+                        (midNoise - 0.5) * 0.045;
+                    reconstructedDensity +=
+                        densityWarp * lerp(0.18, 1.0, edgeContrast);
+
+                    float coreDeficit = 1.0 - smoothstep(
+                        0.07,
+                        0.43,
+                        center.r);
+                    float bodyDeficit = 1.0 - smoothstep(
+                        0.13,
+                        0.79,
+                        reconstructedDensity);
+                    float cavity = permission * saturate(max(
+                        bodyDeficit,
+                        coreDeficit * 0.94));
+
+                    // A real fog boundary has a finite entrainment/shear layer. This
+                    // term peaks neither in the clear core nor in untouched fog; it is
+                    // strongest where density contrast and partial cavity coverage meet.
+                    float transitionBand = saturate(
+                        1.0 - abs(cavity * 2.0 - 1.0));
+                    transitionBand = Smooth01(transitionBand);
+                    float mixingLayer = saturate(
+                        permission *
+                        transitionBand *
+                        (0.45 + edgeContrast * 0.90) *
+                        lerp(0.78, 1.16, broadNoise));
+
+                    return float4(
+                        saturate(cavity),
+                        mixingLayer,
+                        permission,
+                        saturate(reconstructedDensity));
                 }
 
                 float BlastWaveRadiusPx(float ageSeconds)
@@ -194,13 +325,7 @@ Shader "DryCycle/FogComposite"
                     if (_DryCycleHasFluid <= 0.5)
                         return 0.0;
 
-                    // Compute seeds B with a continuous irregular radial distance field
-                    // and A with a short countdown. Bilinear texture sampling therefore
-                    // reconstructs the expanding front at screen resolution instead of
-                    // exposing the underlying 4px fluid cells.
-                    float4 state = tex2D(
-                        _DryCycleFogDensityTex,
-                        saturate(roomUV));
+                    float4 state = SampleFogState(roomUV);
                     float waveLife = state.a;
                     if (waveLife <= 0.0001)
                         return 0.0;
@@ -211,15 +336,19 @@ Shader "DryCycle/FogComposite"
                     float waveRadiusPx = BlastWaveRadiusPx(waveAge);
                     float waveDistancePx =
                         state.b * BlastWaveDistanceScale;
+
+                    // The expanding pressure front itself also has a thick atmospheric
+                    // shoulder, growing slightly as the wave expands instead of drawing a
+                    // one-pixel contour around the blast.
+                    float frontWidth = lerp(
+                        18.0,
+                        34.0,
+                        saturate(waveAge / 0.42));
                     float front = 1.0 - smoothstep(
-                        waveRadiusPx - 12.0,
-                        waveRadiusPx + 12.0,
+                        waveRadiusPx - frontWidth,
+                        waveRadiusPx + frontWidth * 1.12,
                         waveDistancePx);
 
-                    // The high-resolution wave only handles the rapid expansion and a
-                    // short handoff. During its final ~0.12s G/R already contain the
-                    // same evacuated cavity, so this fade is visually replaced by the
-                    // real fluid field rather than making the whole opening fade away.
                     float handoff = smoothstep(
                         0.02,
                         0.14,
@@ -229,8 +358,6 @@ Shader "DryCycle/FogComposite"
 
                 float2 FluidGradient(float2 roomUV)
                 {
-                    // World-space stencil so the same room shape produces comparable
-                    // curl at different simulation resolutions.
                     float2 texel24 = 24.0 /
                         max(_DryCycleRoomSizePx, float2(1.0, 1.0));
                     float l = SampleFluid(roomUV - float2(texel24.x, 0.0));
@@ -265,9 +392,6 @@ Shader "DryCycle/FogComposite"
                         p.yx * 0.46 + float2(0.61, time * 0.0013)).b;
                     warp += (float2(wx2, wy2) * 2.0 - 1.0) * 0.31;
 
-                    // Bend detail along the actual low-frequency fluid density gradient.
-                    // The perpendicular vector acts like a stable curl direction, making
-                    // detailed billows roll around simulated masses and room geometry.
                     float2 gradient = FluidGradient(roomUV);
                     float gradientLength = length(gradient);
                     if (gradientLength > 0.0001)
@@ -293,10 +417,6 @@ Shader "DryCycle/FogComposite"
                     float accumulated = 0.0;
                     float accumulatedSq = 0.0;
 
-                    // Pseudo-depth controls how much virtual volume the pixel integrates.
-                    // Foreground geometry therefore carries less atmospheric thickness
-                    // while distant bands accumulate much more, despite Rain World not
-                    // having a conventional depth buffer.
                     float zExtent = lerp(0.48, 1.0, pseudoDepth);
 
                     [loop]
@@ -319,15 +439,12 @@ Shader "DryCycle/FogComposite"
                         float fluid = SampleFluid(sampleRoomUv);
                         float blastClear = SampleBlastClear(sampleRoomUv);
 
-                        // Macro: huge, slow coherent fog masses.
                         float3 macroCoord = float3(
                             sampleWorld / 500.0 +
                             float2(time * 0.0025, time * -0.0008),
                             z * 0.83 + time * 0.0012);
                         float4 macro = SampleVolume(macroCoord);
 
-                        // Mid: opposite drift and macro-warped sampling produces rolling
-                        // lobes rather than two obvious scrolling noise layers.
                         float3 midCoord = float3(
                             sampleWorld / 176.0 +
                             float2(time * -0.0053, time * 0.0021),
@@ -335,8 +452,6 @@ Shader "DryCycle/FogComposite"
                         float4 mid = SampleVolume(
                             midCoord + macro.gbr * 0.23);
 
-                        // Fine: erosion and wisps. Its weight stays low so the weather
-                        // reads as broad humid fog rather than particle smoke.
                         float3 fineCoord = float3(
                             sampleWorld / 71.0 +
                             float2(time * 0.0091, time * 0.0037),
@@ -362,32 +477,31 @@ Shader "DryCycle/FogComposite"
                             smoothstep(0.36, 0.79, fine.r) *
                             lerp(0.72, 1.18, fine.a);
 
-                        // G acts as permission, not opacity. While G remains above a low
-                        // threshold, the actual R-density deficit decides how much medium
-                        // is missing. This makes returning fog visibly eat the cavity from
-                        // its edges instead of G's exponential decay fading everything.
                         float body =
                             macroBody * 0.68 +
                             midBody * 0.24 +
                             wisps * 0.08;
                         body *= lerp(0.48, 1.30, fluid);
+
+                        // Per-depth clearing is intentionally broad and cheap. The more
+                        // expensive multi-scale reconstruction is done once per final
+                        // pixel below, not 24 times inside this volume integration.
                         float densityDeficit = 1.0 - smoothstep(
-                            0.18,
-                            0.62,
+                            0.10,
+                            0.78,
                             fluid);
                         float blastPermission = smoothstep(
-                            0.08,
-                            0.28,
+                            0.04,
+                            0.22,
                             blastClear);
                         float blastMediumClear =
-                            blastPermission * densityDeficit;
+                            blastPermission *
+                            pow(saturate(densityDeficit), 0.86);
                         body *= lerp(
                             1.0,
-                            0.05,
+                            0.08,
                             blastMediumClear);
 
-                        // Middle-depth weighting prevents the integral becoming a flat
-                        // chalk field while preserving large opaque-looking billows.
                         float slab = 0.76 +
                             0.24 * sin(saturate(z01) * 3.14159265);
                         body *= slab;
@@ -406,14 +520,22 @@ Shader "DryCycle/FogComposite"
                         _DryCycleFogObstacleTex,
                         saturate(roomUV)).g;
                     float surfaceBlastClear = SampleBlastClear(roomUV);
+                    float surfaceFluid = SampleFluid(roomUV);
+                    float surfaceDeficit = 1.0 - smoothstep(
+                        0.10,
+                        0.78,
+                        surfaceFluid);
+                    float surfacePermission = smoothstep(
+                        0.04,
+                        0.22,
+                        surfaceBlastClear);
+                    float surfaceClear =
+                        surfacePermission * surfaceDeficit;
                     density += pow(
                         saturate(1.0 - wallDistance),
                         2.1) * 0.065 *
-                        lerp(1.0, 0.08, surfaceBlastClear);
+                        lerp(1.0, 0.08, surfaceClear);
 
-                    // Variance later adds local colour richness. Random visual-density
-                    // valleys still cannot reveal gameplay; only the explicit G channel
-                    // sampled in frag below has that authority.
                     return float2(
                         saturate(density * 1.48),
                         saturate(variance * 7.0));
@@ -433,9 +555,6 @@ Shader "DryCycle/FogComposite"
 
                 float SegmentVisibility(float2 fromPx, float2 toPx)
                 {
-                    // Player awareness deliberately keeps the original strict occlusion
-                    // behaviour. The softer volumetric treatment below is for real fog
-                    // illuminators only, so this change cannot alter awareness gameplay.
                     const int OcclusionSteps = 24;
                     float blocked = 0.0;
 
@@ -458,10 +577,6 @@ Shader "DryCycle/FogComposite"
                     float2 toPx,
                     float targetSolid)
                 {
-                    // Fog illumination should not behave like a binary line-of-sight
-                    // mask. Integrate solid coverage as optical thickness so anti-aliased
-                    // tile edges and thin walls attenuate continuously rather than cutting
-                    // a perfectly hard geometric wedge through the fog.
                     const int FogOcclusionSteps = 20;
                     float rayLength = max(1.0, distance(fromPx, toPx));
                     float opticalDepth = 0.0;
@@ -476,10 +591,6 @@ Shader "DryCycle/FogComposite"
                             0.82,
                             ObstacleAtWorld(p));
 
-                        // When the receiver itself is a solid tile, ignore only the last
-                        // ~18px of that ray. The wall surface can therefore have its fog
-                        // driven away, while an earlier tile in a thick wall still blocks
-                        // the light. This avoids the old outlined-wall / visibility-mod look.
                         if (targetSolid > 0.001)
                         {
                             float remainingPx = rayLength * (1.0 - t);
@@ -512,10 +623,6 @@ Shader "DryCycle/FogComposite"
                         0.75,
                         ObstacleAtWorld(toPx));
 
-                    // A light illuminating suspended fog behaves more like a finite area
-                    // source than a mathematical point. Five weighted source offsets make
-                    // wall shadows develop a broad penumbra instead of razor-straight
-                    // triangles. The width grows with distance but stays below one tile.
                     float penumbra = lerp(
                         4.0,
                         18.0,
@@ -567,9 +674,6 @@ Shader "DryCycle/FogComposite"
                         if (distancePx >= radius || light.w <= 0.0001)
                             continue;
 
-                        // Use a long, soft shoulder rather than a crisp circular reveal.
-                        // A tiny world-anchored noise warp breaks the last visible perfect
-                        // circle without inheriting the native LightSource radius flicker.
                         float edgeNoise = tex2D(
                             _NoiseTex,
                             frac(worldPx / 260.0 + light.xy / 1900.0)).r;
@@ -593,11 +697,6 @@ Shader "DryCycle/FogComposite"
                             (1.0 - reveal) *
                             (1.0 - localReveal);
 
-                        // Light can still illuminate suspended fog around a corner even
-                        // when geometry strongly limits scene transmittance. Keeping a
-                        // diffuse fraction of the halo prevents wall silhouettes from
-                        // reading like a binary visibility polygon, without exposing the
-                        // scene behind the wall at the same strength.
                         float fogIllumination =
                             radial * light.w *
                             lerp(0.36, 1.0, visible);
@@ -661,8 +760,6 @@ Shader "DryCycle/FogComposite"
                     if (presence <= 0.0001)
                         return scene;
 
-                    // Spatial jitter plus a very slow temporal phase removes visible
-                    // ray-march layers without introducing sparkling/flickering fog.
                     float2 jitterUv = frac(
                         screenUV * (_screenSize / 256.0) +
                         float2(
@@ -677,32 +774,29 @@ Shader "DryCycle/FogComposite"
                         jitter);
                     float visualDensity = densityData.x;
                     float turbulence = densityData.y;
-                    float fluidDensity = SampleFluid(roomUV);
-                    float blastClear = SampleBlastClearSmooth(roomUV);
+
+                    // Reconstruct a finite turbulent mixing layer around the physical
+                    // R/G cavity. This is the primary blast edge representation; there is
+                    // no thresholded circle or low-resolution alpha island here.
+                    float4 blastBoundary = EvaluateBlastBoundary(
+                        roomUV,
+                        worldPx);
+                    float physicalBlastClear = blastBoundary.x;
+                    float edgeMixing = blastBoundary.y;
                     float waveReveal = SampleBlastWaveReveal(roomUV);
 
-                    // G is now purely permission. Once it is above a low threshold, the
-                    // actual R-density deficit controls visibility. G's slow exponential
-                    // decay therefore opens the door for refill without visibly fading
-                    // the entire cavity; real fog must physically return to close it.
-                    float densityDeficit = 1.0 - smoothstep(
-                        0.18,
-                        0.62,
-                        fluidDensity);
-                    float blastPermission = smoothstep(
-                        0.08,
-                        0.28,
-                        blastClear);
-                    float physicalBlastClear = saturate(
-                        blastPermission * densityDeficit);
-                    float blastReveal = smoothstep(
-                        0.14,
-                        0.50,
-                        physicalBlastClear);
+                    // Entrained fog at the boundary has visible body. Adding it back into
+                    // the rendered density/turbulence produces billowing shoulders and
+                    // tongues as normal R advection moves fog into the evacuated region.
+                    visualDensity = saturate(
+                        visualDensity +
+                        edgeMixing * (0.10 + dense * 0.055));
+                    turbulence = saturate(
+                        turbulence + edgeMixing * 0.30);
 
-                    // Normal fluid thinning is visual only. Only explosion-authored G,
-                    // combined with an actual R-density deficit, may relax gameplay
-                    // extinction. Player wakes still cannot expose the hidden room.
+                    // Clear air reduces optical depth exponentially rather than by a hard
+                    // alpha lerp. exp(-3.9) ~= 0.02, matching the previous fully cleared
+                    // extinction while giving the mixing zone a much smoother response.
                     float depthFactor = lerp(
                         0.84,
                         1.31,
@@ -710,18 +804,16 @@ Shader "DryCycle/FogComposite"
                     float extinction =
                         fog * 1.08 +
                         dense * 6.32;
-                    float blastExtinctionScale = lerp(
-                        1.0,
-                        0.02,
-                        physicalBlastClear);
+                    float blastExtinctionScale = exp(
+                        -3.90 * physicalBlastClear);
                     float baseTransmittance = exp(
                         -extinction * blastExtinctionScale * depthFactor);
 
-                    // DenseFog normally enforces the ~0.2% contrast floor. The same
-                    // physical clear amount relaxes it, so returning R density closes
-                    // gameplay visibility even while G remains as refill resistance.
+                    float denseClear = pow(
+                        saturate(physicalBlastClear),
+                        1.05);
                     float effectiveDense =
-                        dense * (1.0 - physicalBlastClear);
+                        dense * (1.0 - denseClear);
                     float denseCeiling = lerp(
                         1.0,
                         0.0020,
@@ -740,10 +832,6 @@ Shader "DryCycle/FogComposite"
                     float awarenessReveal =
                         EvaluateAwareness(worldPx);
 
-                    // Awareness is not a physical clearing source. Lights, the smooth
-                    // sub-second pressure wave, and the subsequent R/G fluid cavity are.
-                    // The wave contributes no coloured halo and hands off to R/G before
-                    // its temporary B/A metadata expires.
                     float awarenessTarget = max(
                         baseTransmittance,
                         lerp(0.075, 0.145, dense));
@@ -751,6 +839,14 @@ Shader "DryCycle/FogComposite"
                         baseTransmittance,
                         awarenessTarget,
                         awarenessReveal);
+
+                    // The cavity core still reaches the same 0.985 clear target as a
+                    // physical fog light, but partial boundary coverage stays partial.
+                    // A mild power curve preserves a broad transition instead of snapping
+                    // through a narrow smoothstep threshold.
+                    float blastReveal = pow(
+                        saturate(physicalBlastClear),
+                        1.10);
                     float physicalReveal = 1.0 -
                         (1.0 - lightReveal) *
                         (1.0 - blastReveal) *
@@ -760,9 +856,6 @@ Shader "DryCycle/FogComposite"
                         0.985,
                         physicalReveal);
 
-                    // Visual density changes the medium's look, not gameplay visibility.
-                    // Turbulent regions gain micro-contrast and cooler valleys, removing
-                    // the previous flat white-cloth appearance.
                     float body = smoothstep(
                         0.13,
                         0.90,
@@ -790,11 +883,13 @@ Shader "DryCycle/FogComposite"
                     scattering += lightScattering *
                         (0.46 + dense * 0.25);
 
-                    // Small density-correlated ambient scattering gives thick masses
-                    // body without whitening the whole frame uniformly.
+                    // The mixing shell catches slightly more ambient fog light than the
+                    // evacuated core, reinforcing the impression of real suspended mist
+                    // rolling inward rather than a blurred transparency mask.
                     scattering *= 1.0 +
                         visualDensity *
-                        (0.025 + dense * 0.025);
+                        (0.025 + dense * 0.025) +
+                        edgeMixing * 0.075;
 
                     float3 finalColor =
                         scene.rgb * transmittance +
