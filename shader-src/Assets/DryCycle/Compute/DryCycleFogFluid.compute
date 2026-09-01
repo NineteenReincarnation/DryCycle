@@ -6,8 +6,10 @@
 #pragma kernel ComputeDivergence
 #pragma kernel JacobiPressure
 #pragma kernel ProjectVelocity
+#pragma kernel ApplyBlastVelocity
 #pragma kernel AdvectDensity
 #pragma kernel MaintainDensity
+#pragma kernel ApplyBlastDensity
 
 Texture2D<float4> _VelocityRead;
 RWTexture2D<float4> _VelocityWrite;
@@ -35,11 +37,15 @@ float _VelocityDissipation;
 float _DensityDissipation;
 float _DensityRelaxation;
 float _VorticityStrength;
+float _BlastClearDecay;
 float4 _WindVelocity;
 float4 _RoomSizePx;
 int _ImpulseCount;
 float4 _ImpulsePosRadius[4];
 float4 _ImpulseVelocity[4];
+int _BlastCount;
+float4 _BlastPosRadii[4];
+float4 _BlastParams[4];
 
 float2 GridUV(uint2 id, uint width, uint height)
 {
@@ -104,6 +110,41 @@ float2 WallTangent(float2 uv, float2 texel)
     return float2(-gradient.y, gradient.x);
 }
 
+float BlastTerrainTransmission(
+    float2 fromPx,
+    float2 toPx,
+    float receiverSolid)
+{
+    float rayLength = distance(fromPx, toPx);
+    if (rayLength <= 1.0)
+        return 1.0;
+
+    // This pass runs only on the one frame where a supported Explosion is discovered,
+    // so a denser ray is affordable. ~12px maximum spacing catches a Rain World tile
+    // across the supported 110-250px source radii. The first 12px are source bias for
+    // bombs/spears detonating against terrain; solid receiver pixels get a 16px end bias
+    // so the wall surface itself may clear without transmitting through that wall.
+    const int BlastOcclusionSteps = 24;
+    [loop]
+    for (int i = 1; i <= BlastOcclusionSteps; i++)
+    {
+        float t = i / (float)(BlastOcclusionSteps + 1);
+        float travelledPx = rayLength * t;
+        float remainingPx = rayLength - travelledPx;
+        if (travelledPx < 12.0)
+            continue;
+        if (receiverSolid > 0.5 && remainingPx < 16.0)
+            continue;
+
+        float2 p = lerp(fromPx, toPx, t);
+        float2 uv = p / max(_RoomSizePx.xy, float2(1.0, 1.0));
+        if (ObstacleAt(uv) > 0.5)
+            return 0.0;
+    }
+
+    return 1.0;
+}
+
 [numthreads(8, 8, 1)]
 void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
 {
@@ -128,6 +169,7 @@ void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
         solid ? 0.0.xx : _WindVelocity.xy,
         0.0,
         0.0);
+    // R = fog density. G = explicit explosion clearing permission.
     _DensityWrite[id] = float4(density, 0.0, 0.0, 1.0);
     _PressureWrite[id] = 0.0;
     _DivergenceWrite[id] = 0.0;
@@ -530,6 +572,85 @@ void ProjectVelocity(uint3 dispatchId : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void ApplyBlastVelocity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 worldPx = uv * _RoomSizePx.xy;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        if (i >= _BlastCount)
+            break;
+
+        float4 blast = _BlastPosRadii[i];
+        float4 parameters = _BlastParams[i];
+        float2 blastPx = blast.xy * _RoomSizePx.xy;
+        float2 deltaPx = worldPx - blastPx;
+        float distancePx = length(deltaPx);
+        if (distancePx <= 0.5 || distancePx >= blast.w)
+            continue;
+
+        float terrain = BlastTerrainTransmission(blastPx, worldPx, 0.0);
+        if (terrain <= 0.0)
+            continue;
+
+        float2 direction = deltaPx / distancePx;
+        float shock = 1.0 - smoothstep(
+            blast.z * 0.12,
+            blast.w,
+            distancePx);
+        shock = pow(saturate(shock), 0.72);
+
+        float2 impulseUvPerSecond =
+            direction * parameters.x /
+            max(_RoomSizePx.xy, float2(1.0, 1.0));
+        velocity += impulseUvPerSecond * shock * terrain;
+    }
+
+    // The shock remains intentionally divergent for this frame, but never gets a free
+    // normal component into an adjacent terrain cell. Next frame's normal projection
+    // and vorticity then fold the displaced mass naturally around geometry.
+    float2 texel = 1.0 / float2(width, height);
+    if (velocity.x < 0.0 &&
+        ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5)
+    {
+        velocity.x = 0.0;
+    }
+    if (velocity.x > 0.0 &&
+        ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5)
+    {
+        velocity.x = 0.0;
+    }
+    if (velocity.y < 0.0 &&
+        ObstacleAt(uv - float2(0.0, texel.y)) > 0.5)
+    {
+        velocity.y = 0.0;
+    }
+    if (velocity.y > 0.0 &&
+        ObstacleAt(uv + float2(0.0, texel.y)) > 0.5)
+    {
+        velocity.y = 0.0;
+    }
+
+    _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
 void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
 {
     uint width;
@@ -540,9 +661,14 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     uint2 id = dispatchId.xy;
     float2 uv = GridUV(id, width, height);
+    float clearDecay = exp(-max(0.0, _BlastClearDecay) * _DeltaTime);
+
     if (ObstacleAt(uv) > 0.5)
     {
-        _DensityWrite[id] = 0.0;
+        // Fog density remains zero inside terrain, but an explosion may temporarily
+        // clear the fog composited over the receiving wall surface itself.
+        float clear = _DensityRead.Load(int3(id, 0)).g * clearDecay;
+        _DensityWrite[id] = float4(0.0, clear, 0.0, 1.0);
         return;
     }
 
@@ -554,13 +680,13 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
     if (ObstacleAt(backtrace) > 0.5)
         backtrace = uv;
 
-    float density = _DensityRead.SampleLevel(
+    float4 state = _DensityRead.SampleLevel(
         LinearClampSampler,
         backtrace,
-        0).x;
+        0);
     _DensityWrite[id] = float4(
-        density * _DensityDissipation,
-        0.0,
+        state.r * _DensityDissipation,
+        saturate(state.g * clearDecay),
         0.0,
         1.0);
 }
@@ -576,21 +702,27 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     uint2 id = dispatchId.xy;
     float2 uv = GridUV(id, width, height);
+    float4 state = _DensityRead.Load(int3(id, 0));
+    float blastClear = saturate(state.g);
+
     if (ObstacleAt(uv) > 0.5)
     {
-        _DensityWrite[id] = 0.0;
+        _DensityWrite[id] = float4(0.0, blastClear, 0.0, 1.0);
         return;
     }
 
-    float density = _DensityRead.Load(int3(id, 0)).x;
+    float density = state.r;
     float shape = TargetShape(uv, _SimulationTime);
 
     // Very weak interior replenishment prevents numerical loss from emptying a room,
-    // but does not repaint the full target every second.
+    // but does not repaint the full target every second. An active blast-clear field
+    // temporarily suppresses replenishment so the physical cavity cannot refill before
+    // its displaced ring has had time to advect away.
     float interiorTarget =
         _TargetDensity * lerp(0.54, 1.05, shape);
     float interiorRelax =
         1.0 - exp(-_DensityRelaxation * _DeltaTime);
+    interiorRelax *= lerp(1.0, 0.12, blastClear);
     density = lerp(
         density,
         interiorTarget,
@@ -613,6 +745,7 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
         _TargetDensity * lerp(0.58, 1.34, inletPulse);
     float inletMix = inlet *
         (1.0 - exp(-2.6 * _DeltaTime));
+    inletMix *= lerp(1.0, 0.20, blastClear);
     density = lerp(
         density,
         inletTarget,
@@ -623,13 +756,15 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     density *= exp(-0.42 * outlet * _DeltaTime);
 
     // Wall pooling gives low-frequency density a stable relationship to room geometry.
+    // Blast-cleared wall-adjacent cells suppress this source until the cavity recovers.
     float wallDistance = WallDistance01(uv);
     density += pow(
         saturate(1.0 - wallDistance),
-        2.35) * 0.052 * _DeltaTime;
+        2.35) * 0.052 * _DeltaTime *
+        lerp(1.0, 0.10, blastClear);
 
-    // Player motion carves only visual density. Gameplay extinction is independent in
-    // the final composite, so even a dramatic wake cannot expose distant hazards.
+    // Player motion carves only visual density. Gameplay extinction remains independent
+    // from this wake because only the explosion-authored G channel grants visibility.
     float2 worldPx = uv * _RoomSizePx.xy;
     [unroll]
     for (int i = 0; i < 4; i++)
@@ -647,7 +782,80 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     _DensityWrite[id] = float4(
         saturate(density),
+        blastClear,
         0.0,
+        1.0);
+}
+
+[numthreads(8, 8, 1)]
+void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _DensityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    float receiverSolid = step(0.5, ObstacleAt(uv));
+    float2 worldPx = uv * _RoomSizePx.xy;
+    float4 state = _DensityRead.Load(int3(id, 0));
+    float density = state.r;
+    float blastClear = state.g;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        if (i >= _BlastCount)
+            break;
+
+        float4 blast = _BlastPosRadii[i];
+        float4 parameters = _BlastParams[i];
+        float2 blastPx = blast.xy * _RoomSizePx.xy;
+        float distancePx = distance(worldPx, blastPx);
+        if (distancePx >= blast.w)
+            continue;
+
+        float terrain = BlastTerrainTransmission(
+            blastPx,
+            worldPx,
+            receiverSolid);
+        if (terrain <= 0.0)
+            continue;
+
+        // The cavity has a broad full-strength centre and smooth shoulder. The ring is
+        // centred just outside that cavity, approximating the fog mass displaced from
+        // the core rather than simply deleting it from the simulation.
+        float cavity = 1.0 - smoothstep(
+            blast.z * 0.10,
+            blast.z,
+            distancePx);
+        cavity = saturate(cavity);
+
+        float ringInner = smoothstep(
+            blast.z * 0.72,
+            blast.z * 1.04,
+            distancePx);
+        float ringOuter = 1.0 - smoothstep(
+            blast.z * 1.04,
+            blast.w,
+            distancePx);
+        float ring = saturate(ringInner * ringOuter);
+
+        density *= 1.0 - cavity * parameters.y * terrain;
+        density += ring * parameters.z * _TargetDensity * terrain;
+        blastClear = max(
+            blastClear,
+            cavity * parameters.w * terrain);
+    }
+
+    if (receiverSolid > 0.5)
+        density = 0.0;
+
+    _DensityWrite[id] = float4(
+        saturate(density),
+        saturate(blastClear),
         0.0,
         1.0);
 }
