@@ -5,6 +5,11 @@ SU {
         LightRain : 70%
         HeavyRain : 45%
     }
+
+    Fog : 100 {
+        Fog : 100
+        DenseFog : 100
+    }
 }
 
 B5 {
@@ -39,6 +44,12 @@ ABCDEFG {
         //大雨，Intensity = (1 + HeavyRain * 4) * 0.24
 
         //子气象允许进入排表的概率
+    }
+
+    Fog : 100 {
+        Fog : 100
+        DenseFog : 100
+        //Fog 与 DenseFog 是同一气象簇的两个独立子气象候选
     }
 
     SandStorm : 50
