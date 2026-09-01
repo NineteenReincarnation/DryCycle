@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
@@ -22,9 +21,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
     private const float FullHorizontalVelocityRetention = 0.965f;
     private const float FullAirDownwardAcceleration = 0.22f;
     private const float FullClimbVelocityRetention = 0.88f;
-
-    [ThreadStatic]
-    private static bool _suppressScheduledHeavyEffectLookup;
 
     private sealed class GlobalState
     {
@@ -54,11 +50,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // This runtime must be enabled after RainWeatherRuntime. Its GetEffectAmount
-        // hook then sits outside DryCycle's temporary room-effect injection and can
-        // bypass only the scheduled HeavyRain override while GlobalRain establishes
-        // the authored/native baseline.
-        On.RoomSettings.GetEffectAmount += RoomSettings_GetEffectAmount;
         On.GlobalRain.Update += GlobalRain_Update;
         On.RoomRain.Update += RoomRain_Update;
         On.RoomRain.ThrowAroundObjects += RoomRain_ThrowAroundObjects;
@@ -73,50 +64,34 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        On.RoomSettings.GetEffectAmount -= RoomSettings_GetEffectAmount;
         On.GlobalRain.Update -= GlobalRain_Update;
         On.RoomRain.Update -= RoomRain_Update;
         On.RoomRain.ThrowAroundObjects -= RoomRain_ThrowAroundObjects;
         On.Player.Update -= Player_Update;
 
-        _suppressScheduledHeavyEffectLookup = false;
+        RainWeatherRuntime.SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalState>();
         _roomStates = new ConditionalWeakTable<RoomRain, RoomRainState>();
         _enabled = false;
-    }
-
-    private static float RoomSettings_GetEffectAmount(
-        On.RoomSettings.orig_GetEffectAmount orig,
-        RoomSettings self,
-        RoomSettings.RoomEffect.Type type)
-    {
-        if (_suppressScheduledHeavyEffectLookup &&
-            type == RoomSettings.RoomEffect.Type.HeavyRain)
-        {
-            // Do not call the inner RainWeatherRuntime hook here: that hook deliberately
-            // returns Max(authored, scheduled). Reading the authored list directly gives
-            // GlobalRain its exact pre-DryCycle HeavyRain baseline instead.
-            return GetAuthoredEffectAmount(self, type);
-        }
-
-        return orig(self, type);
     }
 
     private static void GlobalRain_Update(
         On.GlobalRain.orig_Update orig,
         GlobalRain self)
     {
-        // Let all native systems and RainWeatherRuntime run, but make the one HeavyRain
-        // effect lookup inside GlobalRain see only the room-authored value.
-        bool previousSuppression = _suppressScheduledHeavyEffectLookup;
-        _suppressScheduledHeavyEffectLookup = true;
+        // RainWeatherRuntime still owns all scheduled-rain routing. For this one call,
+        // however, its HeavyRain effect override is disabled so the native GlobalRain
+        // pass establishes exactly what the room itself (and other native systems)
+        // would have produced without DryCycle's scheduled HeavyRain.
+        bool previousSuppression = RainWeatherRuntime.SuppressScheduledHeavyOverride;
+        RainWeatherRuntime.SuppressScheduledHeavyOverride = true;
         try
         {
             orig(self);
         }
         finally
         {
-            _suppressScheduledHeavyEffectLookup = previousSuppression;
+            RainWeatherRuntime.SuppressScheduledHeavyOverride = previousSuppression;
         }
 
         if (self == null)
@@ -189,6 +164,9 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
+        // Capture the room's state before RainWeatherRuntime temporarily changes it for
+        // regional weather rendering. These authored values are used only during the
+        // native physical ThrowAroundObjects call below.
         RoomRainState state = _roomStates.GetOrCreateValue(self);
         state.AuthoredRainIntensity = self.room?.roomSettings?.rInts;
         state.AuthoredDangerType = self.dangerType;
@@ -220,8 +198,8 @@ internal static class ScheduledHeavyRainTraversalRuntime
 
         // RainWeatherRuntime temporarily sets room RainIntensity to 1 and may switch a
         // Flood room to FloodAndRain so scheduled regional rain can render everywhere.
-        // During the physical ThrowAroundObjects call, restore all three authored/native
-        // inputs. Therefore any authored HeavyRain still pushes, stuns, raises rainDeath
+        // During the physical ThrowAroundObjects call, restore the authored/native
+        // inputs. Therefore authored HeavyRain still pushes, stuns, raises rainDeath
         // and kills exactly as before; only DryCycle's additional HeavyRain is absent.
         float scheduledIntensity = self.globalRain.Intensity;
         float? scheduledRoomRainIntensity = self.room?.roomSettings?.rInts;
@@ -437,27 +415,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
                player.animation == Player.AnimationIndex.HangUnderVerticalBeam ||
                player.animation == Player.AnimationIndex.VineGrab ||
                player.animation == Player.AnimationIndex.AntlerClimb;
-    }
-
-    private static float GetAuthoredEffectAmount(
-        RoomSettings settings,
-        RoomSettings.RoomEffect.Type type)
-    {
-        if (settings?.effects == null)
-        {
-            return 0f;
-        }
-
-        for (int i = 0; i < settings.effects.Count; i++)
-        {
-            RoomSettings.RoomEffect effect = settings.effects[i];
-            if (effect != null && effect.type == type)
-            {
-                return effect.amount;
-            }
-        }
-
-        return 0f;
     }
 
     private static float ApplyWatcherPassiveRainReduction(
