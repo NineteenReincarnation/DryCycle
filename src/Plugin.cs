@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.102";
+    public const string Version = "0.1.103";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -73,7 +73,9 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
+            ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
@@ -174,9 +176,18 @@ internal sealed class Plugin : BaseUnityPlugin
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
-            // Install after RainWeatherRuntime so scheduled HeavyRain can be separated
-            // from room-authored HeavyRain without changing the native room effect.
+            // Capture the native GlobalRain result after RainWeatherRuntime but before
+            // ScheduledHeavyRainTraversalRuntime overlays DryCycle's nonlethal HeavyRain.
+            ScheduledRainNativeBaselineRuntime.Enable();
+
+            // Scheduled HeavyRain keeps its room-authored baseline intact while adding
+            // only the DryCycle traversal pressure on top.
             ScheduledHeavyRainTraversalRuntime.Enable();
+
+            // Install last on RoomRain. During an active DryCycle event, authored
+            // DangerType branches (Flood/FloodAndRain/etc.) are bypassed at Update level
+            // rather than temporarily rewriting the room to FloodAndRain.
+            RoomDangerTypeTakeoverRuntime.Enable();
 
             // RainMeterRoundPipRuntime is the single authoritative DryCycle RainMeter
             // renderer. WeatherForecastHudRuntime remains in source as the old split
@@ -199,7 +210,9 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
+            ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
