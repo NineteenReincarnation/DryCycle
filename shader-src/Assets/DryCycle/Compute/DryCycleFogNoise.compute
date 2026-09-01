@@ -130,7 +130,10 @@ void GenerateFogNoise(uint3 id : SV_DispatchThreadID)
     // sampling therefore crosses volume boundaries without the seam produced by the
     // previous non-periodic FBM implementation.
     float fbmLow = PeriodicFBM(uv, 4);
-    float fbmHigh = PeriodicFBM(frac(uv + float3(0.173, 0.391, 0.617)), 9);
+    // 6,12,24,48 stays within the Nyquist limit of the runtime 96^3 volume.
+    float fbmHigh = PeriodicFBM(
+        frac(uv + float3(0.173, 0.391, 0.617)),
+        6);
     float worleyLow = PeriodicWorleyF1(
         frac(uv + float3(0.271, 0.113, 0.443)),
         5);
