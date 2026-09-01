@@ -59,6 +59,9 @@ Shader "DryCycle/FogComposite"
                 uniform int _DryCycleAwarenessCount;
                 uniform float4 _DryCycleAwareness[4];
 
+                static const float BlastWaveDistanceScale = 1024.0;
+                static const float BlastWaveLifetime = 0.62;
+
                 struct v2f
                 {
                     float4 pos : SV_POSITION;
@@ -150,6 +153,78 @@ Shader "DryCycle/FogComposite"
                         _DryCycleFogDensityTex,
                         saturate(roomUV)).g;
                     return saturate(clear * _DryCycleHasFluid);
+                }
+
+                float SampleBlastClearSmooth(float2 roomUV)
+                {
+                    // G lives on the ~4px fluid grid. A small world-space reconstruction
+                    // filter removes visible cell stair-stepping without blurring the R
+                    // density simulation or normal fog. Six pixels is still far below a
+                    // Rain World terrain tile, so wall-separated cavities do not smear
+                    // across ordinary 20px solids.
+                    float2 o = 6.0 /
+                        max(_DryCycleRoomSizePx, float2(1.0, 1.0));
+                    float clear =
+                        SampleBlastClear(roomUV) * 0.28;
+                    clear += SampleBlastClear(
+                        roomUV + float2(o.x, 0.0)) * 0.12;
+                    clear += SampleBlastClear(
+                        roomUV - float2(o.x, 0.0)) * 0.12;
+                    clear += SampleBlastClear(
+                        roomUV + float2(0.0, o.y)) * 0.12;
+                    clear += SampleBlastClear(
+                        roomUV - float2(0.0, o.y)) * 0.12;
+                    clear += SampleBlastClear(roomUV + o) * 0.06;
+                    clear += SampleBlastClear(roomUV - o) * 0.06;
+                    clear += SampleBlastClear(
+                        roomUV + float2(o.x, -o.y)) * 0.06;
+                    clear += SampleBlastClear(
+                        roomUV + float2(-o.x, o.y)) * 0.06;
+                    return saturate(clear);
+                }
+
+                float BlastWaveRadiusPx(float ageSeconds)
+                {
+                    float age = max(0.0, ageSeconds);
+                    return (1250.0 * age) / (1.0 + age * 0.85);
+                }
+
+                float SampleBlastWaveReveal(float2 roomUV)
+                {
+                    if (_DryCycleHasFluid <= 0.5)
+                        return 0.0;
+
+                    // Compute seeds B with a continuous irregular radial distance field
+                    // and A with a short countdown. Bilinear texture sampling therefore
+                    // reconstructs the expanding front at screen resolution instead of
+                    // exposing the underlying 4px fluid cells.
+                    float4 state = tex2D(
+                        _DryCycleFogDensityTex,
+                        saturate(roomUV));
+                    float waveLife = state.a;
+                    if (waveLife <= 0.0001)
+                        return 0.0;
+
+                    float waveAge = max(
+                        0.0,
+                        BlastWaveLifetime - waveLife);
+                    float waveRadiusPx = BlastWaveRadiusPx(waveAge);
+                    float waveDistancePx =
+                        state.b * BlastWaveDistanceScale;
+                    float front = 1.0 - smoothstep(
+                        waveRadiusPx - 12.0,
+                        waveRadiusPx + 12.0,
+                        waveDistancePx);
+
+                    // The high-resolution wave only handles the rapid expansion and a
+                    // short handoff. During its final ~0.12s G/R already contain the
+                    // same evacuated cavity, so this fade is visually replaced by the
+                    // real fluid field rather than making the whole opening fade away.
+                    float handoff = smoothstep(
+                        0.02,
+                        0.14,
+                        waveLife);
+                    return saturate(front * handoff);
                 }
 
                 float2 FluidGradient(float2 roomUV)
@@ -287,16 +362,25 @@ Shader "DryCycle/FogComposite"
                             smoothstep(0.36, 0.79, fine.r) *
                             lerp(0.72, 1.18, fine.a);
 
-                        // Fluid dictates placement; volume noise only gives that mass a
-                        // rich internal shape. A recognized blast is different from an
-                        // ordinary thin patch: its G field explicitly removes the medium
-                        // as well as R density, producing a true temporary cavity.
+                        // G is permission left by an explosion, while R tells us whether
+                        // the air is still physically evacuated. Requiring both means fog
+                        // visibly returns from the edges as real density flows back rather
+                        // than the complete opening fading uniformly with a timer.
                         float body =
                             macroBody * 0.68 +
                             midBody * 0.24 +
                             wisps * 0.08;
                         body *= lerp(0.48, 1.30, fluid);
-                        body *= lerp(1.0, 0.05, blastClear);
+                        float densityDeficit = 1.0 - smoothstep(
+                            0.18,
+                            0.62,
+                            fluid);
+                        float blastMediumClear =
+                            blastClear * densityDeficit;
+                        body *= lerp(
+                            1.0,
+                            0.05,
+                            blastMediumClear);
 
                         // Middle-depth weighting prevents the integral becoming a flat
                         // chalk field while preserving large opaque-looking billows.
@@ -589,21 +673,30 @@ Shader "DryCycle/FogComposite"
                         jitter);
                     float visualDensity = densityData.x;
                     float turbulence = densityData.y;
-                    float blastClear = SampleBlastClear(roomUV);
+                    float fluidDensity = SampleFluid(roomUV);
+                    float blastClear = SampleBlastClearSmooth(roomUV);
+                    float waveReveal = SampleBlastWaveReveal(roomUV);
 
-                    // Remap the physical G field into a broad full-clear core plus a
-                    // soft shoulder. G itself remains obstacle-aware, advected and
-                    // decaying with the fluid; this only fixes the final visibility
-                    // response so a real evacuated cavity can become as clear as a
-                    // LanternMouse instead of being capped around 85-90% transmittance.
-                    float blastReveal = smoothstep(
+                    // G says that an explosion evacuated this air; R says whether the
+                    // physical cavity is still actually empty. Combining them makes the
+                    // long-lived opening close from its fluid-filled edges instead of
+                    // fading as a single alpha shape. A small G-only remainder preserves
+                    // the intended resistance while density is just beginning to return.
+                    float densityDeficit = 1.0 - smoothstep(
                         0.18,
-                        0.55,
-                        blastClear);
+                        0.62,
+                        fluidDensity);
+                    float physicalBlastClear = saturate(
+                        blastClear *
+                        lerp(0.18, 1.0, densityDeficit));
+                    float blastReveal = smoothstep(
+                        0.14,
+                        0.50,
+                        physicalBlastClear);
 
-                    // Normal fluid thinning is visual only. The explicit G channel is
-                    // different: it represents fog physically expelled by a recognized
-                    // explosion, so it is permitted to reduce local gameplay extinction.
+                    // Normal fluid thinning is visual only. Only explosion-authored G,
+                    // modulated by the actual R-density deficit, may relax gameplay
+                    // extinction. Player wakes still cannot expose the hidden room.
                     float depthFactor = lerp(
                         0.84,
                         1.31,
@@ -614,14 +707,15 @@ Shader "DryCycle/FogComposite"
                     float blastExtinctionScale = lerp(
                         1.0,
                         0.02,
-                        blastClear);
+                        physicalBlastClear);
                     float baseTransmittance = exp(
                         -extinction * blastExtinctionScale * depthFactor);
 
-                    // DenseFog normally enforces the ~0.2% contrast floor. A blast only
-                    // relaxes that floor where its advected G field still exists; random
-                    // R-density valleys and player wakes cannot affect this term.
-                    float effectiveDense = dense * (1.0 - blastClear);
+                    // DenseFog normally enforces the ~0.2% contrast floor. The same
+                    // physical clear amount relaxes it, so returning R density closes
+                    // gameplay visibility even while a weak residual G field remains.
+                    float effectiveDense =
+                        dense * (1.0 - physicalBlastClear);
                     float denseCeiling = lerp(
                         1.0,
                         0.0020,
@@ -640,9 +734,10 @@ Shader "DryCycle/FogComposite"
                     float awarenessReveal =
                         EvaluateAwareness(worldPx);
 
-                    // Awareness is NOT a physical clearing source. Lights and an
-                    // explosion-cleared cavity are: both are allowed to reach the same
-                    // 0.985 near-clear target, while the blast adds no coloured halo.
+                    // Awareness is not a physical clearing source. Lights, the smooth
+                    // sub-second pressure wave, and the subsequent R/G fluid cavity are.
+                    // The wave contributes no coloured halo and hands off to R/G before
+                    // its temporary B/A metadata expires.
                     float awarenessTarget = max(
                         baseTransmittance,
                         lerp(0.075, 0.145, dense));
@@ -652,7 +747,8 @@ Shader "DryCycle/FogComposite"
                         awarenessReveal);
                     float physicalReveal = 1.0 -
                         (1.0 - lightReveal) *
-                        (1.0 - blastReveal);
+                        (1.0 - blastReveal) *
+                        (1.0 - waveReveal);
                     transmittance = lerp(
                         transmittance,
                         0.985,
