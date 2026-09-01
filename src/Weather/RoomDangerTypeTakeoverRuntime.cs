@@ -8,9 +8,8 @@ using UnityEngine;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Captures the native GlobalRain intensity before ScheduledHeavyRainTraversalRuntime
-/// overlays DryCycle's nonlethal HeavyRain contribution. Enable this after
-/// RainWeatherRuntime and before ScheduledHeavyRainTraversalRuntime.
+/// Captures GlobalRain after RainWeatherRuntime/native processing but before
+/// ScheduledHeavyRainTraversalRuntime overlays DryCycle's nonlethal HeavyRain.
 /// </summary>
 internal static class ScheduledRainNativeBaselineRuntime
 {
@@ -70,15 +69,10 @@ internal static class ScheduledRainNativeBaselineRuntime
 }
 
 /// <summary>
-/// In a DryCycle-enabled region, rooms with an authored/default RoomRain DangerType
-/// are owned by the DryCycle weather runtime at the update level. The authored
-/// DangerType field is never rewritten to FloodAndRain (or any other value), and its
-/// flood/blizzard/default hazard branch is not executed while DryCycle owns the region.
-///
-/// Scheduled rain receives a rain-only update path. Room-authored rain effects retain
-/// the behavior allowed by the room's original DangerType. With no scheduled/local rain,
-/// RoomRain is quiesced instead of falling back to its default DangerType logic.
-/// Region opt-out immediately restores vanilla by delegating to orig again.
+/// Owns RoomRain objects whose room has a native/authored DangerType while DryCycle is
+/// enabled. The default Rain/Flood/FloodAndRain/Aerie lifecycle is not allowed to run
+/// behind DryCycle's scheduler. Room-authored rain effects are preserved according to
+/// the room's original DangerType, while scheduled rain uses a rain-only update path.
 /// </summary>
 internal static class RoomDangerTypeTakeoverRuntime
 {
@@ -88,31 +82,18 @@ internal static class RoomDangerTypeTakeoverRuntime
     {
         internal readonly float LightRain;
         internal readonly float HeavyRain;
-        internal readonly float BulletRain;
         internal readonly float DeathRain;
-        internal readonly float SandStorm;
-        internal readonly float DangerSandStorm;
 
-        internal WeatherSample(
-            float lightRain,
-            float heavyRain,
-            float bulletRain,
-            float deathRain,
-            float sandStorm,
-            float dangerSandStorm)
+        internal WeatherSample(float lightRain, float heavyRain, float deathRain)
         {
             LightRain = lightRain;
             HeavyRain = heavyRain;
-            BulletRain = bulletRain;
             DeathRain = deathRain;
-            SandStorm = sandStorm;
-            DangerSandStorm = dangerSandStorm;
         }
 
         internal bool ScheduledRainActive =>
             LightRain > Epsilon ||
             HeavyRain > Epsilon ||
-            BulletRain > Epsilon ||
             DeathRain > Epsilon;
     }
 
@@ -160,9 +141,6 @@ internal static class RoomDangerTypeTakeoverRuntime
         }
         else
         {
-            // DryCycle owns this region but there is no rain to render this frame.
-            // Keep the authored/default DangerType dormant instead of running Flood,
-            // FloodAndRain, Rain-cycle or blizzard logic behind the scheduler.
             QuiesceRain(self);
         }
     }
@@ -192,8 +170,8 @@ internal static class RoomDangerTypeTakeoverRuntime
             return;
         }
 
-        // Scheduled HeavyRain is nonlethal. Only preserve the room's authored/native
-        // rain smash behavior if it existed independently of the scheduled event.
+        // Scheduled HeavyRain is nonlethal. Preserve only the room-authored HeavyRain
+        // impact contribution using the pre-scheduled native GlobalRain baseline.
         if (!HasAuthoredHeavyRain(self) ||
             !ScheduledRainNativeBaselineRuntime.TryGetIntensity(
                 self.globalRain,
@@ -229,8 +207,6 @@ internal static class RoomDangerTypeTakeoverRuntime
             return false;
         }
 
-        // No authored/default DangerType means this is normally RainWeatherRuntime's
-        // own synthetic RoomRain. Let that runtime keep handling it directly.
         RoomRain.DangerType authoredDanger = room.roomSettings.DangerType;
         if (authoredDanger == null || authoredDanger == RoomRain.DangerType.None)
         {
@@ -252,31 +228,14 @@ internal static class RoomDangerTypeTakeoverRuntime
             WeatherScheduleRuntime.GetIntensity(
                 world,
                 clock,
-                WeatherScheduleEventKind.Weather,
-                "BulletRain"),
-            WeatherScheduleRuntime.GetIntensity(
-                world,
-                clock,
                 WeatherScheduleEventKind.DangerType,
                 "DeathRain",
-                "Rain"),
-            WeatherScheduleRuntime.GetIntensity(
-                world,
-                clock,
-                WeatherScheduleEventKind.Weather,
-                "SandStorm",
-                "Sandstorm"),
-            WeatherScheduleRuntime.GetIntensity(
-                world,
-                clock,
-                WeatherScheduleEventKind.DangerType,
-                "SandStorm",
-                "Sandstorm",
-                "DeathSandStorm"));
+                "Rain"));
 
-        // Do not steal a DeathRain state that was started by another system. DryCycle's
-        // own scheduled DeathRain is identified by a nonzero schedule envelope here.
-        if (rain.globalRain?.deathRain != null && sample.DeathRain <= Epsilon)
+        // Do not steal a native/foreign DeathRain state that DryCycle did not start.
+        if (rain.globalRain?.deathRain != null &&
+            !RainWeatherRuntime.OwnsDeathRain(rain.globalRain) &&
+            sample.DeathRain <= Epsilon)
         {
             return false;
         }
@@ -300,17 +259,38 @@ internal static class RoomDangerTypeTakeoverRuntime
         rain.evenUpdate = eu;
         EnsureRainLoops(rain);
 
-        float rainCap = sample.ScheduledRainActive
+        float visualRainCap = sample.ScheduledRainActive
             ? 1f
             : Mathf.Clamp01(room.roomSettings.RainIntensity);
 
         rain.intensity = Mathf.Lerp(rain.intensity, global.Intensity, 0.2f);
-        rain.intensity = Mathf.Min(rain.intensity, rainCap);
+        rain.intensity = Mathf.Min(rain.intensity, visualRainCap);
         rain.lastIntensity = rain.intensity;
 
         ApplyRainPhysics(rain, sample, authoredRain);
-        UpdateBulletDrips(rain, rainCap);
+        PreserveWaterAccessibility(rain);
+
+        // Scheduled Light/HeavyRain must not amplify a room-authored BulletRain effect.
+        // Only scheduled DeathRain owns regional BulletDrips at full cap.
+        float bulletCap = sample.DeathRain > Epsilon
+            ? 1f
+            : Mathf.Clamp01(room.roomSettings.RainIntensity);
+        UpdateBulletDrips(rain, bulletCap);
         UpdateRainSounds(rain);
+    }
+
+    private static void PreserveWaterAccessibility(RoomRain rain)
+    {
+        if (rain?.room?.game == null)
+        {
+            return;
+        }
+
+        if (rain.waterLevelMin != null ||
+            (rain.waterLevelMax != null && rain.room.game.clock % 10 == 0))
+        {
+            rain.UpdateWaterAccessibility();
+        }
     }
 
     private static void ApplyRainPhysics(
@@ -668,8 +648,6 @@ internal static class RoomDangerTypeTakeoverRuntime
             rain.rumbleSound.Update();
         }
 
-        // DryCycle schedules its own disaster timing. Do not leak the vanilla
-        // TimeUntilRain countdown or authored flood loop into a taken-over frame.
         MuteLoop(rain.distantDeathRainSound);
         MuteLoop(rain.floodingSound);
 
@@ -698,8 +676,6 @@ internal static class RoomDangerTypeTakeoverRuntime
             return false;
         }
 
-        // Preserve the room's native relationship between DangerType and RoomEffect
-        // rain. Flood does not render local rain in vanilla; Rain/FloodAndRain do.
         return rain.dangerType == RoomRain.DangerType.Rain ||
                rain.dangerType == RoomRain.DangerType.FloodAndRain ||
                rain.dangerType == RoomRain.DangerType.AerieBlizzard;
