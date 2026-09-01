@@ -283,34 +283,13 @@ internal static class WeatherScheduleRuntime
         return random.NextDouble() * 100d < chancePercent;
     }
 
-    private static float EventEnvelope(ScheduledWeatherEvent scheduled, long phaseTicks)
-    {
-        if (WeatherPhaseScheduler.HasDeathRainTransition(scheduled?.Candidate))
-        {
-            return DeathRainEnvelope(scheduled, phaseTicks);
-        }
-
-        long start = (long)scheduled.StartPip * WeatherPhaseScheduler.PipTicks;
-        long end = (long)scheduled.EndPipExclusive * WeatherPhaseScheduler.PipTicks;
-        if (phaseTicks < start || phaseTicks >= end)
-        {
-            return 0f;
-        }
-
-        long local = phaseTicks - start;
-        long duration = end - start;
-        long fadeTicks = Math.Min(WeatherPhaseScheduler.PipTicks / 2, duration / 2);
-        if (fadeTicks <= 0)
-        {
-            return 1f;
-        }
-
-        float fadeIn = Math.Min(1f, (float)local / fadeTicks);
-        float fadeOut = Math.Min(1f, (float)(duration - local) / fadeTicks);
-        return Smooth01(Math.Max(0f, Math.Min(fadeIn, fadeOut)));
-    }
-
-    private static float DeathRainEnvelope(
+    /// <summary>
+    /// Every scheduled Weather and DangerType uses the same external envelope:
+    /// 15 seconds fade-in before the first authored pip, all authored pips at full
+    /// schedule intensity, then 15 seconds fade-out after the final authored pip.
+    /// The transition time is deliberately outside DurationPips.
+    /// </summary>
+    private static float EventEnvelope(
         ScheduledWeatherEvent scheduled,
         long phaseTicks)
     {
@@ -321,7 +300,7 @@ internal static class WeatherScheduleRuntime
 
         long mainStart = (long)scheduled.StartPip * WeatherPhaseScheduler.PipTicks;
         long mainEnd = (long)scheduled.EndPipExclusive * WeatherPhaseScheduler.PipTicks;
-        long transition = WeatherPhaseScheduler.DeathRainTransitionTicks;
+        long transition = WeatherPhaseScheduler.EventTransitionTicks;
         long effectStart = mainStart - transition;
         long effectEnd = mainEnd + transition;
 
@@ -330,9 +309,6 @@ internal static class WeatherScheduleRuntime
             return 0f;
         }
 
-        // The 15-second lead-in exists outside the authored DeathRain cells. It rises
-        // smoothly from zero and reaches exactly 1.0 at the first DeathRain pip, so
-        // none of the scheduled 2..4 danger pips are consumed by ramp-up time.
         if (phaseTicks < mainStart)
         {
             float t = transition <= 0
@@ -341,15 +317,13 @@ internal static class WeatherScheduleRuntime
             return Smooth01(t);
         }
 
-        // Every authored DeathRain cell represents full schedule intensity. Native
-        // DeathRain still controls its own nonlinear internal stages underneath this
-        // multiplier; the scheduler no longer fades those cells down at their edges.
+        // DurationPips represents only the full-strength authored block. No part of
+        // the requested 2..5 Weather or 2..4 Danger duration is consumed by fading.
         if (phaseTicks < mainEnd)
         {
             return 1f;
         }
 
-        // Symmetric extra 15-second tail after the last authored cell.
         float tail = transition <= 0
             ? 0f
             : (effectEnd - phaseTicks) / (float)transition;
@@ -398,9 +372,6 @@ internal static class WeatherScheduleRuntime
                 saveCycle = 0;
             }
 
-            // saveSeed distinguishes save files; saveCycle makes a fresh shelter cycle
-            // roll a new forecast; DayIndex then distinguishes continuous DryCycle days
-            // that pass without a shelter reload.
             AddInt(ref hash, saveSeed);
             AddInt(ref hash, saveCycle);
             AddInt(ref hash, dayIndex);
@@ -451,11 +422,8 @@ internal static class WeatherScheduleRuntime
         {
             ScheduledWeatherEvent scheduled = schedule.Events[i];
             Plugin.Logger?.LogInfo($"  {scheduled}");
-            if (WeatherPhaseScheduler.HasDeathRainTransition(scheduled?.Candidate))
-            {
-                Plugin.Logger?.LogInfo(
-                    "    DeathRain transition: -15s lead-in, full intensity on authored pips, +15s tail.");
-            }
+            Plugin.Logger?.LogInfo(
+                "    Transition: -15s fade-in, full intensity on authored pips, +15s fade-out (30s excluded from duration).");
         }
     }
 }
