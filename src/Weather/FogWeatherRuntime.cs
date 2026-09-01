@@ -12,12 +12,17 @@ namespace DryCycle.Weather;
 /// WorldClock-driven Fog / DenseFog renderer.
 ///
 /// Rain World's native Fog shader supplies the atmospheric color/desaturation pass.
-/// A separate palette-colored screen veil supplies the short visibility range that a
-/// native Fog pass cannot reach on its own. The veil is a custom-color TriangleMesh;
-/// its vertex alpha is reduced inside ordinary LightSource radii, so lamps, lantern
-/// mice, glowing creatures/items and modded standard LightSources reveal the scene
-/// using their original position/radius/alpha instead of a DryCycle-specific range.
-/// Environmental lights never cut the veil.
+/// A separate palette-colored screen veil owns the short visibility range that a
+/// native Fog pass cannot reach on its own. DenseFog additionally applies a nonlinear
+/// visibility extinction curve so high-contrast thin details such as poles and chains
+/// lose almost all scene contribution instead of merely showing through a gray alpha
+/// overlay.
+///
+/// Fog reveal is deliberately restricted to Lantern and LanternMouse. Their reveal
+/// radii are fixed at the minimum designed radius of each object instead of following
+/// the continuously changing LightSource.Rad, preventing the edge of a clear area from
+/// pulsing or twitching with native flicker/breath animation. LanternMouse reveal
+/// strength may still change with its battery/light state; only the radius is fixed.
 ///
 /// Mapper-authored RoomSettings Fog is never replaced or clamped against this weather:
 /// the authored camera effect renders normally and DryCycle layers on top of it.
@@ -26,8 +31,7 @@ internal static class FogWeatherRuntime
 {
     private const float Epsilon = 0.0001f;
 
-    // Native Fog provides the atmospheric look. The veil, not repeated native Fog
-    // passes, now owns actual visibility loss.
+    // Native Fog provides the atmospheric look. The veil owns actual visibility loss.
     private const float FogNativeStrength = 0.92f;
     private const float DenseFogNativeStrength = 1.00f;
 
@@ -36,11 +40,22 @@ internal static class FogWeatherRuntime
     private const float FogVeilStrength = 0.48f;
     private const float DenseFogVeilStrength = 0.94f;
 
-    // DenseFog keeps a tiny minimum player-local visibility bubble so movement is
-    // possible without a light. This is independent from light range; LightSource
-    // reveal always uses the source's own native radius.
+    // At full DenseFog, the old 0.94 alpha veil still left 6% of the original scene,
+    // enough for black poles/chains to remain readable. Extinction applies an exponent
+    // to that remaining scene visibility: 0.06^2.2 ~= 0.002, leaving only ~0.2% of the
+    // original contrast outside reveal areas while ordinary Fog keeps its old response.
+    private const float DenseFogContrastExponent = 2.20f;
+
+    // DenseFog keeps a tiny minimum player-local visibility bubble so movement remains
+    // possible without a lamp. This is awareness, not a fog-penetrating light source.
     private const float DenseFogPlayerAwarenessRadius = 58f;
     private const float DenseFogPlayerAwarenessStrength = 0.84f;
+
+    // Fixed clear radii. Lantern's native 250*flicker targets roughly 0.8..1.2, giving
+    // a designed minimum of 200 px. LanternMouse's native radius can contract to 40 px
+    // while charging; use that minimum rather than its breathing/flickering Rad.
+    private const float LanternRevealRadius = 200f;
+    private const float LanternMouseRevealRadius = 40f;
 
     // ~34 px cells at 1366x768. Vertex interpolation keeps circular reveals smooth
     // while staying well below the cost of a full-screen per-pixel CPU mask.
@@ -64,7 +79,8 @@ internal static class FogWeatherRuntime
 
     private sealed class FogWeatherController : CosmeticSprite
     {
-        private readonly List<LightSource> _localLights = new();
+        private readonly List<Lantern> _lanterns = new();
+        private readonly List<LanternMouse> _lanternMice = new();
         private readonly List<RevealSample> _revealSamples = new();
 
         private float _lastNativeStrength;
@@ -105,7 +121,7 @@ internal static class FogWeatherRuntime
 
             if (--_lightRefreshCounter <= 0)
             {
-                RefreshLocalLights();
+                RefreshFogLights();
                 _lightRefreshCounter = LightRefreshTicks;
             }
         }
@@ -178,7 +194,7 @@ internal static class FogWeatherRuntime
                 if (veil.isVisible)
                 {
                     BuildRevealSamples(timeStacker, denseStrength);
-                    UpdateVeilColors(veil, camPos, veilStrength);
+                    UpdateVeilColors(veil, camPos, veilStrength, denseStrength);
                 }
             }
 
@@ -201,7 +217,7 @@ internal static class FogWeatherRuntime
         {
             // The native atmospheric Fog pass belongs with the normal foreground
             // full-screen effects. The dense veil is intentionally late: transparent
-            // holes reveal the already-rendered level AND its native local lights.
+            // holes reveal the already-rendered level and the two permitted fog lights.
             sLeaser.sprites[0].RemoveFromContainer();
             rCam.ReturnFContainer("Foreground").AddChild(sLeaser.sprites[0]);
 
@@ -209,9 +225,10 @@ internal static class FogWeatherRuntime
             rCam.ReturnFContainer("GrabShaders").AddChild(sLeaser.sprites[1]);
         }
 
-        private void RefreshLocalLights()
+        private void RefreshFogLights()
         {
-            _localLights.Clear();
+            _lanterns.Clear();
+            _lanternMice.Clear();
             if (room?.updateList == null)
             {
                 return;
@@ -219,12 +236,19 @@ internal static class FogWeatherRuntime
 
             for (int i = 0; i < room.updateList.Count; i++)
             {
-                if (room.updateList[i] is LightSource light &&
-                    !light.environmentalLight &&
-                    !light.slatedForDeletetion &&
-                    light.room == room)
+                UpdatableAndDeletable obj = room.updateList[i];
+                if (obj == null || obj.slatedForDeletetion || obj.room != room)
                 {
-                    _localLights.Add(light);
+                    continue;
+                }
+
+                if (obj is Lantern lantern)
+                {
+                    _lanterns.Add(lantern);
+                }
+                else if (obj is LanternMouse mouse)
+                {
+                    _lanternMice.Add(mouse);
                 }
             }
         }
@@ -233,35 +257,59 @@ internal static class FogWeatherRuntime
         {
             _revealSamples.Clear();
 
-            for (int i = _localLights.Count - 1; i >= 0; i--)
+            for (int i = _lanterns.Count - 1; i >= 0; i--)
             {
-                LightSource light = _localLights[i];
-                if (light == null ||
-                    light.slatedForDeletetion ||
-                    light.room != room ||
-                    light.environmentalLight)
+                Lantern lantern = _lanterns[i];
+                if (lantern == null ||
+                    lantern.slatedForDeletetion ||
+                    lantern.room != room ||
+                    lantern.firstChunk == null)
                 {
-                    _localLights.RemoveAt(i);
+                    _lanterns.RemoveAt(i);
                     continue;
                 }
 
-                float radius = Mathf.Max(
-                    0f,
-                    Mathf.Lerp(light.lastRad, light.Rad, timeStacker));
-                float strength = Mathf.Clamp01(
-                    Mathf.Lerp(light.lastAlpha, light.Alpha, timeStacker) *
-                    light.colorAlpha *
-                    EvaluateBlink(light));
-                if (radius <= 1f || strength <= Epsilon)
+                Vector2 position = Vector2.Lerp(
+                    lantern.firstChunk.lastPos,
+                    lantern.firstChunk.pos,
+                    timeStacker);
+                _revealSamples.Add(new RevealSample(
+                    position,
+                    LanternRevealRadius,
+                    1f));
+            }
+
+            for (int i = _lanternMice.Count - 1; i >= 0; i--)
+            {
+                LanternMouse mouse = _lanternMice[i];
+                if (mouse == null ||
+                    mouse.slatedForDeletetion ||
+                    mouse.room != room ||
+                    mouse.mainBodyChunk == null)
+                {
+                    _lanternMice.RemoveAt(i);
+                    continue;
+                }
+
+                MouseGraphics graphics = mouse.graphicsModule as MouseGraphics;
+                float strength = graphics == null
+                    ? 0f
+                    : Mathf.Clamp01(
+                        graphics.LightStrength *
+                        (1f - graphics.flicker * 0.4f));
+                if (strength <= Epsilon)
                 {
                     continue;
                 }
 
                 Vector2 position = Vector2.Lerp(
-                    light.lastPos,
-                    light.Pos,
+                    mouse.mainBodyChunk.lastPos,
+                    mouse.mainBodyChunk.pos,
                     timeStacker);
-                _revealSamples.Add(new RevealSample(position, radius, strength));
+                _revealSamples.Add(new RevealSample(
+                    position,
+                    LanternMouseRevealRadius,
+                    strength));
             }
 
             if (denseStrength <= Epsilon || room?.game?.Players == null)
@@ -270,7 +318,7 @@ internal static class FogWeatherRuntime
             }
 
             // Baseline close-range awareness is intentionally tiny and only scales in
-            // with DenseFog. It does not alter any actual LightSource radius.
+            // with DenseFog. It is separate from the Lantern/LanternMouse light list.
             for (int i = 0; i < room.game.Players.Count; i++)
             {
                 Player player = room.game.Players[i]?.realizedCreature as Player;
@@ -293,12 +341,26 @@ internal static class FogWeatherRuntime
         private void UpdateVeilColors(
             TriangleMesh veil,
             Vector2 camPos,
-            float veilStrength)
+            float veilStrength,
+            float denseStrength)
         {
             if (veil.verticeColors == null || veil.vertices == null)
             {
                 return;
             }
+
+            // Convert the old linear veil alpha into a scene-visibility value, then
+            // collapse that visibility nonlinearly as DenseFog approaches full strength.
+            // Ordinary Fog (denseStrength=0) is unchanged.
+            float linearSceneVisibility = Mathf.Clamp01(1f - veilStrength);
+            float extinctSceneVisibility = Mathf.Pow(
+                linearSceneVisibility,
+                DenseFogContrastExponent);
+            float sceneVisibility = Mathf.Lerp(
+                linearSceneVisibility,
+                extinctSceneVisibility,
+                Mathf.Clamp01(denseStrength));
+            float baseVeilAlpha = 1f - sceneVisibility;
 
             int count = Math.Min(veil.verticeColors.Length, veil.vertices.Length);
             for (int i = 0; i < count; i++)
@@ -315,8 +377,6 @@ internal static class FogWeatherRuntime
                         continue;
                     }
 
-                    // Falloff reaches exactly zero at the native LightSource radius;
-                    // DryCycle changes opacity inside the range, never the range itself.
                     float radial = 1f - distance / sample.Radius;
                     radial = Smooth01(radial);
                     radial = Mathf.Pow(radial, 0.58f);
@@ -330,43 +390,11 @@ internal static class FogWeatherRuntime
                 }
 
                 Color color = _fogColor;
-                color.a = veilStrength * (1f - reveal);
+                color.a = baseVeilAlpha * (1f - reveal);
                 veil.verticeColors[i] = color;
             }
 
             veil.Refresh();
-        }
-
-        private static float EvaluateBlink(LightSource light)
-        {
-            if (light == null ||
-                light.blinkType == PlacedObject.LightSourceData.BlinkType.None)
-            {
-                return 1f;
-            }
-
-            float period = (1.01f - light.blinkRate) * 1000f;
-            if (light.blinkType == PlacedObject.LightSourceData.BlinkType.Flash)
-            {
-                period /= 4f;
-                return period > Epsilon && (float)light.blinkTicker % (period * 2f) <= period
-                    ? 0f
-                    : 1f;
-            }
-
-            if (light.blinkType == PlacedObject.LightSourceData.BlinkType.Fade)
-            {
-                if (period <= Epsilon)
-                {
-                    return 1f;
-                }
-
-                return (Mathf.Sin(
-                            (float)light.blinkTicker % period / period *
-                            Mathf.PI * 2f) + 1f) * 0.5f;
-            }
-
-            return 1f;
         }
     }
 
