@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.107";
+    public const string Version = "0.1.108";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -73,6 +73,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            WeatherCameraEffectsRuntime.Disable();
             SyntheticRoomRainTakeoverRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
@@ -167,6 +168,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationDivider.Enable();
 
             WorldClockHooks.TestScheduleEnabled = false;
+            WeatherTypeRegistry.ResetWarnings();
             RegionClimateRegistry.Reload();
             DayNightRuntime.Enable();
             WorldClockRegionContinuityRuntime.Enable();
@@ -192,6 +194,11 @@ internal sealed class Plugin : BaseUnityPlugin
             // rooms use a rain-only update and never enter vanilla RoomRain.Update.
             SyntheticRoomRainTakeoverRuntime.Enable();
 
+            // WorldClock keeps RainCycle.timer out of RainGameOver, so RoomCamera cannot
+            // receive scheduled rain shake through RainCycle.ScreenShake. Bridge the
+            // already-scheduled HeavyRain/DeathRain outputs directly into the camera.
+            WeatherCameraEffectsRuntime.Enable();
+
             RainMeterRoundPipRuntime.Enable();
             RainMeterFastForwardForecastFix.Enable();
 
@@ -205,6 +212,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            WeatherCameraEffectsRuntime.Disable();
             SyntheticRoomRainTakeoverRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
