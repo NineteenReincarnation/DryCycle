@@ -25,6 +25,15 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
     private const int MaxBlastImpulses = 4;
     private const float BlastClearDecayPerSecond = 0.62f;
 
+    // Blast tuning is intentionally centralized. Velocity is exactly five times the
+    // previous implementation. Radius is scaled by 2.30, so the physically carved area
+    // is 2.30^2 = 5.29 times larger before terrain occlusion. Compression is also five
+    // times stronger so displaced fog reads as an actual pressure front rather than a
+    // faint density ripple.
+    private const float BlastRadiusMultiplier = 2.30f;
+    private const float BlastVelocityMultiplier = 5.00f;
+    private const float BlastCompressionMultiplier = 5.00f;
+
     private readonly Room _room;
     private readonly DryCycleFogObstacleField _obstacles;
     private readonly Vector4[] _impulsePosRadius = new Vector4[MaxPlayerImpulses];
@@ -456,17 +465,24 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
             }
 
             float sourceRadius = Mathf.Max(30f, explosion.rad);
-            float coreRadius = sourceRadius * (scavengerBomb ? 0.60f : 0.58f);
-            float outerRadius = sourceRadius * (scavengerBomb ? 1.18f : 1.30f);
+            float coreRadius = sourceRadius *
+                (scavengerBomb ? 0.60f : 0.58f) *
+                BlastRadiusMultiplier;
+            float outerRadius = sourceRadius *
+                (scavengerBomb ? 1.18f : 1.30f) *
+                BlastRadiusMultiplier;
 
-            // The bomb's stock Explosion is 250px while the explosive spear is 110px.
-            // These values preserve that hierarchy without letting either shock become a
-            // room-wide wind field. Compression is approximately proportional to carved
-            // core area, so the outer ring reads as displaced fog rather than new fog.
-            float impulsePxPerSecond = scavengerBomb ? 620f : 360f;
-            float densityCarve = scavengerBomb ? 0.96f : 0.87f;
-            float compression = scavengerBomb ? 0.38f : 0.28f;
-            float visibilityClear = scavengerBomb ? 0.98f : 0.88f;
+            // Keep the bomb/spear hierarchy, but deliberately make the interaction
+            // dramatically stronger than the first implementation. The 2.30 radius
+            // scale gives 5.29x carved area, and velocity/compression are both 5x.
+            float impulsePxPerSecond =
+                (scavengerBomb ? 620f : 360f) *
+                BlastVelocityMultiplier;
+            float densityCarve = scavengerBomb ? 0.995f : 0.98f;
+            float compression =
+                (scavengerBomb ? 0.38f : 0.28f) *
+                BlastCompressionMultiplier;
+            float visibilityClear = scavengerBomb ? 0.995f : 0.98f;
 
             int index = _blastCount++;
             _blastPosRadii[index] = new Vector4(
