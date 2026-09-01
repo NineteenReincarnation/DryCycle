@@ -76,7 +76,10 @@ internal static class HeatColumnHooks
                 end,
                 data.Radius,
                 data.Strength,
-                data.Turbulence));
+                data.Turbulence,
+                data.FlowSpeed,
+                data.Expansion,
+                data.Pulse));
         }
     }
 
