@@ -591,6 +591,16 @@ Shader "DryCycle/FogComposite"
                     float turbulence = densityData.y;
                     float blastClear = SampleBlastClear(roomUV);
 
+                    // Remap the physical G field into a broad full-clear core plus a
+                    // soft shoulder. G itself remains obstacle-aware, advected and
+                    // decaying with the fluid; this only fixes the final visibility
+                    // response so a real evacuated cavity can become as clear as a
+                    // LanternMouse instead of being capped around 85-90% transmittance.
+                    float blastReveal = smoothstep(
+                        0.18,
+                        0.55,
+                        blastClear);
+
                     // Normal fluid thinning is visual only. The explicit G channel is
                     // different: it represents fog physically expelled by a recognized
                     // explosion, so it is permitted to reduce local gameplay extinction.
@@ -630,11 +640,9 @@ Shader "DryCycle/FogComposite"
                     float awarenessReveal =
                         EvaluateAwareness(worldPx);
 
-                    // Awareness is NOT a light. It only restores a modest amount of
-                    // near-player silhouette information; real fog illuminators
-                    // (Lantern, LanternMouse, theGlow, GlowWeed and LillyPuck) can reach
-                    // almost-clear transmittance. Blast clearing is already baked into
-                    // baseTransmittance above and therefore naturally composes with both.
+                    // Awareness is NOT a physical clearing source. Lights and an
+                    // explosion-cleared cavity are: both are allowed to reach the same
+                    // 0.985 near-clear target, while the blast adds no coloured halo.
                     float awarenessTarget = max(
                         baseTransmittance,
                         lerp(0.075, 0.145, dense));
@@ -642,10 +650,13 @@ Shader "DryCycle/FogComposite"
                         baseTransmittance,
                         awarenessTarget,
                         awarenessReveal);
+                    float physicalReveal = 1.0 -
+                        (1.0 - lightReveal) *
+                        (1.0 - blastReveal);
                     transmittance = lerp(
                         transmittance,
                         0.985,
-                        lightReveal);
+                        physicalReveal);
 
                     // Visual density changes the medium's look, not gameplay visibility.
                     // Turbulent regions gain micro-contrast and cooler valleys, removing
