@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.108";
+    public const string Version = "0.1.109";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -71,6 +71,7 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             MiscRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
+            FogForecastFlowRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             WeatherCameraEffectsRuntime.Disable();
@@ -80,6 +81,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
             ShelterCycleResetRuntime.Disable();
             WorldClockRegionContinuityRuntime.Disable();
@@ -174,6 +176,7 @@ internal sealed class Plugin : BaseUnityPlugin
             WorldClockRegionContinuityRuntime.Enable();
             ShelterCycleResetRuntime.Enable();
             WeatherScheduleRuntime.Enable();
+            FogWeatherRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
@@ -200,6 +203,7 @@ internal sealed class Plugin : BaseUnityPlugin
             WeatherCameraEffectsRuntime.Enable();
 
             RainMeterRoundPipRuntime.Enable();
+            FogForecastFlowRuntime.Enable();
             RainMeterFastForwardForecastFix.Enable();
 
             MiscRuntime.Enable();
@@ -210,6 +214,7 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             MiscRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
+            FogForecastFlowRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             WeatherCameraEffectsRuntime.Disable();
@@ -219,6 +224,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
             ShelterCycleResetRuntime.Disable();
             WorldClockRegionContinuityRuntime.Disable();
