@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
 using UnityEngine;
@@ -7,20 +6,14 @@ using UnityEngine;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Owns the RoomRain objects created by RainWeatherRuntime for rooms that did not
-/// originally have a RoomRain DangerType. Those synthetic objects are rendering
-/// carriers for DryCycle regional rain; they must not enter vanilla RoomRain.Update,
-/// whose flood/rain-cycle branches assume a natively-authored RoomRain lifecycle.
+/// Owns safe rain-only updates for DryCycle-created RoomRain carriers and for the
+/// vanilla DangerType=None RoomRain objects created solely by WaterCycleBottom/Top.
+/// These carriers must not enter vanilla rain/flood hazard branches while a DryCycle
+/// regional rain event is active.
 /// </summary>
 internal static class SyntheticRoomRainTakeoverRuntime
 {
     private const float Epsilon = 0.0001f;
-
-    private sealed class Marker
-    {
-    }
-
-    private static ConditionalWeakTable<RoomRain, Marker> _synthetic = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -30,7 +23,6 @@ internal static class SyntheticRoomRainTakeoverRuntime
             return;
         }
 
-        On.Room.Loaded += Room_Loaded;
         On.RoomRain.Update += RoomRain_Update;
         _enabled = true;
     }
@@ -42,38 +34,8 @@ internal static class SyntheticRoomRainTakeoverRuntime
             return;
         }
 
-        On.Room.Loaded -= Room_Loaded;
         On.RoomRain.Update -= RoomRain_Update;
-        _synthetic = new ConditionalWeakTable<RoomRain, Marker>();
         _enabled = false;
-    }
-
-    private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
-    {
-        RoomRain before = self?.roomRain;
-        orig(self);
-
-        if (self == null ||
-            before != null ||
-            self.roomRain == null ||
-            self.roomSettings == null ||
-            self.roomSettings.DangerType != RoomRain.DangerType.None ||
-            self.roomRain.dangerType != RoomRain.DangerType.Rain ||
-            self.abstractRoom == null ||
-            self.abstractRoom.shelter ||
-            self.world?.game == null ||
-            !self.world.game.IsStorySession ||
-            !RegionDayNightOptions.IsEnabled(self.world))
-        {
-            return;
-        }
-
-        // RainWeatherRuntime is enabled before this runtime. Calling orig above lets
-        // its Room.Loaded hook create the regional carrier first; a transition from
-        // no RoomRain to Rain in an authored DangerType=None room identifies that
-        // carrier without touching native/authored RoomRain objects.
-        _synthetic.Remove(self.roomRain);
-        _synthetic.Add(self.roomRain, new Marker());
     }
 
     private static void RoomRain_Update(
@@ -81,21 +43,36 @@ internal static class SyntheticRoomRainTakeoverRuntime
         RoomRain self,
         bool eu)
     {
-        if (self == null || !_synthetic.TryGetValue(self, out _))
+        bool dryCycleCarrier = RainWeatherRuntime.IsSyntheticRoomRain(self);
+        bool waterCycleCarrier = IsNativeWaterCycleCarrier(self);
+        if (!dryCycleCarrier && !waterCycleCarrier)
         {
             orig(self, eu);
             return;
         }
 
-        Room room = self.room;
+        Room room = self?.room;
         World world = room?.world;
-        if (room?.roomSettings == null ||
-            world?.game == null ||
-            !world.game.IsStorySession ||
-            !RegionDayNightOptions.IsEnabled(world) ||
-            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
+        bool validDryCycleContext =
+            room?.roomSettings != null &&
+            world?.game != null &&
+            world.game.IsStorySession &&
+            RegionDayNightOptions.IsEnabled(world) &&
+            WorldClockHooks.TryGetClock(world, out WorldClock clock);
+
+        if (!validDryCycleContext)
         {
-            Quiesce(self);
+            if (dryCycleCarrier)
+            {
+                // A DryCycle-created carrier has no native lifecycle to fall back to.
+                Quiesce(self);
+            }
+            else
+            {
+                // The vanilla WaterCycle carrier must return to its original update as
+                // soon as DryCycle no longer owns this region.
+                orig(self, eu);
+            }
             return;
         }
 
@@ -118,27 +95,53 @@ internal static class SyntheticRoomRainTakeoverRuntime
             "DeathRain",
             "Rain");
 
-        // A foreign/native DeathRain may own GlobalRain even when DryCycle did not
-        // schedule one. Keep rendering/physics from the already-established native
-        // GlobalRain outputs, but still avoid vanilla RoomRain.Update on this synthetic
-        // carrier.
-        bool foreignDeathRain = self.globalRain?.deathRain != null && death <= Epsilon;
-        if (light <= Epsilon &&
-            heavy <= Epsilon &&
-            death <= Epsilon &&
-            !foreignDeathRain)
+        GlobalRain global = self.globalRain;
+        bool foreignDeathRain = global?.deathRain != null &&
+                                !RainWeatherRuntime.OwnsDeathRain(global) &&
+                                death <= Epsilon;
+        bool scheduledRain = light > Epsilon || heavy > Epsilon || death > Epsilon;
+
+        if (!scheduledRain && !foreignDeathRain)
         {
-            Quiesce(self);
+            if (dryCycleCarrier)
+            {
+                Quiesce(self);
+            }
+            else
+            {
+                // Water-cycle rooms still need their native accessibility/sound state
+                // when no DryCycle rain event is using the carrier.
+                orig(self, eu);
+            }
             return;
         }
 
-        UpdateRainOnly(self, eu, death > Epsilon || foreignDeathRain);
+        UpdateRainOnly(
+            self,
+            eu,
+            lethalDeathRain: death > Epsilon || foreignDeathRain,
+            preserveNativeCarrier: waterCycleCarrier);
+    }
+
+    private static bool IsNativeWaterCycleCarrier(RoomRain rain)
+    {
+        if (rain == null || RainWeatherRuntime.IsSyntheticRoomRain(rain))
+        {
+            return false;
+        }
+
+        Room room = rain.room;
+        return room?.roomSettings != null &&
+               room.roomSettings.DangerType == RoomRain.DangerType.None &&
+               rain.dangerType == RoomRain.DangerType.None &&
+               (rain.waterLevelMin != null || rain.waterLevelMax != null);
     }
 
     private static void UpdateRainOnly(
         RoomRain rain,
         bool eu,
-        bool lethalDeathRain)
+        bool lethalDeathRain,
+        bool preserveNativeCarrier)
     {
         Room room = rain?.room;
         GlobalRain global = rain?.globalRain;
@@ -156,10 +159,8 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         if (lethalDeathRain && global.AnyPushAround)
         {
-            // Only DeathRain is allowed to enter native rain-pressure/rainDeath
-            // physics on a DryCycle synthetic carrier. Scheduled HeavyRain never
-            // calls this path; its traversal resistance is handled separately by
-            // ScheduledHeavyRainTraversalRuntime.
+            // Only DeathRain may use native rain-pressure/rainDeath physics on a
+            // DryCycle regional carrier. Scheduled HeavyRain never enters this path.
             float? previousRainIntensity = room.roomSettings.rInts;
             RoomRain.DangerType previousDanger = rain.dangerType;
             room.roomSettings.rInts = 1f;
@@ -175,8 +176,31 @@ internal static class SyntheticRoomRainTakeoverRuntime
             }
         }
 
-        UpdateBulletDrips(rain, lethalDeathRain ? 1f : 0f);
+        PreserveWaterAccessibility(rain);
+
+        // DeathRain owns regional BulletDrips. For a native WaterCycle carrier, keep
+        // the room-authored BulletRain channel at its original RainIntensity too.
+        float bulletGate = lethalDeathRain
+            ? 1f
+            : preserveNativeCarrier
+                ? Mathf.Clamp01(room.roomSettings.RainIntensity)
+                : 0f;
+        UpdateBulletDrips(rain, bulletGate);
         UpdateRainSounds(rain);
+    }
+
+    private static void PreserveWaterAccessibility(RoomRain rain)
+    {
+        if (rain?.room?.game == null)
+        {
+            return;
+        }
+
+        if (rain.waterLevelMin != null ||
+            (rain.waterLevelMax != null && rain.room.game.clock % 10 == 0))
+        {
+            rain.UpdateWaterAccessibility();
+        }
     }
 
     private static void UpdateBulletDrips(RoomRain rain, float densityGate)
@@ -254,8 +278,8 @@ internal static class SyntheticRoomRainTakeoverRuntime
             rain.rumbleSound.Update();
         }
 
-        // Synthetic regional rain is governed by the DryCycle schedule, not the
-        // vanilla RainCycle countdown/flood branches.
+        // Regional rain uses DryCycle scheduling, never the vanilla countdown/flood
+        // loops on these carrier objects.
         MuteLoop(rain.floodingSound);
         MuteLoop(rain.distantDeathRainSound);
 
