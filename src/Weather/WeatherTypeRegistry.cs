@@ -26,7 +26,10 @@ internal static class WeatherTypeRegistry
 
         if (kind == WeatherScheduleEventKind.Weather)
         {
-            if (normalized == "LIGHTRAIN" || normalized == "HEAVYRAIN")
+            if (normalized == "LIGHTRAIN" ||
+                normalized == "HEAVYRAIN" ||
+                normalized == "FOG" ||
+                normalized == "DENSEFOG")
             {
                 return true;
             }
