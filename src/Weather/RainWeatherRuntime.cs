@@ -94,9 +94,8 @@ internal static class RainWeatherRuntime
         }
 
         // Region weather needs the same renderer/shelter mask/sounds as authored
-        // Rain rooms. This object is explicitly marked as DryCycle-owned so it can be
-        // kept fully dormant whenever no scheduled rain is active or the region opts
-        // out; native/authored RoomRain objects are never suppressed by that rule.
+        // Rain rooms. Mark only the object DryCycle creates so native RoomRain never
+        // gets suppressed by DryCycle's dormant-state rules.
         RoomRain roomRain = new(self.game.globalRain, self)
         {
             dangerType = RoomRain.DangerType.Rain
@@ -111,8 +110,8 @@ internal static class RainWeatherRuntime
         GlobalRain self)
     {
         World world = self?.game?.world;
-        if (world == null ||
-            !self.game.IsStorySession ||
+        if (world?.game == null ||
+            !world.game.IsStorySession ||
             !RegionDayNightOptions.IsEnabled(world) ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock))
         {
@@ -211,7 +210,7 @@ internal static class RainWeatherRuntime
         // rain after this region's DryCycle switch is turned off. Native RoomRain is
         // deliberately not touched here and runs through orig exactly as authored.
         if (synthetic &&
-            (world == null ||
+            (world?.game == null ||
              !world.game.IsStorySession ||
              !RegionDayNightOptions.IsEnabled(world)))
         {
@@ -219,7 +218,7 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        if (world == null ||
+        if (world?.game == null ||
             !RegionDayNightOptions.IsEnabled(world) ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock))
         {
@@ -250,8 +249,6 @@ internal static class RainWeatherRuntime
             }
             else
             {
-                // An authored/native RoomRain remains fully owned by the room whenever
-                // DryCycle has no active regional rain event.
                 orig(self, eu);
             }
             return;
@@ -260,8 +257,7 @@ internal static class RainWeatherRuntime
         float? previousRainIntensity = room.roomSettings.rInts;
         RoomRain.DangerType previousDanger = self.dangerType;
 
-        // Region weather should be visible in rooms that did not author a local rain
-        // intensity. This override exists only for the duration of RoomRain.Update.
+        // Regional rain should render in rooms with no authored local rain intensity.
         room.roomSettings.rInts = 1f;
         if (synthetic)
         {
@@ -269,7 +265,7 @@ internal static class RainWeatherRuntime
         }
         else if (self.dangerType == RoomRain.DangerType.Flood)
         {
-            // Preserve an authored flood while adding the scheduled regional rain.
+            // Preserve an authored flood while adding scheduled regional rain.
             self.dangerType = RoomRain.DangerType.FloodAndRain;
         }
 
@@ -376,7 +372,6 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        // Never claim a DeathRain instance created by another system.
         if (rain.deathRain != null)
         {
             return;
