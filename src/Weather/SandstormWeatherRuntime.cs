@@ -354,7 +354,7 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        if (!TryGetClock(self, out _))
+        if (!TryGetClock(self, out WorldClock clock))
         {
             // Region opt-out restores Watcher's original behavior completely for
             // native/authored storms. Synthetic storms were already caught above.
@@ -362,10 +362,21 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
+        // Only the scheduled DangerType sandstorm needs DryCycle's stronger shelter
+        // rule. Ordinary scheduled SurfaceSandstorm and authored Watcher storms retain
+        // their native AffectObjects implementation.
+        WeatherScheduleRuntime.Synchronize(self.room.world);
+        WeatherSample sample = Evaluate(self.room.world, clock);
+        if (sample.Hazard <= 0.0001f)
+        {
+            orig(self, amount);
+            return;
+        }
+
         // Watcher's native disaster storm progressively lerps the SurfaceMask toward
         // 1 as GlobalIntensity rises, which eventually makes walls stop protecting the
-        // player. DryCycle keeps the local exposure mask authoritative at every storm
-        // strength: wind and lethality must reach a body through open terrain.
+        // player. DryCycle keeps the local exposure mask authoritative for the
+        // scheduled disaster: wind and lethality must reach a body through open terrain.
         if (self.room?.physicalObjects == null)
         {
             return;
