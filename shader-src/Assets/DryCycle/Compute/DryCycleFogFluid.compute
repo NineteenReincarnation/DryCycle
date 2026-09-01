@@ -95,8 +95,6 @@ float BlastShapeRadiusScale(float2 deltaPx, float2 blastUv)
         blastUv.x * 37.17 +
         blastUv.y * 91.73) * 6.2831853;
 
-    // Only a few low angular frequencies are used. The outline therefore has broad
-    // lobes and dents like a pressure cavity, never pixel noise or a perfect circle.
     float irregular =
         sin(angle * 2.0 + seed * 0.73) * 0.035 +
         sin(angle * 3.0 + seed) * 0.085 +
@@ -107,16 +105,11 @@ float BlastShapeRadiusScale(float2 deltaPx, float2 blastUv)
 float BlastWaveRadiusPx(float ageSeconds)
 {
     float age = max(0.0, ageSeconds);
-    // Fast initial expansion followed by mild deceleration. This reaches a spear-sized
-    // cavity in roughly 0.14s and a bomb-sized cavity in roughly 0.35s.
     return (1250.0 * age) / (1.0 + age * 0.85);
 }
 
 float TargetShape(float2 uv, float time)
 {
-    // Only a low-frequency atmospheric bias. The dominant spatial evolution comes
-    // from boundary injection and advection below, not from repainting a moving noise
-    // field everywhere in the room every frame.
     float a = sin((uv.y * 2.31 + time * 0.010) * 6.2831853);
     float b = sin((uv.y * -4.17 + uv.x * 0.73 + time * 0.006 + 0.31) * 6.2831853);
     float c = sin((uv.y * 7.09 + time * -0.003 + 0.73) * 6.2831853);
@@ -167,6 +160,40 @@ float BlastTerrainTransmission(
     return 1.0;
 }
 
+float BlastClearNeighbourhood(int2 p, uint width, uint height)
+{
+    float clear = LoadClamped(_DensityRead, p, width, height).g * 0.18;
+
+    clear += LoadClamped(_DensityRead, p + int2(1, 0), width, height).g * 0.10;
+    clear += LoadClamped(_DensityRead, p + int2(-1, 0), width, height).g * 0.10;
+    clear += LoadClamped(_DensityRead, p + int2(0, 1), width, height).g * 0.10;
+    clear += LoadClamped(_DensityRead, p + int2(0, -1), width, height).g * 0.10;
+
+    clear += LoadClamped(_DensityRead, p + int2(1, 1), width, height).g * 0.055;
+    clear += LoadClamped(_DensityRead, p + int2(-1, 1), width, height).g * 0.055;
+    clear += LoadClamped(_DensityRead, p + int2(1, -1), width, height).g * 0.055;
+    clear += LoadClamped(_DensityRead, p + int2(-1, -1), width, height).g * 0.055;
+
+    clear += LoadClamped(_DensityRead, p + int2(2, 0), width, height).g * 0.04;
+    clear += LoadClamped(_DensityRead, p + int2(-2, 0), width, height).g * 0.04;
+    clear += LoadClamped(_DensityRead, p + int2(0, 2), width, height).g * 0.04;
+    clear += LoadClamped(_DensityRead, p + int2(0, -2), width, height).g * 0.04;
+
+    return saturate(clear);
+}
+
+float DiffuseBlastClear(
+    int2 p,
+    uint width,
+    uint height,
+    float sourceClear,
+    float ratePerSecond)
+{
+    float neighbourhood = BlastClearNeighbourhood(p, width, height);
+    float blend = 1.0 - exp(-max(0.0, ratePerSecond) * _DeltaTime);
+    return saturate(lerp(sourceClear, neighbourhood, blend));
+}
+
 [numthreads(8, 8, 1)]
 void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
 {
@@ -189,9 +216,6 @@ void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
         solid ? 0.0.xx : _WindVelocity.xy,
         0.0,
         0.0);
-    // R = fog density. G = long-lived explosion clearing permission.
-    // B = temporary irregular blast-wave distance / 1024px.
-    // A = remaining blast-wave metadata lifetime; zero means no active wave.
     _DensityWrite[id] = float4(density, 0.0, 0.0, 0.0);
     _PressureWrite[id] = 0.0;
     _DivergenceWrite[id] = 0.0;
@@ -655,6 +679,7 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         return;
 
     uint2 id = dispatchId.xy;
+    int2 p = int2(id);
     float2 uv = GridUV(id, width, height);
     float clearDecay = exp(-max(0.0, _BlastClearDecay) * _DeltaTime);
     float4 localState = _DensityRead.Load(int3(id, 0));
@@ -673,14 +698,26 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         waveHit = saturate(waveHit);
     }
 
-    float localBlastClear = saturate(
-        max(localState.g * clearDecay, waveHit * 0.995));
+    float localDecayedClear = saturate(localState.g * clearDecay);
+    bool solid = ObstacleAt(uv) > 0.5;
 
-    if (ObstacleAt(uv) > 0.5)
+    if (solid)
     {
+        // Surface fog has no physical R density inside terrain, so G carries its blast
+        // clearing state. Unlike velocity, this field deliberately diffuses across tile
+        // boundaries: untouched neighbours erode the cleared wall from its edge while a
+        // low-amplitude shoulder spreads outward before the global decay removes it.
+        float surfaceClear = DiffuseBlastClear(
+            p,
+            width,
+            height,
+            localDecayedClear,
+            2.40);
+        surfaceClear = max(surfaceClear, waveHit * 0.995);
+
         _DensityWrite[id] = float4(
             0.0,
-            localBlastClear,
+            saturate(surfaceClear),
             waveLife > 0.0001 ? localState.b : 0.0,
             waveLife);
         return;
@@ -698,12 +735,21 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         LinearClampSampler,
         backtrace,
         0);
-    float advectedBlastClear = saturate(
-        max(state.g * clearDecay, waveHit * 0.995));
+    float advectedBlastClear = saturate(state.g * clearDecay);
 
-    // Protection now belongs to the short blast-wave phase only. During the last
-    // ~0.18s it releases smoothly, then R returns to the exact ordinary advection path.
-    // G survives only as authorization metadata and no longer acts as a density barrier.
+    // Airborne clear permission primarily follows the actual fog flow, with only a very
+    // weak cross-terrain diffusion. That keeps the post-blast cavity fluid while making
+    // the visual clear field continuous where the initial pressure wave crossed a wall.
+    advectedBlastClear = DiffuseBlastClear(
+        p,
+        width,
+        height,
+        advectedBlastClear,
+        0.34);
+    advectedBlastClear = max(
+        advectedBlastClear,
+        waveHit * 0.995);
+
     float waveProtection = smoothstep(0.0, 0.18, waveLife);
     float incomingDensityScale = lerp(1.0, 0.08, waveProtection);
     float density =
@@ -713,7 +759,7 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     _DensityWrite[id] = float4(
         saturate(density),
-        advectedBlastClear,
+        saturate(advectedBlastClear),
         waveLife > 0.0001 ? localState.b : 0.0,
         waveLife);
 }
@@ -746,9 +792,6 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     float density = state.r;
     float shape = TargetShape(uv, _SimulationTime);
 
-    // The expansion gets a short protected interval, but after B/A expires these are
-    // exactly the normal room replenishment coefficients again. Returning fog can then
-    // physically erode, shear and close the cavity instead of stopping at a G boundary.
     float interiorTarget =
         _TargetDensity * lerp(0.54, 1.05, shape);
     float interiorRelax =
@@ -842,16 +885,12 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
         if (distancePx >= blast.w * 1.18)
             continue;
 
-        float terrain = BlastTerrainTransmission(
-            blastPx,
-            worldPx,
-            receiverSolid);
-        if (terrain <= 0.0)
-            continue;
-
         float radiusScale = BlastShapeRadiusScale(deltaPx, blast.xy);
         float shapedDistancePx = distancePx / max(0.82, radiusScale);
 
+        // The clear/visibility wave is intentionally not terrain-occluded. Rain World's
+        // fog is a room-wide atmospheric composite, so the blast can clear the mist drawn
+        // over walls and continue onto the other side. Physical velocity remains blocked.
         if (shapedDistancePx < blast.z)
         {
             float encodedDistance = saturate(
@@ -866,10 +905,29 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
                 8.0,
                 24.0,
                 shapedDistancePx);
-            density *= 1.0 - initialHit * parameters.y * terrain;
             blastClear = max(
                 blastClear,
-                initialHit * parameters.w * terrain);
+                initialHit * parameters.w);
+        }
+
+        // Momentum and the displaced-density compression ring still obey terrain. This
+        // preserves the physical difference between a visual atmospheric clearing and
+        // actual mass/velocity transport through a solid wall.
+        float terrain = BlastTerrainTransmission(
+            blastPx,
+            worldPx,
+            receiverSolid);
+        if (terrain <= 0.0)
+            continue;
+
+        float initialPhysicalHit = 1.0 - smoothstep(
+            8.0,
+            24.0,
+            shapedDistancePx);
+        if (receiverSolid < 0.5)
+        {
+            density *=
+                1.0 - initialPhysicalHit * parameters.y * terrain;
         }
 
         float ringInner = smoothstep(
