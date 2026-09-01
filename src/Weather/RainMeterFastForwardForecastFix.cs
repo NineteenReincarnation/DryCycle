@@ -226,15 +226,20 @@ internal static class RainMeterFastForwardForecastFix
         float hudFade = Mathf.Clamp01(
             Mathf.Lerp(meter.lastFade, meter.fade, timeStacker));
         float sizeFade = hudFade * hudFade;
-        float animationSeconds = (meter.hud?.owner?.GetOwnerType() == global::HUD.HUD.OwnerType.Player &&
-                                  meter.hud.owner is Player player &&
-                                  player.abstractCreature?.world?.game != null)
-            ? player.abstractCreature.world.game.clock / 40f
-            : 0f;
+
+        float animationSeconds = 0f;
+        Player player = meter.hud?.owner as Player;
+        if (player?.abstractCreature?.world?.game != null)
+        {
+            animationSeconds = player.abstractCreature.world.game.clock / 40f;
+        }
 
         for (int i = 0; i < capacity; i++)
         {
-            state.Fills[i]?.SetVisible(false);
+            if (state.Fills[i] != null)
+            {
+                state.Fills[i].isVisible = false;
+            }
         }
 
         for (int chronologicalPip = 1; chronologicalPip <= activePips; chronologicalPip++)
