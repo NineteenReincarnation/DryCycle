@@ -11,7 +11,11 @@ namespace DryCycle.Weather.Fog;
 /// </summary>
 internal static class DryCycleFogVolumeNoise
 {
-    private const int Size = 64;
+    // 96^3 ARGBHalf is still modest for a single process-wide texture while giving the
+    // three-scale fog ray marcher substantially cleaner trilinear detail than the old
+    // 64^3 prototype. The generator keeps its highest periodic FBM octave at <=48 cells
+    // per axis so this resolution also satisfies the corresponding Nyquist limit.
+    private const int Size = 96;
 
     internal static RenderTexture Texture { get; private set; }
     internal static bool IsAvailable => Texture != null && Texture.IsCreated();
@@ -45,12 +49,21 @@ internal static class DryCycleFogVolumeNoise
             };
             volume.Create();
 
+            if (!volume.IsCreated())
+            {
+                throw new System.InvalidOperationException(
+                    $"Could not create {Size}^3 DryCycle fog noise volume.");
+            }
+
             generator.SetInt("_VolumeSize", Size);
             generator.SetTexture(kernel, "_NoiseVolume", volume);
             int groups = Mathf.CeilToInt(Size / 4f);
             generator.Dispatch(kernel, groups, groups, groups);
 
             Texture = volume;
+            Plugin.Logger?.LogInfo(
+                $"DryCycle generated shared volumetric fog noise: " +
+                $"{Size}x{Size}x{Size} {RenderTextureFormat.ARGBHalf}.");
         }
         catch (System.Exception ex)
         {
