@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.104";
+    public const string Version = "0.1.105";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -74,6 +74,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
+            ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
             ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
@@ -184,6 +185,11 @@ internal sealed class Plugin : BaseUnityPlugin
             // only the DryCycle traversal pressure on top.
             ScheduledHeavyRainTraversalRuntime.Enable();
 
+            // Creature.TerrainImpact has a second native rainDeath path through
+            // RoomRain.CreatureSmashedInGround. Install this before the DangerType
+            // takeover so no-DangerType/synthetic RoomRain is protected as well.
+            ScheduledHeavyRainImpactGuardRuntime.Enable();
+
             // Install last on RoomRain. During an active DryCycle event, authored
             // DangerType branches (Flood/FloodAndRain/etc.) are bypassed at Update level
             // rather than temporarily rewriting the room to FloodAndRain.
@@ -211,6 +217,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
+            ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
             ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
