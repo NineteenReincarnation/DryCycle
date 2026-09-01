@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Climate;
@@ -107,6 +106,10 @@ internal static class FogWeatherRuntime
         {
             if (room == null || room != rCam.room)
             {
+                // RoomCamera instances survive room changes. Clear the per-camera
+                // anchor before this controller removes its sprites so the next room
+                // never tries to order lights against detached fog nodes.
+                RegisterCameraFog(rCam, null, null, false);
                 sLeaser.CleanSpritesAndRemove();
                 return;
             }
