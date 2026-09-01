@@ -265,6 +265,11 @@ internal static class WeatherScheduleRuntime
         for (int i = 0; i < profile.Weather.Count; i++)
         {
             WeatherFamilyClimateEntry family = profile.Weather[i];
+            if (family == null || IsRemovedScheduledWeather(family.Id))
+            {
+                continue;
+            }
+
             if (!Passes(family.ChancePercent, random))
             {
                 continue;
@@ -280,10 +285,17 @@ internal static class WeatherScheduleRuntime
 
             // Variant percentages are independent probabilities, never normalized
             // weights. Multiple variants may pass; the phase scheduler later applies
-            // the day/night event count and spacing limits.
+            // the day/night event count and spacing limits. Removed weather IDs are
+            // skipped before rolling so an old local RegionClimate.txt cannot consume
+            // a schedule slot or perturb the remaining variant RNG stream.
             for (int variantIndex = 0; variantIndex < family.Variants.Count; variantIndex++)
             {
                 ClimateChanceEntry variant = family.Variants[variantIndex];
+                if (variant == null || IsRemovedScheduledWeather(variant.Id))
+                {
+                    continue;
+                }
+
                 if (Passes(variant.ChancePercent, random))
                 {
                     result.Add(new WeatherScheduleCandidate(
@@ -305,6 +317,14 @@ internal static class WeatherScheduleRuntime
         }
 
         return result;
+    }
+
+    private static bool IsRemovedScheduledWeather(string id)
+    {
+        return string.Equals(
+            NormalizeWeatherId(id),
+            "BULLETRAIN",
+            StringComparison.Ordinal);
     }
 
     private static bool Passes(float chancePercent, Random random)
