@@ -228,13 +228,43 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
+        bool dryCycleRegion = world?.game != null &&
+                              world.game.IsStorySession &&
+                              RegionDayNightOptions.IsEnabled(world);
+
         if (!TryGetClock(self, out WorldClock clock))
         {
-            orig(self, eu);
+            // Synthetic/default-danger storms must never fall into Watcher's native
+            // lifecycle during world/camera transition frames. Pure authored surface
+            // storms still return to native behavior when DryCycle is not able to own
+            // the frame.
+            if (synthetic || (dryCycleRegion && IsDefaultDangerSandstorm(self)))
+            {
+                QuiesceSandstorm(self);
+            }
+            else
+            {
+                orig(self, eu);
+            }
             return;
         }
 
-        WeatherScheduleRuntime.Synchronize(self.room.world);
+        // Match the rain runtime's ownership rule: a DeathRain state started by another
+        // system is authoritative. Suppress only DryCycle's scheduled/synthetic storm;
+        // a room-authored SurfaceSandstorm is allowed to keep its native behavior.
+        if (HasForeignDeathRain(world))
+        {
+            if (synthetic || IsDefaultDangerSandstorm(self))
+            {
+                QuiesceSandstorm(self);
+            }
+            else
+            {
+                orig(self, eu);
+            }
+            return;
+        }
+
         WeatherSample sample = Evaluate(self.room.world, clock);
         if (!sample.Active)
         {
@@ -328,6 +358,12 @@ internal static class SandstormWeatherRuntime
                    WatcherEnums.RoomEffectType.SurfaceSandstorm) > Epsilon;
     }
 
+    private static bool HasForeignDeathRain(World world)
+    {
+        GlobalRain rain = world?.game?.globalRain;
+        return rain?.deathRain != null && !RainWeatherRuntime.OwnsDeathRain(rain);
+    }
+
     private static void RunDefaultDangerSurfaceOnly(
         On.Watcher.Sandstorm.orig_Update orig,
         Sandstorm storm,
@@ -397,22 +433,35 @@ internal static class SandstormWeatherRuntime
         Sandstorm self,
         float amount)
     {
-        if (self != null &&
-            _syntheticSandstorms.TryGetValue(self, out _) &&
-            (self.room?.world?.game == null ||
-             !self.room.world.game.IsStorySession ||
-             !RegionDayNightOptions.IsEnabled(self.room.world)))
+        bool synthetic = self != null && _syntheticSandstorms.TryGetValue(self, out _);
+        World world = self?.room?.world;
+
+        if (synthetic &&
+            (world?.game == null ||
+             !world.game.IsStorySession ||
+             !RegionDayNightOptions.IsEnabled(world)))
         {
             return;
         }
 
         if (!TryGetClock(self, out WorldClock clock))
         {
-            orig(self, amount);
+            if (!synthetic)
+            {
+                orig(self, amount);
+            }
             return;
         }
 
-        WeatherScheduleRuntime.Synchronize(self.room.world);
+        if (HasForeignDeathRain(world))
+        {
+            if (!synthetic && !IsDefaultDangerSandstorm(self))
+            {
+                orig(self, amount);
+            }
+            return;
+        }
+
         WeatherSample sample = Evaluate(self.room.world, clock);
         if (sample.Hazard <= Epsilon)
         {
@@ -542,9 +591,13 @@ internal static class SandstormWeatherRuntime
     {
         clock = null;
         World world = storm?.room?.world;
-        return world?.game != null &&
-               world.game.IsStorySession &&
+        RainWorldGame game = world?.game;
+        return game != null &&
+               game.IsStorySession &&
                RegionDayNightOptions.IsEnabled(world) &&
+               game.cameras != null &&
+               game.cameras.Length > 0 &&
+               game.cameras[0]?.room != null &&
                WorldClockHooks.TryGetClock(world, out clock);
     }
 }
