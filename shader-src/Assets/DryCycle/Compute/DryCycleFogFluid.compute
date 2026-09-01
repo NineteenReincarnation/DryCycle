@@ -146,11 +146,6 @@ float BlastTerrainTransmission(
     if (rayLength <= 1.0)
         return 1.0;
 
-    // This pass runs only on the one frame where a supported Explosion is discovered,
-    // so a denser ray is affordable. ~12px maximum spacing catches a Rain World tile
-    // across the supported 110-250px source radii. The first 12px are source bias for
-    // bombs/spears detonating against terrain; solid receiver pixels get a 16px end bias
-    // so the wall surface itself may clear without transmitting through that wall.
     const int BlastOcclusionSteps = 24;
     [loop]
     for (int i = 1; i <= BlastOcclusionSteps; i++)
@@ -190,8 +185,6 @@ void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
         ? 0.0
         : _TargetDensity * lerp(0.48, 1.08, initialShape);
 
-    // Start with the prevailing flow but leave enough non-uniform density for the
-    // pressure/vorticity passes to produce visible structure immediately.
     _VelocityWrite[id] = float4(
         solid ? 0.0.xx : _WindVelocity.xy,
         0.0,
@@ -256,14 +249,10 @@ void ApplyForces(uint3 dispatchId : SV_DispatchThreadID)
 
     float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
 
-    // Prevailing room-scale wind is a soft attractor, not a hard overwrite.
     float windBlend = 1.0 - exp(-0.52 * _DeltaTime);
     velocity = lerp(velocity, _WindVelocity.xy, windBlend);
 
     float2 cellUv = 1.0 / float2(width, height);
-
-    // Broad non-periodic-looking steering keeps the pressure field alive even in a
-    // completely open room. Its magnitude is expressed in simulation-cell scale.
     float turbulenceX =
         sin((uv.y * 4.9 + uv.x * 1.3 + _SimulationTime * 0.027) * 6.2831853);
     float turbulenceY =
@@ -274,9 +263,6 @@ void ApplyForces(uint3 dispatchId : SV_DispatchThreadID)
         turbulenceX + turbulenceX2 * 0.42,
         turbulenceY) * cellUv * 0.58;
 
-    // Near terrain, bias the local flow tangent to the wall-distance gradient. This
-    // makes fog visibly curl around pillars/corners instead of simply stopping at a
-    // blocky solid mask.
     float wallProximity = pow(
         saturate(1.0 - WallDistance01(uv)),
         2.1);
@@ -572,27 +558,18 @@ void ProjectVelocity(uint3 dispatchId : SV_DispatchThreadID)
         right - left,
         top - bottom);
 
-    // No normal flow into a neighbouring solid tile.
     if (velocity.x < 0.0 &&
         ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5)
-    {
         velocity.x = 0.0;
-    }
     if (velocity.x > 0.0 &&
         ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5)
-    {
         velocity.x = 0.0;
-    }
     if (velocity.y < 0.0 &&
         ObstacleAt(uv - float2(0.0, texel.y)) > 0.5)
-    {
         velocity.y = 0.0;
-    }
     if (velocity.y > 0.0 &&
         ObstacleAt(uv + float2(0.0, texel.y)) > 0.5)
-    {
         velocity.y = 0.0;
-    }
 
     _VelocityWrite[dispatchId.xy] = float4(
         velocity,
@@ -651,30 +628,19 @@ void ApplyBlastVelocity(uint3 dispatchId : SV_DispatchThreadID)
         velocity += impulseUvPerSecond * shock * terrain;
     }
 
-    // The shock remains intentionally divergent for this frame, but never gets a free
-    // normal component into an adjacent terrain cell. Next frame's normal projection
-    // and vorticity then fold the displaced mass naturally around geometry.
     float2 texel = 1.0 / float2(width, height);
     if (velocity.x < 0.0 &&
         ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5)
-    {
         velocity.x = 0.0;
-    }
     if (velocity.x > 0.0 &&
         ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5)
-    {
         velocity.x = 0.0;
-    }
     if (velocity.y < 0.0 &&
         ObstacleAt(uv - float2(0.0, texel.y)) > 0.5)
-    {
         velocity.y = 0.0;
-    }
     if (velocity.y > 0.0 &&
         ObstacleAt(uv + float2(0.0, texel.y)) > 0.5)
-    {
         velocity.y = 0.0;
-    }
 
     _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
 }
@@ -712,8 +678,6 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     if (ObstacleAt(uv) > 0.5)
     {
-        // The short-lived B/A wave remains anchored to the room while it expands; G is
-        // the long-lived field that survives afterward and follows the fluid.
         _DensityWrite[id] = float4(
             0.0,
             localBlastClear,
@@ -737,17 +701,14 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
     float advectedBlastClear = saturate(
         max(state.g * clearDecay, waveHit * 0.995));
 
-    // G is the only long-lived permission to resist refill. The temporary pressure wave
-    // reinforces it as the front reaches each destination cell. When neither exists,
-    // every multiplier is exactly the original value and ordinary fog is unchanged.
-    float incomingDensityScale = lerp(1.0, 0.08, localBlastClear);
+    // Protection now belongs to the short blast-wave phase only. During the last
+    // ~0.18s it releases smoothly, then R returns to the exact ordinary advection path.
+    // G survives only as authorization metadata and no longer acts as a density barrier.
+    float waveProtection = smoothstep(0.0, 0.18, waveLife);
+    float incomingDensityScale = lerp(1.0, 0.08, waveProtection);
     float density =
         state.r * _DensityDissipation * incomingDensityScale;
 
-    // Do not make the whole final cavity appear in one frame. B stores a continuous
-    // irregular radial distance field, and only the moving pressure front is allowed to
-    // evacuate R/G. Repeated reinforcement for ~0.62s gives a short stable clear phase
-    // before normal advection is allowed to close the cavity from its edges.
     density *= lerp(1.0, 0.055, waveHit);
 
     _DensityWrite[id] = float4(
@@ -770,6 +731,7 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     float2 uv = GridUV(id, width, height);
     float4 state = _DensityRead.Load(int3(id, 0));
     float blastClear = saturate(state.g);
+    float waveProtection = smoothstep(0.0, 0.18, state.a);
 
     if (ObstacleAt(uv) > 0.5)
     {
@@ -784,22 +746,19 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     float density = state.r;
     float shape = TargetShape(uv, _SimulationTime);
 
-    // Very weak interior replenishment prevents numerical loss from emptying a room,
-    // but does not repaint the full target every second. An active blast-clear field
-    // now suppresses this almost completely while the evacuated cavity is fresh.
+    // The expansion gets a short protected interval, but after B/A expires these are
+    // exactly the normal room replenishment coefficients again. Returning fog can then
+    // physically erode, shear and close the cavity instead of stopping at a G boundary.
     float interiorTarget =
         _TargetDensity * lerp(0.54, 1.05, shape);
     float interiorRelax =
         1.0 - exp(-_DensityRelaxation * _DeltaTime);
-    interiorRelax *= lerp(1.0, 0.02, blastClear);
+    interiorRelax *= lerp(1.0, 0.02, waveProtection);
     density = lerp(
         density,
         interiorTarget,
         interiorRelax);
 
-    // New fog predominantly enters at the upwind edge and leaves at the opposite edge.
-    // This is what turns the density field into travelling masses rather than a moving
-    // alpha pattern that materializes in place.
     float sourceDistance =
         _WindVelocity.x >= 0.0 ? uv.x : (1.0 - uv.x);
     float outletDistance = 1.0 - sourceDistance;
@@ -814,26 +773,20 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
         _TargetDensity * lerp(0.58, 1.34, inletPulse);
     float inletMix = inlet *
         (1.0 - exp(-2.6 * _DeltaTime));
-    inletMix *= lerp(1.0, 0.04, blastClear);
+    inletMix *= lerp(1.0, 0.04, waveProtection);
     density = lerp(
         density,
         inletTarget,
         saturate(inletMix));
 
-    // A gentle outlet sink avoids clamp-boundary accumulation while keeping the field
-    // visually dense enough for long rooms.
     density *= exp(-0.42 * outlet * _DeltaTime);
 
-    // Wall pooling gives low-frequency density a stable relationship to room geometry.
-    // Blast-cleared wall-adjacent cells suppress this source until the cavity recovers.
     float wallDistance = WallDistance01(uv);
     density += pow(
         saturate(1.0 - wallDistance),
         2.35) * 0.052 * _DeltaTime *
-        lerp(1.0, 0.02, blastClear);
+        lerp(1.0, 0.02, waveProtection);
 
-    // Player motion carves only visual density. Gameplay extinction remains independent
-    // from this wake because only the explosion-authored G channel grants visibility.
     float2 worldPx = uv * _RoomSizePx.xy;
     [unroll]
     for (int i = 0; i < 4; i++)
@@ -899,10 +852,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
         float radiusScale = BlastShapeRadiusScale(deltaPx, blast.xy);
         float shapedDistancePx = distancePx / max(0.82, radiusScale);
 
-        // Seed a continuous low-frequency radial distance field rather than instantly
-        // stamping G across the whole core. B/A then drive a fast but visible expanding
-        // pressure front for the next ~0.62s. This is the key to avoiding the old blocky
-        // low-resolution transparent island.
         if (shapedDistancePx < blast.z)
         {
             float encodedDistance = saturate(
@@ -913,8 +862,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
                 waveLife = BlastWaveLifetime;
             }
 
-            // The first frame clears only the immediate detonation centre. The rest of
-            // the cavity is opened by AdvectDensity as the stored wavefront reaches it.
             float initialHit = 1.0 - smoothstep(
                 8.0,
                 24.0,
@@ -925,8 +872,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
                 initialHit * parameters.w * terrain);
         }
 
-        // Compression follows the same broad irregular contour, but remains a one-shot
-        // density displacement. The existing velocity field then advects and curls it.
         float ringInner = smoothstep(
             blast.z * 0.72,
             blast.z * 1.04,
