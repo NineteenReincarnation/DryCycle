@@ -94,12 +94,21 @@ Shader "DryCycle/HeatWaveComposite"
                     return saturate(encoded * 1.34);
                 }
 
-                float2 NoiseGradient(sampler2D noiseTex, float2 uv, float2 texel)
+                float2 NoiseGradientA(float2 uv, float2 texel)
                 {
-                    float xP = tex2D(noiseTex, frac(uv + float2(texel.x, 0.0))).r;
-                    float xM = tex2D(noiseTex, frac(uv - float2(texel.x, 0.0))).r;
-                    float yP = tex2D(noiseTex, frac(uv + float2(0.0, texel.y))).r;
-                    float yM = tex2D(noiseTex, frac(uv - float2(0.0, texel.y))).r;
+                    float xP = tex2D(_NoiseTex, frac(uv + float2(texel.x, 0.0))).r;
+                    float xM = tex2D(_NoiseTex, frac(uv - float2(texel.x, 0.0))).r;
+                    float yP = tex2D(_NoiseTex, frac(uv + float2(0.0, texel.y))).r;
+                    float yM = tex2D(_NoiseTex, frac(uv - float2(0.0, texel.y))).r;
+                    return float2(xP - xM, yP - yM);
+                }
+
+                float2 NoiseGradientB(float2 uv, float2 texel)
+                {
+                    float xP = tex2D(_NoiseTex2, frac(uv + float2(texel.x, 0.0))).r;
+                    float xM = tex2D(_NoiseTex2, frac(uv - float2(texel.x, 0.0))).r;
+                    float yP = tex2D(_NoiseTex2, frac(uv + float2(0.0, texel.y))).r;
+                    float yM = tex2D(_NoiseTex2, frac(uv - float2(0.0, texel.y))).r;
                     return float2(xP - xM, yP - yM);
                 }
 
@@ -107,8 +116,8 @@ Shader "DryCycle/HeatWaveComposite"
                 {
                     float2 p0 = roomUV * float2(2.1, 1.35) + float2(time * 0.0047, time * 0.0021);
                     float2 p1 = roomUV * float2(3.7, 2.4) + float2(-time * 0.0028, time * 0.0036) + 0.37;
-                    float2 g0 = NoiseGradient(_NoiseTex, p0, float2(0.018, 0.018));
-                    float2 g1 = NoiseGradient(_NoiseTex2, p1, float2(0.014, 0.014));
+                    float2 g0 = NoiseGradientA(p0, float2(0.018, 0.018));
+                    float2 g1 = NoiseGradientB(p1, float2(0.014, 0.014));
                     return g0 * 0.68 + g1 * 0.32;
                 }
 
@@ -117,8 +126,8 @@ Shader "DryCycle/HeatWaveComposite"
                     float2 pixelScale = max(_screenSize, float2(1.0, 1.0)) / 96.0;
                     float2 p = screenUV * pixelScale + float2(time * 0.081, -time * 0.064);
                     float2 q = screenUV * pixelScale * 1.73 + float2(-time * 0.052, time * 0.093) + 0.41;
-                    float2 g0 = NoiseGradient(_NoiseTex2, p, float2(0.032, 0.032));
-                    float2 g1 = NoiseGradient(_NoiseTex, q, float2(0.024, 0.024));
+                    float2 g0 = NoiseGradientB(p, float2(0.032, 0.032));
+                    float2 g1 = NoiseGradientA(q, float2(0.024, 0.024));
                     return g0 * 0.63 + g1 * 0.37;
                 }
 
