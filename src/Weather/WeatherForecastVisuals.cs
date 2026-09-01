@@ -18,7 +18,6 @@ internal enum WeatherForecastVisualKind
     DeathSandStorm,
     LightRain,
     HeavyRain,
-    BulletRain,
     DeathRain
 }
 
@@ -69,9 +68,9 @@ internal static class WeatherForecastVisualCatalog
     internal static readonly Color SandStormColor = new(0.90f, 0.76f, 0.42f);
     internal static readonly Color DeathSandStormColor = new(0.66f, 0.44f, 0.16f);
 
-    // Rain language: LightRain is the readable rain-blue; Heavy/Bullet/DeathRain use
-    // one shared deep-blue family so animation, not arbitrary hue changes, carries
-    // the stronger semantic distinction.
+    // Rain language: LightRain is the readable rain-blue; Heavy/DeathRain use one
+    // shared deep-blue family so animation, not arbitrary hue changes, carries the
+    // stronger semantic distinction.
     internal static readonly Color LightRainColor = new(0.30f, 0.62f, 0.92f);
     internal static readonly Color HeavyRainColor = new(0.08f, 0.25f, 0.57f);
     internal static readonly Color RainDropColor = new(0.62f, 0.86f, 1.00f);
@@ -101,16 +100,6 @@ internal static class WeatherForecastVisualCatalog
                 WeatherForecastAnimation.Drip,
                 dripCount: 3,
                 dripCyclesPerSecond: 0.96f,
-                dripTravelPixels: 9.8f),
-
-            // BulletRain keeps HeavyRain's shape/count/travel language and only plays
-            // the same stronger drip animation much faster.
-            WeatherForecastVisualKind.BulletRain => new WeatherForecastVisualStyle(
-                HeavyRainColor,
-                RainDropColor,
-                WeatherForecastAnimation.FastDrip,
-                dripCount: 3,
-                dripCyclesPerSecond: 2.10f,
                 dripTravelPixels: 9.8f),
 
             WeatherForecastVisualKind.DeathRain => new WeatherForecastVisualStyle(
@@ -153,10 +142,6 @@ internal static class WeatherForecastVisualCatalog
 
             case "HEAVYRAIN":
                 visualKind = WeatherForecastVisualKind.HeavyRain;
-                return true;
-
-            case "BULLETRAIN":
-                visualKind = WeatherForecastVisualKind.BulletRain;
                 return true;
 
             case "DEATHRAIN":
