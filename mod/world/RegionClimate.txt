@@ -1,37 +1,63 @@
 [Weather]
-	SU:
-		Rain : 80
-			LightRain : 70%
-			HeavyRain : 45%
-			BulletRain : 15%
-	B5:
-		SandStorm : 100
+
+SU {
+    Rain : 80 {
+        LightRain : 70%
+        HeavyRain : 45%
+        BulletRain : 15%
+    }
+}
+
+B5 {
+    SandStorm : 100
+}
+
 
 [DangerType]
-	SU:
-		DeathRain : 25%
-	B5:
-		SandStorm : 100
+
+SU {
+    DeathRain : 25%
+}
+
+B5 {
+    SandStorm : 100
+}
+
+
+//以下内容是标准格式，不计入游戏运行
 
 [defaultWeather]
 //类型
-	ABCDEFG:
-	//区域缩写
-		Rain : 100
-			LightRain : 1
-			//小雨，Intensity = LightRainAmount * 0.24f;
-			HeavyRain : 1
-			//大雨，Intensity = (1 + HeavyRain * 4) * 0.24
-			BulletRain : 1
-			//子弹雨
-			//子气象允许进入排表的概率
-		SandStorm : 50
-		//气象类型，当日允许该气象进入排表的概率
+
+ABCDEFG {
+    //区域缩写
+
+    Rain : 100 {
+        LightRain : 1
+        //小雨，Intensity = LightRainAmount * 0.24f;
+
+        HeavyRain : 1
+        //大雨，Intensity = (1 + HeavyRain * 4) * 0.24
+
+        BulletRain : 1
+        //子弹雨
+
+        //子气象允许进入排表的概率
+    }
+
+    SandStorm : 50
+    //气象类型，当日允许该气象进入排表的概率
+}
+
 
 [defaultDangerType]
 //类型
-	ABCDEFG:
-	//区域缩写
-		DeathRain : 100
-		DeathSandStorm : 50
-		//气象类型，当日允许该气象进入排表的概率
+
+ABCDEFG {
+    //区域缩写
+
+    DeathRain : 100
+    DeathSandStorm : 50
+
+    //气象类型，当日允许该气象进入排表的概率
+}
