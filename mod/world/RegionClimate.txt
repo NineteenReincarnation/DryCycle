@@ -41,7 +41,7 @@ ABCDEFG {
         //小雨，Intensity = LightRainAmount * 0.24f;
 
         HeavyRain : 1
-        //大雨，Intensity = (1 + HeavyRain * 4) * 0.24
+        //大雨：无 Flux 波动；事件主段最高烈度固定为原完整 HeavyRain 的 70%
 
         //子气象允许进入排表的概率
     }
