@@ -12,6 +12,10 @@
     <GameModRootDir>$(GameModOutputDir)/../..</GameModRootDir>
     <OutputPath>$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
+
+    <DryCycleShaderProjectDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderProjectDir>
+    <DryCycleWeatherBundleSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather</DryCycleWeatherBundleSource>
+    <DryCycleUnityEditor Condition="'$(DryCycleUnityEditor)' == '' and '$(UNITY_EDITOR)' != ''">$(UNITY_EDITOR)</DryCycleUnityEditor>
   </PropertyGroup>
 
   <!-- RainWorldDir can be supplied as an environment variable or MSBuild property.
@@ -56,6 +60,10 @@
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
@@ -81,9 +89,23 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll')" Text="UnityEngine.AssetBundleModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll')" Text="UnityEngine.InputLegacyModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll')" Text="Unity.Mathematics.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
+  </Target>
+
+  <!-- Optional one-command shader build. Keep it opt-in because the Unity Editor is
+       not required for ordinary C# iteration. Example:
+       dotnet build -c Release -p:BuildDryCycleAssets=true -p:DryCycleUnityEditor="C:/.../Unity.exe" -->
+  <Target Name="BuildDryCycleWeatherAssets"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(BuildDryCycleAssets)' == 'true'">
+    <Error Condition="'$(DryCycleUnityEditor)' == ''"
+           Text="BuildDryCycleAssets=true requires DryCycleUnityEditor (or UNITY_EDITOR) to point at Unity.exe." />
+    <Error Condition="!Exists('$(DryCycleShaderProjectDir)/Assets/Editor/BuildDryCycleWeatherBundle.cs')"
+           Text="DryCycle shader project is missing: $(DryCycleShaderProjectDir)" />
+    <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile -" />
   </Target>
 
   <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
@@ -101,6 +123,17 @@
       SourceFiles="$(MSBuildProjectDirectory)/../mod/modify/soundeffects/sounds.txt"
       DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
       SkipUnchangedFiles="true" />
+
+    <!-- Deploy the platform-specific weather shader bundle when it has been built. -->
+    <MakeDir Directories="$(GameModRootDir)/assets/drycycle" />
+    <Copy
+      Condition="Exists('$(DryCycleWeatherBundleSource)')"
+      SourceFiles="$(DryCycleWeatherBundleSource)"
+      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycycleweather"
+      SkipUnchangedFiles="true" />
+    <Warning
+      Condition="!Exists('$(DryCycleWeatherBundleSource)')"
+      Text="DryCycle weather AssetBundle is not built. Fog will use the compatibility renderer. Build shader-src via Unity or pass -p:BuildDryCycleAssets=true." />
 
     <!-- These world text files are live-authored in the actual region mod. Seed them
          only when missing; never overwrite mapper/weather tuning during a build. -->
