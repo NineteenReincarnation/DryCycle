@@ -1,0 +1,569 @@
+#pragma kernel InitializeFields
+#pragma kernel AdvectVelocity
+#pragma kernel ApplyThermalForces
+#pragma kernel ComputeCurl
+#pragma kernel ApplyVorticity
+#pragma kernel ComputeDivergence
+#pragma kernel JacobiPressure
+#pragma kernel ProjectVelocity
+#pragma kernel AdvectThermal
+#pragma kernel InjectThermal
+#pragma kernel BuildOpticalField
+
+Texture2D<float4> _VelocityRead;
+RWTexture2D<float4> _VelocityWrite;
+Texture2D<float4> _ThermalRead;
+RWTexture2D<float4> _ThermalWrite;
+Texture2D<float4> _PressureRead;
+RWTexture2D<float4> _PressureWrite;
+Texture2D<float4> _DivergenceRead;
+RWTexture2D<float4> _DivergenceWrite;
+Texture2D<float4> _CurlRead;
+RWTexture2D<float4> _CurlWrite;
+RWTexture2D<float4> _OpticalWrite;
+Texture2D<float4> _TerrainTex;
+
+SamplerState LinearClampSampler
+{
+    Filter = MIN_MAG_MIP_LINEAR;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+float _DeltaTime;
+float _SimulationTime;
+float _HeatIntensity;
+float _RoomSolarIntensity;
+float _VelocityDissipation;
+float _ThermalDissipation;
+float _BuoyancyScale;
+float _TurbulenceScale;
+float _HeatStorageScale;
+float _BurstStrength;
+float _Stillness;
+float4 _RoomSizePx;
+
+int _EmitterCount;
+float4 _EmitterStartRadius[16];
+float4 _EmitterEndStrength[16];
+float4 _EmitterFlow[16];
+
+static const float Tau = 6.28318530718;
+
+float2 GridUV(uint2 id, uint width, uint height)
+{
+    return (float2(id) + 0.5) / float2(width, height);
+}
+
+float4 TerrainAt(float2 uv)
+{
+    uint width;
+    uint height;
+    _TerrainTex.GetDimensions(width, height);
+    int2 p = int2(clamp(uv, 0.0, 0.999999) * float2(width, height));
+    p = clamp(p, int2(0, 0), int2((int)width - 1, (int)height - 1));
+    return _TerrainTex.Load(int3(p, 0));
+}
+
+float ObstacleAt(float2 uv)
+{
+    return TerrainAt(uv).r;
+}
+
+float WallDistance01(float2 uv)
+{
+    return TerrainAt(uv).g;
+}
+
+float BoundaryHeatAt(float2 uv)
+{
+    return TerrainAt(uv).b;
+}
+
+float SkyExposureAt(float2 uv)
+{
+    return TerrainAt(uv).a;
+}
+
+float4 LoadClamped(Texture2D<float4> tex, int2 p, uint width, uint height)
+{
+    p = clamp(p, int2(0, 0), int2((int)width - 1, (int)height - 1));
+    return tex.Load(int3(p, 0));
+}
+
+float2 WallTangent(float2 uv, float2 texel)
+{
+    float left = WallDistance01(uv - float2(texel.x, 0.0));
+    float right = WallDistance01(uv + float2(texel.x, 0.0));
+    float down = WallDistance01(uv - float2(0.0, texel.y));
+    float up = WallDistance01(uv + float2(0.0, texel.y));
+    float2 gradient = float2(right - left, up - down);
+    float len = length(gradient);
+    if (len < 0.0001)
+        return 0.0.xx;
+    gradient /= len;
+    return float2(-gradient.y, gradient.x);
+}
+
+float Hash12(float2 p)
+{
+    float3 p3 = frac(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float SmoothFalloff(float distancePx, float radiusPx)
+{
+    float x = saturate(1.0 - distancePx / max(1.0, radiusPx));
+    return x * x * (3.0 - 2.0 * x);
+}
+
+float SegmentFalloff(
+    float2 worldPx,
+    float2 startPx,
+    float2 endPx,
+    float radiusPx,
+    out float segmentT)
+{
+    float2 ab = endPx - startPx;
+    float denom = max(1.0, dot(ab, ab));
+    segmentT = saturate(dot(worldPx - startPx, ab) / denom);
+    float2 closest = startPx + ab * segmentT;
+    float widening = lerp(0.72, 1.42, segmentT);
+    return SmoothFalloff(distance(worldPx, closest), radiusPx * widening);
+}
+
+float2 EmitterVelocity(float2 worldPx, out float heatWeight, out float turbulenceWeight)
+{
+    float2 result = 0.0;
+    heatWeight = 0.0;
+    turbulenceWeight = 0.0;
+
+    [unroll]
+    for (int i = 0; i < 16; i++)
+    {
+        if (i >= _EmitterCount)
+            break;
+
+        float4 startData = _EmitterStartRadius[i];
+        float4 endData = _EmitterEndStrength[i];
+        float4 flowData = _EmitterFlow[i];
+        float2 startPx = startData.xy * _RoomSizePx.xy;
+        float2 endPx = endData.xy * _RoomSizePx.xy;
+        float t;
+        float falloff = SegmentFalloff(
+            worldPx,
+            startPx,
+            endPx,
+            startData.z,
+            t);
+
+        float pulse = 0.72 + 0.28 * sin(
+            _SimulationTime * (0.72 + endData.w * 0.38) +
+            flowData.z * Tau + t * 4.1);
+        float strength = endData.z * falloff * pulse;
+        result += flowData.xy * strength;
+        heatWeight += strength;
+        turbulenceWeight += strength * endData.w;
+    }
+
+    heatWeight = saturate(heatWeight);
+    turbulenceWeight = saturate(turbulenceWeight);
+    return result;
+}
+
+[numthreads(8, 8, 1)]
+void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    bool solid = ObstacleAt(uv) > 0.5;
+
+    _VelocityWrite[id] = 0.0;
+    _ThermalWrite[id] = 0.0;
+    _PressureWrite[id] = 0.0;
+    _DivergenceWrite[id] = 0.0;
+    _CurlWrite[id] = 0.0;
+    _OpticalWrite[id] = 0.0;
+
+    if (!solid)
+    {
+        float seed = Hash12(float2(id));
+        _ThermalWrite[id] = float4(seed * 0.008, 0.0, 0.0, 0.0);
+    }
+}
+
+[numthreads(8, 8, 1)]
+void AdvectVelocity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 backtrace = clamp(uv - velocity * _DeltaTime, 0.0, 1.0);
+    if (ObstacleAt(backtrace) > 0.5)
+        backtrace = uv;
+
+    float2 advected = _VelocityRead.SampleLevel(
+        LinearClampSampler,
+        backtrace,
+        0).xy;
+    _VelocityWrite[id] = float4(advected * _VelocityDissipation, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ApplyThermalForces(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float thermal = saturate(_ThermalRead.Load(int3(id, 0)).r);
+    float2 cellUv = 1.0 / float2(width, height);
+
+    float buoyancyPx = (72.0 + thermal * 92.0) * thermal * _BuoyancyScale;
+    velocity.y += buoyancyPx / max(1.0, _RoomSizePx.y) * _DeltaTime;
+
+    float2 worldPx = uv * _RoomSizePx.xy;
+    float emitterHeat;
+    float emitterTurbulence;
+    float2 emitterFlow = EmitterVelocity(worldPx, emitterHeat, emitterTurbulence);
+    velocity += emitterFlow * _DeltaTime * _HeatIntensity * 1.25;
+
+    float macroA = sin((uv.y * 3.7 + uv.x * 1.1 + _SimulationTime * 0.043) * Tau);
+    float macroB = cos((uv.x * 4.3 - uv.y * 1.6 - _SimulationTime * 0.031) * Tau);
+    float meso = sin((uv.x * 9.2 + uv.y * 7.1 + _SimulationTime * 0.071) * Tau);
+    float turbulence =
+        (0.18 + thermal * 0.82 + emitterTurbulence * 0.95) *
+        _TurbulenceScale *
+        (1.0 - _Stillness * 0.82);
+    velocity += float2(
+        macroA + meso * 0.42,
+        macroB - meso * 0.25) * cellUv * turbulence * 0.92;
+
+    float wallProximity = pow(saturate(1.0 - WallDistance01(uv)), 2.0);
+    float2 tangent = WallTangent(uv, cellUv);
+    float tangentSign = sin((uv.x * 5.1 + uv.y * 3.3 + _SimulationTime * 0.052) * Tau);
+    velocity += tangent * tangentSign * wallProximity * cellUv * thermal * 1.35;
+
+    _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ComputeCurl(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _CurlWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _CurlWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float left = LoadClamped(_VelocityRead, p + int2(-1, 0), width, height).y;
+    float right = LoadClamped(_VelocityRead, p + int2(1, 0), width, height).y;
+    float down = LoadClamped(_VelocityRead, p + int2(0, -1), width, height).x;
+    float up = LoadClamped(_VelocityRead, p + int2(0, 1), width, height).x;
+    float curl = (right - left) - (up - down);
+    _CurlWrite[id] = float4(curl, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ApplyVorticity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float left = abs(LoadClamped(_CurlRead, p + int2(-1, 0), width, height).r);
+    float right = abs(LoadClamped(_CurlRead, p + int2(1, 0), width, height).r);
+    float down = abs(LoadClamped(_CurlRead, p + int2(0, -1), width, height).r);
+    float up = abs(LoadClamped(_CurlRead, p + int2(0, 1), width, height).r);
+    float center = LoadClamped(_CurlRead, p, width, height).r;
+
+    float2 gradient = float2(right - left, up - down);
+    float len = length(gradient);
+    if (len > 0.00001)
+        gradient /= len;
+
+    float2 force = float2(gradient.y, -gradient.x) * center;
+    float thermal = saturate(_ThermalRead.Load(int3(id, 0)).r);
+    float strength = (0.10 + thermal * 0.92) * _TurbulenceScale;
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    velocity += force * strength * _DeltaTime;
+    _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ComputeDivergence(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _DivergenceWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _DivergenceWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float2 center = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 vL = LoadClamped(_VelocityRead, p + int2(-1, 0), width, height).xy;
+    float2 vR = LoadClamped(_VelocityRead, p + int2(1, 0), width, height).xy;
+    float2 vD = LoadClamped(_VelocityRead, p + int2(0, -1), width, height).xy;
+    float2 vU = LoadClamped(_VelocityRead, p + int2(0, 1), width, height).xy;
+
+    float2 texel = 1.0 / float2(width, height);
+    if (ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5) vL = -center;
+    if (ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5) vR = -center;
+    if (ObstacleAt(uv - float2(0.0, texel.y)) > 0.5) vD = -center;
+    if (ObstacleAt(uv + float2(0.0, texel.y)) > 0.5) vU = -center;
+
+    float divergence = 0.5 * ((vR.x - vL.x) + (vU.y - vD.y));
+    _DivergenceWrite[id] = float4(divergence, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void JacobiPressure(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PressureWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _PressureWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float pL = LoadClamped(_PressureRead, p + int2(-1, 0), width, height).r;
+    float pR = LoadClamped(_PressureRead, p + int2(1, 0), width, height).r;
+    float pD = LoadClamped(_PressureRead, p + int2(0, -1), width, height).r;
+    float pU = LoadClamped(_PressureRead, p + int2(0, 1), width, height).r;
+    float div = _DivergenceRead.Load(int3(id, 0)).r;
+    _PressureWrite[id] = float4((pL + pR + pD + pU - div) * 0.25, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ProjectVelocity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float pL = LoadClamped(_PressureRead, p + int2(-1, 0), width, height).r;
+    float pR = LoadClamped(_PressureRead, p + int2(1, 0), width, height).r;
+    float pD = LoadClamped(_PressureRead, p + int2(0, -1), width, height).r;
+    float pU = LoadClamped(_PressureRead, p + int2(0, 1), width, height).r;
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    velocity -= 0.5 * float2(pR - pL, pU - pD);
+
+    float2 texel = 1.0 / float2(width, height);
+    if (ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5 && velocity.x < 0.0) velocity.x = 0.0;
+    if (ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5 && velocity.x > 0.0) velocity.x = 0.0;
+    if (ObstacleAt(uv - float2(0.0, texel.y)) > 0.5 && velocity.y < 0.0) velocity.y = 0.0;
+    if (ObstacleAt(uv + float2(0.0, texel.y)) > 0.5 && velocity.y > 0.0) velocity.y = 0.0;
+
+    _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void AdvectThermal(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _ThermalWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _ThermalWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 backtrace = clamp(uv - velocity * _DeltaTime, 0.0, 1.0);
+    if (ObstacleAt(backtrace) > 0.5)
+        backtrace = uv;
+
+    float4 advected = _ThermalRead.SampleLevel(LinearClampSampler, backtrace, 0);
+
+    // Mild bounded anti-diffusion preserves coherent hot blobs without introducing
+    // the ringing/overshoot that an unrestricted high-order correction would cause.
+    float2 texel = 1.0 / float2(width, height);
+    float tL = _ThermalRead.SampleLevel(LinearClampSampler, backtrace - float2(texel.x, 0.0), 0).r;
+    float tR = _ThermalRead.SampleLevel(LinearClampSampler, backtrace + float2(texel.x, 0.0), 0).r;
+    float tD = _ThermalRead.SampleLevel(LinearClampSampler, backtrace - float2(0.0, texel.y), 0).r;
+    float tU = _ThermalRead.SampleLevel(LinearClampSampler, backtrace + float2(0.0, texel.y), 0).r;
+    float localMin = min(advected.r, min(min(tL, tR), min(tD, tU)));
+    float localMax = max(advected.r, max(max(tL, tR), max(tD, tU)));
+    float blur = (tL + tR + tD + tU) * 0.25;
+    advected.r = clamp(advected.r + (advected.r - blur) * 0.16, localMin, localMax);
+
+    float verticalCooling = lerp(0.992, 0.965, saturate(uv.y));
+    advected.r *= pow(_ThermalDissipation * verticalCooling, _DeltaTime * 40.0);
+    advected.g *= pow(0.996, _DeltaTime * 40.0);
+    _ThermalWrite[id] = float4(saturate(advected.r), saturate(advected.g), 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void InjectThermal(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _ThermalWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _ThermalWrite[id] = 0.0;
+        return;
+    }
+
+    float4 state = _ThermalRead.Load(int3(id, 0));
+    float surface = BoundaryHeatAt(uv);
+    float sky = SkyExposureAt(uv);
+    float targetBoundary =
+        surface * _HeatIntensity *
+        lerp(0.68, 1.34, _HeatStorageScale);
+    float injectRate = 1.0 - exp(-3.2 * _DeltaTime);
+    state.r = lerp(state.r, max(state.r, targetBoundary), injectRate);
+    state.g = lerp(state.g, targetBoundary, 1.0 - exp(-1.25 * _DeltaTime));
+
+    // Direct sun warms the air weakly; the high-energy layer still comes from surfaces.
+    state.r += sky * _HeatIntensity * 0.010 * _DeltaTime;
+
+    float2 worldPx = uv * _RoomSizePx.xy;
+    float emitterHeat;
+    float emitterTurbulence;
+    EmitterVelocity(worldPx, emitterHeat, emitterTurbulence);
+    float emitterEnergy = emitterHeat * _HeatIntensity;
+    state.r += emitterEnergy * (0.58 + emitterTurbulence * 0.24) * _DeltaTime;
+    state.g = max(state.g, emitterEnergy * 0.82);
+
+    // Burst releases stored boundary energy into the moving scalar instead of drawing
+    // a separate wave. Every release therefore inherits the actual room/column state.
+    state.r += state.g * _BurstStrength * 0.82 * _DeltaTime;
+    state.g *= 1.0 - _BurstStrength * _DeltaTime * 0.95;
+
+    _ThermalWrite[id] = float4(saturate(state.r), saturate(state.g), 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void BuildOpticalField(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _OpticalWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _OpticalWrite[id] = 0.0;
+        return;
+    }
+
+    int2 p = int2(id);
+    float tC = _ThermalRead.Load(int3(id, 0)).r;
+    float tL = LoadClamped(_ThermalRead, p + int2(-1, 0), width, height).r;
+    float tR = LoadClamped(_ThermalRead, p + int2(1, 0), width, height).r;
+    float tD = LoadClamped(_ThermalRead, p + int2(0, -1), width, height).r;
+    float tU = LoadClamped(_ThermalRead, p + int2(0, 1), width, height).r;
+    float2 gradient = float2(tR - tL, tU - tD);
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float curl = _CurlRead.Load(int3(id, 0)).r;
+    float2 cellUv = 1.0 / float2(width, height);
+    float2 curlDeflection = float2(-curl, curl) * cellUv * 0.42;
+
+    // Refractive displacement is derived primarily from the temperature gradient.
+    // Velocity and curl contribute phase advection/curvature, never the base pattern.
+    float2 refract = -gradient * cellUv * (2.8 + tC * 5.4);
+    refract += velocity * (0.012 + tC * 0.022);
+    refract += curlDeflection * tC * _TurbulenceScale;
+    refract = clamp(refract, -0.012.xx, 0.012.xx);
+
+    float source = BoundaryHeatAt(uv);
+    float2 tileUv = 20.0 / max(_RoomSizePx.xy, float2(1.0, 1.0));
+    source = max(source, BoundaryHeatAt(uv - float2(0.0, tileUv.y)));
+    source = max(source, BoundaryHeatAt(uv + float2(0.0, tileUv.y)) * 0.72);
+    float boundaryLayer = saturate(source * 1.15 + _ThermalRead.Load(int3(id, 0)).g * 0.75);
+
+    _OpticalWrite[id] = float4(refract, saturate(tC), boundaryLayer);
+}
