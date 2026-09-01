@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.99";
+    public const string Version = "0.1.100";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -73,6 +73,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
@@ -173,6 +174,10 @@ internal sealed class Plugin : BaseUnityPlugin
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
+            // Install after RainWeatherRuntime so scheduled HeavyRain can be separated
+            // from room-authored HeavyRain without changing the native room effect.
+            ScheduledHeavyRainTraversalRuntime.Enable();
+
             // RainMeterRoundPipRuntime is the single authoritative DryCycle RainMeter
             // renderer. WeatherForecastHudRuntime remains in source as the old split
             // implementation but is intentionally not enabled to avoid two HUD hooks
@@ -194,6 +199,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
