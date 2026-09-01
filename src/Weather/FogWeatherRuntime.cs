@@ -15,9 +15,10 @@ namespace DryCycle.Weather;
 ///
 /// When DryCycle's weather AssetBundle is available, the late GrabShaders layer is a
 /// full scene composite rather than an alpha veil. Gameplay transmittance, volumetric
-/// visual density, room obstacles, fixed Lantern/LanternMouse reveal and pseudo-depth
-/// are evaluated per pixel. A whole-room GPU fluid field provides low-frequency motion;
-/// a runtime-generated 3D Perlin/Worley-style volume supplies erosion and billow detail.
+/// visual density, room obstacles, fixed Lantern/LanternMouse/theGlow reveal and
+/// pseudo-depth are evaluated per pixel. A whole-room GPU fluid field provides
+/// low-frequency motion; a runtime-generated 3D Perlin/Worley-style volume supplies
+/// erosion and billow detail.
 ///
 /// If the custom bundle is absent, incompatible or a room-specific GPU resource cannot
 /// be created, the previous palette-colored mesh remains as a safe compatibility
@@ -43,6 +44,10 @@ internal static class FogWeatherRuntime
     // breathe/twitch. These are the minimum intended radii previously agreed on.
     private const float LanternRevealRadius = 200f;
     private const float LanternMouseRevealRadius = 40f;
+
+    // Rain World tiles are 20px. theGlow is deliberately much smaller than the native
+    // 300px PlayerGraphics LightSource: exactly two tiles of radius beyond LanternMouse.
+    private const float TheGlowRevealRadius = LanternMouseRevealRadius + 40f;
 
     private const int MaxFogLights = 8;
     private const int MaxAwarenessSources = 4;
@@ -483,6 +488,37 @@ internal static class FogWeatherRuntime
                 count++;
             }
 
+            if (count < MaxFogLights && StoryHasTheGlow() && room?.game?.Players != null)
+            {
+                for (int i = 0;
+                     i < room.game.Players.Count && count < MaxFogLights;
+                     i++)
+                {
+                    Player player = room.game.Players[i]?.realizedCreature as Player;
+                    if (player?.room != room ||
+                        player.bodyChunks == null ||
+                        player.bodyChunks.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    Vector2 position = Vector2.Lerp(
+                        player.bodyChunks[0].lastPos,
+                        player.bodyChunks[0].pos,
+                        timeStacker);
+                    PlayerGraphics graphics = player.graphicsModule as PlayerGraphics;
+                    Color color = graphics?.lightSource?.color ?? Color.white;
+
+                    _fogLightData[count] = new Vector4(
+                        position.x,
+                        position.y,
+                        TheGlowRevealRadius,
+                        1f);
+                    _fogLightColors[count] = color;
+                    count++;
+                }
+            }
+
             return count;
         }
 
@@ -519,6 +555,13 @@ internal static class FogWeatherRuntime
             }
 
             return count;
+        }
+
+        private bool StoryHasTheGlow()
+        {
+            return room?.game?.session is StoryGameSession story &&
+                story.saveState != null &&
+                story.saveState.theGlow;
         }
 
         private void RefreshFogEntities()
@@ -608,6 +651,29 @@ internal static class FogWeatherRuntime
                     position,
                     LanternMouseRevealRadius,
                     strength));
+            }
+
+            if (StoryHasTheGlow() && room?.game?.Players != null)
+            {
+                for (int i = 0; i < room.game.Players.Count; i++)
+                {
+                    Player player = room.game.Players[i]?.realizedCreature as Player;
+                    if (player?.room != room ||
+                        player.bodyChunks == null ||
+                        player.bodyChunks.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    Vector2 position = Vector2.Lerp(
+                        player.bodyChunks[0].lastPos,
+                        player.bodyChunks[0].pos,
+                        timeStacker);
+                    _fallbackRevealSamples.Add(new RevealSample(
+                        position,
+                        TheGlowRevealRadius,
+                        1f));
+                }
             }
 
             if (denseStrength <= Epsilon || room?.game?.Players == null)
