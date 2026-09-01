@@ -74,7 +74,7 @@ internal static class WeatherForecastVisualCatalog
     // the stronger semantic distinction.
     internal static readonly Color LightRainColor = new(0.30f, 0.62f, 0.92f);
     internal static readonly Color HeavyRainColor = new(0.08f, 0.25f, 0.57f);
-    internal static readonly Color RainDropColor = new(0.48f, 0.77f, 1.00f);
+    internal static readonly Color RainDropColor = new(0.62f, 0.86f, 1.00f);
 
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
     {
@@ -99,26 +99,25 @@ internal static class WeatherForecastVisualCatalog
                 HeavyRainColor,
                 RainDropColor,
                 WeatherForecastAnimation.Drip,
-                dripCount: 2,
-                dripCyclesPerSecond: 0.78f,
-                dripTravelPixels: 7.4f),
+                dripCount: 3,
+                dripCyclesPerSecond: 0.96f,
+                dripTravelPixels: 9.8f),
 
-            // BulletRain is deliberately the same visual object as HeavyRain. The
-            // only semantic change requested is faster dripping, so count, shape,
-            // travel and color stay identical and only the playback rate changes.
+            // BulletRain keeps HeavyRain's shape/count/travel language and only plays
+            // the same stronger drip animation much faster.
             WeatherForecastVisualKind.BulletRain => new WeatherForecastVisualStyle(
                 HeavyRainColor,
                 RainDropColor,
                 WeatherForecastAnimation.FastDrip,
-                dripCount: 2,
-                dripCyclesPerSecond: 1.72f,
-                dripTravelPixels: 7.4f),
+                dripCount: 3,
+                dripCyclesPerSecond: 2.10f,
+                dripTravelPixels: 9.8f),
 
             WeatherForecastVisualKind.DeathRain => new WeatherForecastVisualStyle(
                 HeavyRainColor,
                 RainDropColor,
                 WeatherForecastAnimation.VerticalShake,
-                shakeAmplitudePixels: 0.58f),
+                shakeAmplitudePixels: 1.35f),
 
             _ => new WeatherForecastVisualStyle(
                 Color.clear,
