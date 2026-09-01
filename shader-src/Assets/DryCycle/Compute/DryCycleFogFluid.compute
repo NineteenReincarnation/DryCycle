@@ -47,6 +47,9 @@ int _BlastCount;
 float4 _BlastPosRadii[4];
 float4 _BlastParams[4];
 
+static const float BlastWaveDistanceScale = 1024.0;
+static const float BlastWaveLifetime = 0.62;
+
 float2 GridUV(uint2 id, uint width, uint height)
 {
     return (float2(id) + 0.5) / float2(width, height);
@@ -83,6 +86,30 @@ float SmoothFalloff(float distancePx, float radiusPx)
     float x = saturate(1.0 - distancePx / max(1.0, radiusPx));
     x = x * x * (3.0 - 2.0 * x);
     return x;
+}
+
+float BlastShapeRadiusScale(float2 deltaPx, float2 blastUv)
+{
+    float angle = atan2(deltaPx.y, deltaPx.x);
+    float seed = frac(
+        blastUv.x * 37.17 +
+        blastUv.y * 91.73) * 6.2831853;
+
+    // Only a few low angular frequencies are used. The outline therefore has broad
+    // lobes and dents like a pressure cavity, never pixel noise or a perfect circle.
+    float irregular =
+        sin(angle * 2.0 + seed * 0.73) * 0.035 +
+        sin(angle * 3.0 + seed) * 0.085 +
+        sin(angle * 5.0 - seed * 1.41) * 0.050;
+    return clamp(1.0 + irregular, 0.84, 1.16);
+}
+
+float BlastWaveRadiusPx(float ageSeconds)
+{
+    float age = max(0.0, ageSeconds);
+    // Fast initial expansion followed by mild deceleration. This reaches a spear-sized
+    // cavity in roughly 0.14s and a bomb-sized cavity in roughly 0.35s.
+    return (1250.0 * age) / (1.0 + age * 0.85);
 }
 
 float TargetShape(float2 uv, float time)
@@ -169,8 +196,10 @@ void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
         solid ? 0.0.xx : _WindVelocity.xy,
         0.0,
         0.0);
-    // R = fog density. G = explicit explosion clearing permission.
-    _DensityWrite[id] = float4(density, 0.0, 0.0, 1.0);
+    // R = fog density. G = long-lived explosion clearing permission.
+    // B = temporary irregular blast-wave distance / 1024px.
+    // A = remaining blast-wave metadata lifetime; zero means no active wave.
+    _DensityWrite[id] = float4(density, 0.0, 0.0, 0.0);
     _PressureWrite[id] = 0.0;
     _DivergenceWrite[id] = 0.0;
     _CurlWrite[id] = 0.0;
@@ -663,13 +692,33 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
     float2 uv = GridUV(id, width, height);
     float clearDecay = exp(-max(0.0, _BlastClearDecay) * _DeltaTime);
     float4 localState = _DensityRead.Load(int3(id, 0));
-    float localBlastClear = saturate(localState.g * clearDecay);
+
+    float waveLife = max(0.0, localState.a - _DeltaTime);
+    float waveAge = BlastWaveLifetime - waveLife;
+    float waveHit = 0.0;
+    if (waveLife > 0.0001)
+    {
+        float waveDistancePx = localState.b * BlastWaveDistanceScale;
+        float waveRadiusPx = BlastWaveRadiusPx(waveAge);
+        waveHit = 1.0 - smoothstep(
+            waveRadiusPx - 14.0,
+            waveRadiusPx + 10.0,
+            waveDistancePx);
+        waveHit = saturate(waveHit);
+    }
+
+    float localBlastClear = saturate(
+        max(localState.g * clearDecay, waveHit * 0.995));
 
     if (ObstacleAt(uv) > 0.5)
     {
-        // Fog density remains zero inside terrain, but an explosion may temporarily
-        // clear the fog composited over the receiving wall surface itself.
-        _DensityWrite[id] = float4(0.0, localBlastClear, 0.0, 1.0);
+        // The short-lived B/A wave remains anchored to the room while it expands; G is
+        // the long-lived field that survives afterward and follows the fluid.
+        _DensityWrite[id] = float4(
+            0.0,
+            localBlastClear,
+            waveLife > 0.0001 ? localState.b : 0.0,
+            waveLife);
         return;
     }
 
@@ -685,21 +734,27 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         LinearClampSampler,
         backtrace,
         0);
-    float advectedBlastClear = saturate(state.g * clearDecay);
+    float advectedBlastClear = saturate(
+        max(state.g * clearDecay, waveHit * 0.995));
 
-    // The G field is the only permission to resist refill. Use the clear amount that
-    // already occupied this destination cell to throttle dense fog advecting into it,
-    // but do not copy/expand G itself. When G is zero this multiplier is exactly 1.0,
-    // so ordinary fog advection remains bit-for-bit on the original path.
+    // G is the only long-lived permission to resist refill. The temporary pressure wave
+    // reinforces it as the front reaches each destination cell. When neither exists,
+    // every multiplier is exactly the original value and ordinary fog is unchanged.
     float incomingDensityScale = lerp(1.0, 0.08, localBlastClear);
     float density =
         state.r * _DensityDissipation * incomingDensityScale;
 
+    // Do not make the whole final cavity appear in one frame. B stores a continuous
+    // irregular radial distance field, and only the moving pressure front is allowed to
+    // evacuate R/G. Repeated reinforcement for ~0.62s gives a short stable clear phase
+    // before normal advection is allowed to close the cavity from its edges.
+    density *= lerp(1.0, 0.055, waveHit);
+
     _DensityWrite[id] = float4(
         saturate(density),
         advectedBlastClear,
-        0.0,
-        1.0);
+        waveLife > 0.0001 ? localState.b : 0.0,
+        waveLife);
 }
 
 [numthreads(8, 8, 1)]
@@ -718,7 +773,11 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     if (ObstacleAt(uv) > 0.5)
     {
-        _DensityWrite[id] = float4(0.0, blastClear, 0.0, 1.0);
+        _DensityWrite[id] = float4(
+            0.0,
+            blastClear,
+            state.b,
+            state.a);
         return;
     }
 
@@ -793,8 +852,8 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     _DensityWrite[id] = float4(
         saturate(density),
         blastClear,
-        0.0,
-        1.0);
+        state.b,
+        state.a);
 }
 
 [numthreads(8, 8, 1)]
@@ -813,6 +872,8 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
     float4 state = _DensityRead.Load(int3(id, 0));
     float density = state.r;
     float blastClear = state.g;
+    float waveDistance = state.b;
+    float waveLife = state.a;
 
     [unroll]
     for (int i = 0; i < 4; i++)
@@ -823,8 +884,9 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
         float4 blast = _BlastPosRadii[i];
         float4 parameters = _BlastParams[i];
         float2 blastPx = blast.xy * _RoomSizePx.xy;
-        float distancePx = distance(worldPx, blastPx);
-        if (distancePx >= blast.w)
+        float2 deltaPx = worldPx - blastPx;
+        float distancePx = length(deltaPx);
+        if (distancePx >= blast.w * 1.18)
             continue;
 
         float terrain = BlastTerrainTransmission(
@@ -834,30 +896,47 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
         if (terrain <= 0.0)
             continue;
 
-        // The cavity has a broad full-strength centre and smooth shoulder. The ring is
-        // centred just outside that cavity, approximating the fog mass displaced from
-        // the core rather than simply deleting it from the simulation.
-        float cavity = 1.0 - smoothstep(
-            blast.z * 0.10,
-            blast.z,
-            distancePx);
-        cavity = saturate(cavity);
+        float radiusScale = BlastShapeRadiusScale(deltaPx, blast.xy);
+        float shapedDistancePx = distancePx / max(0.82, radiusScale);
 
+        // Seed a continuous low-frequency radial distance field rather than instantly
+        // stamping G across the whole core. B/A then drive a fast but visible expanding
+        // pressure front for the next ~0.62s. This is the key to avoiding the old blocky
+        // low-resolution transparent island.
+        if (shapedDistancePx < blast.z)
+        {
+            float encodedDistance = saturate(
+                shapedDistancePx / BlastWaveDistanceScale);
+            if (waveLife <= 0.0001 || encodedDistance < waveDistance)
+            {
+                waveDistance = encodedDistance;
+                waveLife = BlastWaveLifetime;
+            }
+
+            // The first frame clears only the immediate detonation centre. The rest of
+            // the cavity is opened by AdvectDensity as the stored wavefront reaches it.
+            float initialHit = 1.0 - smoothstep(
+                8.0,
+                24.0,
+                shapedDistancePx);
+            density *= 1.0 - initialHit * parameters.y * terrain;
+            blastClear = max(
+                blastClear,
+                initialHit * parameters.w * terrain);
+        }
+
+        // Compression follows the same broad irregular contour, but remains a one-shot
+        // density displacement. The existing velocity field then advects and curls it.
         float ringInner = smoothstep(
             blast.z * 0.72,
             blast.z * 1.04,
-            distancePx);
+            shapedDistancePx);
         float ringOuter = 1.0 - smoothstep(
             blast.z * 1.04,
             blast.w,
-            distancePx);
+            shapedDistancePx);
         float ring = saturate(ringInner * ringOuter);
-
-        density *= 1.0 - cavity * parameters.y * terrain;
         density += ring * parameters.z * _TargetDensity * terrain;
-        blastClear = max(
-            blastClear,
-            cavity * parameters.w * terrain);
     }
 
     if (receiverSolid > 0.5)
@@ -866,6 +945,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
     _DensityWrite[id] = float4(
         saturate(density),
         saturate(blastClear),
-        0.0,
-        1.0);
+        waveDistance,
+        waveLife);
 }
