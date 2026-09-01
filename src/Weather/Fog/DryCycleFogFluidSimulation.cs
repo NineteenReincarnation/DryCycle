@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DryCycle.Rendering;
 using UnityEngine;
 
@@ -6,25 +7,31 @@ namespace DryCycle.Weather.Fog;
 
 /// <summary>
 /// Whole-room, obstacle-aware low-frequency fog simulation. Velocity is stored in
-/// normalized room UV / second, while density is unitless. The simulation is purely
-/// visual: DenseFog gameplay extinction is calculated independently in the final
-/// composite shader, so fluid thinning can never reveal distant terrain by itself.
+/// normalized room UV / second. Density texture R is physical fog density; G is an
+/// explicit blast-clearing permission field. Ordinary advection/player wakes may alter
+/// R but never gameplay visibility by themselves. Only recognized explosions write G,
+/// allowing the final composite to make that local density loss temporarily real.
 /// </summary>
 internal sealed class DryCycleFogFluidSimulation : IDisposable
 {
     // Five cells per 20px Rain World tile gives a 4px fluid cell in ordinary rooms.
     // This is deliberately denser than the old prototype because room-scale curls and
-    // wakes are now expected to survive all the way into the high-quality composite.
+    // wakes are expected to survive all the way into the high-quality composite.
     private const int CellsPerTile = 5;
     private const int MaxWidth = 1280;
     private const int MaxHeight = 640;
     private const int PressureIterations = 36;
     private const int MaxPlayerImpulses = 4;
+    private const int MaxBlastImpulses = 4;
+    private const float BlastClearDecayPerSecond = 0.62f;
 
     private readonly Room _room;
     private readonly DryCycleFogObstacleField _obstacles;
     private readonly Vector4[] _impulsePosRadius = new Vector4[MaxPlayerImpulses];
     private readonly Vector4[] _impulseVelocity = new Vector4[MaxPlayerImpulses];
+    private readonly Vector4[] _blastPosRadii = new Vector4[MaxBlastImpulses];
+    private readonly Vector4[] _blastParameters = new Vector4[MaxBlastImpulses];
+    private readonly HashSet<Explosion> _processedExplosions = new();
 
     private ComputeShader _solver;
     private RenderTexture _velocityRead;
@@ -44,11 +51,15 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
     private int _divergenceKernel;
     private int _pressureKernel;
     private int _projectKernel;
+    private int _applyBlastVelocityKernel = -1;
     private int _advectDensityKernel;
     private int _maintainDensityKernel;
+    private int _applyBlastDensityKernel = -1;
 
     private float _elapsed;
     private int _impulseCount;
+    private int _blastCount;
+    private bool _blastKernelsAvailable;
 
     internal bool IsAvailable { get; private set; }
     internal Texture DensityTexture => IsAvailable ? _densityRead : Texture2D.whiteTexture;
@@ -80,7 +91,16 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
                 $"DryCycle fog fluid initialized for " +
                 $"'{room.abstractRoom?.name ?? "unknown"}': " +
                 $"{_densityRead.width}x{_densityRead.height}, " +
-                $"pressureIterations={PressureIterations}.");
+                $"pressureIterations={PressureIterations}, " +
+                $"blastInteraction={(_blastKernelsAvailable ? "yes" : "no")}.");
+
+            if (!_blastKernelsAvailable)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DryCycle fog blast kernels are missing from the loaded weather " +
+                    "AssetBundle. Base volumetric fog remains enabled, but explosive " +
+                    "fog displacement requires rebuilding drycycleweather.");
+            }
         }
         catch (Exception ex)
         {
@@ -103,6 +123,7 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         _elapsed += dt;
 
         BuildPlayerImpulses();
+        BuildBlastImpulses();
 
         Vector2 roomSize = RoomSizePixels;
         // Broad prevailing drift. The speed changes slowly enough to feel atmospheric,
@@ -158,6 +179,17 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         Dispatch(_projectKernel);
         Swap(ref _velocityRead, ref _velocityWrite);
 
+        // Explosion shock is intentionally injected after pressure projection. It is a
+        // short compressible impulse; projecting it immediately would erase the radial
+        // expansion and recreate the room-scale return-flow problem seen with oversized
+        // player wakes. Terrain-normal components are still clamped in the blast kernel.
+        if (_blastKernelsAvailable && _blastCount > 0)
+        {
+            BindVelocityPair(_applyBlastVelocityKernel);
+            Dispatch(_applyBlastVelocityKernel);
+            Swap(ref _velocityRead, ref _velocityWrite);
+        }
+
         _solver.SetTexture(_advectDensityKernel, "_DensityRead", _densityRead);
         _solver.SetTexture(_advectDensityKernel, "_DensityWrite", _densityWrite);
         _solver.SetTexture(_advectDensityKernel, "_VelocityRead", _velocityRead);
@@ -170,11 +202,23 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         _solver.SetTexture(_maintainDensityKernel, "_ObstacleTex", _obstacles.Texture);
         Dispatch(_maintainDensityKernel);
         Swap(ref _densityRead, ref _densityWrite);
+
+        // Carve/pack density after ordinary maintenance so the explosion gets one clean
+        // authoritative frame rather than being partially refilled by the inlet/relax pass.
+        if (_blastKernelsAvailable && _blastCount > 0)
+        {
+            _solver.SetTexture(_applyBlastDensityKernel, "_DensityRead", _densityRead);
+            _solver.SetTexture(_applyBlastDensityKernel, "_DensityWrite", _densityWrite);
+            _solver.SetTexture(_applyBlastDensityKernel, "_ObstacleTex", _obstacles.Texture);
+            Dispatch(_applyBlastDensityKernel);
+            Swap(ref _densityRead, ref _densityWrite);
+        }
     }
 
     public void Dispose()
     {
         IsAvailable = false;
+        _processedExplosions.Clear();
 
         Release(ref _velocityRead);
         Release(ref _velocityWrite);
@@ -204,6 +248,24 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         _projectKernel = _solver.FindKernel("ProjectVelocity");
         _advectDensityKernel = _solver.FindKernel("AdvectDensity");
         _maintainDensityKernel = _solver.FindKernel("MaintainDensity");
+
+        _applyBlastVelocityKernel = FindOptionalKernel("ApplyBlastVelocity");
+        _applyBlastDensityKernel = FindOptionalKernel("ApplyBlastDensity");
+        _blastKernelsAvailable =
+            _applyBlastVelocityKernel >= 0 &&
+            _applyBlastDensityKernel >= 0;
+    }
+
+    private int FindOptionalKernel(string name)
+    {
+        try
+        {
+            return _solver.FindKernel(name);
+        }
+        catch (Exception)
+        {
+            return -1;
+        }
     }
 
     private void AllocateTextures()
@@ -275,6 +337,16 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         _solver.SetInt("_ImpulseCount", _impulseCount);
         _solver.SetVectorArray("_ImpulsePosRadius", _impulsePosRadius);
         _solver.SetVectorArray("_ImpulseVelocity", _impulseVelocity);
+
+        // Do not set unknown properties on an older bundle. Missing optional blast
+        // kernels degrade only this new interaction, never the base fog simulation.
+        if (_blastKernelsAvailable)
+        {
+            _solver.SetFloat("_BlastClearDecay", BlastClearDecayPerSecond);
+            _solver.SetInt("_BlastCount", _blastCount);
+            _solver.SetVectorArray("_BlastPosRadii", _blastPosRadii);
+            _solver.SetVectorArray("_BlastParams", _blastParameters);
+        }
     }
 
     private void BuildPlayerImpulses()
@@ -344,6 +416,71 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
                 velocity.y * 40f / Mathf.Max(1f, roomSize.y),
                 0f,
                 0f);
+        }
+    }
+
+    private void BuildBlastImpulses()
+    {
+        _blastCount = 0;
+        Array.Clear(_blastPosRadii, 0, _blastPosRadii.Length);
+        Array.Clear(_blastParameters, 0, _blastParameters.Length);
+
+        if (!_blastKernelsAvailable || _room?.updateList == null)
+        {
+            return;
+        }
+
+        _processedExplosions.RemoveWhere(explosion =>
+            explosion == null ||
+            explosion.slatedForDeletetion ||
+            explosion.room != _room);
+
+        Vector2 roomSize = RoomSizePixels;
+        for (int i = 0;
+             i < _room.updateList.Count && _blastCount < MaxBlastImpulses;
+             i++)
+        {
+            if (_room.updateList[i] is not Explosion explosion ||
+                explosion.slatedForDeletetion ||
+                explosion.room != _room ||
+                _processedExplosions.Contains(explosion))
+            {
+                continue;
+            }
+
+            bool scavengerBomb = explosion.sourceObject is ScavengerBomb;
+            bool explosiveSpear = explosion.sourceObject is ExplosiveSpear;
+            if (!scavengerBomb && !explosiveSpear)
+            {
+                continue;
+            }
+
+            float sourceRadius = Mathf.Max(30f, explosion.rad);
+            float coreRadius = sourceRadius * (scavengerBomb ? 0.60f : 0.58f);
+            float outerRadius = sourceRadius * (scavengerBomb ? 1.18f : 1.30f);
+
+            // The bomb's stock Explosion is 250px while the explosive spear is 110px.
+            // These values preserve that hierarchy without letting either shock become a
+            // room-wide wind field. Compression is approximately proportional to carved
+            // core area, so the outer ring reads as displaced fog rather than new fog.
+            float impulsePxPerSecond = scavengerBomb ? 620f : 360f;
+            float densityCarve = scavengerBomb ? 0.96f : 0.87f;
+            float compression = scavengerBomb ? 0.38f : 0.28f;
+            float visibilityClear = scavengerBomb ? 0.98f : 0.88f;
+
+            int index = _blastCount++;
+            _blastPosRadii[index] = new Vector4(
+                explosion.pos.x / Mathf.Max(1f, roomSize.x),
+                explosion.pos.y / Mathf.Max(1f, roomSize.y),
+                coreRadius,
+                outerRadius);
+            _blastParameters[index] = new Vector4(
+                impulsePxPerSecond,
+                densityCarve,
+                compression,
+                visibilityClear);
+
+            _processedExplosions.Add(explosion);
         }
     }
 
