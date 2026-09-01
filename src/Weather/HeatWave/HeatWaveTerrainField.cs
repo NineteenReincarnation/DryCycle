@@ -1,15 +1,16 @@
 using System;
+using DryCycle.DayNight;
 using DryCycle.TemperatureSystem;
 using UnityEngine;
 
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// Immutable room-space terrain/solar field shared by HeatWave simulation and optics.
-/// R = solid mask, G = normalized distance to solid, B = directly heated boundary
-/// source on the first air tile above an exposed surface, A = direct sky exposure.
-/// No HeatWave-specific RoomSettings are required: geometry comes from tiles and solar
-/// attenuation comes from the existing temperature/environment system.
+/// Immutable room-space terrain/sky field shared by HeatWave simulation and optics.
+/// R = solid mask, G = normalized distance to solid, B = upward-facing exposed surface
+/// source, A = local sky transmission. B/A are geometric/local-shade data rather than
+/// baked sunlight intensity so day/night lighting can change without rebuilding the
+/// texture and HeatWave still works in rooms that omitted optional TemperatureSets data.
 /// </summary>
 internal sealed class HeatWaveTerrainField : IDisposable
 {
@@ -19,7 +20,8 @@ internal sealed class HeatWaveTerrainField : IDisposable
 
     internal Texture2D Texture { get; }
     internal Vector2 RoomSizePixels { get; }
-    internal float RoomSolarIntensity { get; }
+    internal float AuthoredSunlightIntensity { get; }
+    internal float RoomShade { get; }
 
     internal HeatWaveTerrainField(Room room)
     {
@@ -32,11 +34,8 @@ internal sealed class HeatWaveTerrainField : IDisposable
         int height = Math.Max(1, room.TileHeight);
         RoomSizePixels = new Vector2(width * 20f, height * 20f);
 
-        float roomSun = SolarEnvironment.CalculateEffectiveSunlight(
-            SolarEnvironment.GetSunlightIntensity(room),
-            SolarEnvironment.GetRoomShade(room),
-            0f);
-        RoomSolarIntensity = roomSun;
+        AuthoredSunlightIntensity = Mathf.Clamp01(SolarEnvironment.GetSunlightIntensity(room));
+        RoomShade = Mathf.Clamp01(SolarEnvironment.GetRoomShade(room));
 
         float[] distances = BuildDistances(room, width, height);
         bool[] skyOpen = BuildSkyVisibility(room, width, height);
@@ -51,27 +50,30 @@ internal sealed class HeatWaveTerrainField : IDisposable
                 float normalizedDistance = Mathf.Clamp01(
                     distances[index] / MaxEncodedDistanceTiles);
 
-                float skyExposure = 0f;
-                float boundaryHeat = 0f;
-                if (!solid && skyOpen[index] && roomSun > 0.0001f)
+                float skyTransmission = 0f;
+                float boundaryExposure = 0f;
+                if (!solid && skyOpen[index])
                 {
                     Vector2 samplePoint = new(
                         x * 20f + 10f,
                         y * 20f + 10f);
                     float localShade = SolarEnvironment.GetLocalShadeAt(room, samplePoint);
-                    skyExposure = roomSun * (1f - Mathf.Clamp01(localShade));
+                    skyTransmission = 1f - Mathf.Clamp01(localShade);
 
+                    // Only the first air cell over an upward-facing solid surface is a
+                    // direct ground boundary source. The GPU solver spreads/advects the
+                    // resulting heat instead of filling a hand-authored vertical mask.
                     if (y > 0 && room.GetTile(x, y - 1).Solid)
                     {
-                        boundaryHeat = skyExposure;
+                        boundaryExposure = skyTransmission;
                     }
                 }
 
                 pixels[index] = new Color32(
                     solid ? (byte)255 : (byte)0,
                     (byte)Mathf.RoundToInt(normalizedDistance * 255f),
-                    (byte)Mathf.RoundToInt(Mathf.Clamp01(boundaryHeat) * 255f),
-                    (byte)Mathf.RoundToInt(Mathf.Clamp01(skyExposure) * 255f));
+                    (byte)Mathf.RoundToInt(Mathf.Clamp01(boundaryExposure) * 255f),
+                    (byte)Mathf.RoundToInt(Mathf.Clamp01(skyTransmission) * 255f));
             }
         }
 
@@ -84,6 +86,27 @@ internal sealed class HeatWaveTerrainField : IDisposable
         };
         Texture.SetPixels32(pixels);
         Texture.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+    }
+
+    /// <summary>
+    /// Visual/direct-solar drive for the current clock. Authored SunlightIntensity is
+    /// respected as an artistic boost, but it is not mandatory: an open HeatWave room
+    /// still gets a strong midday sun when the optional TemperatureSets field was left
+    /// at its neutral zero default. RoomShade remains authoritative and can suppress it.
+    /// </summary>
+    internal float EvaluateSolar(WorldClock clock)
+    {
+        float directLight = clock?.Lighting.DirectLight ?? 1f;
+        float roomTransmission = 1f - RoomShade;
+        float heatWaveOutdoorBaseline = Mathf.Lerp(
+            0.62f,
+            1f,
+            AuthoredSunlightIntensity);
+
+        return Mathf.Clamp01(
+            directLight *
+            roomTransmission *
+            heatWaveOutdoorBaseline);
     }
 
     public void Dispose()
