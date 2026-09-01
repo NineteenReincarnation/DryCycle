@@ -1,0 +1,408 @@
+#pragma kernel InitializeFields
+#pragma kernel AdvectVelocity
+#pragma kernel ApplyForces
+#pragma kernel ComputeCurl
+#pragma kernel ApplyVorticity
+#pragma kernel ComputeDivergence
+#pragma kernel JacobiPressure
+#pragma kernel ProjectVelocity
+#pragma kernel AdvectDensity
+#pragma kernel MaintainDensity
+
+Texture2D<float4> _VelocityRead;
+RWTexture2D<float4> _VelocityWrite;
+Texture2D<float4> _DensityRead;
+RWTexture2D<float4> _DensityWrite;
+Texture2D<float4> _PressureRead;
+RWTexture2D<float4> _PressureWrite;
+Texture2D<float4> _DivergenceRead;
+RWTexture2D<float4> _DivergenceWrite;
+Texture2D<float4> _CurlRead;
+RWTexture2D<float4> _CurlWrite;
+Texture2D<float4> _ObstacleTex;
+
+SamplerState LinearClampSampler
+{
+    Filter = MIN_MAG_MIP_LINEAR;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+float _DeltaTime;
+float _SimulationTime;
+float _TargetDensity;
+float _VelocityDissipation;
+float _DensityDissipation;
+float _DensityRelaxation;
+float _VorticityStrength;
+float4 _WindVelocity;
+float4 _RoomSizePx;
+int _ImpulseCount;
+float4 _ImpulsePosRadius[4];
+float4 _ImpulseVelocity[4];
+
+float2 GridUV(uint2 id, uint width, uint height)
+{
+    return (float2(id) + 0.5) / float2(width, height);
+}
+
+float ObstacleAt(float2 uv)
+{
+    uint width;
+    uint height;
+    _ObstacleTex.GetDimensions(width, height);
+    int2 p = int2(clamp(uv, 0.0, 0.999999) * float2(width, height));
+    p = clamp(p, int2(0, 0), int2((int)width - 1, (int)height - 1));
+    return _ObstacleTex.Load(int3(p, 0)).r;
+}
+
+float WallDistance01(float2 uv)
+{
+    uint width;
+    uint height;
+    _ObstacleTex.GetDimensions(width, height);
+    int2 p = int2(clamp(uv, 0.0, 0.999999) * float2(width, height));
+    p = clamp(p, int2(0, 0), int2((int)width - 1, (int)height - 1));
+    return _ObstacleTex.Load(int3(p, 0)).g;
+}
+
+float4 LoadClamped(Texture2D<float4> tex, int2 p, uint width, uint height)
+{
+    p = clamp(p, int2(0, 0), int2((int)width - 1, (int)height - 1));
+    return tex.Load(int3(p, 0));
+}
+
+float SmoothFalloff(float distancePx, float radiusPx)
+{
+    float x = saturate(1.0 - distancePx / max(1.0, radiusPx));
+    x = x * x * (3.0 - 2.0 * x);
+    return x;
+}
+
+float TargetShape(float2 uv, float time)
+{
+    float a = sin((uv.x * 3.15 + uv.y * 1.37 + time * 0.018) * 6.2831853);
+    float b = sin((uv.x * -1.72 + uv.y * 4.63 + time * 0.011 + 0.31) * 6.2831853);
+    float c = sin((uv.x * 6.21 + uv.y * -2.11 + time * 0.007 + 0.73) * 6.2831853);
+    return saturate(0.58 + a * 0.18 + b * 0.13 + c * 0.08);
+}
+
+[numthreads(8, 8, 1)]
+void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    bool solid = ObstacleAt(uv) > 0.5;
+
+    float density = solid ? 0.0 : _TargetDensity * lerp(0.78, 1.18, TargetShape(uv, 0.0));
+    _VelocityWrite[id] = float4(solid ? 0.0.xx : _WindVelocity.xy, 0.0, 0.0);
+    _DensityWrite[id] = float4(density, 0.0, 0.0, 1.0);
+    _PressureWrite[id] = 0.0;
+    _DivergenceWrite[id] = 0.0;
+    _CurlWrite[id] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void AdvectVelocity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 backtrace = clamp(uv - velocity * _DeltaTime, 0.0, 1.0);
+    if (ObstacleAt(backtrace) > 0.5)
+        backtrace = uv;
+
+    float2 advected = _VelocityRead.SampleLevel(LinearClampSampler, backtrace, 0).xy;
+    _VelocityWrite[id] = float4(advected * _VelocityDissipation, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ApplyForces(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float windBlend = 1.0 - exp(-0.65 * _DeltaTime);
+    velocity = lerp(velocity, _WindVelocity.xy, windBlend);
+
+    float turbulenceX = sin((uv.y * 5.7 + _SimulationTime * 0.031) * 6.2831853);
+    float turbulenceY = cos((uv.x * 4.1 - _SimulationTime * 0.023) * 6.2831853);
+    float2 cellUv = 1.0 / float2(width, height);
+    velocity += float2(turbulenceX, turbulenceY) * cellUv * 0.36;
+
+    float2 worldPx = uv * _RoomSizePx.xy;
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        if (i >= _ImpulseCount)
+            break;
+
+        float4 impulse = _ImpulsePosRadius[i];
+        float2 impulsePx = impulse.xy * _RoomSizePx.xy;
+        float falloff = SmoothFalloff(distance(worldPx, impulsePx), impulse.z) * impulse.w;
+        velocity += _ImpulseVelocity[i].xy * falloff * 0.42;
+    }
+
+    _VelocityWrite[id] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ComputeCurl(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _CurlWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    int2 p = int2(dispatchId.xy);
+    float2 uv = GridUV(dispatchId.xy, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _CurlWrite[dispatchId.xy] = 0.0;
+        return;
+    }
+
+    float2 left = LoadClamped(_VelocityRead, p + int2(-1, 0), width, height).xy;
+    float2 right = LoadClamped(_VelocityRead, p + int2(1, 0), width, height).xy;
+    float2 bottom = LoadClamped(_VelocityRead, p + int2(0, -1), width, height).xy;
+    float2 top = LoadClamped(_VelocityRead, p + int2(0, 1), width, height).xy;
+    float curl = 0.5 * ((right.y - left.y) - (top.x - bottom.x));
+    _CurlWrite[dispatchId.xy] = float4(curl, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ApplyVorticity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    int2 p = int2(dispatchId.xy);
+    float2 uv = GridUV(dispatchId.xy, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[dispatchId.xy] = 0.0;
+        return;
+    }
+
+    float curlCenter = LoadClamped(_CurlRead, p, width, height).x;
+    float curlLeft = abs(LoadClamped(_CurlRead, p + int2(-1, 0), width, height).x);
+    float curlRight = abs(LoadClamped(_CurlRead, p + int2(1, 0), width, height).x);
+    float curlBottom = abs(LoadClamped(_CurlRead, p + int2(0, -1), width, height).x);
+    float curlTop = abs(LoadClamped(_CurlRead, p + int2(0, 1), width, height).x);
+
+    float2 gradient = 0.5 * float2(curlRight - curlLeft, curlTop - curlBottom);
+    float gradientLength = max(length(gradient), 1e-5);
+    float2 normal = gradient / gradientLength;
+    float2 confinement = float2(normal.y, -normal.x) * curlCenter;
+
+    float2 velocity = _VelocityRead.Load(int3(dispatchId.xy, 0)).xy;
+    velocity += confinement * _VorticityStrength * _DeltaTime;
+    _VelocityWrite[dispatchId.xy] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ComputeDivergence(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _DivergenceWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    int2 p = int2(dispatchId.xy);
+    float2 uv = GridUV(dispatchId.xy, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _DivergenceWrite[dispatchId.xy] = 0.0;
+        return;
+    }
+
+    float2 left = LoadClamped(_VelocityRead, p + int2(-1, 0), width, height).xy;
+    float2 right = LoadClamped(_VelocityRead, p + int2(1, 0), width, height).xy;
+    float2 bottom = LoadClamped(_VelocityRead, p + int2(0, -1), width, height).xy;
+    float2 top = LoadClamped(_VelocityRead, p + int2(0, 1), width, height).xy;
+
+    float divergence = 0.5 * ((right.x - left.x) + (top.y - bottom.y));
+    _DivergenceWrite[dispatchId.xy] = float4(divergence, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void JacobiPressure(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PressureWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    int2 p = int2(dispatchId.xy);
+    float2 uv = GridUV(dispatchId.xy, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _PressureWrite[dispatchId.xy] = 0.0;
+        return;
+    }
+
+    float center = LoadClamped(_PressureRead, p, width, height).x;
+    float left = LoadClamped(_PressureRead, p + int2(-1, 0), width, height).x;
+    float right = LoadClamped(_PressureRead, p + int2(1, 0), width, height).x;
+    float bottom = LoadClamped(_PressureRead, p + int2(0, -1), width, height).x;
+    float top = LoadClamped(_PressureRead, p + int2(0, 1), width, height).x;
+
+    float2 texel = 1.0 / float2(width, height);
+    if (ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5) left = center;
+    if (ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5) right = center;
+    if (ObstacleAt(uv - float2(0.0, texel.y)) > 0.5) bottom = center;
+    if (ObstacleAt(uv + float2(0.0, texel.y)) > 0.5) top = center;
+
+    float divergence = _DivergenceRead.Load(int3(dispatchId.xy, 0)).x;
+    float pressure = (left + right + bottom + top - divergence) * 0.25;
+    _PressureWrite[dispatchId.xy] = float4(pressure, 0.0, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void ProjectVelocity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _VelocityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    int2 p = int2(dispatchId.xy);
+    float2 uv = GridUV(dispatchId.xy, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _VelocityWrite[dispatchId.xy] = 0.0;
+        return;
+    }
+
+    float center = LoadClamped(_PressureRead, p, width, height).x;
+    float left = LoadClamped(_PressureRead, p + int2(-1, 0), width, height).x;
+    float right = LoadClamped(_PressureRead, p + int2(1, 0), width, height).x;
+    float bottom = LoadClamped(_PressureRead, p + int2(0, -1), width, height).x;
+    float top = LoadClamped(_PressureRead, p + int2(0, 1), width, height).x;
+
+    float2 texel = 1.0 / float2(width, height);
+    if (ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5) left = center;
+    if (ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5) right = center;
+    if (ObstacleAt(uv - float2(0.0, texel.y)) > 0.5) bottom = center;
+    if (ObstacleAt(uv + float2(0.0, texel.y)) > 0.5) top = center;
+
+    float2 velocity = _VelocityRead.Load(int3(dispatchId.xy, 0)).xy;
+    velocity -= 0.5 * float2(right - left, top - bottom);
+
+    // Do not allow projected velocity to push directly into a neighboring solid cell.
+    if (velocity.x < 0.0 && ObstacleAt(uv - float2(texel.x, 0.0)) > 0.5) velocity.x = 0.0;
+    if (velocity.x > 0.0 && ObstacleAt(uv + float2(texel.x, 0.0)) > 0.5) velocity.x = 0.0;
+    if (velocity.y < 0.0 && ObstacleAt(uv - float2(0.0, texel.y)) > 0.5) velocity.y = 0.0;
+    if (velocity.y > 0.0 && ObstacleAt(uv + float2(0.0, texel.y)) > 0.5) velocity.y = 0.0;
+
+    _VelocityWrite[dispatchId.xy] = float4(velocity, 0.0, 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _DensityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _DensityWrite[id] = 0.0;
+        return;
+    }
+
+    float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
+    float2 backtrace = clamp(uv - velocity * _DeltaTime, 0.0, 1.0);
+    if (ObstacleAt(backtrace) > 0.5)
+        backtrace = uv;
+
+    float density = _DensityRead.SampleLevel(LinearClampSampler, backtrace, 0).x;
+    _DensityWrite[id] = float4(density * _DensityDissipation, 0.0, 0.0, 1.0);
+}
+
+[numthreads(8, 8, 1)]
+void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _DensityWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    if (ObstacleAt(uv) > 0.5)
+    {
+        _DensityWrite[id] = 0.0;
+        return;
+    }
+
+    float density = _DensityRead.Load(int3(id, 0)).x;
+    float target = _TargetDensity * lerp(0.72, 1.24, TargetShape(uv, _SimulationTime));
+
+    // Slight wall pooling gives the low-frequency field a spatial relationship to the
+    // room instead of behaving like a texture pasted over the camera.
+    float wallDistance = WallDistance01(uv);
+    target += pow(saturate(1.0 - wallDistance), 2.2) * 0.08;
+
+    float relax = 1.0 - exp(-_DensityRelaxation * _DeltaTime);
+    density = lerp(density, target, relax);
+
+    // Player motion carves only the visual density field. The final gameplay
+    // transmittance is independent, so this wake cannot expose distant hazards.
+    float2 worldPx = uv * _RoomSizePx.xy;
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        if (i >= _ImpulseCount)
+            break;
+
+        float4 impulse = _ImpulsePosRadius[i];
+        float2 impulsePx = impulse.xy * _RoomSizePx.xy;
+        float falloff = SmoothFalloff(distance(worldPx, impulsePx), impulse.z) * impulse.w;
+        density *= 1.0 - falloff * 0.16;
+    }
+
+    _DensityWrite[id] = float4(saturate(density), 0.0, 0.0, 1.0);
+}
