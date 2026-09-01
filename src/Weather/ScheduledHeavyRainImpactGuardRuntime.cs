@@ -10,12 +10,13 @@ namespace DryCycle.Weather;
 ///
 /// Creature.TerrainImpact calls RoomRain.CreatureSmashedInGround whenever the current
 /// GlobalRain reports AnyPushAround. Scheduled HeavyRain deliberately raises the visual
-/// GlobalRain intensity, so without this guard a synthetic RoomRain could still add
-/// rainDeath on ground impacts even though ThrowAroundObjects had already been isolated.
+/// GlobalRain intensity, so without this guard a RoomRain carrier can still add
+/// rainDeath on ground impacts even though ThrowAroundObjects is isolated.
 ///
-/// During DryCycle Scheduled HeavyRain, only the native/authored GlobalRain baseline is
-/// allowed to drive CreatureSmashedInGround. If that baseline had no push at all, the
-/// impact callback is suppressed. DeathRain remains untouched and fully lethal.
+/// During DryCycle Scheduled HeavyRain, only a native RoomRain that genuinely existed
+/// without DryCycle may preserve its own baseline impact behavior. DryCycle-created
+/// synthetic carriers never receive impact rainDeath from Scheduled HeavyRain.
+/// Scheduled/foreign DeathRain remains untouched and fully lethal.
 /// </summary>
 internal static class ScheduledHeavyRainImpactGuardRuntime
 {
@@ -64,6 +65,16 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
 
         WeatherScheduleRuntime.Synchronize(world);
 
+        // A DeathRain state owned by somebody else is authoritative. Scheduled
+        // HeavyRain is already prevented from layering onto it in GlobalRain, so the
+        // impact guard must not suppress any of that foreign disaster's native paths.
+        if (self.globalRain.deathRain != null &&
+            !RainWeatherRuntime.OwnsDeathRain(self.globalRain))
+        {
+            orig(self, crit, speed);
+            return;
+        }
+
         float deathRain = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
@@ -72,7 +83,7 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
             "Rain");
         if (deathRain > Epsilon)
         {
-            // Scheduled DeathRain intentionally keeps the complete native lethal path.
+            // DryCycle Scheduled DeathRain intentionally keeps the complete lethal path.
             orig(self, crit, speed);
             return;
         }
@@ -88,9 +99,19 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
             return;
         }
 
-        // Rooms with an authored/default DangerType are already handled by the outer
-        // RoomDangerTypeTakeoverRuntime. This guard targets the no-DangerType/synthetic
-        // RoomRain path that otherwise falls through to vanilla CreatureSmashedInGround.
+        // This carrier did not exist in vanilla. There is therefore no native impact
+        // rainDeath behavior to preserve. In particular, do not call vanilla
+        // CreatureSmashedInGround with dangerType=Rain merely because the carrier uses
+        // that value for rendering; vanilla's Mathf.Lerp(num, 1, .5) would add
+        // rainDeath even when the local pressure is zero.
+        if (RainWeatherRuntime.IsSyntheticRoomRain(self))
+        {
+            return;
+        }
+
+        // Rooms with an authored/default DangerType are handled by the outer
+        // RoomDangerTypeTakeoverRuntime. If hook ordering changes, defer to that/native
+        // chain instead of trying to duplicate its authored-danger policy here.
         RoomRain.DangerType authoredDanger = room.roomSettings?.DangerType;
         if (authoredDanger != null && authoredDanger != RoomRain.DangerType.None)
         {
@@ -102,8 +123,8 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
                 self.globalRain,
                 out float nativeIntensity))
         {
-            // Failing closed is important here: current GlobalRain.Intensity contains
-            // Scheduled HeavyRain, so delegating without a baseline would reintroduce
+            // Failing closed is important here: current GlobalRain.Intensity can contain
+            // Scheduled HeavyRain, so delegating without a baseline could reintroduce
             // the exact rainDeath leak this guard exists to remove.
             return;
         }
@@ -121,7 +142,8 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
         self.globalRain.Intensity = nativeIntensity;
         try
         {
-            // Preserve room-authored/foreign rain lethality exactly at its own baseline.
+            // This is a native DangerType=None WaterCycle carrier (or equivalent
+            // foreign RoomRain), so preserve the baseline behavior it already had.
             orig(self, crit, speed);
         }
         finally
