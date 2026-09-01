@@ -10,6 +10,7 @@ using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Misc;
 using DryCycle.Registration;
+using DryCycle.Rendering;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
@@ -30,7 +31,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.110";
+    public const string Version = "0.1.111";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -45,6 +46,10 @@ internal sealed class Plugin : BaseUnityPlugin
             DryCycleContent.Register(new MossySpiderDefinition());
             _contentRegistered = true;
         }
+
+        // This only installs RainWorld.LoadResources. Unity shader assets themselves
+        // are intentionally not touched until Rain World executes that hook.
+        DryCycleShaderAssets.Enable();
 
         DryCycleContent.Enable();
         MossySpiderBackPlatform.Enable();
@@ -114,6 +119,8 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearHooks.Disable();
             _initialized = false;
         }
+
+        DryCycleShaderAssets.Disable();
     }
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
