@@ -29,7 +29,8 @@ internal enum WeatherForecastAnimation
     Static,
     Drip,
     FastDrip,
-    VerticalShake
+    VerticalShake,
+    HeatShimmer
 }
 
 internal readonly struct WeatherForecastVisualStyle
@@ -61,10 +62,6 @@ internal readonly struct WeatherForecastVisualStyle
     }
 }
 
-/// <summary>
-/// Centralized colors and animation parameters for forecast pips. Keeping this data
-/// out of WorldClockHooks prevents visual tuning from leaking into clock logic.
-/// </summary>
 internal static class WeatherForecastVisualCatalog
 {
     internal static readonly Color SandStormColor = new(0.90f, 0.76f, 0.42f);
@@ -77,8 +74,7 @@ internal static class WeatherForecastVisualCatalog
     internal static readonly Color FogColor = new(168f / 255f, 186f / 255f, 189f / 255f);
     internal static readonly Color DenseFogColor = new(82f / 255f, 99f / 255f, 102f / 255f);
 
-    // HeatWave is intentionally pale rather than orange. The weather's identity is
-    // white-hot midday bleaching, not sunset coloration.
+    // Pale white-gold: HeatWave is brutal midday radiation, never a sunset-orange icon.
     internal static readonly Color HeatWaveColor = new(1.00f, 0.86f, 0.57f);
 
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
@@ -127,7 +123,8 @@ internal static class WeatherForecastVisualCatalog
             WeatherForecastVisualKind.HeatWave => new WeatherForecastVisualStyle(
                 HeatWaveColor,
                 HeatWaveColor,
-                WeatherForecastAnimation.Static),
+                WeatherForecastAnimation.HeatShimmer,
+                shakeAmplitudePixels: 0.42f),
 
             _ => new WeatherForecastVisualStyle(
                 Color.clear,
@@ -195,11 +192,6 @@ internal static class WeatherForecastVisualCatalog
     }
 }
 
-/// <summary>
-/// Stores the already-generated forecast for a game. This is intentionally only a
-/// display cache: scheduling and probability remain owned by WeatherPhaseScheduler
-/// and the future climate loader.
-/// </summary>
 internal static class WeatherForecastTimeline
 {
     private sealed class State
