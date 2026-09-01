@@ -38,6 +38,12 @@ internal static class RainWeatherRuntime
     [ThreadStatic]
     private static float _bulletRainOverride;
 
+    // ScheduledHeavyRainTraversalRuntime temporarily opens this gate only while
+    // GlobalRain is establishing the room-authored/native HeavyRain baseline. It is
+    // thread-local so nested or unrelated room-effect queries cannot leak the state.
+    [ThreadStatic]
+    internal static bool SuppressScheduledHeavyOverride;
+
     private static ConditionalWeakTable<GlobalRain, GlobalRainState> _globalStates = new();
     private static ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker> _syntheticRoomRain = new();
     private static bool _enabled;
@@ -72,6 +78,7 @@ internal static class RainWeatherRuntime
         _lightRainOverride = 0f;
         _heavyRainOverride = 0f;
         _bulletRainOverride = 0f;
+        SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalRainState>();
         _syntheticRoomRain = new ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker>();
         _enabled = false;
@@ -354,7 +361,9 @@ internal static class RainWeatherRuntime
 
         if (type == RoomSettings.RoomEffect.Type.HeavyRain)
         {
-            return Math.Max(authored, _heavyRainOverride);
+            return SuppressScheduledHeavyOverride
+                ? authored
+                : Math.Max(authored, _heavyRainOverride);
         }
 
         if (type == RoomSettings.RoomEffect.Type.BulletRain)
