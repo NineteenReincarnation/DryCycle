@@ -4,7 +4,6 @@ SU {
     Rain : 80 {
         LightRain : 70%
         HeavyRain : 45%
-        BulletRain : 15%
     }
 }
 
@@ -38,9 +37,6 @@ ABCDEFG {
 
         HeavyRain : 1
         //大雨，Intensity = (1 + HeavyRain * 4) * 0.24
-
-        BulletRain : 1
-        //子弹雨
 
         //子气象允许进入排表的概率
     }
