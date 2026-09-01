@@ -65,6 +65,10 @@
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
@@ -91,6 +95,7 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll')" Text="UnityEngine.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll')" Text="UnityEngine.AssetBundleModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AudioModule.dll')" Text="UnityEngine.AudioModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll')" Text="UnityEngine.InputLegacyModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll')" Text="Unity.Mathematics.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
@@ -141,7 +146,7 @@
       SkipUnchangedFiles="true" />
     <Warning
       Condition="!Exists('$(DryCycleWeatherBundleSource)')"
-      Text="DryCycle weather AssetBundle is not built. Fog will use the compatibility renderer. Build shader-src via Unity or pass -p:BuildDryCycleAssets=true." />
+      Text="DryCycle weather AssetBundle is not built. Fog will use the compatibility renderer and HeatWave will keep its safe tone fallback. Build shader-src via Unity or pass -p:BuildDryCycleAssets=true." />
     <Warning
       Condition="Exists('$(DryCycleWeatherBundleSource)') and !Exists('$(DryCycleWeatherBundleVersionSource)')"
       Text="DryCycle weather AssetBundle exists but has no Unity-version sidecar. Rebuild shader-src to restore runtime compatibility diagnostics." />
