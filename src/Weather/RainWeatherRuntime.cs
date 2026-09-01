@@ -32,12 +32,9 @@ internal static class RainWeatherRuntime
     [ThreadStatic]
     private static float _lightRainOverride;
 
-    [ThreadStatic]
-    private static float _heavyRainOverride;
-
-    // ScheduledHeavyRainTraversalRuntime opens this only while the native/authored
-    // HeavyRain baseline is being sampled. Thread-local state prevents nested room
-    // effect queries from leaking the suppression to unrelated updates.
+    // Kept only as an internal compatibility gate for ScheduledHeavyRainTraversalRuntime.
+    // Scheduled HeavyRain is no longer injected through RoomEffect.HeavyRain at all;
+    // the traversal runtime owns its GlobalRain contribution directly.
     [ThreadStatic]
     internal static bool SuppressScheduledHeavyOverride;
 
@@ -71,7 +68,6 @@ internal static class RainWeatherRuntime
 
         _effectOverrideSettings = null;
         _lightRainOverride = 0f;
-        _heavyRainOverride = 0f;
         SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalRainState>();
         _syntheticRoomRain = new ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker>();
@@ -99,7 +95,7 @@ internal static class RainWeatherRuntime
             !self.game.IsStorySession ||
             !RegionDayNightOptions.IsEnabled(self.world) ||
             self.abstractRoom == null ||
-            self.abstractRoom.shelter ||
+            IsIntactShelter(self) ||
             !RegionSupportsRain(self.world.region.name) ||
             self.roomRain != null)
         {
@@ -108,6 +104,7 @@ internal static class RainWeatherRuntime
 
         // Region weather needs Rain World's shelter mask, splash data and sound-loop
         // fields, but the carrier must never run the native RainCycle/Flood update.
+        // Broken shelters deliberately receive a carrier just like vanilla Room.Loaded.
         RoomRain roomRain = new(self.game.globalRain, self)
         {
             dangerType = RoomRain.DangerType.Rain
@@ -115,6 +112,25 @@ internal static class RainWeatherRuntime
         self.roomRain = roomRain;
         self.AddObject(roomRain);
         _syntheticRoomRain.Add(roomRain, new SyntheticRoomRainMarker());
+    }
+
+    private static bool IsIntactShelter(Room room)
+    {
+        if (room?.abstractRoom == null || !room.abstractRoom.shelter)
+        {
+            return false;
+        }
+
+        int shelterIndex = room.abstractRoom.shelterIndex;
+        bool[] broken = room.world?.brokenShelters;
+        if (broken == null || shelterIndex < 0 || shelterIndex >= broken.Length)
+        {
+            // Unknown shelter state should fail safe as sheltered rather than creating
+            // a regional rain carrier in a normal hibernation room.
+            return true;
+        }
+
+        return !broken[shelterIndex];
     }
 
     private static void GlobalRain_Update(
@@ -139,11 +155,6 @@ internal static class RainWeatherRuntime
             clock,
             WeatherScheduleEventKind.Weather,
             "LightRain");
-        float heavy = WeatherScheduleRuntime.GetIntensity(
-            world,
-            clock,
-            WeatherScheduleEventKind.Weather,
-            "HeavyRain");
         float death = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
@@ -183,11 +194,9 @@ internal static class RainWeatherRuntime
 
         RoomSettings previousSettings = _effectOverrideSettings;
         float previousLight = _lightRainOverride;
-        float previousHeavy = _heavyRainOverride;
 
         _effectOverrideSettings = settings;
         _lightRainOverride = light;
-        _heavyRainOverride = heavy;
 
         try
         {
@@ -197,7 +206,6 @@ internal static class RainWeatherRuntime
         {
             _effectOverrideSettings = previousSettings;
             _lightRainOverride = previousLight;
-            _heavyRainOverride = previousHeavy;
         }
     }
 
@@ -217,15 +225,11 @@ internal static class RainWeatherRuntime
             return Math.Max(authored, _lightRainOverride);
         }
 
-        if (type == RoomSettings.RoomEffect.Type.HeavyRain)
-        {
-            return SuppressScheduledHeavyOverride
-                ? authored
-                : Math.Max(authored, _heavyRainOverride);
-        }
-
-        // RoomEffect.BulletRain remains a native room-authored effect. DryCycle no
-        // longer schedules BulletRain and therefore never overrides this channel.
+        // Scheduled HeavyRain is intentionally absent here. It is layered by
+        // ScheduledHeavyRainTraversalRuntime after the native/authored GlobalRain
+        // baseline has been calculated, which keeps its nonlethal contribution out of
+        // RoomEffect.HeavyRain and native ThrowAroundObjects.
+        // RoomEffect.BulletRain also remains purely room-authored.
         return authored;
     }
 
@@ -267,6 +271,14 @@ internal static class RainWeatherRuntime
             return;
         }
 
+        // Mirror the important ownership cleanup performed by GlobalRain.ResetRain
+        // without resetting RainCycle.timer/HUD or other systems that belong to the
+        // DryCycle clock. Detaching the back-reference prevents a retired native
+        // DeathRain state from retaining/operating on GlobalRain after the event.
+        if (rain.deathRain != null)
+        {
+            rain.deathRain.globalRain = null;
+        }
         rain.deathRain = null;
         rain.Intensity = 0f;
         rain.RumbleSound = 0f;
