@@ -1,72 +1,10 @@
 using System;
-using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
 using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather;
-
-/// <summary>
-/// Captures GlobalRain after RainWeatherRuntime/native processing but before
-/// ScheduledHeavyRainTraversalRuntime overlays DryCycle's nonlethal HeavyRain.
-/// </summary>
-internal static class ScheduledRainNativeBaselineRuntime
-{
-    private sealed class State
-    {
-        internal float Intensity;
-    }
-
-    private static ConditionalWeakTable<GlobalRain, State> _states = new();
-    private static bool _enabled;
-
-    internal static void Enable()
-    {
-        if (_enabled)
-        {
-            return;
-        }
-
-        On.GlobalRain.Update += GlobalRain_Update;
-        _enabled = true;
-    }
-
-    internal static void Disable()
-    {
-        if (!_enabled)
-        {
-            return;
-        }
-
-        On.GlobalRain.Update -= GlobalRain_Update;
-        _states = new ConditionalWeakTable<GlobalRain, State>();
-        _enabled = false;
-    }
-
-    internal static bool TryGetIntensity(GlobalRain rain, out float intensity)
-    {
-        intensity = 0f;
-        if (rain == null || !_states.TryGetValue(rain, out State state))
-        {
-            return false;
-        }
-
-        intensity = state.Intensity;
-        return true;
-    }
-
-    private static void GlobalRain_Update(
-        On.GlobalRain.orig_Update orig,
-        GlobalRain self)
-    {
-        orig(self);
-        if (self != null)
-        {
-            _states.GetOrCreateValue(self).Intensity = self.Intensity;
-        }
-    }
-}
 
 /// <summary>
 /// Owns RoomRain objects whose room has a native/authored DangerType while DryCycle is
@@ -171,9 +109,9 @@ internal static class RoomDangerTypeTakeoverRuntime
         }
 
         // Scheduled HeavyRain is nonlethal. Preserve only the room-authored HeavyRain
-        // impact contribution using the pre-scheduled native GlobalRain baseline.
+        // impact contribution using the single pre-scheduled native GlobalRain baseline.
         if (!HasAuthoredHeavyRain(self) ||
-            !ScheduledRainNativeBaselineRuntime.TryGetIntensity(
+            !ScheduledHeavyRainTraversalRuntime.TryGetNativeIntensity(
                 self.globalRain,
                 out float baselineIntensity))
         {
@@ -323,7 +261,7 @@ internal static class RoomDangerTypeTakeoverRuntime
 
         float nativeIntensity = rain.globalRain.Intensity;
         if (sample.HeavyRain > Epsilon &&
-            ScheduledRainNativeBaselineRuntime.TryGetIntensity(
+            ScheduledHeavyRainTraversalRuntime.TryGetNativeIntensity(
                 rain.globalRain,
                 out float baselineIntensity))
         {
