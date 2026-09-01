@@ -8,27 +8,53 @@ float Hash11(float n)
     return frac(sin(n) * 43758.5453123);
 }
 
-float3 Hash33(float3 p)
+int WrapCell(int value, int period)
 {
-    p = frac(p * float3(0.1031, 0.1030, 0.0973));
+    int wrapped = value % period;
+    return wrapped < 0 ? wrapped + period : wrapped;
+}
+
+int3 WrapCell3(int3 value, int period)
+{
+    return int3(
+        WrapCell(value.x, period),
+        WrapCell(value.y, period),
+        WrapCell(value.z, period));
+}
+
+float HashPeriodic(int3 cell, int period)
+{
+    int3 wrapped = WrapCell3(cell, period);
+    return Hash11(
+        wrapped.x * 1.0 +
+        wrapped.y * 57.0 +
+        wrapped.z * 113.0 +
+        period * 17.0);
+}
+
+float3 Hash33Periodic(int3 cell, int period)
+{
+    int3 wrapped = WrapCell3(cell, period);
+    float3 p = float3(wrapped);
+    p = frac(p * float3(0.1031, 0.1030, 0.0973) + period * 0.017);
     p += dot(p, p.yxz + 33.33);
     return frac((p.xxy + p.yxx) * p.zyx);
 }
 
-float ValueNoise(float3 p)
+float PeriodicValueNoise(float3 p, int period)
 {
-    float3 cell = floor(p);
+    int3 cell = int3(floor(p));
     float3 f = frac(p);
     f = f * f * (3.0 - 2.0 * f);
 
-    float n000 = Hash11(dot(cell + float3(0, 0, 0), float3(1, 57, 113)));
-    float n100 = Hash11(dot(cell + float3(1, 0, 0), float3(1, 57, 113)));
-    float n010 = Hash11(dot(cell + float3(0, 1, 0), float3(1, 57, 113)));
-    float n110 = Hash11(dot(cell + float3(1, 1, 0), float3(1, 57, 113)));
-    float n001 = Hash11(dot(cell + float3(0, 0, 1), float3(1, 57, 113)));
-    float n101 = Hash11(dot(cell + float3(1, 0, 1), float3(1, 57, 113)));
-    float n011 = Hash11(dot(cell + float3(0, 1, 1), float3(1, 57, 113)));
-    float n111 = Hash11(dot(cell + float3(1, 1, 1), float3(1, 57, 113)));
+    float n000 = HashPeriodic(cell + int3(0, 0, 0), period);
+    float n100 = HashPeriodic(cell + int3(1, 0, 0), period);
+    float n010 = HashPeriodic(cell + int3(0, 1, 0), period);
+    float n110 = HashPeriodic(cell + int3(1, 1, 0), period);
+    float n001 = HashPeriodic(cell + int3(0, 0, 1), period);
+    float n101 = HashPeriodic(cell + int3(1, 0, 1), period);
+    float n011 = HashPeriodic(cell + int3(0, 1, 1), period);
+    float n111 = HashPeriodic(cell + int3(1, 1, 1), period);
 
     float x00 = lerp(n000, n100, f.x);
     float x10 = lerp(n010, n110, f.x);
@@ -39,23 +65,30 @@ float ValueNoise(float3 p)
     return lerp(y0, y1, f.z);
 }
 
-float FBM(float3 p)
+float PeriodicFBM(float3 uv, int basePeriod)
 {
     float value = 0.0;
-    float amplitude = 0.5;
+    float amplitude = 0.5333333;
+    float normalization = 0.0;
+    int period = basePeriod;
+
     [unroll]
-    for (int i = 0; i < 5; i++)
+    for (int octave = 0; octave < 4; octave++)
     {
-        value += ValueNoise(p) * amplitude;
-        p = p * 2.03 + float3(17.1, 9.2, 13.7);
+        float3 p = uv * (float)period;
+        value += PeriodicValueNoise(p, period) * amplitude;
+        normalization += amplitude;
         amplitude *= 0.5;
+        period *= 2;
     }
-    return saturate(value);
+
+    return saturate(value / max(normalization, 0.0001));
 }
 
-float WorleyF1(float3 p)
+float PeriodicWorleyF1(float3 uv, int period)
 {
-    float3 baseCell = floor(p);
+    float3 p = uv * (float)period;
+    int3 baseCell = int3(floor(p));
     float3 local = frac(p);
     float minDistanceSquared = 8.0;
 
@@ -68,10 +101,12 @@ float WorleyF1(float3 p)
             [unroll]
             for (int x = -1; x <= 1; x++)
             {
-                float3 offset = float3(x, y, z);
-                float3 feature = Hash33(baseCell + offset);
-                float3 delta = offset + feature - local;
-                minDistanceSquared = min(minDistanceSquared, dot(delta, delta));
+                int3 offset = int3(x, y, z);
+                float3 feature = Hash33Periodic(baseCell + offset, period);
+                float3 delta = float3(offset) + feature - local;
+                minDistanceSquared = min(
+                    minDistanceSquared,
+                    dot(delta, delta));
             }
         }
     }
@@ -82,24 +117,40 @@ float WorleyF1(float3 p)
 [numthreads(4, 4, 4)]
 void GenerateFogNoise(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= _VolumeSize || id.y >= _VolumeSize || id.z >= _VolumeSize)
+    if (id.x >= _VolumeSize ||
+        id.y >= _VolumeSize ||
+        id.z >= _VolumeSize)
+    {
         return;
+    }
 
     float3 uv = (float3(id) + 0.5) / (float)_VolumeSize;
 
-    // The volume tiles seamlessly enough for fog because it is sampled with domain
-    // warping and several incommensurate frequencies in the final composite.
-    float fbmLow = FBM(uv * 4.0);
-    float fbmHigh = FBM(uv * 11.0 + float3(3.7, 9.1, 1.4));
-    float worleyLow = WorleyF1(uv * 5.0 + 2.3);
-    float worleyHigh = WorleyF1(uv * 13.0 + float3(4.2, 1.3, 7.7));
+    // Every component below is explicitly periodic in [0,1]^3. Trilinear Repeat
+    // sampling therefore crosses volume boundaries without the seam produced by the
+    // previous non-periodic FBM implementation.
+    float fbmLow = PeriodicFBM(uv, 4);
+    float fbmHigh = PeriodicFBM(frac(uv + float3(0.173, 0.391, 0.617)), 9);
+    float worleyLow = PeriodicWorleyF1(
+        frac(uv + float3(0.271, 0.113, 0.443)),
+        5);
+    float worleyHigh = PeriodicWorleyF1(
+        frac(uv + float3(0.619, 0.347, 0.191)),
+        13);
 
-    // Horizon/Nubis-like authoring principle: coherent Perlin/value-noise mass is
-    // eroded by cellular detail instead of simply multiplying two noise textures.
-    float macro = saturate(fbmLow * 1.18 - worleyLow * 0.38 + 0.16);
+    // Nubis-style authoring principle: coherent FBM supplies the cloud body; cellular
+    // fields erode its boundary instead of merely multiplying independent textures.
+    float macro = saturate(
+        fbmLow * 1.22 -
+        worleyLow * 0.40 +
+        0.17);
     float erosion = saturate(1.0 - worleyHigh);
-    float detail = saturate(fbmHigh * 0.58 + erosion * 0.42);
-    float hybrid = saturate(macro - (1.0 - detail) * 0.24);
+    float detail = saturate(
+        fbmHigh * 0.56 +
+        erosion * 0.44);
+    float hybrid = saturate(
+        macro -
+        (1.0 - detail) * 0.25);
 
     _NoiseVolume[id] = float4(
         hybrid,
