@@ -14,9 +14,9 @@ namespace DryCycle.Weather.Scheduling;
 /// </summary>
 internal static class WeatherScheduleRuntime
 {
-    // Native GlobalRain uses a 60-tick (1.5 second at 40 Hz) linear ramp on both
-    // sides of HeavyRainFlux's wet/dry plateaus.
-    private const int NativeHeavyRainFluxRampTicks = 60;
+    // Scheduled HeavyRain is intentionally capped below the native full-strength
+    // RoomEffect. The event envelope still fades 0..1, then this cap is applied.
+    private const float HeavyRainMaxIntensity = 0.70f;
 
     private sealed class GameState
     {
@@ -159,7 +159,7 @@ internal static class WeatherScheduleRuntime
             float intensity = EventEnvelope(scheduled, phaseTicks);
             if (intensity > 0f && IsScheduledHeavyRain(scheduled))
             {
-                intensity *= HeavyRainFluxMultiplier(scheduled, phaseTicks);
+                intensity *= HeavyRainMaxIntensity;
             }
 
             if (intensity > 0f)
@@ -245,39 +245,9 @@ internal static class WeatherScheduleRuntime
         Random random = new(BuildSeed(game, regionId, dayIndex, phase));
         List<WeatherScheduleCandidate> candidates = RollCandidates(regionId, random);
 
-        WeatherPhaseSchedule schedule = phase == WeatherSchedulePhase.Day
+        return phase == WeatherSchedulePhase.Day
             ? WeatherPhaseScheduler.BuildDay(phasePipCount, candidates, random)
             : WeatherPhaseScheduler.BuildNight(phasePipCount, candidates, random);
-
-        // Event-specific parameters are rolled only after placement. This keeps the
-        // existing event selection/duration/position stream unchanged while making
-        // the assigned Flux deterministic for the same save/region/day/phase seed.
-        AssignEventParameters(schedule, random);
-        return schedule;
-    }
-
-    private static void AssignEventParameters(
-        WeatherPhaseSchedule schedule,
-        Random random)
-    {
-        if (schedule?.Events == null || random == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < schedule.Events.Count; i++)
-        {
-            ScheduledWeatherEvent scheduled = schedule.Events[i];
-            if (!IsScheduledHeavyRain(scheduled))
-            {
-                continue;
-            }
-
-            // The room-editor HeavyRainFlux slider is a 0..1 value. Use the same
-            // complete range here; the value is fixed for this schedule event and is
-            // never rerolled every frame.
-            scheduled.HeavyRainFlux = (float)random.NextDouble();
-        }
     }
 
     private static List<WeatherScheduleCandidate> RollCandidates(
@@ -435,7 +405,6 @@ internal static class WeatherScheduleRuntime
     /// Every scheduled Weather and DangerType uses the same external envelope:
     /// 15 seconds fade-in before the first authored pip, the authored pips use the
     /// full base schedule envelope, then 15 seconds fade-out after the final pip.
-    /// Per-weather modulation such as HeavyRainFlux is multiplied on top separately.
     /// The transition time is deliberately outside DurationPips.
     /// </summary>
     private static float EventEnvelope(
@@ -475,72 +444,6 @@ internal static class WeatherScheduleRuntime
             ? 0f
             : (effectEnd - phaseTicks) / (float)transition;
         return Smooth01(tail);
-    }
-
-    /// <summary>
-    /// Reproduces the native HeavyRainFlux waveform with an event-local phase.
-    /// Native GlobalRain uses: 1.5 s ramp, 30*flux s wet plateau, 1.5 s ramp,
-    /// 30*flux s dry plateau. DryCycle rotates that periodic waveform so the first
-    /// authored HeavyRain pip starts on the wet plateau; the separate 15-second
-    /// event pre-roll therefore reaches full intensity cleanly instead of snapping
-    /// back to zero at the first authored pip.
-    /// </summary>
-    private static float HeavyRainFluxMultiplier(
-        ScheduledWeatherEvent scheduled,
-        long phaseTicks)
-    {
-        if (scheduled == null || !scheduled.HeavyRainFlux.HasValue)
-        {
-            return 1f;
-        }
-
-        float flux = Math.Max(0f, Math.Min(1f, scheduled.HeavyRainFlux.Value));
-        if (flux <= 0.0001f)
-        {
-            // Native HeavyRainFlux == 0 disables flux and leaves HeavyRain steady.
-            return 1f;
-        }
-
-        long mainStart = (long)scheduled.StartPip * WeatherPhaseScheduler.PipTicks;
-        if (phaseTicks < mainStart)
-        {
-            // Universal DryCycle pre-roll remains a single clean 15-second fade-in.
-            return 1f;
-        }
-
-        long plateauTicks = Math.Max(
-            1L,
-            (long)Math.Round(WeatherPhaseScheduler.PipTicks * flux));
-        long rampTicks = NativeHeavyRainFluxRampTicks;
-        long period = plateauTicks * 2L + rampTicks * 2L;
-        long local = (phaseTicks - mainStart) % period;
-
-        // Wet plateau: native HeavyRain strength.
-        if (local < plateauTicks)
-        {
-            return 1f;
-        }
-
-        local -= plateauTicks;
-
-        // Native 1.5-second linear fall.
-        if (local < rampTicks)
-        {
-            return Math.Max(0f, 1f - local / (float)rampTicks);
-        }
-
-        local -= rampTicks;
-
-        // Dry plateau.
-        if (local < plateauTicks)
-        {
-            return 0f;
-        }
-
-        local -= plateauTicks;
-
-        // Native 1.5-second linear rise back into the next wet plateau.
-        return Math.Max(0f, Math.Min(1f, local / (float)rampTicks));
     }
 
     private static bool IsScheduledHeavyRain(ScheduledWeatherEvent scheduled)
@@ -656,13 +559,6 @@ internal static class WeatherScheduleRuntime
             Plugin.Logger?.LogInfo($"  {scheduled}");
             Plugin.Logger?.LogInfo(
                 "    Transition: -15s fade-in, authored pips use full base envelope, +15s fade-out (30s excluded from duration).");
-
-            if (scheduled?.HeavyRainFlux.HasValue == true)
-            {
-                float flux = scheduled.HeavyRainFlux.Value;
-                Plugin.Logger?.LogInfo(
-                    $"    HeavyRainFlux={flux:0.###}: wet={30f * flux:0.##}s, dry={30f * flux:0.##}s, native ramps=1.5s each.");
-            }
         }
     }
 }
