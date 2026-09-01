@@ -14,11 +14,10 @@ Shader "DryCycle/FogComposite"
 
         SubShader
         {
-            // This shader is a final world composite rather than a translucent sprite.
-            // Use an anonymous GrabPass deliberately: a named GrabPass can be reused by
-            // later objects in the same frame, which is incorrect when Jolly/split-screen
-            // has multiple RoomCamera composites. Correct per-camera capture wins over
-            // the performance optimization here.
+            // Anonymous GrabPass is intentional. A named grab can be reused by later
+            // RoomCamera composites in the same frame; split-screen/Jolly cameras need
+            // their own current scene capture. ComputeGrabScreenPos handles Unity's
+            // inverted render-texture projection correctly.
             GrabPass { }
 
             Pass
@@ -88,6 +87,9 @@ Shader "DryCycle/FogComposite"
 
                 float2 RoomUV(float2 screenUV)
                 {
+                    // Rain World publishes camera origin and visible span normalized to
+                    // the current room. Using this instead of screen-space UV anchors fog
+                    // in the world when the camera pans or changes camera position.
                     return _camInRoomRect.xy + screenUV * _camInRoomRect.zw;
                 }
 
@@ -105,31 +107,10 @@ Shader "DryCycle/FogComposite"
                     if (level.r >= 0.999 && level.g >= 0.999 && level.b >= 0.999)
                         return 1.0;
 
-                    float encoded = fmod(max(0.0, level.r * 255.0 - 1.0), 30.0) / 30.0;
-                    return saturate(encoded * 1.35);
-                }
-
-                float2 DomainWarpPx(float2 worldPx, float time)
-                {
-                    float2 p = worldPx / 680.0;
-                    float wx = tex2D(
-                        _NoiseTex,
-                        p * float2(0.83, 1.17) +
-                        float2(time * 0.0041, time * -0.0017)).r;
-                    float wy = tex2D(
-                        _NoiseTex,
-                        p.yx * float2(1.31, 0.71) +
-                        float2(time * -0.0027, time * 0.0033) + 0.37).r;
-                    float2 warp = float2(wx, wy) * 2.0 - 1.0;
-
-                    float wx2 = tex2D(
-                        _NoiseTex2,
-                        p * 0.43 + float2(time * -0.0011, 0.19)).g;
-                    float wy2 = tex2D(
-                        _NoiseTex2,
-                        p.yx * 0.47 + float2(0.61, time * 0.0015)).b;
-                    warp += (float2(wx2, wy2) * 2.0 - 1.0) * 0.34;
-                    return warp * 88.0;
+                    float encoded = fmod(
+                        max(0.0, level.r * 255.0 - 1.0),
+                        30.0) / 30.0;
+                    return saturate(encoded * 1.34);
                 }
 
                 float4 SampleVolume(float3 p)
@@ -137,8 +118,9 @@ Shader "DryCycle/FogComposite"
                     if (_DryCycleHasNoise3D > 0.5)
                         return tex3D(_DryCycleFogNoise3D, frac(p));
 
-                    // Compatibility path: synthesize pseudo-3D structure from Rain
-                    // World's global 2D noise textures using Z-dependent offsets.
+                    // Compatibility path when compute/3D textures are unavailable.
+                    // Z-dependent offsets synthesize pseudo-volume structure from Rain
+                    // World's global 2D noise textures instead of flat texture scrolling.
                     float2 aUv = p.xy + float2(p.z * 0.173, p.z * -0.119);
                     float2 bUv = p.yz + float2(p.x * -0.137, p.x * 0.091);
                     float a = tex2D(_NoiseTex, frac(aUv)).r;
@@ -151,68 +133,184 @@ Shader "DryCycle/FogComposite"
                         c);
                 }
 
-                float VisualFogDensity(
+                float SampleFluid(float2 roomUV)
+                {
+                    float d = tex2D(
+                        _DryCycleFogDensityTex,
+                        saturate(roomUV)).r;
+                    return lerp(0.68, d, _DryCycleHasFluid);
+                }
+
+                float2 FluidGradient(float2 roomUV)
+                {
+                    // World-space stencil so the same room shape produces comparable
+                    // curl at different simulation resolutions.
+                    float2 texel24 = 24.0 /
+                        max(_DryCycleRoomSizePx, float2(1.0, 1.0));
+                    float l = SampleFluid(roomUV - float2(texel24.x, 0.0));
+                    float r = SampleFluid(roomUV + float2(texel24.x, 0.0));
+                    float b = SampleFluid(roomUV - float2(0.0, texel24.y));
+                    float t = SampleFluid(roomUV + float2(0.0, texel24.y));
+                    return float2(r - l, t - b);
+                }
+
+                float2 DomainWarpPx(
+                    float2 roomUV,
+                    float2 worldPx,
+                    float time)
+                {
+                    float2 p = worldPx / 720.0;
+
+                    float wx = tex2D(
+                        _NoiseTex,
+                        p * float2(0.81, 1.19) +
+                        float2(time * 0.0037, time * -0.0015)).r;
+                    float wy = tex2D(
+                        _NoiseTex,
+                        p.yx * float2(1.27, 0.73) +
+                        float2(time * -0.0023, time * 0.0030) + 0.37).r;
+                    float2 warp = float2(wx, wy) * 2.0 - 1.0;
+
+                    float wx2 = tex2D(
+                        _NoiseTex2,
+                        p * 0.41 + float2(time * -0.0010, 0.19)).g;
+                    float wy2 = tex2D(
+                        _NoiseTex2,
+                        p.yx * 0.46 + float2(0.61, time * 0.0013)).b;
+                    warp += (float2(wx2, wy2) * 2.0 - 1.0) * 0.31;
+
+                    // Bend detail along the actual low-frequency fluid density gradient.
+                    // The perpendicular vector acts like a stable curl direction, making
+                    // detailed billows roll around simulated masses and room geometry.
+                    float2 gradient = FluidGradient(roomUV);
+                    float gradientLength = length(gradient);
+                    if (gradientLength > 0.0001)
+                    {
+                        float2 tangent =
+                            float2(-gradient.y, gradient.x) / gradientLength;
+                        warp += tangent *
+                            saturate(gradientLength * 5.0) * 0.72;
+                    }
+
+                    return warp * 102.0;
+                }
+
+                float2 VisualFogDensity(
                     float2 roomUV,
                     float2 worldPx,
                     float pseudoDepth,
                     float jitter)
                 {
-                    const int Steps = 12;
+                    const int Steps = 24;
                     float time = _DryCycleFogTime;
-                    float2 warpPx = DomainWarpPx(worldPx, time);
+                    float2 warpPx = DomainWarpPx(roomUV, worldPx, time);
                     float accumulated = 0.0;
+                    float accumulatedSq = 0.0;
 
-                    [unroll]
+                    // Pseudo-depth controls how much virtual volume the pixel integrates.
+                    // Foreground geometry therefore carries less atmospheric thickness
+                    // while distant bands accumulate much more, despite Rain World not
+                    // having a conventional depth buffer.
+                    float zExtent = lerp(0.48, 1.0, pseudoDepth);
+
+                    [loop]
                     for (int s = 0; s < Steps; s++)
                     {
-                        float z = (s + jitter) / (float)Steps;
+                        float z01 = (s + jitter) / (float)Steps;
+                        float z = z01 * zExtent;
                         float depthParallax =
-                            (z - 0.5) * lerp(34.0, 82.0, pseudoDepth);
-                        float2 sampleWorld =
-                            worldPx + warpPx * lerp(0.35, 1.0, z);
+                            (z - 0.5 * zExtent) *
+                            lerp(42.0, 104.0, pseudoDepth);
+
+                        float2 sampleWorld = worldPx;
+                        sampleWorld += warpPx * lerp(0.24, 1.08, z01);
                         sampleWorld += float2(
-                            depthParallax * 0.41,
-                            depthParallax * -0.17);
+                            depthParallax * 0.43,
+                            depthParallax * -0.16);
 
                         float2 sampleRoomUv = sampleWorld /
                             max(_DryCycleRoomSizePx, float2(1.0, 1.0));
-                        float fluid = tex2D(
-                            _DryCycleFogDensityTex,
-                            saturate(sampleRoomUv)).r;
-                        fluid = lerp(0.68, fluid, _DryCycleHasFluid);
+                        float fluid = SampleFluid(sampleRoomUv);
 
-                        // Large coherent mass, high-frequency Worley-style erosion and
-                        // a second incommensurate sample create billows instead of a
-                        // scrolling 2D texture.
+                        // Macro: huge, slow coherent fog masses.
                         float3 macroCoord = float3(
-                            sampleWorld / 430.0 +
-                            float2(time * 0.0032, time * -0.0011),
-                            z * 0.91 + time * 0.0017);
+                            sampleWorld / 500.0 +
+                            float2(time * 0.0025, time * -0.0008),
+                            z * 0.83 + time * 0.0012);
                         float4 macro = SampleVolume(macroCoord);
 
-                        float3 detailCoord = float3(
-                            sampleWorld / 137.0 +
-                            float2(time * -0.0071, time * 0.0029),
-                            z * 2.73 - time * 0.0037);
-                        float4 detail = SampleVolume(
-                            detailCoord + macro.gbr * 0.19);
+                        // Mid: opposite drift and macro-warped sampling produces rolling
+                        // lobes rather than two obvious scrolling noise layers.
+                        float3 midCoord = float3(
+                            sampleWorld / 176.0 +
+                            float2(time * -0.0053, time * 0.0021),
+                            z * 2.19 - time * 0.0027);
+                        float4 mid = SampleVolume(
+                            midCoord + macro.gbr * 0.23);
 
-                        float body = saturate(
-                            macro.r * 1.30 -
-                            (1.0 - detail.b) * 0.38 +
-                            0.05);
-                        body = pow(body, lerp(1.45, 0.82, macro.g));
-                        accumulated += body * lerp(0.56, 1.18, fluid);
+                        // Fine: erosion and wisps. Its weight stays low so the weather
+                        // reads as broad humid fog rather than particle smoke.
+                        float3 fineCoord = float3(
+                            sampleWorld / 71.0 +
+                            float2(time * 0.0091, time * 0.0037),
+                            z * 4.73 + time * 0.0041);
+                        float4 fine = SampleVolume(
+                            fineCoord +
+                            mid.brg * 0.17 +
+                            macro.arg * 0.09);
+
+                        float macroBody = saturate(
+                            macro.r * 1.36 -
+                            (1.0 - mid.g) * 0.31 +
+                            0.035);
+                        macroBody = pow(
+                            macroBody,
+                            lerp(1.55, 0.76, macro.g));
+
+                        float midBody = saturate(
+                            mid.r * 1.18 -
+                            (1.0 - fine.b) * 0.29 +
+                            0.02);
+                        float wisps =
+                            smoothstep(0.36, 0.79, fine.r) *
+                            lerp(0.72, 1.18, fine.a);
+
+                        // Fluid dictates placement; volume noise only gives that mass a
+                        // rich internal shape. Gameplay visibility is separate below.
+                        float body =
+                            macroBody * 0.68 +
+                            midBody * 0.24 +
+                            wisps * 0.08;
+                        body *= lerp(0.48, 1.30, fluid);
+
+                        // Middle-depth weighting prevents the integral becoming a flat
+                        // chalk field while preserving large opaque-looking billows.
+                        float slab = 0.76 +
+                            0.24 * sin(saturate(z01) * 3.14159265);
+                        body *= slab;
+
+                        accumulated += body;
+                        accumulatedSq += body * body;
                     }
 
                     float density = accumulated / (float)Steps;
+                    float secondMoment = accumulatedSq / (float)Steps;
+                    float variance = max(
+                        0.0,
+                        secondMoment - density * density);
+
                     float wallDistance = tex2D(
                         _DryCycleFogObstacleTex,
                         saturate(roomUV)).g;
                     density += pow(
                         saturate(1.0 - wallDistance),
-                        2.0) * 0.075;
-                    return saturate(density * 1.42);
+                        2.1) * 0.065;
+
+                    // Variance later adds local colour richness without punching holes
+                    // through gameplay extinction.
+                    return float2(
+                        saturate(density * 1.48),
+                        saturate(variance * 7.0));
                 }
 
                 float ObstacleAtWorld(float2 worldPx)
@@ -229,12 +327,13 @@ Shader "DryCycle/FogComposite"
 
                 float SegmentVisibility(float2 fromPx, float2 toPx)
                 {
-                    // Lantern is capped at 200 px and LanternMouse at 40 px. Twelve
-                    // samples therefore give <= 17 px spacing for the largest allowed
-                    // reveal radius, slightly finer than one Rain World tile.
-                    const int OcclusionSteps = 12;
+                    // 24 samples put the 200px Lantern ray spacing at ~8px: less than
+                    // half a Rain World tile and sufficiently fine to stop thin walls
+                    // leaking the clear circle into an adjacent chamber.
+                    const int OcclusionSteps = 24;
                     float blocked = 0.0;
-                    [unroll]
+
+                    [loop]
                     for (int i = 1; i <= OcclusionSteps; i++)
                     {
                         float t = i / (float)(OcclusionSteps + 1);
@@ -242,6 +341,8 @@ Shader "DryCycle/FogComposite"
                         blocked = max(
                             blocked,
                             step(0.5, ObstacleAtWorld(p)));
+                        if (blocked > 0.5)
+                            break;
                     }
                     return 1.0 - blocked;
                 }
@@ -255,7 +356,7 @@ Shader "DryCycle/FogComposite"
                     reveal = 0.0;
                     coloredScattering = float3(0.0, 0.0, 0.0);
 
-                    [unroll]
+                    [loop]
                     for (int i = 0; i < 8; i++)
                     {
                         if (i >= _DryCycleFogLightCount)
@@ -269,7 +370,7 @@ Shader "DryCycle/FogComposite"
 
                         float radial = Smooth01(
                             1.0 - distancePx / radius);
-                        radial = pow(radial, 0.66);
+                        radial = pow(radial, 0.68);
                         float visible = SegmentVisibility(
                             light.xy,
                             worldPx);
@@ -279,17 +380,22 @@ Shader "DryCycle/FogComposite"
                         reveal = 1.0 -
                             (1.0 - reveal) *
                             (1.0 - localReveal);
+
+                        // Real illumination both clears extinction and lights suspended
+                        // fog. Dense lobes catch more coloured light, giving the Lantern
+                        // a genuine volumetric halo rather than a transparent circle.
+                        float halo = localReveal *
+                            lerp(0.08, 0.50, visualDensity) *
+                            (0.55 + radial * 0.45);
                         coloredScattering +=
-                            _DryCycleFogLightColors[i].rgb *
-                            localReveal *
-                            lerp(0.10, 0.42, visualDensity);
+                            _DryCycleFogLightColors[i].rgb * halo;
                     }
                 }
 
                 float EvaluateAwareness(float2 worldPx)
                 {
                     float reveal = 0.0;
-                    [unroll]
+                    [loop]
                     for (int i = 0; i < 4; i++)
                     {
                         if (i >= _DryCycleAwarenessCount)
@@ -338,33 +444,41 @@ Shader "DryCycle/FogComposite"
                     if (presence <= 0.0001)
                         return scene;
 
-                    float jitter = tex2D(
-                        _NoiseTex2,
-                        frac(screenUV * (_screenSize / 256.0))).r;
-                    float visualDensity = VisualFogDensity(
+                    // Spatial jitter plus a very slow temporal phase removes visible
+                    // ray-march layers without introducing sparkling/flickering fog.
+                    float2 jitterUv = frac(
+                        screenUV * (_screenSize / 256.0) +
+                        float2(
+                            frac(_DryCycleFogTime * 0.0137),
+                            frac(_DryCycleFogTime * 0.0089)));
+                    float jitter = tex2D(_NoiseTex2, jitterUv).r;
+
+                    float2 densityData = VisualFogDensity(
                         roomUV,
                         worldPx,
                         pseudoDepth,
                         jitter);
+                    float visualDensity = densityData.x;
+                    float turbulence = densityData.y;
 
-                    // Gameplay visibility is deliberately independent from visual fog
-                    // texture. DenseFog can billow, tear and flow without ever opening
-                    // a random long-distance window through the weather.
+                    // Gameplay visibility is independent from pretty moving density.
+                    // DenseFog may tear, billow and form wisps but those shapes can
+                    // never expose long-range poles, pits or enemies by chance.
                     float depthFactor = lerp(
-                        0.86,
-                        1.28,
+                        0.84,
+                        1.31,
                         pseudoDepth);
                     float extinction =
-                        fog * 1.05 +
-                        dense * 6.22;
+                        fog * 1.08 +
+                        dense * 6.32;
                     float baseTransmittance = exp(
                         -extinction * depthFactor);
 
-                    // At full DenseFog force high-contrast details into the same
-                    // ~0.2% regime as the earlier CPU extinction prototype.
+                    // Full DenseFog keeps high-contrast details near the 0.2% visibility
+                    // floor established by the earlier contrast-extinction prototype.
                     float denseCeiling = lerp(
                         1.0,
-                        0.0022,
+                        0.0020,
                         dense);
                     baseTransmittance = min(
                         baseTransmittance,
@@ -377,37 +491,60 @@ Shader "DryCycle/FogComposite"
                         visualDensity,
                         lightReveal,
                         lightScattering);
-                    float awarenessReveal = EvaluateAwareness(worldPx);
-                    float reveal = 1.0 -
-                        (1.0 - lightReveal) *
-                        (1.0 - awarenessReveal);
+                    float awarenessReveal =
+                        EvaluateAwareness(worldPx);
 
+                    // Awareness is NOT a light. It only restores a modest amount of
+                    // near-player silhouette information; only Lantern/LanternMouse can
+                    // reach almost-clear transmittance.
+                    float awarenessTarget = max(
+                        baseTransmittance,
+                        lerp(0.075, 0.145, dense));
                     float transmittance = lerp(
                         baseTransmittance,
+                        awarenessTarget,
+                        awarenessReveal);
+                    transmittance = lerp(
+                        transmittance,
                         0.985,
-                        reveal);
+                        lightReveal);
 
-                    // Density changes the appearance/internal lighting of fog, not the
-                    // gameplay transmittance. Thick lobes are brighter; valleys are
-                    // darker and cooler instead of becoming transparent windows.
-                    float densityShade = smoothstep(
-                        0.16,
-                        0.88,
+                    // Visual density changes the medium's look, not gameplay visibility.
+                    // Turbulent regions gain micro-contrast and cooler valleys, removing
+                    // the previous flat white-cloth appearance.
+                    float body = smoothstep(
+                        0.13,
+                        0.90,
                         visualDensity);
                     float shade = lerp(
-                        0.77,
-                        1.12,
-                        densityShade);
+                        0.69,
+                        1.11,
+                        body);
+                    shade *= lerp(
+                        0.95,
+                        1.07,
+                        turbulence);
+
                     float3 fogColor =
                         _DryCycleFogColor.rgb * shade;
+                    float3 coolValley =
+                        _DryCycleFogColor.rgb *
+                        float3(0.91, 0.94, 0.98);
                     fogColor = lerp(
+                        coolValley,
                         fogColor,
-                        _DryCycleFogColor.rgb * 0.90,
-                        (1.0 - visualDensity) * 0.25);
+                        smoothstep(0.20, 0.72, visualDensity));
 
-                    float3 scattering =
-                        fogColor +
-                        lightScattering * (0.48 + dense * 0.22);
+                    float3 scattering = fogColor;
+                    scattering += lightScattering *
+                        (0.46 + dense * 0.25);
+
+                    // Small density-correlated ambient scattering gives thick masses
+                    // body without whitening the whole frame uniformly.
+                    scattering *= 1.0 +
+                        visualDensity *
+                        (0.025 + dense * 0.025);
+
                     float3 finalColor =
                         scene.rgb * transmittance +
                         scattering * (1.0 - transmittance);
