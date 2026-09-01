@@ -15,6 +15,7 @@
 
     <DryCycleShaderProjectDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderProjectDir>
     <DryCycleWeatherBundleSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather</DryCycleWeatherBundleSource>
+    <DryCycleWeatherBundleVersionSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather.version.txt</DryCycleWeatherBundleVersionSource>
     <DryCycleUnityEditor Condition="'$(DryCycleUnityEditor)' == '' and '$(UNITY_EDITOR)' != ''">$(UNITY_EDITOR)</DryCycleUnityEditor>
   </PropertyGroup>
 
@@ -124,16 +125,26 @@
       DestinationFiles="$(GameModRootDir)/modify/soundeffects/sounds.txt"
       SkipUnchangedFiles="true" />
 
-    <!-- Deploy the platform-specific weather shader bundle when it has been built. -->
+    <!-- Deploy the platform-specific weather shader bundle and the editor-version
+         sidecar produced alongside it. The sidecar lets runtime logs distinguish an
+         algorithm/render bug from an AssetBundle editor/player compatibility problem. -->
     <MakeDir Directories="$(GameModRootDir)/assets/drycycle" />
     <Copy
       Condition="Exists('$(DryCycleWeatherBundleSource)')"
       SourceFiles="$(DryCycleWeatherBundleSource)"
       DestinationFiles="$(GameModRootDir)/assets/drycycle/drycycleweather"
       SkipUnchangedFiles="true" />
+    <Copy
+      Condition="Exists('$(DryCycleWeatherBundleVersionSource)')"
+      SourceFiles="$(DryCycleWeatherBundleVersionSource)"
+      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycycleweather.version.txt"
+      SkipUnchangedFiles="true" />
     <Warning
       Condition="!Exists('$(DryCycleWeatherBundleSource)')"
       Text="DryCycle weather AssetBundle is not built. Fog will use the compatibility renderer. Build shader-src via Unity or pass -p:BuildDryCycleAssets=true." />
+    <Warning
+      Condition="Exists('$(DryCycleWeatherBundleSource)') and !Exists('$(DryCycleWeatherBundleVersionSource)')"
+      Text="DryCycle weather AssetBundle exists but has no Unity-version sidecar. Rebuild shader-src to restore runtime compatibility diagnostics." />
 
     <!-- These world text files are live-authored in the actual region mod. Seed them
          only when missing; never overwrite mapper/weather tuning during a build. -->
