@@ -18,7 +18,7 @@ internal static class RainMeterRoundPipRuntime
 {
     private const float GameTicksPerSecond = 40f;
     private const float FillDiameterPixels = 5.30f;
-    private const int MaxDripGlyphs = 2;
+    private const int MaxDripGlyphs = 3;
 
     private sealed class DripGlyph
     {
@@ -394,9 +394,6 @@ internal static class RainMeterRoundPipRuntime
             orig(self, timeStacker);
             HideForecasts(state);
 
-            // Vanilla intentionally draws no RainMeter circles for Saint outside
-            // Rubicon. If the same HUD previously rendered DryCycle pips in Rubicon,
-            // explicitly hide their sprites so the previous frame cannot persist.
             if (!vanillaAllowsDraw)
             {
                 HideCircleSprites(self);
@@ -418,10 +415,6 @@ internal static class RainMeterRoundPipRuntime
         }
 
         orig(self, timeStacker);
-
-        // Reapply the authoritative 1200-tick layout after vanilla/other hooks. The
-        // final HUDCircle.Draw below is the only DryCycle visual state that survives
-        // this frame.
         ApplyPhasePipLayout(self, clock);
         DrawFinal(state, clock, schedule, Mathf.Clamp01(timeStacker));
     }
