@@ -11,7 +11,7 @@ namespace DryCycle.Weather;
 /// Separates DryCycle's scheduled HeavyRain from authored RoomEffect.HeavyRain.
 /// Authored HeavyRain keeps native ThrowAroundObjects/rainDeath/Die behavior.
 /// Scheduled HeavyRain contributes visuals, sound, shake and nonlethal traversal
-/// pressure, but its contribution is removed from native lethal rain physics.
+/// pressure, but its contribution is layered only after the native GlobalRain pass.
 /// </summary>
 internal static class ScheduledHeavyRainTraversalRuntime
 {
@@ -64,29 +64,36 @@ internal static class ScheduledHeavyRainTraversalRuntime
         On.RoomRain.ThrowAroundObjects -= RoomRain_ThrowAroundObjects;
         On.Player.Update -= Player_Update;
 
-        RainWeatherRuntime.SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalState>();
         _roomStates = new ConditionalWeakTable<RoomRain, RoomRainState>();
         _enabled = false;
+    }
+
+    /// <summary>
+    /// Returns GlobalRain.Intensity exactly as it existed after native/room-authored
+    /// processing and before DryCycle Scheduled HeavyRain was layered on top. This is
+    /// the single authoritative baseline used by all HeavyRain lethality guards.
+    /// </summary>
+    internal static bool TryGetNativeIntensity(GlobalRain rain, out float intensity)
+    {
+        intensity = 0f;
+        if (rain == null || !_globalStates.TryGetValue(rain, out GlobalState state))
+        {
+            return false;
+        }
+
+        intensity = state.NativeIntensity;
+        return true;
     }
 
     private static void GlobalRain_Update(
         On.GlobalRain.orig_Update orig,
         GlobalRain self)
     {
-        // Establish the native/authored HeavyRain baseline first. RainWeatherRuntime's
-        // scheduled HeavyRain RoomEffect override is suppressed only for this nested
-        // GlobalRain update; LightRain and foreign/native systems remain untouched.
-        bool previousSuppression = RainWeatherRuntime.SuppressScheduledHeavyOverride;
-        RainWeatherRuntime.SuppressScheduledHeavyOverride = true;
-        try
-        {
-            orig(self);
-        }
-        finally
-        {
-            RainWeatherRuntime.SuppressScheduledHeavyOverride = previousSuppression;
-        }
+        // RainWeatherRuntime no longer injects Scheduled HeavyRain through
+        // RoomEffect.HeavyRain. Therefore one native chain is enough to establish the
+        // authored baseline; no nested suppression/update pass is needed here.
+        orig(self);
 
         if (self == null)
         {
@@ -106,7 +113,6 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        WeatherScheduleRuntime.Synchronize(world);
         float heavy = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
@@ -117,7 +123,9 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // Native/foreign DeathRain remains authoritative if another system owns one.
+        // Native/foreign or DryCycle DeathRain remains authoritative. Weather schedules
+        // do not overlap by design, and this protects compatibility if another system
+        // starts DeathRain independently.
         if (self.deathRain != null)
         {
             return;
@@ -129,9 +137,7 @@ internal static class ScheduledHeavyRainTraversalRuntime
         if (heavy > 0.0001f)
         {
             // HeavyRain's native full RoomEffect intensity is 1.2. The DryCycle event
-            // envelope is an outer intensity envelope, so fade the final contribution
-            // from 0 -> 1.2 rather than feeding the envelope into (1 + H*4)*0.24,
-            // which incorrectly jumps to 0.24 as soon as H becomes nonzero.
+            // envelope is an outer intensity envelope, so fade 0 -> 1.2 directly.
             float scheduledIntensity = FullScheduledHeavyRainIntensity * heavy;
             self.Intensity = Math.Max(self.Intensity, scheduledIntensity);
             self.RumbleSound = Math.Max(self.RumbleSound, heavy * 0.2f);
@@ -189,8 +195,7 @@ internal static class ScheduledHeavyRainTraversalRuntime
 
         // Run the native physical pass only with the intensity that existed before
         // DryCycle added Scheduled HeavyRain. Room-authored HeavyRain therefore keeps
-        // its native push, stun, rainDeath and lethality; the scheduled contribution
-        // never enters that lethal pass.
+        // native push/stun/rainDeath/lethality; scheduled HeavyRain never enters it.
         float scheduledIntensity = self.globalRain.Intensity;
         float? currentRainIntensity = self.room?.roomSettings?.rInts;
         RoomRain.DangerType currentDangerType = self.dangerType;
@@ -264,6 +269,10 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return false;
         }
 
+        // GetIntensity self-synchronizes, but keep this explicit at the player-facing
+        // boundary so a region transfer can never apply the previous region's traversal
+        // pressure for one update frame.
+        WeatherScheduleRuntime.Synchronize(world);
         float scheduledHeavy = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
