@@ -662,13 +662,14 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
     uint2 id = dispatchId.xy;
     float2 uv = GridUV(id, width, height);
     float clearDecay = exp(-max(0.0, _BlastClearDecay) * _DeltaTime);
+    float4 localState = _DensityRead.Load(int3(id, 0));
+    float localBlastClear = saturate(localState.g * clearDecay);
 
     if (ObstacleAt(uv) > 0.5)
     {
         // Fog density remains zero inside terrain, but an explosion may temporarily
         // clear the fog composited over the receiving wall surface itself.
-        float clear = _DensityRead.Load(int3(id, 0)).g * clearDecay;
-        _DensityWrite[id] = float4(0.0, clear, 0.0, 1.0);
+        _DensityWrite[id] = float4(0.0, localBlastClear, 0.0, 1.0);
         return;
     }
 
@@ -684,9 +685,19 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         LinearClampSampler,
         backtrace,
         0);
+    float advectedBlastClear = saturate(state.g * clearDecay);
+
+    // The G field is the only permission to resist refill. Use the clear amount that
+    // already occupied this destination cell to throttle dense fog advecting into it,
+    // but do not copy/expand G itself. When G is zero this multiplier is exactly 1.0,
+    // so ordinary fog advection remains bit-for-bit on the original path.
+    float incomingDensityScale = lerp(1.0, 0.08, localBlastClear);
+    float density =
+        state.r * _DensityDissipation * incomingDensityScale;
+
     _DensityWrite[id] = float4(
-        state.r * _DensityDissipation,
-        saturate(state.g * clearDecay),
+        saturate(density),
+        advectedBlastClear,
         0.0,
         1.0);
 }
@@ -716,13 +727,12 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     // Very weak interior replenishment prevents numerical loss from emptying a room,
     // but does not repaint the full target every second. An active blast-clear field
-    // temporarily suppresses replenishment so the physical cavity cannot refill before
-    // its displaced ring has had time to advect away.
+    // now suppresses this almost completely while the evacuated cavity is fresh.
     float interiorTarget =
         _TargetDensity * lerp(0.54, 1.05, shape);
     float interiorRelax =
         1.0 - exp(-_DensityRelaxation * _DeltaTime);
-    interiorRelax *= lerp(1.0, 0.12, blastClear);
+    interiorRelax *= lerp(1.0, 0.02, blastClear);
     density = lerp(
         density,
         interiorTarget,
@@ -745,7 +755,7 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
         _TargetDensity * lerp(0.58, 1.34, inletPulse);
     float inletMix = inlet *
         (1.0 - exp(-2.6 * _DeltaTime));
-    inletMix *= lerp(1.0, 0.20, blastClear);
+    inletMix *= lerp(1.0, 0.04, blastClear);
     density = lerp(
         density,
         inletTarget,
@@ -761,7 +771,7 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
     density += pow(
         saturate(1.0 - wallDistance),
         2.35) * 0.052 * _DeltaTime *
-        lerp(1.0, 0.10, blastClear);
+        lerp(1.0, 0.02, blastClear);
 
     // Player motion carves only visual density. Gameplay extinction remains independent
     // from this wake because only the explosion-authored G channel grants visibility.
