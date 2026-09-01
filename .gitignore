@@ -17,6 +17,19 @@ lib/*.dll
 mod/newest/plugins/*.dll
 mod/newest/plugins/*.pdb
 
+# DryCycle Unity shader project caches
+shader-src/Library/
+shader-src/Temp/
+shader-src/Logs/
+shader-src/UserSettings/
+shader-src/obj/
+shader-src/.vs/
+
+# AssetBundle sidecar output. The actual drycycleweather bundle is intentionally not
+# ignored because it is a runtime mod asset and may be committed/released.
+mod/assets/drycycle/*.manifest
+mod/assets/drycycle/drycycleweather.manifest
+
 # Legacy output locations
 mod/plugins/*.dll
 mod/plugins/*.pdb
