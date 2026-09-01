@@ -8,8 +8,12 @@ namespace DryCycle.Weather.HeatWave;
 /// <summary>
 /// Persistent obstacle-aware GPU heat/air simulation. Velocity is stored in normalized
 /// room UV per second; thermal state R is temperature excess and G is retained boundary
-/// energy. The final optical field stores a temperature-gradient-derived refraction
-/// vector in RG, temperature in B and near-source boundary-layer strength in A.
+/// energy. The optical field stores a temperature-gradient-derived refraction vector in
+/// RG, temperature in B and near-source boundary-layer strength in A.
+///
+/// Simulation state has real temporal memory. A room first entered while HeatWave is
+/// already active is primed from exposed terrain/HeatColumns so the atmosphere does not
+/// visibly cold-start, while later frames are purely advected/evolved from history.
 /// </summary>
 internal sealed class HeatWaveThermalSimulation : IDisposable
 {
@@ -17,7 +21,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     private const int MaxWidth = 1024;
     private const int MaxHeight = 512;
     private const int PressureIterations = 24;
-    private const int MaxEmitters = 16;
+    private const int MaxEmitters = 24;
 
     private readonly Room _room;
     private readonly HeatWaveTerrainField _terrain;
@@ -25,6 +29,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     private readonly Vector4[] _emitterStartRadius = new Vector4[MaxEmitters];
     private readonly Vector4[] _emitterEndStrength = new Vector4[MaxEmitters];
     private readonly Vector4[] _emitterFlow = new Vector4[MaxEmitters];
+    private readonly Vector4[] _emitterShape = new Vector4[MaxEmitters];
 
     private ComputeShader _solver;
     private RenderTexture _velocityRead;
@@ -38,6 +43,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     private RenderTexture _optical;
 
     private int _initializeKernel;
+    private int _primeKernel;
     private int _advectVelocityKernel;
     private int _applyForcesKernel;
     private int _curlKernel;
@@ -50,12 +56,14 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     private int _buildOpticalKernel;
 
     private float _elapsed;
+    private float _lastWeatherIntensity;
     private int _emitterCount;
 
     internal bool IsAvailable { get; private set; }
     internal Texture ThermalTexture => IsAvailable ? _thermalRead : Texture2D.blackTexture;
     internal Texture VelocityTexture => IsAvailable ? _velocityRead : Texture2D.blackTexture;
     internal Texture OpticalTexture => IsAvailable ? _optical : Texture2D.blackTexture;
+    internal int EmitterCount => _emitterCount;
 
     internal HeatWaveThermalSimulation(Room room, HeatWaveTerrainField terrain)
     {
@@ -80,7 +88,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
                 $"DryCycle HeatWave thermal field initialized for " +
                 $"'{room.abstractRoom?.name ?? "unknown"}': " +
                 $"{_thermalRead.width}x{_thermalRead.height}, " +
-                $"pressureIterations={PressureIterations}.");
+                $"pressureIterations={PressureIterations}, emitters={MaxEmitters} max.");
         }
         catch (Exception ex)
         {
@@ -95,6 +103,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     internal void Step(
         float deltaTime,
         float weatherIntensity,
+        float solarIntensity,
         HeatWaveBurstController burst)
     {
         if (!IsAvailable || _solver == null)
@@ -103,9 +112,20 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
         }
 
         float dt = Mathf.Clamp(deltaTime, 1f / 240f, 1f / 20f);
+        float intensity = Mathf.Clamp01(weatherIntensity);
+        float solar = Mathf.Clamp01(solarIntensity);
         _elapsed += dt;
+
         BuildEmitterData();
-        SetCommonParameters(dt, weatherIntensity, burst);
+        SetCommonParameters(dt, intensity, solar, burst);
+
+        // Entering a room during an already-established HeatWave must not reveal the
+        // implementation by showing a cold, motionless field for several seconds.
+        if (_lastWeatherIntensity <= 0.025f && intensity > 0.08f)
+        {
+            PrimeActiveWeather();
+        }
+        _lastWeatherIntensity = intensity;
 
         BindVelocityPair(_advectVelocityKernel);
         Dispatch(_advectVelocityKernel);
@@ -192,6 +212,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
     private void CacheKernels()
     {
         _initializeKernel = _solver.FindKernel("InitializeFields");
+        _primeKernel = _solver.FindKernel("PrimeActiveWeather");
         _advectVelocityKernel = _solver.FindKernel("AdvectVelocity");
         _applyForcesKernel = _solver.FindKernel("ApplyThermalForces");
         _curlKernel = _solver.FindKernel("ComputeCurl");
@@ -222,7 +243,8 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
 
     private void InitializeFields()
     {
-        SetCommonParameters(1f / 40f, 0f, null);
+        BuildEmitterData();
+        SetCommonParameters(1f / 40f, 0f, 0f, null);
         _solver.SetTexture(_initializeKernel, "_VelocityWrite", _velocityRead);
         _solver.SetTexture(_initializeKernel, "_ThermalWrite", _thermalRead);
         _solver.SetTexture(_initializeKernel, "_PressureWrite", _pressureRead);
@@ -237,25 +259,46 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
         Graphics.Blit(_pressureRead, _pressureWrite);
     }
 
+    private void PrimeActiveWeather()
+    {
+        _solver.SetTexture(_primeKernel, "_VelocityRead", _velocityRead);
+        _solver.SetTexture(_primeKernel, "_VelocityWrite", _velocityWrite);
+        _solver.SetTexture(_primeKernel, "_ThermalRead", _thermalRead);
+        _solver.SetTexture(_primeKernel, "_ThermalWrite", _thermalWrite);
+        _solver.SetTexture(_primeKernel, "_TerrainTex", _terrain.Texture);
+        Dispatch(_primeKernel);
+        Swap(ref _velocityRead, ref _velocityWrite);
+        Swap(ref _thermalRead, ref _thermalWrite);
+
+        // Prime both ping-pong targets so the first advection pass cannot sample the
+        // stale cold texture after a swap.
+        Graphics.Blit(_velocityRead, _velocityWrite);
+        Graphics.Blit(_thermalRead, _thermalWrite);
+    }
+
     private void SetCommonParameters(
         float dt,
         float weatherIntensity,
+        float solarIntensity,
         HeatWaveBurstController burst)
     {
         float intensity = Mathf.Clamp01(weatherIntensity);
+        float solar = Mathf.Clamp01(solarIntensity);
         float stillness = burst?.Stillness ?? 0f;
         float burstStrength = burst?.BurstStrength ?? 0f;
+        float burstKick = burst?.BurstKick ?? 0f;
 
         _solver.SetFloat("_DeltaTime", dt);
         _solver.SetFloat("_SimulationTime", _elapsed);
         _solver.SetFloat("_HeatIntensity", intensity);
-        _solver.SetFloat("_RoomSolarIntensity", _terrain.RoomSolarIntensity);
+        _solver.SetFloat("_RoomSolarIntensity", solar);
         _solver.SetFloat("_VelocityDissipation", Mathf.Lerp(0.994f, 0.9985f, stillness));
         _solver.SetFloat("_ThermalDissipation", 0.9985f);
         _solver.SetFloat("_BuoyancyScale", burst?.BuoyancyScale ?? 1f);
         _solver.SetFloat("_TurbulenceScale", burst?.TurbulenceScale ?? 1f);
         _solver.SetFloat("_HeatStorageScale", burst?.HeatStorageScale ?? 1f);
         _solver.SetFloat("_BurstStrength", burstStrength);
+        _solver.SetFloat("_BurstKick", burstKick);
         _solver.SetFloat("_Stillness", stillness);
         _solver.SetVector("_RoomSizePx", new Vector4(
             _terrain.RoomSizePixels.x,
@@ -266,6 +309,13 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
         _solver.SetVectorArray("_EmitterStartRadius", _emitterStartRadius);
         _solver.SetVectorArray("_EmitterEndStrength", _emitterEndStrength);
         _solver.SetVectorArray("_EmitterFlow", _emitterFlow);
+        _solver.SetVectorArray("_EmitterShape", _emitterShape);
+
+        Water water = _room?.waterObject;
+        bool hasWater = water != null;
+        _solver.SetFloat("_HasWater", hasWater ? 1f : 0f);
+        _solver.SetFloat("_WaterLevelPx", hasWater ? water.fWaterLevel : -100000f);
+        _solver.SetFloat("_WaterInverted", hasWater && _room.waterInverted ? 1f : 0f);
     }
 
     private void BuildEmitterData()
@@ -275,6 +325,7 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
         Array.Clear(_emitterStartRadius, 0, _emitterStartRadius.Length);
         Array.Clear(_emitterEndStrength, 0, _emitterEndStrength.Length);
         Array.Clear(_emitterFlow, 0, _emitterFlow.Length);
+        Array.Clear(_emitterShape, 0, _emitterShape.Length);
 
         Vector2 roomSize = _terrain.RoomSizePixels;
         for (int i = 0; i < _emitterCount; i++)
@@ -290,7 +341,10 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
             Vector2 direction = emitter.End - emitter.Start;
             float length = Mathf.Max(1f, direction.magnitude);
             direction /= length;
-            float speedPx = Mathf.Lerp(46f, 112f, Mathf.Clamp01(emitter.Strength));
+
+            // Authored reach and airflow speed are intentionally separate. A long
+            // lazily rising column is now possible without forcing huge velocity.
+            float speedPx = 82f * emitter.FlowSpeed;
             Vector2 flowUv = new(
                 direction.x * speedPx / Mathf.Max(1f, roomSize.x),
                 direction.y * speedPx / Mathf.Max(1f, roomSize.y));
@@ -309,6 +363,11 @@ internal sealed class HeatWaveThermalSimulation : IDisposable
                 flowUv.x,
                 flowUv.y,
                 Mathf.Repeat(i * 0.6180339f, 1f),
+                emitter.Pulse);
+            _emitterShape[i] = new Vector4(
+                emitter.Expansion,
+                emitter.FlowSpeed,
+                emitter.Pulse,
                 0f);
         }
     }
