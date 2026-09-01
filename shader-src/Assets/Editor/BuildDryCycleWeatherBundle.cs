@@ -15,6 +15,7 @@ namespace DryCycle.Editor
     public static class BuildDryCycleWeatherBundle
     {
         private const string BundleName = "drycycleweather";
+        private const string VersionSidecarName = "drycycleweather.version.txt";
 
         private static readonly string[] WeatherAssets =
         {
@@ -39,6 +40,8 @@ namespace DryCycle.Editor
 
         private static void Build(BuildTarget target)
         {
+            ValidateSourceAssets();
+
             DirectoryInfo projectDirectory = Directory.GetParent(Application.dataPath);
             string projectRoot = projectDirectory == null ? null : projectDirectory.FullName;
             DirectoryInfo repositoryDirectory = string.IsNullOrEmpty(projectRoot)
@@ -62,6 +65,9 @@ namespace DryCycle.Editor
                 assetNames = WeatherAssets
             };
 
+            // Keep the TypeTree and editor-version information in the bundle. TypeTree
+            // data is valuable when the player/editor versions differ, and the sidecar
+            // written below makes that difference explicit at runtime.
             BuildAssetBundleOptions options =
                 BuildAssetBundleOptions.ChunkBasedCompression |
                 BuildAssetBundleOptions.ForceRebuildAssetBundle;
@@ -80,9 +86,43 @@ namespace DryCycle.Editor
                     bundlePath + "'.");
             }
 
+            string sidecarPath = Path.Combine(output, VersionSidecarName);
+            File.WriteAllText(sidecarPath, Application.unityVersion + Environment.NewLine);
+
             Debug.Log(
                 "DryCycle weather AssetBundle built with Unity " +
                 Application.unityVersion + ": " + bundlePath);
+            Debug.Log(
+                "DryCycle weather AssetBundle version metadata: " + sidecarPath);
+        }
+
+        private static void ValidateSourceAssets()
+        {
+            Shader fogShader = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[0]);
+            if (fogShader == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle fog composite shader could not be imported: " + WeatherAssets[0]);
+            }
+
+            ComputeShader fluid = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[1]);
+            if (fluid == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle fog fluid compute shader could not be imported: " + WeatherAssets[1]);
+            }
+
+            ComputeShader noise = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[2]);
+            if (noise == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle fog noise compute shader could not be imported: " + WeatherAssets[2]);
+            }
+
+            Debug.Log(
+                "DryCycle weather source assets imported successfully. " +
+                "Editor Unity=" + Application.unityVersion +
+                ", Graphics API target=" + EditorUserBuildSettings.activeBuildTarget + ".");
         }
     }
 }
