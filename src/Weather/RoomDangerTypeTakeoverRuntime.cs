@@ -151,6 +151,15 @@ internal static class RoomDangerTypeTakeoverRuntime
             return false;
         }
 
+        // Foreign/native DeathRain ownership is absolute. Never intercept its
+        // RoomRain just because DryCycle happens to have a DeathRain event scheduled
+        // at the same time.
+        if (rain.globalRain?.deathRain != null &&
+            !RainWeatherRuntime.OwnsDeathRain(rain.globalRain))
+        {
+            return false;
+        }
+
         WeatherScheduleRuntime.Synchronize(world);
         sample = new WeatherSample(
             WeatherScheduleRuntime.GetIntensity(
@@ -169,14 +178,6 @@ internal static class RoomDangerTypeTakeoverRuntime
                 WeatherScheduleEventKind.DangerType,
                 "DeathRain",
                 "Rain"));
-
-        // Do not steal a native/foreign DeathRain state that DryCycle did not start.
-        if (rain.globalRain?.deathRain != null &&
-            !RainWeatherRuntime.OwnsDeathRain(rain.globalRain) &&
-            sample.DeathRain <= Epsilon)
-        {
-            return false;
-        }
 
         return true;
     }
