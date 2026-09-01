@@ -196,9 +196,7 @@ internal static class ScheduledHeavyRainTraversalRuntime
             return;
         }
 
-        // RainWeatherRuntime temporarily sets room RainIntensity to 1 and may switch a
-        // Flood room to FloodAndRain so scheduled regional rain can render everywhere.
-        // During the physical ThrowAroundObjects call, restore the authored/native
+        // During the physical ThrowAroundObjects call, restore only the authored/native
         // inputs. Therefore authored HeavyRain still pushes, stuns, raises rainDeath
         // and kills exactly as before; only DryCycle's additional HeavyRain is absent.
         float scheduledIntensity = self.globalRain.Intensity;
@@ -355,9 +353,22 @@ internal static class ScheduledHeavyRainTraversalRuntime
         for (int i = 0; i < player.bodyChunks.Length; i++)
         {
             BodyChunk chunk = player.bodyChunks[i];
-            if (chunk != null)
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            // HeavyRain should shorten jumps, not turn an ordinary fall into lethal
+            // impact damage. Apply full pressure while the player is still rising and
+            // only a small apex pressure close to zero vertical velocity. Once a body
+            // chunk is already descending normally, add no further downward speed.
+            if (chunk.vel.y > 0f)
             {
                 chunk.vel.y -= down;
+            }
+            else if (chunk.vel.y > -1.5f)
+            {
+                chunk.vel.y -= down * 0.25f;
             }
         }
     }
