@@ -5,14 +5,15 @@ using UnityEngine;
 namespace DryCycle.Rendering;
 
 /// <summary>
-/// Owns DryCycle's custom Unity shader bundle. AssetBundle.LoadAsset is deliberately
-/// deferred until RainWorld.LoadResources; loading Unity shader assets from BepInEx
-/// OnEnable/Awake can hard-crash the player before Rain World has initialized its
-/// rendering resources.
+/// Owns DryCycle's custom Unity weather shader bundle. AssetBundle.LoadAsset is
+/// deliberately deferred until RainWorld.LoadResources; loading Unity shader assets
+/// from BepInEx OnEnable/Awake can hard-crash the player before Rain World has
+/// initialized its rendering resources.
 /// </summary>
 internal static class DryCycleShaderAssets
 {
     internal const string FogCompositeShaderKey = "DryCycleFogComposite";
+    internal const string HeatWaveCompositeShaderKey = "DryCycleHeatWaveComposite";
     internal const string BundleRelativePath = "assets/drycycle/drycycleweather";
     internal const string BundleVersionRelativePath =
         "assets/drycycle/drycycleweather.version.txt";
@@ -23,6 +24,10 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/compute/drycyclefogfluid.compute";
     private const string FogNoiseAssetPath =
         "assets/drycycle/compute/drycyclefognoise.compute";
+    private const string HeatWaveCompositeAssetPath =
+        "assets/drycycle/shaders/drycycleheatwavecomposite.shader";
+    private const string HeatWaveThermalAssetPath =
+        "assets/drycycle/compute/drycycleheatwavethermal.compute";
 
     private static AssetBundle _bundle;
     private static bool _enabled;
@@ -31,10 +36,14 @@ internal static class DryCycleShaderAssets
     internal static FShader FogComposite { get; private set; }
     internal static ComputeShader FogFluidCompute { get; private set; }
     internal static ComputeShader FogNoiseCompute { get; private set; }
+    internal static FShader HeatWaveComposite { get; private set; }
+    internal static ComputeShader HeatWaveThermalCompute { get; private set; }
 
     internal static bool HasFogComposite => FogComposite != null;
     internal static bool HasFluidCompute => FogFluidCompute != null;
     internal static bool HasNoiseCompute => FogNoiseCompute != null;
+    internal static bool HasHeatWaveComposite => HeatWaveComposite != null;
+    internal static bool HasHeatWaveThermalCompute => HeatWaveThermalCompute != null;
 
     internal static void Enable()
     {
@@ -73,7 +82,7 @@ internal static class DryCycleShaderAssets
 
     private static void TryLoad(RainWorld rainWorld)
     {
-        if (rainWorld == null || FogComposite != null)
+        if (rainWorld == null || _bundle != null)
         {
             return;
         }
@@ -86,7 +95,8 @@ internal static class DryCycleShaderAssets
                 _missingBundleLogged = true;
                 Plugin.Logger?.LogWarning(
                     $"DryCycle weather AssetBundle not found at '{path}'. " +
-                    "Fog will use the compatibility renderer until " +
+                    "Fog will use the compatibility renderer and HeatWave optical " +
+                    "rendering will remain disabled until " +
                     $"'{BundleRelativePath}' is built and installed. " +
                     $"Runtime Unity version: {Application.unityVersion}.");
             }
@@ -97,11 +107,7 @@ internal static class DryCycleShaderAssets
 
         try
         {
-            if (_bundle == null)
-            {
-                _bundle = AssetBundle.LoadFromFile(path);
-            }
-
+            _bundle = AssetBundle.LoadFromFile(path);
             if (_bundle == null)
             {
                 Plugin.Logger?.LogError(
@@ -110,61 +116,25 @@ internal static class DryCycleShaderAssets
                 return;
             }
 
-            Shader fogShader = _bundle.LoadAsset<Shader>(FogCompositeAssetPath);
-            if (fogShader == null)
-            {
-                Plugin.Logger?.LogError(
-                    $"DryCycle weather bundle is missing shader '{FogCompositeAssetPath}'.");
-                return;
-            }
-
-            if (!fogShader.isSupported)
-            {
-                Plugin.Logger?.LogError(
-                    $"DryCycle fog shader '{fogShader.name}' is not supported by the " +
-                    $"current graphics device '{SystemInfo.graphicsDeviceName}' " +
-                    $"({SystemInfo.graphicsDeviceType}). The compatibility fog " +
-                    "renderer will be used instead.");
-                return;
-            }
-
-            FogComposite = FShader.CreateShader(FogCompositeShaderKey, fogShader);
-            rainWorld.Shaders[FogCompositeShaderKey] = FogComposite;
-
-            FogFluidCompute = _bundle.LoadAsset<ComputeShader>(FogFluidAssetPath);
-            FogNoiseCompute = _bundle.LoadAsset<ComputeShader>(FogNoiseAssetPath);
+            LoadFogAssets(rainWorld);
+            LoadHeatWaveAssets(rainWorld);
 
             if (!SystemInfo.supportsComputeShaders)
             {
                 Plugin.Logger?.LogWarning(
-                    "DryCycle custom fog composite is available, but this graphics " +
-                    "device reports no compute-shader support. The shader will keep " +
-                    "its volumetric noise fallback while the room fluid solver stays " +
-                    "disabled.");
-            }
-            else
-            {
-                if (FogFluidCompute == null)
-                {
-                    Plugin.Logger?.LogWarning(
-                        $"DryCycle weather bundle is missing compute shader " +
-                        $"'{FogFluidAssetPath}'. Fog will render without room-fluid " +
-                        "advection.");
-                }
-
-                if (FogNoiseCompute == null)
-                {
-                    Plugin.Logger?.LogWarning(
-                        $"DryCycle weather bundle is missing compute shader " +
-                        $"'{FogNoiseAssetPath}'. Fog will use Rain World's 2D-noise " +
-                        "pseudo-volume fallback.");
-                }
+                    "DryCycle custom weather composites are available, but this " +
+                    "graphics device reports no compute-shader support. Fog will keep " +
+                    "its volumetric-noise fallback and HeatWave will use its optical " +
+                    "phase fallback without the persistent thermal-fluid field.");
             }
 
             Plugin.Logger?.LogInfo(
                 "DryCycle weather rendering assets loaded: " +
-                $"FogComposite=yes, FluidCompute={(FogFluidCompute != null ? "yes" : "no")}, " +
-                $"NoiseCompute={(FogNoiseCompute != null ? "yes" : "no")}, " +
+                $"FogComposite={(FogComposite != null ? "yes" : "no")}, " +
+                $"FogFluid={(FogFluidCompute != null ? "yes" : "no")}, " +
+                $"FogNoise={(FogNoiseCompute != null ? "yes" : "no")}, " +
+                $"HeatWaveComposite={(HeatWaveComposite != null ? "yes" : "no")}, " +
+                $"HeatWaveThermal={(HeatWaveThermalCompute != null ? "yes" : "no")}, " +
                 $"ComputeSupported={SystemInfo.supportsComputeShaders}, " +
                 $"Unity={Application.unityVersion}, GPU='{SystemInfo.graphicsDeviceName}'.");
         }
@@ -173,10 +143,87 @@ internal static class DryCycleShaderAssets
             FogComposite = null;
             FogFluidCompute = null;
             FogNoiseCompute = null;
+            HeatWaveComposite = null;
+            HeatWaveThermalCompute = null;
             Plugin.Logger?.LogError(
                 "DryCycle failed to initialize custom weather shaders. " +
-                "The compatibility fog renderer will remain available.");
+                "Compatibility renderers will remain available where implemented.");
             Plugin.Logger?.LogError(ex);
+        }
+    }
+
+    private static void LoadFogAssets(RainWorld rainWorld)
+    {
+        Shader fogShader = _bundle.LoadAsset<Shader>(FogCompositeAssetPath);
+        if (fogShader == null)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle weather bundle is missing shader '{FogCompositeAssetPath}'.");
+        }
+        else if (!fogShader.isSupported)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle fog shader '{fogShader.name}' is not supported by the " +
+                $"current graphics device '{SystemInfo.graphicsDeviceName}' " +
+                $"({SystemInfo.graphicsDeviceType}). The compatibility fog " +
+                "renderer will be used instead.");
+        }
+        else
+        {
+            FogComposite = FShader.CreateShader(FogCompositeShaderKey, fogShader);
+            rainWorld.Shaders[FogCompositeShaderKey] = FogComposite;
+        }
+
+        FogFluidCompute = _bundle.LoadAsset<ComputeShader>(FogFluidAssetPath);
+        FogNoiseCompute = _bundle.LoadAsset<ComputeShader>(FogNoiseAssetPath);
+
+        if (SystemInfo.supportsComputeShaders)
+        {
+            if (FogFluidCompute == null)
+            {
+                Plugin.Logger?.LogWarning(
+                    $"DryCycle weather bundle is missing compute shader " +
+                    $"'{FogFluidAssetPath}'. Fog will render without room-fluid " +
+                    "advection.");
+            }
+
+            if (FogNoiseCompute == null)
+            {
+                Plugin.Logger?.LogWarning(
+                    $"DryCycle weather bundle is missing compute shader " +
+                    $"'{FogNoiseAssetPath}'. Fog will use Rain World's 2D-noise " +
+                    "pseudo-volume fallback.");
+            }
+        }
+    }
+
+    private static void LoadHeatWaveAssets(RainWorld rainWorld)
+    {
+        Shader heatShader = _bundle.LoadAsset<Shader>(HeatWaveCompositeAssetPath);
+        if (heatShader == null)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle weather bundle is missing shader '{HeatWaveCompositeAssetPath}'.");
+        }
+        else if (!heatShader.isSupported)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle HeatWave shader '{heatShader.name}' is not supported by " +
+                $"'{SystemInfo.graphicsDeviceName}' ({SystemInfo.graphicsDeviceType}).");
+        }
+        else
+        {
+            HeatWaveComposite = FShader.CreateShader(HeatWaveCompositeShaderKey, heatShader);
+            rainWorld.Shaders[HeatWaveCompositeShaderKey] = HeatWaveComposite;
+        }
+
+        HeatWaveThermalCompute = _bundle.LoadAsset<ComputeShader>(HeatWaveThermalAssetPath);
+        if (SystemInfo.supportsComputeShaders && HeatWaveThermalCompute == null)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle weather bundle is missing compute shader " +
+                $"'{HeatWaveThermalAssetPath}'. HeatWave will keep the composite " +
+                "fallback but local thermal memory and HeatColumn fluid injection are disabled.");
         }
     }
 
@@ -189,7 +236,7 @@ internal static class DryCycleShaderAssets
                 "DryCycle weather AssetBundle has no Unity-version sidecar. " +
                 $"Expected '{BundleVersionRelativePath}'. Runtime Unity is " +
                 $"{Application.unityVersion}; if the bundle fails, rebuild it with " +
-                "the matching Unity Editor before debugging the fog algorithm.");
+                "the matching Unity Editor before debugging the weather algorithms.");
             return;
         }
 
