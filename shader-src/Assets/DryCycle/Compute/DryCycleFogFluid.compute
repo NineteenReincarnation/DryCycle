@@ -162,7 +162,7 @@ float BlastTerrainTransmission(
 
 float BlastClearNeighbourhood(int2 p, uint width, uint height)
 {
-    float clear = LoadClamped(_DensityRead, p, width, height).g * 0.18;
+    float clear = LoadClamped(_DensityRead, p, width, height).g * 0.22;
 
     clear += LoadClamped(_DensityRead, p + int2(1, 0), width, height).g * 0.10;
     clear += LoadClamped(_DensityRead, p + int2(-1, 0), width, height).g * 0.10;
@@ -189,7 +189,9 @@ float DiffuseBlastClear(
     float sourceClear,
     float ratePerSecond)
 {
-    float neighbourhood = BlastClearNeighbourhood(p, width, height);
+    float clearDecay = exp(-max(0.0, _BlastClearDecay) * _DeltaTime);
+    float neighbourhood =
+        BlastClearNeighbourhood(p, width, height) * clearDecay;
     float blend = 1.0 - exp(-max(0.0, ratePerSecond) * _DeltaTime);
     return saturate(lerp(sourceClear, neighbourhood, blend));
 }
@@ -703,10 +705,6 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     if (solid)
     {
-        // Surface fog has no physical R density inside terrain, so G carries its blast
-        // clearing state. Unlike velocity, this field deliberately diffuses across tile
-        // boundaries: untouched neighbours erode the cleared wall from its edge while a
-        // low-amplitude shoulder spreads outward before the global decay removes it.
         float surfaceClear = DiffuseBlastClear(
             p,
             width,
@@ -737,9 +735,6 @@ void AdvectDensity(uint3 dispatchId : SV_DispatchThreadID)
         0);
     float advectedBlastClear = saturate(state.g * clearDecay);
 
-    // Airborne clear permission primarily follows the actual fog flow, with only a very
-    // weak cross-terrain diffusion. That keeps the post-blast cavity fluid while making
-    // the visual clear field continuous where the initial pressure wave crossed a wall.
     advectedBlastClear = DiffuseBlastClear(
         p,
         width,
@@ -888,9 +883,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
         float radiusScale = BlastShapeRadiusScale(deltaPx, blast.xy);
         float shapedDistancePx = distancePx / max(0.82, radiusScale);
 
-        // The clear/visibility wave is intentionally not terrain-occluded. Rain World's
-        // fog is a room-wide atmospheric composite, so the blast can clear the mist drawn
-        // over walls and continue onto the other side. Physical velocity remains blocked.
         if (shapedDistancePx < blast.z)
         {
             float encodedDistance = saturate(
@@ -910,9 +902,6 @@ void ApplyBlastDensity(uint3 dispatchId : SV_DispatchThreadID)
                 initialHit * parameters.w);
         }
 
-        // Momentum and the displaced-density compression ring still obey terrain. This
-        // preserves the physical difference between a visual atmospheric clearing and
-        // actual mass/velocity transport through a solid wall.
         float terrain = BlastTerrainTransmission(
             blastPx,
             worldPx,
