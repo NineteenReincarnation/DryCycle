@@ -59,9 +59,7 @@ internal readonly struct HeatWaveRenderFrame
 /// Far pass sits at the front of Midground, Mid pass at the front of Items and Near
 /// pass at the front of GrabShaders. A background pixel therefore traverses all three
 /// refractive slices, an item traverses Mid+Near, and foreground/gameplay content only
-/// traverses Near. This deliberately accumulates optical path length instead of trying
-/// to infer depth from one final full-screen image. HUD/HUD2 are later containers and
-/// remain untouched.
+/// traverses Near. HUD/HUD2 are later containers and remain untouched.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
@@ -100,12 +98,13 @@ internal static class HeatWaveRenderPipeline
 
     private static readonly LayerProfile[] Profiles =
     {
-        // Far scenery receives the strongest broad wander and the least micro jitter.
-        new("Midground", 0.55f, 1.24f, 0.32f, 0.80f, 0f),
-        // Mid-distance objects keep coherent deformation but more readable shimmer.
-        new("Items", 0.33f, 0.70f, 0.64f, 0.54f, 0f),
-        // Gameplay foreground remains readable. White Heat is applied exactly once here.
-        new("GrabShaders", 0.16f, 0.20f, 1.00f, 0.24f, 1f)
+        // Far scenery receives the strongest broad wander and an extra atmospheric
+        // bleaching slice. Background pixels later traverse Mid+Near as well.
+        new("Midground", 0.55f, 1.24f, 0.32f, 0.80f, 0.38f),
+        // Mid-distance objects keep coherent deformation and a moderate tone slice.
+        new("Items", 0.33f, 0.70f, 0.64f, 0.54f, 0.22f),
+        // Gameplay foreground remains readable while still responding to direct sun.
+        new("GrabShaders", 0.16f, 0.20f, 1.00f, 0.24f, 0.58f)
     };
 
     private static readonly MaterialPropertyBlock MaterialProperties = new();
