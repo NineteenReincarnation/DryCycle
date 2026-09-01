@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.98";
+    public const string Version = "0.1.99";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -70,6 +70,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             MiscRuntime.Disable();
+            RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             RainWeatherRuntime.Disable();
@@ -178,6 +179,11 @@ internal sealed class Plugin : BaseUnityPlugin
             // reading different schedule representations.
             RainMeterRoundPipRuntime.Enable();
 
+            // DevTools S changes the game update rate to 400 FPS. Install this after
+            // the authoritative renderer so its final overlay can keep weather colors
+            // above the interpolated white HUDCircle during fast-forward inspection.
+            RainMeterFastForwardForecastFix.Enable();
+
             MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
@@ -185,6 +191,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             MiscRuntime.Disable();
+            RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
             RainWeatherRuntime.Disable();
