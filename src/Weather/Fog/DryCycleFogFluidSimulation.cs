@@ -12,10 +12,13 @@ namespace DryCycle.Weather.Fog;
 /// </summary>
 internal sealed class DryCycleFogFluidSimulation : IDisposable
 {
-    private const int CellsPerTile = 4;
-    private const int MaxWidth = 1024;
-    private const int MaxHeight = 512;
-    private const int PressureIterations = 28;
+    // Five cells per 20px Rain World tile gives a 4px fluid cell in ordinary rooms.
+    // This is deliberately denser than the old prototype because room-scale curls and
+    // wakes are now expected to survive all the way into the high-quality composite.
+    private const int CellsPerTile = 5;
+    private const int MaxWidth = 1280;
+    private const int MaxHeight = 640;
+    private const int PressureIterations = 36;
     private const int MaxPlayerImpulses = 4;
 
     private readonly Room _room;
@@ -72,6 +75,12 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
             AllocateTextures();
             InitializeFields();
             IsAvailable = true;
+
+            Plugin.Logger?.LogInfo(
+                $"DryCycle fog fluid initialized for " +
+                $"'{room.abstractRoom?.name ?? "unknown"}': " +
+                $"{_densityRead.width}x{_densityRead.height}, " +
+                $"pressureIterations={PressureIterations}.");
         }
         catch (Exception ex)
         {
@@ -96,14 +105,18 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         BuildPlayerImpulses();
 
         Vector2 roomSize = RoomSizePixels;
+        // Broad prevailing drift. The speed changes slowly enough to feel atmospheric,
+        // while the solver's local vorticity and obstacle field provide the turbulence.
         Vector2 windUvPerSecond = new(
-            (18f + Mathf.Sin(_elapsed * 0.073f) * 4f) / Mathf.Max(1f, roomSize.x),
-            (2.5f + Mathf.Cos(_elapsed * 0.049f) * 2f) / Mathf.Max(1f, roomSize.y));
+            (22f + Mathf.Sin(_elapsed * 0.067f) * 5f) /
+                Mathf.Max(1f, roomSize.x),
+            (3.0f + Mathf.Cos(_elapsed * 0.043f) * 2.4f) /
+                Mathf.Max(1f, roomSize.y));
 
         float dense = Mathf.Clamp01(denseStrength);
-        float targetDensity = Mathf.Lerp(0.50f, 0.82f, dense);
+        float targetDensity = Mathf.Lerp(0.48f, 0.86f, dense);
         float weatherPresence = Mathf.Clamp01(Mathf.Max(fogStrength, denseStrength));
-        targetDensity = Mathf.Lerp(0.38f, targetDensity, weatherPresence);
+        targetDensity = Mathf.Lerp(0.34f, targetDensity, weatherPresence);
 
         SetCommonParameters(dt, windUvPerSecond, targetDensity);
 
@@ -197,11 +210,11 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
     {
         int width = Mathf.Clamp(
             Math.Max(1, _room.TileWidth) * CellsPerTile,
-            64,
+            80,
             MaxWidth);
         int height = Mathf.Clamp(
             Math.Max(1, _room.TileHeight) * CellsPerTile,
-            64,
+            80,
             MaxHeight);
 
         _velocityRead = CreateField(width, height, "VelocityA");
@@ -218,7 +231,7 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
     {
         SetCommonParameters(
             1f / 40f,
-            new Vector2(18f / Mathf.Max(1f, RoomSizePixels.x), 0f),
+            new Vector2(22f / Mathf.Max(1f, RoomSizePixels.x), 0f),
             0.55f);
 
         _solver.SetTexture(_initializeKernel, "_VelocityWrite", _velocityRead);
@@ -242,10 +255,13 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
         _solver.SetFloat("_DeltaTime", dt);
         _solver.SetFloat("_SimulationTime", _elapsed);
         _solver.SetFloat("_TargetDensity", targetDensity);
-        _solver.SetFloat("_VelocityDissipation", 0.994f);
-        _solver.SetFloat("_DensityDissipation", 0.9975f);
-        _solver.SetFloat("_DensityRelaxation", 0.18f);
-        _solver.SetFloat("_VorticityStrength", 0.28f);
+        _solver.SetFloat("_VelocityDissipation", 0.997f);
+        _solver.SetFloat("_DensityDissipation", 0.9990f);
+        // Interior relaxation is intentionally weak. The compute pass injects most new
+        // fog at the upwind room boundary so masses travel through the room instead of
+        // materializing uniformly everywhere.
+        _solver.SetFloat("_DensityRelaxation", 0.055f);
+        _solver.SetFloat("_VorticityStrength", 0.62f);
         _solver.SetVector("_WindVelocity", new Vector4(
             windUvPerSecond.x,
             windUvPerSecond.y,
@@ -310,8 +326,8 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
             velocity /= chunks;
 
             float speed = velocity.magnitude;
-            float strength = Mathf.Clamp01(speed / 8f);
-            if (strength <= 0.025f)
+            float strength = Mathf.Clamp01(speed / 7f);
+            if (strength <= 0.02f)
             {
                 continue;
             }
@@ -320,7 +336,7 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
             _impulsePosRadius[index] = new Vector4(
                 position.x / Mathf.Max(1f, roomSize.x),
                 position.y / Mathf.Max(1f, roomSize.y),
-                Mathf.Lerp(42f, 90f, strength),
+                Mathf.Lerp(46f, 104f, strength),
                 strength);
 
             _impulseVelocity[index] = new Vector4(
@@ -357,6 +373,12 @@ internal sealed class DryCycleFogFluidSimulation : IDisposable
             autoGenerateMips = false
         };
         texture.Create();
+        if (!texture.IsCreated())
+        {
+            UnityEngine.Object.Destroy(texture);
+            throw new InvalidOperationException(
+                $"Could not create DryCycle fog field {suffix} at {width}x{height}.");
+        }
         return texture;
     }
 
