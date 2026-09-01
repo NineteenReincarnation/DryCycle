@@ -25,13 +25,16 @@ internal sealed class HeatWaveBurstController
     private float _phaseClock;
     private float _phaseDuration;
     private float _triggerThreshold;
+    private bool _debugTriggerRequested;
 
     internal float Instability => Mathf.Clamp01(_instability);
     internal float Stillness { get; private set; }
     internal float BurstStrength { get; private set; }
+    internal float BurstKick { get; private set; }
     internal float BuoyancyScale { get; private set; } = 1f;
     internal float TurbulenceScale { get; private set; } = 1f;
     internal float HeatStorageScale { get; private set; } = 1f;
+    internal string PhaseName => _phase.ToString();
 
     internal HeatWaveBurstController(Room room)
     {
@@ -57,15 +60,27 @@ internal sealed class HeatWaveBurstController
 
         Stillness = 0f;
         BurstStrength = 0f;
+        BurstKick = 0f;
         BuoyancyScale = 1f;
         TurbulenceScale = 1f;
         HeatStorageScale = 1f;
+
+        if (_debugTriggerRequested && heat > 0.025f)
+        {
+            _debugTriggerRequested = false;
+            _instability = 1f;
+            if (_phase == Phase.Accumulating || _phase == Phase.Recovery)
+            {
+                EnterCharging(shortDebugCharge: true);
+            }
+        }
 
         if (heat <= 0.025f)
         {
             _instability = Mathf.Max(0f, _instability - dt * 0.18f);
             _phase = Phase.Accumulating;
             _phaseClock = 0f;
+            _debugTriggerRequested = false;
             return;
         }
 
@@ -74,15 +89,16 @@ internal sealed class HeatWaveBurstController
         {
             case Phase.Accumulating:
             {
+                // Strong weather builds instability on a tens-of-seconds timescale.
+                // Solar energy accelerates it, but a HeatWave can still burst in a
+                // hot shaded room because the weather itself drives the boundary layer.
                 float growth = Mathf.Lerp(0.0045f, 0.022f, heat) *
-                               Mathf.Lerp(0.72f, 1.18f, solar);
+                               Mathf.Lerp(0.80f, 1.18f, solar);
                 _instability = Mathf.Clamp01(_instability + growth * dt);
 
                 if (_instability >= _triggerThreshold && heat >= 0.55f)
                 {
-                    _phase = Phase.Charging;
-                    _phaseClock = 0f;
-                    _phaseDuration = Next(2.0f, 4.3f);
+                    EnterCharging(shortDebugCharge: false);
                 }
                 break;
             }
@@ -91,16 +107,16 @@ internal sealed class HeatWaveBurstController
             {
                 float t = Smooth01(_phaseClock / Mathf.Max(0.01f, _phaseDuration));
                 Stillness = t;
-                BuoyancyScale = Mathf.Lerp(1f, 0.16f, t);
-                TurbulenceScale = Mathf.Lerp(1f, 0.20f, t);
-                HeatStorageScale = Mathf.Lerp(1f, 2.35f, t);
+                BuoyancyScale = Mathf.Lerp(1f, 0.13f, t);
+                TurbulenceScale = Mathf.Lerp(1f, 0.17f, t);
+                HeatStorageScale = Mathf.Lerp(1f, 2.55f, t);
                 _instability = Mathf.Clamp01(_instability + dt * 0.035f * heat);
 
                 if (_phaseClock >= _phaseDuration)
                 {
                     _phase = Phase.Release;
                     _phaseClock = 0f;
-                    _phaseDuration = Next(1.7f, 3.0f);
+                    _phaseDuration = Next(1.8f, 3.1f);
                 }
                 break;
             }
@@ -109,17 +125,26 @@ internal sealed class HeatWaveBurstController
             {
                 float t = Mathf.Clamp01(_phaseClock / Mathf.Max(0.01f, _phaseDuration));
                 float envelope = Mathf.Sin(t * Mathf.PI);
-                BurstStrength = Mathf.Pow(Mathf.Clamp01(envelope), 0.72f);
-                BuoyancyScale = Mathf.Lerp(1.45f, 4.10f, BurstStrength);
-                TurbulenceScale = Mathf.Lerp(1.35f, 4.75f, BurstStrength);
-                HeatStorageScale = Mathf.Lerp(1.25f, 0.48f, t);
-                _instability = Mathf.Max(0f, _instability - dt * (0.16f + BurstStrength * 0.42f));
+                BurstStrength = Mathf.Pow(Mathf.Clamp01(envelope), 0.70f);
+
+                // The first half-second is a separate physical kick: stored boundary
+                // heat detaches abruptly before the longer turbulence envelope peaks.
+                // This creates the visual "layer tears free" moment without a ring.
+                BurstKick = Mathf.Exp(-_phaseClock * 5.4f) *
+                            Smooth01(Mathf.InverseLerp(0f, 0.08f, _phaseClock));
+
+                BuoyancyScale = Mathf.Lerp(1.45f, 4.25f, BurstStrength);
+                TurbulenceScale = Mathf.Lerp(1.35f, 4.85f, BurstStrength);
+                HeatStorageScale = Mathf.Lerp(1.15f, 0.42f, t);
+                _instability = Mathf.Max(
+                    0f,
+                    _instability - dt * (0.16f + BurstStrength * 0.44f + BurstKick * 0.18f));
 
                 if (_phaseClock >= _phaseDuration)
                 {
                     _phase = Phase.Recovery;
                     _phaseClock = 0f;
-                    _phaseDuration = Next(6.5f, 11.5f);
+                    _phaseDuration = Next(7.0f, 12.5f);
                 }
                 break;
             }
@@ -130,7 +155,7 @@ internal sealed class HeatWaveBurstController
                 float tail = 1f - t;
                 BurstStrength = tail * tail * 0.30f;
                 BuoyancyScale = Mathf.Lerp(1f, 1.42f, tail);
-                TurbulenceScale = Mathf.Lerp(1f, 1.85f, tail);
+                TurbulenceScale = Mathf.Lerp(1f, 1.90f, tail);
                 _instability = Mathf.Max(0f, _instability - dt * 0.045f);
 
                 if (_phaseClock >= _phaseDuration)
@@ -143,6 +168,20 @@ internal sealed class HeatWaveBurstController
                 break;
             }
         }
+    }
+
+    internal void DebugTrigger()
+    {
+        _debugTriggerRequested = true;
+    }
+
+    private void EnterCharging(bool shortDebugCharge)
+    {
+        _phase = Phase.Charging;
+        _phaseClock = 0f;
+        _phaseDuration = shortDebugCharge
+            ? 0.75f
+            : Next(2.1f, 4.5f);
     }
 
     private void ResetThreshold()
