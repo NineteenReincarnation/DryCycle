@@ -327,9 +327,9 @@ Shader "DryCycle/FogComposite"
 
                 float SegmentVisibility(float2 fromPx, float2 toPx)
                 {
-                    // 24 samples put the 200px Lantern ray spacing at ~8px: less than
-                    // half a Rain World tile and sufficiently fine to stop thin walls
-                    // leaking the clear circle into an adjacent chamber.
+                    // Player awareness deliberately keeps the original strict occlusion
+                    // behaviour. The softer volumetric treatment below is for real fog
+                    // illuminators only, so this change cannot alter awareness gameplay.
                     const int OcclusionSteps = 24;
                     float blocked = 0.0;
 
@@ -345,6 +345,99 @@ Shader "DryCycle/FogComposite"
                             break;
                     }
                     return 1.0 - blocked;
+                }
+
+                float FogLightRayTransmittance(
+                    float2 fromPx,
+                    float2 toPx,
+                    float targetSolid)
+                {
+                    // Fog illumination should not behave like a binary line-of-sight
+                    // mask. Integrate solid coverage as optical thickness so anti-aliased
+                    // tile edges and thin walls attenuate continuously rather than cutting
+                    // a perfectly hard geometric wedge through the fog.
+                    const int FogOcclusionSteps = 20;
+                    float rayLength = max(1.0, distance(fromPx, toPx));
+                    float opticalDepth = 0.0;
+
+                    [loop]
+                    for (int i = 1; i <= FogOcclusionSteps; i++)
+                    {
+                        float t = i / (float)(FogOcclusionSteps + 1);
+                        float2 p = lerp(fromPx, toPx, t);
+                        float solid = smoothstep(
+                            0.18,
+                            0.82,
+                            ObstacleAtWorld(p));
+
+                        // When the receiver itself is a solid tile, ignore only the last
+                        // ~18px of that ray. The wall surface can therefore have its fog
+                        // driven away, while an earlier tile in a thick wall still blocks
+                        // the light. This avoids the old outlined-wall / visibility-mod look.
+                        if (targetSolid > 0.001)
+                        {
+                            float remainingPx = rayLength * (1.0 - t);
+                            float receiverWeight = smoothstep(
+                                4.0,
+                                18.0,
+                                remainingPx);
+                            solid *= lerp(
+                                1.0,
+                                receiverWeight,
+                                targetSolid);
+                        }
+
+                        opticalDepth += solid;
+                    }
+
+                    return exp(-opticalDepth * 1.55);
+                }
+
+                float FogLightSoftVisibility(
+                    float2 fromPx,
+                    float2 toPx,
+                    float radius)
+                {
+                    float2 delta = toPx - fromPx;
+                    float rayLength = max(1.0, length(delta));
+                    float2 normal = float2(-delta.y, delta.x) / rayLength;
+                    float targetSolid = smoothstep(
+                        0.25,
+                        0.75,
+                        ObstacleAtWorld(toPx));
+
+                    // A light illuminating suspended fog behaves more like a finite area
+                    // source than a mathematical point. Five weighted source offsets make
+                    // wall shadows develop a broad penumbra instead of razor-straight
+                    // triangles. The width grows with distance but stays below one tile.
+                    float penumbra = lerp(
+                        4.0,
+                        18.0,
+                        saturate(rayLength / max(1.0, radius)));
+
+                    float visibility =
+                        FogLightRayTransmittance(
+                            fromPx,
+                            toPx,
+                            targetSolid) * 0.36;
+                    visibility += FogLightRayTransmittance(
+                        fromPx + normal * (penumbra * 0.50),
+                        toPx,
+                        targetSolid) * 0.22;
+                    visibility += FogLightRayTransmittance(
+                        fromPx - normal * (penumbra * 0.50),
+                        toPx,
+                        targetSolid) * 0.22;
+                    visibility += FogLightRayTransmittance(
+                        fromPx + normal * penumbra,
+                        toPx,
+                        targetSolid) * 0.10;
+                    visibility += FogLightRayTransmittance(
+                        fromPx - normal * penumbra,
+                        toPx,
+                        targetSolid) * 0.10;
+
+                    return saturate(visibility);
                 }
 
                 void EvaluateFogLights(
@@ -368,12 +461,25 @@ Shader "DryCycle/FogComposite"
                         if (distancePx >= radius || light.w <= 0.0001)
                             continue;
 
-                        float radial = Smooth01(
-                            1.0 - distancePx / radius);
-                        radial = pow(radial, 0.68);
-                        float visible = SegmentVisibility(
+                        // Use a long, soft shoulder rather than a crisp circular reveal.
+                        // A tiny world-anchored noise warp breaks the last visible perfect
+                        // circle without inheriting the native LightSource radius flicker.
+                        float edgeNoise = tex2D(
+                            _NoiseTex,
+                            frac(worldPx / 260.0 + light.xy / 1900.0)).r;
+                        float normalizedDistance =
+                            distancePx /
+                            (radius * lerp(0.97, 1.03, edgeNoise));
+                        float radial = 1.0 - smoothstep(
+                            0.16,
+                            1.0,
+                            normalizedDistance);
+                        radial = pow(saturate(radial), 1.12);
+
+                        float visible = FogLightSoftVisibility(
                             light.xy,
-                            worldPx);
+                            worldPx,
+                            radius);
                         float localReveal = saturate(
                             radial * light.w * visible);
 
@@ -381,10 +487,15 @@ Shader "DryCycle/FogComposite"
                             (1.0 - reveal) *
                             (1.0 - localReveal);
 
-                        // Real illumination both clears extinction and lights suspended
-                        // fog. Dense lobes catch more coloured light, giving the Lantern
-                        // a genuine volumetric halo rather than a transparent circle.
-                        float halo = localReveal *
+                        // Light can still illuminate suspended fog around a corner even
+                        // when geometry strongly limits scene transmittance. Keeping a
+                        // diffuse fraction of the halo prevents wall silhouettes from
+                        // reading like a binary visibility polygon, without exposing the
+                        // scene behind the wall at the same strength.
+                        float fogIllumination =
+                            radial * light.w *
+                            lerp(0.36, 1.0, visible);
+                        float halo = fogIllumination *
                             lerp(0.08, 0.50, visualDensity) *
                             (0.55 + radial * 0.45);
                         coloredScattering +=
@@ -495,8 +606,9 @@ Shader "DryCycle/FogComposite"
                         EvaluateAwareness(worldPx);
 
                     // Awareness is NOT a light. It only restores a modest amount of
-                    // near-player silhouette information; only Lantern/LanternMouse can
-                    // reach almost-clear transmittance.
+                    // near-player silhouette information; real fog illuminators
+                    // (Lantern, LanternMouse and theGlow) can reach almost-clear
+                    // transmittance.
                     float awarenessTarget = max(
                         baseTransmittance,
                         lerp(0.075, 0.145, dense));
