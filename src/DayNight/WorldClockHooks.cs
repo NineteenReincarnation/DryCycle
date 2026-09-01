@@ -122,8 +122,7 @@ internal static class WorldClockHooks
 
             // A clock can first come into existence after the player has already spent
             // time in a region whose DryCycle switch is off. Import that vanilla phase
-            // progress instead of silently restarting at Base/0 when DryCycle becomes
-            // active for the first time.
+            // progress instead of silently restarting at Base/0.
             long initialElapsed = InitialElapsedTicks(rainCycle, dayCycleLength);
             if (initialElapsed > 0)
             {
@@ -197,17 +196,9 @@ internal static class WorldClockHooks
 
         self.timer = safeTimer;
         self.deathRainHasHit = false;
-
         orig(self);
 
         int advanced = Math.Max(0, self.timer - safeTimer);
-
-        // RainCycle begins updating before a heavily modded story session has a
-        // realized player/camera room. Counting those loading frames used to consume
-        // one or more half-minute pips before the player could even see the HUD, and
-        // could also make a scheduled event finish during loading. World time begins
-        // only once gameplay is actually live. Region/world loading then freezes time
-        // rather than secretly advancing it.
         if (advanced > 0 && HasLiveGameplay(self.world.game))
         {
             clock.Advance(advanced);
@@ -291,7 +282,9 @@ internal static class WorldClockHooks
         }
     }
 
-    private static void RainMeter_Update(On.HUD.RainMeter.orig_Update orig, global::HUD.RainMeter self)
+    private static void RainMeter_Update(
+        On.HUD.RainMeter.orig_Update orig,
+        global::HUD.RainMeter self)
     {
         Player player = self?.hud?.owner as Player;
         RainCycle rainCycle = player?.abstractCreature?.world?.rainCycle;
@@ -309,11 +302,19 @@ internal static class WorldClockHooks
         int dayCycleLength = DayCycleLengthFor(rainCycle);
         rainCycle.cycleLength = dayCycleLength;
         rainCycle.timer = clock.VirtualRainTimer(dayCycleLength);
+
         try
         {
+            // Production only needs the vanilla RainMeter state machine to observe the
+            // WorldClock timer proxy. Final pip layout/shape/weather rendering belongs
+            // exclusively to RainMeterRoundPipRuntime. The legacy fixed test retains
+            // its original local visualization behind TestScheduleEnabled.
             orig(self);
-            ApplyBidirectionalPips(self, clock);
-            ApplyWeatherForecastPips(self, clock);
+            if (TestScheduleEnabled)
+            {
+                ApplyBidirectionalPips(self, clock);
+                ApplyWeatherForecastPips(self, clock);
+            }
         }
         finally
         {
@@ -336,7 +337,9 @@ internal static class WorldClockHooks
         orig(self);
     }
 
-    private static void ApplyBidirectionalPips(global::HUD.RainMeter meter, WorldClock clock)
+    private static void ApplyBidirectionalPips(
+        global::HUD.RainMeter meter,
+        WorldClock clock)
     {
         global::HUD.HUDCircle[] circles = meter.circles;
         if (circles == null || circles.Length == 0)
@@ -359,11 +362,9 @@ internal static class WorldClockHooks
             }
 
             circle.forceColor = null;
-
             int order = clock.IsNight ? i : count - 1 - i;
             float boundary = Mathf.Clamp01(scaledProgress - order);
             boundary = boundary * boundary * (3f - 2f * boundary);
-
             float hollow = clock.IsNight ? 1f - boundary : boundary;
             ApplyPipShape(circle, hollow, sizeFade);
 
@@ -377,7 +378,9 @@ internal static class WorldClockHooks
         }
     }
 
-    private static void ApplyWeatherForecastPips(global::HUD.RainMeter meter, WorldClock clock)
+    private static void ApplyWeatherForecastPips(
+        global::HUD.RainMeter meter,
+        WorldClock clock)
     {
         if (!_weatherPips.TryGetValue(meter, out WeatherPipState state) ||
             state.Fills == null ||
@@ -387,7 +390,6 @@ internal static class WorldClockHooks
         }
 
         HideWeatherPips(state);
-
         if (!TestScheduleEnabled || clock.IsNight)
         {
             return;
@@ -440,7 +442,9 @@ internal static class WorldClockHooks
         }
     }
 
-    private static void CreateWeatherPipState(global::HUD.RainMeter meter, FContainer container)
+    private static void CreateWeatherPipState(
+        global::HUD.RainMeter meter,
+        FContainer container)
     {
         if (!TestScheduleEnabled ||
             meter?.circles == null ||
@@ -542,7 +546,10 @@ internal static class WorldClockHooks
         }
     }
 
-    private static void ApplyPipShape(global::HUD.HUDCircle circle, float hollow, float sizeFade)
+    private static void ApplyPipShape(
+        global::HUD.HUDCircle circle,
+        float hollow,
+        float sizeFade)
     {
         hollow = Mathf.Clamp01(hollow);
 
@@ -567,10 +574,8 @@ internal static class WorldClockHooks
             return;
         }
 
-        float targetRad = Mathf.Lerp(2f, 3f, hollow);
-        float targetThickness = Mathf.Lerp(3.5f, 1f, hollow);
-        circle.rad = targetRad * sizeFade;
-        circle.thickness = targetThickness * sizeFade;
+        circle.rad = Mathf.Lerp(2f, 3f, hollow) * sizeFade;
+        circle.thickness = Mathf.Lerp(3.5f, 1f, hollow) * sizeFade;
     }
 
     private static int SafeLegacyTimer(RainCycle rainCycle)
