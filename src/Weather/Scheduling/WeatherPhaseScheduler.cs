@@ -12,16 +12,15 @@ namespace DryCycle.Weather.Scheduling;
 /// - night: at most 1 Weather + 1 DangerType;
 /// - Weather duration: weighted 2..5 pips, alpha 0.68;
 /// - DangerType duration: weighted 2..4 pips, alpha 0.5;
-/// - DangerType may not start in the first 4 pips of the phase;
-/// - DeathRain additionally owns a 15-second pre-roll and a 15-second tail outside
-///   its authored 2..4 full pips. Its full-strength cells therefore begin only after
-///   that transition can fit beyond the protected opening, and its tail must finish
-///   before the phase ends;
-/// - no events overlap;
-/// - every pair of neighboring effects must have at least 2 completely empty pips
-///   between them. Because DeathRain extends half a pip outside its authored cells,
-///   any nominal gap adjacent to DeathRain is raised to 3 full pips so the actual
-///   post-transition empty time is still at least 2 pips;
+/// - every scheduled event owns an additional 15-second fade-in before its authored
+///   cells and an additional 15-second fade-out after them. These 30 seconds are not
+///   counted in DurationPips; every authored pip is full schedule intensity;
+/// - DangerType has no influence during the first 4 pips of a phase, including its
+///   external fade-in;
+/// - no effects overlap;
+/// - neighboring effects retain at least 2 completely empty pips after both events'
+///   external half-pip transitions are accounted for. On the integer-pip placement
+///   grid this means authored blocks need a nominal gap of at least 3 pips;
 /// - if the selected events cannot fit, randomly cancel one and retry until the
 ///   remaining set has a legal layout.
 /// </summary>
@@ -30,7 +29,13 @@ internal static class WeatherPhaseScheduler
     internal const int PipTicks = 1200;
     internal const int MinimumGapPips = 2;
     internal const int DangerProtectedOpeningPips = 4;
-    internal const int DeathRainTransitionTicks = PipTicks / 2;
+
+    // All weather and danger events now use the same external transition window.
+    internal const int EventTransitionTicks = PipTicks / 2;
+
+    // Kept as an alias so older internal call sites or development branches referring
+    // to the former DeathRain-only transition continue to compile.
+    internal const int DeathRainTransitionTicks = EventTransitionTicks;
 
     internal const int DayMaxWeatherEvents = 2;
     internal const int DayMaxDangerEvents = 1;
@@ -116,8 +121,9 @@ internal static class WeatherPhaseScheduler
                 return new WeatherPhaseSchedule(phase, phasePipCount, events, cancelled);
             }
 
-            // The rules are not weakened to force a fit. If there is no legal layout,
-            // randomly remove one event exactly as specified and try the remaining set.
+            // Never weaken duration, transition, protection, or spacing rules merely
+            // to force a layout. If no complete layout exists, remove one random event
+            // and exhaustively try the smaller set again.
             int removeIndex = random.Next(pending.Count);
             cancelled.Add(pending[removeIndex].Candidate);
             pending.RemoveAt(removeIndex);
@@ -153,6 +159,13 @@ internal static class WeatherPhaseScheduler
         return Math.Max(0, ticks) / PipTicks;
     }
 
+    internal static bool HasExternalTransition(WeatherScheduleCandidate candidate)
+    {
+        return candidate != null;
+    }
+
+    // Compatibility helper retained for code that still needs to recognize the
+    // DeathRain ID specifically. Transition behavior itself is no longer special.
     internal static bool HasDeathRainTransition(WeatherScheduleCandidate candidate)
     {
         if (candidate == null || candidate.Kind != WeatherScheduleEventKind.DangerType)
@@ -277,9 +290,8 @@ internal static class WeatherPhaseScheduler
             return true;
         }
 
-        // Search order is randomized, but the recursive search remains exhaustive for
-        // that order. Therefore an event is cancelled only when no legal arrangement
-        // exists, not merely because a greedy random placement happened to fail.
+        // Search order is randomized, but recursion is exhaustive for that order. An
+        // event is cancelled only when no legal arrangement exists on this pip grid.
         List<PendingEvent> searchOrder = new(pending);
         Shuffle(searchOrder, random);
 
@@ -304,27 +316,25 @@ internal static class WeatherPhaseScheduler
         }
 
         PendingEvent pending = searchOrder[eventIndex];
-        bool deathRainTransition = HasDeathRainTransition(pending.Candidate);
 
-        int earliestStart = pending.Candidate.Kind == WeatherScheduleEventKind.DangerType
-            ? DangerProtectedOpeningPips
-            : 0;
+        // Every event needs a complete 15-second lead-in before its first authored
+        // full-intensity pip. Starts remain integer pip boundaries, so one full leading
+        // cell is reserved; the actual transition occupies only its latter half.
+        int earliestStart = 1;
 
-        // DeathRain begins fading in half a pip before its first full-strength cell.
-        // Since starts are integer pip boundaries, moving the full-strength start one
-        // additional pip later is the first placement that keeps the entire pre-roll
-        // outside the protected first four pips.
-        if (deathRainTransition)
+        if (pending.Candidate.Kind == WeatherScheduleEventKind.DangerType)
         {
+            // The first four pips must contain zero DangerType influence. A main start
+            // at pip 4 would begin its lead-in at 3.5, so the first legal integer main
+            // start is pip 5.
             earliestStart = Math.Max(
                 earliestStart,
                 DangerProtectedOpeningPips + 1);
         }
 
-        // Reserve one trailing integer cell for DeathRain. Its actual fade-out only
-        // consumes the first half of that cell, but this guarantees the complete
-        // 15-second tail finishes before Day/Night switches phase.
-        int trailingReservePips = deathRainTransition ? 1 : 0;
+        // Every event also needs its complete 15-second tail before the phase ends.
+        // One integer cell is conservatively reserved; only its first half is used.
+        const int trailingReservePips = 1;
         int latestStart = phasePipCount - pending.DurationPips - trailingReservePips;
 
         if (latestStart < earliestStart)
@@ -335,11 +345,7 @@ internal static class WeatherPhaseScheduler
         List<int> starts = new(latestStart - earliestStart + 1);
         for (int start = earliestStart; start <= latestStart; start++)
         {
-            if (CanPlace(
-                    pending.Candidate,
-                    start,
-                    pending.DurationPips,
-                    placed))
+            if (CanPlace(start, pending.DurationPips, placed))
             {
                 starts.Add(start);
             }
@@ -372,7 +378,6 @@ internal static class WeatherPhaseScheduler
     }
 
     private static bool CanPlace(
-        WeatherScheduleCandidate candidate,
         int startPip,
         int durationPips,
         List<ScheduledWeatherEvent> placed)
@@ -382,7 +387,15 @@ internal static class WeatherPhaseScheduler
         for (int i = 0; i < placed.Count; i++)
         {
             ScheduledWeatherEvent other = placed[i];
-            int requiredGap = RequiredNominalGapPips(candidate, other?.Candidate);
+            if (other == null)
+            {
+                continue;
+            }
+
+            // Each event has a half-pip tail and the next event a half-pip lead-in.
+            // A nominal 3-pip authored gap therefore leaves exactly 2 completely empty
+            // pips between the actual weather effects.
+            int requiredGap = MinimumGapPips + 1;
 
             if (endPipExclusive <= other.StartPip)
             {
@@ -404,24 +417,10 @@ internal static class WeatherPhaseScheduler
                 continue;
             }
 
-            // Intervals overlap.
             return false;
         }
 
         return true;
-    }
-
-    private static int RequiredNominalGapPips(
-        WeatherScheduleCandidate a,
-        WeatherScheduleCandidate b)
-    {
-        // A DeathRain transition occupies half a pip outside the authored block. With
-        // integer placement, a nominal 3-pip gap is the smallest value that leaves at
-        // least the required 2 complete pips after subtracting that half-pip tail or
-        // pre-roll. Other event pairs keep the ordinary >=2-pip rule.
-        return HasDeathRainTransition(a) || HasDeathRainTransition(b)
-            ? MinimumGapPips + 1
-            : MinimumGapPips;
     }
 
     private static void Shuffle<T>(List<T> list, Random random)
