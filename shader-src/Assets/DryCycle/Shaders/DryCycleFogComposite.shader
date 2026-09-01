@@ -141,6 +141,17 @@ Shader "DryCycle/FogComposite"
                     return lerp(0.68, d, _DryCycleHasFluid);
                 }
 
+                float SampleBlastClear(float2 roomUV)
+                {
+                    // R can be thinned by ordinary fluid motion and player wakes. G is
+                    // authored only by recognized ExplosiveSpear/ScavengerBomb blasts,
+                    // so only G is allowed to relax gameplay extinction below.
+                    float clear = tex2D(
+                        _DryCycleFogDensityTex,
+                        saturate(roomUV)).g;
+                    return saturate(clear * _DryCycleHasFluid);
+                }
+
                 float2 FluidGradient(float2 roomUV)
                 {
                     // World-space stencil so the same room shape produces comparable
@@ -231,6 +242,7 @@ Shader "DryCycle/FogComposite"
                         float2 sampleRoomUv = sampleWorld /
                             max(_DryCycleRoomSizePx, float2(1.0, 1.0));
                         float fluid = SampleFluid(sampleRoomUv);
+                        float blastClear = SampleBlastClear(sampleRoomUv);
 
                         // Macro: huge, slow coherent fog masses.
                         float3 macroCoord = float3(
@@ -276,12 +288,15 @@ Shader "DryCycle/FogComposite"
                             lerp(0.72, 1.18, fine.a);
 
                         // Fluid dictates placement; volume noise only gives that mass a
-                        // rich internal shape. Gameplay visibility is separate below.
+                        // rich internal shape. A recognized blast is different from an
+                        // ordinary thin patch: its G field explicitly removes the medium
+                        // as well as R density, producing a true temporary cavity.
                         float body =
                             macroBody * 0.68 +
                             midBody * 0.24 +
                             wisps * 0.08;
                         body *= lerp(0.48, 1.30, fluid);
+                        body *= lerp(1.0, 0.05, blastClear);
 
                         // Middle-depth weighting prevents the integral becoming a flat
                         // chalk field while preserving large opaque-looking billows.
@@ -302,12 +317,15 @@ Shader "DryCycle/FogComposite"
                     float wallDistance = tex2D(
                         _DryCycleFogObstacleTex,
                         saturate(roomUV)).g;
+                    float surfaceBlastClear = SampleBlastClear(roomUV);
                     density += pow(
                         saturate(1.0 - wallDistance),
-                        2.1) * 0.065;
+                        2.1) * 0.065 *
+                        lerp(1.0, 0.08, surfaceBlastClear);
 
-                    // Variance later adds local colour richness without punching holes
-                    // through gameplay extinction.
+                    // Variance later adds local colour richness. Random visual-density
+                    // valleys still cannot reveal gameplay; only the explicit G channel
+                    // sampled in frag below has that authority.
                     return float2(
                         saturate(density * 1.48),
                         saturate(variance * 7.0));
@@ -571,10 +589,11 @@ Shader "DryCycle/FogComposite"
                         jitter);
                     float visualDensity = densityData.x;
                     float turbulence = densityData.y;
+                    float blastClear = SampleBlastClear(roomUV);
 
-                    // Gameplay visibility is independent from pretty moving density.
-                    // DenseFog may tear, billow and form wisps but those shapes can
-                    // never expose long-range poles, pits or enemies by chance.
+                    // Normal fluid thinning is visual only. The explicit G channel is
+                    // different: it represents fog physically expelled by a recognized
+                    // explosion, so it is permitted to reduce local gameplay extinction.
                     float depthFactor = lerp(
                         0.84,
                         1.31,
@@ -582,15 +601,21 @@ Shader "DryCycle/FogComposite"
                     float extinction =
                         fog * 1.08 +
                         dense * 6.32;
+                    float blastExtinctionScale = lerp(
+                        1.0,
+                        0.02,
+                        blastClear);
                     float baseTransmittance = exp(
-                        -extinction * depthFactor);
+                        -extinction * blastExtinctionScale * depthFactor);
 
-                    // Full DenseFog keeps high-contrast details near the 0.2% visibility
-                    // floor established by the earlier contrast-extinction prototype.
+                    // DenseFog normally enforces the ~0.2% contrast floor. A blast only
+                    // relaxes that floor where its advected G field still exists; random
+                    // R-density valleys and player wakes cannot affect this term.
+                    float effectiveDense = dense * (1.0 - blastClear);
                     float denseCeiling = lerp(
                         1.0,
                         0.0020,
-                        dense);
+                        effectiveDense);
                     baseTransmittance = min(
                         baseTransmittance,
                         denseCeiling);
@@ -607,8 +632,9 @@ Shader "DryCycle/FogComposite"
 
                     // Awareness is NOT a light. It only restores a modest amount of
                     // near-player silhouette information; real fog illuminators
-                    // (Lantern, LanternMouse and theGlow) can reach almost-clear
-                    // transmittance.
+                    // (Lantern, LanternMouse, theGlow, GlowWeed and LillyPuck) can reach
+                    // almost-clear transmittance. Blast clearing is already baked into
+                    // baseTransmittance above and therefore naturally composes with both.
                     float awarenessTarget = max(
                         baseTransmittance,
                         lerp(0.075, 0.145, dense));
