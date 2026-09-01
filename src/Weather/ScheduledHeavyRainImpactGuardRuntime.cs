@@ -119,7 +119,7 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
             return;
         }
 
-        if (!ScheduledRainNativeBaselineRuntime.TryGetIntensity(
+        if (!ScheduledHeavyRainTraversalRuntime.TryGetNativeIntensity(
                 self.globalRain,
                 out float nativeIntensity))
         {
