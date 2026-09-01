@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.106";
+    public const string Version = "0.1.107";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -77,7 +77,6 @@ internal sealed class Plugin : BaseUnityPlugin
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
-            ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
@@ -167,8 +166,6 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Enable();
             HydrationDivider.Enable();
 
-            // Keep the old fixed five-pip diagnostic path in source, but production
-            // always uses the authored cycle length and RegionClimate schedules.
             WorldClockHooks.TestScheduleEnabled = false;
             RegionClimateRegistry.Reload();
             DayNightRuntime.Enable();
@@ -178,37 +175,24 @@ internal sealed class Plugin : BaseUnityPlugin
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
-            // Capture the native GlobalRain result after RainWeatherRuntime but before
-            // ScheduledHeavyRainTraversalRuntime overlays DryCycle's nonlethal HeavyRain.
-            ScheduledRainNativeBaselineRuntime.Enable();
-
-            // Scheduled HeavyRain keeps its room-authored baseline intact while adding
-            // only the DryCycle traversal pressure on top.
+            // One GlobalRain layer owns the entire Scheduled HeavyRain split: it first
+            // records native/authored intensity, then overlays the nonlethal regional
+            // contribution. All impact/DangerType guards read that same baseline.
             ScheduledHeavyRainTraversalRuntime.Enable();
 
-            // Creature.TerrainImpact has a second native rainDeath path through
-            // RoomRain.CreatureSmashedInGround. Install this before the DangerType
-            // takeover so no-DangerType/synthetic RoomRain is protected as well.
+            // Creature.TerrainImpact has a separate rainDeath path through
+            // RoomRain.CreatureSmashedInGround; isolate Scheduled HeavyRain there too.
             ScheduledHeavyRainImpactGuardRuntime.Enable();
 
             // Authored/default DangerType RoomRain objects never run their vanilla
             // flood/rain-cycle hazard branch while DryCycle owns the region.
             RoomDangerTypeTakeoverRuntime.Enable();
 
-            // Install last on RoomRain. RainWeatherRuntime-created carriers in
-            // DangerType=None rooms use a DryCycle rain-only update and never enter
-            // vanilla RoomRain.Update, avoiding native lifecycle assumptions/NREs.
+            // Install last on RoomRain. DryCycle-created carriers in DangerType=None
+            // rooms use a rain-only update and never enter vanilla RoomRain.Update.
             SyntheticRoomRainTakeoverRuntime.Enable();
 
-            // RainMeterRoundPipRuntime is the single authoritative DryCycle RainMeter
-            // renderer. WeatherForecastHudRuntime remains in source as the old split
-            // implementation but is intentionally not enabled to avoid two HUD hooks
-            // reading different schedule representations.
             RainMeterRoundPipRuntime.Enable();
-
-            // DevTools S changes the game update rate to 400 FPS. Install this after
-            // the authoritative renderer so its final overlay can keep weather colors
-            // above the interpolated white HUDCircle during fast-forward inspection.
             RainMeterFastForwardForecastFix.Enable();
 
             MiscRuntime.Enable();
@@ -225,7 +209,6 @@ internal sealed class Plugin : BaseUnityPlugin
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
-            ScheduledRainNativeBaselineRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
