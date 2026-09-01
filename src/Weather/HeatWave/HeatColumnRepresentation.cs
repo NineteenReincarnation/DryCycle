@@ -263,10 +263,13 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
 
     private FSprite MakeLine(Color color)
     {
+        // DevInterface's native control lines stretch the pixel sprite on Y and use
+        // Custom.VecToDeg (0 degrees = up). Match that convention exactly so editor
+        // previews do not rotate ninety degrees relative to their handles.
         FSprite line = new("pixel")
         {
-            anchorX = 0f,
-            anchorY = 0.5f,
+            anchorX = 0.5f,
+            anchorY = 0f,
             color = color,
             alpha = color.a
         };
@@ -285,8 +288,8 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
         float length = Mathf.Max(0.001f, delta.magnitude);
         line.x = from.x;
         line.y = from.y;
-        line.scaleX = length;
-        line.scaleY = thickness;
-        line.rotation = Custom.VecToDeg(delta) - 90f;
+        line.scaleX = thickness;
+        line.scaleY = length;
+        line.rotation = Custom.VecToDeg(delta);
     }
 }
