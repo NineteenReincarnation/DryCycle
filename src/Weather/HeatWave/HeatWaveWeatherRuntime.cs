@@ -125,6 +125,7 @@ internal static class HeatWaveWeatherRuntime
     private sealed class HeatWaveController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
         private readonly HeatWaveBurstController _burst;
+        private readonly HeatWaveAudio _audio;
 
         private HeatWaveTerrainField _terrain;
         private HeatWaveThermalSimulation _simulation;
@@ -144,6 +145,7 @@ internal static class HeatWaveWeatherRuntime
         {
             room = ownerRoom;
             _burst = new HeatWaveBurstController(ownerRoom);
+            _audio = new HeatWaveAudio(this);
         }
 
         public override void Update(bool eu)
@@ -194,6 +196,13 @@ internal static class HeatWaveWeatherRuntime
                 _burst.BurstStrength * solarWhite * 0.08f);
 
             _visualTime += 1f / 40f;
+            _audio.Update(
+                _intensity,
+                _solar,
+                _burst.Stillness,
+                _burst.BurstStrength,
+                _burst.BurstKick,
+                _visualTime);
 
             if ((_intensity > Epsilon || _cooldown > 0f) &&
                 _simulation?.IsAvailable == true)
@@ -393,6 +402,7 @@ internal static class HeatWaveWeatherRuntime
             }
 
             _resourcesDisposed = true;
+            _audio.Dispose();
             _simulation?.Dispose();
             _simulation = null;
             _terrain?.Dispose();
