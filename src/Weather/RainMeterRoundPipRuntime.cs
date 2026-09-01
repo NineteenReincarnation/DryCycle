@@ -347,7 +347,9 @@ internal static class RainMeterRoundPipRuntime
             _states.TryGetValue(self, out state);
         }
 
-        bool dryCycle = state != null && TryGetContext(self, out _, out WorldClock clock);
+        World world = null;
+        WorldClock clock = null;
+        bool dryCycle = state != null && TryGetContext(self, out world, out clock);
         if (!dryCycle)
         {
             RestoreVanillaState(state);
@@ -382,8 +384,10 @@ internal static class RainMeterRoundPipRuntime
             _states.TryGetValue(self, out state);
         }
 
+        World world = null;
+        WorldClock clock = null;
         bool vanillaAllowsDraw = VanillaAllowsRainMeterDraw(self);
-        bool dryCycle = state != null && TryGetContext(self, out World world, out WorldClock clock);
+        bool dryCycle = state != null && TryGetContext(self, out world, out clock);
         if (!dryCycle)
         {
             RestoreVanillaState(state);
@@ -688,10 +692,6 @@ internal static class RainMeterRoundPipRuntime
             }
 
             float remaining = 1f - PipElapsed(clock, chronologicalPip);
-
-            // Declare the out value before the short-circuit expression. C# definite
-            // assignment does not consider an out variable assigned when the left side
-            // of && can skip the method call (CS0165).
             WeatherForecastVisualKind kind = WeatherForecastVisualKind.None;
             bool hasMarker = remaining > 0.001f &&
                              TryGetMarker(schedule, chronologicalPip, out kind);
@@ -719,7 +719,6 @@ internal static class RainMeterRoundPipRuntime
                 visual.Hide();
                 circle.forceColor = null;
 
-                // Never snap a fully solid DryCycle pip to low-resolution Circle4.
                 if (circle.snapGraphic == global::HUD.HUDCircle.SnapToGraphic.Circle4)
                 {
                     circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.None;
