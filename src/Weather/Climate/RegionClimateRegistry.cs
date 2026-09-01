@@ -114,9 +114,11 @@ internal sealed class RegionClimateProfile
 }
 
 /// <summary>
-/// Strict loader for Ancient Site/world/RegionClimate.txt.
-/// 0 tabs: section, 1 tab: region, 2 tabs: family/danger, 3 tabs: variant.
-/// Probabilities are independent 0..100 rolls; // begins a comment.
+/// Loader for Ancient Site/world/RegionClimate.txt.
+/// Hierarchy is defined only by { } blocks; tabs and spaces are presentation-only.
+/// [Weather] supports Region -> Family -> Variant, while [DangerType] supports
+/// Region -> DangerType. Probabilities are independent 0..100 rolls and // starts a
+/// comment. [defaultWeather]/[defaultDangerType] are documentation-only sections.
 /// </summary>
 internal static class RegionClimateRegistry
 {
@@ -126,6 +128,12 @@ internal static class RegionClimateRegistry
         Weather,
         DangerType,
         ReservedDefault
+    }
+
+    private enum BlockKind
+    {
+        Region,
+        WeatherFamily
     }
 
     private static readonly Dictionary<string, RegionClimateProfile> Profiles =
@@ -199,10 +207,6 @@ internal static class RegionClimateRegistry
 
     private static string ResolveClimatePath()
     {
-        // First prefer the exact active Ancient Site mod root requested by the author.
-        // AssetManager can resolve merged/versioned assets, but RegionClimate.txt is
-        // intentionally a live-authored mod file and should not depend on merge-cache
-        // behavior to be discoverable.
         try
         {
             if (ModManager.ActiveMods != null)
@@ -272,31 +276,33 @@ internal static class RegionClimateRegistry
         Section section = Section.None;
         RegionClimateProfile currentRegion = null;
         WeatherFamilyClimateEntry currentFamily = null;
+        Stack<BlockKind> blocks = new();
 
         for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
-            string raw = StripComment(lines[lineIndex] ?? string.Empty);
-            if (string.IsNullOrWhiteSpace(raw))
+            string text = StripComment(lines[lineIndex] ?? string.Empty).Trim();
+            if (text.Length == 0)
             {
                 continue;
             }
 
-            int tabs = CountLeadingTabs(raw);
-            if (tabs < raw.Length && raw[tabs] == ' ')
+            if (TryParseSectionHeader(text, out Section parsedSection))
             {
-                Warn(lineIndex, "indentation must use literal TAB characters, not spaces");
-                continue;
-            }
+                if (blocks.Count > 0 && section != Section.ReservedDefault)
+                {
+                    Warn(lineIndex,
+                        $"section started before {blocks.Count} open block(s) were closed; parser state was reset");
+                }
 
-            string text = raw.Substring(tabs).TrimEnd();
-            if (tabs == 0 && text.StartsWith("[") && text.EndsWith("]"))
-            {
-                section = ParseSection(text);
+                blocks.Clear();
                 currentRegion = null;
                 currentFamily = null;
+                section = parsedSection;
                 continue;
             }
 
+            // Documentation/example sections are intentionally ignored wholesale.
+            // Their brace layout can evolve without affecting runtime parsing.
             if (section == Section.ReservedDefault)
             {
                 continue;
@@ -308,101 +314,221 @@ internal static class RegionClimateRegistry
                 continue;
             }
 
-            if (tabs == 1)
+            // Allow one or more closing braces on the same line ("}" or "}}") so
+            // formatting remains flexible. Any content after them is parsed normally.
+            while (text.StartsWith("}", StringComparison.Ordinal))
             {
-                if (!text.EndsWith(":"))
-                {
-                    Warn(lineIndex, "region entry must end with ':'");
-                    currentRegion = null;
-                    currentFamily = null;
-                    continue;
-                }
+                CloseBlock(
+                    lineIndex,
+                    blocks,
+                    ref currentRegion,
+                    ref currentFamily);
+                text = text.Substring(1).TrimStart();
+            }
 
-                string regionId = NormalizeId(text.Substring(0, text.Length - 1));
-                if (regionId.Length == 0)
-                {
-                    Warn(lineIndex, "region ID is empty");
-                    continue;
-                }
-
-                currentRegion = GetOrCreateProfile(regionId);
-                currentFamily = null;
+            if (text.Length == 0)
+            {
                 continue;
             }
 
-            if (currentRegion == null)
+            if (text.IndexOf('}') >= 0)
             {
-                Warn(lineIndex, "weather entry has no active region");
+                Warn(lineIndex, "closing '}' must appear before any other content on its line");
                 continue;
             }
 
-            if (tabs == 2)
+            bool opensBlock = text.EndsWith("{", StringComparison.Ordinal);
+            if (opensBlock)
             {
-                if (!TryParseChanceEntry(text, out ClimateChanceEntry parsed))
-                {
-                    Warn(lineIndex, "expected 'Id : probability'");
-                    currentFamily = null;
-                    continue;
-                }
-
-                if (section == Section.Weather)
-                {
-                    currentFamily = new WeatherFamilyClimateEntry(
-                        parsed.Id,
-                        parsed.ChancePercent);
-                    currentRegion.AddWeather(currentFamily);
-                }
-                else
-                {
-                    currentRegion.AddDanger(parsed);
-                    currentFamily = null;
-                }
-
+                text = text.Substring(0, text.Length - 1).TrimEnd();
+            }
+            else if (text.IndexOf('{') >= 0)
+            {
+                Warn(lineIndex, "opening '{' must appear at the end of an entry");
                 continue;
             }
 
-            if (tabs == 3 && section == Section.Weather)
+            if (text.Length == 0)
             {
-                if (currentFamily == null)
-                {
-                    Warn(lineIndex, "weather variant has no parent weather family");
-                    continue;
-                }
-
-                if (!TryParseChanceEntry(text, out ClimateChanceEntry variant))
-                {
-                    Warn(lineIndex, "expected 'VariantId : probability'");
-                    continue;
-                }
-
-                currentFamily.AddVariant(variant);
+                Warn(lineIndex, "standalone '{' has no parent entry");
                 continue;
             }
 
-            Warn(lineIndex, $"unexpected indentation level {tabs}");
+            if (opensBlock)
+            {
+                ParseBlockStart(
+                    lineIndex,
+                    section,
+                    text,
+                    blocks,
+                    ref currentRegion,
+                    ref currentFamily);
+                continue;
+            }
+
+            ParseLeafEntry(
+                lineIndex,
+                section,
+                text,
+                currentRegion,
+                currentFamily);
+        }
+
+        if (blocks.Count > 0)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle RegionClimate.txt ended with {blocks.Count} unclosed '{{' block(s).");
         }
     }
 
-    private static Section ParseSection(string text)
+    private static void ParseBlockStart(
+        int lineIndex,
+        Section section,
+        string text,
+        Stack<BlockKind> blocks,
+        ref RegionClimateProfile currentRegion,
+        ref WeatherFamilyClimateEntry currentFamily)
     {
+        bool hasChance = text.IndexOf(':') >= 0;
+
+        if (!hasChance)
+        {
+            if (blocks.Count != 0 || currentRegion != null)
+            {
+                Warn(lineIndex, "region blocks cannot be nested inside another block");
+                return;
+            }
+
+            string regionId = NormalizeId(text);
+            if (regionId.Length == 0)
+            {
+                Warn(lineIndex, "region ID is empty");
+                return;
+            }
+
+            currentRegion = GetOrCreateProfile(regionId);
+            currentFamily = null;
+            blocks.Push(BlockKind.Region);
+            return;
+        }
+
+        if (section != Section.Weather)
+        {
+            Warn(lineIndex, "[DangerType] entries cannot open child blocks");
+            return;
+        }
+
+        if (currentRegion == null || blocks.Count == 0)
+        {
+            Warn(lineIndex, "weather family block has no active region");
+            return;
+        }
+
+        if (currentFamily != null || blocks.Peek() != BlockKind.Region)
+        {
+            Warn(lineIndex, "weather variant blocks are not supported");
+            return;
+        }
+
+        if (!TryParseChanceEntry(text, out ClimateChanceEntry parsed))
+        {
+            Warn(lineIndex, "expected 'WeatherFamily : probability {'");
+            return;
+        }
+
+        currentFamily = new WeatherFamilyClimateEntry(parsed.Id, parsed.ChancePercent);
+        currentRegion.AddWeather(currentFamily);
+        blocks.Push(BlockKind.WeatherFamily);
+    }
+
+    private static void ParseLeafEntry(
+        int lineIndex,
+        Section section,
+        string text,
+        RegionClimateProfile currentRegion,
+        WeatherFamilyClimateEntry currentFamily)
+    {
+        if (currentRegion == null)
+        {
+            Warn(lineIndex, "entry has no active region block");
+            return;
+        }
+
+        if (!TryParseChanceEntry(text, out ClimateChanceEntry parsed))
+        {
+            Warn(lineIndex, "expected 'Id : probability'");
+            return;
+        }
+
+        if (section == Section.DangerType)
+        {
+            currentRegion.AddDanger(parsed);
+            return;
+        }
+
+        if (currentFamily != null)
+        {
+            currentFamily.AddVariant(parsed);
+            return;
+        }
+
+        // A Weather entry without its own child block is a complete family with no
+        // variants, e.g. B5 { SandStorm : 100 } written over multiple lines.
+        currentRegion.AddWeather(
+            new WeatherFamilyClimateEntry(parsed.Id, parsed.ChancePercent));
+    }
+
+    private static void CloseBlock(
+        int lineIndex,
+        Stack<BlockKind> blocks,
+        ref RegionClimateProfile currentRegion,
+        ref WeatherFamilyClimateEntry currentFamily)
+    {
+        if (blocks.Count == 0)
+        {
+            Warn(lineIndex, "unexpected closing '}'");
+            return;
+        }
+
+        BlockKind closed = blocks.Pop();
+        if (closed == BlockKind.WeatherFamily)
+        {
+            currentFamily = null;
+            return;
+        }
+
+        currentFamily = null;
+        currentRegion = null;
+    }
+
+    private static bool TryParseSectionHeader(string text, out Section section)
+    {
+        section = Section.None;
+        if (text.Length < 3 || text[0] != '[' || text[text.Length - 1] != ']')
+        {
+            return false;
+        }
+
         string name = text.Substring(1, text.Length - 2).Trim();
         if (string.Equals(name, "Weather", StringComparison.OrdinalIgnoreCase))
         {
-            return Section.Weather;
+            section = Section.Weather;
         }
-
-        if (string.Equals(name, "DangerType", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(name, "DangerType", StringComparison.OrdinalIgnoreCase))
         {
-            return Section.DangerType;
+            section = Section.DangerType;
         }
-
-        if (string.Equals(name, "defaultWeather", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "defaultDangerType", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(name, "defaultWeather", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(name, "defaultDangerType", StringComparison.OrdinalIgnoreCase))
         {
-            return Section.ReservedDefault;
+            section = Section.ReservedDefault;
+        }
+        else
+        {
+            section = Section.None;
         }
 
-        return Section.None;
+        return true;
     }
 
     private static RegionClimateProfile GetOrCreateProfile(string regionId)
@@ -421,6 +547,13 @@ internal static class RegionClimateRegistry
         entry = null;
         int colon = text.IndexOf(':');
         if (colon <= 0 || colon >= text.Length - 1)
+        {
+            return false;
+        }
+
+        // This grammar intentionally has one ':' per chance entry. Reject additional
+        // separators now rather than silently accepting a malformed future syntax.
+        if (text.IndexOf(':', colon + 1) >= 0)
         {
             return false;
         }
@@ -450,17 +583,6 @@ internal static class RegionClimateRegistry
     {
         int comment = line.IndexOf("//", StringComparison.Ordinal);
         return comment >= 0 ? line.Substring(0, comment) : line;
-    }
-
-    private static int CountLeadingTabs(string line)
-    {
-        int count = 0;
-        while (count < line.Length && line[count] == '\t')
-        {
-            count++;
-        }
-
-        return count;
     }
 
     private static string NormalizeId(string value)
