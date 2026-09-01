@@ -1,0 +1,485 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using DryCycle.DayNight;
+using DryCycle.Weather.Scheduling;
+using RWCustom;
+using UnityEngine;
+
+namespace DryCycle.Weather;
+
+/// <summary>
+/// Separates DryCycle's scheduled HeavyRain from authored RoomEffect.HeavyRain.
+///
+/// Authored room HeavyRain remains completely native, including ThrowAroundObjects,
+/// rainDeath and Die(). DryCycle HeavyRain keeps the native-looking rain intensity,
+/// sound and screen shake, but its extra contribution is removed from the native
+/// ThrowAroundObjects pass and replaced with a nonlethal player traversal pressure.
+/// </summary>
+internal static class ScheduledHeavyRainTraversalRuntime
+{
+    private const float ActivationThreshold = 0.25f;
+    private const float FullHorizontalVelocityRetention = 0.965f;
+    private const float FullAirDownwardAcceleration = 0.22f;
+    private const float FullClimbVelocityRetention = 0.88f;
+
+    [ThreadStatic]
+    private static bool _suppressScheduledHeavyEffectLookup;
+
+    private sealed class GlobalState
+    {
+        internal float NativeIntensity;
+        internal float NativeRumbleSound;
+        internal float NativeScreenShake;
+        internal float NativeMicroScreenShake;
+        internal float NativeBulletRainDensity;
+        internal float ScheduledHeavy;
+    }
+
+    private sealed class RoomRainState
+    {
+        internal bool InUpdate;
+        internal float? AuthoredRainIntensity;
+        internal RoomRain.DangerType AuthoredDangerType;
+    }
+
+    private static ConditionalWeakTable<GlobalRain, GlobalState> _globalStates = new();
+    private static ConditionalWeakTable<RoomRain, RoomRainState> _roomStates = new();
+    private static bool _enabled;
+
+    internal static void Enable()
+    {
+        if (_enabled)
+        {
+            return;
+        }
+
+        // This runtime must be enabled after RainWeatherRuntime. Its GetEffectAmount
+        // hook then sits outside DryCycle's temporary room-effect injection and can
+        // bypass only the scheduled HeavyRain override while GlobalRain establishes
+        // the authored/native baseline.
+        On.RoomSettings.GetEffectAmount += RoomSettings_GetEffectAmount;
+        On.GlobalRain.Update += GlobalRain_Update;
+        On.RoomRain.Update += RoomRain_Update;
+        On.RoomRain.ThrowAroundObjects += RoomRain_ThrowAroundObjects;
+        On.Player.Update += Player_Update;
+        _enabled = true;
+    }
+
+    internal static void Disable()
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        On.RoomSettings.GetEffectAmount -= RoomSettings_GetEffectAmount;
+        On.GlobalRain.Update -= GlobalRain_Update;
+        On.RoomRain.Update -= RoomRain_Update;
+        On.RoomRain.ThrowAroundObjects -= RoomRain_ThrowAroundObjects;
+        On.Player.Update -= Player_Update;
+
+        _suppressScheduledHeavyEffectLookup = false;
+        _globalStates = new ConditionalWeakTable<GlobalRain, GlobalState>();
+        _roomStates = new ConditionalWeakTable<RoomRain, RoomRainState>();
+        _enabled = false;
+    }
+
+    private static float RoomSettings_GetEffectAmount(
+        On.RoomSettings.orig_GetEffectAmount orig,
+        RoomSettings self,
+        RoomSettings.RoomEffect.Type type)
+    {
+        if (_suppressScheduledHeavyEffectLookup &&
+            type == RoomSettings.RoomEffect.Type.HeavyRain)
+        {
+            // Do not call the inner RainWeatherRuntime hook here: that hook deliberately
+            // returns Max(authored, scheduled). Reading the authored list directly gives
+            // GlobalRain its exact pre-DryCycle HeavyRain baseline instead.
+            return GetAuthoredEffectAmount(self, type);
+        }
+
+        return orig(self, type);
+    }
+
+    private static void GlobalRain_Update(
+        On.GlobalRain.orig_Update orig,
+        GlobalRain self)
+    {
+        // Let all native systems and RainWeatherRuntime run, but make the one HeavyRain
+        // effect lookup inside GlobalRain see only the room-authored value.
+        bool previousSuppression = _suppressScheduledHeavyEffectLookup;
+        _suppressScheduledHeavyEffectLookup = true;
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            _suppressScheduledHeavyEffectLookup = previousSuppression;
+        }
+
+        if (self == null)
+        {
+            return;
+        }
+
+        GlobalState state = _globalStates.GetOrCreateValue(self);
+        state.NativeIntensity = self.Intensity;
+        state.NativeRumbleSound = self.RumbleSound;
+        state.NativeScreenShake = self.ScreenShake;
+        state.NativeMicroScreenShake = self.MicroScreenShake;
+        state.NativeBulletRainDensity = self.bulletRainDensity;
+        state.ScheduledHeavy = 0f;
+
+        World world = self.game?.world;
+        if (world?.game == null ||
+            !world.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(world) ||
+            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
+        {
+            return;
+        }
+
+        WeatherScheduleRuntime.Synchronize(world);
+        float heavy = WeatherScheduleRuntime.GetIntensity(
+            world,
+            clock,
+            WeatherScheduleEventKind.Weather,
+            "HeavyRain");
+        if (heavy <= 0.0001f)
+        {
+            return;
+        }
+
+        // A native/foreign DeathRain remains authoritative. The scheduler normally
+        // prevents overlap, but this also protects compatibility with other mods.
+        if (self.deathRain != null)
+        {
+            return;
+        }
+
+        heavy = ApplyWatcherPassiveRainReduction(heavy, out float reducedToLight);
+        state.ScheduledHeavy = heavy;
+
+        if (heavy > 0.0001f)
+        {
+            float scheduledIntensity = (1f + heavy * 4f) * 0.24f;
+            self.Intensity = Math.Max(self.Intensity, scheduledIntensity);
+            self.RumbleSound = Math.Max(self.RumbleSound, heavy * 0.2f);
+            self.ScreenShake = Math.Max(self.ScreenShake, heavy);
+        }
+        else if (reducedToLight > 0.0001f)
+        {
+            // Match Watcher's passive-rain reduction behavior: at >= 0.5 the HeavyRain
+            // channel is converted into a weaker LightRain-style intensity instead of
+            // silently disappearing.
+            self.Intensity = Math.Max(self.Intensity, reducedToLight * 0.24f);
+        }
+    }
+
+    private static void RoomRain_Update(
+        On.RoomRain.orig_Update orig,
+        RoomRain self,
+        bool eu)
+    {
+        if (self == null)
+        {
+            orig(self, eu);
+            return;
+        }
+
+        RoomRainState state = _roomStates.GetOrCreateValue(self);
+        state.AuthoredRainIntensity = self.room?.roomSettings?.rInts;
+        state.AuthoredDangerType = self.dangerType;
+        state.InUpdate = true;
+
+        try
+        {
+            orig(self, eu);
+        }
+        finally
+        {
+            state.InUpdate = false;
+        }
+    }
+
+    private static void RoomRain_ThrowAroundObjects(
+        On.RoomRain.orig_ThrowAroundObjects orig,
+        RoomRain self)
+    {
+        if (self?.globalRain == null ||
+            !_globalStates.TryGetValue(self.globalRain, out GlobalState globalState) ||
+            globalState.ScheduledHeavy <= 0.0001f ||
+            !_roomStates.TryGetValue(self, out RoomRainState roomState) ||
+            !roomState.InUpdate)
+        {
+            orig(self);
+            return;
+        }
+
+        // RainWeatherRuntime temporarily sets room RainIntensity to 1 and may switch a
+        // Flood room to FloodAndRain so scheduled regional rain can render everywhere.
+        // During the physical ThrowAroundObjects call, restore all three authored/native
+        // inputs. Therefore any authored HeavyRain still pushes, stuns, raises rainDeath
+        // and kills exactly as before; only DryCycle's additional HeavyRain is absent.
+        float scheduledIntensity = self.globalRain.Intensity;
+        float? scheduledRoomRainIntensity = self.room?.roomSettings?.rInts;
+        RoomRain.DangerType scheduledDangerType = self.dangerType;
+
+        self.globalRain.Intensity = globalState.NativeIntensity;
+        if (self.room?.roomSettings != null)
+        {
+            self.room.roomSettings.rInts = roomState.AuthoredRainIntensity;
+        }
+        self.dangerType = roomState.AuthoredDangerType;
+
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            self.globalRain.Intensity = scheduledIntensity;
+            if (self.room?.roomSettings != null)
+            {
+                self.room.roomSettings.rInts = scheduledRoomRainIntensity;
+            }
+            self.dangerType = scheduledDangerType;
+        }
+    }
+
+    private static void Player_Update(
+        On.Player.orig_Update orig,
+        Player self,
+        bool eu)
+    {
+        orig(self, eu);
+
+        if (!TryGetScheduledTraversalPressure(self, out float pressure) ||
+            pressure <= 0.0001f)
+        {
+            return;
+        }
+
+        ApplyHorizontalResistance(self, pressure);
+
+        if (IsClimbing(self))
+        {
+            ApplyClimbResistance(self, pressure);
+            return;
+        }
+
+        if (IsAirborne(self))
+        {
+            ApplyAirDownPressure(self, pressure);
+        }
+    }
+
+    private static bool TryGetScheduledTraversalPressure(
+        Player player,
+        out float pressure)
+    {
+        pressure = 0f;
+        Room room = player?.room;
+        World world = room?.world;
+        if (player == null ||
+            room == null ||
+            world?.game == null ||
+            player.dead ||
+            !player.Consious ||
+            player.submerged ||
+            !world.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(world) ||
+            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
+        {
+            return false;
+        }
+
+        float scheduledHeavy = WeatherScheduleRuntime.GetIntensity(
+            world,
+            clock,
+            WeatherScheduleEventKind.Weather,
+            "HeavyRain");
+        if (scheduledHeavy <= ActivationThreshold)
+        {
+            return false;
+        }
+
+        // Terrain exposure uses the same rainReach mask as native RoomRain. A roof or
+        // solid overhang therefore removes DryCycle's traversal penalty, while open sky
+        // receives the full pressure. This does not read RoomEffect.HeavyRain at all.
+        RoomRain rain = room.roomRain;
+        if (rain?.rainReach == null || rain.rainReach.Length == 0)
+        {
+            return false;
+        }
+
+        float exposedFraction = 0f;
+        int validChunks = 0;
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk == null || chunk.submersion >= 0.5f)
+            {
+                continue;
+            }
+
+            validChunks++;
+            IntVector2 tile = room.GetTilePosition(chunk.pos);
+            int x = Custom.IntClamp(tile.x, 0, room.TileWidth - 1);
+            if (rain.rainReach[x] < tile.y)
+            {
+                exposedFraction += 1f;
+            }
+        }
+
+        if (validChunks == 0)
+        {
+            return false;
+        }
+
+        exposedFraction /= validChunks;
+        if (exposedFraction <= 0f)
+        {
+            return false;
+        }
+
+        float normalized = Mathf.InverseLerp(
+            ActivationThreshold,
+            1f,
+            Mathf.Clamp01(scheduledHeavy));
+        normalized = normalized * normalized * (3f - 2f * normalized);
+        pressure = normalized * exposedFraction;
+        return pressure > 0.0001f;
+    }
+
+    private static void ApplyHorizontalResistance(Player player, float pressure)
+    {
+        float retention = Mathf.Lerp(
+            1f,
+            FullHorizontalVelocityRetention,
+            Mathf.Clamp01(pressure));
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null)
+            {
+                chunk.vel.x *= retention;
+            }
+        }
+    }
+
+    private static void ApplyAirDownPressure(Player player, float pressure)
+    {
+        float down = FullAirDownwardAcceleration * Mathf.Clamp01(pressure);
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null)
+            {
+                chunk.vel.y -= down;
+            }
+        }
+    }
+
+    private static void ApplyClimbResistance(Player player, float pressure)
+    {
+        float retention = Mathf.Lerp(
+            1f,
+            FullClimbVelocityRetention,
+            Mathf.Clamp01(pressure));
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            chunk.vel.x *= retention;
+            chunk.vel.y *= retention;
+        }
+    }
+
+    private static bool IsAirborne(Player player)
+    {
+        if (player.bodyMode == Player.BodyModeIndex.Swimming ||
+            player.bodyMode == Player.BodyModeIndex.ZeroG ||
+            player.bodyMode == Player.BodyModeIndex.CorridorClimb ||
+            player.bodyMode == Player.BodyModeIndex.WallClimb ||
+            player.bodyMode == Player.BodyModeIndex.ClimbingOnBeam)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null && chunk.ContactPoint.y < 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsClimbing(Player player)
+    {
+        return player.bodyMode == Player.BodyModeIndex.ClimbingOnBeam ||
+               player.bodyMode == Player.BodyModeIndex.WallClimb ||
+               player.bodyMode == Player.BodyModeIndex.CorridorClimb ||
+               player.animation == Player.AnimationIndex.ClimbOnBeam ||
+               player.animation == Player.AnimationIndex.HangFromBeam ||
+               player.animation == Player.AnimationIndex.HangUnderVerticalBeam ||
+               player.animation == Player.AnimationIndex.VineGrab ||
+               player.animation == Player.AnimationIndex.AntlerClimb;
+    }
+
+    private static float GetAuthoredEffectAmount(
+        RoomSettings settings,
+        RoomSettings.RoomEffect.Type type)
+    {
+        if (settings?.effects == null)
+        {
+            return 0f;
+        }
+
+        for (int i = 0; i < settings.effects.Count; i++)
+        {
+            RoomSettings.RoomEffect effect = settings.effects[i];
+            if (effect != null && effect.type == type)
+            {
+                return effect.amount;
+            }
+        }
+
+        return 0f;
+    }
+
+    private static float ApplyWatcherPassiveRainReduction(
+        float heavy,
+        out float reducedToLight)
+    {
+        reducedToLight = 0f;
+        heavy = Mathf.Clamp01(heavy);
+        if (!ModManager.Watcher)
+        {
+            return heavy;
+        }
+
+        float reduction = global::Watcher.Watcher.cfgReducePassiveRainIntensity.Value;
+        if (reduction < 0.5f)
+        {
+            return heavy *
+                   (1f - Mathf.Lerp(0f, 0.99f, reduction * 2f));
+        }
+
+        reducedToLight = heavy *
+                         Mathf.Lerp(1f, 0f, (reduction - 0.5f) * 2f);
+        return 0f;
+    }
+}
