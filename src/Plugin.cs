@@ -30,7 +30,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.1.105";
+    public const string Version = "0.1.106";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -73,6 +73,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            SyntheticRoomRainTakeoverRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
@@ -190,10 +191,14 @@ internal sealed class Plugin : BaseUnityPlugin
             // takeover so no-DangerType/synthetic RoomRain is protected as well.
             ScheduledHeavyRainImpactGuardRuntime.Enable();
 
-            // Install last on RoomRain. During an active DryCycle event, authored
-            // DangerType branches (Flood/FloodAndRain/etc.) are bypassed at Update level
-            // rather than temporarily rewriting the room to FloodAndRain.
+            // Authored/default DangerType RoomRain objects never run their vanilla
+            // flood/rain-cycle hazard branch while DryCycle owns the region.
             RoomDangerTypeTakeoverRuntime.Enable();
+
+            // Install last on RoomRain. RainWeatherRuntime-created carriers in
+            // DangerType=None rooms use a DryCycle rain-only update and never enter
+            // vanilla RoomRain.Update, avoiding native lifecycle assumptions/NREs.
+            SyntheticRoomRainTakeoverRuntime.Enable();
 
             // RainMeterRoundPipRuntime is the single authoritative DryCycle RainMeter
             // renderer. WeatherForecastHudRuntime remains in source as the old split
@@ -216,6 +221,7 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Disable();
             RainMeterRoundPipRuntime.Disable();
             WeatherForecastHudRuntime.Disable();
+            SyntheticRoomRainTakeoverRuntime.Disable();
             RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
