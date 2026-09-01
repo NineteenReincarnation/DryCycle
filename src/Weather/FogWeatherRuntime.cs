@@ -19,9 +19,10 @@ namespace DryCycle.Weather;
 /// are evaluated per pixel. A whole-room GPU fluid field provides low-frequency motion;
 /// a runtime-generated 3D Perlin/Worley-style volume supplies erosion and billow detail.
 ///
-/// If the custom bundle is absent or incompatible, the previous palette-colored mesh
-/// remains as a safe compatibility renderer. Mapper-authored RoomSettings Fog is never
-/// replaced: Rain World's own fog renders normally and DryCycle layers on top.
+/// If the custom bundle is absent, incompatible or a room-specific GPU resource cannot
+/// be created, the previous palette-colored mesh remains as a safe compatibility
+/// renderer. Mapper-authored RoomSettings Fog is never replaced: Rain World's own fog
+/// renders normally and DryCycle layers on top.
 /// </summary>
 internal static class FogWeatherRuntime
 {
@@ -80,7 +81,7 @@ internal static class FogWeatherRuntime
         }
     }
 
-    private sealed class FogWeatherController : CosmeticSprite
+    private sealed class FogWeatherController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
         private readonly List<Lantern> _lanterns = new();
         private readonly List<LanternMouse> _lanternMice = new();
@@ -89,9 +90,10 @@ internal static class FogWeatherRuntime
         private readonly Vector4[] _fogLightColors = new Vector4[MaxFogLights];
         private readonly Vector4[] _awarenessData = new Vector4[MaxAwarenessSources];
 
-        private readonly bool _useVolumetricComposite;
-        private readonly DryCycleFogObstacleField _obstacles;
-        private readonly DryCycleFogFluidSimulation _fluid;
+        private bool _useVolumetricComposite;
+        private DryCycleFogObstacleField _obstacles;
+        private DryCycleFogFluidSimulation _fluid;
+        private bool _volumetricResourcesDisposed;
 
         private float _lastFogStrength;
         private float _fogStrength;
@@ -110,24 +112,26 @@ internal static class FogWeatherRuntime
             this.room = room;
             _useVolumetricComposite = DryCycleShaderAssets.HasFogComposite;
 
-            if (_useVolumetricComposite)
+            if (!_useVolumetricComposite)
             {
-                try
-                {
-                    _obstacles = new DryCycleFogObstacleField(room);
-                    DryCycleFogVolumeNoise.Ensure();
-                    _fluid = new DryCycleFogFluidSimulation(room, _obstacles);
-                }
-                catch (Exception ex)
-                {
-                    Plugin.Logger?.LogError(
-                        $"DryCycle failed to construct volumetric fog resources for " +
-                        $"'{room?.abstractRoom?.name ?? "unknown"}'.");
-                    Plugin.Logger?.LogError(ex);
-                    _fluid?.Dispose();
-                    _obstacles?.Dispose();
-                    throw;
-                }
+                return;
+            }
+
+            try
+            {
+                _obstacles = new DryCycleFogObstacleField(room);
+                DryCycleFogVolumeNoise.Ensure();
+                _fluid = new DryCycleFogFluidSimulation(room, _obstacles);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger?.LogError(
+                    $"DryCycle could not construct volumetric fog resources for " +
+                    $"'{room?.abstractRoom?.name ?? "unknown"}'. " +
+                    "This room will use the compatibility fog renderer.");
+                Plugin.Logger?.LogError(ex);
+                DisposeVolumetricResources();
+                _useVolumetricComposite = false;
             }
         }
 
@@ -270,7 +274,6 @@ internal static class FogWeatherRuntime
                 {
                     ApplyCompositeProperties(
                         lateFog,
-                        rCam,
                         timeStacker,
                         fogStrength,
                         denseStrength);
@@ -319,16 +322,34 @@ internal static class FogWeatherRuntime
             rCam.ReturnFContainer("GrabShaders").AddChild(sLeaser.sprites[1]);
         }
 
+        public void RoomUnloaded()
+        {
+            DisposeVolumetricResources();
+            Destroy();
+        }
+
         public override void Destroy()
         {
-            _fluid?.Dispose();
-            _obstacles?.Dispose();
+            DisposeVolumetricResources();
             base.Destroy();
+        }
+
+        private void DisposeVolumetricResources()
+        {
+            if (_volumetricResourcesDisposed)
+            {
+                return;
+            }
+
+            _volumetricResourcesDisposed = true;
+            _fluid?.Dispose();
+            _fluid = null;
+            _obstacles?.Dispose();
+            _obstacles = null;
         }
 
         private void ApplyCompositeProperties(
             FSprite sprite,
-            RoomCamera rCam,
             float timeStacker,
             float fogStrength,
             float denseStrength)
