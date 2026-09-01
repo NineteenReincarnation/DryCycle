@@ -92,16 +92,39 @@ internal static class WeatherScheduleRuntime
             clock == null ||
             ids == null ||
             ids.Length == 0 ||
-            !_states.TryGetValue(world.game, out GameState state) ||
+            !world.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(world))
+        {
+            return 0f;
+        }
+
+        // Intensity reads happen from GlobalRain, RoomRain, Player and Watcher hooks,
+        // not only RainCycle.Update. A region/world replacement can therefore occur
+        // before the next RainCycle tick. Synchronize here so no caller can observe the
+        // previous region/day/phase schedule for even one frame.
+        Synchronize(world, clock);
+
+        if (!_states.TryGetValue(world.game, out GameState state) ||
             state.Schedule == null)
         {
             return 0f;
         }
 
+        string regionId = world.region?.name?.Trim().ToUpperInvariant();
         WeatherSchedulePhase expectedPhase = clock.IsNight
             ? WeatherSchedulePhase.Night
             : WeatherSchedulePhase.Day;
-        if (state.Schedule.Phase != expectedPhase)
+        int expectedPips = WeatherPhaseScheduler.FullPipsFromTicks(clock.CurrentHalfLength);
+
+        // Fail closed if synchronization could not establish a schedule for this exact
+        // world state (for example during an incomplete region transition frame).
+        if (string.IsNullOrEmpty(regionId) ||
+            !string.Equals(state.RegionId, regionId, StringComparison.OrdinalIgnoreCase) ||
+            state.DayIndex != clock.DayIndex ||
+            state.Phase != expectedPhase ||
+            state.PhasePipCount != expectedPips ||
+            state.Schedule.Phase != expectedPhase ||
+            state.Schedule.PhasePipCount != expectedPips)
         {
             return 0f;
         }
@@ -169,6 +192,11 @@ internal static class WeatherScheduleRuntime
 
     private static void Synchronize(World world, WorldClock clock)
     {
+        if (world?.game == null || clock == null)
+        {
+            return;
+        }
+
         string regionId = world.region?.name?.Trim().ToUpperInvariant();
         if (string.IsNullOrEmpty(regionId))
         {
@@ -308,7 +336,7 @@ internal static class WeatherScheduleRuntime
         for (int i = 0; i < profile.DangerTypes.Count; i++)
         {
             ClimateChanceEntry danger = profile.DangerTypes[i];
-            if (Passes(danger.ChancePercent, random))
+            if (danger != null && Passes(danger.ChancePercent, random))
             {
                 result.Add(new WeatherScheduleCandidate(
                     danger.Id,
