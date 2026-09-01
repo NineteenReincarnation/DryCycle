@@ -50,6 +50,13 @@ internal sealed class ScheduledWeatherEvent
     internal int DurationPips { get; }
     internal int EndPipExclusive => StartPip + DurationPips;
 
+    /// <summary>
+    /// Room Settings exposes HeavyRainFlux as a 0..1 effect. DryCycle assigns one
+    /// deterministic random value to each scheduled HeavyRain event when the phase
+    /// schedule is built. Null means this event has no HeavyRain flux parameter.
+    /// </summary>
+    internal float? HeavyRainFlux { get; set; }
+
     internal ScheduledWeatherEvent(
         WeatherScheduleCandidate candidate,
         int startPip,
@@ -62,7 +69,10 @@ internal sealed class ScheduledWeatherEvent
 
     public override string ToString()
     {
-        return $"{Candidate} [{StartPip}, {EndPipExclusive}) ({DurationPips} pips)";
+        string flux = HeavyRainFlux.HasValue
+            ? $", flux={HeavyRainFlux.Value:0.###}"
+            : string.Empty;
+        return $"{Candidate} [{StartPip}, {EndPipExclusive}) ({DurationPips} pips{flux})";
     }
 }
 
