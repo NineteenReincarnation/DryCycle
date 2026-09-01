@@ -362,10 +362,10 @@ Shader "DryCycle/FogComposite"
                             smoothstep(0.36, 0.79, fine.r) *
                             lerp(0.72, 1.18, fine.a);
 
-                        // G is permission left by an explosion, while R tells us whether
-                        // the air is still physically evacuated. Requiring both means fog
-                        // visibly returns from the edges as real density flows back rather
-                        // than the complete opening fading uniformly with a timer.
+                        // G acts as permission, not opacity. While G remains above a low
+                        // threshold, the actual R-density deficit decides how much medium
+                        // is missing. This makes returning fog visibly eat the cavity from
+                        // its edges instead of G's exponential decay fading everything.
                         float body =
                             macroBody * 0.68 +
                             midBody * 0.24 +
@@ -375,8 +375,12 @@ Shader "DryCycle/FogComposite"
                             0.18,
                             0.62,
                             fluid);
+                        float blastPermission = smoothstep(
+                            0.08,
+                            0.28,
+                            blastClear);
                         float blastMediumClear =
-                            blastClear * densityDeficit;
+                            blastPermission * densityDeficit;
                         body *= lerp(
                             1.0,
                             0.05,
@@ -677,25 +681,27 @@ Shader "DryCycle/FogComposite"
                     float blastClear = SampleBlastClearSmooth(roomUV);
                     float waveReveal = SampleBlastWaveReveal(roomUV);
 
-                    // G says that an explosion evacuated this air; R says whether the
-                    // physical cavity is still actually empty. Combining them makes the
-                    // long-lived opening close from its fluid-filled edges instead of
-                    // fading as a single alpha shape. A small G-only remainder preserves
-                    // the intended resistance while density is just beginning to return.
+                    // G is now purely permission. Once it is above a low threshold, the
+                    // actual R-density deficit controls visibility. G's slow exponential
+                    // decay therefore opens the door for refill without visibly fading
+                    // the entire cavity; real fog must physically return to close it.
                     float densityDeficit = 1.0 - smoothstep(
                         0.18,
                         0.62,
                         fluidDensity);
+                    float blastPermission = smoothstep(
+                        0.08,
+                        0.28,
+                        blastClear);
                     float physicalBlastClear = saturate(
-                        blastClear *
-                        lerp(0.18, 1.0, densityDeficit));
+                        blastPermission * densityDeficit);
                     float blastReveal = smoothstep(
                         0.14,
                         0.50,
                         physicalBlastClear);
 
                     // Normal fluid thinning is visual only. Only explosion-authored G,
-                    // modulated by the actual R-density deficit, may relax gameplay
+                    // combined with an actual R-density deficit, may relax gameplay
                     // extinction. Player wakes still cannot expose the hidden room.
                     float depthFactor = lerp(
                         0.84,
@@ -713,7 +719,7 @@ Shader "DryCycle/FogComposite"
 
                     // DenseFog normally enforces the ~0.2% contrast floor. The same
                     // physical clear amount relaxes it, so returning R density closes
-                    // gameplay visibility even while a weak residual G field remains.
+                    // gameplay visibility even while G remains as refill resistance.
                     float effectiveDense =
                         dense * (1.0 - physicalBlastClear);
                     float denseCeiling = lerp(
