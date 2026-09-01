@@ -70,14 +70,15 @@ internal static class ScheduledRainNativeBaselineRuntime
 }
 
 /// <summary>
-/// During an active DryCycle weather event, rooms with an authored/default DangerType
-/// are temporarily owned by the DryCycle weather runtime at the update level. The
-/// authored DangerType field is never rewritten to FloodAndRain (or any other value),
-/// and its flood/blizzard/default hazard branch is not executed for that frame.
+/// In a DryCycle-enabled region, rooms with an authored/default RoomRain DangerType
+/// are owned by the DryCycle weather runtime at the update level. The authored
+/// DangerType field is never rewritten to FloodAndRain (or any other value), and its
+/// flood/blizzard/default hazard branch is not executed while DryCycle owns the region.
 ///
-/// Scheduled rain receives a rain-only update path. Scheduled sandstorms simply pause
-/// RoomRain unless the room also has an authored rain effect that must remain visible.
-/// When the DryCycle event ends, the hook immediately delegates to vanilla again.
+/// Scheduled rain receives a rain-only update path. Room-authored rain effects retain
+/// the behavior allowed by the room's original DangerType. With no scheduled/local rain,
+/// RoomRain is quiesced instead of falling back to its default DangerType logic.
+/// Region opt-out immediately restores vanilla by delegating to orig again.
 /// </summary>
 internal static class RoomDangerTypeTakeoverRuntime
 {
@@ -113,11 +114,6 @@ internal static class RoomDangerTypeTakeoverRuntime
             HeavyRain > Epsilon ||
             BulletRain > Epsilon ||
             DeathRain > Epsilon;
-
-        internal bool AnyDryCycleEvent =>
-            ScheduledRainActive ||
-            SandStorm > Epsilon ||
-            DangerSandStorm > Epsilon;
     }
 
     private static bool _enabled;
@@ -151,7 +147,7 @@ internal static class RoomDangerTypeTakeoverRuntime
         RoomRain self,
         bool eu)
     {
-        if (!TryGetTakeover(self, out WorldClock clock, out WeatherSample sample))
+        if (!TryGetTakeover(self, out _, out WeatherSample sample))
         {
             orig(self, eu);
             return;
@@ -164,8 +160,9 @@ internal static class RoomDangerTypeTakeoverRuntime
         }
         else
         {
-            // A scheduled non-rain weather event owns the room this frame. Suppress
-            // the authored/default RoomRain DangerType without mutating it.
+            // DryCycle owns this region but there is no rain to render this frame.
+            // Keep the authored/default DangerType dormant instead of running Flood,
+            // FloodAndRain, Rain-cycle or blizzard logic behind the scheduler.
             QuiesceRain(self);
         }
     }
@@ -277,7 +274,14 @@ internal static class RoomDangerTypeTakeoverRuntime
                 "Sandstorm",
                 "DeathSandStorm"));
 
-        return sample.AnyDryCycleEvent;
+        // Do not steal a DeathRain state that was started by another system. DryCycle's
+        // own scheduled DeathRain is identified by a nonzero schedule envelope here.
+        if (rain.globalRain?.deathRain != null && sample.DeathRain <= Epsilon)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static void UpdateRainOnly(
