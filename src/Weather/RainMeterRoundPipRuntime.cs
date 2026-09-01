@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
+using MoreSlugcats;
 using RWCustom;
 using UnityEngine;
 
@@ -10,11 +11,8 @@ namespace DryCycle.Weather;
 
 /// <summary>
 /// Single authoritative DryCycle RainMeter presentation pass.
-///
-/// The scheduler, the time-pip shape and the colored forecast marker all use the same
-/// zero-based 1200-tick grid. Keeping them in one pass avoids cache/order disagreements
-/// between the white ring and the colored weather fill, especially after hibernation,
-/// region changes and HUD reconstruction.
+/// Scheduler cells, time-pip shapes and colored forecast markers all use the same
+/// zero-based 1200-tick grid.
 /// </summary>
 internal static class RainMeterRoundPipRuntime
 {
@@ -35,7 +33,6 @@ internal static class RainMeterRoundPipRuntime
                 isVisible = false,
                 alpha = 1f
             };
-
             Tail = new FSprite("Futile_White")
             {
                 shader = rainWorld.Shaders["VectorCircle"],
@@ -78,7 +75,10 @@ internal static class RainMeterRoundPipRuntime
         private readonly DripGlyph[] _drips;
         private readonly float _fillBaseScale;
 
-        internal ForecastPipVisual(RainWorld rainWorld, FContainer container, FSprite whiteRing)
+        internal ForecastPipVisual(
+            RainWorld rainWorld,
+            FContainer container,
+            FSprite whiteRing)
         {
             _whiteRing = whiteRing;
 
@@ -328,6 +328,7 @@ internal static class RainMeterRoundPipRuntime
         Player player = hud?.owner as Player;
         World world = player?.abstractCreature?.world;
         if (world != null &&
+            VanillaAllowsRainMeterDraw(self) &&
             RegionDayNightOptions.IsEnabled(world) &&
             WorldClockHooks.TryGetClock(world, out WorldClock clock) &&
             _states.TryGetValue(self, out MeterState state))
@@ -346,14 +347,9 @@ internal static class RainMeterRoundPipRuntime
             _states.TryGetValue(self, out state);
         }
 
-        World world = null;
-        WorldClock clock = null;
-        bool dryCycle = state != null &&
-                        TryGetContext(self, out world, out clock);
+        bool dryCycle = state != null && TryGetContext(self, out _, out WorldClock clock);
         if (!dryCycle)
         {
-            // Region-level disable must truly return to vanilla. Undo capacity,
-            // visibility and time-per-circle changes before the vanilla update runs.
             RestoreVanillaState(state);
         }
 
@@ -365,7 +361,6 @@ internal static class RainMeterRoundPipRuntime
         }
 
         state.AnimationTicks++;
-
         if (!dryCycle)
         {
             HideForecasts(state);
@@ -387,25 +382,28 @@ internal static class RainMeterRoundPipRuntime
             _states.TryGetValue(self, out state);
         }
 
-        World world = null;
-        WorldClock clock = null;
-        WeatherPhaseSchedule schedule = null;
-        bool dryCycle = state != null &&
-                        TryGetContext(self, out world, out clock);
-
+        bool vanillaAllowsDraw = VanillaAllowsRainMeterDraw(self);
+        bool dryCycle = state != null && TryGetContext(self, out World world, out WorldClock clock);
         if (!dryCycle)
         {
-            // Also restore before Draw: a region gate can swap World between the last
-            // Update and this frame, and vanilla must not render DryCycle-expanded or
-            // hidden circles even for one frame.
             RestoreVanillaState(state);
             orig(self, timeStacker);
             HideForecasts(state);
+
+            // Vanilla intentionally draws no RainMeter circles for Saint outside
+            // Rubicon. If the same HUD previously rendered DryCycle pips in Rubicon,
+            // explicitly hide their sprites so the previous frame cannot persist.
+            if (!vanillaAllowsDraw)
+            {
+                HideCircleSprites(self);
+            }
             return;
         }
 
         EnsureCapacity(state, FullDayPipCount(clock));
         WeatherScheduleRuntime.Synchronize(world);
+
+        WeatherPhaseSchedule schedule = null;
         if (WeatherScheduleRuntime.TryGetCurrentSchedule(
                 world,
                 out WeatherPhaseSchedule current) &&
@@ -417,9 +415,9 @@ internal static class RainMeterRoundPipRuntime
 
         orig(self, timeStacker);
 
-        // WorldClockHooks also customizes the same HUD circles during Update. Reapply
-        // the authoritative 1200-tick phase layout here before the final circle Draw,
-        // so hook ordering cannot make night consume a day-sized set of pips.
+        // Reapply the authoritative 1200-tick layout after vanilla/other hooks. The
+        // final HUDCircle.Draw below is the only DryCycle visual state that survives
+        // this frame.
         ApplyPhasePipLayout(self, clock);
         DrawFinal(state, clock, schedule, Mathf.Clamp01(timeStacker));
     }
@@ -484,7 +482,6 @@ internal static class RainMeterRoundPipRuntime
 
         global::HUD.HUDCircle[] circles = new global::HUD.HUDCircle[requiredPips];
         ForecastPipVisual[] pips = new ForecastPipVisual[requiredPips];
-
         Array.Copy(oldCircles, circles, oldCircles.Length);
         Array.Copy(oldPips, pips, Math.Min(oldPips.Length, pips.Length));
 
@@ -518,10 +515,28 @@ internal static class RainMeterRoundPipRuntime
         world = player?.abstractCreature?.world;
         clock = null;
 
-        return world?.game != null &&
+        return VanillaAllowsRainMeterDraw(meter) &&
+               world?.game != null &&
                world.game.IsStorySession &&
                RegionDayNightOptions.IsEnabled(world) &&
                WorldClockHooks.TryGetClock(world, out clock);
+    }
+
+    private static bool VanillaAllowsRainMeterDraw(global::HUD.RainMeter meter)
+    {
+        if (!ModManager.MSC)
+        {
+            return true;
+        }
+
+        Player player = meter?.hud?.owner as Player;
+        if (player?.abstractCreature?.world?.game == null ||
+            player.abstractCreature.world.game.StoryCharacter != MoreSlugcatsEnums.SlugcatStatsName.Saint)
+        {
+            return true;
+        }
+
+        return meter.hud?.map != null && Region.IsRubiconRegion(meter.hud.map.RegionName);
     }
 
     private static int FullDayPipCount(WorldClock clock)
@@ -531,9 +546,7 @@ internal static class RainMeterRoundPipRuntime
             : WeatherPhaseScheduler.FullPipsFromTicks(clock.DayCycleLength);
     }
 
-    private static int ActivePhasePipCount(
-        WorldClock clock,
-        int capacity)
+    private static int ActivePhasePipCount(WorldClock clock, int capacity)
     {
         if (clock == null || capacity <= 0)
         {
@@ -572,8 +585,7 @@ internal static class RainMeterRoundPipRuntime
         long phaseTicks = CurrentPhaseTicks(clock);
         long start = (long)(chronologicalPip - 1) * WeatherPhaseScheduler.PipTicks;
         float elapsed = (phaseTicks - start) / (float)WeatherPhaseScheduler.PipTicks;
-        elapsed = Mathf.Clamp01(elapsed);
-        return Smooth01(elapsed);
+        return Smooth01(Mathf.Clamp01(elapsed));
     }
 
     private static int CircleIndex(
@@ -609,7 +621,6 @@ internal static class RainMeterRoundPipRuntime
             }
 
             circle.forceColor = null;
-
             if (i >= activePips)
             {
                 circle.visible = false;
@@ -641,7 +652,7 @@ internal static class RainMeterRoundPipRuntime
         WeatherPhaseSchedule schedule,
         float timeStacker)
     {
-        global::HUD.RainMeter meter = state.Meter;
+        global::HUD.RainMeter meter = state?.Meter;
         if (meter?.circles == null || state.Pips == null)
         {
             return;
@@ -652,15 +663,12 @@ internal static class RainMeterRoundPipRuntime
         float hudFade = Mathf.Clamp01(Mathf.Lerp(meter.lastFade, meter.fade, timeStacker));
         float animationSeconds = (state.AnimationTicks + timeStacker) / GameTicksPerSecond;
 
-        for (int i = 0; i < capacity; i++)
+        for (int i = activePips; i < capacity; i++)
         {
-            if (i >= activePips)
+            state.Pips[i]?.Hide();
+            if (meter.circles[i]?.sprite != null)
             {
-                state.Pips[i]?.Hide();
-                if (meter.circles[i]?.sprite != null)
-                {
-                    meter.circles[i].sprite.isVisible = false;
-                }
+                meter.circles[i].sprite.isVisible = false;
             }
         }
 
@@ -680,11 +688,13 @@ internal static class RainMeterRoundPipRuntime
             }
 
             float remaining = 1f - PipElapsed(clock, chronologicalPip);
+
+            // Declare the out value before the short-circuit expression. C# definite
+            // assignment does not consider an out variable assigned when the left side
+            // of && can skip the method call (CS0165).
+            WeatherForecastVisualKind kind = WeatherForecastVisualKind.None;
             bool hasMarker = remaining > 0.001f &&
-                             TryGetMarker(
-                                 schedule,
-                                 chronologicalPip,
-                                 out WeatherForecastVisualKind kind);
+                             TryGetMarker(schedule, chronologicalPip, out kind);
 
             if (hasMarker)
             {
@@ -697,9 +707,6 @@ internal static class RainMeterRoundPipRuntime
                     animationSeconds,
                     chronologicalPip + (clock.IsNight ? 101 : 0));
 
-                // A forecasted cell always keeps a white outline while its colored
-                // center is still visible. Once the cell is completely consumed this
-                // override stops, allowing night pips to become solid normally.
                 circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.smallEmptyCircle;
                 circle.snapRad = 3f;
                 circle.snapThickness = 1f;
@@ -712,7 +719,7 @@ internal static class RainMeterRoundPipRuntime
                 visual.Hide();
                 circle.forceColor = null;
 
-                // Keep every fully-solid non-weather pip procedural and circular.
+                // Never snap a fully solid DryCycle pip to low-resolution Circle4.
                 if (circle.snapGraphic == global::HUD.HUDCircle.SnapToGraphic.Circle4)
                 {
                     circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.None;
@@ -773,15 +780,12 @@ internal static class RainMeterRoundPipRuntime
         int originalCount = Math.Max(0, state.OriginalCircleCount);
         if (meter.circles.Length > originalCount)
         {
-            // Remove only circles introduced by DryCycle. The original objects remain
-            // untouched so vanilla/MSC/mod HUD behavior can continue normally.
             for (int i = originalCount; i < meter.circles.Length; i++)
             {
                 if (state.Pips != null && i < state.Pips.Length)
                 {
                     state.Pips[i]?.Remove();
                 }
-
                 meter.circles[i]?.ClearSprite();
             }
 
@@ -828,6 +832,22 @@ internal static class RainMeterRoundPipRuntime
         }
     }
 
+    private static void HideCircleSprites(global::HUD.RainMeter meter)
+    {
+        if (meter?.circles == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < meter.circles.Length; i++)
+        {
+            if (meter.circles[i]?.sprite != null)
+            {
+                meter.circles[i].sprite.isVisible = false;
+            }
+        }
+    }
+
     private static void RemoveState(MeterState state)
     {
         if (state?.Pips == null)
@@ -850,7 +870,6 @@ internal static class RainMeterRoundPipRuntime
 
         if (hollow <= 0.001f)
         {
-            // Use the procedural path for a solid ball instead of Circle4.
             circle.snapGraphic = global::HUD.HUDCircle.SnapToGraphic.None;
             circle.snapRad = -1f;
             circle.snapThickness = -1f;
