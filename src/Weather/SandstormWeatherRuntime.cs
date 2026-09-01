@@ -10,9 +10,10 @@ using Watcher;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// WorldClock-driven Watcher sandstorm bridge. DryCycle schedules the event while
-/// Watcher's native Sandstorm remains responsible for rendering, sound, wind and its
-/// nonlinear hazard progression. Solid terrain remains valid disaster shelter.
+/// WorldClock-driven Watcher sandstorm bridge. DryCycle owns scheduled surface and
+/// danger storms in enabled regions while room-authored SurfaceSandstorm remains a
+/// native environmental effect. Default Watcher DangerType.Sandstorm progression is
+/// neutralized while DryCycle owns the region.
 /// </summary>
 internal static class SandstormWeatherRuntime
 {
@@ -187,9 +188,8 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        // Keep a dormant native Sandstorm object ready in regions that can schedule
-        // the event. Mark only the object DryCycle actually creates; an authored
-        // SurfaceSandstorm/DangerType object must retain its original lifecycle.
+        // Keep a dormant native Watcher renderer ready only when no authored/default
+        // Sandstorm object already exists. The marker identifies DryCycle ownership.
         if (self.sandstorm == null)
         {
             self.sandstorm = new Sandstorm(self);
@@ -226,12 +226,14 @@ internal static class SandstormWeatherRuntime
              !world.game.IsStorySession ||
              !RegionDayNightOptions.IsEnabled(world)))
         {
-            QuiesceSyntheticSandstorm(self);
+            QuiesceSandstorm(self);
             return;
         }
 
         if (!TryGetClock(self, out WorldClock clock))
         {
+            // Native/authored storms return completely to Watcher outside DryCycle
+            // regions. Synthetic storms were already caught and silenced above.
             orig(self, eu);
             return;
         }
@@ -242,10 +244,18 @@ internal static class SandstormWeatherRuntime
         {
             if (synthetic)
             {
-                QuiesceSyntheticSandstorm(self);
+                QuiesceSandstorm(self);
+            }
+            else if (IsDefaultDangerSandstorm(self))
+            {
+                // DryCycle owns DangerType timing. Run Watcher's native update at its
+                // pre-buildup neutral time so an authored SurfaceSandstorm still works,
+                // but the room's default global disaster cannot start on RainCycle time.
+                RunDefaultDangerSurfaceOnly(orig, self, eu);
             }
             else
             {
+                // Pure room-authored SurfaceSandstorm remains fully native.
                 orig(self, eu);
             }
             return;
@@ -255,13 +265,17 @@ internal static class SandstormWeatherRuntime
         RoomSettings settings = self.room.roomSettings;
         if (rainCycle == null || settings == null)
         {
-            orig(self, eu);
+            if (synthetic || IsDefaultDangerSandstorm(self))
+            {
+                QuiesceSandstorm(self);
+            }
+            else
+            {
+                orig(self, eu);
+            }
             return;
         }
 
-        // The hazardous storm must still have a terrain exposure mask. Watcher's
-        // original DangerType path can skip mask generation because GlobalIntensity
-        // is assigned after the SurfaceIntensity mask check.
         if (self.surfaceMask == null)
         {
             self.GenerateSurfaceMask();
@@ -273,8 +287,8 @@ internal static class SandstormWeatherRuntime
         RoomSettings previousOverrideSettings = _effectOverrideSettings;
         float previousSurfaceOverride = _surfaceEffectOverride;
 
-        // Compress Watcher's native -400..2800 danger progression into the scheduled
-        // hazard envelope. This preserves native shake/global intensity/lethality.
+        // Compress Watcher's native -400..2800 disaster curve into DryCycle's 0..1
+        // schedule envelope while preserving Watcher's native shake and lethality curve.
         int syntheticDangerTime = Mathf.RoundToInt(Mathf.Lerp(
             Sandstorm.buildupStartTime,
             Sandstorm.lethalMaxTime,
@@ -300,7 +314,40 @@ internal static class SandstormWeatherRuntime
         }
     }
 
-    private static void QuiesceSyntheticSandstorm(Sandstorm storm)
+    private static bool IsDefaultDangerSandstorm(Sandstorm storm)
+    {
+        return ModManager.Watcher &&
+               storm?.room?.roomSettings != null &&
+               storm.room.roomSettings.DangerType == WatcherEnums.WatcherDangerType.Sandstorm;
+    }
+
+    private static void RunDefaultDangerSurfaceOnly(
+        On.Watcher.Sandstorm.orig_Update orig,
+        Sandstorm storm,
+        bool eu)
+    {
+        RainCycle rainCycle = storm?.room?.world?.rainCycle;
+        if (rainCycle == null)
+        {
+            QuiesceSandstorm(storm);
+            return;
+        }
+
+        int previousTimer = rainCycle.timer;
+        try
+        {
+            // At buildupStartTime Watcher has zero GlobalIntensity/ScreenShake/lethality,
+            // while SurfaceSandstorm is still read at its authored value.
+            rainCycle.timer = rainCycle.cycleLength + Sandstorm.buildupStartTime;
+            orig(storm, eu);
+        }
+        finally
+        {
+            rainCycle.timer = previousTimer;
+        }
+    }
+
+    private static void QuiesceSandstorm(Sandstorm storm)
     {
         if (storm == null)
         {
@@ -356,15 +403,12 @@ internal static class SandstormWeatherRuntime
 
         if (!TryGetClock(self, out WorldClock clock))
         {
-            // Region opt-out restores Watcher's original behavior completely for
-            // native/authored storms. Synthetic storms were already caught above.
             orig(self, amount);
             return;
         }
 
-        // Only the scheduled DangerType sandstorm needs DryCycle's stronger shelter
-        // rule. Ordinary scheduled SurfaceSandstorm and authored Watcher storms retain
-        // their native AffectObjects implementation.
+        // Only scheduled DangerType sandstorms use DryCycle's wall-shelter lethality
+        // mask. Scheduled/room-authored SurfaceSandstorm keeps native object physics.
         WeatherScheduleRuntime.Synchronize(self.room.world);
         WeatherSample sample = Evaluate(self.room.world, clock);
         if (sample.Hazard <= 0.0001f)
@@ -373,10 +417,6 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        // Watcher's native disaster storm progressively lerps the SurfaceMask toward
-        // 1 as GlobalIntensity rises, which eventually makes walls stop protecting the
-        // player. DryCycle keeps the local exposure mask authoritative for the
-        // scheduled disaster: wind and lethality must reach a body through open terrain.
         if (self.room?.physicalObjects == null)
         {
             return;
@@ -498,8 +538,10 @@ internal static class SandstormWeatherRuntime
     private static bool TryGetClock(Sandstorm storm, out WorldClock clock)
     {
         clock = null;
-        return storm?.room?.world?.game != null &&
-               storm.room.world.game.IsStorySession &&
-               WorldClockHooks.TryGetClock(storm.room.world, out clock);
+        World world = storm?.room?.world;
+        return world?.game != null &&
+               world.game.IsStorySession &&
+               RegionDayNightOptions.IsEnabled(world) &&
+               WorldClockHooks.TryGetClock(world, out clock);
     }
 }
