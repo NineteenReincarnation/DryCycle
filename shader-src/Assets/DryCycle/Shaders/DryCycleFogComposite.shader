@@ -827,7 +827,6 @@ Shader "DryCycle/FogComposite"
                         worldPx);
                     float physicalBlastClear = blastBoundary.x;
                     float edgeMixing = blastBoundary.y;
-                    float waveReveal = SampleBlastWaveReveal(roomUV);
 
                     visualDensity = saturate(
                         visualDensity +
@@ -881,10 +880,12 @@ Shader "DryCycle/FogComposite"
                     float blastReveal = pow(
                         saturate(physicalBlastClear),
                         1.10);
+                    // B/A only drive the R/G evacuation front in compute. They are not
+                    // rendered as a second reveal layer, which avoids a visible circular
+                    // pressure-wave line while preserving the expanding clear cavity.
                     float physicalReveal = 1.0 -
                         (1.0 - lightReveal) *
-                        (1.0 - blastReveal) *
-                        (1.0 - waveReveal);
+                        (1.0 - blastReveal);
                     transmittance = lerp(
                         transmittance,
                         0.985,
