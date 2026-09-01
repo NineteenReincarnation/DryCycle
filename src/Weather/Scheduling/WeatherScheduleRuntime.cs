@@ -298,28 +298,73 @@ internal static class WeatherScheduleRuntime
                 continue;
             }
 
-            if (!Passes(family.ChancePercent, random))
+            if (family.Variants.Count == 0)
             {
+                if (!WeatherTypeRegistry.IsSchedulable(
+                        family.Id,
+                        WeatherScheduleEventKind.Weather))
+                {
+                    WeatherTypeRegistry.WarnUnsupported(
+                        regionId,
+                        family.Id,
+                        WeatherScheduleEventKind.Weather);
+                    continue;
+                }
+
+                if (Passes(family.ChancePercent, random))
+                {
+                    result.Add(new WeatherScheduleCandidate(
+                        family.Id,
+                        WeatherScheduleEventKind.Weather));
+                }
                 continue;
             }
 
-            if (family.Variants.Count == 0)
+            // Validate child runtimes before the family probability roll. A family
+            // whose variants are all future/unimplemented weather therefore consumes
+            // neither a schedule slot nor RNG state used by implemented weather.
+            bool hasSchedulableVariant = false;
+            for (int variantIndex = 0; variantIndex < family.Variants.Count; variantIndex++)
             {
-                result.Add(new WeatherScheduleCandidate(
-                    family.Id,
-                    WeatherScheduleEventKind.Weather));
+                ClimateChanceEntry variant = family.Variants[variantIndex];
+                if (variant == null || IsRemovedScheduledWeather(variant.Id))
+                {
+                    continue;
+                }
+
+                if (WeatherTypeRegistry.IsSchedulable(
+                        variant.Id,
+                        WeatherScheduleEventKind.Weather))
+                {
+                    hasSchedulableVariant = true;
+                }
+                else
+                {
+                    WeatherTypeRegistry.WarnUnsupported(
+                        regionId,
+                        variant.Id,
+                        WeatherScheduleEventKind.Weather);
+                }
+            }
+
+            if (!hasSchedulableVariant || !Passes(family.ChancePercent, random))
+            {
                 continue;
             }
 
             // Variant percentages are independent probabilities, never normalized
             // weights. Multiple variants may pass; the phase scheduler later applies
-            // the day/night event count and spacing limits. Removed weather IDs are
-            // skipped before rolling so an old local RegionClimate.txt cannot consume
-            // a schedule slot or perturb the remaining variant RNG stream.
+            // the day/night event count and spacing limits. Removed or unsupported IDs
+            // are skipped before rolling so stale/future climate entries cannot consume
+            // a schedule slot or perturb the implemented variant RNG stream.
             for (int variantIndex = 0; variantIndex < family.Variants.Count; variantIndex++)
             {
                 ClimateChanceEntry variant = family.Variants[variantIndex];
-                if (variant == null || IsRemovedScheduledWeather(variant.Id))
+                if (variant == null ||
+                    IsRemovedScheduledWeather(variant.Id) ||
+                    !WeatherTypeRegistry.IsSchedulable(
+                        variant.Id,
+                        WeatherScheduleEventKind.Weather))
                 {
                     continue;
                 }
@@ -336,7 +381,23 @@ internal static class WeatherScheduleRuntime
         for (int i = 0; i < profile.DangerTypes.Count; i++)
         {
             ClimateChanceEntry danger = profile.DangerTypes[i];
-            if (danger != null && Passes(danger.ChancePercent, random))
+            if (danger == null)
+            {
+                continue;
+            }
+
+            if (!WeatherTypeRegistry.IsSchedulable(
+                    danger.Id,
+                    WeatherScheduleEventKind.DangerType))
+            {
+                WeatherTypeRegistry.WarnUnsupported(
+                    regionId,
+                    danger.Id,
+                    WeatherScheduleEventKind.DangerType);
+                continue;
+            }
+
+            if (Passes(danger.ChancePercent, random))
             {
                 result.Add(new WeatherScheduleCandidate(
                     danger.Id,
