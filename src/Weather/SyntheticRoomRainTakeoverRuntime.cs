@@ -52,12 +52,13 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         Room room = self?.room;
         World world = room?.world;
+        WorldClock clock = null;
         bool validDryCycleContext =
             room?.roomSettings != null &&
             world?.game != null &&
             world.game.IsStorySession &&
             RegionDayNightOptions.IsEnabled(world) &&
-            WorldClockHooks.TryGetClock(world, out WorldClock clock);
+            WorldClockHooks.TryGetClock(world, out clock);
 
         if (!validDryCycleContext)
         {
