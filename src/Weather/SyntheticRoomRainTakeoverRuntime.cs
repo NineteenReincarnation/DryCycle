@@ -8,8 +8,7 @@ namespace DryCycle.Weather;
 /// <summary>
 /// Owns safe rain-only updates for DryCycle-created RoomRain carriers and for the
 /// vanilla DangerType=None RoomRain objects created solely by WaterCycleBottom/Top.
-/// These carriers must not enter vanilla rain/flood hazard branches while a DryCycle
-/// regional rain event is active.
+/// DryCycle carriers never enter vanilla rain/flood hazard branches.
 /// </summary>
 internal static class SyntheticRoomRainTakeoverRuntime
 {
@@ -64,13 +63,10 @@ internal static class SyntheticRoomRainTakeoverRuntime
         {
             if (dryCycleCarrier)
             {
-                // A DryCycle-created carrier has no native lifecycle to fall back to.
                 Quiesce(self);
             }
             else
             {
-                // The vanilla WaterCycle carrier must return to its original update as
-                // soon as DryCycle no longer owns this region.
                 orig(self, eu);
             }
             return;
@@ -97,10 +93,20 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         GlobalRain global = self.globalRain;
         bool foreignDeathRain = global?.deathRain != null &&
-                                !RainWeatherRuntime.OwnsDeathRain(global) &&
-                                death <= Epsilon;
-        bool scheduledRain = light > Epsilon || heavy > Epsilon || death > Epsilon;
+                                !RainWeatherRuntime.OwnsDeathRain(global);
 
+        // A native WaterCycle carrier already existed before DryCycle. If another
+        // system owns DeathRain, return that carrier completely to the native/foreign
+        // hook chain rather than approximating the foreign disaster in our rain-only
+        // path. DryCycle-created carriers have no native lifecycle, so they still need
+        // our safe rain-only renderer for that external GlobalRain state.
+        if (foreignDeathRain && waterCycleCarrier)
+        {
+            orig(self, eu);
+            return;
+        }
+
+        bool scheduledRain = light > Epsilon || heavy > Epsilon || death > Epsilon;
         if (!scheduledRain && !foreignDeathRain)
         {
             if (dryCycleCarrier)
@@ -109,8 +115,6 @@ internal static class SyntheticRoomRainTakeoverRuntime
             }
             else
             {
-                // Water-cycle rooms still need their native accessibility/sound state
-                // when no DryCycle rain event is using the carrier.
                 orig(self, eu);
             }
             return;
@@ -178,8 +182,6 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         PreserveWaterAccessibility(rain);
 
-        // DeathRain owns regional BulletDrips. For a native WaterCycle carrier, keep
-        // the room-authored BulletRain channel at its original RainIntensity too.
         float bulletGate = lethalDeathRain
             ? 1f
             : preserveNativeCarrier
@@ -278,8 +280,6 @@ internal static class SyntheticRoomRainTakeoverRuntime
             rain.rumbleSound.Update();
         }
 
-        // Regional rain uses DryCycle scheduling, never the vanilla countdown/flood
-        // loops on these carrier objects.
         MuteLoop(rain.floodingSound);
         MuteLoop(rain.distantDeathRainSound);
 
