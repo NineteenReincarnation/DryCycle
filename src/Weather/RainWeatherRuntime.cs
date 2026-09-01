@@ -7,10 +7,10 @@ using DryCycle.Weather.Scheduling;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Bridges scheduled Rain variants into Rain World's native rain simulation.
-/// LightRain and HeavyRain reuse the original RoomEffect channels; DeathRain reuses
-/// the native GlobalRain.DeathRain state machine but is owned only for the scheduled
-/// interval and is cleaned up when that interval ends.
+/// Owns DryCycle's GlobalRain bridge and creates regional RoomRain rendering carriers.
+/// RoomRain.Update itself is deliberately owned by the dedicated authored-DangerType
+/// and synthetic-carrier takeover runtimes; this class never rewrites a room's
+/// DangerType or calls vanilla RoomRain.Update for scheduled weather.
 /// </summary>
 internal static class RainWeatherRuntime
 {
@@ -35,9 +35,9 @@ internal static class RainWeatherRuntime
     [ThreadStatic]
     private static float _heavyRainOverride;
 
-    // ScheduledHeavyRainTraversalRuntime temporarily opens this gate only while
-    // GlobalRain is establishing the room-authored/native HeavyRain baseline. It is
-    // thread-local so nested or unrelated room-effect queries cannot leak the state.
+    // ScheduledHeavyRainTraversalRuntime opens this only while the native/authored
+    // HeavyRain baseline is being sampled. Thread-local state prevents nested room
+    // effect queries from leaking the suppression to unrelated updates.
     [ThreadStatic]
     internal static bool SuppressScheduledHeavyOverride;
 
@@ -55,7 +55,6 @@ internal static class RainWeatherRuntime
         _enabled = true;
         On.Room.Loaded += Room_Loaded;
         On.GlobalRain.Update += GlobalRain_Update;
-        On.RoomRain.Update += RoomRain_Update;
         On.RoomSettings.GetEffectAmount += RoomSettings_GetEffectAmount;
     }
 
@@ -68,7 +67,6 @@ internal static class RainWeatherRuntime
 
         On.Room.Loaded -= Room_Loaded;
         On.GlobalRain.Update -= GlobalRain_Update;
-        On.RoomRain.Update -= RoomRain_Update;
         On.RoomSettings.GetEffectAmount -= RoomSettings_GetEffectAmount;
 
         _effectOverrideSettings = null;
@@ -78,6 +76,18 @@ internal static class RainWeatherRuntime
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalRainState>();
         _syntheticRoomRain = new ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker>();
         _enabled = false;
+    }
+
+    internal static bool IsSyntheticRoomRain(RoomRain rain)
+    {
+        return rain != null && _syntheticRoomRain.TryGetValue(rain, out _);
+    }
+
+    internal static bool OwnsDeathRain(GlobalRain rain)
+    {
+        return rain != null &&
+               _globalStates.TryGetValue(rain, out GlobalRainState state) &&
+               state.OwnsDeathRain;
     }
 
     private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
@@ -96,9 +106,8 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        // Region weather needs the same renderer/shelter mask/sounds as authored
-        // Rain rooms. Mark only the object DryCycle creates so native RoomRain never
-        // gets suppressed by DryCycle's dormant-state rules.
+        // Region weather needs Rain World's shelter mask, splash data and sound-loop
+        // fields, but the carrier must never run the native RainCycle/Flood update.
         RoomRain roomRain = new(self.game.globalRain, self)
         {
             dangerType = RoomRain.DangerType.Rain
@@ -148,15 +157,15 @@ internal static class RainWeatherRuntime
             StartOwnedDeathRain(self, state);
             orig(self);
 
-            // If another system already owned DeathRain, leave it completely alone.
+            // If another system already owned DeathRain, leave that state completely
+            // untouched rather than scaling a foreign disaster with DryCycle's clock.
             if (!state.OwnsDeathRain)
             {
                 return;
             }
 
-            // Native DeathRain remains responsible for stage selection and all of its
-            // nonlinear relationships. The schedule envelope fades the complete native
-            // output through the extra lead-in/tail windows defined by the scheduler.
+            // Native DeathRain keeps its nonlinear internal state machine. The
+            // universal DryCycle event envelope scales the complete native output.
             self.Intensity *= death;
             self.RumbleSound *= death;
             self.ScreenShake *= death;
@@ -192,173 +201,6 @@ internal static class RainWeatherRuntime
         }
     }
 
-    private static void RoomRain_Update(
-        On.RoomRain.orig_Update orig,
-        RoomRain self,
-        bool eu)
-    {
-        Room room = self?.room;
-        World world = room?.world;
-        bool synthetic = self != null && _syntheticRoomRain.TryGetValue(self, out _);
-
-        // A DryCycle-created RoomRain must never become a hidden source of vanilla
-        // rain after this region's DryCycle switch is turned off. Native RoomRain is
-        // deliberately not touched here and runs through orig exactly as authored.
-        if (synthetic &&
-            (world?.game == null ||
-             !world.game.IsStorySession ||
-             !RegionDayNightOptions.IsEnabled(world)))
-        {
-            QuiesceSyntheticRoomRain(self);
-            return;
-        }
-
-        if (world?.game == null ||
-            !RegionDayNightOptions.IsEnabled(world) ||
-            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
-        {
-            orig(self, eu);
-            return;
-        }
-
-        float rain = Math.Max(
-            WeatherScheduleRuntime.GetIntensity(
-                world,
-                clock,
-                WeatherScheduleEventKind.Weather,
-                "LightRain",
-                "HeavyRain"),
-            WeatherScheduleRuntime.GetIntensity(
-                world,
-                clock,
-                WeatherScheduleEventKind.DangerType,
-                "DeathRain",
-                "Rain"));
-
-        if (rain <= 0.0001f)
-        {
-            if (synthetic)
-            {
-                QuiesceSyntheticRoomRain(self);
-            }
-            else
-            {
-                orig(self, eu);
-            }
-            return;
-        }
-
-        float? previousRainIntensity = room.roomSettings.rInts;
-        RoomRain.DangerType previousDanger = self.dangerType;
-
-        // Regional rain should render in rooms with no authored local rain intensity.
-        room.roomSettings.rInts = 1f;
-        if (synthetic)
-        {
-            self.dangerType = RoomRain.DangerType.Rain;
-        }
-        else if (self.dangerType == RoomRain.DangerType.Flood)
-        {
-            // Kept as a legacy fallback for hook stacks where the direct DangerType
-            // takeover is bypassed by another mod. Normal DryCycle-owned DangerType
-            // rooms are intercepted earlier by RoomDangerTypeTakeoverRuntime.
-            EnsureRainLoopsForPromotedFlood(self);
-            self.dangerType = RoomRain.DangerType.FloodAndRain;
-        }
-
-        try
-        {
-            orig(self, eu);
-        }
-        finally
-        {
-            room.roomSettings.rInts = previousRainIntensity;
-            self.dangerType = previousDanger;
-        }
-    }
-
-    private static void EnsureRainLoopsForPromotedFlood(RoomRain rain)
-    {
-        if (rain == null)
-        {
-            return;
-        }
-
-        if (rain.normalRainSound == null)
-        {
-            rain.normalRainSound = new DisembodiedDynamicSoundLoop(rain)
-            {
-                sound = SoundID.Normal_Rain_LOOP,
-                VolumeGroup = 3
-            };
-        }
-
-        if (rain.heavyRainSound == null)
-        {
-            rain.heavyRainSound = new DisembodiedDynamicSoundLoop(rain)
-            {
-                sound = SoundID.Heavy_Rain_LOOP,
-                VolumeGroup = 3
-            };
-        }
-    }
-
-    private static void QuiesceSyntheticRoomRain(RoomRain rain)
-    {
-        if (rain == null)
-        {
-            return;
-        }
-
-        rain.intensity = 0f;
-        rain.lastIntensity = 0f;
-
-        if (rain.bulletDrips != null)
-        {
-            for (int i = rain.bulletDrips.Count - 1; i >= 0; i--)
-            {
-                rain.bulletDrips[i]?.Destroy();
-            }
-            rain.bulletDrips.Clear();
-        }
-
-        if (rain.normalRainSound != null)
-        {
-            rain.normalRainSound.Volume = 0f;
-            rain.normalRainSound.Update();
-        }
-        if (rain.heavyRainSound != null)
-        {
-            rain.heavyRainSound.Volume = 0f;
-            rain.heavyRainSound.Update();
-        }
-        if (rain.deathRainSound != null)
-        {
-            rain.deathRainSound.Volume = 0f;
-            rain.deathRainSound.Update();
-        }
-        if (rain.rumbleSound != null)
-        {
-            rain.rumbleSound.Volume = 0f;
-            rain.rumbleSound.Update();
-        }
-        if (rain.floodingSound != null)
-        {
-            rain.floodingSound.Volume = 0f;
-            rain.floodingSound.Update();
-        }
-        if (rain.distantDeathRainSound != null)
-        {
-            rain.distantDeathRainSound.Volume = 0f;
-            rain.distantDeathRainSound.Update();
-        }
-        if (rain.SCREENSHAKESOUND != null)
-        {
-            rain.SCREENSHAKESOUND.Volume = 0f;
-            rain.SCREENSHAKESOUND.Update();
-        }
-    }
-
     private static float RoomSettings_GetEffectAmount(
         On.RoomSettings.orig_GetEffectAmount orig,
         RoomSettings self,
@@ -382,8 +224,8 @@ internal static class RainWeatherRuntime
                 : Math.Max(authored, _heavyRainOverride);
         }
 
-        // RoomEffect.BulletRain is deliberately not overridden here. It remains a
-        // native room-authored effect and is no longer a DryCycle scheduled weather.
+        // RoomEffect.BulletRain remains a native room-authored effect. DryCycle no
+        // longer schedules BulletRain and therefore never overrides this channel.
         return authored;
     }
 
@@ -395,6 +237,16 @@ internal static class RainWeatherRuntime
         }
 
         if (rain.deathRain != null)
+        {
+            return;
+        }
+
+        // DeathRain.NextDeathRainMode reads camera[0] in several native story paths.
+        // WorldClock normally guarantees live gameplay here, but fail closed during
+        // room/camera transition frames instead of constructing an invalid native state.
+        if (rain.game?.cameras == null ||
+            rain.game.cameras.Length == 0 ||
+            rain.game.cameras[0]?.room == null)
         {
             return;
         }
