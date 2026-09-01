@@ -17,6 +17,7 @@ internal static class RainWeatherRuntime
     private sealed class GlobalRainState
     {
         internal bool OwnsDeathRain;
+        internal GlobalRain.DeathRain OwnedDeathRain;
         internal float StartFlood;
         internal float StartFloodSpeed;
         internal bool StartForceSlowFlood;
@@ -31,12 +32,6 @@ internal static class RainWeatherRuntime
 
     [ThreadStatic]
     private static float _lightRainOverride;
-
-    // Kept only as an internal compatibility gate for ScheduledHeavyRainTraversalRuntime.
-    // Scheduled HeavyRain is no longer injected through RoomEffect.HeavyRain at all;
-    // the traversal runtime owns its GlobalRain contribution directly.
-    [ThreadStatic]
-    internal static bool SuppressScheduledHeavyOverride;
 
     private static ConditionalWeakTable<GlobalRain, GlobalRainState> _globalStates = new();
     private static ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker> _syntheticRoomRain = new();
@@ -68,7 +63,6 @@ internal static class RainWeatherRuntime
 
         _effectOverrideSettings = null;
         _lightRainOverride = 0f;
-        SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalRainState>();
         _syntheticRoomRain = new ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker>();
         _enabled = false;
@@ -83,7 +77,9 @@ internal static class RainWeatherRuntime
     {
         return rain != null &&
                _globalStates.TryGetValue(rain, out GlobalRainState state) &&
-               state.OwnsDeathRain;
+               state.OwnsDeathRain &&
+               state.OwnedDeathRain != null &&
+               ReferenceEquals(rain.deathRain, state.OwnedDeathRain);
     }
 
     private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
@@ -125,8 +121,6 @@ internal static class RainWeatherRuntime
         bool[] broken = room.world?.brokenShelters;
         if (broken == null || shelterIndex < 0 || shelterIndex >= broken.Length)
         {
-            // Unknown shelter state should fail safe as sheltered rather than creating
-            // a regional rain carrier in a normal hibernation room.
             return true;
         }
 
@@ -148,8 +142,6 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        WeatherScheduleRuntime.Synchronize(world);
-
         float light = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
@@ -168,15 +160,13 @@ internal static class RainWeatherRuntime
             StartOwnedDeathRain(self, state);
             orig(self);
 
-            // If another system already owned DeathRain, leave that state completely
-            // untouched rather than scaling a foreign disaster with DryCycle's clock.
-            if (!state.OwnsDeathRain)
+            // Only scale the exact DeathRain object created by DryCycle. If another
+            // system replaced it, current GlobalRain ownership belongs to that system.
+            if (!OwnsDeathRain(self))
             {
                 return;
             }
 
-            // Native DeathRain keeps its nonlinear internal state machine. The
-            // universal DryCycle event envelope scales the complete native output.
             self.Intensity *= death;
             self.RumbleSound *= death;
             self.ScreenShake *= death;
@@ -225,19 +215,37 @@ internal static class RainWeatherRuntime
             return Math.Max(authored, _lightRainOverride);
         }
 
-        // Scheduled HeavyRain is intentionally absent here. It is layered by
-        // ScheduledHeavyRainTraversalRuntime after the native/authored GlobalRain
-        // baseline has been calculated, which keeps its nonlethal contribution out of
-        // RoomEffect.HeavyRain and native ThrowAroundObjects.
-        // RoomEffect.BulletRain also remains purely room-authored.
+        // Scheduled HeavyRain is layered only after the native GlobalRain pass by
+        // ScheduledHeavyRainTraversalRuntime. RoomEffect.HeavyRain and BulletRain
+        // therefore remain purely room-authored inputs to native physics.
         return authored;
     }
 
     private static void StartOwnedDeathRain(GlobalRain rain, GlobalRainState state)
     {
-        if (rain == null || state == null || state.OwnsDeathRain)
+        if (rain == null || state == null)
         {
             return;
+        }
+
+        if (state.OwnsDeathRain)
+        {
+            if (state.OwnedDeathRain != null &&
+                ReferenceEquals(rain.deathRain, state.OwnedDeathRain))
+            {
+                return;
+            }
+
+            // Our old instance is no longer the current GlobalRain DeathRain. Detach
+            // only that retired object and relinquish ownership; never clear the new
+            // current object that replaced it.
+            if (state.OwnedDeathRain != null &&
+                ReferenceEquals(state.OwnedDeathRain.globalRain, rain))
+            {
+                state.OwnedDeathRain.globalRain = null;
+            }
+            state.OwnedDeathRain = null;
+            state.OwnsDeathRain = false;
         }
 
         if (rain.deathRain != null)
@@ -245,9 +253,6 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        // DeathRain.NextDeathRainMode reads camera[0] in several native story paths.
-        // WorldClock normally guarantees live gameplay here, but fail closed during
-        // room/camera transition frames instead of constructing an invalid native state.
         if (rain.game?.cameras == null ||
             rain.game.cameras.Length == 0 ||
             rain.game.cameras[0]?.room == null)
@@ -259,7 +264,8 @@ internal static class RainWeatherRuntime
         state.StartFloodSpeed = rain.floodSpeed;
         state.StartForceSlowFlood = rain.forceSlowFlood;
         rain.InitDeathRain();
-        state.OwnsDeathRain = true;
+        state.OwnedDeathRain = rain.deathRain;
+        state.OwnsDeathRain = state.OwnedDeathRain != null;
     }
 
     private static void StopOwnedDeathRain(GlobalRain rain)
@@ -271,14 +277,24 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        // Mirror the important ownership cleanup performed by GlobalRain.ResetRain
-        // without resetting RainCycle.timer/HUD or other systems that belong to the
-        // DryCycle clock. Detaching the back-reference prevents a retired native
-        // DeathRain state from retaining/operating on GlobalRain after the event.
-        if (rain.deathRain != null)
+        GlobalRain.DeathRain owned = state.OwnedDeathRain;
+        bool stillCurrent = owned != null && ReferenceEquals(rain.deathRain, owned);
+
+        if (owned != null && ReferenceEquals(owned.globalRain, rain))
         {
-            rain.deathRain.globalRain = null;
+            owned.globalRain = null;
         }
+
+        state.OwnedDeathRain = null;
+        state.OwnsDeathRain = false;
+
+        if (!stillCurrent)
+        {
+            // Another system has already replaced our DeathRain. Do not reset any
+            // GlobalRain outputs/flood fields that may now belong to that system.
+            return;
+        }
+
         rain.deathRain = null;
         rain.Intensity = 0f;
         rain.RumbleSound = 0f;
@@ -289,7 +305,6 @@ internal static class RainWeatherRuntime
         rain.flood = state.StartFlood;
         rain.floodSpeed = state.StartFloodSpeed;
         rain.forceSlowFlood = state.StartForceSlowFlood;
-        state.OwnsDeathRain = false;
     }
 
     private static bool RegionSupportsRain(string regionId)
