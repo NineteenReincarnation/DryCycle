@@ -158,10 +158,20 @@ internal static class RainWeatherRuntime
         if (death > 0.0001f)
         {
             StartOwnedDeathRain(self, state);
+
+            // Native DeathRain.Update also advances GlobalRain's shared flood state.
+            // Scheduled DeathRain owns the rain hazard, not the world's flood lifecycle,
+            // so preserve the exact pre-update flood values and restore them after the
+            // native state machine has produced this frame's intensity/shake outputs.
+            float frameFlood = self.flood;
+            float frameFloodSpeed = self.floodSpeed;
+            bool frameForceSlowFlood = self.forceSlowFlood;
+
             orig(self);
 
-            // Only scale the exact DeathRain object created by DryCycle. If another
-            // system replaced it, current GlobalRain ownership belongs to that system.
+            // Only scale/restore when the exact DeathRain object created by DryCycle is
+            // still current. If another system replaced it during orig(), ownership and
+            // all shared GlobalRain fields immediately belong to that system.
             if (!OwnsDeathRain(self))
             {
                 return;
@@ -172,6 +182,10 @@ internal static class RainWeatherRuntime
             self.ScreenShake *= death;
             self.MicroScreenShake *= death;
             self.bulletRainDensity *= death;
+
+            self.flood = frameFlood;
+            self.floodSpeed = frameFloodSpeed;
+            self.forceSlowFlood = frameForceSlowFlood;
             return;
         }
 
