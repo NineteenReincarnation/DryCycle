@@ -6,6 +6,7 @@ using DryCycle.Rendering;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.Fog;
 using DryCycle.Weather.Scheduling;
+using MoreSlugcats;
 using UnityEngine;
 
 namespace DryCycle.Weather;
@@ -15,10 +16,11 @@ namespace DryCycle.Weather;
 ///
 /// When DryCycle's weather AssetBundle is available, the late GrabShaders layer is a
 /// full scene composite rather than an alpha veil. Gameplay transmittance, volumetric
-/// visual density, room obstacles, fixed Lantern/LanternMouse/theGlow reveal and
-/// pseudo-depth are evaluated per pixel. A whole-room GPU fluid field provides
+/// visual density, room obstacles, fixed Lantern/LanternMouse/theGlow/GlowWeed/LillyPuck
+/// reveal and pseudo-depth are evaluated per pixel. A whole-room GPU fluid field provides
 /// low-frequency motion; a runtime-generated 3D Perlin/Worley-style volume supplies
-/// erosion and billow detail.
+/// erosion and billow detail. Supported explosions disturb that same fluid field rather
+/// than drawing a separate screen-space clearing mask.
 ///
 /// If the custom bundle is absent, incompatible or a room-specific GPU resource cannot
 /// be created, the previous palette-colored mesh remains as a safe compatibility
@@ -41,9 +43,11 @@ internal static class FogWeatherRuntime
     private const float DenseFogPlayerAwarenessStrength = 0.84f;
 
     // Fixed by design: native light radius animation must never make the fog opening
-    // breathe/twitch. These are the minimum intended radii previously agreed on.
+    // breathe/twitch. These values are DryCycle gameplay radii, not LightSource.Rad.
     private const float LanternRevealRadius = 200f;
     private const float LanternMouseRevealRadius = 40f;
+    private const float GlowWeedRevealRadius = LanternMouseRevealRadius;
+    private const float LillyPuckRevealRadius = LanternMouseRevealRadius;
 
     // Rain World tiles are 20px. theGlow is deliberately much smaller than the native
     // 300px PlayerGraphics LightSource: exactly two tiles of radius beyond LanternMouse.
@@ -90,6 +94,8 @@ internal static class FogWeatherRuntime
     {
         private readonly List<Lantern> _lanterns = new();
         private readonly List<LanternMouse> _lanternMice = new();
+        private readonly List<GlowWeed> _glowWeeds = new();
+        private readonly List<LillyPuck> _lillyPucks = new();
         private readonly List<RevealSample> _fallbackRevealSamples = new();
         private readonly Vector4[] _fogLightData = new Vector4[MaxFogLights];
         private readonly Vector4[] _fogLightColors = new Vector4[MaxFogLights];
@@ -519,6 +525,76 @@ internal static class FogWeatherRuntime
                 }
             }
 
+            for (int i = _glowWeeds.Count - 1;
+                 i >= 0 && count < MaxFogLights;
+                 i--)
+            {
+                GlowWeed glowWeed = _glowWeeds[i];
+                if (glowWeed == null ||
+                    glowWeed.slatedForDeletetion ||
+                    glowWeed.room != room ||
+                    glowWeed.firstChunk == null)
+                {
+                    _glowWeeds.RemoveAt(i);
+                    continue;
+                }
+
+                float strength = Mathf.Clamp01(glowWeed.bites / 3f);
+                if (strength <= Epsilon)
+                {
+                    continue;
+                }
+
+                Vector2 position = Vector2.Lerp(
+                    glowWeed.firstChunk.lastPos,
+                    glowWeed.firstChunk.pos,
+                    timeStacker);
+                Color color = glowWeed.myLight?.color ?? new Color(0.8f, 1f, 0.4f);
+
+                _fogLightData[count] = new Vector4(
+                    position.x,
+                    position.y,
+                    GlowWeedRevealRadius,
+                    strength);
+                _fogLightColors[count] = color;
+                count++;
+            }
+
+            for (int i = _lillyPucks.Count - 1;
+                 i >= 0 && count < MaxFogLights;
+                 i--)
+            {
+                LillyPuck lillyPuck = _lillyPucks[i];
+                if (lillyPuck == null ||
+                    lillyPuck.slatedForDeletetion ||
+                    lillyPuck.room != room ||
+                    lillyPuck.firstChunk == null)
+                {
+                    _lillyPucks.RemoveAt(i);
+                    continue;
+                }
+
+                float strength = Mathf.Clamp01(lillyPuck.lightFade);
+                if (strength <= Epsilon)
+                {
+                    continue;
+                }
+
+                Vector2 position = Vector2.Lerp(
+                    lillyPuck.firstChunk.lastPos,
+                    lillyPuck.firstChunk.pos,
+                    timeStacker);
+                Color color = lillyPuck.light?.color ?? lillyPuck.flowerColor;
+
+                _fogLightData[count] = new Vector4(
+                    position.x,
+                    position.y,
+                    LillyPuckRevealRadius,
+                    strength);
+                _fogLightColors[count] = color;
+                count++;
+            }
+
             return count;
         }
 
@@ -568,6 +644,8 @@ internal static class FogWeatherRuntime
         {
             _lanterns.Clear();
             _lanternMice.Clear();
+            _glowWeeds.Clear();
+            _lillyPucks.Clear();
             if (room?.updateList == null)
             {
                 return;
@@ -588,6 +666,14 @@ internal static class FogWeatherRuntime
                 else if (obj is LanternMouse mouse)
                 {
                     _lanternMice.Add(mouse);
+                }
+                else if (ModManager.MSC && obj is GlowWeed glowWeed)
+                {
+                    _glowWeeds.Add(glowWeed);
+                }
+                else if (ModManager.MSC && obj is LillyPuck lillyPuck)
+                {
+                    _lillyPucks.Add(lillyPuck);
                 }
             }
         }
@@ -674,6 +760,62 @@ internal static class FogWeatherRuntime
                         TheGlowRevealRadius,
                         1f));
                 }
+            }
+
+            for (int i = _glowWeeds.Count - 1; i >= 0; i--)
+            {
+                GlowWeed glowWeed = _glowWeeds[i];
+                if (glowWeed == null ||
+                    glowWeed.slatedForDeletetion ||
+                    glowWeed.room != room ||
+                    glowWeed.firstChunk == null)
+                {
+                    _glowWeeds.RemoveAt(i);
+                    continue;
+                }
+
+                float strength = Mathf.Clamp01(glowWeed.bites / 3f);
+                if (strength <= Epsilon)
+                {
+                    continue;
+                }
+
+                Vector2 position = Vector2.Lerp(
+                    glowWeed.firstChunk.lastPos,
+                    glowWeed.firstChunk.pos,
+                    timeStacker);
+                _fallbackRevealSamples.Add(new RevealSample(
+                    position,
+                    GlowWeedRevealRadius,
+                    strength));
+            }
+
+            for (int i = _lillyPucks.Count - 1; i >= 0; i--)
+            {
+                LillyPuck lillyPuck = _lillyPucks[i];
+                if (lillyPuck == null ||
+                    lillyPuck.slatedForDeletetion ||
+                    lillyPuck.room != room ||
+                    lillyPuck.firstChunk == null)
+                {
+                    _lillyPucks.RemoveAt(i);
+                    continue;
+                }
+
+                float strength = Mathf.Clamp01(lillyPuck.lightFade);
+                if (strength <= Epsilon)
+                {
+                    continue;
+                }
+
+                Vector2 position = Vector2.Lerp(
+                    lillyPuck.firstChunk.lastPos,
+                    lillyPuck.firstChunk.pos,
+                    timeStacker);
+                _fallbackRevealSamples.Add(new RevealSample(
+                    position,
+                    LillyPuckRevealRadius,
+                    strength));
             }
 
             if (denseStrength <= Epsilon || room?.game?.Players == null)
