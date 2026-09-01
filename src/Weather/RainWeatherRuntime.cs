@@ -272,7 +272,13 @@ internal static class RainWeatherRuntime
         }
         else if (self.dangerType == RoomRain.DangerType.Flood)
         {
-            // Preserve an authored flood while adding scheduled regional rain.
+            // A RoomRain constructed as Flood deliberately has no normal/heavy rain
+            // sound loops. Promoting that same object to FloodAndRain without creating
+            // them makes vanilla RoomRain.Update dereference null at its rain-sound
+            // section every frame. This was the DangerType freeze reported in 0.1.101.
+            // Create only the loops required by our temporary promotion; the authored
+            // room DangerType itself is restored in finally and remains untouched.
+            EnsureRainLoopsForPromotedFlood(self);
             self.dangerType = RoomRain.DangerType.FloodAndRain;
         }
 
@@ -284,6 +290,32 @@ internal static class RainWeatherRuntime
         {
             room.roomSettings.rInts = previousRainIntensity;
             self.dangerType = previousDanger;
+        }
+    }
+
+    private static void EnsureRainLoopsForPromotedFlood(RoomRain rain)
+    {
+        if (rain == null)
+        {
+            return;
+        }
+
+        if (rain.normalRainSound == null)
+        {
+            rain.normalRainSound = new DisembodiedDynamicSoundLoop(rain)
+            {
+                sound = SoundID.Normal_Rain_LOOP,
+                VolumeGroup = 3
+            };
+        }
+
+        if (rain.heavyRainSound == null)
+        {
+            rain.heavyRainSound = new DisembodiedDynamicSoundLoop(rain)
+            {
+                sound = SoundID.Heavy_Rain_LOOP,
+                VolumeGroup = 3
+            };
         }
     }
 
