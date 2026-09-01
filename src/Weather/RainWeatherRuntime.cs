@@ -8,8 +8,8 @@ namespace DryCycle.Weather;
 
 /// <summary>
 /// Bridges scheduled Rain variants into Rain World's native rain simulation.
-/// Passive variants reuse the original RoomEffect channels; DeathRain reuses the
-/// native GlobalRain.DeathRain state machine but is owned only for the scheduled
+/// LightRain and HeavyRain reuse the original RoomEffect channels; DeathRain reuses
+/// the native GlobalRain.DeathRain state machine but is owned only for the scheduled
 /// interval and is cleaned up when that interval ends.
 /// </summary>
 internal static class RainWeatherRuntime
@@ -34,9 +34,6 @@ internal static class RainWeatherRuntime
 
     [ThreadStatic]
     private static float _heavyRainOverride;
-
-    [ThreadStatic]
-    private static float _bulletRainOverride;
 
     // ScheduledHeavyRainTraversalRuntime temporarily opens this gate only while
     // GlobalRain is establishing the room-authored/native HeavyRain baseline. It is
@@ -77,7 +74,6 @@ internal static class RainWeatherRuntime
         _effectOverrideSettings = null;
         _lightRainOverride = 0f;
         _heavyRainOverride = 0f;
-        _bulletRainOverride = 0f;
         SuppressScheduledHeavyOverride = false;
         _globalStates = new ConditionalWeakTable<GlobalRain, GlobalRainState>();
         _syntheticRoomRain = new ConditionalWeakTable<RoomRain, SyntheticRoomRainMarker>();
@@ -139,11 +135,6 @@ internal static class RainWeatherRuntime
             clock,
             WeatherScheduleEventKind.Weather,
             "HeavyRain");
-        float bullet = WeatherScheduleRuntime.GetIntensity(
-            world,
-            clock,
-            WeatherScheduleEventKind.Weather,
-            "BulletRain");
         float death = WeatherScheduleRuntime.GetIntensity(
             world,
             clock,
@@ -184,12 +175,10 @@ internal static class RainWeatherRuntime
         RoomSettings previousSettings = _effectOverrideSettings;
         float previousLight = _lightRainOverride;
         float previousHeavy = _heavyRainOverride;
-        float previousBullet = _bulletRainOverride;
 
         _effectOverrideSettings = settings;
         _lightRainOverride = light;
         _heavyRainOverride = heavy;
-        _bulletRainOverride = bullet;
 
         try
         {
@@ -200,7 +189,6 @@ internal static class RainWeatherRuntime
             _effectOverrideSettings = previousSettings;
             _lightRainOverride = previousLight;
             _heavyRainOverride = previousHeavy;
-            _bulletRainOverride = previousBullet;
         }
     }
 
@@ -239,8 +227,7 @@ internal static class RainWeatherRuntime
                 clock,
                 WeatherScheduleEventKind.Weather,
                 "LightRain",
-                "HeavyRain",
-                "BulletRain"),
+                "HeavyRain"),
             WeatherScheduleRuntime.GetIntensity(
                 world,
                 clock,
@@ -272,12 +259,9 @@ internal static class RainWeatherRuntime
         }
         else if (self.dangerType == RoomRain.DangerType.Flood)
         {
-            // A RoomRain constructed as Flood deliberately has no normal/heavy rain
-            // sound loops. Promoting that same object to FloodAndRain without creating
-            // them makes vanilla RoomRain.Update dereference null at its rain-sound
-            // section every frame. This was the DangerType freeze reported in 0.1.101.
-            // Create only the loops required by our temporary promotion; the authored
-            // room DangerType itself is restored in finally and remains untouched.
+            // Kept as a legacy fallback for hook stacks where the direct DangerType
+            // takeover is bypassed by another mod. Normal DryCycle-owned DangerType
+            // rooms are intercepted earlier by RoomDangerTypeTakeoverRuntime.
             EnsureRainLoopsForPromotedFlood(self);
             self.dangerType = RoomRain.DangerType.FloodAndRain;
         }
@@ -398,11 +382,8 @@ internal static class RainWeatherRuntime
                 : Math.Max(authored, _heavyRainOverride);
         }
 
-        if (type == RoomSettings.RoomEffect.Type.BulletRain)
-        {
-            return Math.Max(authored, _bulletRainOverride);
-        }
-
+        // RoomEffect.BulletRain is deliberately not overridden here. It remains a
+        // native room-authored effect and is no longer a DryCycle scheduled weather.
         return authored;
     }
 
@@ -452,7 +433,6 @@ internal static class RainWeatherRuntime
         return RegionClimateRegistry.RegionCanUseWeather(regionId, "Rain") ||
                RegionClimateRegistry.RegionCanUseWeather(regionId, "LightRain") ||
                RegionClimateRegistry.RegionCanUseWeather(regionId, "HeavyRain") ||
-               RegionClimateRegistry.RegionCanUseWeather(regionId, "BulletRain") ||
                RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathRain") ||
                RegionClimateRegistry.RegionCanUseDanger(regionId, "Rain");
     }
