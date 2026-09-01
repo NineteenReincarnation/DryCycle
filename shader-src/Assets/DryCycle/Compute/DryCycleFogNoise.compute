@@ -1,0 +1,109 @@
+#pragma kernel GenerateFogNoise
+
+RWTexture3D<float4> _NoiseVolume;
+int _VolumeSize;
+
+float Hash11(float n)
+{
+    return frac(sin(n) * 43758.5453123);
+}
+
+float3 Hash33(float3 p)
+{
+    p = frac(p * float3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return frac((p.xxy + p.yxx) * p.zyx);
+}
+
+float ValueNoise(float3 p)
+{
+    float3 cell = floor(p);
+    float3 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = Hash11(dot(cell + float3(0, 0, 0), float3(1, 57, 113)));
+    float n100 = Hash11(dot(cell + float3(1, 0, 0), float3(1, 57, 113)));
+    float n010 = Hash11(dot(cell + float3(0, 1, 0), float3(1, 57, 113)));
+    float n110 = Hash11(dot(cell + float3(1, 1, 0), float3(1, 57, 113)));
+    float n001 = Hash11(dot(cell + float3(0, 0, 1), float3(1, 57, 113)));
+    float n101 = Hash11(dot(cell + float3(1, 0, 1), float3(1, 57, 113)));
+    float n011 = Hash11(dot(cell + float3(0, 1, 1), float3(1, 57, 113)));
+    float n111 = Hash11(dot(cell + float3(1, 1, 1), float3(1, 57, 113)));
+
+    float x00 = lerp(n000, n100, f.x);
+    float x10 = lerp(n010, n110, f.x);
+    float x01 = lerp(n001, n101, f.x);
+    float x11 = lerp(n011, n111, f.x);
+    float y0 = lerp(x00, x10, f.y);
+    float y1 = lerp(x01, x11, f.y);
+    return lerp(y0, y1, f.z);
+}
+
+float FBM(float3 p)
+{
+    float value = 0.0;
+    float amplitude = 0.5;
+    [unroll]
+    for (int i = 0; i < 5; i++)
+    {
+        value += ValueNoise(p) * amplitude;
+        p = p * 2.03 + float3(17.1, 9.2, 13.7);
+        amplitude *= 0.5;
+    }
+    return saturate(value);
+}
+
+float WorleyF1(float3 p)
+{
+    float3 baseCell = floor(p);
+    float3 local = frac(p);
+    float minDistanceSquared = 8.0;
+
+    [unroll]
+    for (int z = -1; z <= 1; z++)
+    {
+        [unroll]
+        for (int y = -1; y <= 1; y++)
+        {
+            [unroll]
+            for (int x = -1; x <= 1; x++)
+            {
+                float3 offset = float3(x, y, z);
+                float3 feature = Hash33(baseCell + offset);
+                float3 delta = offset + feature - local;
+                minDistanceSquared = min(minDistanceSquared, dot(delta, delta));
+            }
+        }
+    }
+
+    return saturate(sqrt(minDistanceSquared) / 1.7320508);
+}
+
+[numthreads(4, 4, 4)]
+void GenerateFogNoise(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _VolumeSize || id.y >= _VolumeSize || id.z >= _VolumeSize)
+        return;
+
+    float3 uv = (float3(id) + 0.5) / (float)_VolumeSize;
+
+    // The volume tiles seamlessly enough for fog because it is sampled with domain
+    // warping and several incommensurate frequencies in the final composite.
+    float fbmLow = FBM(uv * 4.0);
+    float fbmHigh = FBM(uv * 11.0 + float3(3.7, 9.1, 1.4));
+    float worleyLow = WorleyF1(uv * 5.0 + 2.3);
+    float worleyHigh = WorleyF1(uv * 13.0 + float3(4.2, 1.3, 7.7));
+
+    // Horizon/Nubis-like authoring principle: coherent Perlin/value-noise mass is
+    // eroded by cellular detail instead of simply multiplying two noise textures.
+    float macro = saturate(fbmLow * 1.18 - worleyLow * 0.38 + 0.16);
+    float erosion = saturate(1.0 - worleyHigh);
+    float detail = saturate(fbmHigh * 0.58 + erosion * 0.42);
+    float hybrid = saturate(macro - (1.0 - detail) * 0.24);
+
+    _NoiseVolume[id] = float4(
+        hybrid,
+        saturate(1.0 - worleyLow),
+        detail,
+        saturate(1.0 - worleyHigh));
+}
