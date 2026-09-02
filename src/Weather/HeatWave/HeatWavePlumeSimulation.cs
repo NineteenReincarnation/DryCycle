@@ -7,19 +7,19 @@ namespace DryCycle.Weather.HeatWave;
 /// <summary>
 /// Persistent visual plume field driven by the physical thermal solver.
 ///
-/// This is deliberately not a second fluid simulation for gameplay. The thermal solver
+/// This is deliberately not a second gameplay fluid simulation. The thermal solver
 /// remains authoritative for air/heat motion; this field extracts sparse, coherent
-/// rising bodies that are suitable for presentation. R=density, G=hot core, B=age,
-/// A=stable plume identity/phase. The composite shader uses this as a local mask, so
-/// strong refraction exists only inside readable hot-air structures.
+/// rising bodies suitable for presentation. R=density, G=hot core, B=age, A=stable
+/// plume identity/phase. Strong refraction therefore exists only inside readable hot
+/// air structures.
 /// </summary>
 internal sealed class HeatWavePlumeSimulation : IDisposable
 {
     private const int CellsPerTile = 4;
     private const int MaxWidth = 1024;
     private const int MaxHeight = 512;
-    private const int PrimeSteps = 14;
-    private const float PrimeStepSeconds = 0.11f;
+    private const int PrimeRelaxSteps = 8;
+    private const float PrimeRelaxStepSeconds = 0.08f;
 
     private readonly Room _room;
     private readonly HeatWaveTerrainField _terrain;
@@ -28,6 +28,7 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
     private RenderTexture _read;
     private RenderTexture _write;
     private int _initializeKernel;
+    private int _primeKernel;
     private int _advectKernel;
     private int _injectKernel;
     private float _elapsed;
@@ -51,6 +52,7 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
         {
             _solver = UnityEngine.Object.Instantiate(DryCycleShaderAssets.HeatWavePlumeCompute);
             _initializeKernel = _solver.FindKernel("InitializePlumes");
+            _primeKernel = _solver.FindKernel("PrimePlumes");
             _advectKernel = _solver.FindKernel("AdvectPlumes");
             _injectKernel = _solver.FindKernel("InjectPlumes");
 
@@ -93,9 +95,11 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
         float intensity = Mathf.Clamp01(weatherIntensity);
         float solar = Mathf.Clamp01(solarIntensity);
 
-        // Entering an already-hot room must show established convection immediately.
-        // Prewarming advances only this visual field; gameplay/physical thermal state is
-        // untouched, and the one-time cost happens only on a cold->active transition.
+        // The previous implementation tried to "prime" by running ~1.5 seconds of the
+        // normal stochastic birth cycle. Some lanes have much longer inactive phases,
+        // so a room could legitimately enter HeatWave with an almost black plume field.
+        // PrimePlumes writes an established but deterministic convection snapshot once;
+        // a few normal steps then relax it into the live velocity field.
         if (_lastIntensity <= 0.025f && intensity > 0.08f)
         {
             Prime(intensity, solar, thermalTexture, velocityTexture);
@@ -136,10 +140,18 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
         Texture thermalTexture,
         Texture velocityTexture)
     {
-        for (int i = 0; i < PrimeSteps; i++)
+        SetCommonParameters(PrimeRelaxStepSeconds, intensity, solar);
+        _solver.SetTexture(_primeKernel, "_PlumeWrite", _read);
+        _solver.SetTexture(_primeKernel, "_ThermalTex", thermalTexture);
+        _solver.SetTexture(_primeKernel, "_VelocityTex", velocityTexture);
+        _solver.SetTexture(_primeKernel, "_TerrainTex", _terrain.Texture);
+        Dispatch(_primeKernel);
+        Graphics.Blit(_read, _write);
+
+        for (int i = 0; i < PrimeRelaxSteps; i++)
         {
             Advance(
-                PrimeStepSeconds,
+                PrimeRelaxStepSeconds,
                 intensity,
                 solar,
                 thermalTexture,
