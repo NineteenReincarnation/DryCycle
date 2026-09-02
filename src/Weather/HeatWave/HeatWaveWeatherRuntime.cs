@@ -7,15 +7,18 @@ using UnityEngine;
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// WorldClock-driven HeatWave owner. HeatWave has no RoomSettings weather effect and
-/// does not borrow a native Rain World heat-haze object. A tiny controller may exist in
-/// every DryCycle story room, but expensive terrain/GPU resources are allocated lazily
-/// only when the scheduled weather (or developer force mode) actually becomes active.
+/// WorldClock-driven desert HeatWave owner. HeatWave has no RoomSettings weather
+/// effect. The GPU thermal field remains a background driver, while the presentation
+/// shader decides where visible ground shimmer/plumes are allowed to exist.
+///
+/// Thermal Burst is intentionally disabled in this revision. The previous burst had a
+/// disproportionate explosion-like sound/response without a readable hot-air visual
+/// event. It will not return until it has a dedicated presentation worthy of the weather.
 /// </summary>
 internal static class HeatWaveWeatherRuntime
 {
     private const float Epsilon = 0.0001f;
-    private const float ResidualSeconds = 14f;
+    private const float ResidualSeconds = 7f;
 
     private static ConditionalWeakTable<Room, HeatWaveController> _controllers = new();
     private static bool _enabled;
@@ -74,9 +77,8 @@ internal static class HeatWaveWeatherRuntime
     }
 
     /// <summary>
-    /// Gameplay systems may use this scalar, but never the GPU thermal texture, as a
-    /// deterministic room-wide HeatWave influence. Keeping gameplay authoritative on
-    /// schedule data prevents graphics support or simulation resolution changing rules.
+    /// Deterministic gameplay influence. GPU textures are never authoritative for
+    /// temperature/gameplay behavior.
     /// </summary>
     internal static float GetAmbientHeatInfluence(Room room)
     {
@@ -86,14 +88,6 @@ internal static class HeatWaveWeatherRuntime
         }
 
         return Mathf.Clamp01(intensity);
-    }
-
-    internal static void DebugForceBurst(Room room)
-    {
-        if (room != null && _controllers.TryGetValue(room, out HeatWaveController controller))
-        {
-            controller.DebugForceBurst();
-        }
     }
 
     internal static bool TryGetDebugSnapshot(Room room, out HeatWaveDebugSnapshot snapshot)
@@ -124,7 +118,10 @@ internal static class HeatWaveWeatherRuntime
 
     private sealed class HeatWaveController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
-        private readonly HeatWaveBurstController _burst;
+        // HeatWaveThermalSimulation currently accepts the shared burst-state contract.
+        // Keeping one controller at its untouched neutral defaults avoids a broad solver
+        // rewrite while guaranteeing no charge/release/burst can occur.
+        private readonly HeatWaveBurstController _neutralThermalState;
         private readonly HeatWaveAudio _audio;
 
         private HeatWaveTerrainField _terrain;
@@ -144,7 +141,7 @@ internal static class HeatWaveWeatherRuntime
         internal HeatWaveController(Room ownerRoom)
         {
             room = ownerRoom;
-            _burst = new HeatWaveBurstController(ownerRoom);
+            _neutralThermalState = new HeatWaveBurstController(ownerRoom);
             _audio = new HeatWaveAudio(this);
         }
 
@@ -184,24 +181,18 @@ internal static class HeatWaveWeatherRuntime
             }
 
             _solar = EvaluateSolar(clock);
-            _burst.Update(1f / 40f, _intensity, _solar);
 
             float whiteBase = Mathf.SmoothStep(
                 0f,
                 1f,
-                Mathf.InverseLerp(0.16f, 1f, _intensity));
-            float solarWhite = Mathf.Pow(Mathf.Clamp01(_solar), 0.62f);
-            _whiteHeat = Mathf.Clamp01(
-                whiteBase * solarWhite * 0.94f +
-                _burst.BurstStrength * solarWhite * 0.08f);
+                Mathf.InverseLerp(0.14f, 1f, _intensity));
+            float solarWhite = Mathf.Pow(Mathf.Clamp01(_solar), 0.60f);
+            _whiteHeat = Mathf.Clamp01(whiteBase * solarWhite);
 
             _visualTime += 1f / 40f;
             _audio.Update(
                 _intensity,
                 _solar,
-                _burst.Stillness,
-                _burst.BurstStrength,
-                _burst.BurstKick,
                 _visualTime);
 
             if ((_intensity > Epsilon || _cooldown > 0f) &&
@@ -211,7 +202,7 @@ internal static class HeatWaveWeatherRuntime
                     1f / 40f,
                     _intensity,
                     _solar,
-                    _burst);
+                    _neutralThermalState);
             }
         }
 
@@ -253,8 +244,6 @@ internal static class HeatWaveWeatherRuntime
                 return;
             }
 
-            // Debug force/view can be enabled before the scheduled weather has ever
-            // allocated this room's resources. Initialize lazily at the first draw.
             EnsureResources();
 
             Vector2 roomSize = _terrain?.RoomSizePixels ?? new Vector2(
@@ -266,9 +255,6 @@ internal static class HeatWaveWeatherRuntime
                 intensity,
                 whiteHeat,
                 solar,
-                _burst.BurstStrength,
-                _burst.BurstKick,
-                _burst.Stillness,
                 _visualTime,
                 active,
                 _simulation?.IsAvailable == true,
@@ -310,12 +296,6 @@ internal static class HeatWaveWeatherRuntime
             base.Destroy();
         }
 
-        internal void DebugForceBurst()
-        {
-            EnsureResources();
-            _burst.DebugTrigger();
-        }
-
         internal bool TryGetDebugSnapshot(out HeatWaveDebugSnapshot snapshot)
         {
             int emitters = _simulation?.EmitterCount ?? CountPlacedEmitters();
@@ -323,12 +303,7 @@ internal static class HeatWaveWeatherRuntime
                 _intensity,
                 _solar,
                 _whiteHeat,
-                _burst.Instability,
-                _burst.Stillness,
-                _burst.BurstStrength,
-                _burst.BurstKick,
                 _simulation?.IsAvailable == true,
-                _burst.PhaseName,
                 emitters);
             return true;
         }
