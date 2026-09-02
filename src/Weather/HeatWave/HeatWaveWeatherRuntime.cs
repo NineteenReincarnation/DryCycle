@@ -51,6 +51,11 @@ internal static class HeatWaveWeatherRuntime
     internal static bool TryEvaluate(Room room, out float intensity)
     {
         intensity = 0f;
+        if (!_enabled)
+        {
+            return false;
+        }
+
         if (HeatWaveDebugRuntime.TryGetForcedIntensity(room, out float forced))
         {
             intensity = forced;
