@@ -4,46 +4,14 @@ using UnityEngine;
 
 namespace DryCycle.Weather.HeatWave;
 
-internal readonly struct HeatColumnEmitterSample
-{
-    internal readonly Vector2 Start;
-    internal readonly Vector2 End;
-    internal readonly float Radius;
-    internal readonly float Strength;
-    internal readonly float Turbulence;
-    internal readonly float FlowSpeed;
-    internal readonly float Expansion;
-    internal readonly float Pulse;
-
-    internal HeatColumnEmitterSample(
-        Vector2 start,
-        Vector2 end,
-        float radius,
-        float strength,
-        float turbulence,
-        float flowSpeed,
-        float expansion,
-        float pulse)
-    {
-        Start = start;
-        End = end;
-        Radius = Mathf.Clamp(radius, 16f, 360f);
-        Strength = Mathf.Clamp(strength, 0f, 2.5f);
-        Turbulence = Mathf.Clamp(turbulence, 0f, 2.5f);
-        FlowSpeed = Mathf.Clamp(flowSpeed, 0.15f, 3f);
-        Expansion = Mathf.Clamp(expansion, 0.35f, 2.6f);
-        Pulse = Mathf.Clamp01(pulse);
-    }
-}
-
 /// <summary>
-/// Mapper-authored local thermal emitter. It never renders a sprite and never decides
-/// whether weather is active; HeatWave samples it only while the weather is present.
-/// FlowVector is a soft preferred path, not a rigid particle trajectory.
+/// Mapper-authored local hot-air distortion volume.
 ///
-/// V2 separates visual reach from flow speed and exposes plume expansion/pulsation so
-/// a tall slow column, compact violent vent or broad wavering thermal sheet can share
-/// the same simulation contract. V1 rooms remain readable.
+/// HeatColumn is deliberately not the global HeatWave weather. It describes a strong
+/// local heat source whose authored direction/reach is rendered with Rain World's
+/// HeatDistortion language while HeatWave is active. V2 keeps reach, width, intensity,
+/// turbulence, flow speed, expansion and pulse independently editable. V1 room data
+/// remains readable for backwards compatibility.
 /// </summary>
 internal sealed class HeatColumnData : PlacedObject.Data
 {
