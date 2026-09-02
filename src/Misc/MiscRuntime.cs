@@ -11,6 +11,7 @@ internal static class MiscRuntime
             return;
         }
 
+        DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable();
         PaletteDirectInputRuntime.Enable();
         IndividualPlacedObjectViewer.Enable();
         FadePaletteCombiner.Enable();
@@ -27,6 +28,7 @@ internal static class MiscRuntime
         FadePaletteCombiner.Disable();
         IndividualPlacedObjectViewer.Disable();
         PaletteDirectInputRuntime.Disable();
+        DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Disable();
         _enabled = false;
     }
 }
