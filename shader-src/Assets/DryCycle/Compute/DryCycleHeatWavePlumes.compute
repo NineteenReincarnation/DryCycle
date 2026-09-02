@@ -96,9 +96,6 @@ float GroundSource(float2 uv)
 
 float SpawnEnvelope(float worldX)
 {
-    // Wide lanes create coherent plume families. Each lane owns its own slow cycle,
-    // while a second offset lane breaks the obvious spacing so the horizon never reads
-    // as a row of synchronized emitters.
     float lane = floor(worldX / 68.0);
     float laneSeed = Hash11(lane * 1.731 + 7.13);
     float speed = lerp(0.050, 0.091, Hash11(lane + 19.7));
@@ -149,9 +146,6 @@ void AdvectPlumes(uint3 dispatchId : SV_DispatchThreadID)
     float4 thermal = _ThermalTex.SampleLevel(LinearClampSampler, uv, 0.0);
     float2 velocity = _VelocityTex.SampleLevel(LinearClampSampler, uv, 0.0).xy;
 
-    // The physical field decides the broad route. Presentation adds a restrained
-    // buoyant rise so visually coherent plumes do not disappear when the pressure
-    // projection temporarily flattens a weak local velocity cell.
     float risePx = lerp(24.0, 58.0, saturate(thermal.r * 1.45 + _HeatIntensity * 0.34));
     float swayPhase = uv.y * 11.7 + uv.x * 7.3 + _SimulationTime * 0.31;
     float swayPx = sin(swayPhase) * 5.5 + sin(swayPhase * 0.47 + 1.9) * 3.2;
@@ -179,8 +173,6 @@ void AdvectPlumes(uint3 dispatchId : SV_DispatchThreadID)
         saturate(backUv + float2(0.0, texel.y)),
         0.0);
 
-    // Horizontal diffusion is intentionally stronger than vertical diffusion. Hot
-    // columns widen and mushroom as they rise instead of turning into long thin smoke.
     float densityWide = (left.r + right.r) * 0.5;
     float densityVertical = (down.r + up.r) * 0.5;
     float spread = saturate(_DeltaTime * (3.0 + center.b * 2.2));
@@ -194,7 +186,6 @@ void AdvectPlumes(uint3 dispatchId : SV_DispatchThreadID)
     float dissipationPerSecond = lerp(0.16, 0.42, age) + cooling * 1.75;
     density *= exp(-_DeltaTime * dissipationPerSecond);
 
-    // Slow coherent erosion tears one plume into lobes without frame-random noise.
     float erosion =
         sin(uv.x * 41.0 + uv.y * 27.0 - _SimulationTime * 0.43 + center.a * Tau) * 0.5 +
         sin(uv.x * 19.0 - uv.y * 35.0 + _SimulationTime * 0.29 + 1.4) * 0.5;
@@ -227,28 +218,41 @@ void InjectPlumes(uint3 dispatchId : SV_DispatchThreadID)
         return;
     }
 
-    float4 previous = _PlumeRead.Load(int3(id, 0));
+    float4 previous = _PlumeRead.SampleLevel(LinearClampSampler, uv, 0.0);
     float boundary = GroundSource(uv);
     float4 thermal = _ThermalTex.SampleLevel(LinearClampSampler, uv, 0.0);
+    float2 velocityUv = _VelocityTex.SampleLevel(LinearClampSampler, uv, 0.0).xy;
+    float2 velocityPx = velocityUv * _RoomSizePx.xy;
     float worldX = uv.x * _RoomSizePx.x;
     float spawn = SpawnEnvelope(worldX);
 
-    // Small-scale spatial breakup prevents an exposed platform from injecting one
-    // continuous curtain. The wide spawn envelope above still keeps neighboring cells
-    // coherent enough to form a readable rising body.
     float cellPattern = lerp(
         0.48,
         1.0,
         Hash12(float2(floor(worldX / 17.0), floor(uv.y * 61.0))));
     float solarDrive = lerp(0.46, 1.0, saturate(_RoomSolarIntensity));
     float thermalDrive = lerp(0.58, 1.18, saturate(thermal.r * 1.35));
-    float source = boundary *
-                   saturate(_HeatIntensity) *
-                   solarDrive *
-                   spawn *
-                   cellPattern *
-                   thermalDrive;
 
+    float groundSource = boundary *
+                         saturate(_HeatIntensity) *
+                         solarDrive *
+                         spawn *
+                         cellPattern *
+                         thermalDrive;
+
+    // Strong hot updrafts can seed presentation away from the ground. This is how
+    // future HeatColumn emitters remain visually meaningful even though raw thermal
+    // gradients are no longer shown directly. Thresholds are intentionally high so a
+    // generally warm room cannot turn into a full-screen distortion mask.
+    float rising = smoothstep(16.0, 72.0, velocityPx.y);
+    float hotCore = smoothstep(0.34, 0.78, thermal.r);
+    float aloftBreakup = Smooth01(
+        sin(uv.x * 33.1 + uv.y * 21.7 + _SimulationTime * 0.19) * 0.5 + 0.5);
+    float risingSource = hotCore * rising *
+                         lerp(0.42, 1.0, aloftBreakup) *
+                         saturate(_HeatIntensity) * 0.72;
+
+    float source = max(groundSource, risingSource);
     float density = saturate(previous.r + source * _DeltaTime * 5.6);
     float core = saturate(max(previous.g, source * 0.92 + thermal.r * 0.32));
     float age = source > 0.018
