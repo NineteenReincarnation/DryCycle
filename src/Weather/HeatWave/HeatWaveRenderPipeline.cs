@@ -51,8 +51,21 @@ internal static class HeatWaveRenderPipeline
     internal const int AtmosphereLayer = 0;
     internal const int LayerCount = 1;
 
+    // The shader is authored in pixel-like displacement units. HeatWave deliberately
+    // resolves those units slightly larger than physical pixels at high intensity so a
+    // broad open-air region visibly trembles instead of only producing sub-pixel shimmer.
+    private const float MinimumDistortionScale = 1.08f;
+    private const float MaximumDistortionScale = 1.28f;
+
+    // Thermal sheets already move in world space. Their original rates were intentionally
+    // conservative and could leave a warm band near the same height for too long. This
+    // accelerates only the HeatWave shader clock; gameplay time and audio timing stay put.
+    private const float MinimumShaderTimeScale = 1.55f;
+    private const float MaximumShaderTimeScale = 2.25f;
+
     private static readonly MaterialPropertyBlock MaterialProperties = new();
 
+    private static readonly int ScreenSizeId = Shader.PropertyToID("_screenSize");
     private static readonly int RoomSizePxId = Shader.PropertyToID("_DryCycleHeatRoomSizePx");
     private static readonly int IntensityId = Shader.PropertyToID("_DryCycleHeatWaveIntensity");
     private static readonly int SolarIntensityId = Shader.PropertyToID("_DryCycleHeatSolarIntensity");
@@ -140,7 +153,12 @@ internal static class HeatWaveRenderPipeline
         sprite.isVisible = true;
         sprite.MoveToFront();
 
-        ApplyProperties(sprite, frame, debugMode);
+        ApplyProperties(
+            sprite,
+            frame,
+            debugMode,
+            screenWidth,
+            screenHeight);
     }
 
     internal static void Hide(FSprite[] sprites)
@@ -162,7 +180,9 @@ internal static class HeatWaveRenderPipeline
     private static void ApplyProperties(
         FSprite sprite,
         in HeatWaveRenderFrame frame,
-        int debugMode)
+        int debugMode,
+        float screenWidth,
+        float screenHeight)
     {
         bool hasTextures = HeatWaveNoiseField.IsAvailable;
         bool hasSurfaceField = frame.SurfaceField != null;
@@ -179,15 +199,37 @@ internal static class HeatWaveRenderPipeline
             ? frame.SurfaceField
             : Texture2D.blackTexture;
 
+        float heatDrive = Mathf.Pow(Mathf.Clamp01(frame.Intensity), 0.72f);
+        float distortionScale = Mathf.Lerp(
+            MinimumDistortionScale,
+            MaximumDistortionScale,
+            heatDrive);
+        float shaderTimeScale = Mathf.Lerp(
+            MinimumShaderTimeScale,
+            MaximumShaderTimeScale,
+            heatDrive);
+
+        // _screenSize is used only by this material's GrabPass resolve to convert
+        // pixel-space optical displacement into UV space. Giving HeatWave an effective
+        // screen that is slightly smaller magnifies every existing lattice/sheet/mirage
+        // displacement coherently without increasing the shader's internal hard clamps.
+        Vector4 effectiveScreenSize = new(
+            Mathf.Max(1f, screenWidth / distortionScale),
+            Mathf.Max(1f, screenHeight / distortionScale),
+            0f,
+            0f);
         Vector4 roomSize = new(
             frame.RoomSizePx.x,
             frame.RoomSizePx.y,
             0f,
             0f);
+        float shaderTime = frame.Time * shaderTimeScale;
 
         ApplyGlobalProperties(
+            effectiveScreenSize,
             roomSize,
             frame,
+            shaderTime,
             debugMode,
             hasTextures,
             hasSurfaceField,
@@ -204,12 +246,13 @@ internal static class HeatWaveRenderPipeline
 
         MaterialProperties.Clear();
         renderer.GetPropertyBlock(MaterialProperties);
+        MaterialProperties.SetVector(ScreenSizeId, effectiveScreenSize);
         MaterialProperties.SetVector(RoomSizePxId, roomSize);
         MaterialProperties.SetFloat(IntensityId, frame.Intensity);
         MaterialProperties.SetFloat(SolarIntensityId, frame.SolarIntensity);
         MaterialProperties.SetFloat(ToneAmountId, frame.ToneAmount);
         MaterialProperties.SetFloat(LevelHeatAmountId, frame.LevelHeatAmount);
-        MaterialProperties.SetFloat(TimeId, frame.Time);
+        MaterialProperties.SetFloat(TimeId, shaderTime);
         MaterialProperties.SetTexture(FlowFieldId, flowTexture);
         MaterialProperties.SetTexture(NormalFieldId, normalTexture);
         MaterialProperties.SetTexture(MirageFieldId, mirageTexture);
@@ -221,8 +264,10 @@ internal static class HeatWaveRenderPipeline
     }
 
     private static void ApplyGlobalProperties(
+        Vector4 effectiveScreenSize,
         Vector4 roomSize,
         in HeatWaveRenderFrame frame,
+        float shaderTime,
         int debugMode,
         bool hasTextures,
         bool hasSurfaceField,
@@ -233,12 +278,13 @@ internal static class HeatWaveRenderPipeline
     {
         // Futile can rebuild render layers. Mirror only DryCycle-owned uniforms globally
         // as a resilience path; the per-renderer property block remains authoritative.
+        Shader.SetGlobalVector(ScreenSizeId, effectiveScreenSize);
         Shader.SetGlobalVector(RoomSizePxId, roomSize);
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
         Shader.SetGlobalFloat(ToneAmountId, frame.ToneAmount);
         Shader.SetGlobalFloat(LevelHeatAmountId, frame.LevelHeatAmount);
-        Shader.SetGlobalFloat(TimeId, frame.Time);
+        Shader.SetGlobalFloat(TimeId, shaderTime);
         Shader.SetGlobalTexture(FlowFieldId, flowTexture);
         Shader.SetGlobalTexture(NormalFieldId, normalTexture);
         Shader.SetGlobalTexture(MirageFieldId, mirageTexture);
