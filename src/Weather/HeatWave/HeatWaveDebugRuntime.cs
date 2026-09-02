@@ -8,45 +8,29 @@ internal readonly struct HeatWaveDebugSnapshot
     internal readonly float Intensity;
     internal readonly float SolarIntensity;
     internal readonly float WhiteHeat;
-    internal readonly float Instability;
-    internal readonly float Stillness;
-    internal readonly float Burst;
-    internal readonly float BurstKick;
     internal readonly bool SimulationAvailable;
-    internal readonly string BurstPhase;
     internal readonly int Emitters;
 
     internal HeatWaveDebugSnapshot(
         float intensity,
         float solarIntensity,
         float whiteHeat,
-        float instability,
-        float stillness,
-        float burst,
-        float burstKick,
         bool simulationAvailable,
-        string burstPhase,
         int emitters)
     {
         Intensity = intensity;
         SolarIntensity = solarIntensity;
         WhiteHeat = whiteHeat;
-        Instability = instability;
-        Stillness = stillness;
-        Burst = burst;
-        BurstKick = burstKick;
         SimulationAvailable = simulationAvailable;
-        BurstPhase = burstPhase ?? "--";
         Emitters = emitters;
     }
 }
 
 /// <summary>
 /// Developer-only HeatWave diagnostics.
-/// Ctrl+Shift+H cycles optical debug views.
+/// Ctrl+Shift+H cycles visual/debug fields.
 /// Ctrl+Shift+J forces HeatWave intensity 1 in the camera room without changing the
 /// climate schedule.
-/// Ctrl+Shift+B forces a Thermal Burst through the real state machine.
 /// </summary>
 internal static class HeatWaveDebugRuntime
 {
@@ -136,10 +120,6 @@ internal static class HeatWaveDebugRuntime
         Room cameraRoom = game.cameras != null && game.cameras.Length > 0
             ? game.cameras[0]?.room
             : null;
-        if (control && shift && Input.GetKeyDown(KeyCode.B))
-        {
-            HeatWaveWeatherRuntime.DebugForceBurst(cameraRoom);
-        }
 
         bool visible = _forceWeather || _debugMode > 0;
         SetUiVisible(visible);
@@ -195,7 +175,7 @@ internal static class HeatWaveDebugRuntime
             x = 12f,
             y = Futile.screen.pixelHeight - 12f,
             scaleX = 440f,
-            scaleY = 126f,
+            scaleY = 116f,
             color = Color.black,
             alpha = 0.78f
         };
@@ -222,7 +202,6 @@ internal static class HeatWaveDebugRuntime
             return;
         }
 
-        _root.y = 0f;
         string mode = DebugModeName(_debugMode);
         if (!HeatWaveWeatherRuntime.TryGetDebugSnapshot(room, out HeatWaveDebugSnapshot snapshot))
         {
@@ -230,16 +209,16 @@ internal static class HeatWaveDebugRuntime
                 "HeatWave Debug\n" +
                 $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}\n" +
                 "No HeatWave controller in camera room\n" +
-                "Ctrl+Shift+H view  J force  B burst";
+                "Ctrl+Shift+H view   Ctrl+Shift+J force";
             return;
         }
 
         _label.text =
             "HeatWave Debug\n" +
             $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   GPU: {(snapshot.SimulationAvailable ? "YES" : "NO")}\n" +
-            $"I {snapshot.Intensity:0.00}  Solar {snapshot.SolarIntensity:0.00}  White {snapshot.WhiteHeat:0.00}  Emitters {snapshot.Emitters}\n" +
-            $"Burst {snapshot.BurstPhase}  Inst {snapshot.Instability:0.00}  Still {snapshot.Stillness:0.00}  B {snapshot.Burst:0.00}/{snapshot.BurstKick:0.00}\n" +
-            "Ctrl+Shift+H view  J force  B burst";
+            $"Intensity {snapshot.Intensity:0.00}   Solar {snapshot.SolarIntensity:0.00}   WhiteHeat {snapshot.WhiteHeat:0.00}\n" +
+            $"HeatColumn emitters {snapshot.Emitters}\n" +
+            "Ctrl+Shift+H view   Ctrl+Shift+J force";
     }
 
     private static string DebugModeName(int mode)
@@ -250,7 +229,7 @@ internal static class HeatWaveDebugRuntime
             2 => "VELOCITY",
             3 => "OPTICAL",
             4 => "TERRAIN/SUN",
-            5 => "BOUNDARY",
+            5 => "GROUND/PLUME/DEPTH",
             _ => "FINAL"
         };
     }
