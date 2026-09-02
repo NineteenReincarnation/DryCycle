@@ -133,8 +133,6 @@ Shader "DryCycle/HeatWaveComposite"
 
                 float GroundBoundaryMask(float2 roomUV)
                 {
-                    // Search downward through only the first ~46 px of air. This keeps
-                    // heat boil glued to hot ground/platforms instead of filling rooms.
                     float invH = 1.0 / max(_DryCycleRoomSizePx.y, 1.0);
                     float g = TerrainAt(roomUV).b;
                     g = max(g, TerrainAt(roomUV - float2(0.0, 6.0 * invH)).b * 0.98);
@@ -186,7 +184,6 @@ Shader "DryCycle/HeatWaveComposite"
 
                 float2 PlumeGradient(float2 roomUV)
                 {
-                    // Plume simulation uses four cells per 20px tile => ~5px per texel.
                     float2 texel = 5.0 / max(_DryCycleRoomSizePx, float2(1.0, 1.0));
                     float left = PlumeAt(roomUV - float2(texel.x, 0.0)).r;
                     float right = PlumeAt(roomUV + float2(texel.x, 0.0)).r;
@@ -216,24 +213,24 @@ Shader "DryCycle/HeatWaveComposite"
                     float plumeDensity = plumeData.r * _DryCycleHasHeatPlumes;
                     float plumeCore = plumeData.g * _DryCycleHasHeatPlumes;
                     float plumeAge = plumeData.b;
-                    result.plume = smoothstep(0.035, 0.54, plumeDensity) *
-                                   lerp(0.32, 1.0, _DryCycleHeatWaveIntensity);
+                    result.plume = smoothstep(0.018, 0.42, plumeDensity) *
+                                   lerp(0.40, 1.0, _DryCycleHeatWaveIntensity);
 
                     float2 micro = MicroPhase(screenUV, _DryCycleHeatTime);
 
-                    // Ground air boils fast, anisotropically and by very few pixels.
-                    // Vertical displacement is deliberately stronger than horizontal so
-                    // rods/feet compress and stretch instead of reading as water waves.
+                    // The near-ground layer is a thin vertical boil, not a horizontal
+                    // water wave. Its displacement remains small but is now strong enough
+                    // to be legible on Rain World's pixel-scale edges.
                     float2 groundOffset = float2(
-                        micro.x * 0.58,
-                        micro.y * 1.08 +
-                        sin((_DryCycleHeatTime * 2.35 + screenUV.x * 13.0) * 6.2831853) * 0.24);
+                        micro.x * 0.66,
+                        micro.y * 1.28 +
+                        sin((_DryCycleHeatTime * 2.35 + screenUV.x * 13.0) * 6.2831853) * 0.29);
                     groundOffset *= result.ground *
-                                    lerp(0.45, 1.18, _DryCycleHeatWaveIntensity);
+                                    lerp(0.52, 1.34, _DryCycleHeatWaveIntensity);
 
-                    // Coherent rising plumes get the strongest local refraction. Their
-                    // density gradient bends silhouettes; thermal velocity only biases
-                    // the direction so a plume visibly flows upward instead of wobbling.
+                    // Plume edges are the main optical event. Density gradient bends the
+                    // background while velocity only biases the lens upward; this avoids
+                    // bringing back the old full-screen liquid deformation.
                     float2 plumeGrad = PlumeGradient(roomUV);
                     float2 velocityUv = tex2D(
                         _DryCycleHeatVelocityTex,
@@ -244,21 +241,19 @@ Shader "DryCycle/HeatWaveComposite"
                         ? velocityPx / velocityLen
                         : float2(0.0, 1.0);
 
-                    float edgeStrength = saturate(length(plumeGrad) * 3.8);
+                    float edgeStrength = saturate(length(plumeGrad) * 4.8);
                     float2 plumeOffset = plumeGrad *
-                        lerp(3.2, 7.4, saturate(plumeCore * 1.20));
+                        lerp(4.1, 8.8, saturate(plumeCore * 1.18));
                     plumeOffset += velocityDir *
-                        (0.34 + plumeCore * 0.62) *
-                        (0.35 + edgeStrength * 0.65);
+                        (0.38 + plumeCore * 0.70) *
+                        (0.30 + edgeStrength * 0.70);
                     plumeOffset += float2(
-                        micro.x * 0.62,
-                        micro.y * 0.42) *
-                        (0.35 + plumeAge * 0.65);
-                    plumeOffset = ClampMagnitude(plumeOffset, 4.6);
+                        micro.x * 0.70,
+                        micro.y * 0.48) *
+                        (0.30 + plumeAge * 0.70);
+                    plumeOffset = ClampMagnitude(plumeOffset, 5.4);
                     plumeOffset *= result.plume;
 
-                    // Distant atmosphere never becomes a visible wave. It is a slow,
-                    // sub-pixel image wander meant to be noticed only after staring.
                     float farMask = smoothstep(0.52, 0.91, depth) *
                                     _DryCycleHeatWaveIntensity;
                     float2 macroUv = roomUV * float2(1.73, 1.17) +
@@ -287,34 +282,58 @@ Shader "DryCycle/HeatWaveComposite"
                     float shadow = 1.0 - smoothstep(0.12, 0.34, luma);
                     float mid = smoothstep(0.18, 0.70, luma) *
                                 (1.0 - smoothstep(0.78, 0.98, luma));
-                    float high = smoothstep(0.52, 0.93, luma);
+                    float high = smoothstep(0.46, 0.90, luma);
 
-                    // Mid/high chroma is burned away first; deep shadow is protected.
                     float desaturation = amount * sun *
-                        (mid * 0.30 + high * 0.55) *
-                        (1.0 - shadow * 0.96);
+                        (mid * 0.38 + high * 0.66) *
+                        (1.0 - shadow * 0.97);
                     float warmLuma = dot(color, float3(0.235, 0.705, 0.060));
                     color = lerp(color, warmLuma.xxx, saturate(desaturation));
 
-                    // Exposed highlights approach warm white with a soft shoulder. This
-                    // raises sun-baked surfaces without turning creatures/shadows emissive.
                     float bleach = amount * sun * high *
-                        (0.18 + sun * 0.26 + depth * 0.07) *
+                        (0.23 + sun * 0.32 + depth * 0.08) *
                         (1.0 - shadow);
                     float3 hotWhite = float3(1.0, 0.986, 0.925);
                     color = lerp(color, hotWhite, saturate(bleach));
 
-                    // A plume slightly lowers local contrast like a refractive air lens;
-                    // this is not fog and remains almost invisible without motion.
-                    float airVeil = plume * amount * sun * 0.018 *
+                    float airVeil = plume * amount * sun * 0.025 *
                                     (1.0 - shadow * 0.92);
                     color = lerp(color, hotWhite, airVeil);
 
-                    // Far sunlit scenery loses a little contrast in the dry glare.
-                    float distantVeil = depth * amount * sun * 0.020 *
+                    float distantVeil = depth * amount * sun * 0.027 *
                                         (1.0 - shadow);
                     color = lerp(color, hotWhite, distantVeil);
                     return saturate(color);
+                }
+
+                // Pure refraction is mathematically invisible over a nearly flat-color
+                // background (exactly what SU_A53 has in its central sky). Real turbulent
+                // air also produces scintillation / tiny local contrast changes. This
+                // restrained schlieren-like term gives plume edges a readable moving
+                // signature without drawing smoke, glow, chromatic aberration or a veil.
+                float3 ApplyHeatScintillation(
+                    float3 color,
+                    float2 roomUV,
+                    float2 screenUV,
+                    float plumeDensity,
+                    float ground,
+                    float intensity)
+                {
+                    float2 grad = PlumeGradient(roomUV);
+                    float gradLen = length(grad);
+                    float edge = smoothstep(0.008, 0.13, gradLen);
+                    float plumeBody = smoothstep(0.025, 0.48, plumeDensity);
+                    float2 micro = MicroPhase(screenUV, _DryCycleHeatTime * 1.07 + 2.1);
+
+                    float signedEdge = gradLen > 0.00001
+                        ? dot(grad / gradLen, float2(0.72, -0.31))
+                        : 0.0;
+                    float edgeMod = signedEdge * edge * plumeBody * intensity * 0.032;
+                    float boilingMod = micro.y *
+                        max(plumeBody * 0.50, ground * 0.42) *
+                        intensity * 0.014;
+
+                    return saturate(color * (1.0 + edgeMod + boilingMod));
                 }
 
                 float3 HeatMap(float value)
@@ -400,7 +419,7 @@ Shader "DryCycle/HeatWaveComposite"
 
                     float intensity = saturate(_DryCycleHeatWaveIntensity);
                     float plumeDensity = PlumeAt(roomUV).r * _DryCycleHasHeatPlumes;
-                    float residualPlume = smoothstep(0.05, 0.46, plumeDensity) * 0.32;
+                    float residualPlume = smoothstep(0.025, 0.42, plumeDensity) * 0.36;
                     float opticalPresence = max(intensity, residualPlume);
                     float toneAmount = saturate(_DryCycleWhiteHeat);
 
@@ -410,8 +429,6 @@ Shader "DryCycle/HeatWaveComposite"
 
                     DistortionSample first = EvaluateDistortion(roomUV, screenUV, depth);
 
-                    // Only plume refraction gets a second field sample. This produces a
-                    // continuous bent air lens without recursively distorting SceneColor.
                     float2 roomStep = first.offsetPx /
                         max(_DryCycleRoomSizePx, float2(1.0, 1.0)) * 0.42;
                     float2 secondRoomUV = saturate(roomUV + roomStep);
@@ -424,21 +441,27 @@ Shader "DryCycle/HeatWaveComposite"
                         first.offsetPx,
                         (first.offsetPx + second.offsetPx) * 0.5,
                         plumeTrace * 0.72);
-                    offsetPx = ClampMagnitude(offsetPx, 5.1);
+                    offsetPx = ClampMagnitude(offsetPx, 5.6);
 
                     float2 offsetUV = offsetPx / max(_screenSize, float2(1.0, 1.0));
                     float2 distortedUV = grabUV + offsetUV;
                     float4 color = tex2D(_GrabTexture, distortedUV);
 
-                    // Directional source blur exists only inside strong plume cores.
-                    // Ground shimmer and ordinary pixels retain Rain World's sharp edge.
-                    float streak = smoothstep(0.42, 0.92, plumeDensity) * 0.16;
+                    float streak = smoothstep(0.38, 0.90, plumeDensity) * 0.18;
                     if (streak > 0.001)
                     {
                         float3 a = tex2D(_GrabTexture, distortedUV - offsetUV * 0.42).rgb;
                         float3 b = tex2D(_GrabTexture, distortedUV + offsetUV * 0.31).rgb;
                         color.rgb = lerp(color.rgb, (color.rgb * 2.0 + a + b) * 0.25, streak);
                     }
+
+                    color.rgb = ApplyHeatScintillation(
+                        color.rgb,
+                        roomUV,
+                        screenUV,
+                        plumeDensity,
+                        first.ground,
+                        intensity);
 
                     float sky = VisualSkyTransmission(roomUV);
                     color.rgb = WhiteHeatTone(
