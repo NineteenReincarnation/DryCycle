@@ -209,10 +209,8 @@ internal static class HeatWaveRenderPipeline
             MaximumShaderTimeScale,
             heatDrive);
 
-        // _screenSize is used only by this material's GrabPass resolve to convert
-        // pixel-space optical displacement into UV space. Giving HeatWave an effective
-        // screen that is slightly smaller magnifies every existing lattice/sheet/mirage
-        // displacement coherently without increasing the shader's internal hard clamps.
+        // _screenSize is a shared Rain World uniform, so the HeatWave-specific scale must
+        // stay on this renderer's property block. Do not mirror this value globally.
         Vector4 effectiveScreenSize = new(
             Mathf.Max(1f, screenWidth / distortionScale),
             Mathf.Max(1f, screenHeight / distortionScale),
@@ -226,7 +224,6 @@ internal static class HeatWaveRenderPipeline
         float shaderTime = frame.Time * shaderTimeScale;
 
         ApplyGlobalProperties(
-            effectiveScreenSize,
             roomSize,
             frame,
             shaderTime,
@@ -264,7 +261,6 @@ internal static class HeatWaveRenderPipeline
     }
 
     private static void ApplyGlobalProperties(
-        Vector4 effectiveScreenSize,
         Vector4 roomSize,
         in HeatWaveRenderFrame frame,
         float shaderTime,
@@ -276,9 +272,8 @@ internal static class HeatWaveRenderPipeline
         Texture mirageTexture,
         Texture surfaceTexture)
     {
-        // Futile can rebuild render layers. Mirror only DryCycle-owned uniforms globally
-        // as a resilience path; the per-renderer property block remains authoritative.
-        Shader.SetGlobalVector(ScreenSizeId, effectiveScreenSize);
+        // Futile can rebuild render layers. Mirror DryCycle-owned uniforms globally as a
+        // resilience path; shared Rain World uniforms such as _screenSize stay untouched.
         Shader.SetGlobalVector(RoomSizePxId, roomSize);
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
