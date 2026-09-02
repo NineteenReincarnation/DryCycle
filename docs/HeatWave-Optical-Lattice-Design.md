@@ -1,20 +1,20 @@
 # HeatWave Optical Lattice Direction
 
-Status: **approved design direction for the next HeatWave visual iteration**.
+Status: **implemented as the current HeatWave optical backbone**.
 
-This note exists so the direction is not lost between implementation passes.
+This note remains the implementation contract for future HeatWave tuning.
 
 ## Goal
 
-HeatWave should read as **extreme dry hot air / desert mirage** even in a static frame. The core visual must be spatially coherent air refraction, not a generic fullscreen wobble, fog veil, or stronger single UV offset.
+HeatWave should read as **extreme dry hot air / desert mirage** even in a static frame. The core visual is spatially coherent air refraction, not a generic fullscreen wobble, fog veil, or stronger single UV offset.
 
-## Core change
+## Implemented core
 
-Introduce a room/world-anchored **Optical Lattice**: a continuous 2D deformation field that represents hot air as deformable optical space.
+HeatWave now uses a room/world-anchored **Optical Lattice**: a continuous 2D deformation field representing hot air as deformable optical space.
 
-Instead of treating Thermal Sheets as just another additive UV offset, use them to deform the lattice itself. The resulting space should support local compression, expansion, shear, and bending.
+Thermal Sheets and Ground Mirage no longer act only as additive UV offsets. They also drive the lattice itself, producing local compression, expansion, shear, bending and large coherent refractive movement.
 
-Conceptual pipeline:
+Current pipeline:
 
 ```text
 Flow / Heat Bodies / SurfaceField
@@ -24,97 +24,125 @@ Flow / Heat Bodies / SurfaceField
             |
             +-- Thermal Sheets drive local compression/stretch
             +-- Ground Mirage drives dense near-surface deformation
+            +-- Updraft moves deformation upward through room space
             +-- Lateral meander breaks mechanical vertical motion
             +-- Relaxation returns calm regions toward rest
             |
             v
     Continuous refractive coordinates
             |
-            +-- Fine Normal / Mirage texture adds high-frequency shimmer
+            +-- Jacobian -> compression / expansion / shear / bend
+            +-- Thermal Sheet boundary refraction
+            +-- Fine Normal / Mirage high-frequency shimmer
             |
             v
         Scene Grab resolve
+            |
+            +-- silhouette compression / layering
+            +-- directional softening
+            +-- optical focus
+            +-- dry-hot yellow grading
 ```
 
 ## Lattice scales
 
-Preferred multi-scale structure:
-
 ### Macro lattice
-- Roughly 24x14 control points per screen-equivalent area.
-- Slow, broad deformation.
-- Creates large heat bodies, long bends, and low-frequency spatial tilt.
+
+Implemented at approximately **64 px control spacing**.
+
+On a 1366x768 screen-equivalent area this is roughly 21x12 control cells, close to the intended 24x14 class.
+
+Purpose:
+- slow broad deformation;
+- large heat bodies;
+- long bends;
+- low-frequency spatial tilt;
+- coherent motion instead of noise wobble.
 
 ### Thermal lattice
-- Roughly 48x28 or 64x36 control points per screen-equivalent area.
-- Main HeatWave optical layer.
-- Driven by Thermal Sheets and Ground Mirage.
-- Produces visible local compression/stretch through poles, chains, architecture silhouettes, etc.
+
+Implemented at approximately **28 px control spacing**.
+
+On a 1366x768 screen-equivalent area this is roughly 49x27 control cells, within the intended 48x28 class.
+
+Purpose:
+- main visible HeatWave spatial deformation;
+- driven strongly by Thermal Sheets and Ground Mirage;
+- local pinching and stretching through poles, chains, architecture and creature silhouettes;
+- faster evolution than the macro lattice without becoming fine noise.
 
 ### Fine shader detail
-- Keep existing Detail Normal / Mirage texture path.
-- Small amplitude, faster shimmer (~subpixel to about 1 px typical).
-- Should never become the main deformation source.
 
-Exact grid resolution can be adjusted after profiling; the concept matters more than fixed numbers.
+Existing Base/Detail refractive normals and Mirage texture remain active on top of the lattice.
 
-## Forces / deformation drivers
+Fine detail amplitude was deliberately kept below the lattice/sheet deformation so it reads as shimmer rather than the primary shape of the weather.
 
-The optical lattice should be driven visually, not by a full fluid simulation.
+## Implemented forces / deformation drivers
 
 ### Updraft
-- Slow upward bias.
-- Gives hot air coherent rising motion.
+
+The lattice node phase moves upward through room coordinates over time. Large heat structures therefore evolve as rising air rather than as a texture attached to the screen.
 
 ### Thermal Sheets
-- Long, thin, irregular horizontal/near-horizontal layers.
-- Upper and lower sheet boundaries should bend in opposite directions.
-- These boundaries should create visible local pinching and expansion rather than whole-object translation.
+
+Long, thin, irregular horizontal/near-horizontal layers remain present at multiple scales.
+
+The shader samples sheet values above and below the current point and derives:
+- first vertical derivative -> opposing upper/lower boundary refraction;
+- second vertical derivative -> local pinching / expansion.
+
+These values now also drive the thermal lattice, so a Thermal Sheet deforms the surrounding optical space rather than merely adding another independent offset.
 
 ### Ground heat
-- Strongest immediately above hot terrain from `HeatWaveSurfaceField`.
-- Dense, short vertical wavelengths near floors, ledges, slopes, and exposed solid terrain.
-- Rapidly falls off with height.
-- Suppressed under water.
+
+`HeatWaveSurfaceField` remains the geometry-aware ground guide.
+
+Ground proximity:
+- strengthens the thermal lattice;
+- increases short-scale boiling motion;
+- increases dense Ground Mirage layers;
+- increases optical compression and directional blur;
+- falls off away from terrain;
+- remains suppressed under water through the dry-air mask.
 
 ### Lateral meander
-- Small horizontal variation.
-- Prevents perfectly vertical or sinusoidal movement.
+
+Each lattice scale contains smaller horizontal variation driven by room-anchored node phase, flow direction and spatial hash. This prevents perfectly vertical sine-wave movement.
 
 ### Relaxation
-- Calm regions slowly return toward an undeformed lattice.
-- Avoids permanent drift and makes deformation feel like passing air bodies.
+
+Lattice node amplitude is gated by coherent heat-body / sheet drive. Calm regions collapse back toward the undeformed lattice rather than accumulating permanent drift.
 
 ## Optical measurements from the lattice
 
-Use the local deformation Jacobian / finite differences to derive optical state directly from space deformation:
+The implementation derives a local deformation Jacobian from the interpolated lattice node derivatives.
 
-- **compression**: locally reduced area/spacing;
-- **expansion**: locally increased area/spacing;
-- **shear**: directional skew;
-- **bend/gradient**: refraction direction.
+Current measurements:
+- **compression** from determinant below 1;
+- **expansion** from determinant above 1;
+- **shear** from cross-axis derivatives;
+- **bend** from total local deformation gradient.
 
-Use these quantities for secondary optical response instead of guessing focus from unrelated noise.
-
-Suggested response:
+These values directly drive secondary optics:
 
 ```text
-compression -> slight luminance gain, contour concentration, limited silhouette overlap
-expansion   -> slight luminance loss, slight directional softening
-shear       -> directional refraction / contour skew
+compression -> local contour concentration + slight focus gain
+expansion   -> stronger directional softening + slight focus loss
+shear       -> directional skew / refractive blur direction
+bend        -> additional strong-air blur contribution
 ```
 
-Keep luminance modulation subtle; do not turn it into water caustics.
+No water-caustic texture is used.
 
 ## World anchoring
 
-The lattice must remain **room/world anchored**, not screen anchored.
+All lattice cell coordinates are derived from `roomPx`, which itself is derived from Rain World's room/camera transform.
 
-Camera movement must reveal the same hot-air structures at their room positions. Heat should feel present in the level, not stuck to the monitor.
+The lattice is therefore **room/world anchored**, not screen anchored. Camera movement reveals the same hot-air structures at their room positions.
 
 ## Thermal Sheet appearance
 
-Thermal Sheets should have several states continuously blended:
+The current shader continuously blends:
 
 ```text
 calm air
@@ -124,34 +152,42 @@ very hot optical lens
 dense ground boiling layer
 ```
 
-Do not make distortion uniform across the whole room.
+Thermal Sheets remain irregular and multi-scale rather than uniform bands.
 
-Target visual features:
+Target visual features retained by implementation:
 - long horizontal / gently sloped hot layers;
 - irregular edges and break-up;
 - slow broad evolution;
 - faster small detail riding on top;
-- local pinching/stretching of thin poles, chains, architecture edges;
-- static screenshots should already show strong heat refraction.
+- local pinching/stretching of thin poles, chains and architecture edges;
+- static screenshots should already show visible heat refraction.
+
+## Player / creature inclusion
+
+The HeatWave atmosphere remains in Rain World's `GrabShaders` scene stage. This stage is after the main room sprite layers and therefore the scene grab contains player/creature sprites as well as terrain and props.
+
+Directional softening is now explicitly **scene-edge driven inside coherent hot-air layers**. This means the slugcat and other high-contrast creature silhouettes can be refracted and blurred by HeatWave instead of remaining unnaturally razor-sharp while the room behind them bends.
+
+This is environmental optics only. It is **not** tied to player dehydration, dizziness, health, or physiology.
+
+The player is not given a permanent character-only blur halo: creature softening still requires a HeatWave layer / lattice deformation to overlap the silhouette.
 
 ## Depth / scene-layer direction
 
-Long optical path should read stronger than near foreground where feasible.
+A true stable per-pixel scene-depth mask is still not hard-coded because Rain World's mixed Futile sprite layers and level texture semantics need to remain compatible across base game/DLC rooms and arbitrary modded sprites.
 
-Future implementation should investigate using Rain World's level/depth semantics or another stable scene mask so approximately:
+The current implementation instead gains depth-like visual separation from:
+- geometry-aware Ground Mirage;
+- coherent thermal layers;
+- scene-edge response;
+- large lattice deformation behind and through silhouettes;
+- player/creature inclusion in the same scene grab.
 
-```text
-far background : strongest
-midground      : strong
-near foreground: reduced
-very near      : light shimmer only
-```
+A future genuine optical-depth mask may be added only if it can be derived reliably without room-specific tuning or incorrectly excluding creatures/props.
 
-This must not require per-room hand tuning.
+## Color rules
 
-## Color rules remain unchanged
-
-HeatWave color direction:
+HeatWave color direction remains:
 - strong dry yellow / sand-yellow atmosphere;
 - preserve deep shadows and black silhouettes;
 - midtones take most of the warm shift;
@@ -161,19 +197,19 @@ HeatWave color direction:
 
 ## Explicit non-goals
 
-Do **not** solve the next iteration by:
-- simply raising distortion max from 14.5 px to a much larger number;
+Do **not** solve future tuning by:
+- simply raising the distortion cap indefinitely;
 - adding generic scrolling noise;
 - making the entire screen sway like water;
 - adding gray/white fog;
 - making every pixel distort equally;
 - reintroducing the removed thermal/plume compute-fluid simulation;
-- coupling the effect to player dehydration, dizziness, or physiology for now;
+- coupling the effect to player dehydration, dizziness, or physiology;
 - hard-coding individual rooms such as SU_A53.
 
-## Relationship to current HeatWave
+## Relationship to the rest of HeatWave
 
-Keep the useful existing layers:
+The implemented Optical Lattice is the **low/mid-frequency spatial deformation backbone** underneath the existing useful layers:
 - Rain World `LevelHeat` for terrain-level melt;
 - runtime FlowField;
 - Base/Detail refractive normals;
@@ -184,7 +220,21 @@ Keep the useful existing layers:
 - directional softening;
 - local HeatColumn using built-in HeatDistortion.
 
-The Optical Lattice should become the **low/mid-frequency spatial deformation backbone** underneath those layers rather than replacing all existing work.
+It does not replace those layers; it gives them one coherent deformable optical space.
+
+## Debugging
+
+`Ctrl+Shift+H` now includes an `OPTICAL LATTICE` view.
+
+The lattice debug view exposes approximately:
+
+```text
+R = compression
+G = expansion
+B = shear
+```
+
+This allows testing whether weak final visuals are caused by the deformation field itself or by the final scene resolve.
 
 ## Acceptance criteria
 
@@ -196,4 +246,5 @@ A successful implementation should make a room look extremely hot without needin
 4. Fine shimmer exists but does not dominate.
 5. The image reads as dry desert heat, not water, gelatin, fog, or a cheap post-process filter.
 6. Color remains yellow/hot without bleaching toward white.
-7. No per-room special casing.
+7. Player/creature silhouettes participate in environmental heat refraction and softening.
+8. No per-room special casing.
