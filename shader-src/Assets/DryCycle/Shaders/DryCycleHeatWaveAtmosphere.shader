@@ -497,7 +497,6 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float2 row0 = lerp(n00, n10, smoothLocal.x);
                     float2 row1 = lerp(n01, n11, smoothLocal.x);
                     result.offsetPx = lerp(row0, row1, smoothLocal.y);
-
                     result.dOffsetDx =
                         lerp(n10 - n00, n11 - n01, smoothLocal.y) *
                         smoothDerivative.x;
@@ -953,84 +952,142 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float heat = saturate(_DryCycleHeatWaveIntensity);
                     float tone = saturate(max(
                         _DryCycleHeatToneAmount,
-                        heat * 0.68));
+                        heat * 0.72));
                     float solar = saturate(_DryCycleHeatSolarIntensity * heat);
 
                     float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-                    float shadow = 1.0 - smoothstep(0.070, 0.29, luma);
+                    float shadow = 1.0 - smoothstep(0.060, 0.28, luma);
                     float lit = 1.0 - shadow;
-                    float midRise = smoothstep(0.105, 0.45, luma);
-                    float midFall = 1.0 - smoothstep(0.74, 0.97, luma);
+                    float midRise = smoothstep(0.095, 0.41, luma);
+                    float midFall = 1.0 - smoothstep(0.72, 0.965, luma);
                     float midBand = midRise * midFall;
-                    float high = smoothstep(0.44, 0.90, luma);
-                    float highlightHeadroom = 1.0 - smoothstep(0.78, 0.98, luma);
+                    float redMidBand =
+                        smoothstep(0.14, 0.40, luma) *
+                        (1.0 - smoothstep(0.68, 0.94, luma));
+                    float high = smoothstep(0.42, 0.88, luma);
+                    float highlightHeadroom = 1.0 - smoothstep(0.76, 0.985, luma);
 
-                    float contrast = tone * (0.092 + solar * 0.112);
-                    color = (color - 0.415) * (1.0 + contrast) + 0.415;
+                    // Hard dry contrast first. The lower pivot keeps the room from
+                    // drifting back toward pale gray while deep silhouettes remain black.
+                    float contrast = tone * (0.118 + solar * 0.108);
+                    color = (color - 0.392) * (1.0 + contrast) + 0.392;
                     color = saturate(color);
 
-                    float3 yellowShifted = saturate(
-                        color * float3(1.105, 1.044, 0.735) +
-                        luma * float3(0.094, 0.060, 0.000));
-                    float yellowAmount =
+                    float gradedLuma = dot(color, float3(0.2126, 0.7152, 0.0722));
+                    float maxChannel = max(color.r, max(color.g, color.b));
+                    float minChannel = min(color.r, min(color.g, color.b));
+                    float chroma = maxChannel - minChannel;
+                    // Keep strongly saturated emissive colors recognizable. Neutral
+                    // concrete, dust and terrain receive the full scorched treatment.
+                    float neutralResponse = lerp(
+                        0.48,
+                        1.0,
+                        1.0 - smoothstep(0.26, 0.70, chroma));
+
+                    float bandHeat = saturate((field.band - 0.20) / 0.80);
+                    float sheetHeat = smoothstep(0.14, 0.88, field.sheet);
+                    float lensHeat = saturate(
+                        max(field.focus, 0.0) * 0.56 +
+                        field.ground * 0.46);
+                    float localHeat = saturate(max(
+                        bandHeat * 0.78,
+                        max(sheetHeat, lensHeat)));
+
+                    // Broad amber grade: red rises, blue is heavily suppressed, green
+                    // is held below red so the result reads as sun-baked ochre rather
+                    // than lemon yellow.
+                    float3 amberShifted = saturate(
+                        color * float3(1.155, 0.965, 0.615) +
+                        gradedLuma * float3(0.112, 0.038, 0.000));
+                    float amberAmount =
                         tone *
-                        (0.305 +
-                         solar * 0.245 +
-                         field.band * 0.075 +
-                         field.sheet * 0.090 +
-                         field.ground * 0.050) *
+                        (0.300 +
+                         solar * 0.165 +
+                         localHeat * 0.090) *
+                        lit *
+                        (0.42 + midBand * 0.58) *
+                        neutralResponse;
+                    color = lerp(color, amberShifted, saturate(amberAmount));
+
+                    // Scorched ochre lives mainly in the middle values. A slight
+                    // luminance pull-down stops the grade from reading as bright cream.
+                    float scorchMask =
                         midBand *
-                        lit;
-                    color = lerp(color, yellowShifted, saturate(yellowAmount));
-
-                    float dryLuma = dot(color, float3(0.260, 0.682, 0.058));
-                    float3 dryYellow = dryLuma * float3(1.17, 1.05, 0.65);
-                    float dryAmount =
+                        (1.0 - smoothstep(0.86, 0.99, gradedLuma));
+                    float dryDown =
                         tone *
-                        (0.068 +
-                         solar * 0.118 +
-                         field.band * 0.038 +
-                         field.sheet * 0.035) *
-                        high *
+                        (0.022 + localHeat * 0.014) *
+                        scorchMask *
                         lit;
-                    color = lerp(color, dryYellow, saturate(dryAmount));
+                    color *= 1.0 - dryDown;
 
-                    float3 hotYellow = float3(1.0, 0.820, 0.395);
-                    float yellowHighlight =
+                    float3 burntOchre = saturate(
+                        color * float3(1.125, 0.915, 0.565) +
+                        gradedLuma * float3(0.102, 0.028, 0.000));
+                    float scorchAmount =
+                        tone *
+                        (0.135 +
+                         solar * 0.100 +
+                         localHeat * 0.112) *
+                        scorchMask *
+                        lit *
+                        neutralResponse;
+                    color = lerp(color, burntOchre, saturate(scorchAmount));
+
+                    // A restrained red/amber cast in low-mid and mid values gives the
+                    // room the dim, baked dusk-red quality of extreme dry desert heat.
+                    float3 duskRed = saturate(
+                        color * float3(1.100, 0.910, 0.700) +
+                        gradedLuma * float3(0.068, 0.010, 0.000));
+                    float redAmount =
+                        tone *
+                        (0.082 +
+                         solar * 0.045 +
+                         localHeat * 0.090) *
+                        redMidBand *
+                        lit *
+                        neutralResponse;
+                    color = lerp(color, duskRed, saturate(redAmount));
+
+                    // Hot highlights become amber-orange, never white. Even near-white
+                    // source values retain some warm pull instead of escaping the grade.
+                    float3 hotAmber = float3(1.0, 0.715, 0.190);
+                    float amberHighlight =
                         high *
                         lit *
-                        (tone * 0.145 +
-                         solar * 0.285 +
-                         solar * field.band * 0.095 +
-                         field.sheet * tone * 0.050 +
-                         field.ground * tone * 0.035);
-                    color = lerp(color, hotYellow, saturate(yellowHighlight));
+                        (tone * 0.122 +
+                         solar * 0.205 +
+                         localHeat * 0.112) *
+                        (0.42 + highlightHeadroom * 0.58) *
+                        neutralResponse;
+                    color = lerp(color, hotAmber, saturate(amberHighlight));
 
-                    float bandHeat = saturate((field.band - 0.25) / 0.75);
-                    float sheetHeat = smoothstep(0.18, 0.90, field.sheet);
-                    float3 bandYellow = saturate(
-                        color * float3(1.052, 1.019, 0.870) +
-                        luma * float3(0.032, 0.019, 0.0));
-                    float bandColorAmount =
-                        max(bandHeat * 0.72, sheetHeat) *
+                    // Strong thermal sheets and ground lenses receive an extra local
+                    // burnt-orange response that stays tied to the optical heat field.
+                    float3 localScorch = saturate(
+                        color * float3(1.070, 0.935, 0.670) +
+                        gradedLuma * float3(0.048, 0.012, 0.000));
+                    float localScorchAmount =
+                        localHeat *
                         tone *
-                        (0.062 +
-                         solar * 0.060 +
-                         max(field.focus, 0.0) * 0.030) *
-                        lit;
-                    color = lerp(color, bandYellow, saturate(bandColorAmount));
+                        (0.082 + solar * 0.060) *
+                        lit *
+                        neutralResponse;
+                    color = lerp(color, localScorch, saturate(localScorchAmount));
 
+                    // Keep the optical breathing subtle so heat bands change hue and
+                    // density without washing the scene back toward pale exposure.
                     float exposureBreath =
                         ((field.band - 0.34) * 0.55 +
                          (field.sheet - 0.34) * 0.45) *
                         tone *
-                        (0.038 + solar * 0.042) *
+                        (0.022 + solar * 0.020) *
                         lit *
                         highlightHeadroom;
                     exposureBreath +=
                         field.focus *
                         tone *
-                        0.022 *
+                        0.014 *
                         lit *
                         highlightHeadroom;
                     color *= 1.0 + exposureBreath;
