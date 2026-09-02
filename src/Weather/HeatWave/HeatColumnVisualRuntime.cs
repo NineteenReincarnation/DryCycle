@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather.HeatWave;
@@ -127,7 +128,7 @@ internal static class HeatColumnVisualRuntime
                 sprite.alpha = Mathf.Clamp01(
                     heatStrength *
                     Mathf.Lerp(0.34f, 0.58f, t) *
-                    Mathf.Lerp(0.82f, 1.08f, pulse - 0.9f));
+                    Mathf.Lerp(0.90f, 1.10f, Mathf.InverseLerp(0.90f, 1.10f, pulse)));
                 sprite.isVisible = sprite.alpha > 0.005f;
             }
 
