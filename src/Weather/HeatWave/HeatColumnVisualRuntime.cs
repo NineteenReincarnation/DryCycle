@@ -38,6 +38,7 @@ internal static class HeatColumnVisualRuntime
     {
         private const int SegmentCount = 4;
         private readonly PlacedObject _placed;
+        private bool _shaderAvailable;
         private float _time;
 
         internal HeatColumnVisual(PlacedObject placed)
@@ -59,9 +60,11 @@ internal static class HeatColumnVisualRuntime
         public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
         {
             sLeaser.sprites = new FSprite[SegmentCount];
-            bool hasShader = rCam?.room?.game?.rainWorld?.Shaders != null &&
-                             rCam.room.game.rainWorld.Shaders.TryGetValue("HeatDistortion", out FShader heatShader) &&
-                             heatShader != null;
+            _shaderAvailable = rCam?.room?.game?.rainWorld?.Shaders != null &&
+                               rCam.room.game.rainWorld.Shaders.TryGetValue(
+                                   "HeatDistortion",
+                                   out FShader heatShader) &&
+                               heatShader != null;
 
             for (int i = 0; i < SegmentCount; i++)
             {
@@ -71,10 +74,12 @@ internal static class HeatColumnVisualRuntime
                     anchorY = 0.5f,
                     isVisible = false
                 };
-                if (hasShader)
+
+                if (_shaderAvailable)
                 {
                     sprite.shader = heatShader;
                 }
+
                 sLeaser.sprites[i] = sprite;
             }
 
@@ -93,7 +98,12 @@ internal static class HeatColumnVisualRuntime
                 return;
             }
 
-            if (!HeatWaveWeatherRuntime.TryEvaluate(room, out float intensity) || intensity <= 0.0001f)
+            // HeatDistortion is an optional local embellishment. Never substitute the
+            // Basic shader: doing so would turn an unavailable effect into visible white
+            // rectangles. The global HeatWave remains fully functional without columns.
+            if (!_shaderAvailable ||
+                !HeatWaveWeatherRuntime.TryEvaluate(room, out float intensity) ||
+                intensity <= 0.0001f)
             {
                 SetVisible(sLeaser.sprites, false);
                 base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
@@ -153,6 +163,7 @@ internal static class HeatColumnVisualRuntime
                 {
                     continue;
                 }
+
                 sprite.RemoveFromContainer();
                 container.AddChild(sprite);
             }
