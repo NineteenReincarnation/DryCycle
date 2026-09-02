@@ -76,6 +76,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             MiscRuntime.Disable();
+            RainDrinkingRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
             FogForecastFlowRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
@@ -207,6 +208,10 @@ internal sealed class Plugin : BaseUnityPlugin
             // rooms use a rain-only update and never enter vanilla RoomRain.Update.
             SyntheticRoomRainTakeoverRuntime.Enable();
 
+            // Install after all rain owners so pickup-hold hydration observes the final
+            // scheduled/authored rain state and the same RoomRain shelter mask.
+            RainDrinkingRuntime.Enable();
+
             // WorldClock keeps RainCycle.timer out of RainGameOver, so RoomCamera cannot
             // receive scheduled rain shake through RainCycle.ScreenShake. Bridge the
             // already-scheduled HeavyRain/DeathRain outputs directly into the camera.
@@ -223,6 +228,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             MiscRuntime.Disable();
+            RainDrinkingRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
             FogForecastFlowRuntime.Disable();
             RainMeterRoundPipRuntime.Disable();
