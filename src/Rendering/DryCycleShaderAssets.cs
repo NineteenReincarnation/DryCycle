@@ -13,7 +13,7 @@ namespace DryCycle.Rendering;
 internal static class DryCycleShaderAssets
 {
     internal const string FogCompositeShaderKey = "DryCycleFogComposite";
-    internal const string HeatWaveCompositeShaderKey = "DryCycleHeatWaveComposite";
+    internal const string HeatWaveAtmosphereShaderKey = "DryCycleHeatWaveAtmosphere";
     internal const string BundleRelativePath = "assets/drycycle/drycycleweather";
     internal const string BundleVersionRelativePath =
         "assets/drycycle/drycycleweather.version.txt";
@@ -24,12 +24,8 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/compute/drycyclefogfluid.compute";
     private const string FogNoiseAssetPath =
         "assets/drycycle/compute/drycyclefognoise.compute";
-    private const string HeatWaveCompositeAssetPath =
-        "assets/drycycle/shaders/drycycleheatwavecomposite.shader";
-    private const string HeatWaveThermalAssetPath =
-        "assets/drycycle/compute/drycycleheatwavethermal.compute";
-    private const string HeatWavePlumeAssetPath =
-        "assets/drycycle/compute/drycycleheatwaveplumes.compute";
+    private const string HeatWaveAtmosphereAssetPath =
+        "assets/drycycle/shaders/drycycleheatwaveatmosphere.shader";
 
     private static AssetBundle _bundle;
     private static bool _enabled;
@@ -38,16 +34,12 @@ internal static class DryCycleShaderAssets
     internal static FShader FogComposite { get; private set; }
     internal static ComputeShader FogFluidCompute { get; private set; }
     internal static ComputeShader FogNoiseCompute { get; private set; }
-    internal static FShader HeatWaveComposite { get; private set; }
-    internal static ComputeShader HeatWaveThermalCompute { get; private set; }
-    internal static ComputeShader HeatWavePlumeCompute { get; private set; }
+    internal static FShader HeatWaveAtmosphere { get; private set; }
 
     internal static bool HasFogComposite => FogComposite != null;
     internal static bool HasFluidCompute => FogFluidCompute != null;
     internal static bool HasNoiseCompute => FogNoiseCompute != null;
-    internal static bool HasHeatWaveComposite => HeatWaveComposite != null;
-    internal static bool HasHeatWaveThermalCompute => HeatWaveThermalCompute != null;
-    internal static bool HasHeatWavePlumeCompute => HeatWavePlumeCompute != null;
+    internal static bool HasHeatWaveAtmosphere => HeatWaveAtmosphere != null;
 
     internal static void Enable()
     {
@@ -104,8 +96,9 @@ internal static class DryCycleShaderAssets
                 _missingBundleLogged = true;
                 Plugin.Logger?.LogWarning(
                     $"DryCycle weather AssetBundle not found at '{path}'. " +
-                    "Fog will use the compatibility renderer and HeatWave optical " +
-                    "rendering will remain disabled until " +
+                    "Fog will use the compatibility renderer. HeatWave will retain " +
+                    "Rain World's LevelHeat core, but its custom atmosphere/color pass " +
+                    "will remain unavailable until " +
                     $"'{BundleRelativePath}' is built and installed. " +
                     $"Runtime Unity version: {Application.unityVersion}.");
             }
@@ -131,10 +124,9 @@ internal static class DryCycleShaderAssets
             if (!SystemInfo.supportsComputeShaders)
             {
                 Plugin.Logger?.LogWarning(
-                    "DryCycle custom weather composites are available, but this " +
-                    "graphics device reports no compute-shader support. Fog will keep " +
-                    "its volumetric-noise fallback and HeatWave will use a restrained " +
-                    "screen-space fallback without persistent thermal/plume fields.");
+                    "This graphics device reports no compute-shader support. DryCycle " +
+                    "fog will use its non-fluid fallback. HeatWave no longer depends on " +
+                    "compute shaders.");
             }
 
             Plugin.Logger?.LogInfo(
@@ -142,9 +134,7 @@ internal static class DryCycleShaderAssets
                 $"FogComposite={(FogComposite != null ? "yes" : "no")}, " +
                 $"FogFluid={(FogFluidCompute != null ? "yes" : "no")}, " +
                 $"FogNoise={(FogNoiseCompute != null ? "yes" : "no")}, " +
-                $"HeatWaveComposite={(HeatWaveComposite != null ? "yes" : "no")}, " +
-                $"HeatWaveThermal={(HeatWaveThermalCompute != null ? "yes" : "no")}, " +
-                $"HeatWavePlumes={(HeatWavePlumeCompute != null ? "yes" : "no")}, " +
+                $"HeatWaveAtmosphere={(HeatWaveAtmosphere != null ? "yes" : "no")}, " +
                 $"ComputeSupported={SystemInfo.supportsComputeShaders}, " +
                 $"Unity={Application.unityVersion}, GPU='{SystemInfo.graphicsDeviceName}'.");
         }
@@ -153,9 +143,7 @@ internal static class DryCycleShaderAssets
             FogComposite = null;
             FogFluidCompute = null;
             FogNoiseCompute = null;
-            HeatWaveComposite = null;
-            HeatWaveThermalCompute = null;
-            HeatWavePlumeCompute = null;
+            HeatWaveAtmosphere = null;
             Plugin.Logger?.LogError(
                 "DryCycle failed to initialize custom weather shaders. " +
                 "Compatibility renderers will remain available where implemented.");
@@ -210,41 +198,25 @@ internal static class DryCycleShaderAssets
 
     private static void LoadHeatWaveAssets(RainWorld rainWorld)
     {
-        Shader heatShader = _bundle.LoadAsset<Shader>(HeatWaveCompositeAssetPath);
+        Shader heatShader = _bundle.LoadAsset<Shader>(HeatWaveAtmosphereAssetPath);
         if (heatShader == null)
         {
             Plugin.Logger?.LogError(
-                $"DryCycle weather bundle is missing shader '{HeatWaveCompositeAssetPath}'.");
+                $"DryCycle weather bundle is missing shader '{HeatWaveAtmosphereAssetPath}'. " +
+                "HeatWave LevelHeat will still function, but custom atmosphere rendering " +
+                "requires rebuilding the weather bundle.");
         }
         else if (!heatShader.isSupported)
         {
             Plugin.Logger?.LogError(
-                $"DryCycle HeatWave shader '{heatShader.name}' is not supported by " +
-                $"'{SystemInfo.graphicsDeviceName}' ({SystemInfo.graphicsDeviceType}).");
+                $"DryCycle HeatWave atmosphere shader '{heatShader.name}' is not " +
+                $"supported by '{SystemInfo.graphicsDeviceName}' " +
+                $"({SystemInfo.graphicsDeviceType}).");
         }
         else
         {
-            HeatWaveComposite = FShader.CreateShader(HeatWaveCompositeShaderKey, heatShader);
-            rainWorld.Shaders[HeatWaveCompositeShaderKey] = HeatWaveComposite;
-        }
-
-        HeatWaveThermalCompute = _bundle.LoadAsset<ComputeShader>(HeatWaveThermalAssetPath);
-        HeatWavePlumeCompute = _bundle.LoadAsset<ComputeShader>(HeatWavePlumeAssetPath);
-
-        if (SystemInfo.supportsComputeShaders && HeatWaveThermalCompute == null)
-        {
-            Plugin.Logger?.LogWarning(
-                $"DryCycle weather bundle is missing compute shader " +
-                $"'{HeatWaveThermalAssetPath}'. HeatWave will keep the composite " +
-                "fallback but local thermal memory and HeatColumn fluid injection are disabled.");
-        }
-
-        if (SystemInfo.supportsComputeShaders && HeatWavePlumeCompute == null)
-        {
-            Plugin.Logger?.LogWarning(
-                $"DryCycle weather bundle is missing compute shader " +
-                $"'{HeatWavePlumeAssetPath}'. HeatWave will keep ground shimmer and " +
-                "solar tone, but coherent rising thermal plumes are disabled.");
+            HeatWaveAtmosphere = FShader.CreateShader(HeatWaveAtmosphereShaderKey, heatShader);
+            rainWorld.Shaders[HeatWaveAtmosphereShaderKey] = HeatWaveAtmosphere;
         }
     }
 
@@ -257,7 +229,7 @@ internal static class DryCycleShaderAssets
                 "DryCycle weather AssetBundle has no Unity-version sidecar. " +
                 $"Expected '{BundleVersionRelativePath}'. Runtime Unity is " +
                 $"{Application.unityVersion}; if the bundle fails, rebuild it with " +
-                "the matching Unity Editor before debugging the weather algorithms.");
+                "the matching Unity Editor before debugging weather rendering.");
             return;
         }
 
@@ -304,9 +276,6 @@ internal static class DryCycleShaderAssets
             return resolvedPath;
         }
 
-        // During LoadResources, AssetManager may resolve a mod-relative path against
-        // Rain World's global StreamingAssets folder. Walk upward from this assembly
-        // as a fallback so the bundle is found inside the owning mod directory.
         try
         {
             string assemblyDirectory = Path.GetDirectoryName(
