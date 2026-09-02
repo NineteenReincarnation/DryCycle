@@ -5,6 +5,7 @@ namespace DryCycle.Weather.HeatWave;
 
 internal readonly struct HeatWaveRenderFrame
 {
+    internal readonly Vector2 RoomSizePx;
     internal readonly float Intensity;
     internal readonly float SolarIntensity;
     internal readonly float ToneAmount;
@@ -13,6 +14,7 @@ internal readonly struct HeatWaveRenderFrame
     internal readonly bool Active;
 
     internal HeatWaveRenderFrame(
+        Vector2 roomSizePx,
         float intensity,
         float solarIntensity,
         float toneAmount,
@@ -20,6 +22,9 @@ internal readonly struct HeatWaveRenderFrame
         float time,
         bool active)
     {
+        RoomSizePx = new Vector2(
+            Mathf.Max(1f, roomSizePx.x),
+            Mathf.Max(1f, roomSizePx.y));
         Intensity = Mathf.Clamp01(intensity);
         SolarIntensity = Mathf.Clamp01(solarIntensity);
         ToneAmount = Mathf.Clamp01(toneAmount);
@@ -37,6 +42,9 @@ internal readonly struct HeatWaveRenderFrame
 /// distant optical softening and the bleached high-temperature color state. It captures
 /// SceneColor once and resolves once; there is no multi-layer recursive distortion and
 /// no dependency on thermal/plume compute textures.
+///
+/// Phase fields are anchored to room-world pixel coordinates, so camera movement travels
+/// through an atmospheric field instead of dragging a screen-space filter with it.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
@@ -46,6 +54,7 @@ internal static class HeatWaveRenderPipeline
     private const float Epsilon = 0.0001f;
     private static readonly MaterialPropertyBlock MaterialProperties = new();
 
+    private static readonly int RoomSizePxId = Shader.PropertyToID("_DryCycleHeatRoomSizePx");
     private static readonly int IntensityId = Shader.PropertyToID("_DryCycleHeatWaveIntensity");
     private static readonly int SolarIntensityId = Shader.PropertyToID("_DryCycleHeatSolarIntensity");
     private static readonly int ToneAmountId = Shader.PropertyToID("_DryCycleHeatToneAmount");
@@ -189,8 +198,14 @@ internal static class HeatWaveRenderPipeline
         Texture microNoise = customNoise
             ? HeatWaveNoiseField.MicroTexture
             : Texture2D.grayTexture;
+        Vector4 roomSize = new(
+            frame.RoomSizePx.x,
+            frame.RoomSizePx.y,
+            0f,
+            0f);
 
         ApplyGlobalProperties(
+            roomSize,
             frame,
             debugMode,
             customNoise,
@@ -205,6 +220,7 @@ internal static class HeatWaveRenderPipeline
 
         MaterialProperties.Clear();
         renderer.GetPropertyBlock(MaterialProperties);
+        MaterialProperties.SetVector(RoomSizePxId, roomSize);
         MaterialProperties.SetFloat(IntensityId, frame.Intensity);
         MaterialProperties.SetFloat(SolarIntensityId, frame.SolarIntensity);
         MaterialProperties.SetFloat(ToneAmountId, frame.ToneAmount);
@@ -218,6 +234,7 @@ internal static class HeatWaveRenderPipeline
     }
 
     private static void ApplyGlobalProperties(
+        Vector4 roomSize,
         in HeatWaveRenderFrame frame,
         int debugMode,
         bool customNoise,
@@ -226,6 +243,7 @@ internal static class HeatWaveRenderPipeline
     {
         // Futile can rebuild render layers. Mirror DryCycle-unique uniforms globally as
         // a resilience path; the per-renderer property block remains authoritative.
+        Shader.SetGlobalVector(RoomSizePxId, roomSize);
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
         Shader.SetGlobalFloat(ToneAmountId, frame.ToneAmount);
