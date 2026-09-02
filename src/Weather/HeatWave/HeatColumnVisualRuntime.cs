@@ -60,10 +60,11 @@ internal static class HeatColumnVisualRuntime
         public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
         {
             sLeaser.sprites = new FSprite[SegmentCount];
+            FShader heatShader = null;
             _shaderAvailable = rCam?.room?.game?.rainWorld?.Shaders != null &&
                                rCam.room.game.rainWorld.Shaders.TryGetValue(
                                    "HeatDistortion",
-                                   out FShader heatShader) &&
+                                   out heatShader) &&
                                heatShader != null;
 
             for (int i = 0; i < SegmentCount; i++)
