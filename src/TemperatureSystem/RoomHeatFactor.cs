@@ -12,8 +12,9 @@ namespace DryCycle.TemperatureSystem;
 /// dissipate heat toward it, while a body node at or below RoomHeat receives no
 /// room-driven temperature change.
 ///
-/// HeatWave may raise this baseline from schedule data only. GPU thermal textures are
-/// deliberately excluded so graphics capability/resolution can never change gameplay.
+/// HeatWave may raise this baseline from deterministic schedule intensity only. Visual
+/// shader/LevelHeat state is deliberately excluded so rendering behavior can never
+/// change gameplay temperature.
 /// </summary>
 internal static class RoomHeatFactor
 {
