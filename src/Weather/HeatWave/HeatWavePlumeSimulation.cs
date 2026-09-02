@@ -18,6 +18,8 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
     private const int CellsPerTile = 4;
     private const int MaxWidth = 1024;
     private const int MaxHeight = 512;
+    private const int PrimeSteps = 14;
+    private const float PrimeStepSeconds = 0.11f;
 
     private readonly Room _room;
     private readonly HeatWaveTerrainField _terrain;
@@ -29,6 +31,7 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
     private int _advectKernel;
     private int _injectKernel;
     private float _elapsed;
+    private float _lastIntensity;
 
     internal bool IsAvailable { get; private set; }
     internal Texture PlumeTexture => IsAvailable ? _read : Texture2D.blackTexture;
@@ -87,25 +90,20 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
             return;
         }
 
+        float intensity = Mathf.Clamp01(weatherIntensity);
+        float solar = Mathf.Clamp01(solarIntensity);
+
+        // Entering an already-hot room must show established convection immediately.
+        // Prewarming advances only this visual field; gameplay/physical thermal state is
+        // untouched, and the one-time cost happens only on a cold->active transition.
+        if (_lastIntensity <= 0.025f && intensity > 0.08f)
+        {
+            Prime(intensity, solar, thermalTexture, velocityTexture);
+        }
+        _lastIntensity = intensity;
+
         float dt = Mathf.Clamp(deltaTime, 1f / 240f, 1f / 20f);
-        _elapsed += dt;
-        SetCommonParameters(dt, weatherIntensity, solarIntensity);
-
-        _solver.SetTexture(_advectKernel, "_PlumeRead", _read);
-        _solver.SetTexture(_advectKernel, "_PlumeWrite", _write);
-        _solver.SetTexture(_advectKernel, "_ThermalTex", thermalTexture);
-        _solver.SetTexture(_advectKernel, "_VelocityTex", velocityTexture);
-        _solver.SetTexture(_advectKernel, "_TerrainTex", _terrain.Texture);
-        Dispatch(_advectKernel);
-        Swap();
-
-        _solver.SetTexture(_injectKernel, "_PlumeRead", _read);
-        _solver.SetTexture(_injectKernel, "_PlumeWrite", _write);
-        _solver.SetTexture(_injectKernel, "_ThermalTex", thermalTexture);
-        _solver.SetTexture(_injectKernel, "_VelocityTex", velocityTexture);
-        _solver.SetTexture(_injectKernel, "_TerrainTex", _terrain.Texture);
-        Dispatch(_injectKernel);
-        Swap();
+        Advance(dt, intensity, solar, thermalTexture, velocityTexture);
     }
 
     public void Dispose()
@@ -130,6 +128,50 @@ internal sealed class HeatWavePlumeSimulation : IDisposable
         _solver.SetTexture(_initializeKernel, "_TerrainTex", _terrain.Texture);
         Dispatch(_initializeKernel);
         Graphics.Blit(_read, _write);
+    }
+
+    private void Prime(
+        float intensity,
+        float solar,
+        Texture thermalTexture,
+        Texture velocityTexture)
+    {
+        for (int i = 0; i < PrimeSteps; i++)
+        {
+            Advance(
+                PrimeStepSeconds,
+                intensity,
+                solar,
+                thermalTexture,
+                velocityTexture);
+        }
+    }
+
+    private void Advance(
+        float dt,
+        float intensity,
+        float solar,
+        Texture thermalTexture,
+        Texture velocityTexture)
+    {
+        _elapsed += dt;
+        SetCommonParameters(dt, intensity, solar);
+
+        _solver.SetTexture(_advectKernel, "_PlumeRead", _read);
+        _solver.SetTexture(_advectKernel, "_PlumeWrite", _write);
+        _solver.SetTexture(_advectKernel, "_ThermalTex", thermalTexture);
+        _solver.SetTexture(_advectKernel, "_VelocityTex", velocityTexture);
+        _solver.SetTexture(_advectKernel, "_TerrainTex", _terrain.Texture);
+        Dispatch(_advectKernel);
+        Swap();
+
+        _solver.SetTexture(_injectKernel, "_PlumeRead", _read);
+        _solver.SetTexture(_injectKernel, "_PlumeWrite", _write);
+        _solver.SetTexture(_injectKernel, "_ThermalTex", thermalTexture);
+        _solver.SetTexture(_injectKernel, "_VelocityTex", velocityTexture);
+        _solver.SetTexture(_injectKernel, "_TerrainTex", _terrain.Texture);
+        Dispatch(_injectKernel);
+        Swap();
     }
 
     private void SetCommonParameters(
