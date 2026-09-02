@@ -32,7 +32,7 @@ internal readonly struct HeatWaveDebugSnapshot
 
 /// <summary>
 /// Developer-only diagnostics for the actual HeatWave presentation layers.
-/// Ctrl+Shift+H cycles final/band/air/color/depth views.
+/// Ctrl+Shift+H cycles final/band/air/color/flow-mirage views.
 /// Ctrl+Shift+J forces HeatWave intensity 1 in the camera room without changing the
 /// climate schedule.
 /// </summary>
@@ -208,12 +208,14 @@ internal static class HeatWaveDebugRuntime
 
         string mode = DebugModeName(_debugMode);
         string atmosphere = DryCycleShaderAssets.HasHeatWaveAtmosphere ? "YES" : "NO";
+        string textures = HeatWaveNoiseField.IsAvailable ? "YES" : "NO";
 
         if (!HeatWaveWeatherRuntime.TryGetDebugSnapshot(room, out HeatWaveDebugSnapshot snapshot))
         {
             _label.text =
                 "HeatWave Debug\n" +
                 $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   Atmosphere: {atmosphere}\n" +
+                $"OpticalTextures: {textures}\n" +
                 "No HeatWave controller in camera room\n" +
                 "Ctrl+Shift+H view   Ctrl+Shift+J force";
             return;
@@ -222,7 +224,7 @@ internal static class HeatWaveDebugRuntime
         _label.text =
             "HeatWave Debug\n" +
             $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   Atmosphere: {atmosphere}\n" +
-            $"LevelHeat: {(snapshot.LevelHeatApplied ? "YES" : "NO")}   " +
+            $"OpticalTextures: {textures}   LevelHeat: {(snapshot.LevelHeatApplied ? "YES" : "NO")}   " +
             $"LevelAmount {snapshot.LevelHeatAmount:0.00}\n" +
             $"Intensity {snapshot.Intensity:0.00}   Solar {snapshot.SolarIntensity:0.00}   " +
             $"Tone {snapshot.ToneAmount:0.00}   HeatColumns {snapshot.Emitters}\n" +
@@ -236,7 +238,7 @@ internal static class HeatWaveDebugRuntime
             1 => "HEAT BANDS",
             2 => "AIR MOTION",
             3 => "HEAT COLOR",
-            4 => "DEPTH",
+            4 => "FLOW / MIRAGE",
             _ => "FINAL"
         };
     }
