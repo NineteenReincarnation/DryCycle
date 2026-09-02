@@ -129,6 +129,8 @@ internal static class HeatWaveWeatherRuntime
         private float _toneAmount;
         private float _levelHeatAmount;
         private float _visualTime;
+        private Texture2D _surfaceField;
+        private bool _surfaceFieldAttempted;
         private bool _disposed;
 
         internal HeatWaveController(Room ownerRoom)
@@ -170,6 +172,7 @@ internal static class HeatWaveWeatherRuntime
             if (_intensity > Epsilon)
             {
                 HeatWaveNoiseField.Ensure();
+                EnsureSurfaceField();
             }
 
             _audio.Update(_intensity, _solar, _visualTime);
@@ -220,6 +223,9 @@ internal static class HeatWaveWeatherRuntime
                 return;
             }
 
+            HeatWaveNoiseField.Ensure();
+            EnsureSurfaceField();
+
             Vector2 roomSizePx = new(
                 Mathf.Max(1, room.TileWidth) * 20f,
                 Mathf.Max(1, room.TileHeight) * 20f);
@@ -231,6 +237,7 @@ internal static class HeatWaveWeatherRuntime
                 toneAmount,
                 levelHeatAmount,
                 _visualTime,
+                _surfaceField,
                 active);
 
             HeatWaveRenderPipeline.Draw(
@@ -261,6 +268,8 @@ internal static class HeatWaveWeatherRuntime
             {
                 _disposed = true;
                 _audio.Dispose();
+                HeatWaveSurfaceField.Dispose(_surfaceField);
+                _surfaceField = null;
                 HeatWaveLevelEffect.RestoreForRoom(room);
             }
 
@@ -280,8 +289,20 @@ internal static class HeatWaveWeatherRuntime
                 _toneAmount,
                 _levelHeatAmount,
                 HeatWaveLevelEffect.IsApplied(room),
+                _surfaceField != null,
                 CountPlacedEmitters());
             return true;
+        }
+
+        private void EnsureSurfaceField()
+        {
+            if (_surfaceFieldAttempted)
+            {
+                return;
+            }
+
+            _surfaceFieldAttempted = true;
+            _surfaceField = HeatWaveSurfaceField.Build(room);
         }
 
         private float EvaluateSolar(WorldClock clock)
@@ -302,8 +323,8 @@ internal static class HeatWaveWeatherRuntime
                 return 0f;
             }
 
-            // Heat remains perceptible when the sun is weak, while the bleached noon
-            // state becomes dominant under direct light.
+            // Heat remains perceptible when the sun is weak, while direct sunlight
+            // pushes the room toward the harsh yellow-hot desert state.
             float solarDrive = Mathf.Pow(Mathf.Clamp01(solar), 0.72f);
             return Mathf.Clamp01(heat * Mathf.Lerp(0.34f, 1f, solarDrive));
         }
