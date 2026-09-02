@@ -21,7 +21,9 @@ namespace DryCycle.Editor
         {
             "Assets/DryCycle/Shaders/DryCycleFogComposite.shader",
             "Assets/DryCycle/Compute/DryCycleFogFluid.compute",
-            "Assets/DryCycle/Compute/DryCycleFogNoise.compute"
+            "Assets/DryCycle/Compute/DryCycleFogNoise.compute",
+            "Assets/DryCycle/Shaders/DryCycleHeatWaveComposite.shader",
+            "Assets/DryCycle/Compute/DryCycleHeatWaveThermal.compute"
         };
 
         [MenuItem("DryCycle/Build Weather AssetBundle (Windows x64)")]
@@ -65,9 +67,6 @@ namespace DryCycle.Editor
                 assetNames = WeatherAssets
             };
 
-            // Keep the TypeTree and editor-version information in the bundle. TypeTree
-            // data is valuable when the player/editor versions differ, and the sidecar
-            // written below makes that difference explicit at runtime.
             BuildAssetBundleOptions options =
                 BuildAssetBundleOptions.ChunkBasedCompression |
                 BuildAssetBundleOptions.ForceRebuildAssetBundle;
@@ -117,6 +116,20 @@ namespace DryCycle.Editor
             {
                 throw new InvalidOperationException(
                     "DryCycle fog noise compute shader could not be imported: " + WeatherAssets[2]);
+            }
+
+            Shader heatComposite = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[3]);
+            if (heatComposite == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle HeatWave composite shader could not be imported: " + WeatherAssets[3]);
+            }
+
+            ComputeShader heatThermal = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[4]);
+            if (heatThermal == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle HeatWave thermal compute shader could not be imported: " + WeatherAssets[4]);
             }
 
             Debug.Log(

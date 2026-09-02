@@ -1,4 +1,5 @@
 using System;
+using DryCycle.Weather.HeatWave;
 using UnityEngine;
 
 namespace DryCycle.TemperatureSystem;
@@ -7,15 +8,19 @@ namespace DryCycle.TemperatureSystem;
 /// Authored room environmental heat baseline.
 ///
 /// RoomHeat is not a target that automatically heats the player. The thermal model
-/// only uses it as the lower baseline for room cooling: a body node above RoomHeat
-/// can dissipate heat toward it, while a body node at or below RoomHeat receives no
+/// only uses it as the lower baseline for room cooling: a body node above RoomHeat can
+/// dissipate heat toward it, while a body node at or below RoomHeat receives no
 /// room-driven temperature change.
+///
+/// HeatWave may raise this baseline from schedule data only. GPU thermal textures are
+/// deliberately excluded so graphics capability/resolution can never change gameplay.
 /// </summary>
 internal static class RoomHeatFactor
 {
     internal const float MinimumHeat = -1f;
     internal const float MaximumHeat = 1f;
     internal const float DefaultHeat = 0f;
+    internal const float MaximumHeatWaveAmbientBaseline = 0.86f;
 
     internal static float GetRoomHeat(Room room)
     {
@@ -36,12 +41,27 @@ internal static class RoomHeatFactor
             regionName = InferRegionFromRoomName(roomName);
         }
 
-        return TemperatureSetsLoader.GetRoomHeat(regionName, roomName);
+        float authored = TemperatureSetsLoader.GetRoomHeat(regionName, roomName);
+        float heatWave = CalculateHeatWaveBaseline(room);
+        return ClampHeat(Mathf.Max(authored, heatWave));
     }
 
     internal static float ClampHeat(float value)
     {
         return Mathf.Clamp(value, MinimumHeat, MaximumHeat);
+    }
+
+    private static float CalculateHeatWaveBaseline(Room room)
+    {
+        float intensity = HeatWaveWeatherRuntime.GetAmbientHeatInfluence(room);
+        if (intensity <= 0f)
+        {
+            return DefaultHeat;
+        }
+
+        float t = Mathf.Clamp01(intensity);
+        t = t * t * (3f - 2f * t);
+        return MaximumHeatWaveAmbientBaseline * t;
     }
 
     private static string InferRegionFromRoomName(string roomName)

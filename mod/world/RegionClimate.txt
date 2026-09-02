@@ -13,6 +13,7 @@ SU {
 }
 
 B5 {
+    HeatWave : 100
     SandStorm : 100
 }
 
@@ -51,6 +52,10 @@ ABCDEFG {
         DenseFog : 100
         //Fog 与 DenseFog 是同一气象簇的两个独立子气象候选
     }
+
+    HeatWave : 50
+    //HeatWave 内部自行管理白灼、热边界层、HeatColumn 和 Thermal Burst；
+    //它们不是独立气象 ID，也不依赖 RoomSettings effect。
 
     SandStorm : 50
     //气象类型，当日允许该气象进入排表的概率

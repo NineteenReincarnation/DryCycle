@@ -20,7 +20,8 @@ internal enum WeatherForecastVisualKind
     HeavyRain,
     DeathRain,
     Fog,
-    DenseFog
+    DenseFog,
+    HeatWave
 }
 
 internal enum WeatherForecastAnimation
@@ -28,7 +29,8 @@ internal enum WeatherForecastAnimation
     Static,
     Drip,
     FastDrip,
-    VerticalShake
+    VerticalShake,
+    HeatShimmer
 }
 
 internal readonly struct WeatherForecastVisualStyle
@@ -60,28 +62,20 @@ internal readonly struct WeatherForecastVisualStyle
     }
 }
 
-/// <summary>
-/// Centralized colors and animation parameters for forecast pips. Keeping this data
-/// out of WorldClockHooks prevents visual tuning from leaking into clock logic.
-/// </summary>
 internal static class WeatherForecastVisualCatalog
 {
-    // Sandstorm colors remain the same palette established by the temporary test.
     internal static readonly Color SandStormColor = new(0.90f, 0.76f, 0.42f);
     internal static readonly Color DeathSandStormColor = new(0.66f, 0.44f, 0.16f);
 
-    // Rain language: LightRain is the readable rain-blue; Heavy/DeathRain use one
-    // shared deep-blue family so animation, not arbitrary hue changes, carries the
-    // stronger semantic distinction.
     internal static readonly Color LightRainColor = new(0.30f, 0.62f, 0.92f);
     internal static readonly Color HeavyRainColor = new(0.08f, 0.25f, 0.57f);
     internal static readonly Color RainDropColor = new(0.62f, 0.86f, 1.00f);
 
-    // Fog family: both variants stay in the same desaturated cyan-grey hue. Density
-    // is communicated primarily through luminance so the pair reads as one weather
-    // family without colliding with Rain's saturated blues or Sandstorm's ochres.
     internal static readonly Color FogColor = new(168f / 255f, 186f / 255f, 189f / 255f);
     internal static readonly Color DenseFogColor = new(82f / 255f, 99f / 255f, 102f / 255f);
+
+    // Pale white-gold: HeatWave is brutal midday radiation, never a sunset-orange icon.
+    internal static readonly Color HeatWaveColor = new(1.00f, 0.86f, 0.57f);
 
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
     {
@@ -126,6 +120,12 @@ internal static class WeatherForecastVisualCatalog
                 DenseFogColor,
                 WeatherForecastAnimation.Static),
 
+            WeatherForecastVisualKind.HeatWave => new WeatherForecastVisualStyle(
+                HeatWaveColor,
+                HeatWaveColor,
+                WeatherForecastAnimation.HeatShimmer,
+                shakeAmplitudePixels: 0.42f),
+
             _ => new WeatherForecastVisualStyle(
                 Color.clear,
                 Color.clear,
@@ -133,11 +133,6 @@ internal static class WeatherForecastVisualCatalog
         };
     }
 
-    /// <summary>
-    /// Resolves authored/scheduled IDs without making the scheduler depend on HUD
-    /// presentation classes. Aliases for the generic danger family IDs are accepted
-    /// so future config revisions do not require a renderer rewrite.
-    /// </summary>
     internal static bool TryResolve(
         string id,
         WeatherScheduleEventKind eventKind,
@@ -174,6 +169,10 @@ internal static class WeatherForecastVisualCatalog
                 visualKind = WeatherForecastVisualKind.DenseFog;
                 return true;
 
+            case "HEATWAVE" when eventKind == WeatherScheduleEventKind.Weather:
+                visualKind = WeatherForecastVisualKind.HeatWave;
+                return true;
+
             case "SANDSTORM":
                 visualKind = eventKind == WeatherScheduleEventKind.DangerType
                     ? WeatherForecastVisualKind.DeathSandStorm
@@ -193,11 +192,6 @@ internal static class WeatherForecastVisualCatalog
     }
 }
 
-/// <summary>
-/// Stores the already-generated forecast for a game. This is intentionally only a
-/// display cache: scheduling and probability remain owned by WeatherPhaseScheduler
-/// and the future climate loader.
-/// </summary>
 internal static class WeatherForecastTimeline
 {
     private sealed class State
@@ -234,8 +228,6 @@ internal static class WeatherForecastTimeline
 
             for (int pip = scheduled.StartPip; pip < scheduled.EndPipExclusive; pip++)
             {
-                // Scheduler uses zero-based half-minute cells; HUD-facing pips are
-                // chronological and one-based.
                 target[pip + 1] = kind;
             }
         }

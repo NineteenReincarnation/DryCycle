@@ -16,6 +16,7 @@ using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
 using DryCycle.Weather;
 using DryCycle.Weather.Climate;
+using DryCycle.Weather.HeatWave;
 using DryCycle.Weather.Scheduling;
 
 #pragma warning disable CS0618
@@ -86,6 +87,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            HeatWaveWeatherRuntime.Disable();
             FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
             ShelterCycleResetRuntime.Disable();
@@ -184,6 +186,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ShelterCycleResetRuntime.Enable();
             WeatherScheduleRuntime.Enable();
             FogWeatherRuntime.Enable();
+            HeatWaveWeatherRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
@@ -231,6 +234,7 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
+            HeatWaveWeatherRuntime.Disable();
             FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
             ShelterCycleResetRuntime.Disable();
