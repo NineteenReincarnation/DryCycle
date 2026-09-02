@@ -49,6 +49,7 @@ float4 _BlastParams[4];
 
 static const float BlastWaveDistanceScale = 1024.0;
 static const float BlastWaveLifetime = 0.62;
+static const float TwoPi = 6.2831853;
 
 float2 GridUV(uint2 id, uint width, uint height)
 {
@@ -93,7 +94,7 @@ float BlastShapeRadiusScale(float2 deltaPx, float2 blastUv)
     float angle = atan2(deltaPx.y, deltaPx.x);
     float seed = frac(
         blastUv.x * 37.17 +
-        blastUv.y * 91.73) * 6.2831853;
+        blastUv.y * 91.73) * TwoPi;
 
     float irregular =
         sin(angle * 2.0 + seed * 0.73) * 0.035 +
@@ -110,9 +111,9 @@ float BlastWaveRadiusPx(float ageSeconds)
 
 float TargetShape(float2 uv, float time)
 {
-    float a = sin((uv.y * 2.31 + time * 0.010) * 6.2831853);
-    float b = sin((uv.y * -4.17 + uv.x * 0.73 + time * 0.006 + 0.31) * 6.2831853);
-    float c = sin((uv.y * 7.09 + time * -0.003 + 0.73) * 6.2831853);
+    float a = sin((uv.y * 2.31 + time * 0.010) * TwoPi);
+    float b = sin((uv.y * -4.17 + uv.x * 0.73 + time * 0.006 + 0.31) * TwoPi);
+    float c = sin((uv.y * 7.09 + time * -0.003 + 0.73) * TwoPi);
     return saturate(0.60 + a * 0.18 + b * 0.12 + c * 0.07);
 }
 
@@ -128,6 +129,181 @@ float2 WallTangent(float2 uv, float2 texel)
         return 0.0.xx;
     gradient /= len;
     return float2(-gradient.y, gradient.x);
+}
+
+// Deterministic scalar hash. Room dimensions are intentionally part of the seed below;
+// the obstacle-aware solver then makes rooms with similar dimensions diverge further as
+// the same atmosphere is projected around their different geometry.
+float Hash11(float n)
+{
+    return frac(sin(n * 12.9898 + 78.233) * 43758.5453);
+}
+
+// Analytic 2D curl mode derived from a scalar stream function. Because velocity is
+// (dPsi/dy, -dPsi/dx), each mode is divergence-free before pressure projection. This
+// gives the background atmosphere broad circulation without procedural sinks/sources.
+float2 CurlModePx(
+    float2 worldPx,
+    float2 wavelengthPx,
+    float2 phase,
+    float speedPxPerSecond)
+{
+    float2 wavelength = max(wavelengthPx, float2(64.0, 64.0));
+    float2 k = TwoPi / wavelength;
+    float2 a = worldPx * k + phase;
+    float kReference = max(k.x, k.y);
+
+    return speedPxPerSecond * float2(
+        (k.y / kReference) * sin(a.x) * cos(a.y),
+        -(k.x / kReference) * cos(a.x) * sin(a.y));
+}
+
+float AmbientIntermittency()
+{
+    float2 roomPx = max(_RoomSizePx.xy, float2(1.0, 1.0));
+    float roomSeed = Hash11(
+        roomPx.x * 0.0137 +
+        roomPx.y * 0.0291 +
+        17.31);
+
+    float slow = 0.5 + 0.5 * sin(
+        _SimulationTime * 0.029 +
+        Hash11(roomSeed * 41.7 + 0.31) * TwoPi);
+    float medium = 0.5 + 0.5 * sin(
+        _SimulationTime * 0.071 +
+        Hash11(roomSeed * 19.3 + 0.77) * TwoPi);
+
+    float breathing = saturate(
+        0.32 +
+        slow * 0.22 +
+        medium * 0.46);
+    return breathing * breathing * (3.0 - 2.0 * breathing);
+}
+
+float2 AmbientTargetVelocityUv(float2 uv, float2 cellUv)
+{
+    float2 roomPx = max(_RoomSizePx.xy, float2(1.0, 1.0));
+    float2 worldPx = uv * roomPx;
+    float shortSide = max(120.0, min(roomPx.x, roomPx.y));
+    float roomSeed = Hash11(
+        roomPx.x * 0.0137 +
+        roomPx.y * 0.0291 +
+        17.31);
+    float breathing = AmbientIntermittency();
+
+    float2 macroPhase = TwoPi * float2(
+        Hash11(roomSeed * 17.17 + 0.11),
+        Hash11(roomSeed * 53.31 + 0.73));
+    macroPhase += _SimulationTime * float2(0.011, -0.008);
+
+    float2 mesoPhaseA = TwoPi * float2(
+        Hash11(roomSeed * 71.3 + 0.29),
+        Hash11(roomSeed * 31.9 + 0.61));
+    mesoPhaseA += _SimulationTime * float2(-0.024, 0.019);
+
+    float2 mesoPhaseB = TwoPi * float2(
+        Hash11(roomSeed * 11.1 + 0.47),
+        Hash11(roomSeed * 89.7 + 0.13));
+    mesoPhaseB += _SimulationTime * float2(0.037, 0.028);
+
+    float2 finePhase = TwoPi * float2(
+        Hash11(roomSeed * 43.9 + 0.83),
+        Hash11(roomSeed * 67.1 + 0.37));
+    finePhase += _SimulationTime * float2(-0.052, 0.044);
+
+    float2 macroWave = max(
+        roomPx * float2(1.14, 1.08),
+        float2(560.0, 440.0));
+    float mesoScaleA = clamp(shortSide * 0.66, 300.0, 520.0);
+    float mesoScaleB = clamp(shortSide * 0.43, 180.0, 330.0);
+    float fineScale = clamp(shortSide * 0.22, 96.0, 168.0);
+
+    float slowPulse = 0.5 + 0.5 * sin(
+        _SimulationTime * 0.041 +
+        roomSeed * TwoPi * 1.7);
+
+    float2 macroPx = CurlModePx(
+        worldPx,
+        macroWave,
+        macroPhase,
+        7.4 * lerp(0.78, 1.08, slowPulse));
+    float2 mesoPxA = CurlModePx(
+        worldPx,
+        mesoScaleA.xx,
+        mesoPhaseA,
+        4.8 * lerp(0.55, 1.0, breathing));
+    float2 mesoPxB = CurlModePx(
+        worldPx,
+        mesoScaleB.xx,
+        mesoPhaseB,
+        2.6 * lerp(0.48, 1.0, breathing));
+    float2 finePx = CurlModePx(
+        worldPx,
+        fineScale.xx,
+        finePhase,
+        0.82 * lerp(0.42, 1.0, breathing));
+
+    // A very weak open-space vertical circulation stands in for slow thermal tendency.
+    // It is x-dependent rather than y-dependent, so it is divergence-free in 2D and
+    // cannot create fog from a point source. Pressure/obstacles reshape it afterwards.
+    float convectionScale = max(380.0, shortSide * 0.92);
+    float convectionPhase =
+        worldPx.x / convectionScale * TwoPi +
+        Hash11(roomSeed * 97.3 + 0.21) * TwoPi +
+        _SimulationTime * 0.013;
+    float convectionBreath = 0.5 + 0.5 * sin(
+        _SimulationTime * 0.033 +
+        Hash11(roomSeed * 23.7 + 0.66) * TwoPi);
+    float openSpace = smoothstep(
+        0.16,
+        0.78,
+        WallDistance01(uv));
+
+    float2 ambientPx =
+        macroPx +
+        mesoPxA +
+        mesoPxB +
+        finePx;
+    ambientPx.y +=
+        sin(convectionPhase) *
+        1.25 *
+        lerp(0.42, 1.0, convectionBreath) *
+        openSpace;
+
+    // The old 22px/s prevailing drift is kept only as a weak large-scale bias. The
+    // atmosphere above supplies most local motion; this prevents a room from looking like
+    // one texture sheet scrolling permanently from left to right.
+    float2 desiredVelocity =
+        _WindVelocity.xy * 0.34 +
+        ambientPx / roomPx;
+
+    // Near geometry, pre-align the background field to the wall tangent. The following
+    // pressure projection remains authoritative; this simply avoids constantly forcing
+    // velocity straight into a wall and lets long-lived boundary currents emerge.
+    float wallProximity = pow(
+        saturate(1.0 - WallDistance01(uv)),
+        1.85);
+    float2 tangent = WallTangent(uv, cellUv);
+    if (dot(tangent, tangent) > 0.25)
+    {
+        float2 tangentialVelocity =
+            tangent * dot(desiredVelocity, tangent);
+        desiredVelocity = lerp(
+            desiredVelocity,
+            tangentialVelocity,
+            wallProximity * 0.88);
+
+        float boundaryBreath = sin(
+            uv.x * 2.7 +
+            uv.y * 3.9 +
+            _SimulationTime * 0.021 +
+            roomSeed * TwoPi);
+        desiredVelocity +=
+            tangent * boundaryBreath * wallProximity *
+            (0.55 / roomPx);
+    }
+
+    return desiredVelocity;
 }
 
 float BlastTerrainTransmission(
@@ -213,9 +389,13 @@ void InitializeFields(uint3 dispatchId : SV_DispatchThreadID)
     float density = solid
         ? 0.0
         : _TargetDensity * lerp(0.48, 1.08, initialShape);
+    float2 cellUv = 1.0 / float2(width, height);
+    float2 initialVelocity = solid
+        ? 0.0.xx
+        : AmbientTargetVelocityUv(uv, cellUv);
 
     _VelocityWrite[id] = float4(
-        solid ? 0.0.xx : _WindVelocity.xy,
+        initialVelocity,
         0.0,
         0.0);
     _DensityWrite[id] = float4(density, 0.0, 0.0, 0.0);
@@ -274,29 +454,19 @@ void ApplyForces(uint3 dispatchId : SV_DispatchThreadID)
     }
 
     float2 velocity = _VelocityRead.Load(int3(id, 0)).xy;
-
-    float windBlend = 1.0 - exp(-0.52 * _DeltaTime);
-    velocity = lerp(velocity, _WindVelocity.xy, windBlend);
-
     float2 cellUv = 1.0 / float2(width, height);
-    float turbulenceX =
-        sin((uv.y * 4.9 + uv.x * 1.3 + _SimulationTime * 0.027) * 6.2831853);
-    float turbulenceY =
-        cos((uv.x * 3.7 - uv.y * 0.9 - _SimulationTime * 0.019) * 6.2831853);
-    float turbulenceX2 =
-        sin((uv.y * -8.1 + _SimulationTime * 0.011 + 0.41) * 6.2831853);
-    velocity += float2(
-        turbulenceX + turbulenceX2 * 0.42,
-        turbulenceY) * cellUv * 0.58;
 
-    float wallProximity = pow(
-        saturate(1.0 - WallDistance01(uv)),
-        2.1);
-    float2 tangent = WallTangent(uv, cellUv);
-    float tangentSign =
-        sin((uv.x * 3.1 + uv.y * 4.7 + _SimulationTime * 0.017) * 6.2831853);
-    velocity += tangent * tangentSign *
-        wallProximity * cellUv * 1.15;
+    // Ambient atmosphere is a weak target velocity, not a density animation. The force
+    // response is deliberately slow so player wakes and explosions remain much stronger.
+    float2 ambientTarget = AmbientTargetVelocityUv(uv, cellUv);
+    float breathing = AmbientIntermittency();
+    float atmosphereResponse = lerp(0.16, 0.32, breathing);
+    float atmosphereBlend =
+        1.0 - exp(-atmosphereResponse * _DeltaTime);
+    velocity = lerp(
+        velocity,
+        ambientTarget,
+        atmosphereBlend);
 
     float2 worldPx = uv * _RoomSizePx.xy;
     [unroll]
@@ -805,8 +975,8 @@ void MaintainDensity(uint3 dispatchId : SV_DispatchThreadID)
 
     float inletPulse = saturate(
         0.62 +
-        0.24 * sin((uv.y * 2.7 + _SimulationTime * 0.009) * 6.2831853) +
-        0.14 * sin((uv.y * -6.1 + _SimulationTime * 0.004 + 0.37) * 6.2831853));
+        0.24 * sin((uv.y * 2.7 + _SimulationTime * 0.009) * TwoPi) +
+        0.14 * sin((uv.y * -6.1 + _SimulationTime * 0.004 + 0.37) * TwoPi));
     float inletTarget =
         _TargetDensity * lerp(0.58, 1.34, inletPulse);
     float inletMix = inlet *
