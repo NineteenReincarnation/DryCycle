@@ -8,13 +8,15 @@ Rain World cannot compile a new Unity `.shader` or `.compute` file at runtime. T
 
 The runtime logs the exact player engine version as `Application.unityVersion` when the bundle is loaded or missing. Use a Unity Editor matching that version whenever possible. Unity documents AssetBundles as backward-compatible in many cases but **not forward-compatible**, so a bundle built by an editor newer than Rain World's player can fail even when the shader source itself is correct.
 
-Every build now writes a sibling file:
+Every build writes a sibling file:
 
 `mod/assets/drycycle/drycycleweather.version.txt`
 
 The runtime compares that editor version with Rain World's player version and logs the result before loading the bundle.
 
 ## Assets
+
+### Fog
 
 - `Assets/DryCycle/Shaders/DryCycleFogComposite.shader`
   - anonymous per-camera GrabPass final world composite
@@ -37,6 +39,26 @@ The runtime compares that editor version with Rain World's player version and lo
   - generates one shared **96^3 ARGBHalf** volumetric noise texture
   - explicitly periodic value-noise FBM and Worley fields, so Repeat sampling has no hard 3D seam
   - Nubis-style coherent body + cellular erosion rather than simple texture multiplication
+
+### HeatWave
+
+HeatWave deliberately follows Rain World's own global/local split instead of treating a giant full-screen `HeatDistortion` as the weather.
+
+- Rain World's built-in `LevelHeat` shader is applied to `RoomCamera.levelGraphic` while scheduled HeatWave is active.
+  - this is the **primary** weather deformation
+  - terrain receives the recognizable vertical heat-melt / palette response already proven by the base game
+  - authored RoomSettings `HeatWave` remains compatible and is combined with the scheduled weather
+- `Assets/DryCycle/Shaders/DryCycleHeatWaveAtmosphere.shader`
+  - one SceneColor grab and one final resolve; no recursive Far/Mid/Near distortion stack
+  - broad rising heat bands and meso-scale whole-air instability
+  - stronger vertical compression/stretch than horizontal displacement, avoiding the "underwater" look
+  - separate high-frequency shimmer spectrum for edge vibration
+  - luminance-aware desert bleaching toward warm/bone white while protecting deep shadows
+  - depth-weighted distant contrast loss and very small local softening in strong hot-air bands
+  - dedicated debug views for heat bands, air motion, heat color and pseudo-depth
+- Mapper-authored `HeatColumn` objects use Rain World's built-in local `HeatDistortion` shader.
+  - HeatColumn is an auxiliary local hot-air volume, not the global HeatWave implementation
+  - there is no HeatWave thermal-fluid compute solver, plume compute field or Thermal Burst state machine
 
 ## Build in the Unity Editor
 
@@ -61,10 +83,10 @@ dotnet build .\src\DryCycle.csproj -c Release `
 
 You can also set the `UNITY_EDITOR` environment variable instead of passing `DryCycleUnityEditor`.
 
-A normal Release build automatically copies an existing bundle and its version sidecar into the active Ancient Site mod at `assets/drycycle/`. If no bundle exists, the build emits a warning and the game uses DryCycle's compatibility fog renderer instead of crashing.
+A normal Release build automatically copies an existing bundle and its version sidecar into the active Ancient Site mod at `assets/drycycle/`. If no bundle exists, the build emits a warning. Fog uses its compatibility renderer; HeatWave still retains its built-in `LevelHeat` primary deformation while the custom atmosphere pass is unavailable.
 
 ## Runtime safety
 
 Do not move AssetBundle loading into BepInEx `Awake`/`OnEnable`. `DryCycleShaderAssets` only installs the hook there; `AssetBundle.LoadFromFile` and `LoadAsset` execute after Rain World's own `LoadResources` pass.
 
-The custom composite can still run without compute shaders: if compute/3D texture support is unavailable, room fluid advection is disabled and the shader synthesizes pseudo-volume structure from Rain World's built-in `_NoiseTex` / `_NoiseTex2`. This is a degraded visual path, not a crash path.
+Fog's custom composite can still run without compute shaders: if compute/3D texture support is unavailable, room fluid advection is disabled and the shader synthesizes pseudo-volume structure from Rain World's built-in `_NoiseTex` / `_NoiseTex2`. HeatWave does not depend on compute shaders.
