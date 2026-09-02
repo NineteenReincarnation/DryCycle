@@ -11,6 +11,7 @@ internal readonly struct HeatWaveRenderFrame
     internal readonly float ToneAmount;
     internal readonly float LevelHeatAmount;
     internal readonly float Time;
+    internal readonly Texture2D SurfaceField;
     internal readonly bool Active;
 
     internal HeatWaveRenderFrame(
@@ -20,6 +21,7 @@ internal readonly struct HeatWaveRenderFrame
         float toneAmount,
         float levelHeatAmount,
         float time,
+        Texture2D surfaceField,
         bool active)
     {
         RoomSizePx = new Vector2(
@@ -30,6 +32,7 @@ internal readonly struct HeatWaveRenderFrame
         ToneAmount = Mathf.Clamp01(toneAmount);
         LevelHeatAmount = Mathf.Clamp01(levelHeatAmount);
         Time = time;
+        SurfaceField = surfaceField;
         Active = active;
     }
 }
@@ -38,9 +41,10 @@ internal readonly struct HeatWaveRenderFrame
 /// HeatWave atmosphere resolve.
 ///
 /// Rain World's LevelHeat owns terrain-level melting. This single GrabPass resolve owns
-/// the air itself: room-space flow-advection, base/detail refractive normals, mirage
-/// vertical remapping, distortion-aware softening and dry-hot color grading. Optical
-/// textures are generated once by HeatWaveNoiseField and remain anchored to room space.
+/// the air itself: room-space flow advection, base/detail refractive normals, mirage
+/// vertical remapping, geometry-aware ground shimmer, optical focusing, directional
+/// softening and dry-hot color grading. Runtime optical textures remain anchored to room
+/// space; a small per-room surface field only guides where ground mirage should gather.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
@@ -58,7 +62,9 @@ internal static class HeatWaveRenderPipeline
     private static readonly int FlowFieldId = Shader.PropertyToID("_DryCycleHeatFlowField");
     private static readonly int NormalFieldId = Shader.PropertyToID("_DryCycleHeatNormalField");
     private static readonly int MirageFieldId = Shader.PropertyToID("_DryCycleHeatMirageField");
+    private static readonly int SurfaceFieldId = Shader.PropertyToID("_DryCycleHeatSurfaceField");
     private static readonly int HasHeatTexturesId = Shader.PropertyToID("_DryCycleHasHeatTextures");
+    private static readonly int HasSurfaceFieldId = Shader.PropertyToID("_DryCycleHasHeatSurfaceField");
     private static readonly int DebugModeId = Shader.PropertyToID("_DryCycleHeatDebugMode");
 
     internal static FSprite[] CreateSprites(RoomCamera camera)
@@ -159,6 +165,7 @@ internal static class HeatWaveRenderPipeline
         int debugMode)
     {
         bool hasTextures = HeatWaveNoiseField.IsAvailable;
+        bool hasSurfaceField = frame.SurfaceField != null;
         Texture flowTexture = hasTextures
             ? HeatWaveNoiseField.FlowTexture
             : Texture2D.grayTexture;
@@ -168,6 +175,9 @@ internal static class HeatWaveRenderPipeline
         Texture mirageTexture = hasTextures
             ? HeatWaveNoiseField.MirageTexture
             : Texture2D.grayTexture;
+        Texture surfaceTexture = hasSurfaceField
+            ? frame.SurfaceField
+            : Texture2D.blackTexture;
 
         Vector4 roomSize = new(
             frame.RoomSizePx.x,
@@ -180,9 +190,11 @@ internal static class HeatWaveRenderPipeline
             frame,
             debugMode,
             hasTextures,
+            hasSurfaceField,
             flowTexture,
             normalTexture,
-            mirageTexture);
+            mirageTexture,
+            surfaceTexture);
 
         Renderer renderer = sprite?._renderLayer?._meshRenderer;
         if (renderer == null)
@@ -201,7 +213,9 @@ internal static class HeatWaveRenderPipeline
         MaterialProperties.SetTexture(FlowFieldId, flowTexture);
         MaterialProperties.SetTexture(NormalFieldId, normalTexture);
         MaterialProperties.SetTexture(MirageFieldId, mirageTexture);
+        MaterialProperties.SetTexture(SurfaceFieldId, surfaceTexture);
         MaterialProperties.SetFloat(HasHeatTexturesId, hasTextures ? 1f : 0f);
+        MaterialProperties.SetFloat(HasSurfaceFieldId, hasSurfaceField ? 1f : 0f);
         MaterialProperties.SetInt(DebugModeId, debugMode);
         renderer.SetPropertyBlock(MaterialProperties);
     }
@@ -211,9 +225,11 @@ internal static class HeatWaveRenderPipeline
         in HeatWaveRenderFrame frame,
         int debugMode,
         bool hasTextures,
+        bool hasSurfaceField,
         Texture flowTexture,
         Texture normalTexture,
-        Texture mirageTexture)
+        Texture mirageTexture,
+        Texture surfaceTexture)
     {
         // Futile can rebuild render layers. Mirror only DryCycle-owned uniforms globally
         // as a resilience path; the per-renderer property block remains authoritative.
@@ -226,7 +242,9 @@ internal static class HeatWaveRenderPipeline
         Shader.SetGlobalTexture(FlowFieldId, flowTexture);
         Shader.SetGlobalTexture(NormalFieldId, normalTexture);
         Shader.SetGlobalTexture(MirageFieldId, mirageTexture);
+        Shader.SetGlobalTexture(SurfaceFieldId, surfaceTexture);
         Shader.SetGlobalFloat(HasHeatTexturesId, hasTextures ? 1f : 0f);
+        Shader.SetGlobalFloat(HasSurfaceFieldId, hasSurfaceField ? 1f : 0f);
         Shader.SetGlobalInt(DebugModeId, debugMode);
     }
 }
