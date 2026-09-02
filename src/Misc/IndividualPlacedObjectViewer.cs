@@ -82,7 +82,7 @@ internal static class IndividualPlacedObjectViewer
     private static void ObjectsPage_ctor(
         On.DevInterface.ObjectsPage.orig_ctor orig,
         ObjectsPage self,
-        DevUI owner,
+        DevInterface.DevUI owner,
         string IDstring,
         DevUINode parentNode,
         string name)
@@ -547,7 +547,7 @@ internal static class IndividualPlacedObjectViewer
 
         public PlacedObjectsPanel(
             ObjectsPage objectsPage,
-            DevUI owner,
+            DevInterface.DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,
@@ -692,7 +692,7 @@ internal static class IndividualPlacedObjectViewer
     private sealed class DeleteConfirmationPanel : Panel, IDevUISignals
     {
         public DeleteConfirmationPanel(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,

@@ -31,7 +31,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         internal int Index;
 
         internal VertexHandle(
-            DevUI owner,
+            DevInterface.DevUI owner,
             DevUINode parentNode,
             int index,
             Vector2 position)
@@ -63,7 +63,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         private float _lastKnownDataValue;
 
         internal ZoneTextInput(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string idString,
             DevUINode parentNode,
             Vector2 position,
@@ -353,7 +353,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         private readonly ZoneTextInput _humidityInput;
 
         internal EnvironmentControlPanel(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string idString,
             DevUINode parentNode,
             Vector2 position)
@@ -425,7 +425,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
     private SolarShadeZoneData Data => pObj.data as SolarShadeZoneData;
 
     internal SolarShadeZoneRepresentation(
-        DevUI owner,
+        DevInterface.DevUI owner,
         string idString,
         DevUINode parentNode,
         PlacedObject placedObject,

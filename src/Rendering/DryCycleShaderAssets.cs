@@ -72,6 +72,11 @@ internal static class DryCycleShaderAssets
         // Rain World itself owns the lifetime for the remainder of the process.
     }
 
+    internal static void EnsureLoaded(RainWorld rainWorld)
+    {
+        TryLoad(rainWorld);
+    }
+
     private static void RainWorld_LoadResources(
         On.RainWorld.orig_LoadResources orig,
         RainWorld self)
@@ -87,7 +92,7 @@ internal static class DryCycleShaderAssets
             return;
         }
 
-        string path = AssetManager.ResolveFilePath(BundleRelativePath);
+        string path = ResolveWeatherAssetPath(BundleRelativePath);
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
             if (!_missingBundleLogged)
@@ -229,7 +234,7 @@ internal static class DryCycleShaderAssets
 
     private static void LogEditorPlayerVersionRelationship()
     {
-        string metadataPath = AssetManager.ResolveFilePath(BundleVersionRelativePath);
+        string metadataPath = ResolveWeatherAssetPath(BundleVersionRelativePath);
         if (string.IsNullOrEmpty(metadataPath) || !File.Exists(metadataPath))
         {
             Plugin.Logger?.LogWarning(
@@ -273,5 +278,50 @@ internal static class DryCycleShaderAssets
             Plugin.Logger?.LogWarning(
                 $"DryCycle could not read AssetBundle version metadata: {ex.Message}");
         }
+    }
+
+    private static string ResolveWeatherAssetPath(string relativePath)
+    {
+        string resolvedPath = AssetManager.ResolveFilePath(relativePath);
+        if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+        {
+            return resolvedPath;
+        }
+
+        // During LoadResources, AssetManager may resolve a mod-relative path against
+        // Rain World's global StreamingAssets folder. Walk upward from this assembly
+        // as a fallback so the bundle is found inside the owning mod directory.
+        try
+        {
+            string assemblyDirectory = Path.GetDirectoryName(
+                typeof(DryCycleShaderAssets).Assembly.Location);
+            DirectoryInfo directory = string.IsNullOrEmpty(assemblyDirectory)
+                ? null
+                : new DirectoryInfo(assemblyDirectory);
+            string platformRelativePath = relativePath.Replace(
+                '/',
+                Path.DirectorySeparatorChar);
+
+            while (directory != null)
+            {
+                string candidate = Path.Combine(
+                    directory.FullName,
+                    platformRelativePath);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle could not resolve mod-local weather asset " +
+                $"'{relativePath}': {ex.Message}");
+        }
+
+        return resolvedPath;
     }
 }

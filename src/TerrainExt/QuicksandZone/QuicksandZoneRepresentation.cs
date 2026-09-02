@@ -24,7 +24,7 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
         internal float U;
 
         internal MaterialBoundaryHandle(
-            DevUI owner,
+            DevInterface.DevUI owner,
             DevUINode parentNode,
             float u)
             : base(owner, "Quicksand_MaterialBoundary", parentNode, Vector2.zero)
@@ -50,7 +50,7 @@ internal sealed class QuicksandZoneRepresentation : PlacedObjectRepresentation
     private QuicksandZoneData Data => pObj.data as QuicksandZoneData;
 
     internal QuicksandZoneRepresentation(
-        DevUI owner,
+        DevInterface.DevUI owner,
         string idString,
         DevUINode parentNode,
         PlacedObject placedObject,

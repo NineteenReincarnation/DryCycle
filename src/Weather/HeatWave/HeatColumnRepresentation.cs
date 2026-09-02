@@ -37,7 +37,7 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
         private readonly float _max;
 
         internal ColumnSlider(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string idString,
             DevUINode parentNode,
             Vector2 position,
@@ -144,7 +144,7 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
     private readonly FSprite _panelLine;
 
     internal HeatColumnRepresentation(
-        DevUI owner,
+        DevInterface.DevUI owner,
         string idString,
         DevUINode parentNode,
         PlacedObject placedObject)
@@ -241,7 +241,7 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
     }
 
     private void AddSlider(
-        DevUI owner,
+        DevInterface.DevUI owner,
         string idString,
         string title,
         ColumnField field,

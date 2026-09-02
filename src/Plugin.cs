@@ -141,6 +141,10 @@ internal sealed class Plugin : BaseUnityPlugin
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
+        // LoadResources can run before Rain World's mod paths are fully available.
+        // Retry here so the mod-local shader bundle is guaranteed a second chance.
+        DryCycleShaderAssets.EnsureLoaded(self);
+
         RegionDayNightOptions.Register();
 
         if (_initialized)

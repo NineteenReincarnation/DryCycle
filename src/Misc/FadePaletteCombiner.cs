@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using DevInterface;
+using DryCycle.DevUI.Controls;
 using RWCustom;
 using UnityEngine;
 
@@ -18,7 +19,6 @@ internal static class FadePaletteCombiner
 {
     private const string PanelId = "DryCycle_Fade_Palette_Combiner_Panel";
     private const string SaveButtonId = "DryCycle_Save_Combined_Palette";
-    private const string NumberInputId = "DryCycle_Combined_Palette_Number_Input";
 
     private static bool _enabled;
 
@@ -47,7 +47,7 @@ internal static class FadePaletteCombiner
     private static void RoomSettingsPage_ctor(
         On.DevInterface.RoomSettingsPage.orig_ctor orig,
         RoomSettingsPage self,
-        DevUI owner,
+        DevInterface.DevUI owner,
         string IDstring,
         DevUINode parentNode,
         string name)
@@ -73,7 +73,7 @@ internal static class FadePaletteCombiner
         private readonly DevUILabel _statusLabel;
 
         public FadePaletteCombinerPanel(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,
@@ -89,16 +89,17 @@ internal static class FadePaletteCombiner
                 "New Palette:");
             subNodes.Add(_paletteController);
 
-            PaletteNumberInput.AttachIntegerInput(
+            IntegerControlInputBinding.Attach(
                 owner,
                 _paletteController,
-                NumberInputId,
-                () => _paletteController.NewPaletteNumber.ToString(CultureInfo.InvariantCulture),
+                () => _paletteController.NewPaletteNumber,
                 value =>
                 {
                     _paletteController.NewPaletteNumber = Math.Max(0, value);
                     _paletteController.Refresh();
-                });
+                },
+                minValue: 0,
+                maxValue: int.MaxValue);
 
             subNodes.Add(new Button(
                 owner,
@@ -296,7 +297,7 @@ internal static class FadePaletteCombiner
         public int NewPaletteNumber { get; set; }
 
         public OutputPaletteController(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,
