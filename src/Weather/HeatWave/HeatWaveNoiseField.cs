@@ -4,11 +4,12 @@ using UnityEngine;
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// Self-authored phase/noise textures for HeatWave optics. The renderer deliberately
-/// does not depend on Rain World's _NoiseTex/_NoiseTex2 so the atmospheric spectrum is
-/// stable across regions, palettes and other mods. Macro noise is periodic fractal
-/// value noise; micro noise is a deterministic high-pass field whose low-frequency
-/// energy is suppressed so shimmer reads as fine air turbulence rather than blotches.
+/// Self-authored phase textures for the HeatWave atmosphere pass.
+///
+/// Macro channels drive broad rising heat bands and meso-scale whole-air deformation;
+/// micro channels drive fast fine shimmer. Keeping the two spectra separate prevents
+/// the weather from degenerating into one scrolling water-like normal map and keeps its
+/// appearance stable across regions, palettes and other mods.
 /// </summary>
 internal static class HeatWaveNoiseField
 {
@@ -38,7 +39,7 @@ internal static class HeatWaveNoiseField
         {
             Plugin.Logger?.LogWarning(
                 "DryCycle HeatWave could not generate custom phase textures. " +
-                "The composite will fall back to analytic phase motion.");
+                "The atmosphere shader will use its analytic fallback motion.");
             Plugin.Logger?.LogWarning(ex);
         }
     }
@@ -53,9 +54,9 @@ internal static class HeatWaveNoiseField
                 float u = x / (float)MacroSize;
                 float v = y / (float)MacroSize;
 
-                // Two statistically independent phase channels. The octave falloff
-                // intentionally favors broad structures; small-scale detail belongs to
-                // the GPU thermal field and the micro texture instead of fractal mush.
+                // Three independent broad phase channels let the shader build heat
+                // ridges, rising bodies and breakup without baking a particular visual
+                // shape into the texture itself.
                 float a = PeriodicFbm(u, v, 0x1F123BB5u);
                 float b = PeriodicFbm(u, v, 0x91E10DA5u);
                 float c = PeriodicFbm(u, v, 0xD1B54A35u);
@@ -184,8 +185,8 @@ internal static class HeatWaveNoiseField
         average += Hash01(PositiveModulo(x + 1, MicroSize), PositiveModulo(y + 1, MicroSize), seed);
         average *= 0.125f;
 
-        // Compress the high-pass residual around 0.5. Bilinear filtering then produces
-        // a fine vector field without long low-frequency patches or hard white noise.
+        // Suppressing low-frequency energy lets bilinear filtering produce dense edge
+        // shimmer without introducing slow cloudy patches that belong in the macro field.
         return Mathf.Clamp01(0.5f + (center - average) * 0.72f);
     }
 
