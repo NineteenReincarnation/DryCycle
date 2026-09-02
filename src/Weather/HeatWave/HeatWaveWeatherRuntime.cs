@@ -8,12 +8,12 @@ namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
 /// WorldClock-driven desert HeatWave owner. HeatWave has no RoomSettings weather
-/// effect. The GPU thermal field remains a background driver, while the presentation
-/// shader decides where visible ground shimmer/plumes are allowed to exist.
+/// effect. The physical thermal solver drives a separate visual plume field; the final
+/// shader sees only deliberate presentation masks and never turns raw temperature
+/// gradients into full-screen distortion.
 ///
-/// Thermal Burst is intentionally disabled in this revision. The previous burst had a
-/// disproportionate explosion-like sound/response without a readable hot-air visual
-/// event. It will not return until it has a dedicated presentation worthy of the weather.
+/// Thermal Burst remains disabled. A HeatWave must first read as convincing sustained
+/// desert heat before any extreme transient is allowed back into the weather.
 /// </summary>
 internal static class HeatWaveWeatherRuntime
 {
@@ -118,14 +118,11 @@ internal static class HeatWaveWeatherRuntime
 
     private sealed class HeatWaveController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
-        // HeatWaveThermalSimulation currently accepts the shared burst-state contract.
-        // Keeping one controller at its untouched neutral defaults avoids a broad solver
-        // rewrite while guaranteeing no charge/release/burst can occur.
-        private readonly HeatWaveBurstController _neutralThermalState;
         private readonly HeatWaveAudio _audio;
 
         private HeatWaveTerrainField _terrain;
         private HeatWaveThermalSimulation _simulation;
+        private HeatWavePlumeSimulation _plumes;
         private bool _resourcesInitialized;
         private bool _resourcesDisposed;
 
@@ -141,7 +138,6 @@ internal static class HeatWaveWeatherRuntime
         internal HeatWaveController(Room ownerRoom)
         {
             room = ownerRoom;
-            _neutralThermalState = new HeatWaveBurstController(ownerRoom);
             _audio = new HeatWaveAudio(this);
         }
 
@@ -182,11 +178,14 @@ internal static class HeatWaveWeatherRuntime
 
             _solar = EvaluateSolar(clock);
 
+            // White Heat follows solar exposure, but the curve deliberately starts
+            // later than the optical atmosphere. Mild HeatWave therefore reads first
+            // through hot air rather than through a global color filter.
             float whiteBase = Mathf.SmoothStep(
                 0f,
                 1f,
-                Mathf.InverseLerp(0.14f, 1f, _intensity));
-            float solarWhite = Mathf.Pow(Mathf.Clamp01(_solar), 0.60f);
+                Mathf.InverseLerp(0.28f, 1f, _intensity));
+            float solarWhite = Mathf.Pow(Mathf.Clamp01(_solar), 0.68f);
             _whiteHeat = Mathf.Clamp01(whiteBase * solarWhite);
 
             _visualTime += 1f / 40f;
@@ -202,7 +201,17 @@ internal static class HeatWaveWeatherRuntime
                     1f / 40f,
                     _intensity,
                     _solar,
-                    _neutralThermalState);
+                    null);
+
+                if (_plumes?.IsAvailable == true)
+                {
+                    _plumes.Step(
+                        1f / 40f,
+                        _intensity,
+                        _solar,
+                        _simulation.ThermalTexture,
+                        _simulation.VelocityTexture);
+                }
             }
         }
 
@@ -258,10 +267,12 @@ internal static class HeatWaveWeatherRuntime
                 _visualTime,
                 active,
                 _simulation?.IsAvailable == true,
+                _plumes?.IsAvailable == true,
                 _simulation?.OpticalTexture,
                 _simulation?.ThermalTexture,
                 _simulation?.VelocityTexture,
-                _terrain?.Texture);
+                _terrain?.Texture,
+                _plumes?.PlumeTexture);
 
             HeatWaveRenderPipeline.Draw(
                 sLeaser.sprites,
@@ -304,6 +315,7 @@ internal static class HeatWaveWeatherRuntime
                 _solar,
                 _whiteHeat,
                 _simulation?.IsAvailable == true,
+                _plumes?.IsAvailable == true,
                 emitters);
             return true;
         }
@@ -353,6 +365,7 @@ internal static class HeatWaveWeatherRuntime
             {
                 _terrain = new HeatWaveTerrainField(room);
                 _simulation = new HeatWaveThermalSimulation(room, _terrain);
+                _plumes = new HeatWavePlumeSimulation(room, _terrain);
                 HeatWaveNoiseField.Ensure();
             }
             catch (Exception ex)
@@ -362,6 +375,8 @@ internal static class HeatWaveWeatherRuntime
                     $"'{room?.abstractRoom?.name ?? "unknown"}'. " +
                     "The weather will retain its safe visual fallback.");
                 Plugin.Logger?.LogError(ex);
+                _plumes?.Dispose();
+                _plumes = null;
                 _simulation?.Dispose();
                 _simulation = null;
                 _terrain?.Dispose();
@@ -378,6 +393,8 @@ internal static class HeatWaveWeatherRuntime
 
             _resourcesDisposed = true;
             _audio.Dispose();
+            _plumes?.Dispose();
+            _plumes = null;
             _simulation?.Dispose();
             _simulation = null;
             _terrain?.Dispose();
