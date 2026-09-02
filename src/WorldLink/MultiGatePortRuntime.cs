@@ -171,7 +171,7 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
         base.Update(eu);
         if (!WorldLinkRoomRegistry.Enabled || Placed == null || room?.roomSettings?.placedObjects == null || !room.roomSettings.placedObjects.Contains(Placed))
         {
-            SlateForDeletion();
+            Destroy();
             return;
         }
         if (!Placed.active || !Data.Enabled)
