@@ -331,7 +331,7 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float midFall = 1.0 - smoothstep(0.72, 0.96, luma);
                     float midBand = midRise * midFall;
                     float high = smoothstep(0.46, 0.90, luma);
-                    float extreme = smoothstep(0.82, 0.995, luma);
+                    float highlightHeadroom = 1.0 - smoothstep(0.78, 0.98, luma);
 
                     // Dry desert sun increases separation between deep graphic shadows
                     // and exposed surfaces. The heat state should feel harsh, not foggy.
@@ -351,55 +351,49 @@ Shader "DryCycle/HeatWaveAtmosphere"
                         midBand * lit;
                     color = lerp(color, yellowShifted, saturate(yellowAmount));
 
-                    // Higher values dry out and lose some chroma, but the target stays
-                    // warm-yellow rather than gray. This prevents the old washed-out fog
-                    // look while retaining the sense of scorched pigment under hard sun.
+                    // High values dry out toward yellow rather than losing their identity
+                    // into white. HeatWave changes hue and contrast, not camera exposure.
                     float dryLuma = dot(color, float3(0.255, 0.685, 0.060));
                     float3 dryYellow = dryLuma * float3(1.14, 1.04, 0.72);
                     float dryAmount =
                         tone *
                         (0.055 + solar * 0.105 + field.band * 0.040) *
-                        high * lit * (1.0 - extreme * 0.35);
+                        high * lit;
                     color = lerp(color, dryYellow, saturate(dryAmount));
 
-                    // Bright exposed surfaces become pale yellow first. Only the most
-                    // extreme highlights approach near-white, so HeatWave does not turn
-                    // the entire room into the previous gray/white washed-out state.
-                    float3 hotYellow = float3(1.0, 0.895, 0.585);
+                    // Exposed highlights stay visibly yellow. There is deliberately no
+                    // HeatWave target that pushes pixels toward white; naturally white
+                    // source art may stay white, but weather never bleaches toward it.
+                    float3 hotYellow = float3(1.0, 0.855, 0.455);
                     float yellowHighlight =
                         high * lit *
-                        (tone * 0.105 +
-                         solar * 0.255 +
-                         solar * field.band * 0.105) *
-                        (1.0 - extreme * 0.58);
+                        (tone * 0.125 +
+                         solar * 0.285 +
+                         solar * field.band * 0.115);
                     color = lerp(color, hotYellow, saturate(yellowHighlight));
 
-                    float3 sunWhite = float3(1.0, 0.985, 0.925);
-                    float whitePeak =
-                        extreme * lit *
-                        (tone * 0.030 +
-                         solar * 0.145 +
-                         solar * field.band * 0.055);
-                    color = lerp(color, sunWhite, saturate(whitePeak));
-
                     // The same coherent heat bodies that bend the image also modulate
-                    // local warmth/exposure, making a hot band readable over flat-color
-                    // Rain World backgrounds without introducing a uniform yellow veil.
+                    // local warmth. This keeps the optical and palette motion coupled
+                    // without introducing either a white veil or a uniform yellow sheet.
                     float bandHeat = saturate((field.band - 0.30) / 0.70);
                     float3 bandYellow = saturate(
                         color * float3(1.045, 1.015, 0.895) +
                         luma * float3(0.028, 0.016, 0.0));
                     float bandColorAmount =
                         bandHeat * tone *
-                        (0.055 + solar * 0.060) *
+                        (0.060 + solar * 0.065) *
                         lit;
                     color = lerp(color, bandYellow, saturate(bandColorAmount));
 
+                    // Heat bodies can breathe a little in brightness, but bright pixels
+                    // lose that gain before clipping so the effect cannot recreate the
+                    // old white washed-out look.
                     float exposureBreath =
                         (field.band - 0.34) *
                         tone *
                         (0.045 + solar * 0.050) *
-                        lit;
+                        lit *
+                        highlightHeadroom;
                     color *= 1.0 + exposureBreath;
 
                     return saturate(color);
