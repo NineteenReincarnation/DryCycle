@@ -55,8 +55,7 @@ internal readonly struct HeatWaveRenderFrame
 ///
 /// Strong deformation is never global. The shader receives separate masks for exposed
 /// ground and persistent thermal plumes; distant atmosphere is allowed only a tiny
-/// sub-pixel wander. The scene is captured/refracted exactly once, which prevents the
-/// recursive liquid/glass look of the first HeatWave implementation.
+/// sub-pixel wander. SceneColor is captured/refracted exactly once.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
@@ -197,7 +196,11 @@ internal static class HeatWaveRenderPipeline
         sprite.scaleX = screenWidth / 16f;
         sprite.scaleY = screenHeight / 16f;
         sprite.color = new Color(1f, 0.98f, 0.91f);
-        sprite.alpha = Mathf.Clamp01(frame.WhiteHeat * 0.045f);
+
+        // If the AssetBundle/composite is missing, make failure visible enough to
+        // diagnose instead of silently looking identical to normal gameplay. This is
+        // still restrained and is only a compatibility fallback, never the target VFX.
+        sprite.alpha = Mathf.Clamp01(frame.WhiteHeat * 0.085f);
         sprite.isVisible = sprite.alpha > Epsilon;
         if (sprite.isVisible)
         {
@@ -210,6 +213,42 @@ internal static class HeatWaveRenderPipeline
         in HeatWaveRenderFrame frame,
         int debugMode)
     {
+        bool customNoise = HeatWaveNoiseField.IsAvailable;
+        Texture optical = frame.OpticalTexture ?? Texture2D.blackTexture;
+        Texture thermal = frame.ThermalTexture ?? Texture2D.blackTexture;
+        Texture velocity = frame.VelocityTexture ?? Texture2D.blackTexture;
+        Texture terrain = frame.TerrainTexture ?? Texture2D.blackTexture;
+        Texture plume = frame.PlumeTexture ?? Texture2D.blackTexture;
+        Texture macroNoise = customNoise
+            ? HeatWaveNoiseField.MacroTexture
+            : Texture2D.grayTexture;
+        Texture microNoise = customNoise
+            ? HeatWaveNoiseField.MicroTexture
+            : Texture2D.grayTexture;
+        Vector4 roomSize = new(
+            frame.RoomSize.x,
+            frame.RoomSize.y,
+            0f,
+            0f);
+
+        // Futile can rebuild render layers/batches when sprites move between containers
+        // or shaders. MaterialPropertyBlock remains the authoritative per-renderer path,
+        // but the same DryCycle-unique uniforms are mirrored globally so a transient
+        // render-layer rebuild cannot turn the HeatWave shader into an all-zero/no-op
+        // frame. The property block still wins whenever it is present.
+        ApplyGlobalProperties(
+            roomSize,
+            frame,
+            debugMode,
+            customNoise,
+            optical,
+            thermal,
+            velocity,
+            terrain,
+            plume,
+            macroNoise,
+            microNoise);
+
         Renderer renderer = sprite?._renderLayer?._meshRenderer;
         if (renderer == null)
         {
@@ -218,42 +257,53 @@ internal static class HeatWaveRenderPipeline
 
         MaterialProperties.Clear();
         renderer.GetPropertyBlock(MaterialProperties);
-        MaterialProperties.SetVector(RoomSizeId, new Vector4(
-            frame.RoomSize.x,
-            frame.RoomSize.y,
-            0f,
-            0f));
+        MaterialProperties.SetVector(RoomSizeId, roomSize);
         MaterialProperties.SetFloat(IntensityId, frame.Intensity);
         MaterialProperties.SetFloat(WhiteHeatId, frame.WhiteHeat);
         MaterialProperties.SetFloat(SolarIntensityId, frame.SolarIntensity);
         MaterialProperties.SetFloat(TimeId, frame.Time);
         MaterialProperties.SetFloat(HasSimulationId, frame.HasSimulation ? 1f : 0f);
         MaterialProperties.SetFloat(HasPlumesId, frame.HasPlumes ? 1f : 0f);
-        MaterialProperties.SetTexture(
-            OpticalTextureId,
-            frame.OpticalTexture ?? Texture2D.blackTexture);
-        MaterialProperties.SetTexture(
-            ThermalTextureId,
-            frame.ThermalTexture ?? Texture2D.blackTexture);
-        MaterialProperties.SetTexture(
-            VelocityTextureId,
-            frame.VelocityTexture ?? Texture2D.blackTexture);
-        MaterialProperties.SetTexture(
-            TerrainTextureId,
-            frame.TerrainTexture ?? Texture2D.blackTexture);
-        MaterialProperties.SetTexture(
-            PlumeTextureId,
-            frame.PlumeTexture ?? Texture2D.blackTexture);
-
-        bool customNoise = HeatWaveNoiseField.IsAvailable;
-        MaterialProperties.SetTexture(
-            MacroNoiseId,
-            customNoise ? HeatWaveNoiseField.MacroTexture : Texture2D.grayTexture);
-        MaterialProperties.SetTexture(
-            MicroNoiseId,
-            customNoise ? HeatWaveNoiseField.MicroTexture : Texture2D.grayTexture);
+        MaterialProperties.SetTexture(OpticalTextureId, optical);
+        MaterialProperties.SetTexture(ThermalTextureId, thermal);
+        MaterialProperties.SetTexture(VelocityTextureId, velocity);
+        MaterialProperties.SetTexture(TerrainTextureId, terrain);
+        MaterialProperties.SetTexture(PlumeTextureId, plume);
+        MaterialProperties.SetTexture(MacroNoiseId, macroNoise);
+        MaterialProperties.SetTexture(MicroNoiseId, microNoise);
         MaterialProperties.SetFloat(HasCustomNoiseId, customNoise ? 1f : 0f);
         MaterialProperties.SetInt(DebugModeId, debugMode);
         renderer.SetPropertyBlock(MaterialProperties);
+    }
+
+    private static void ApplyGlobalProperties(
+        Vector4 roomSize,
+        in HeatWaveRenderFrame frame,
+        int debugMode,
+        bool customNoise,
+        Texture optical,
+        Texture thermal,
+        Texture velocity,
+        Texture terrain,
+        Texture plume,
+        Texture macroNoise,
+        Texture microNoise)
+    {
+        Shader.SetGlobalVector(RoomSizeId, roomSize);
+        Shader.SetGlobalFloat(IntensityId, frame.Intensity);
+        Shader.SetGlobalFloat(WhiteHeatId, frame.WhiteHeat);
+        Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
+        Shader.SetGlobalFloat(TimeId, frame.Time);
+        Shader.SetGlobalFloat(HasSimulationId, frame.HasSimulation ? 1f : 0f);
+        Shader.SetGlobalFloat(HasPlumesId, frame.HasPlumes ? 1f : 0f);
+        Shader.SetGlobalTexture(OpticalTextureId, optical);
+        Shader.SetGlobalTexture(ThermalTextureId, thermal);
+        Shader.SetGlobalTexture(VelocityTextureId, velocity);
+        Shader.SetGlobalTexture(TerrainTextureId, terrain);
+        Shader.SetGlobalTexture(PlumeTextureId, plume);
+        Shader.SetGlobalTexture(MacroNoiseId, macroNoise);
+        Shader.SetGlobalTexture(MicroNoiseId, microNoise);
+        Shader.SetGlobalFloat(HasCustomNoiseId, customNoise ? 1f : 0f);
+        Shader.SetGlobalInt(DebugModeId, debugMode);
     }
 }
