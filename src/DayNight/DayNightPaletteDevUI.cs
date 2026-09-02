@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using DevInterface;
+using DryCycle.DevUI.Controls;
 using DryCycle.Misc;
 using UnityEngine;
 
@@ -35,7 +36,7 @@ internal static class DayNightPaletteDevUI
     private static void RoomSettingsPage_ctor(
         On.DevInterface.RoomSettingsPage.orig_ctor orig,
         RoomSettingsPage self,
-        DevUI owner,
+        DevInterface.DevUI owner,
         string IDstring,
         DevUINode parentNode,
         string name)
@@ -62,7 +63,7 @@ internal static class DayNightPaletteDevUI
             "Base Palette: ",
             0);
         panel.subNodes.Add(baseController);
-        PaletteNumberInput.AttachPaletteController(owner, baseController);
+        PaletteDirectInputRuntime.AttachPaletteController(owner, baseController);
 
         DayNightPaletteController duskController = new(
             owner,
@@ -88,22 +89,20 @@ internal static class DayNightPaletteDevUI
     }
 
     private static void AttachDayNightInput(
-        DevUI owner,
+        DevInterface.DevUI owner,
         DayNightPaletteController controller,
         DayNightPaletteSlot slot)
     {
-        PaletteNumberInput.AttachIntegerInput(
+        IntegerControlInputBinding.Attach(
             owner,
             controller,
-            "DryCycle_DayNight_Number_Input_" + controller.IDstring,
             () =>
             {
                 RoomSettings roomSettings = owner?.room?.roomSettings;
                 DayNightPaletteSettings.Values values = DayNightPaletteSettings.Get(roomSettings);
-                int palette = slot == DayNightPaletteSlot.Dusk
+                return slot == DayNightPaletteSlot.Dusk
                     ? values.DuskPalette
                     : values.NightPalette;
-                return palette.ToString(CultureInfo.InvariantCulture);
             },
             value =>
             {
@@ -124,10 +123,12 @@ internal static class DayNightPaletteDevUI
                 }
 
                 RefreshLighting(owner);
-            });
+            },
+            minValue: 0,
+            maxValue: int.MaxValue);
     }
 
-    private static void RefreshLighting(DevUI owner)
+    private static void RefreshLighting(DevInterface.DevUI owner)
     {
         if (owner?.room?.game?.cameras != null && owner.room.game.cameras.Length > 0)
         {
@@ -146,7 +147,7 @@ internal static class DayNightPaletteDevUI
         private readonly DayNightPaletteSlot _slot;
 
         public DayNightPaletteController(
-            DevUI owner,
+            DevInterface.DevUI owner,
             string IDstring,
             DevUINode parentNode,
             Vector2 pos,

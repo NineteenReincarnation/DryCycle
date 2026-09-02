@@ -11,7 +11,7 @@ internal static class MiscRuntime
             return;
         }
 
-        PaletteNumberInput.Enable();
+        PaletteDirectInputRuntime.Enable();
         IndividualPlacedObjectViewer.Enable();
         FadePaletteCombiner.Enable();
         _enabled = true;
@@ -26,7 +26,7 @@ internal static class MiscRuntime
 
         FadePaletteCombiner.Disable();
         IndividualPlacedObjectViewer.Disable();
-        PaletteNumberInput.Disable();
+        PaletteDirectInputRuntime.Disable();
         _enabled = false;
     }
 }
