@@ -9,6 +9,7 @@ internal readonly struct HeatWaveDebugSnapshot
     internal readonly float SolarIntensity;
     internal readonly float WhiteHeat;
     internal readonly bool SimulationAvailable;
+    internal readonly bool PlumesAvailable;
     internal readonly int Emitters;
 
     internal HeatWaveDebugSnapshot(
@@ -16,12 +17,14 @@ internal readonly struct HeatWaveDebugSnapshot
         float solarIntensity,
         float whiteHeat,
         bool simulationAvailable,
+        bool plumesAvailable,
         int emitters)
     {
         Intensity = intensity;
         SolarIntensity = solarIntensity;
         WhiteHeat = whiteHeat;
         SimulationAvailable = simulationAvailable;
+        PlumesAvailable = plumesAvailable;
         Emitters = emitters;
     }
 }
@@ -174,7 +177,7 @@ internal static class HeatWaveDebugRuntime
             anchorY = 1f,
             x = 12f,
             y = Futile.screen.pixelHeight - 12f,
-            scaleX = 440f,
+            scaleX = 470f,
             scaleY = 116f,
             color = Color.black,
             alpha = 0.78f
@@ -215,7 +218,9 @@ internal static class HeatWaveDebugRuntime
 
         _label.text =
             "HeatWave Debug\n" +
-            $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   GPU: {(snapshot.SimulationAvailable ? "YES" : "NO")}\n" +
+            $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   " +
+            $"Thermal: {(snapshot.SimulationAvailable ? "YES" : "NO")}   " +
+            $"Plumes: {(snapshot.PlumesAvailable ? "YES" : "NO")}\n" +
             $"Intensity {snapshot.Intensity:0.00}   Solar {snapshot.SolarIntensity:0.00}   WhiteHeat {snapshot.WhiteHeat:0.00}\n" +
             $"HeatColumn emitters {snapshot.Emitters}\n" +
             "Ctrl+Shift+H view   Ctrl+Shift+J force";
@@ -229,7 +234,7 @@ internal static class HeatWaveDebugRuntime
             2 => "VELOCITY",
             3 => "OPTICAL",
             4 => "TERRAIN/SUN",
-            5 => "GROUND/PLUME/DEPTH",
+            5 => "PLUME/GROUND/DEPTH",
             _ => "FINAL"
         };
     }
