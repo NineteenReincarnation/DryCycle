@@ -35,23 +35,18 @@ internal readonly struct HeatWaveRenderFrame
 }
 
 /// <summary>
-/// Secondary HeatWave atmosphere pass.
+/// HeatWave atmosphere resolve.
 ///
-/// Rain World's LevelHeat shader owns the primary terrain melt. This pass adds the
-/// things LevelHeat deliberately does not own: whole-air meso shimmer, fine edge jitter,
-/// distant optical softening and the bleached high-temperature color state. It captures
-/// SceneColor once and resolves once; there is no multi-layer recursive distortion and
-/// no dependency on thermal/plume compute textures.
-///
-/// Phase fields are anchored to room-world pixel coordinates, so camera movement travels
-/// through an atmospheric field instead of dragging a screen-space filter with it.
+/// Rain World's LevelHeat owns terrain-level melting. This single GrabPass resolve owns
+/// the air itself: room-space flow-advection, base/detail refractive normals, mirage
+/// vertical remapping, distortion-aware softening and dry-hot color grading. Optical
+/// textures are generated once by HeatWaveNoiseField and remain anchored to room space.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
     internal const int AtmosphereLayer = 0;
     internal const int LayerCount = 1;
 
-    private const float Epsilon = 0.0001f;
     private static readonly MaterialPropertyBlock MaterialProperties = new();
 
     private static readonly int RoomSizePxId = Shader.PropertyToID("_DryCycleHeatRoomSizePx");
@@ -60,9 +55,10 @@ internal static class HeatWaveRenderPipeline
     private static readonly int ToneAmountId = Shader.PropertyToID("_DryCycleHeatToneAmount");
     private static readonly int LevelHeatAmountId = Shader.PropertyToID("_DryCycleHeatLevelAmount");
     private static readonly int TimeId = Shader.PropertyToID("_DryCycleHeatTime");
-    private static readonly int MacroNoiseId = Shader.PropertyToID("_DryCycleHeatMacroNoise");
-    private static readonly int MicroNoiseId = Shader.PropertyToID("_DryCycleHeatMicroNoise");
-    private static readonly int HasCustomNoiseId = Shader.PropertyToID("_DryCycleHasHeatCustomNoise");
+    private static readonly int FlowFieldId = Shader.PropertyToID("_DryCycleHeatFlowField");
+    private static readonly int NormalFieldId = Shader.PropertyToID("_DryCycleHeatNormalField");
+    private static readonly int MirageFieldId = Shader.PropertyToID("_DryCycleHeatMirageField");
+    private static readonly int HasHeatTexturesId = Shader.PropertyToID("_DryCycleHasHeatTextures");
     private static readonly int DebugModeId = Shader.PropertyToID("_DryCycleHeatDebugMode");
 
     internal static FSprite[] CreateSprites(RoomCamera camera)
@@ -116,15 +112,11 @@ internal static class HeatWaveRenderPipeline
             return;
         }
 
-        if (!frame.Active)
+        if (!frame.Active || !DryCycleShaderAssets.HasHeatWaveAtmosphere)
         {
+            // Never fake missing assets with a translucent white fullscreen sprite.
+            // Vanilla LevelHeat remains the safe visual fallback.
             sprite.isVisible = false;
-            return;
-        }
-
-        if (!DryCycleShaderAssets.HasHeatWaveAtmosphere)
-        {
-            DrawFallback(sprite, camera, frame);
             return;
         }
 
@@ -161,43 +153,22 @@ internal static class HeatWaveRenderPipeline
         }
     }
 
-    private static void DrawFallback(
-        FSprite sprite,
-        RoomCamera camera,
-        in HeatWaveRenderFrame frame)
-    {
-        float screenWidth = camera.game.rainWorld.options.ScreenSize.x;
-        float screenHeight = camera.game.rainWorld.options.ScreenSize.y;
-        sprite.shader = camera.game.rainWorld.Shaders["Basic"];
-        sprite.x = 0f;
-        sprite.y = 0f;
-        sprite.scaleX = screenWidth / 16f;
-        sprite.scaleY = screenHeight / 16f;
-        sprite.color = new Color(1f, 0.975f, 0.90f);
-
-        // LevelHeat still provides the core weather even when the custom bundle is
-        // absent. This fallback only adds a faint warm-white exposure cue so missing
-        // atmosphere assets never collapse the weather back to a visually normal room.
-        sprite.alpha = Mathf.Clamp01(frame.ToneAmount * 0.075f);
-        sprite.isVisible = sprite.alpha > Epsilon;
-        if (sprite.isVisible)
-        {
-            sprite.MoveToFront();
-        }
-    }
-
     private static void ApplyProperties(
         FSprite sprite,
         in HeatWaveRenderFrame frame,
         int debugMode)
     {
-        bool customNoise = HeatWaveNoiseField.IsAvailable;
-        Texture macroNoise = customNoise
-            ? HeatWaveNoiseField.MacroTexture
+        bool hasTextures = HeatWaveNoiseField.IsAvailable;
+        Texture flowTexture = hasTextures
+            ? HeatWaveNoiseField.FlowTexture
             : Texture2D.grayTexture;
-        Texture microNoise = customNoise
-            ? HeatWaveNoiseField.MicroTexture
+        Texture normalTexture = hasTextures
+            ? HeatWaveNoiseField.NormalTexture
             : Texture2D.grayTexture;
+        Texture mirageTexture = hasTextures
+            ? HeatWaveNoiseField.MirageTexture
+            : Texture2D.grayTexture;
+
         Vector4 roomSize = new(
             frame.RoomSizePx.x,
             frame.RoomSizePx.y,
@@ -208,9 +179,10 @@ internal static class HeatWaveRenderPipeline
             roomSize,
             frame,
             debugMode,
-            customNoise,
-            macroNoise,
-            microNoise);
+            hasTextures,
+            flowTexture,
+            normalTexture,
+            mirageTexture);
 
         Renderer renderer = sprite?._renderLayer?._meshRenderer;
         if (renderer == null)
@@ -226,9 +198,10 @@ internal static class HeatWaveRenderPipeline
         MaterialProperties.SetFloat(ToneAmountId, frame.ToneAmount);
         MaterialProperties.SetFloat(LevelHeatAmountId, frame.LevelHeatAmount);
         MaterialProperties.SetFloat(TimeId, frame.Time);
-        MaterialProperties.SetTexture(MacroNoiseId, macroNoise);
-        MaterialProperties.SetTexture(MicroNoiseId, microNoise);
-        MaterialProperties.SetFloat(HasCustomNoiseId, customNoise ? 1f : 0f);
+        MaterialProperties.SetTexture(FlowFieldId, flowTexture);
+        MaterialProperties.SetTexture(NormalFieldId, normalTexture);
+        MaterialProperties.SetTexture(MirageFieldId, mirageTexture);
+        MaterialProperties.SetFloat(HasHeatTexturesId, hasTextures ? 1f : 0f);
         MaterialProperties.SetInt(DebugModeId, debugMode);
         renderer.SetPropertyBlock(MaterialProperties);
     }
@@ -237,21 +210,23 @@ internal static class HeatWaveRenderPipeline
         Vector4 roomSize,
         in HeatWaveRenderFrame frame,
         int debugMode,
-        bool customNoise,
-        Texture macroNoise,
-        Texture microNoise)
+        bool hasTextures,
+        Texture flowTexture,
+        Texture normalTexture,
+        Texture mirageTexture)
     {
-        // Futile can rebuild render layers. Mirror DryCycle-unique uniforms globally as
-        // a resilience path; the per-renderer property block remains authoritative.
+        // Futile can rebuild render layers. Mirror only DryCycle-owned uniforms globally
+        // as a resilience path; the per-renderer property block remains authoritative.
         Shader.SetGlobalVector(RoomSizePxId, roomSize);
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
         Shader.SetGlobalFloat(ToneAmountId, frame.ToneAmount);
         Shader.SetGlobalFloat(LevelHeatAmountId, frame.LevelHeatAmount);
         Shader.SetGlobalFloat(TimeId, frame.Time);
-        Shader.SetGlobalTexture(MacroNoiseId, macroNoise);
-        Shader.SetGlobalTexture(MicroNoiseId, microNoise);
-        Shader.SetGlobalFloat(HasCustomNoiseId, customNoise ? 1f : 0f);
+        Shader.SetGlobalTexture(FlowFieldId, flowTexture);
+        Shader.SetGlobalTexture(NormalFieldId, normalTexture);
+        Shader.SetGlobalTexture(MirageFieldId, mirageTexture);
+        Shader.SetGlobalFloat(HasHeatTexturesId, hasTextures ? 1f : 0f);
         Shader.SetGlobalInt(DebugModeId, debugMode);
     }
 }
