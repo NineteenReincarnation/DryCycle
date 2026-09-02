@@ -317,8 +317,8 @@ Shader "DryCycle/HeatWaveAtmosphere"
                 {
                     float heat = saturate(_DryCycleHeatWaveIntensity);
 
-                    // HeatWave must alter the room palette even in shade. Direct sun
-                    // amplifies the effect but no longer acts as a gate.
+                    // HeatWave owns a room-wide dry-hot color state even away from direct
+                    // sunlight. Solar exposure strengthens it but does not gate it.
                     float tone = saturate(max(
                         _DryCycleHeatToneAmount,
                         heat * 0.62));
@@ -327,52 +327,78 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
                     float shadow = 1.0 - smoothstep(0.075, 0.30, luma);
                     float lit = 1.0 - shadow;
-                    float mid = smoothstep(0.14, 0.72, luma);
-                    float high = smoothstep(0.42, 0.90, luma);
+                    float midRise = smoothstep(0.12, 0.48, luma);
+                    float midFall = 1.0 - smoothstep(0.72, 0.96, luma);
+                    float midBand = midRise * midFall;
+                    float high = smoothstep(0.46, 0.90, luma);
+                    float extreme = smoothstep(0.82, 0.995, luma);
 
-                    // Hot desert light increases local contrast instead of laying pale
-                    // fog over the scene. Rain World's graphic blacks stay dense.
-                    float contrast = tone * (0.075 + solar * 0.085);
-                    color = (color - 0.43) * (1.0 + contrast) + 0.43;
+                    // Dry desert sun increases separation between deep graphic shadows
+                    // and exposed surfaces. The heat state should feel harsh, not foggy.
+                    float contrast = tone * (0.070 + solar * 0.090);
+                    color = (color - 0.425) * (1.0 + contrast) + 0.425;
                     color = saturate(color);
 
-                    // Shift exposed colors toward dry warm stone/bone. This is a room
-                    // color state, not a uniform orange overlay.
-                    float3 warmed = color * float3(1.105, 1.005, 0.835);
-                    float warmAmount =
+                    // Midtones carry the strongest desert-yellow identity. Rather than
+                    // overlaying a yellow sheet, preserve the original palette and bend
+                    // exposed values toward a dry sand/sun spectrum according to luma.
+                    float3 yellowShifted = saturate(
+                        color * float3(1.085, 1.035, 0.790) +
+                        luma * float3(0.080, 0.052, 0.000));
+                    float yellowAmount =
                         tone *
-                        (0.27 + solar * 0.19 + field.band * 0.055) *
-                        lit;
-                    color = lerp(color, warmed, saturate(warmAmount));
+                        (0.24 + solar * 0.23 + field.band * 0.085) *
+                        midBand * lit;
+                    color = lerp(color, yellowShifted, saturate(yellowAmount));
 
-                    // Only modest desaturation: the old implementation over-desaturated
-                    // broad areas and looked like fog. Here color loss belongs mostly to
-                    // bright surfaces being scorched by the heat state.
-                    float dryGray = dot(color, float3(0.255, 0.685, 0.060));
-                    float desaturation =
+                    // Higher values dry out and lose some chroma, but the target stays
+                    // warm-yellow rather than gray. This prevents the old washed-out fog
+                    // look while retaining the sense of scorched pigment under hard sun.
+                    float dryLuma = dot(color, float3(0.255, 0.685, 0.060));
+                    float3 dryYellow = dryLuma * float3(1.14, 1.04, 0.72);
+                    float dryAmount =
                         tone *
-                        (0.075 + solar * 0.12 + field.band * 0.045) *
-                        mid * lit;
-                    color = lerp(
-                        color,
-                        dryGray * float3(1.075, 1.015, 0.86),
-                        saturate(desaturation));
+                        (0.055 + solar * 0.105 + field.band * 0.040) *
+                        high * lit * (1.0 - extreme * 0.35);
+                    color = lerp(color, dryYellow, saturate(dryAmount));
 
-                    float3 hotWhite = float3(1.0, 0.955, 0.805);
-                    float bleach =
+                    // Bright exposed surfaces become pale yellow first. Only the most
+                    // extreme highlights approach near-white, so HeatWave does not turn
+                    // the entire room into the previous gray/white washed-out state.
+                    float3 hotYellow = float3(1.0, 0.895, 0.585);
+                    float yellowHighlight =
                         high * lit *
-                        (tone * 0.115 +
-                         solar * 0.285 +
-                         solar * field.band * 0.095);
-                    color = lerp(color, hotWhite, saturate(bleach));
+                        (tone * 0.105 +
+                         solar * 0.255 +
+                         solar * field.band * 0.105) *
+                        (1.0 - extreme * 0.58);
+                    color = lerp(color, hotYellow, saturate(yellowHighlight));
 
-                    // Heat bodies also carry a small, warm exposure pulse. This keeps
-                    // them visible across flat regions without using a gray atmospheric
-                    // veil and ties color motion to the same field as the optics.
+                    float3 sunWhite = float3(1.0, 0.985, 0.925);
+                    float whitePeak =
+                        extreme * lit *
+                        (tone * 0.030 +
+                         solar * 0.145 +
+                         solar * field.band * 0.055);
+                    color = lerp(color, sunWhite, saturate(whitePeak));
+
+                    // The same coherent heat bodies that bend the image also modulate
+                    // local warmth/exposure, making a hot band readable over flat-color
+                    // Rain World backgrounds without introducing a uniform yellow veil.
+                    float bandHeat = saturate((field.band - 0.30) / 0.70);
+                    float3 bandYellow = saturate(
+                        color * float3(1.045, 1.015, 0.895) +
+                        luma * float3(0.028, 0.016, 0.0));
+                    float bandColorAmount =
+                        bandHeat * tone *
+                        (0.055 + solar * 0.060) *
+                        lit;
+                    color = lerp(color, bandYellow, saturate(bandColorAmount));
+
                     float exposureBreath =
                         (field.band - 0.34) *
                         tone *
-                        (0.052 + solar * 0.055) *
+                        (0.045 + solar * 0.050) *
                         lit;
                     color *= 1.0 + exposureBreath;
 
