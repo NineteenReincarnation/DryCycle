@@ -77,18 +77,21 @@ internal static class HeatWaveNoiseField
                 float turn = PeriodicFbmAnisotropic(u, v, 0xD1B54A35u, 5, 3);
                 float phase = PeriodicFbmAnisotropic(u, v, 0xA24BAED5u, 4, 4);
 
+                // Keep a wider portion of the room optically active. Strong local bodies
+                // still exist, but open air no longer spends most of its time below the
+                // useful distortion range.
                 float strength = Smooth01(Mathf.Clamp01(
-                    (body * 0.72f + breakup * 0.28f - 0.24f) * 1.58f));
+                    (body * 0.70f + breakup * 0.30f - 0.20f) * 1.72f));
 
                 // HeatWave air has a strong upward bias. Lateral movement is coherent
                 // but secondary; this keeps the field from reading as water normals.
                 float lateral =
-                    (turn - 0.5f) * 0.82f +
-                    Mathf.Sin((v * 3f + phase * 0.71f) * Tau) * 0.13f;
+                    (turn - 0.5f) * 0.88f +
+                    Mathf.Sin((v * 3f + phase * 0.71f) * Tau) * 0.15f;
                 float vertical =
-                    0.82f +
-                    (body - 0.5f) * 0.28f +
-                    (breakup - 0.5f) * 0.10f;
+                    0.84f +
+                    (body - 0.5f) * 0.31f +
+                    (breakup - 0.5f) * 0.12f;
 
                 Vector2 flow = new(lateral, Mathf.Max(0.22f, vertical));
                 float magnitude = flow.magnitude;
@@ -166,11 +169,13 @@ internal static class HeatWaveNoiseField
 
                 // Encode scalar-density gradients, not velocity. The shader may use the
                 // flow field to transport these normals, but optical bending comes from
-                // refractive gradients as it should.
-                baseX = Mathf.Clamp(baseX * 7.4f, -1f, 1f);
-                baseY = Mathf.Clamp(baseY * 8.8f, -1f, 1f);
-                detailX = Mathf.Clamp(detailX * 5.8f, -1f, 1f);
-                detailY = Mathf.Clamp(detailY * 6.6f, -1f, 1f);
+                // refractive gradients as it should. Base Y is deliberately strongest:
+                // desert heat should visibly melt vertical spacing instead of behaving
+                // like an isotropic water surface.
+                baseX = Mathf.Clamp(baseX * 9.2f, -1f, 1f);
+                baseY = Mathf.Clamp(baseY * 11.6f, -1f, 1f);
+                detailX = Mathf.Clamp(detailX * 7.0f, -1f, 1f);
+                detailY = Mathf.Clamp(detailY * 8.3f, -1f, 1f);
 
                 pixels[y * NormalSize + x] = new Color32(
                     EncodeSigned(baseX),
@@ -208,19 +213,27 @@ internal static class HeatWaveNoiseField
                     (v * 6f + (warp - 0.5f) * 0.82f + phase * 0.31f) * Tau);
                 float fineWave = Mathf.Sin(
                     (v * 13f - u * 2f + (breakup - 0.5f) * 0.66f + phase * 0.47f) * Tau);
+                float crossWave = Mathf.Sin(
+                    (v * 8f + u * 1.35f + (warp - 0.5f) * 0.52f + phase * 0.83f) * Tau);
 
-                float band = Smooth01(Mathf.Clamp01((broadWave * 0.5f + 0.5f - 0.34f) * 1.62f));
-                band *= Mathf.Lerp(0.56f, 1f, breakup);
+                // Wider, stronger lenses make the open-air portion of the screen visibly
+                // unstable while the shader's world anchoring keeps the motion attached
+                // to the room rather than the monitor.
+                float band = Smooth01(Mathf.Clamp01(
+                    (broadWave * 0.5f + 0.5f - 0.30f) * 1.70f));
+                band *= Mathf.Lerp(0.60f, 1f, breakup);
 
                 float stretch = Mathf.Clamp(
-                    fineWave * (0.34f + band * 0.66f) +
-                    (warp - 0.5f) * 0.32f,
+                    fineWave * (0.42f + band * 0.82f) +
+                    crossWave * 0.18f +
+                    broadWave * 0.12f +
+                    (warp - 0.5f) * 0.44f,
                     -1f,
                     1f);
 
                 float blur = Mathf.Clamp01(
-                    band * 0.78f +
-                    Mathf.Abs(stretch) * 0.22f);
+                    band * 0.82f +
+                    Mathf.Abs(stretch) * 0.28f);
 
                 pixels[y * MirageWidth + x] = new Color32(
                     ToByte(band),
