@@ -7,16 +7,34 @@ namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
 /// Immutable room-space terrain/sky field shared by HeatWave simulation and optics.
-/// R = solid mask, G = normalized distance to solid, B = upward-facing exposed surface
-/// source, A = local sky transmission. B/A are geometric/local-shade data rather than
-/// baked sunlight intensity so day/night lighting can change without rebuilding the
-/// texture and HeatWave still works in rooms that omitted optional TemperatureSets data.
+/// R = solid mask, G = normalized distance to solid, B = upward-facing hot-surface
+/// source, A = local sky transmission. B/A are geometry/local-shade data rather than
+/// baked clock intensity so day/night lighting can change without rebuilding the field.
+///
+/// Sky exposure is deliberately hemispherical rather than a single vertical test. Rain
+/// World rooms contain bridges, ledges and machinery that frequently block a straight
+/// ray to the top while still being obviously outdoors. Treating the first overhead
+/// tile as a sealed roof starved the previous HeatWave implementation of essentially all
+/// ground sources in rooms such as SU_A53.
 /// </summary>
 internal sealed class HeatWaveTerrainField : IDisposable
 {
     private const float MaxEncodedDistanceTiles = 16f;
     private const float DiagonalCost = 1.41421356237f;
     private const float Infinity = 1000000f;
+
+    // A small 2D approximation of an upper hemisphere. The center ray carries most of
+    // the direct-sun meaning while oblique rays allow hot surfaces under thin platforms
+    // to see open sky through the sides. Leaving the room horizontally counts as sky.
+    private static readonly float[] SkyRaySlopes =
+    {
+        -1.35f, -0.82f, -0.46f, -0.22f, 0f, 0.22f, 0.46f, 0.82f, 1.35f
+    };
+
+    private static readonly float[] SkyRayWeights =
+    {
+        0.38f, 0.58f, 0.78f, 0.92f, 1.20f, 0.92f, 0.78f, 0.58f, 0.38f
+    };
 
     internal Texture2D Texture { get; }
     internal Vector2 RoomSizePixels { get; }
@@ -38,7 +56,7 @@ internal sealed class HeatWaveTerrainField : IDisposable
         RoomShade = Mathf.Clamp01(SolarEnvironment.GetRoomShade(room));
 
         float[] distances = BuildDistances(room, width, height);
-        bool[] skyOpen = BuildSkyVisibility(room, width, height);
+        float[] skyExposure = BuildSkyExposure(room, width, height);
         Color32[] pixels = new Color32[width * height];
 
         for (int y = 0; y < height; y++)
@@ -52,20 +70,28 @@ internal sealed class HeatWaveTerrainField : IDisposable
 
                 float skyTransmission = 0f;
                 float boundaryExposure = 0f;
-                if (!solid && skyOpen[index])
+                if (!solid)
                 {
                     Vector2 samplePoint = new(
                         x * 20f + 10f,
                         y * 20f + 10f);
                     float localShade = SolarEnvironment.GetLocalShadeAt(room, samplePoint);
-                    skyTransmission = 1f - Mathf.Clamp01(localShade);
+                    float localTransmission = 1f - Mathf.Clamp01(localShade);
+                    float geometrySky = Mathf.Clamp01(skyExposure[index]);
 
-                    // Only the first air cell over an upward-facing solid surface is a
-                    // direct ground boundary source. The GPU solver spreads/advects the
-                    // resulting heat instead of filling a hand-authored vertical mask.
+                    skyTransmission = geometrySky * localTransmission;
+
                     if (y > 0 && room.GetTile(x, y - 1).Solid)
                     {
-                        boundaryExposure = skyTransmission;
+                        // HeatWave is a hot-air weather state, not a binary sunlight
+                        // decal. Even a partly covered upward-facing surface retains a
+                        // weak boundary layer from the already-heated room air; open sky
+                        // then ramps it rapidly toward full strength. This 10% floor is
+                        // intentionally too weak to fill enclosed rooms by itself, but it
+                        // prevents a single bridge tile from deleting an entire plume.
+                        float skyDriven = Mathf.Pow(geometrySky, 0.72f);
+                        float ambientBoundary = Mathf.Lerp(0.10f, 1f, skyDriven);
+                        boundaryExposure = ambientBoundary * localTransmission;
                     }
                 }
 
@@ -117,24 +143,70 @@ internal sealed class HeatWaveTerrainField : IDisposable
         }
     }
 
-    private static bool[] BuildSkyVisibility(Room room, int width, int height)
+    private static float[] BuildSkyExposure(Room room, int width, int height)
     {
-        bool[] result = new bool[width * height];
-        for (int x = 0; x < width; x++)
+        float[] result = new float[width * height];
+        float totalWeight = 0f;
+        for (int i = 0; i < SkyRayWeights.Length; i++)
         {
-            bool blocked = false;
-            for (int y = height - 1; y >= 0; y--)
+            totalWeight += SkyRayWeights[i];
+        }
+        totalWeight = Mathf.Max(0.0001f, totalWeight);
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
             {
                 int index = y * width + x;
-                bool solid = room.GetTile(x, y).Solid;
-                result[index] = !blocked && !solid;
-                if (solid)
+                if (room.GetTile(x, y).Solid)
                 {
-                    blocked = true;
+                    result[index] = 0f;
+                    continue;
                 }
+
+                float visibleWeight = 0f;
+                for (int ray = 0; ray < SkyRaySlopes.Length; ray++)
+                {
+                    if (RayEscapesToSky(room, width, height, x, y, SkyRaySlopes[ray]))
+                    {
+                        visibleWeight += SkyRayWeights[ray];
+                    }
+                }
+
+                result[index] = Mathf.Clamp01(visibleWeight / totalWeight);
             }
         }
+
         return result;
+    }
+
+    private static bool RayEscapesToSky(
+        Room room,
+        int width,
+        int height,
+        int startX,
+        int startY,
+        float slope)
+    {
+        for (int step = 1; step <= height - startY + width; step++)
+        {
+            int y = startY + step;
+            int x = Mathf.RoundToInt(startX + slope * step);
+
+            // Exiting the authored room through the top or either open side means the
+            // ray reached the exterior atmosphere.
+            if (y >= height || x < 0 || x >= width)
+            {
+                return true;
+            }
+
+            if (room.GetTile(x, y).Solid)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static float[] BuildDistances(Room room, int width, int height)
