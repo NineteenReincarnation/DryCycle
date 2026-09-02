@@ -16,82 +16,59 @@ internal static class RGBColorClipboard
     {
         StoredColor = Opaque(color);
         HasColor = true;
-        RGBClipboardBridge.SetText(RGBColorEffectEditor.ToHex(StoredColor));
+        GUIUtility.systemCopyBuffer = RGBColorEffectEditor.ToHex(StoredColor);
     }
 
     internal static bool TryPaste(out Color color)
     {
-        string text = RGBClipboardBridge.GetText();
-        if (RGBColorEffectEditor.TryParseHex(text, out color))
+        if (RGBColorEffectEditor.TryParseHex(GUIUtility.systemCopyBuffer, out color))
         {
             StoredColor = Opaque(color);
             HasColor = true;
             return true;
         }
 
-        color = StoredColor;
-        return HasColor;
+        if (HasColor)
+        {
+            color = StoredColor;
+            return true;
+        }
+
+        color = Color.white;
+        return false;
     }
 
-    private static Color Opaque(Color color) => new(color.r, color.g, color.b, 1f);
+    internal static void ClearTransientState()
+    {
+        HasColor = false;
+        StoredColor = UnityEngine.Color.white;
+    }
+
+    private static Color Opaque(Color color)
+    {
+        color.a = 1f;
+        return color;
+    }
 }
 
-internal sealed class RGBColorEffectEditor : Panel
+internal sealed class RGBColorEffectEditor : PositionedDevUINode, IDevUISignals
 {
-    private const float ExpandedWidth = 396f;
-    private const float ExpandedHeight = 522f;
-    private const float CollapsedWidth = 272f;
-    private const float CollapsedHeight = 28f;
-    private const float ChannelTrackWidth = 216f;
-    private const float ChannelTrackX = 118f;
-    private const float RingCenterX = 197f;
-    private const float RingCenterY = 202f;
-    private const float RingOuterRadius = 88f;
-    private const float RingInnerRadius = 67f;
-    private const float SVSize = 108f;
-    private const float SVHalf = SVSize * 0.5f;
-    private const int RingSegments = 96;
-    private const int SVGrid = 12;
-
-    private static RGBColorEffectEditor _pointerCapture;
-
     private readonly RoomSettings.RoomEffect _effect;
-    private readonly bool _replaceA;
-    private readonly bool _readOnly;
     private readonly Color _previousColor;
-    private readonly FSprite _previousSwatch;
-    private readonly FSprite _currentSwatch;
-    private readonly FLabel _collapsedColorLabel;
-    private readonly DryCycleIntegerField _rField;
-    private readonly DryCycleIntegerField _gField;
-    private readonly DryCycleIntegerField _bField;
-    private readonly DryCycleIntegerField _hField;
-    private readonly DryCycleIntegerField _sField;
-    private readonly DryCycleIntegerField _vField;
+    private readonly bool _effectA;
+    private readonly ColorSwatch _previousSwatch;
+    private readonly ColorSwatch _currentSwatch;
+    private readonly ByteChannelControl _red;
+    private readonly ByteChannelControl _green;
+    private readonly ByteChannelControl _blue;
     private readonly DryCycleTextField _hexField;
-    private readonly FSprite[] _rTrack = new FSprite[2];
-    private readonly FSprite[] _gTrack = new FSprite[2];
-    private readonly FSprite[] _bTrack = new FSprite[2];
-    private readonly FSprite[] _channelNubs = new FSprite[3];
-    private readonly TriangleMesh _hueRing;
-    private readonly TriangleMesh _svMesh;
-    private readonly FSprite _hueOuterCursor;
-    private readonly FSprite _hueInnerCursor;
-    private readonly FSprite _svCursorHorizontal;
-    private readonly FSprite _svCursorVertical;
-    private readonly SimpleButton _resetButton;
-    private readonly SimpleButton _copyButton;
-    private readonly SimpleButton _pasteButton;
-    private readonly SimpleButton _collapseButton;
-    private readonly PositionedDevUINode[] _expandedNodes;
-
-    private Color _color;
-    private float _hue;
-    private float _saturation;
-    private float _value;
-    private bool _synchronizing;
-    private bool _collapsed;
-    private CaptureMode _captureMode;
+    private readonly HueRingControl _hueRing;
+    private readonly SaturationValueControl _svField;
+    private readonly DryCycleIntegerField _hueField;
+    private readonly DryCycleIntegerField _saturationField;
+    private readonly DryCycleIntegerField _valueField;
+    private readonly DevUILabel _readOnlyLabel;
+    private Color _lastObservedColor;
 
     internal RGBColorEffectEditor(
         DevUIOwner owner,
@@ -99,817 +76,884 @@ internal sealed class RGBColorEffectEditor : Panel
         DevUINode parentNode,
         Vector2 pos,
         RoomSettings.RoomEffect effect,
-        bool replaceA,
-        bool readOnly)
-        : base(owner, IDstring, parentNode, pos, new Vector2(ExpandedWidth, ExpandedHeight), effect.type.ToString())
+        bool effectA)
+        : base(owner, IDstring, parentNode, pos)
     {
-        _effect = effect ?? throw new ArgumentNullException(nameof(effect));
-        _replaceA = replaceA;
-        _readOnly = readOnly;
-        _color = ReadColor(effect);
-        _previousColor = _color;
-        Color.RGBToHSV(_color, out _hue, out _saturation, out _value);
+        _effect = effect;
+        _effectA = effectA;
+        _previousColor = RGBEffectRuntime.ReadColor(effect);
+        _lastObservedColor = _previousColor;
 
-        _previousSwatch = MakePixel(new Vector2(20f, 442f), new Vector2(72f, 42f));
-        _currentSwatch = MakePixel(new Vector2(112f, 442f), new Vector2(72f, 42f));
-        _collapsedColorLabel = new FLabel(Custom.GetFont(), string.Empty)
-        {
-            anchorX = 0f,
-            anchorY = 0f
-        };
-        Futile.stage.AddChild(_collapsedColorLabel);
+        subNodes.Add(new DevUILabel(owner, "RGB_Mode", this, new Vector2(8f, 427f), 210f,
+            effectA ? "EFFECT COLOR A / PRESERVE LUMINANCE" : "EFFECT COLOR B / PRESERVE LUMINANCE"));
 
-        AddLabel("PREVIOUS", new Vector2(20f, 489f), 72f);
-        AddLabel("CURRENT", new Vector2(112f, 489f), 72f);
+        subNodes.Add(new DevUILabel(owner, "RGB_Previous_Label", this, new Vector2(8f, 401f), 72f, "PREVIOUS"));
+        subNodes.Add(new DevUILabel(owner, "RGB_Current_Label", this, new Vector2(112f, 401f), 72f, "CURRENT"));
 
-        _rField = MakeChannelField("R", 390f, 0);
-        _gField = MakeChannelField("G", 350f, 1);
-        _bField = MakeChannelField("B", 310f, 2);
+        _previousSwatch = new ColorSwatch(owner, "RGB_Previous_Swatch", this, new Vector2(8f, 366f), new Vector2(88f, 28f), _previousColor,
+            () => SetColor(_previousColor));
+        _currentSwatch = new ColorSwatch(owner, "RGB_Current_Swatch", this, new Vector2(112f, 366f), new Vector2(88f, 28f), _previousColor, null);
+        subNodes.Add(_previousSwatch);
+        subNodes.Add(_currentSwatch);
 
-        AddChannelTrack(_rTrack, 390f, 0);
-        AddChannelTrack(_gTrack, 350f, 1);
-        AddChannelTrack(_bTrack, 310f, 2);
+        _readOnlyLabel = new DevUILabel(owner, "RGB_ReadOnly", this, new Vector2(218f, 376f), 200f,
+            effect.inherited ? "<T> INHERITED / READ ONLY" : "LIVE ROOM CAMERA PREVIEW");
+        subNodes.Add(_readOnlyLabel);
 
-        AddLabel("HEX", new Vector2(20f, 272f), 44f);
+        _red = new ByteChannelControl(owner, "RGB_R", this, new Vector2(8f, 333f), "R", ReadByteChannel(0),
+            () => ReadByteChannel(0), value => SetByteChannel(0, value));
+        _green = new ByteChannelControl(owner, "RGB_G", this, new Vector2(8f, 307f), "G", ReadByteChannel(1),
+            () => ReadByteChannel(1), value => SetByteChannel(1, value));
+        _blue = new ByteChannelControl(owner, "RGB_B", this, new Vector2(8f, 281f), "B", ReadByteChannel(2),
+            () => ReadByteChannel(2), value => SetByteChannel(2, value));
+        subNodes.Add(_red);
+        subNodes.Add(_green);
+        subNodes.Add(_blue);
+
+        subNodes.Add(new DevUILabel(owner, "RGB_Hex_Label", this, new Vector2(8f, 251f), 48f, "HEX"));
         _hexField = new DryCycleTextField(
             owner,
-            IDstring + "_Hex",
+            "RGB_Hex_Field",
             this,
-            new Vector2(68f, 272f),
-            116f,
-            ToHex(_color),
-            text => TryParseHex(text, out _) ? DryCycleTextValidationState.Valid : DryCycleTextValidationState.Invalid,
-            c => char.IsDigit(c) || c == '#' || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'),
+            new Vector2(58f, 251f),
+            100f,
+            ToHex(_previousColor),
+            ValidateHex,
+            IsHexCharacter,
             maxLength: 7,
             selectAllOnFocus: true);
-        _hexField.AcceptedTextChanged += (_, text, __) =>
-        {
-            if (!_synchronizing && TryParseHex(text, out Color parsed))
-            {
-                SetColor(parsed, write: true);
-            }
-        };
+        _hexField.AcceptedTextChanged += HexField_AcceptedTextChanged;
         subNodes.Add(_hexField);
 
-        _hueRing = BuildHueRing();
-        _svMesh = BuildSVField();
-        _hueOuterCursor = MakeCursor("pixel", 5f, 5f);
-        _hueInnerCursor = MakeCursor("pixel", 3f, 3f);
-        _svCursorHorizontal = MakeCursor("pixel", SVSize + 8f, 1f);
-        _svCursorVertical = MakeCursor("pixel", 1f, SVSize + 8f);
+        subNodes.Add(new DevUILabel(owner, "RGB_Hue_Label", this, new Vector2(8f, 226f), 150f, "HUE"));
+        subNodes.Add(new DevUILabel(owner, "RGB_SV_Label", this, new Vector2(206f, 226f), 190f, "SATURATION / VALUE"));
 
-        _hField = MakeHSVField("H", 25f, 0, 359);
-        _sField = MakeHSVField("S", 25f, 1, 100);
-        _vField = MakeHSVField("V", 25f, 2, 100);
-        _hField.Move(new Vector2(20f, 25f));
-        _sField.Move(new Vector2(137f, 25f));
-        _vField.Move(new Vector2(254f, 25f));
+        Color.RGBToHSV(_previousColor, out float initialH, out float initialS, out float initialV);
+        _hueRing = new HueRingControl(owner, "RGB_Hue_Ring", this, new Vector2(8f, 69f), 150f, initialH, SetHueFromPicker);
+        _svField = new SaturationValueControl(owner, "RGB_SV_Field", this, new Vector2(206f, 69f), 150f, initialH, initialS, initialV, SetSVFromPicker);
+        subNodes.Add(_hueRing);
+        subNodes.Add(_svField);
 
-        _resetButton = AddButton("RESET", IDstring + "_Reset", new Vector2(20f, 0f), 62f);
-        _copyButton = AddButton("COPY", IDstring + "_Copy", new Vector2(88f, 0f), 62f);
-        _pasteButton = AddButton("PASTE", IDstring + "_Paste", new Vector2(156f, 0f), 62f);
-        _collapseButton = AddButton("EXPAND", IDstring + "_Collapse", new Vector2(ExpandedWidth - 82f, ExpandedHeight - 24f), 62f);
+        subNodes.Add(new DevUILabel(owner, "RGB_H_Label", this, new Vector2(8f, 43f), 20f, "H"));
+        _hueField = new DryCycleIntegerField(owner, "RGB_H_Field", this, new Vector2(28f, 43f), 48f,
+            Mathf.RoundToInt(initialH * 359f), 0, 359,
+            readValue: ReadHueDegrees,
+            writeValue: SetHueDegrees);
+        subNodes.Add(_hueField);
 
-        _expandedNodes = new PositionedDevUINode[]
-        {
-            _rField, _gField, _bField, _hexField, _hField, _sField, _vField,
-            _resetButton, _copyButton, _pasteButton
-        };
+        subNodes.Add(new DevUILabel(owner, "RGB_S_Label", this, new Vector2(90f, 43f), 20f, "S"));
+        _saturationField = new DryCycleIntegerField(owner, "RGB_S_Field", this, new Vector2(110f, 43f), 48f,
+            Mathf.RoundToInt(initialS * 100f), 0, 100,
+            readValue: ReadSaturationPercent,
+            writeValue: SetSaturationPercent);
+        subNodes.Add(_saturationField);
 
-        ApplyCollapsedState(collapsed: true, persist: false);
-        RefreshAllVisuals();
+        subNodes.Add(new DevUILabel(owner, "RGB_V_Label", this, new Vector2(172f, 43f), 20f, "V"));
+        _valueField = new DryCycleIntegerField(owner, "RGB_V_Field", this, new Vector2(192f, 43f), 48f,
+            Mathf.RoundToInt(initialV * 100f), 0, 100,
+            readValue: ReadValuePercent,
+            writeValue: SetValuePercent);
+        subNodes.Add(_valueField);
+
+        subNodes.Add(new Button(owner, "RGB_Reset", this, new Vector2(258f, 43f), 50f, "RESET"));
+        subNodes.Add(new Button(owner, "RGB_Copy", this, new Vector2(312f, 43f), 48f, "COPY"));
+        subNodes.Add(new Button(owner, "RGB_Paste", this, new Vector2(364f, 43f), 56f, "PASTE"));
+
+        subNodes.Add(new DevUILabel(owner, "RGB_Help", this, new Vector2(8f, 15f), 412f,
+            "RGB / HSV / HEX / WHEEL are one ColorModel. Dragging previews immediately."));
+
+        SyncVisuals(_previousColor, force: true);
     }
 
     public override void Update()
     {
         base.Update();
 
-        if (_effect == null)
+        Color current = RGBEffectRuntime.ReadColor(_effect);
+        if (!Approximately(current, _lastObservedColor))
         {
-            return;
+            SyncVisuals(current, force: false);
         }
 
-        if (_collapsed)
-        {
-            UpdateCollapsedLabel();
-            return;
-        }
-
-        if (!_readOnly)
-        {
-            HandlePointerInput();
-        }
-
-        Color authoritative = ReadColor(_effect);
-        if (!Approximately(authoritative, _color) && _pointerCapture != this)
-        {
-            SetColor(authoritative, write: false);
-        }
-
-        RefreshAllVisuals();
+        _readOnlyLabel.Text = _effect.inherited
+            ? "<T> INHERITED / READ ONLY"
+            : (_effectA ? "LIVE PREVIEW -> EFFECT COLOR A" : "LIVE PREVIEW -> EFFECT COLOR B");
     }
 
-    public override void Signal(DevUISignalType type, DevUINode sender, string message)
+    public void Signal(DevUISignalType type, DevUINode sender, string message)
     {
-        base.Signal(type, sender, message);
-
-        if (sender == _collapseButton)
-        {
-            ApplyCollapsedState(!_collapsed, persist: true);
-            return;
-        }
-
-        if (_readOnly)
+        if (type != DevUISignalType.ButtonClick || sender == null)
         {
             return;
         }
 
-        if (sender == _resetButton)
+        switch (sender.IDstring)
         {
-            SetColor(_previousColor, write: true);
+            case "RGB_Reset":
+                SetColor(_previousColor);
+                break;
+            case "RGB_Copy":
+                RGBColorClipboard.Copy(RGBEffectRuntime.ReadColor(_effect));
+                break;
+            case "RGB_Paste":
+                if (RGBColorClipboard.TryPaste(out Color pasted))
+                {
+                    SetColor(pasted);
+                }
+                break;
         }
-        else if (sender == _copyButton)
+    }
+
+    internal static string ToHex(Color color)
+    {
+        Color32 c = color;
+        return $"#{c.r:X2}{c.g:X2}{c.b:X2}";
+    }
+
+    internal static bool TryParseHex(string text, out Color color)
+    {
+        string value = (text ?? string.Empty).Trim();
+        if (value.StartsWith("#", StringComparison.Ordinal))
         {
-            RGBColorClipboard.Copy(_color);
+            value = value.Substring(1);
         }
-        else if (sender == _pasteButton && RGBColorClipboard.TryPaste(out Color color))
+
+        if (value.Length == 6
+            && byte.TryParse(value.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte r)
+            && byte.TryParse(value.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte g)
+            && byte.TryParse(value.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte b))
         {
-            SetColor(color, write: true);
+            color = new Color32(r, g, b, 255);
+            return true;
+        }
+
+        color = Color.white;
+        return false;
+    }
+
+    private static DryCycleTextValidationState ValidateHex(string text)
+    {
+        string value = text ?? string.Empty;
+        if (value.StartsWith("#", StringComparison.Ordinal))
+        {
+            value = value.Substring(1);
+        }
+
+        if (value.Length < 6)
+        {
+            return value.Length == 0 || IsAllHex(value)
+                ? DryCycleTextValidationState.Intermediate
+                : DryCycleTextValidationState.Invalid;
+        }
+
+        return value.Length == 6 && IsAllHex(value)
+            ? DryCycleTextValidationState.Valid
+            : DryCycleTextValidationState.Invalid;
+    }
+
+    private static bool IsHexCharacter(char c)
+        => c == '#' || Uri.IsHexDigit(c);
+
+    private static bool IsAllHex(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (!Uri.IsHexDigit(value[i]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void HexField_AcceptedTextChanged(DryCycleTextField field, string text, string oldText)
+    {
+        if (TryParseHex(text, out Color color))
+        {
+            SetColor(color);
+        }
+    }
+
+    private int ReadByteChannel(int channel)
+    {
+        Color32 c = RGBEffectRuntime.ReadColor(_effect);
+        return channel switch
+        {
+            0 => c.r,
+            1 => c.g,
+            _ => c.b
+        };
+    }
+
+    private void SetByteChannel(int channel, int value)
+    {
+        Color32 c = RGBEffectRuntime.ReadColor(_effect);
+        byte next = (byte)Mathf.Clamp(value, 0, 255);
+        if (channel == 0)
+        {
+            c.r = next;
+        }
+        else if (channel == 1)
+        {
+            c.g = next;
+        }
+        else
+        {
+            c.b = next;
+        }
+        SetColor(c);
+    }
+
+    private int ReadHueDegrees()
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out float h, out _, out _);
+        return Mathf.Clamp(Mathf.RoundToInt(h * 359f), 0, 359);
+    }
+
+    private int ReadSaturationPercent()
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out _, out float s, out _);
+        return Mathf.Clamp(Mathf.RoundToInt(s * 100f), 0, 100);
+    }
+
+    private int ReadValuePercent()
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out _, out _, out float v);
+        return Mathf.Clamp(Mathf.RoundToInt(v * 100f), 0, 100);
+    }
+
+    private void SetHueDegrees(int degrees)
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out _, out float s, out float v);
+        SetColor(Color.HSVToRGB(Mathf.Repeat(degrees / 360f, 1f), s, v));
+    }
+
+    private void SetSaturationPercent(int percent)
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out float h, out _, out float v);
+        SetColor(Color.HSVToRGB(h, Mathf.Clamp01(percent / 100f), v));
+    }
+
+    private void SetValuePercent(int percent)
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out float h, out float s, out _);
+        SetColor(Color.HSVToRGB(h, s, Mathf.Clamp01(percent / 100f)));
+    }
+
+    private void SetHueFromPicker(float hue)
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out _, out float s, out float v);
+        SetColor(Color.HSVToRGB(Mathf.Repeat(hue, 1f), s, v));
+    }
+
+    private void SetSVFromPicker(float saturation, float value)
+    {
+        Color.RGBToHSV(RGBEffectRuntime.ReadColor(_effect), out float h, out _, out _);
+        SetColor(Color.HSVToRGB(h, Mathf.Clamp01(saturation), Mathf.Clamp01(value)));
+    }
+
+    private void SetColor(Color color)
+    {
+        color.a = 1f;
+        RGBEffectRuntime.WriteColor(_effect, color, owner);
+        SyncVisuals(RGBEffectRuntime.ReadColor(_effect), force: false);
+    }
+
+    private void SyncVisuals(Color color, bool force)
+    {
+        _lastObservedColor = color;
+        _currentSwatch.SetColor(color);
+
+        Color.RGBToHSV(color, out float h, out float s, out float v);
+        _hueRing.SetHue(h);
+        _svField.SetHSV(h, s, v);
+        _red.SyncFromSource();
+        _green.SyncFromSource();
+        _blue.SyncFromSource();
+
+        if (!_hexField.IsFocused || force)
+        {
+            _hexField.SetValue(ToHex(color), notify: false, updateWhileFocused: force);
+        }
+
+        if (!_hueField.IsFocused || force)
+        {
+            _hueField.SetValue(ReadHueDegrees(), notify: false);
+        }
+        if (!_saturationField.IsFocused || force)
+        {
+            _saturationField.SetValue(ReadSaturationPercent(), notify: false);
+        }
+        if (!_valueField.IsFocused || force)
+        {
+            _valueField.SetValue(ReadValuePercent(), notify: false);
+        }
+    }
+
+    private static bool Approximately(Color a, Color b)
+        => Mathf.Abs(a.r - b.r) < 0.0005f
+           && Mathf.Abs(a.g - b.g) < 0.0005f
+           && Mathf.Abs(a.b - b.b) < 0.0005f;
+}
+
+internal sealed class ByteChannelControl : PositionedDevUINode
+{
+    private readonly Func<int> _readValue;
+    private readonly Action<int> _writeValue;
+    private readonly DryCycleIntegerField _field;
+    private readonly ByteSlider _slider;
+
+    internal ByteChannelControl(
+        DevUIOwner owner,
+        string IDstring,
+        DevUINode parentNode,
+        Vector2 pos,
+        string label,
+        int initialValue,
+        Func<int> readValue,
+        Action<int> writeValue)
+        : base(owner, IDstring, parentNode, pos)
+    {
+        _readValue = readValue;
+        _writeValue = writeValue;
+        subNodes.Add(new DevUILabel(owner, IDstring + "_Label", this, Vector2.zero, 18f, label));
+
+        _field = new DryCycleIntegerField(
+            owner,
+            IDstring + "_Field",
+            this,
+            new Vector2(24f, 0f),
+            48f,
+            initialValue,
+            0,
+            255,
+            readValue,
+            value => _writeValue(value));
+        subNodes.Add(_field);
+
+        _slider = new ByteSlider(owner, IDstring + "_Slider", this, new Vector2(82f, 0f), 330f, initialValue,
+            value => _writeValue(value));
+        subNodes.Add(_slider);
+    }
+
+    public override void Update()
+    {
+        base.Update();
+
+        if (_field.MouseOver && owner != null && !_field.IsFocused)
+        {
+            float wheel = Input.mouseScrollDelta.y;
+            if (Mathf.Abs(wheel) > 0.01f)
+            {
+                bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                int step = shift ? 10 : 1;
+                int direction = wheel > 0f ? 1 : -1;
+                _writeValue(Mathf.Clamp(_readValue() + step * direction, 0, 255));
+            }
+        }
+
+        SyncFromSource();
+    }
+
+    internal void SyncFromSource()
+    {
+        int value = Mathf.Clamp(_readValue(), 0, 255);
+        if (!_field.IsFocused)
+        {
+            _field.SetValue(value, notify: false);
+        }
+        _slider.SetValue(value);
+    }
+}
+
+internal sealed class ByteSlider : RectangularDevUINode
+{
+    private readonly Action<int> _writeValue;
+    private readonly FSprite _track;
+    private readonly FSprite _fill;
+    private readonly FSprite _nub;
+    private int _value;
+    private bool _held;
+
+    internal ByteSlider(
+        DevUIOwner owner,
+        string IDstring,
+        DevUINode parentNode,
+        Vector2 pos,
+        float width,
+        int initialValue,
+        Action<int> writeValue)
+        : base(owner, IDstring, parentNode, pos, new Vector2(width, 16f))
+    {
+        _value = Mathf.Clamp(initialValue, 0, 255);
+        _writeValue = writeValue;
+
+        _track = NewPixel(new Color(1f, 1f, 1f, 0.38f));
+        _fill = NewPixel(new Color(0f, 0f, 0f, 0.65f));
+        _nub = NewPixel(Color.black);
+        fSprites.Add(_track);
+        fSprites.Add(_fill);
+        fSprites.Add(_nub);
+        AddToStage(_track);
+        AddToStage(_fill);
+        AddToStage(_nub);
+        Refresh();
+    }
+
+    public override void Update()
+    {
+        base.Update();
+        if (owner == null)
+        {
+            _held = false;
+            return;
+        }
+
+        if (owner.mouseClick && MouseOver && (owner.draggedNode == null || owner.draggedNode == this))
+        {
+            _held = true;
+            UpdateFromMouse();
+        }
+
+        if (_held)
+        {
+            owner.draggedNode = this;
+            if (owner.mouseDown)
+            {
+                UpdateFromMouse();
+            }
+            else
+            {
+                _held = false;
+            }
+        }
+
+        _nub.color = _held ? Color.blue : MouseOver ? Color.red : Color.black;
+    }
+
+    public override void Refresh()
+    {
+        base.Refresh();
+        float t = _value / 255f;
+
+        _track.x = absPos.x;
+        _track.y = absPos.y + 7f;
+        _track.scaleX = size.x;
+        _track.scaleY = 2f;
+
+        _fill.x = absPos.x;
+        _fill.y = absPos.y + 6f;
+        _fill.scaleX = Mathf.Max(1f, size.x * t);
+        _fill.scaleY = 4f;
+
+        _nub.x = absPos.x + Mathf.Lerp(0f, size.x - 6f, t);
+        _nub.y = absPos.y;
+        _nub.scaleX = 6f;
+        _nub.scaleY = 16f;
+    }
+
+    internal void SetValue(int value)
+    {
+        int clamped = Mathf.Clamp(value, 0, 255);
+        if (_value == clamped)
+        {
+            return;
+        }
+        _value = clamped;
+        Refresh();
+    }
+
+    private void UpdateFromMouse()
+    {
+        float t = Mathf.InverseLerp(absPos.x, absPos.x + size.x, owner.mousePos.x);
+        int next = Mathf.Clamp(Mathf.RoundToInt(t * 255f), 0, 255);
+        if (next != _value)
+        {
+            _value = next;
+            _writeValue(next);
+            Refresh();
+        }
+    }
+
+    private static FSprite NewPixel(Color color)
+        => new("pixel") { anchorX = 0f, anchorY = 0f, color = color };
+
+    private void AddToStage(FSprite sprite)
+    {
+        if (owner != null)
+        {
+            Futile.stage.AddChild(sprite);
+        }
+    }
+}
+
+internal sealed class ColorSwatch : RectangularDevUINode
+{
+    private readonly FSprite _body;
+    private readonly FSprite _border;
+    private readonly Action _clicked;
+
+    internal ColorSwatch(
+        DevUIOwner owner,
+        string IDstring,
+        DevUINode parentNode,
+        Vector2 pos,
+        Vector2 size,
+        Color color,
+        Action clicked)
+        : base(owner, IDstring, parentNode, pos, size)
+    {
+        _clicked = clicked;
+        _border = new FSprite("pixel") { anchorX = 0f, anchorY = 0f, color = Color.white };
+        _body = new FSprite("pixel") { anchorX = 0f, anchorY = 0f, color = color };
+        fSprites.Add(_border);
+        fSprites.Add(_body);
+        if (owner != null)
+        {
+            Futile.stage.AddChild(_border);
+            Futile.stage.AddChild(_body);
+        }
+        Refresh();
+    }
+
+    public override void Update()
+    {
+        base.Update();
+        if (_clicked != null && owner != null && owner.mouseClick && MouseOver)
+        {
+            _clicked();
+        }
+        _border.color = MouseOver && _clicked != null ? Color.red : Color.white;
+    }
+
+    public override void Refresh()
+    {
+        base.Refresh();
+        _border.x = absPos.x - 1f;
+        _border.y = absPos.y - 1f;
+        _border.scaleX = size.x + 2f;
+        _border.scaleY = size.y + 2f;
+        _body.x = absPos.x;
+        _body.y = absPos.y;
+        _body.scaleX = size.x;
+        _body.scaleY = size.y;
+    }
+
+    internal void SetColor(Color color)
+    {
+        color.a = 1f;
+        _body.color = color;
+    }
+}
+
+internal sealed class HueRingControl : RectangularDevUINode
+{
+    private const int Segments = 72;
+    private readonly float _radius;
+    private readonly float _innerRadius;
+    private readonly Action<float> _writeHue;
+    private readonly TriangleMesh _mesh;
+    private readonly FSprite _markerOuter;
+    private readonly FSprite _markerInner;
+    private float _hue;
+    private bool _held;
+
+    internal HueRingControl(
+        DevUIOwner owner,
+        string IDstring,
+        DevUINode parentNode,
+        Vector2 pos,
+        float diameter,
+        float initialHue,
+        Action<float> writeHue)
+        : base(owner, IDstring, parentNode, pos, new Vector2(diameter, diameter))
+    {
+        _radius = diameter * 0.5f;
+        _innerRadius = _radius - 18f;
+        _hue = Mathf.Repeat(initialHue, 1f);
+        _writeHue = writeHue;
+        _mesh = CreateRingMesh();
+        _markerOuter = new FSprite("Circle20") { scale = 0.48f, color = Color.black };
+        _markerInner = new FSprite("Circle20") { scale = 0.28f, color = Color.white };
+        fSprites.Add(_mesh);
+        fSprites.Add(_markerOuter);
+        fSprites.Add(_markerInner);
+        if (owner != null)
+        {
+            Futile.stage.AddChild(_mesh);
+            Futile.stage.AddChild(_markerOuter);
+            Futile.stage.AddChild(_markerInner);
+        }
+        Refresh();
+    }
+
+    public override void Update()
+    {
+        base.Update();
+        if (owner == null)
+        {
+            _held = false;
+            return;
+        }
+
+        Vector2 center = absPos + new Vector2(_radius, _radius);
+        float distance = Vector2.Distance(owner.mousePos, center);
+        bool overRing = distance >= _innerRadius - 5f && distance <= _radius + 5f;
+
+        if (owner.mouseClick && overRing && (owner.draggedNode == null || owner.draggedNode == this))
+        {
+            _held = true;
+            UpdateFromMouse(center);
+        }
+
+        if (_held)
+        {
+            owner.draggedNode = this;
+            if (owner.mouseDown)
+            {
+                UpdateFromMouse(center);
+            }
+            else
+            {
+                _held = false;
+            }
         }
     }
 
     public override void Refresh()
     {
         base.Refresh();
-        ApplyCollapsedGeometry();
-        RefreshAllVisuals();
+        Vector2 center = absPos + new Vector2(_radius, _radius);
+        _mesh.x = center.x;
+        _mesh.y = center.y;
+        UpdateMarker(center);
     }
 
-    public override void ClearSprites()
+    internal void SetHue(float hue)
     {
-        if (_pointerCapture == this)
-        {
-            _pointerCapture = null;
-        }
-
-        _collapsedColorLabel.RemoveFromContainer();
-        base.ClearSprites();
-    }
-
-    internal void RestorePersistedCollapsedState(bool? collapsed)
-    {
-        ApplyCollapsedState(collapsed ?? true, persist: false);
-    }
-
-    private void ApplyCollapsedState(bool collapsed, bool persist)
-    {
-        if (_collapsed == collapsed && !persist)
-        {
-            ApplyCollapsedGeometry();
-            return;
-        }
-
-        _collapsed = collapsed;
-        _collapseButton.Text = collapsed ? "EXPAND" : "COLLAPSE";
-
-        if (_pointerCapture == this)
-        {
-            _pointerCapture = null;
-        }
-
-        ApplyCollapsedGeometry();
-        RefreshAllVisuals();
-
-        if (persist)
-        {
-            RGBEffectEditorPanelState.SetCollapsed(_effect, collapsed);
-        }
-    }
-
-    private void ApplyCollapsedGeometry()
-    {
-        size = _collapsed
-            ? new Vector2(CollapsedWidth, CollapsedHeight)
-            : new Vector2(ExpandedWidth, ExpandedHeight);
-
-        _collapseButton.Move(_collapsed
-            ? new Vector2(CollapsedWidth - 82f, 2f)
-            : new Vector2(ExpandedWidth - 82f, ExpandedHeight - 24f));
-
-        bool visible = !_collapsed;
-        SetNodeVisible(_rField, visible);
-        SetNodeVisible(_gField, visible);
-        SetNodeVisible(_bField, visible);
-        SetNodeVisible(_hexField, visible);
-        SetNodeVisible(_hField, visible);
-        SetNodeVisible(_sField, visible);
-        SetNodeVisible(_vField, visible);
-        SetNodeVisible(_resetButton, visible);
-        SetNodeVisible(_copyButton, visible);
-        SetNodeVisible(_pasteButton, visible);
-
-        SetSpriteVisible(_previousSwatch, visible);
-        SetSpriteVisible(_currentSwatch, visible);
-        SetSpriteVisible(_hueRing, visible);
-        SetSpriteVisible(_svMesh, visible);
-        SetSpriteVisible(_hueOuterCursor, visible);
-        SetSpriteVisible(_hueInnerCursor, visible);
-        SetSpriteVisible(_svCursorHorizontal, visible);
-        SetSpriteVisible(_svCursorVertical, visible);
-        for (int i = 0; i < 3; i++)
-        {
-            SetSpriteVisible(_channelNubs[i], visible);
-        }
-        SetTrackVisible(_rTrack, visible);
-        SetTrackVisible(_gTrack, visible);
-        SetTrackVisible(_bTrack, visible);
-
-        for (int i = 0; i < fLabels.Count; i++)
-        {
-            if (fLabels[i] != null)
-            {
-                fLabels[i].isVisible = visible || i == 0;
-            }
-        }
-
-        _collapsedColorLabel.isVisible = _collapsed;
-        UpdateCollapsedLabel();
-    }
-
-    private void UpdateCollapsedLabel()
-    {
-        _collapsedColorLabel.text = ToHex(_color);
-        _collapsedColorLabel.color = _color;
-        _collapsedColorLabel.x = absPos.x + 8f;
-        _collapsedColorLabel.y = absPos.y + 4f;
-    }
-
-    private static void SetNodeVisible(PositionedDevUINode node, bool visible)
-    {
-        if (node == null)
+        float normalized = Mathf.Repeat(hue, 1f);
+        if (Mathf.Abs(normalized - _hue) < 0.0001f)
         {
             return;
         }
-
-        if (node.fLabels != null)
-        {
-            for (int i = 0; i < node.fLabels.Count; i++)
-            {
-                node.fLabels[i].isVisible = visible;
-            }
-        }
-        if (node.fSprites != null)
-        {
-            for (int i = 0; i < node.fSprites.Count; i++)
-            {
-                node.fSprites[i].isVisible = visible;
-            }
-        }
+        _hue = normalized;
+        UpdateMarker(absPos + new Vector2(_radius, _radius));
     }
 
-    private static void SetSpriteVisible(FNode sprite, bool visible)
+    private TriangleMesh CreateRingMesh()
     {
-        if (sprite is FSprite fs)
+        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[Segments * 2];
+        for (int i = 0; i < Segments; i++)
         {
-            fs.isVisible = visible;
-        }
-        else if (sprite is TriangleMesh mesh)
-        {
-            mesh.isVisible = visible;
-        }
-    }
-
-    private static void SetTrackVisible(FSprite[] track, bool visible)
-    {
-        if (track == null)
-        {
-            return;
-        }
-        for (int i = 0; i < track.Length; i++)
-        {
-            if (track[i] != null)
-            {
-                track[i].isVisible = visible;
-            }
-        }
-    }
-
-    private DryCycleIntegerField MakeChannelField(string label, float y, int channel)
-    {
-        AddLabel(label, new Vector2(20f, y), 16f);
-        DryCycleIntegerField field = new(
-            owner,
-            IDstring + "_" + label,
-            this,
-            new Vector2(42f, y),
-            58f,
-            GetChannel255(_color, channel),
-            0,
-            255,
-            readValue: () => GetChannel255(_color, channel),
-            writeValue: value =>
-            {
-                if (_readOnly || _synchronizing)
-                {
-                    return;
-                }
-                SetChannel(channel, value / 255f);
-            });
-        subNodes.Add(field);
-        return field;
-    }
-
-    private DryCycleIntegerField MakeHSVField(string label, float y, int channel, int max)
-    {
-        DryCycleIntegerField field = new(
-            owner,
-            IDstring + "_" + label,
-            this,
-            Vector2.zero,
-            58f,
-            channel switch
-            {
-                0 => HueDegrees,
-                1 => Mathf.RoundToInt(_saturation * 100f),
-                _ => Mathf.RoundToInt(_value * 100f)
-            },
-            0,
-            max,
-            readValue: () => channel switch
-            {
-                0 => HueDegrees,
-                1 => Mathf.RoundToInt(_saturation * 100f),
-                _ => Mathf.RoundToInt(_value * 100f)
-            },
-            writeValue: value =>
-            {
-                if (_readOnly || _synchronizing)
-                {
-                    return;
-                }
-                if (channel == 0)
-                {
-                    _hue = Mathf.Repeat(value / 360f, 1f);
-                }
-                else if (channel == 1)
-                {
-                    _saturation = Mathf.Clamp01(value / 100f);
-                }
-                else
-                {
-                    _value = Mathf.Clamp01(value / 100f);
-                }
-                SetColor(Color.HSVToRGB(_hue, _saturation, _value), write: true);
-            });
-        subNodes.Add(field);
-        AddLabel(label, new Vector2(field.pos.x - 18f, field.pos.y), 16f);
-        return field;
-    }
-
-    private void AddChannelTrack(FSprite[] track, float y, int channel)
-    {
-        track[0] = MakePixel(new Vector2(ChannelTrackX, y + 7f), new Vector2(ChannelTrackWidth, 2f));
-        track[0].color = new Color(0.16f, 0.16f, 0.16f);
-        track[1] = MakePixel(new Vector2(ChannelTrackX, y + 7f), new Vector2(ChannelTrackWidth, 2f));
-        _channelNubs[channel] = MakeCursor("pixel", 3f, 13f);
-    }
-
-    private void HandlePointerInput()
-    {
-        if (owner == null)
-        {
-            return;
+            int a = i * 2;
+            int b = (i + 1) * 2;
+            triangles[i * 2] = new TriangleMesh.Triangle(a, a + 1, b + 1);
+            triangles[i * 2 + 1] = new TriangleMesh.Triangle(a, b + 1, b);
         }
 
-        Vector2 mouse = owner.mousePos;
-        if (owner.mouseClick && _pointerCapture == null)
+        TriangleMesh mesh = new("Futile_White", triangles, customColor: true);
+        for (int i = 0; i <= Segments; i++)
         {
-            if (PointInChannelTrack(mouse, 0))
-            {
-                _pointerCapture = this;
-                _captureMode = CaptureMode.Red;
-            }
-            else if (PointInChannelTrack(mouse, 1))
-            {
-                _pointerCapture = this;
-                _captureMode = CaptureMode.Green;
-            }
-            else if (PointInChannelTrack(mouse, 2))
-            {
-                _pointerCapture = this;
-                _captureMode = CaptureMode.Blue;
-            }
-            else
-            {
-                Vector2 local = mouse - absPos;
-                Vector2 delta = local - new Vector2(RingCenterX, RingCenterY);
-                float radius = delta.magnitude;
-                if (radius >= RingInnerRadius && radius <= RingOuterRadius)
-                {
-                    _pointerCapture = this;
-                    _captureMode = CaptureMode.Hue;
-                }
-                else if (Mathf.Abs(delta.x) <= SVHalf && Mathf.Abs(delta.y) <= SVHalf)
-                {
-                    _pointerCapture = this;
-                    _captureMode = CaptureMode.SV;
-                }
-            }
-        }
-
-        if (_pointerCapture != this)
-        {
-            return;
-        }
-
-        if (!owner.mouseDown)
-        {
-            _pointerCapture = null;
-            _captureMode = CaptureMode.None;
-            return;
-        }
-
-        switch (_captureMode)
-        {
-            case CaptureMode.Red:
-                SetChannel(0, ChannelValueAtMouse(mouse));
-                break;
-            case CaptureMode.Green:
-                SetChannel(1, ChannelValueAtMouse(mouse));
-                break;
-            case CaptureMode.Blue:
-                SetChannel(2, ChannelValueAtMouse(mouse));
-                break;
-            case CaptureMode.Hue:
-                Vector2 delta = mouse - (absPos + new Vector2(RingCenterX, RingCenterY));
-                _hue = Mathf.Repeat(Mathf.Atan2(delta.y, delta.x) / (Mathf.PI * 2f), 1f);
-                SetColor(Color.HSVToRGB(_hue, _saturation, _value), write: true);
-                break;
-            case CaptureMode.SV:
-                Vector2 local = mouse - (absPos + new Vector2(RingCenterX, RingCenterY));
-                _saturation = Mathf.Clamp01((local.x + SVHalf) / SVSize);
-                _value = Mathf.Clamp01((local.y + SVHalf) / SVSize);
-                SetColor(Color.HSVToRGB(_hue, _saturation, _value), write: true);
-                break;
-        }
-    }
-
-    private bool PointInChannelTrack(Vector2 mouse, int channel)
-    {
-        float y = channel switch
-        {
-            0 => 390f,
-            1 => 350f,
-            _ => 310f
-        };
-        Vector2 local = mouse - absPos;
-        return local.x >= ChannelTrackX - 5f
-            && local.x <= ChannelTrackX + ChannelTrackWidth + 5f
-            && local.y >= y - 5f
-            && local.y <= y + 17f;
-    }
-
-    private float ChannelValueAtMouse(Vector2 mouse)
-    {
-        float localX = mouse.x - absPos.x;
-        return Mathf.InverseLerp(ChannelTrackX, ChannelTrackX + ChannelTrackWidth, localX);
-    }
-
-    private void SetChannel(int channel, float value)
-    {
-        value = Mathf.Clamp01(value);
-        Color next = _color;
-        if (channel == 0)
-        {
-            next.r = value;
-        }
-        else if (channel == 1)
-        {
-            next.g = value;
-        }
-        else
-        {
-            next.b = value;
-        }
-        SetColor(next, write: true);
-    }
-
-    private void SetColor(Color color, bool write)
-    {
-        color.a = 1f;
-        _color = color;
-        Color.RGBToHSV(color, out _hue, out _saturation, out _value);
-
-        if (write && !_readOnly)
-        {
-            RGBEffectRuntime.WriteColor(_effect, color);
-            RGBEffectRuntime.ApplyCurrentRoom(owner?.room);
-        }
-
-        SynchronizeFields();
-        RefreshAllVisuals();
-    }
-
-    private void SynchronizeFields()
-    {
-        _synchronizing = true;
-        try
-        {
-            _rField?.SetValue(GetChannel255(_color, 0), notify: false);
-            _gField?.SetValue(GetChannel255(_color, 1), notify: false);
-            _bField?.SetValue(GetChannel255(_color, 2), notify: false);
-            _hField?.SetValue(HueDegrees, notify: false);
-            _sField?.SetValue(Mathf.RoundToInt(_saturation * 100f), notify: false);
-            _vField?.SetValue(Mathf.RoundToInt(_value * 100f), notify: false);
-            _hexField?.SetValue(ToHex(_color), notify: false);
-        }
-        finally
-        {
-            _synchronizing = false;
-        }
-    }
-
-    private void RefreshAllVisuals()
-    {
-        if (_previousSwatch != null)
-        {
-            _previousSwatch.color = _previousColor;
-        }
-        if (_currentSwatch != null)
-        {
-            _currentSwatch.color = _color;
-        }
-
-        if (_collapsed)
-        {
-            UpdateCollapsedLabel();
-            return;
-        }
-
-        RefreshChannelTrack(0, _rTrack, _color.r, Color.red);
-        RefreshChannelTrack(1, _gTrack, _color.g, Color.green);
-        RefreshChannelTrack(2, _bTrack, _color.b, Color.blue);
-        RefreshHueRingCursor();
-        RefreshSVField();
-    }
-
-    private void RefreshChannelTrack(int channel, FSprite[] track, float value, Color tint)
-    {
-        track[0].x = absPos.x + ChannelTrackX;
-        track[0].y = absPos.y + (channel == 0 ? 397f : channel == 1 ? 357f : 317f);
-        track[0].scaleX = ChannelTrackWidth;
-        track[1].x = track[0].x;
-        track[1].y = track[0].y;
-        track[1].scaleX = ChannelTrackWidth * value;
-        track[1].color = tint;
-
-        FSprite nub = _channelNubs[channel];
-        nub.x = absPos.x + ChannelTrackX + ChannelTrackWidth * value;
-        nub.y = track[0].y;
-    }
-
-    private void RefreshHueRingCursor()
-    {
-        float angle = _hue * Mathf.PI * 2f;
-        Vector2 dir = new(Mathf.Cos(angle), Mathf.Sin(angle));
-        Vector2 center = absPos + new Vector2(RingCenterX, RingCenterY);
-        _hueOuterCursor.SetPosition(center + dir * RingOuterRadius);
-        _hueInnerCursor.SetPosition(center + dir * RingInnerRadius);
-    }
-
-    private void RefreshSVField()
-    {
-        Color hueColor = Color.HSVToRGB(_hue, 1f, 1f);
-        int stride = SVGrid + 1;
-        for (int y = 0; y <= SVGrid; y++)
-        {
-            float v = y / (float)SVGrid;
-            for (int x = 0; x <= SVGrid; x++)
-            {
-                float s = x / (float)SVGrid;
-                _svMesh.verticeColors[y * stride + x] = Color.HSVToRGB(_hue, s, v);
-            }
-        }
-
-        _svMesh.Refresh();
-        Vector2 cursor = absPos + new Vector2(
-            RingCenterX - SVHalf + _saturation * SVSize,
-            RingCenterY - SVHalf + _value * SVSize);
-        _svCursorHorizontal.SetPosition(cursor);
-        _svCursorVertical.SetPosition(cursor);
-    }
-
-    private TriangleMesh BuildHueRing()
-    {
-        int verts = RingSegments * 2;
-        TriangleMesh.Triangle[] tris = new TriangleMesh.Triangle[RingSegments * 2];
-        for (int i = 0; i < RingSegments; i++)
-        {
-            int next = (i + 1) % RingSegments;
-            int o0 = i * 2;
-            int i0 = o0 + 1;
-            int o1 = next * 2;
-            int i1 = o1 + 1;
-            tris[i * 2] = new TriangleMesh.Triangle(o0, o1, i0);
-            tris[i * 2 + 1] = new TriangleMesh.Triangle(i0, o1, i1);
-        }
-
-        TriangleMesh mesh = new("Futile_White", tris, customColor: true, customUV: false);
-        fSprites.Add(mesh);
-        Futile.stage.AddChild(mesh);
-        Vector2 center = absPos + new Vector2(RingCenterX, RingCenterY);
-        for (int i = 0; i < RingSegments; i++)
-        {
-            float h = i / (float)RingSegments;
-            float a = h * Mathf.PI * 2f;
-            Vector2 dir = new(Mathf.Cos(a), Mathf.Sin(a));
-            mesh.vertices[i * 2] = center + dir * RingOuterRadius;
-            mesh.vertices[i * 2 + 1] = center + dir * RingInnerRadius;
-            Color c = Color.HSVToRGB(h, 1f, 1f);
-            mesh.verticeColors[i * 2] = c;
-            mesh.verticeColors[i * 2 + 1] = c;
+            float hue = i / (float)Segments;
+            float angle = hue * Mathf.PI * 2f - Mathf.PI * 0.5f;
+            Vector2 direction = new(Mathf.Cos(angle), Mathf.Sin(angle));
+            int inner = i * 2;
+            int outer = inner + 1;
+            mesh.vertices[inner] = direction * _innerRadius;
+            mesh.vertices[outer] = direction * _radius;
+            Color color = Color.HSVToRGB(Mathf.Repeat(hue, 1f), 1f, 1f);
+            mesh.verticeColors[inner] = color;
+            mesh.verticeColors[outer] = color;
         }
         mesh.Refresh();
         return mesh;
     }
 
-    private TriangleMesh BuildSVField()
+    private void UpdateFromMouse(Vector2 center)
     {
-        int stride = SVGrid + 1;
-        int vertCount = stride * stride;
-        TriangleMesh.Triangle[] tris = new TriangleMesh.Triangle[SVGrid * SVGrid * 2];
-        int tri = 0;
-        for (int y = 0; y < SVGrid; y++)
-        {
-            for (int x = 0; x < SVGrid; x++)
-            {
-                int a = y * stride + x;
-                int b = a + 1;
-                int c = a + stride;
-                int d = c + 1;
-                tris[tri++] = new TriangleMesh.Triangle(a, b, c);
-                tris[tri++] = new TriangleMesh.Triangle(c, b, d);
-            }
-        }
-
-        TriangleMesh mesh = new("Futile_White", tris, customColor: true, customUV: false);
-        fSprites.Add(mesh);
-        Futile.stage.AddChild(mesh);
-        Vector2 origin = absPos + new Vector2(RingCenterX - SVHalf, RingCenterY - SVHalf);
-        for (int y = 0; y <= SVGrid; y++)
-        {
-            for (int x = 0; x <= SVGrid; x++)
-            {
-                mesh.vertices[y * stride + x] = origin + new Vector2(x * SVSize / SVGrid, y * SVSize / SVGrid);
-            }
-        }
-        mesh.Refresh();
-        return mesh;
+        Vector2 delta = owner.mousePos - center;
+        float angle = Mathf.Atan2(delta.y, delta.x);
+        float hue = Mathf.Repeat((angle + Mathf.PI * 0.5f) / (Mathf.PI * 2f), 1f);
+        _hue = hue;
+        _writeHue(hue);
+        UpdateMarker(center);
     }
 
-    private FSprite MakePixel(Vector2 pos, Vector2 size)
+    private void UpdateMarker(Vector2 center)
     {
-        FSprite sprite = new("pixel")
-        {
-            anchorX = 0f,
-            anchorY = 0f,
-            x = absPos.x + pos.x,
-            y = absPos.y + pos.y,
-            scaleX = size.x,
-            scaleY = size.y
-        };
-        fSprites.Add(sprite);
-        Futile.stage.AddChild(sprite);
-        return sprite;
-    }
-
-    private FSprite MakeCursor(string element, float width, float height)
-    {
-        FSprite cursor = new(element)
-        {
-            anchorX = 0.5f,
-            anchorY = 0.5f,
-            scaleX = width,
-            scaleY = height,
-            color = Color.white
-        };
-        fSprites.Add(cursor);
-        Futile.stage.AddChild(cursor);
-        return cursor;
-    }
-
-    private void AddLabel(string text, Vector2 pos, float width)
-    {
-        subNodes.Add(new DevUILabel(owner, IDstring + "_Label_" + text + "_" + pos.y.ToString(CultureInfo.InvariantCulture), this, pos, width, text));
-    }
-
-    private SimpleButton AddButton(string text, string id, Vector2 pos, float width)
-    {
-        SimpleButton button = new(owner, id, this, pos, width, text);
-        subNodes.Add(button);
-        return button;
-    }
-
-    private void ApplyCollapsedState(bool collapsed, bool persist, bool _dummy = false)
-    {
-        ApplyCollapsedState(collapsed, persist);
-    }
-
-    private static Color ReadColor(RoomSettings.RoomEffect effect)
-    {
-        return RGBEffectRuntime.ReadColor(effect);
-    }
-
-    private int HueDegrees => Mathf.RoundToInt(_hue * 359f);
-
-    private static int GetChannel255(Color color, int channel)
-    {
-        float value = channel switch
-        {
-            0 => color.r,
-            1 => color.g,
-            _ => color.b
-        };
-        return Mathf.Clamp(Mathf.RoundToInt(value * 255f), 0, 255);
-    }
-
-    private static bool Approximately(Color a, Color b)
-    {
-        return Mathf.Abs(a.r - b.r) < 0.0005f
-            && Mathf.Abs(a.g - b.g) < 0.0005f
-            && Mathf.Abs(a.b - b.b) < 0.0005f;
-    }
-
-    internal static string ToHex(Color color)
-    {
-        int r = GetChannel255(color, 0);
-        int g = GetChannel255(color, 1);
-        int b = GetChannel255(color, 2);
-        return $"#{r:X2}{g:X2}{b:X2}";
-    }
-
-    internal static bool TryParseHex(string text, out Color color)
-    {
-        color = Color.white;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
-        string s = text.Trim();
-        if (s.StartsWith("#", StringComparison.Ordinal))
-        {
-            s = s.Substring(1);
-        }
-        if (s.Length != 6)
-        {
-            return false;
-        }
-
-        if (!byte.TryParse(s.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte r)
-            || !byte.TryParse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte g)
-            || !byte.TryParse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte b))
-        {
-            return false;
-        }
-
-        color = new Color(r / 255f, g / 255f, b / 255f, 1f);
-        return true;
-    }
-
-    private enum CaptureMode
-    {
-        None,
-        Red,
-        Green,
-        Blue,
-        Hue,
-        SV
+        float angle = _hue * Mathf.PI * 2f - Mathf.PI * 0.5f;
+        float radius = (_innerRadius + _radius) * 0.5f;
+        Vector2 p = center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
+        _markerOuter.x = p.x;
+        _markerOuter.y = p.y;
+        _markerInner.x = p.x;
+        _markerInner.y = p.y;
     }
 }
 
-internal static class RGBEffectEditorPanelState
+internal sealed class SaturationValueControl : RectangularDevUINode
 {
-    private sealed class Holder
-    {
-        internal bool? Collapsed;
-    }
+    private const int Grid = 12;
+    private readonly Action<float, float> _writeSV;
+    private readonly TriangleMesh _mesh;
+    private readonly FSprite _border;
+    private readonly FSprite _markerOuter;
+    private readonly FSprite _markerInner;
+    private float _hue;
+    private float _saturation;
+    private float _value;
+    private bool _held;
 
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<RoomSettings.RoomEffect, Holder> State = new();
-
-    internal static bool? GetCollapsed(RoomSettings.RoomEffect effect)
+    internal SaturationValueControl(
+        DevUIOwner owner,
+        string IDstring,
+        DevUINode parentNode,
+        Vector2 pos,
+        float side,
+        float hue,
+        float saturation,
+        float value,
+        Action<float, float> writeSV)
+        : base(owner, IDstring, parentNode, pos, new Vector2(side, side))
     {
-        return effect != null && State.TryGetValue(effect, out Holder holder)
-            ? holder.Collapsed
-            : null;
-    }
-
-    internal static void SetCollapsed(RoomSettings.RoomEffect effect, bool collapsed)
-    {
-        if (effect == null)
+        _hue = Mathf.Repeat(hue, 1f);
+        _saturation = Mathf.Clamp01(saturation);
+        _value = Mathf.Clamp01(value);
+        _writeSV = writeSV;
+        _mesh = CreateGridMesh();
+        _border = new FSprite("pixel") { anchorX = 0f, anchorY = 0f, color = Color.white };
+        _markerOuter = new FSprite("Circle20") { scale = 0.48f, color = Color.black };
+        _markerInner = new FSprite("Circle20") { scale = 0.28f, color = Color.white };
+        fSprites.Add(_border);
+        fSprites.Add(_mesh);
+        fSprites.Add(_markerOuter);
+        fSprites.Add(_markerInner);
+        if (owner != null)
         {
+            Futile.stage.AddChild(_border);
+            Futile.stage.AddChild(_mesh);
+            Futile.stage.AddChild(_markerOuter);
+            Futile.stage.AddChild(_markerInner);
+        }
+        RecolorMesh();
+        Refresh();
+    }
+
+    public override void Update()
+    {
+        base.Update();
+        if (owner == null)
+        {
+            _held = false;
             return;
         }
-        State.GetOrCreateValue(effect).Collapsed = collapsed;
+
+        if (owner.mouseClick && MouseOver && (owner.draggedNode == null || owner.draggedNode == this))
+        {
+            _held = true;
+            UpdateFromMouse();
+        }
+
+        if (_held)
+        {
+            owner.draggedNode = this;
+            if (owner.mouseDown)
+            {
+                UpdateFromMouse();
+            }
+            else
+            {
+                _held = false;
+            }
+        }
+    }
+
+    public override void Refresh()
+    {
+        base.Refresh();
+        _border.x = absPos.x - 1f;
+        _border.y = absPos.y - 1f;
+        _border.scaleX = size.x + 2f;
+        _border.scaleY = size.y + 2f;
+        _mesh.x = absPos.x;
+        _mesh.y = absPos.y;
+        UpdateMarker();
+    }
+
+    internal void SetHSV(float hue, float saturation, float value)
+    {
+        float normalizedHue = Mathf.Repeat(hue, 1f);
+        if (Mathf.Abs(normalizedHue - _hue) > 0.0001f)
+        {
+            _hue = normalizedHue;
+            RecolorMesh();
+        }
+        _saturation = Mathf.Clamp01(saturation);
+        _value = Mathf.Clamp01(value);
+        UpdateMarker();
+    }
+
+    private TriangleMesh CreateGridMesh()
+    {
+        int verticesPerSide = Grid + 1;
+        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[Grid * Grid * 2];
+        int triangle = 0;
+        for (int y = 0; y < Grid; y++)
+        {
+            for (int x = 0; x < Grid; x++)
+            {
+                int a = y * verticesPerSide + x;
+                int b = a + 1;
+                int c = a + verticesPerSide;
+                int d = c + 1;
+                triangles[triangle++] = new TriangleMesh.Triangle(a, b, d);
+                triangles[triangle++] = new TriangleMesh.Triangle(a, d, c);
+            }
+        }
+
+        TriangleMesh mesh = new("Futile_White", triangles, customColor: true);
+        for (int y = 0; y <= Grid; y++)
+        {
+            for (int x = 0; x <= Grid; x++)
+            {
+                int index = y * verticesPerSide + x;
+                mesh.vertices[index] = new Vector2(size.x * x / Grid, size.y * y / Grid);
+            }
+        }
+        mesh.Refresh();
+        return mesh;
+    }
+
+    private void RecolorMesh()
+    {
+        int verticesPerSide = Grid + 1;
+        for (int y = 0; y <= Grid; y++)
+        {
+            float value = y / (float)Grid;
+            for (int x = 0; x <= Grid; x++)
+            {
+                float saturation = x / (float)Grid;
+                int index = y * verticesPerSide + x;
+                _mesh.verticeColors[index] = Color.HSVToRGB(_hue, saturation, value);
+            }
+        }
+        _mesh.Refresh();
+    }
+
+    private void UpdateFromMouse()
+    {
+        _saturation = Mathf.InverseLerp(absPos.x, absPos.x + size.x, owner.mousePos.x);
+        _value = Mathf.InverseLerp(absPos.y, absPos.y + size.y, owner.mousePos.y);
+        _writeSV(_saturation, _value);
+        UpdateMarker();
+    }
+
+    private void UpdateMarker()
+    {
+        Vector2 p = absPos + new Vector2(_saturation * size.x, _value * size.y);
+        _markerOuter.x = p.x;
+        _markerOuter.y = p.y;
+        _markerInner.x = p.x;
+        _markerInner.y = p.y;
     }
 }
