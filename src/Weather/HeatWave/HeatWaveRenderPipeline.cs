@@ -12,10 +12,12 @@ internal readonly struct HeatWaveRenderFrame
     internal readonly float Time;
     internal readonly bool Active;
     internal readonly bool HasSimulation;
+    internal readonly bool HasPlumes;
     internal readonly Texture OpticalTexture;
     internal readonly Texture ThermalTexture;
     internal readonly Texture VelocityTexture;
     internal readonly Texture TerrainTexture;
+    internal readonly Texture PlumeTexture;
 
     internal HeatWaveRenderFrame(
         Vector2 roomSize,
@@ -25,10 +27,12 @@ internal readonly struct HeatWaveRenderFrame
         float time,
         bool active,
         bool hasSimulation,
+        bool hasPlumes,
         Texture opticalTexture,
         Texture thermalTexture,
         Texture velocityTexture,
-        Texture terrainTexture)
+        Texture terrainTexture,
+        Texture plumeTexture)
     {
         RoomSize = roomSize;
         Intensity = Mathf.Clamp01(intensity);
@@ -37,21 +41,22 @@ internal readonly struct HeatWaveRenderFrame
         Time = time;
         Active = active;
         HasSimulation = hasSimulation;
+        HasPlumes = hasPlumes;
         OpticalTexture = opticalTexture;
         ThermalTexture = thermalTexture;
         VelocityTexture = velocityTexture;
         TerrainTexture = terrainTexture;
+        PlumeTexture = plumeTexture;
     }
 }
 
 /// <summary>
-/// Final HeatWave presentation pass.
+/// One late optical resolve for the whole HeatWave.
 ///
-/// The earlier three-pass compositor recursively refracted the same image and made the
-/// whole room read as underwater. HeatWave now uses exactly one late world pass. Depth,
-/// exposed ground and the thermal field only decide WHERE air may shimmer; they never
-/// multiply the number of scene refractions. HUD/HUD2 are rendered later and remain
-/// untouched.
+/// Strong deformation is never global. The shader receives separate masks for exposed
+/// ground and persistent thermal plumes; distant atmosphere is allowed only a tiny
+/// sub-pixel wander. The scene is captured/refracted exactly once, which prevents the
+/// recursive liquid/glass look of the first HeatWave implementation.
 /// </summary>
 internal static class HeatWaveRenderPipeline
 {
@@ -68,10 +73,12 @@ internal static class HeatWaveRenderPipeline
     private static readonly int SolarIntensityId = Shader.PropertyToID("_DryCycleHeatSolarIntensity");
     private static readonly int TimeId = Shader.PropertyToID("_DryCycleHeatTime");
     private static readonly int HasSimulationId = Shader.PropertyToID("_DryCycleHasHeatSimulation");
+    private static readonly int HasPlumesId = Shader.PropertyToID("_DryCycleHasHeatPlumes");
     private static readonly int OpticalTextureId = Shader.PropertyToID("_DryCycleHeatOpticalTex");
     private static readonly int ThermalTextureId = Shader.PropertyToID("_DryCycleHeatThermalTex");
     private static readonly int VelocityTextureId = Shader.PropertyToID("_DryCycleHeatVelocityTex");
     private static readonly int TerrainTextureId = Shader.PropertyToID("_DryCycleHeatTerrainTex");
+    private static readonly int PlumeTextureId = Shader.PropertyToID("_DryCycleHeatPlumeTex");
     private static readonly int MacroNoiseId = Shader.PropertyToID("_DryCycleHeatMacroNoise");
     private static readonly int MicroNoiseId = Shader.PropertyToID("_DryCycleHeatMicroNoise");
     private static readonly int HasCustomNoiseId = Shader.PropertyToID("_DryCycleHasHeatCustomNoise");
@@ -189,8 +196,8 @@ internal static class HeatWaveRenderPipeline
         sprite.y = 0f;
         sprite.scaleX = screenWidth / 16f;
         sprite.scaleY = screenHeight / 16f;
-        sprite.color = new Color(1f, 0.975f, 0.90f);
-        sprite.alpha = Mathf.Clamp01(frame.WhiteHeat * 0.055f);
+        sprite.color = new Color(1f, 0.98f, 0.91f);
+        sprite.alpha = Mathf.Clamp01(frame.WhiteHeat * 0.045f);
         sprite.isVisible = sprite.alpha > Epsilon;
         if (sprite.isVisible)
         {
@@ -221,6 +228,7 @@ internal static class HeatWaveRenderPipeline
         MaterialProperties.SetFloat(SolarIntensityId, frame.SolarIntensity);
         MaterialProperties.SetFloat(TimeId, frame.Time);
         MaterialProperties.SetFloat(HasSimulationId, frame.HasSimulation ? 1f : 0f);
+        MaterialProperties.SetFloat(HasPlumesId, frame.HasPlumes ? 1f : 0f);
         MaterialProperties.SetTexture(
             OpticalTextureId,
             frame.OpticalTexture ?? Texture2D.blackTexture);
@@ -233,6 +241,9 @@ internal static class HeatWaveRenderPipeline
         MaterialProperties.SetTexture(
             TerrainTextureId,
             frame.TerrainTexture ?? Texture2D.blackTexture);
+        MaterialProperties.SetTexture(
+            PlumeTextureId,
+            frame.PlumeTexture ?? Texture2D.blackTexture);
 
         bool customNoise = HeatWaveNoiseField.IsAvailable;
         MaterialProperties.SetTexture(
