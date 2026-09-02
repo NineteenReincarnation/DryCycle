@@ -5,9 +5,12 @@ namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
 /// Applies Rain World's own LevelHeat shader while scheduled HeatWave is active.
-/// This is the primary scene deformation layer: terrain/palette geometry receives the
-/// same visual language as vanilla HeatWave instead of routing the whole camera through
-/// a giant HeatDistortion pass.
+///
+/// DryCycle borrows ownership of levelGraphic only for the active weather interval. The
+/// exact shader/alpha state that existed before DryCycle took ownership is restored once
+/// on release; after that DryCycle no longer touches the camera level shader. This keeps
+/// HeatWave compatible with authored vanilla effects and with other systems that may
+/// legitimately replace levelGraphic later.
 /// </summary>
 internal static class HeatWaveLevelEffect
 {
@@ -23,8 +26,8 @@ internal static class HeatWaveLevelEffect
             return 0f;
         }
 
-        // The ground/room can remain hot after direct sunlight weakens. Solar therefore
-        // modulates, rather than gates, the vanilla-style level melt.
+        // Heat stored in the room remains visible when direct sunlight weakens. Solar
+        // amplifies the melt but never gates the weather presentation.
         return heat * Mathf.Lerp(0.72f, 1f, Mathf.Clamp01(solar));
     }
 
@@ -42,7 +45,8 @@ internal static class HeatWaveLevelEffect
         }
 
         float weatherAmount = EvaluateWeatherAmount(intensity, solar);
-        float authoredAmount = room.roomSettings?.GetEffectAmount(RoomSettings.RoomEffect.Type.HeatWave) ?? 0f;
+        float authoredAmount =
+            room.roomSettings?.GetEffectAmount(RoomSettings.RoomEffect.Type.HeatWave) ?? 0f;
         float combinedAmount = Mathf.Max(authoredAmount, weatherAmount);
         if (combinedAmount <= Epsilon)
         {
@@ -58,8 +62,24 @@ internal static class HeatWaveLevelEffect
         }
 
         CameraState state = CameraStates.GetOrCreateValue(camera);
-        state.OwnerRoom = room;
-        state.Applied = true;
+        if (state.Applied && state.OwnerRoom != room)
+        {
+            Release(camera, state.OwnerRoom);
+        }
+
+        if (!state.Applied)
+        {
+            state.PreviousShader = camera.levelGraphic.shader;
+            state.PreviousAlpha = camera.levelGraphic.alpha;
+            state.OwnerRoom = room;
+            state.AppliedShader = levelHeat;
+            state.Applied = true;
+        }
+        else
+        {
+            state.OwnerRoom = room;
+            state.AppliedShader = levelHeat;
+        }
 
         camera.levelGraphic.shader = levelHeat;
         camera.levelGraphic.alpha = Mathf.Clamp01(combinedAmount) * 0.5f;
@@ -68,7 +88,9 @@ internal static class HeatWaveLevelEffect
 
     internal static void Release(RoomCamera camera, Room ownerRoom)
     {
-        if (camera == null || !CameraStates.TryGetValue(camera, out CameraState state))
+        if (camera == null ||
+            !CameraStates.TryGetValue(camera, out CameraState state) ||
+            !state.Applied)
         {
             return;
         }
@@ -78,9 +100,36 @@ internal static class HeatWaveLevelEffect
             return;
         }
 
+        FShader previousShader = state.PreviousShader;
+        float previousAlpha = state.PreviousAlpha;
+        FShader appliedShader = state.AppliedShader;
+
+        // If another system has already replaced our shader, it owns the camera now and
+        // must not be overwritten by our cleanup.
+        bool stillOwnsLevelGraphic =
+            camera.levelGraphic != null &&
+            camera.levelGraphic.shader == appliedShader;
+
         state.Applied = false;
         state.OwnerRoom = null;
-        RestoreVanillaLevelState(camera, camera.room);
+        state.AppliedShader = null;
+        state.PreviousShader = null;
+        state.PreviousAlpha = 1f;
+
+        if (!stillOwnsLevelGraphic || camera.levelGraphic == null)
+        {
+            return;
+        }
+
+        if (previousShader != null)
+        {
+            camera.levelGraphic.shader = previousShader;
+        }
+        else
+        {
+            camera.levelGraphic.shader = FShader.defaultShader;
+        }
+        camera.levelGraphic.alpha = previousAlpha;
     }
 
     internal static void RestoreForRoom(Room room)
@@ -94,16 +143,12 @@ internal static class HeatWaveLevelEffect
         for (int i = 0; i < game.cameras.Length; i++)
         {
             RoomCamera camera = game.cameras[i];
-            if (camera == null)
+            if (camera != null &&
+                CameraStates.TryGetValue(camera, out CameraState state) &&
+                state.Applied &&
+                state.OwnerRoom == room)
             {
-                continue;
-            }
-
-            if (CameraStates.TryGetValue(camera, out CameraState state) && state.OwnerRoom == room)
-            {
-                state.Applied = false;
-                state.OwnerRoom = null;
-                RestoreVanillaLevelState(camera, camera.room);
+                Release(camera, room);
             }
         }
     }
@@ -144,50 +189,16 @@ internal static class HeatWaveLevelEffect
         }
 
         return ModManager.MSC &&
-               room.roomSettings.GetEffectAmount(MoreSlugcats.MoreSlugcatsEnums.RoomEffectType.BrokenPalette) != 0f;
-    }
-
-    private static void RestoreVanillaLevelState(RoomCamera camera, Room room)
-    {
-        if (camera?.levelGraphic == null || camera.game?.rainWorld == null || room?.roomSettings == null)
-        {
-            return;
-        }
-
-        RainWorld rainWorld = camera.game.rainWorld;
-
-        if (ModManager.MSC &&
-            room.roomSettings.GetEffectAmount(MoreSlugcats.MoreSlugcatsEnums.RoomEffectType.BrokenPalette) != 0f)
-        {
-            camera.levelGraphic.shader = FShader.defaultShader;
-            return;
-        }
-
-        float voidMelt = room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.VoidMelt);
-        if (voidMelt > 0f && rainWorld.Shaders.TryGetValue("LevelMelt", out FShader levelMelt))
-        {
-            camera.levelGraphic.shader = levelMelt;
-            camera.levelGraphic.alpha = voidMelt;
-            return;
-        }
-
-        float authoredHeat = room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.HeatWave);
-        if (authoredHeat > 0f && rainWorld.Shaders.TryGetValue("LevelHeat", out FShader levelHeat))
-        {
-            camera.levelGraphic.shader = levelHeat;
-            camera.levelGraphic.alpha = authoredHeat * 0.5f;
-            return;
-        }
-
-        if (rainWorld.Shaders.TryGetValue("LevelColor", out FShader levelColor))
-        {
-            camera.levelGraphic.shader = levelColor;
-        }
+               room.roomSettings.GetEffectAmount(
+                   MoreSlugcats.MoreSlugcatsEnums.RoomEffectType.BrokenPalette) != 0f;
     }
 
     private sealed class CameraState
     {
         internal Room OwnerRoom;
+        internal FShader PreviousShader;
+        internal FShader AppliedShader;
+        internal float PreviousAlpha = 1f;
         internal bool Applied;
     }
 }
