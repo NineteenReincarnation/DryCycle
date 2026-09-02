@@ -1,4 +1,5 @@
 #pragma kernel InitializePlumes
+#pragma kernel PrimePlumes
 #pragma kernel AdvectPlumes
 #pragma kernel InjectPlumes
 
@@ -113,6 +114,51 @@ float SpawnEnvelope(float worldX)
     return saturate(max(primary, secondary * 0.68));
 }
 
+// Builds an already-established convection column for the one-time room/weather prime.
+// This is not a recurring procedural overlay: after this kernel the field is advected,
+// split and dissipated normally, preserving temporal identity. Sampling downward lets
+// an air cell discover the nearest hot boundary even when it is already many pixels
+// above the floor.
+float PrimedColumn(float2 uv)
+{
+    float best = 0.0;
+    float pxY = 0.0;
+
+    [unroll]
+    for (int step = 0; step < 16; step++)
+    {
+        float distancePx = step * 11.0;
+        float swayPx = sin(uv.x * 37.0 + step * 0.73) * distancePx * 0.055;
+        float2 sampleUv = uv - float2(
+            swayPx / max(_RoomSizePx.x, 1.0),
+            distancePx / max(_RoomSizePx.y, 1.0));
+
+        if (sampleUv.y < 0.0)
+            break;
+
+        float source = GroundSource(sampleUv);
+        float heightFade = exp(-distancePx / 118.0);
+        best = max(best, source * heightFade);
+        if (source > 0.02)
+            pxY = max(pxY, distancePx);
+    }
+
+    float worldX = uv.x * _RoomSizePx.x;
+    float broadLane = floor(worldX / 78.0);
+    float laneSeed = Hash11(broadLane * 1.913 + 4.77);
+    float center = (Hash11(broadLane + 12.4) - 0.5) * 28.0;
+    float laneLocal = frac(worldX / 78.0) * 78.0 - 39.0 - center;
+    float widthPx = lerp(18.0, 34.0, laneSeed) + pxY * 0.10;
+    float laneMask = exp(-(laneLocal * laneLocal) / max(32.0, widthPx * widthPx));
+
+    float breakup =
+        sin(uv.x * 29.0 + uv.y * 19.0 + laneSeed * Tau) * 0.5 +
+        sin(uv.x * 13.0 - uv.y * 31.0 + 1.7) * 0.5;
+    breakup = lerp(0.58, 1.0, saturate(breakup * 0.5 + 0.5));
+
+    return saturate(best * lerp(0.55, 1.0, laneMask) * breakup);
+}
+
 [numthreads(8, 8, 1)]
 void InitializePlumes(uint3 dispatchId : SV_DispatchThreadID)
 {
@@ -123,6 +169,37 @@ void InitializePlumes(uint3 dispatchId : SV_DispatchThreadID)
         return;
 
     _PlumeWrite[dispatchId.xy] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void PrimePlumes(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PlumeWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    float4 terrain = TerrainAt(uv);
+    if (terrain.r > 0.5 || WaterMask(uv) > 0.5)
+    {
+        _PlumeWrite[id] = 0.0;
+        return;
+    }
+
+    float column = PrimedColumn(uv);
+    float4 thermal = _ThermalTex.SampleLevel(LinearClampSampler, uv, 0.0);
+    float solarDrive = lerp(0.58, 1.0, saturate(_RoomSolarIntensity));
+    float thermalDrive = lerp(0.72, 1.18, saturate(thermal.r * 1.45));
+    float density = saturate(column * _HeatIntensity * solarDrive * thermalDrive * 0.92);
+
+    float worldX = uv.x * _RoomSizePx.x;
+    float identity = Hash11(floor(worldX / 78.0) * 1.71 + 9.3);
+    float age = lerp(0.08, 0.44, Hash12(float2(floor(worldX / 31.0), floor(uv.y * 19.0))));
+    float core = saturate(density * lerp(0.72, 1.0, thermalDrive));
+    _PlumeWrite[id] = float4(density, core, age, identity);
 }
 
 [numthreads(8, 8, 1)]
