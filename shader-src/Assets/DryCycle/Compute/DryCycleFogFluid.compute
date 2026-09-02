@@ -226,24 +226,24 @@ float2 AmbientTargetVelocityUv(float2 uv, float2 cellUv)
         worldPx,
         macroWave,
         macroPhase,
-        7.4 * lerp(0.78, 1.08, slowPulse));
+        8.2 * lerp(0.78, 1.08, slowPulse));
     float2 mesoPxA = CurlModePx(
         worldPx,
         mesoScaleA.xx,
         mesoPhaseA,
-        4.8 * lerp(0.55, 1.0, breathing));
+        5.3 * lerp(0.55, 1.0, breathing));
     float2 mesoPxB = CurlModePx(
         worldPx,
         mesoScaleB.xx,
         mesoPhaseB,
-        2.6 * lerp(0.48, 1.0, breathing));
+        2.9 * lerp(0.48, 1.0, breathing));
     float2 finePx = CurlModePx(
         worldPx,
         fineScale.xx,
         finePhase,
-        0.82 * lerp(0.42, 1.0, breathing));
+        0.90 * lerp(0.42, 1.0, breathing));
 
-    // A very weak open-space vertical circulation stands in for slow thermal tendency.
+    // A weak open-space vertical circulation stands in for slow thermal tendency.
     // It is x-dependent rather than y-dependent, so it is divergence-free in 2D and
     // cannot create fog from a point source. Pressure/obstacles reshape it afterwards.
     float convectionScale = max(380.0, shortSide * 0.92);
@@ -266,7 +266,7 @@ float2 AmbientTargetVelocityUv(float2 uv, float2 cellUv)
         finePx;
     ambientPx.y +=
         sin(convectionPhase) *
-        1.25 *
+        1.55 *
         lerp(0.42, 1.0, convectionBreath) *
         openSpace;
 
@@ -300,7 +300,7 @@ float2 AmbientTargetVelocityUv(float2 uv, float2 cellUv)
             roomSeed * TwoPi);
         desiredVelocity +=
             tangent * boundaryBreath * wallProximity *
-            (0.55 / roomPx);
+            (0.60 / roomPx);
     }
 
     return desiredVelocity;
