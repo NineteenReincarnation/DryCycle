@@ -1,24 +1,22 @@
-using System;
 using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
+using DryCycle.TemperatureSystem;
 using DryCycle.Weather.Scheduling;
 using UnityEngine;
 
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// WorldClock-driven desert HeatWave owner. HeatWave has no RoomSettings weather
-/// effect. The physical thermal solver drives a separate visual plume field; the final
-/// shader sees only deliberate presentation masks and never turns raw temperature
-/// gradients into full-screen distortion.
+/// Scheduled HeatWave owner.
 ///
-/// Thermal Burst remains disabled. A HeatWave must first read as convincing sustained
-/// desert heat before any extreme transient is allowed back into the weather.
+/// The global weather follows Rain World's proven split: LevelHeat is the primary scene
+/// deformation, a single atmosphere pass supplies whole-air shimmer/color/exposure, and
+/// mapper-authored HeatColumn objects use local HeatDistortion. There is no thermal-fluid
+/// compute simulation, plume field or burst state in the weather core.
 /// </summary>
 internal static class HeatWaveWeatherRuntime
 {
     private const float Epsilon = 0.0001f;
-    private const float ResidualSeconds = 7f;
 
     private static ConditionalWeakTable<Room, HeatWaveController> _controllers = new();
     private static bool _enabled;
@@ -77,17 +75,14 @@ internal static class HeatWaveWeatherRuntime
     }
 
     /// <summary>
-    /// Deterministic gameplay influence. GPU textures are never authoritative for
-    /// temperature/gameplay behavior.
+    /// Deterministic gameplay influence. Rendering state never participates in gameplay
+    /// temperature calculations.
     /// </summary>
     internal static float GetAmbientHeatInfluence(Room room)
     {
-        if (!TryEvaluate(room, out float intensity))
-        {
-            return 0f;
-        }
-
-        return Mathf.Clamp01(intensity);
+        return TryEvaluate(room, out float intensity)
+            ? Mathf.Clamp01(intensity)
+            : 0f;
     }
 
     internal static bool TryGetDebugSnapshot(Room room, out HeatWaveDebugSnapshot snapshot)
@@ -114,26 +109,22 @@ internal static class HeatWaveWeatherRuntime
         HeatWaveController controller = new(self);
         _controllers.Add(self, controller);
         self.AddObject(controller);
+        HeatColumnVisualRuntime.AttachToRoom(self);
     }
 
     private sealed class HeatWaveController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
         private readonly HeatWaveAudio _audio;
 
-        private HeatWaveTerrainField _terrain;
-        private HeatWaveThermalSimulation _simulation;
-        private HeatWavePlumeSimulation _plumes;
-        private bool _resourcesInitialized;
-        private bool _resourcesDisposed;
-
         private float _lastIntensity;
         private float _intensity;
-        private float _lastWhiteHeat;
-        private float _whiteHeat;
         private float _lastSolar;
         private float _solar;
+        private float _lastToneAmount;
+        private float _toneAmount;
+        private float _levelHeatAmount;
         private float _visualTime;
-        private float _cooldown;
+        private bool _disposed;
 
         internal HeatWaveController(Room ownerRoom)
         {
@@ -151,24 +142,14 @@ internal static class HeatWaveWeatherRuntime
             }
 
             _lastIntensity = _intensity;
-            _lastWhiteHeat = _whiteHeat;
             _lastSolar = _solar;
+            _lastToneAmount = _toneAmount;
 
             if (!TryEvaluate(room, out float scheduled))
             {
                 scheduled = 0f;
             }
             _intensity = Mathf.Clamp01(scheduled);
-
-            if (_intensity > Epsilon)
-            {
-                EnsureResources();
-                _cooldown = ResidualSeconds;
-            }
-            else
-            {
-                _cooldown = Mathf.Max(0f, _cooldown - 1f / 40f);
-            }
 
             WorldClock clock = null;
             if (room?.world != null)
@@ -177,42 +158,16 @@ internal static class HeatWaveWeatherRuntime
             }
 
             _solar = EvaluateSolar(clock);
-
-            // White Heat follows solar exposure, but the curve deliberately starts
-            // later than the optical atmosphere. Mild HeatWave therefore reads first
-            // through hot air rather than through a global color filter.
-            float whiteBase = Mathf.SmoothStep(
-                0f,
-                1f,
-                Mathf.InverseLerp(0.28f, 1f, _intensity));
-            float solarWhite = Mathf.Pow(Mathf.Clamp01(_solar), 0.68f);
-            _whiteHeat = Mathf.Clamp01(whiteBase * solarWhite);
-
+            _toneAmount = EvaluateToneAmount(_intensity, _solar);
+            _levelHeatAmount = HeatWaveLevelEffect.EvaluateWeatherAmount(_intensity, _solar);
             _visualTime += 1f / 40f;
-            _audio.Update(
-                _intensity,
-                _solar,
-                _visualTime);
 
-            if ((_intensity > Epsilon || _cooldown > 0f) &&
-                _simulation?.IsAvailable == true)
+            if (_intensity > Epsilon)
             {
-                _simulation.Step(
-                    1f / 40f,
-                    _intensity,
-                    _solar,
-                    null);
-
-                if (_plumes?.IsAvailable == true)
-                {
-                    _plumes.Step(
-                        1f / 40f,
-                        _intensity,
-                        _solar,
-                        _simulation.ThermalTexture,
-                        _simulation.VelocityTexture);
-                }
+                HeatWaveNoiseField.Ensure();
             }
+
+            _audio.Update(_intensity, _solar, _visualTime);
         }
 
         public override void InitiateSprites(
@@ -232,19 +187,26 @@ internal static class HeatWaveWeatherRuntime
         {
             if (room == null || room != rCam.room)
             {
+                HeatWaveLevelEffect.Release(rCam, room);
                 sLeaser.CleanSpritesAndRemove();
                 return;
             }
 
             float intensity = Mathf.Lerp(_lastIntensity, _intensity, timeStacker);
-            float whiteHeat = Mathf.Lerp(_lastWhiteHeat, _whiteHeat, timeStacker);
             float solar = Mathf.Lerp(_lastSolar, _solar, timeStacker);
+            float toneAmount = Mathf.Lerp(_lastToneAmount, _toneAmount, timeStacker);
+            float levelHeatAmount = HeatWaveLevelEffect.EvaluateWeatherAmount(intensity, solar);
             bool debugVisible = HeatWaveDebugRuntime.DebugMode > 0;
-            bool active =
-                intensity > Epsilon ||
-                _cooldown > 0f ||
-                whiteHeat > Epsilon ||
-                debugVisible;
+            bool active = intensity > Epsilon || debugVisible;
+
+            if (intensity > Epsilon)
+            {
+                HeatWaveLevelEffect.Apply(rCam, room, intensity, solar);
+            }
+            else
+            {
+                HeatWaveLevelEffect.Release(rCam, room);
+            }
 
             if (!active)
             {
@@ -253,26 +215,18 @@ internal static class HeatWaveWeatherRuntime
                 return;
             }
 
-            EnsureResources();
-
-            Vector2 roomSize = _terrain?.RoomSizePixels ?? new Vector2(
+            Vector2 roomSize = new(
                 Mathf.Max(1, room.TileWidth) * 20f,
                 Mathf.Max(1, room.TileHeight) * 20f);
 
             HeatWaveRenderFrame frame = new(
                 roomSize,
                 intensity,
-                whiteHeat,
                 solar,
+                toneAmount,
+                levelHeatAmount,
                 _visualTime,
-                active,
-                _simulation?.IsAvailable == true,
-                _plumes?.IsAvailable == true,
-                _simulation?.OpticalTexture,
-                _simulation?.ThermalTexture,
-                _simulation?.VelocityTexture,
-                _terrain?.Texture,
-                _plumes?.PlumeTexture);
+                active);
 
             HeatWaveRenderPipeline.Draw(
                 sLeaser.sprites,
@@ -293,42 +247,60 @@ internal static class HeatWaveWeatherRuntime
 
         public void RoomUnloaded()
         {
-            DisposeResources();
             Destroy();
         }
 
         public override void Destroy()
         {
-            DisposeResources();
+            if (!_disposed)
+            {
+                _disposed = true;
+                _audio.Dispose();
+                HeatWaveLevelEffect.RestoreForRoom(room);
+            }
+
             if (room != null)
             {
                 _controllers.Remove(room);
             }
+
             base.Destroy();
         }
 
         internal bool TryGetDebugSnapshot(out HeatWaveDebugSnapshot snapshot)
         {
-            int emitters = _simulation?.EmitterCount ?? CountPlacedEmitters();
             snapshot = new HeatWaveDebugSnapshot(
                 _intensity,
                 _solar,
-                _whiteHeat,
-                _simulation?.IsAvailable == true,
-                _plumes?.IsAvailable == true,
-                emitters);
+                _toneAmount,
+                _levelHeatAmount,
+                HeatWaveLevelEffect.IsApplied(room),
+                CountPlacedEmitters());
             return true;
         }
 
         private float EvaluateSolar(WorldClock clock)
         {
-            if (_terrain != null)
+            float directLight = Mathf.Clamp01(clock?.Lighting.DirectLight ?? 1f);
+            float roomShade = Mathf.Clamp01(SolarEnvironment.GetRoomShade(room));
+            float authoredSun = Mathf.Clamp01(SolarEnvironment.GetSunlightIntensity(room));
+            float roomTransmission = 1f - roomShade;
+            float outdoorBaseline = Mathf.Lerp(0.72f, 1f, authoredSun);
+            return Mathf.Clamp01(directLight * roomTransmission * outdoorBaseline);
+        }
+
+        private static float EvaluateToneAmount(float intensity, float solar)
+        {
+            float heat = Mathf.Clamp01(intensity);
+            if (heat <= Epsilon)
             {
-                return _terrain.EvaluateSolar(clock);
+                return 0f;
             }
 
-            float directLight = clock?.Lighting.DirectLight ?? 1f;
-            return Mathf.Clamp01(directLight * 0.62f);
+            // Heat remains perceptible when the sun is weak, while the bleached noon
+            // state becomes dominant under direct light.
+            float solarDrive = Mathf.Pow(Mathf.Clamp01(solar), 0.72f);
+            return Mathf.Clamp01(heat * Mathf.Lerp(0.34f, 1f, solarDrive));
         }
 
         private int CountPlacedEmitters()
@@ -351,54 +323,6 @@ internal static class HeatWaveWeatherRuntime
                 }
             }
             return count;
-        }
-
-        private void EnsureResources()
-        {
-            if (_resourcesInitialized || _resourcesDisposed || room == null)
-            {
-                return;
-            }
-
-            _resourcesInitialized = true;
-            try
-            {
-                _terrain = new HeatWaveTerrainField(room);
-                _simulation = new HeatWaveThermalSimulation(room, _terrain);
-                _plumes = new HeatWavePlumeSimulation(room, _terrain);
-                HeatWaveNoiseField.Ensure();
-            }
-            catch (Exception ex)
-            {
-                Plugin.Logger?.LogError(
-                    $"DryCycle could not construct HeatWave resources for " +
-                    $"'{room?.abstractRoom?.name ?? "unknown"}'. " +
-                    "The weather will retain its safe visual fallback.");
-                Plugin.Logger?.LogError(ex);
-                _plumes?.Dispose();
-                _plumes = null;
-                _simulation?.Dispose();
-                _simulation = null;
-                _terrain?.Dispose();
-                _terrain = null;
-            }
-        }
-
-        private void DisposeResources()
-        {
-            if (_resourcesDisposed)
-            {
-                return;
-            }
-
-            _resourcesDisposed = true;
-            _audio.Dispose();
-            _plumes?.Dispose();
-            _plumes = null;
-            _simulation?.Dispose();
-            _simulation = null;
-            _terrain?.Dispose();
-            _terrain = null;
         }
     }
 }
