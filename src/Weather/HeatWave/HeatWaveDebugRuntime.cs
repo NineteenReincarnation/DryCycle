@@ -35,13 +35,13 @@ internal readonly struct HeatWaveDebugSnapshot
 
 /// <summary>
 /// Developer-only diagnostics for the actual HeatWave presentation layers.
-/// Ctrl+Shift+H cycles final/band/air/color/flow/surface/focus views.
+/// Ctrl+Shift+H cycles final/band/air/color/flow/surface/focus/lattice views.
 /// Ctrl+Shift+J forces HeatWave intensity 1 in the camera room without changing the
 /// climate schedule.
 /// </summary>
 internal static class HeatWaveDebugRuntime
 {
-    private const int MaxDebugMode = 6;
+    private const int MaxDebugMode = 7;
 
     private static bool _enabled;
     private static bool _forceWeather;
@@ -245,6 +245,7 @@ internal static class HeatWaveDebugRuntime
             4 => "FLOW / MIRAGE",
             5 => "SURFACE / GROUND",
             6 => "LENS FOCUS",
+            7 => "OPTICAL LATTICE",
             _ => "FINAL"
         };
     }
