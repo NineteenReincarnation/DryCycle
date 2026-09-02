@@ -241,6 +241,11 @@ internal static class RGBEffectRuntime
             Vector2.zero,
             effect,
             IsA(effect.type)));
+
+        // RGB editors are intentionally large. Start collapsed so adding A/B does not
+        // cover most of the room, while still using vanilla Panel's normal collapse
+        // button and expand behavior.
+        self.collapsed = true;
         self.Refresh();
     }
 
