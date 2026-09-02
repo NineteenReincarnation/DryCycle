@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using DevInterface;
 using RWCustom;
 using UnityEngine;
@@ -49,38 +48,6 @@ internal static class HeatColumnHooks
         DevCategory = null;
         PlacedType?.Unregister();
         PlacedType = null;
-    }
-
-    internal static void CollectEmitters(Room room, List<HeatColumnEmitterSample> target)
-    {
-        target.Clear();
-        if (room?.roomSettings?.placedObjects == null || PlacedType == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < room.roomSettings.placedObjects.Count; i++)
-        {
-            PlacedObject placed = room.roomSettings.placedObjects[i];
-            if (placed == null ||
-                !placed.active ||
-                placed.type != PlacedType ||
-                placed.data is not HeatColumnData data)
-            {
-                continue;
-            }
-
-            Vector2 end = placed.pos + data.FlowVector;
-            target.Add(new HeatColumnEmitterSample(
-                placed.pos,
-                end,
-                data.Radius,
-                data.Strength,
-                data.Turbulence,
-                data.FlowSpeed,
-                data.Expansion,
-                data.Pulse));
-        }
     }
 
     private static void PlacedObject_GenerateEmptyData(
