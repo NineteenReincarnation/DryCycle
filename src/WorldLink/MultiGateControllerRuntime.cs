@@ -33,7 +33,7 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
         base.Update(eu);
         if (!WorldLinkRoomRegistry.Enabled || room?.game == null || _placed == null || room.roomSettings?.placedObjects == null || !room.roomSettings.placedObjects.Contains(_placed))
         {
-            SlateForDeletion();
+            Destroy();
             return;
         }
         if (!_placed.active)
