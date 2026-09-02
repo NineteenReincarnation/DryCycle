@@ -28,6 +28,8 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/shaders/drycycleheatwavecomposite.shader";
     private const string HeatWaveThermalAssetPath =
         "assets/drycycle/compute/drycycleheatwavethermal.compute";
+    private const string HeatWavePlumeAssetPath =
+        "assets/drycycle/compute/drycycleheatwaveplumes.compute";
 
     private static AssetBundle _bundle;
     private static bool _enabled;
@@ -38,12 +40,14 @@ internal static class DryCycleShaderAssets
     internal static ComputeShader FogNoiseCompute { get; private set; }
     internal static FShader HeatWaveComposite { get; private set; }
     internal static ComputeShader HeatWaveThermalCompute { get; private set; }
+    internal static ComputeShader HeatWavePlumeCompute { get; private set; }
 
     internal static bool HasFogComposite => FogComposite != null;
     internal static bool HasFluidCompute => FogFluidCompute != null;
     internal static bool HasNoiseCompute => FogNoiseCompute != null;
     internal static bool HasHeatWaveComposite => HeatWaveComposite != null;
     internal static bool HasHeatWaveThermalCompute => HeatWaveThermalCompute != null;
+    internal static bool HasHeatWavePlumeCompute => HeatWavePlumeCompute != null;
 
     internal static void Enable()
     {
@@ -129,8 +133,8 @@ internal static class DryCycleShaderAssets
                 Plugin.Logger?.LogWarning(
                     "DryCycle custom weather composites are available, but this " +
                     "graphics device reports no compute-shader support. Fog will keep " +
-                    "its volumetric-noise fallback and HeatWave will use its optical " +
-                    "phase fallback without the persistent thermal-fluid field.");
+                    "its volumetric-noise fallback and HeatWave will use a restrained " +
+                    "screen-space fallback without persistent thermal/plume fields.");
             }
 
             Plugin.Logger?.LogInfo(
@@ -140,6 +144,7 @@ internal static class DryCycleShaderAssets
                 $"FogNoise={(FogNoiseCompute != null ? "yes" : "no")}, " +
                 $"HeatWaveComposite={(HeatWaveComposite != null ? "yes" : "no")}, " +
                 $"HeatWaveThermal={(HeatWaveThermalCompute != null ? "yes" : "no")}, " +
+                $"HeatWavePlumes={(HeatWavePlumeCompute != null ? "yes" : "no")}, " +
                 $"ComputeSupported={SystemInfo.supportsComputeShaders}, " +
                 $"Unity={Application.unityVersion}, GPU='{SystemInfo.graphicsDeviceName}'.");
         }
@@ -150,6 +155,7 @@ internal static class DryCycleShaderAssets
             FogNoiseCompute = null;
             HeatWaveComposite = null;
             HeatWaveThermalCompute = null;
+            HeatWavePlumeCompute = null;
             Plugin.Logger?.LogError(
                 "DryCycle failed to initialize custom weather shaders. " +
                 "Compatibility renderers will remain available where implemented.");
@@ -223,12 +229,22 @@ internal static class DryCycleShaderAssets
         }
 
         HeatWaveThermalCompute = _bundle.LoadAsset<ComputeShader>(HeatWaveThermalAssetPath);
+        HeatWavePlumeCompute = _bundle.LoadAsset<ComputeShader>(HeatWavePlumeAssetPath);
+
         if (SystemInfo.supportsComputeShaders && HeatWaveThermalCompute == null)
         {
             Plugin.Logger?.LogWarning(
                 $"DryCycle weather bundle is missing compute shader " +
                 $"'{HeatWaveThermalAssetPath}'. HeatWave will keep the composite " +
                 "fallback but local thermal memory and HeatColumn fluid injection are disabled.");
+        }
+
+        if (SystemInfo.supportsComputeShaders && HeatWavePlumeCompute == null)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle weather bundle is missing compute shader " +
+                $"'{HeatWavePlumeAssetPath}'. HeatWave will keep ground shimmer and " +
+                "solar tone, but coherent rising thermal plumes are disabled.");
         }
     }
 
