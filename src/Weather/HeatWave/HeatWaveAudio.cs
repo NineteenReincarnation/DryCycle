@@ -4,9 +4,9 @@ using UnityEngine;
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// Extremely restrained desert-heat ambience. HeatWave no longer owns a burst/explosion
-/// transient: sound is only a quiet broad-band pressure bed that supports the visual
-/// dryness without becoming a weather event by itself.
+/// Extremely restrained desert-heat ambience. HeatWave owns no burst/explosion
+/// transient: sound is only a quiet broad-band pressure bed supporting visual dryness
+/// without becoming a weather event by itself.
 /// </summary>
 internal sealed class HeatWaveAudio : IDisposable
 {
@@ -41,7 +41,7 @@ internal sealed class HeatWaveAudio : IDisposable
         float sfxVolume = ResolveSfxVolume();
 
         // Heat itself should not sound like a storm. Keep the bed quiet enough that
-        // players mainly notice its absence/presence subconsciously.
+        // players mainly register it subconsciously.
         float target = audibleRoom
             ? Mathf.Clamp01(intensity) *
               Mathf.Lerp(0.018f, 0.036f, Mathf.Clamp01(solarIntensity)) *
@@ -234,9 +234,33 @@ internal sealed class HeatWaveAudio : IDisposable
             float amplitude = bandGain * Mathf.Lerp(0.55f, 1f, (float)random.NextDouble());
             float phaseStep = Mathf.PI * 2f * cycles / frames;
 
+            // Only evaluate trig once per oscillator. Recurrence produces the remaining
+            // samples and avoids millions of Mathf.Sin calls during first HeatWave use.
+            float sinValue = Mathf.Sin(phase);
+            float cosValue = Mathf.Cos(phase);
+            float sinStep = Mathf.Sin(phaseStep);
+            float cosStep = Mathf.Cos(phaseStep);
+
             for (int i = 0; i < frames; i++)
             {
-                target[i] += Mathf.Sin(phase + phaseStep * i) * amplitude;
+                target[i] += sinValue * amplitude;
+
+                float nextSin = sinValue * cosStep + cosValue * sinStep;
+                float nextCos = cosValue * cosStep - sinValue * sinStep;
+                sinValue = nextSin;
+                cosValue = nextCos;
+
+                // Floating point recurrence drifts very slowly. Renormalizing a few
+                // dozen times per oscillator keeps the loop stable without expensive
+                // per-sample trig.
+                if ((i & 2047) == 2047)
+                {
+                    float invLength = 1f / Mathf.Max(
+                        0.000001f,
+                        Mathf.Sqrt(sinValue * sinValue + cosValue * cosValue));
+                    sinValue *= invLength;
+                    cosValue *= invLength;
+                }
             }
         }
     }
