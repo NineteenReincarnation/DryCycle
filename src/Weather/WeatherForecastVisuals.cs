@@ -74,8 +74,9 @@ internal static class WeatherForecastVisualCatalog
     internal static readonly Color FogColor = new(168f / 255f, 186f / 255f, 189f / 255f);
     internal static readonly Color DenseFogColor = new(82f / 255f, 99f / 255f, 102f / 255f);
 
-    // Pale white-gold: HeatWave is brutal midday radiation, never a sunset-orange icon.
-    internal static readonly Color HeatWaveColor = new(1.00f, 0.86f, 0.57f);
+    // HeatWave forecast marker is deliberately hot red so it reads immediately as a
+    // dangerous high-temperature weather window on the RainMeter.
+    internal static readonly Color HeatWaveColor = new(0.96f, 0.12f, 0.075f);
 
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
     {
