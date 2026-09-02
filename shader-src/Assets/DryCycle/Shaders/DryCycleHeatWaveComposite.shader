@@ -43,17 +43,9 @@ Shader "DryCycle/HeatWaveComposite"
                 uniform float _DryCycleHeatWaveIntensity;
                 uniform float _DryCycleWhiteHeat;
                 uniform float _DryCycleHeatSolarIntensity;
-                uniform float _DryCycleHeatBurst;
-                uniform float _DryCycleHeatBurstKick;
-                uniform float _DryCycleHeatStillness;
                 uniform float _DryCycleHeatTime;
                 uniform float _DryCycleHasHeatSimulation;
                 uniform float _DryCycleHasHeatCustomNoise;
-                uniform float _DryCycleHeatLayerOpticalScale;
-                uniform float _DryCycleHeatLayerMacroScale;
-                uniform float _DryCycleHeatLayerMicroScale;
-                uniform float _DryCycleHeatLayerStreakScale;
-                uniform float _DryCycleHeatLayerToneWeight;
                 uniform int _DryCycleHeatDebugMode;
 
                 struct v2f
@@ -62,7 +54,6 @@ Shader "DryCycle/HeatWaveComposite"
                     float2 uv : TEXCOORD0;
                     float4 screenPos : TEXCOORD1;
                     float4 grabPos : TEXCOORD2;
-                    float4 color : COLOR;
                 };
 
                 v2f vert(appdata_full v)
@@ -72,14 +63,7 @@ Shader "DryCycle/HeatWaveComposite"
                     o.uv = v.texcoord.xy;
                     o.screenPos = ComputeScreenPos(o.pos);
                     o.grabPos = ComputeGrabScreenPos(o.pos);
-                    o.color = v.color;
                     return o;
-                }
-
-                float Smooth01(float x)
-                {
-                    x = saturate(x);
-                    return x * x * (3.0 - 2.0 * x);
                 }
 
                 float2 RoomUV(float2 screenUV)
@@ -99,7 +83,7 @@ Shader "DryCycle/HeatWaveComposite"
                 {
                     float4 level = tex2D(_LevelTex, saturate(levelUV));
                     if (level.r >= 0.999 && level.g >= 0.999 && level.b >= 0.999)
-                        return 0.55;
+                        return 0.60;
 
                     float encoded = fmod(
                         max(0.0, level.r * 255.0 - 1.0),
@@ -107,9 +91,9 @@ Shader "DryCycle/HeatWaveComposite"
                     return saturate(encoded * 1.34);
                 }
 
-                float4 SampleOptical(float2 roomUV)
+                float4 SampleTerrain(float2 roomUV)
                 {
-                    return tex2D(_DryCycleHeatOpticalTex, saturate(roomUV));
+                    return tex2D(_DryCycleHeatTerrainTex, saturate(roomUV));
                 }
 
                 float4 SampleThermal(float2 roomUV)
@@ -117,74 +101,165 @@ Shader "DryCycle/HeatWaveComposite"
                     return tex2D(_DryCycleHeatThermalTex, saturate(roomUV));
                 }
 
-                float4 SampleTerrain(float2 roomUV)
+                float4 SampleOptical(float2 roomUV)
                 {
-                    return tex2D(_DryCycleHeatTerrainTex, saturate(roomUV));
+                    return tex2D(_DryCycleHeatOpticalTex, saturate(roomUV));
                 }
 
-                float2 MacroGradientCustom(float2 uv)
-                {
-                    float2 texel = float2(1.0 / 256.0, 1.0 / 256.0);
-                    float2 xP = tex2D(_DryCycleHeatMacroNoise, frac(uv + float2(texel.x, 0.0))).rg;
-                    float2 xM = tex2D(_DryCycleHeatMacroNoise, frac(uv - float2(texel.x, 0.0))).rg;
-                    float2 yP = tex2D(_DryCycleHeatMacroNoise, frac(uv + float2(0.0, texel.y))).gb;
-                    float2 yM = tex2D(_DryCycleHeatMacroNoise, frac(uv - float2(0.0, texel.y))).gb;
-                    return float2(
-                        (xP.x - xM.x) + (xP.y - xM.y) * 0.42,
-                        (yP.x - yM.x) + (yP.y - yM.y) * 0.42);
-                }
-
-                float2 MacroPhase(float2 roomUV, float time)
+                float MacroValue(float2 uv)
                 {
                     if (_DryCycleHasHeatCustomNoise > 0.5)
+                        return tex2D(_DryCycleHeatMacroNoise, frac(uv)).r;
+
+                    float a = sin((uv.x * 2.7 + uv.y * 1.3) * 6.2831853);
+                    float b = cos((uv.x * 1.1 - uv.y * 3.4 + 0.37) * 6.2831853);
+                    return saturate(0.5 + a * 0.23 + b * 0.17);
+                }
+
+                float2 MacroVector(float2 roomUV, float time)
+                {
+                    float2 p = roomUV * float2(2.4, 1.55) +
+                        float2(time * 0.0032, -time * 0.0017);
+
+                    if (_DryCycleHasHeatCustomNoise > 0.5)
                     {
-                        float2 p0 = roomUV * float2(2.05, 1.32) +
-                            float2(time * 0.0046, time * 0.0020);
-                        float2 p1 = roomUV * float2(3.55, 2.38) +
-                            float2(-time * 0.0027, time * 0.0035) + 0.37;
-                        return MacroGradientCustom(p0) * 0.72 +
-                               MacroGradientCustom(p1) * 0.38;
+                        float2 texel = float2(1.0 / 256.0, 1.0 / 256.0);
+                        float xP = tex2D(_DryCycleHeatMacroNoise, frac(p + float2(texel.x, 0.0))).r;
+                        float xM = tex2D(_DryCycleHeatMacroNoise, frac(p - float2(texel.x, 0.0))).r;
+                        float yP = tex2D(_DryCycleHeatMacroNoise, frac(p + float2(0.0, texel.y))).g;
+                        float yM = tex2D(_DryCycleHeatMacroNoise, frac(p - float2(0.0, texel.y))).g;
+                        return float2(xP - xM, yP - yM) * 3.1;
                     }
 
-                    // Analytic fallback if runtime phase texture generation failed.
-                    float a = sin((roomUV.y * 2.3 + roomUV.x * 0.7 + time * 0.0061) * 6.2831853);
-                    float b = cos((roomUV.x * 3.1 - roomUV.y * 1.2 - time * 0.0042) * 6.2831853);
-                    float c = sin((roomUV.x * 1.4 + roomUV.y * 3.7 + time * 0.0032) * 6.2831853);
-                    return float2(a + c * 0.36, b - c * 0.28) * 0.052;
+                    return float2(
+                        sin((p.x + p.y * 0.41) * 6.2831853),
+                        cos((p.y - p.x * 0.37) * 6.2831853)) * 0.42;
                 }
 
-                float2 MicroPhase(float2 screenUV, float time)
+                float2 MicroVector(float2 screenUV, float time)
                 {
+                    float2 pixelScale = max(_screenSize, float2(1.0, 1.0)) / 72.0;
+                    float2 p = frac(
+                        screenUV * pixelScale +
+                        float2(time * 0.074, -time * 0.111));
+                    float2 q = frac(
+                        screenUV * pixelScale * 1.67 +
+                        float2(-time * 0.093, time * 0.061) + 0.43);
+
                     if (_DryCycleHasHeatCustomNoise > 0.5)
                     {
-                        float2 pixelScale = max(_screenSize, float2(1.0, 1.0)) / 84.0;
-                        float2 p = frac(
-                            screenUV * pixelScale +
-                            float2(time * 0.087, -time * 0.069));
-                        float2 q = frac(
-                            screenUV * pixelScale * 1.71 +
-                            float2(-time * 0.057, time * 0.097) + 0.41);
                         float2 a = tex2D(_DryCycleHeatMicroNoise, p).rg * 2.0 - 1.0;
                         float2 b = tex2D(_DryCycleHeatMicroNoise, q).gb * 2.0 - 1.0;
-                        return a * 0.64 + b * 0.36;
+                        return a * 0.66 + b * 0.34;
                     }
 
-                    float a = sin((screenUV.x * 113.0 + screenUV.y * 71.0 + time * 1.37) * 6.2831853);
-                    float b = cos((screenUV.x * 83.0 - screenUV.y * 127.0 - time * 1.09) * 6.2831853);
-                    return float2(a, b) * 0.36;
+                    return float2(
+                        sin((p.x * 17.0 + p.y * 11.0) * 6.2831853),
+                        cos((q.x * 13.0 - q.y * 19.0) * 6.2831853)) * 0.58;
+                }
+
+                float BoundaryBelow(float2 roomUV, float tilesDown)
+                {
+                    float tileY = 20.0 / max(_DryCycleRoomSizePx.y, 1.0);
+                    float distance = tileY * tilesDown;
+                    float valid = step(distance, roomUV.y);
+                    return SampleTerrain(roomUV - float2(0.0, distance)).b * valid;
+                }
+
+                void BuildHeatMasks(
+                    float2 roomUV,
+                    float time,
+                    out float groundLayer,
+                    out float plumeLayer)
+                {
+                    // Ground shimmer lives in a thin 0-40px boundary layer. The old
+                    // renderer let the entire simulated field distort the screen; this
+                    // mask is deliberately geometric and local.
+                    float b0 = BoundaryBelow(roomUV, 0.0);
+                    float b1 = BoundaryBelow(roomUV, 0.75);
+                    float b2 = BoundaryBelow(roomUV, 1.50);
+                    float groundSource = max(b0, max(b1 * 0.92, b2 * 0.48));
+                    groundLayer = saturate(groundSource);
+
+                    // Automatic desert plumes extend farther above sun-baked surfaces,
+                    // but are broken into rising pockets instead of forming a solid
+                    // vertical distortion curtain.
+                    float p2 = BoundaryBelow(roomUV, 2.0) * 0.92;
+                    float p3 = BoundaryBelow(roomUV, 3.0) * 0.82;
+                    float p4 = BoundaryBelow(roomUV, 4.0) * 0.68;
+                    float p5 = BoundaryBelow(roomUV, 5.0) * 0.50;
+                    float p6 = BoundaryBelow(roomUV, 6.0) * 0.34;
+                    float p7 = BoundaryBelow(roomUV, 7.0) * 0.20;
+                    float plumeSource = max(
+                        max(p2, p3),
+                        max(max(p4, p5), max(p6, p7)));
+
+                    float riseA = MacroValue(
+                        roomUV * float2(4.3, 1.35) +
+                        float2(time * 0.006, -time * 0.041));
+                    float riseB = MacroValue(
+                        roomUV * float2(7.1, 2.05) +
+                        float2(-time * 0.004, -time * 0.057) + 0.37);
+                    float breakup = smoothstep(0.30, 0.78, riseA * 0.68 + riseB * 0.32);
+
+                    float thermal = SampleThermal(roomUV).r;
+                    float thermalDriver = lerp(
+                        0.58,
+                        0.58 + smoothstep(0.08, 0.62, thermal) * 0.52,
+                        _DryCycleHasHeatSimulation);
+                    plumeLayer = saturate(
+                        plumeSource *
+                        (0.30 + breakup * 0.82) *
+                        thermalDriver);
                 }
 
                 float VisualSkyTransmission(float2 roomUV)
                 {
                     float4 terrain = SampleTerrain(roomUV);
-                    float2 oneTile = 20.0 / max(_DryCycleRoomSizePx, float2(1.0, 1.0));
-                    float above = SampleTerrain(roomUV + float2(0.0, oneTile.y)).a;
-                    float twoAbove = SampleTerrain(roomUV + float2(0.0, oneTile.y * 2.0)).a;
+                    float tileY = 20.0 / max(_DryCycleRoomSizePx.y, 1.0);
+                    float above = SampleTerrain(roomUV + float2(0.0, tileY)).a;
+                    float twoAbove = SampleTerrain(roomUV + float2(0.0, tileY * 2.0)).a;
+                    return saturate(max(terrain.a, max(above * 0.94, twoAbove * 0.70)));
+                }
 
-                    // Solid pixels encode no sky themselves. Sampling the air directly
-                    // above lets sun-baked floors/platforms bleach without making a
-                    // shaded creature or wall glow merely because it is bright-colored.
-                    return saturate(max(terrain.a, max(above * 0.94, twoAbove * 0.72)));
+                float3 ApplyWhiteHeat(
+                    float3 color,
+                    float amount,
+                    float solar,
+                    float skyTransmission,
+                    float depth)
+                {
+                    amount = saturate(amount);
+                    float localSun = saturate(solar * skyTransmission);
+                    float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+                    float shadows = 1.0 - smoothstep(0.10, 0.36, luma);
+                    float mids = smoothstep(0.20, 0.66, luma) *
+                                 (1.0 - smoothstep(0.74, 0.96, luma));
+                    float highs = smoothstep(0.48, 0.92, luma);
+
+                    // Dry noon heat removes color from exposed mids/highs while deep
+                    // shade remains dark. This is intentionally the opposite of the old
+                    // grey full-screen veil.
+                    float desat = amount * localSun *
+                        (mids * 0.24 + highs * 0.36) *
+                        (1.0 - shadows * 0.96);
+                    color = lerp(color, luma.xxx, saturate(desat));
+
+                    float bleach = amount * localSun * highs *
+                        (0.18 + localSun * 0.24) *
+                        (1.0 - shadows);
+                    color = lerp(color, float3(1.0, 0.995, 0.965), saturate(bleach));
+
+                    // Very distant atmosphere loses contrast and picks up a faint warm
+                    // veil. Near gameplay art never receives this term.
+                    float farAir = amount * solar *
+                        smoothstep(0.58, 1.0, depth) * 0.075;
+                    color = lerp(color, float3(0.965, 0.955, 0.905), farAir);
+
+                    // Tiny warm response on already-lit surfaces; never an orange tint.
+                    float warm = amount * localSun * (mids + highs) * 0.035;
+                    color *= lerp(1.0.xxx, float3(1.018, 1.006, 0.970), warm);
+                    return saturate(color);
                 }
 
                 float3 HeatMap(float value)
@@ -193,13 +268,13 @@ Shader "DryCycle/HeatWaveComposite"
                     float3 cold = float3(0.015, 0.025, 0.055);
                     float3 warm = float3(0.95, 0.16, 0.025);
                     float3 hot = float3(1.0, 0.88, 0.10);
-                    float3 white = float3(1.0, 1.0, 1.0);
-                    float3 a = lerp(cold, warm, smoothstep(0.0, 0.48, value));
-                    float3 b = lerp(hot, white, smoothstep(0.72, 1.0, value));
-                    return lerp(a, b, smoothstep(0.42, 0.78, value));
+                    return lerp(
+                        lerp(cold, warm, smoothstep(0.0, 0.52, value)),
+                        hot,
+                        smoothstep(0.50, 1.0, value));
                 }
 
-                float4 DebugOutput(float2 roomUV)
+                float4 DebugOutput(float2 roomUV, float2 screenUV)
                 {
                     float4 thermal = SampleThermal(roomUV);
                     float4 optical = SampleOptical(roomUV);
@@ -207,11 +282,7 @@ Shader "DryCycle/HeatWaveComposite"
                     float2 velocity = tex2D(_DryCycleHeatVelocityTex, saturate(roomUV)).xy;
 
                     if (_DryCycleHeatDebugMode == 1)
-                    {
-                        float3 heat = HeatMap(thermal.r);
-                        heat = lerp(heat, float3(0.40, 0.10, 0.95), saturate(thermal.g) * 0.34);
-                        return float4(heat, 1.0);
-                    }
+                        return float4(HeatMap(thermal.r), 1.0);
 
                     if (_DryCycleHeatDebugMode == 2)
                     {
@@ -248,67 +319,14 @@ Shader "DryCycle/HeatWaveComposite"
 
                     if (_DryCycleHeatDebugMode == 5)
                     {
-                        float boundary = saturate(optical.a);
-                        float retained = saturate(thermal.g);
-                        return float4(
-                            boundary,
-                            retained * 0.58 + boundary * 0.42,
-                            retained,
-                            1.0);
+                        float groundLayer;
+                        float plumeLayer;
+                        BuildHeatMasks(roomUV, _DryCycleHeatTime, groundLayer, plumeLayer);
+                        float depth = DecodePseudoDepth(LevelUV(screenUV));
+                        return float4(groundLayer, plumeLayer, depth * 0.65, 1.0);
                     }
 
                     return float4(0.0, 0.0, 0.0, 1.0);
-                }
-
-                float3 WhiteHeatTone(
-                    float3 color,
-                    float amount,
-                    float skyTransmission,
-                    float thermal)
-                {
-                    amount = saturate(amount);
-                    float localSun = saturate(
-                        skyTransmission *
-                        _DryCycleHeatSolarIntensity);
-                    float exposure = saturate(localSun * 0.92 + thermal * 0.12);
-                    float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-                    float shadowProtect = 1.0 - smoothstep(0.11, 0.39, luma);
-                    float mid = smoothstep(0.17, 0.72, luma) *
-                                (1.0 - smoothstep(0.76, 0.98, luma));
-                    float high = smoothstep(0.48, 0.94, luma);
-
-                    // Sunlight progressively destroys chroma and contrast in exposed
-                    // mid/high values. Deep shadows are intentionally protected.
-                    float desaturate =
-                        amount *
-                        exposure *
-                        (mid * 0.42 + high * 0.66) *
-                        (1.0 - shadowProtect * 0.94);
-                    color = lerp(color, luma.xxx, saturate(desaturate));
-
-                    float contrastLoss =
-                        amount *
-                        exposure *
-                        (0.05 + high * 0.16) *
-                        (1.0 - shadowProtect);
-                    color = lerp(color, lerp(color, luma.xxx, 0.65), contrastLoss);
-
-                    float bleach =
-                        amount *
-                        high *
-                        exposure *
-                        (0.31 + localSun * 0.39 + thermal * 0.12);
-                    color = lerp(color, 1.0.xxx, saturate(bleach));
-
-                    // Veiling glare belongs to exposed atmosphere, not emissive
-                    // surfaces. It stays very low amplitude and never lifts deep shade.
-                    float veil =
-                        amount *
-                        localSun *
-                        (0.015 + thermal * 0.021) *
-                        (1.0 - shadowProtect * 0.96);
-                    color += veil;
-                    return saturate(color);
                 }
 
                 float4 frag(v2f i) : SV_Target
@@ -318,139 +336,87 @@ Shader "DryCycle/HeatWaveComposite"
                     float2 roomUV = RoomUV(screenUV);
 
                     if (_DryCycleHeatDebugMode > 0)
-                        return DebugOutput(roomUV);
+                        return DebugOutput(roomUV, screenUV);
 
                     float intensity = saturate(_DryCycleHeatWaveIntensity);
-                    float4 centerOptical = SampleOptical(roomUV);
-                    float residualThermal = centerOptical.b * _DryCycleHasHeatSimulation;
-                    float opticalPresence = saturate(max(
-                        intensity,
-                        max(
-                            _DryCycleHeatBurst * 0.48,
-                            max(_DryCycleHeatBurstKick * 0.58, residualThermal * 0.36))));
-
+                    float whiteHeat = saturate(_DryCycleWhiteHeat);
+                    float solar = saturate(_DryCycleHeatSolarIntensity);
                     float4 original = tex2D(_GrabTexture, grabUV);
-                    float toneAmount =
-                        saturate(_DryCycleWhiteHeat) *
-                        max(0.0, _DryCycleHeatLayerToneWeight);
-                    if (opticalPresence <= 0.0001 && toneAmount <= 0.0001)
+                    if (intensity <= 0.0001 && whiteHeat <= 0.0001)
                         return original;
 
-                    // Real path length is now supplied by the ordered Far/Mid/Near
-                    // capture slices. _LevelTex only gives a tiny local refinement so
-                    // decorative depth cannot dominate the optical hierarchy.
-                    float levelDepth = DecodePseudoDepth(LevelUV(screenUV));
-                    float depthGain = lerp(0.96, 1.06, levelDepth);
-                    float2 pxToRoom = 1.0 / max(
-                        _DryCycleRoomSizePx,
-                        float2(1.0, 1.0));
-                    float2 accumulatedRoom = float2(0.0, 0.0);
-                    float accumulatedThermal = 0.0;
-                    float accumulatedBoundary = 0.0;
+                    float groundLayer;
+                    float plumeLayer;
+                    BuildHeatMasks(roomUV, _DryCycleHeatTime, groundLayer, plumeLayer);
 
-                    [unroll]
-                    for (int stepIndex = 0; stepIndex < 6; stepIndex++)
-                    {
-                        float traceT = (stepIndex + 0.5) / 6.0;
-                        float2 traceRoomUV = saturate(
-                            roomUV +
-                            accumulatedRoom * (0.40 + traceT * 0.31));
-                        float4 optical = SampleOptical(traceRoomUV);
-                        float4 terrain = SampleTerrain(traceRoomUV);
-                        float thermal = lerp(
-                            0.20 * intensity,
-                            optical.b,
-                            _DryCycleHasHeatSimulation);
-                        float boundary = lerp(
-                            terrain.b * intensity * 0.46,
-                            optical.a,
-                            _DryCycleHasHeatSimulation);
+                    float depth = DecodePseudoDepth(LevelUV(screenUV));
+                    float sky = VisualSkyTransmission(roomUV);
+                    float thermal = SampleThermal(roomUV).r;
+                    float thermalMod = lerp(
+                        1.0,
+                        0.78 + smoothstep(0.06, 0.72, thermal) * 0.42,
+                        _DryCycleHasHeatSimulation);
 
-                        float2 meso =
-                            optical.rg *
-                            _DryCycleHasHeatSimulation *
-                            (0.74 + thermal * 0.98);
-                        float2 macro =
-                            MacroPhase(traceRoomUV, _DryCycleHeatTime) *
-                            pxToRoom *
-                            (1.05 + thermal * 2.15) *
-                            _DryCycleHeatLayerMacroScale;
-                        float2 micro =
-                            MicroPhase(screenUV + accumulatedRoom, _DryCycleHeatTime) *
-                            pxToRoom *
-                            (0.30 + thermal * 1.30 + boundary * 1.08) *
-                            _DryCycleHeatLayerMicroScale;
+                    // Far scenery only wanders by a fraction of a pixel. It should be
+                    // noticed over seconds, not read as a visible water-wave filter.
+                    float farMask = smoothstep(0.56, 1.0, depth) *
+                        lerp(0.46, 1.0, sky);
+                    float2 macro = MacroVector(roomUV, _DryCycleHeatTime);
+                    float2 micro = MicroVector(screenUV, _DryCycleHeatTime);
 
-                        float stillness = saturate(_DryCycleHeatStillness);
-                        meso *= lerp(1.0, 0.70, stillness);
-                        macro *= lerp(1.0, 0.82, stillness);
-                        micro *= lerp(1.0, 0.22, stillness);
+                    float2 farOffsetPx = macro *
+                        (0.12 + intensity * 0.20) *
+                        farMask;
 
-                        float burstScale =
-                            1.0 +
-                            saturate(_DryCycleHeatBurst) * 1.62 +
-                            saturate(_DryCycleHeatBurstKick) * 2.15;
-                        float2 stepOffset =
-                            meso * _DryCycleHeatLayerOpticalScale +
-                            macro +
-                            micro;
+                    // Thin hot boundary layer: fast sub-pixel shimmer with slightly
+                    // stronger vertical instability, never room-height distortion.
+                    float groundDrive = intensity *
+                        lerp(0.60, 1.0, solar) *
+                        groundLayer * thermalMod;
+                    float2 groundOffsetPx = float2(
+                        micro.x * 0.78 + macro.x * 0.12,
+                        micro.y * 0.46 + macro.y * 0.10) *
+                        groundDrive;
 
-                        // Near hot surfaces the vertical refractive gradient dominates,
-                        // creating local compression/stretch and small inferior-mirage
-                        // folds without drawing a fake water puddle.
-                        stepOffset.y *=
-                            1.0 +
-                            boundary *
-                            (0.74 + intensity * 0.68 + _DryCycleHeatBurstKick * 0.45);
-                        stepOffset *=
-                            opticalPresence *
-                            depthGain *
-                            burstScale /
-                            6.0;
-                        accumulatedRoom += stepOffset;
-                        accumulatedThermal += thermal / 6.0;
-                        accumulatedBoundary += boundary / 6.0;
-                    }
+                    // Rising automatic plumes are sparse pockets above exposed ground.
+                    // They move more slowly and coherently than the ground shimmer.
+                    float plumeDrive = intensity * plumeLayer * thermalMod;
+                    float2 plumeOffsetPx = float2(
+                        macro.x * 0.88 + micro.x * 0.16,
+                        macro.y * 0.42 + micro.y * 0.24) *
+                        (0.52 + thermal * 0.42) *
+                        plumeDrive;
 
-                    float2 screenOffset = accumulatedRoom /
-                        max(abs(_camInRoomRect.zw), float2(0.0001, 0.0001));
+                    float2 offsetPx = farOffsetPx + groundOffsetPx + plumeOffsetPx;
+                    float2 screenSize = max(_screenSize, float2(1.0, 1.0));
                     float2 grabOffset = float2(
-                        screenOffset.x,
-                        screenOffset.y * _ProjectionParams.x);
+                        offsetPx.x / screenSize.x,
+                        offsetPx.y / screenSize.y * _ProjectionParams.x);
 
-                    float streakAmount = saturate(
-                        (accumulatedThermal * 0.50 +
-                         accumulatedBoundary * 0.38 +
-                         _DryCycleHeatBurst * 0.42 +
-                         _DryCycleHeatBurstKick * 0.62) *
-                        _DryCycleHeatLayerStreakScale);
-                    float2 streak = grabOffset * (0.35 + streakAmount * 0.68);
                     float3 scene = tex2D(
                         _GrabTexture,
                         saturate(grabUV + grabOffset)).rgb;
 
-                    // Directional optical smear exists only where the integrated path
-                    // is energetic. Ordinary pixel art stays a single sharp sample.
-                    if (streakAmount > 0.055)
+                    // A tiny two-tap optical softness only inside strong local hot air.
+                    // Outside those masks pixel art remains a single sharp sample.
+                    float localAir = saturate(groundLayer * 0.72 + plumeLayer * 0.58) * intensity;
+                    if (localAir > 0.16)
                     {
-                        float3 a = tex2D(
-                            _GrabTexture,
-                            saturate(grabUV + grabOffset - streak * 0.58)).rgb;
-                        float3 b = tex2D(
-                            _GrabTexture,
-                            saturate(grabUV + grabOffset + streak * 0.58)).rgb;
-                        scene = lerp(
-                            scene,
-                            (a + scene * 2.0 + b) * 0.25,
-                            streakAmount * 0.36);
+                        float2 softPx = float2(
+                            micro.x * 0.32,
+                            micro.y * 0.18) / screenSize;
+                        softPx.y *= _ProjectionParams.x;
+                        float3 a = tex2D(_GrabTexture, saturate(grabUV + grabOffset + softPx)).rgb;
+                        float3 b = tex2D(_GrabTexture, saturate(grabUV + grabOffset - softPx)).rgb;
+                        scene = lerp(scene, (a + scene * 2.0 + b) * 0.25, localAir * 0.10);
                     }
 
-                    float skyTransmission = VisualSkyTransmission(roomUV);
-                    scene = WhiteHeatTone(
+                    scene = ApplyWhiteHeat(
                         scene,
-                        toneAmount,
-                        skyTransmission,
-                        accumulatedThermal);
+                        whiteHeat,
+                        solar,
+                        sky,
+                        depth);
 
                     return float4(scene, 1.0);
                 }
