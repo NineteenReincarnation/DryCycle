@@ -23,10 +23,20 @@ internal sealed class RegionDayNightOptions : OptionInterface
 
     private readonly List<string> _regionOrder = new();
 
+    private Configurable<bool> _legacyIndividualPlacedObjectViewer;
+    private Configurable<bool> _legacyFadePaletteCombiner;
+
+    internal static bool EnableLegacyIndividualPlacedObjectViewer
+        => _instance?._legacyIndividualPlacedObjectViewer?.Value ?? false;
+
+    internal static bool EnableLegacyFadePaletteCombiner
+        => _instance?._legacyFadePaletteCombiner?.Value ?? false;
+
     internal static void Register()
     {
         _instance ??= new RegionDayNightOptions();
         _instance.BindKnownRegions();
+        _instance.BindCompatibilityOptions();
 
         // MachineConnector keys option interfaces by Rain World's modinfo.json ID,
         // not by the BepInEx plugin GUID. DryCycle is shipped inside Ancient Site,
@@ -77,11 +87,15 @@ internal sealed class RegionDayNightOptions : OptionInterface
     {
         base.Initialize();
         BindKnownRegions();
+        BindCompatibilityOptions();
 
         Tabs = new[]
         {
-            new OpTab(this, Translate("Regions"))
+            new OpTab(this, Translate("Regions")),
+            new OpTab(this, Translate("Compatibility"))
         };
+
+        BuildCompatibilityTab(Tabs[1]);
 
         float contentHeight = Math.Max(600f, 125f + _regionOrder.Count * RowHeight);
         OpScrollBox scroll = new(Tabs[0], contentHeight);
@@ -142,6 +156,64 @@ internal sealed class RegionDayNightOptions : OptionInterface
             scroll.AddItems(checkBox, label);
             y -= RowHeight;
         }
+    }
+
+    private void BuildCompatibilityTab(OpTab tab)
+    {
+        OpLabel title = new(
+            new Vector2(150f, 530f),
+            new Vector2(300f, 30f),
+            "RegionKit Fallbacks",
+            FLabelAlignment.Center,
+            bigText: true);
+
+        OpLabel description = new(
+            new Vector2(30f, 470f),
+            new Vector2(520f, 44f),
+            "Temporary standalone replacements for RegionKit utilities. Keep these disabled when RegionKit is working to avoid duplicate DevTools hooks/UI.",
+            FLabelAlignment.Left);
+
+        OpCheckBox objectViewer = new(_legacyIndividualPlacedObjectViewer, new Vector2(32f, 410f));
+        objectViewer.description =
+            "Enable DryCycle's standalone replacement for RegionKit IndividualPlacedObjectViewer. Requires a mod reload/restart after changing.";
+        OpLabel objectViewerLabel = new(72f, 410f, "Legacy Individual Placed Object Viewer")
+        {
+            bumpBehav = objectViewer.bumpBehav,
+            description = objectViewer.description
+        };
+
+        OpCheckBox fadeCombiner = new(_legacyFadePaletteCombiner, new Vector2(32f, 360f));
+        fadeCombiner.description =
+            "Enable DryCycle's standalone replacement for RegionKit FadePaletteCombiner. Requires a mod reload/restart after changing.";
+        OpLabel fadeCombinerLabel = new(72f, 360f, "Legacy Fade Palette Combiner")
+        {
+            bumpBehav = fadeCombiner.bumpBehav,
+            description = fadeCombiner.description
+        };
+
+        UIfocusable.MutualVerticalFocusableBind(objectViewer, fadeCombiner);
+        tab.AddItems(title, description, objectViewer, objectViewerLabel, fadeCombiner, fadeCombinerLabel);
+    }
+
+    private void BindCompatibilityOptions()
+    {
+        _legacyIndividualPlacedObjectViewer ??= config.Bind(
+            "LegacyIndividualPlacedObjectViewer",
+            defaultValue: false,
+            new ConfigurableInfo(
+                "Enable DryCycle's temporary standalone replacement for RegionKit IndividualPlacedObjectViewer. Leave disabled when RegionKit is available.",
+                null,
+                "Compatibility",
+                "Legacy Individual Placed Object Viewer"));
+
+        _legacyFadePaletteCombiner ??= config.Bind(
+            "LegacyFadePaletteCombiner",
+            defaultValue: false,
+            new ConfigurableInfo(
+                "Enable DryCycle's temporary standalone replacement for RegionKit FadePaletteCombiner. Leave disabled when RegionKit is available.",
+                null,
+                "Compatibility",
+                "Legacy Fade Palette Combiner"));
     }
 
     private void BindKnownRegions()
