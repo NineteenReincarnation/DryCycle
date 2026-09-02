@@ -1,3 +1,4 @@
+using DryCycle.Rendering;
 using RWCustom;
 using UnityEngine;
 
@@ -177,7 +178,7 @@ internal static class HeatWaveDebugRuntime
             anchorY = 1f,
             x = 12f,
             y = Futile.screen.pixelHeight - 12f,
-            scaleX = 470f,
+            scaleX = 560f,
             scaleY = 116f,
             color = Color.black,
             alpha = 0.78f
@@ -206,11 +207,16 @@ internal static class HeatWaveDebugRuntime
         }
 
         string mode = DebugModeName(_debugMode);
+        string composite = DryCycleShaderAssets.HasHeatWaveComposite ? "YES" : "NO";
+        string thermalAsset = DryCycleShaderAssets.HasHeatWaveThermalCompute ? "YES" : "NO";
+        string plumeAsset = DryCycleShaderAssets.HasHeatWavePlumeCompute ? "YES" : "NO";
+
         if (!HeatWaveWeatherRuntime.TryGetDebugSnapshot(room, out HeatWaveDebugSnapshot snapshot))
         {
             _label.text =
                 "HeatWave Debug\n" +
-                $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}\n" +
+                $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   Composite: {composite}\n" +
+                $"ThermalAsset: {thermalAsset}   PlumeAsset: {plumeAsset}\n" +
                 "No HeatWave controller in camera room\n" +
                 "Ctrl+Shift+H view   Ctrl+Shift+J force";
             return;
@@ -218,9 +224,9 @@ internal static class HeatWaveDebugRuntime
 
         _label.text =
             "HeatWave Debug\n" +
-            $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   " +
-            $"Thermal: {(snapshot.SimulationAvailable ? "YES" : "NO")}   " +
-            $"Plumes: {(snapshot.PlumesAvailable ? "YES" : "NO")}\n" +
+            $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   Composite: {composite}\n" +
+            $"Thermal: {(snapshot.SimulationAvailable ? "YES" : "NO")} ({thermalAsset})   " +
+            $"Plumes: {(snapshot.PlumesAvailable ? "YES" : "NO")} ({plumeAsset})\n" +
             $"Intensity {snapshot.Intensity:0.00}   Solar {snapshot.SolarIntensity:0.00}   WhiteHeat {snapshot.WhiteHeat:0.00}\n" +
             $"HeatColumn emitters {snapshot.Emitters}\n" +
             "Ctrl+Shift+H view   Ctrl+Shift+J force";
