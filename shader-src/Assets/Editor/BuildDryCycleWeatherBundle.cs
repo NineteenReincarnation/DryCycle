@@ -23,7 +23,8 @@ namespace DryCycle.Editor
             "Assets/DryCycle/Compute/DryCycleFogFluid.compute",
             "Assets/DryCycle/Compute/DryCycleFogNoise.compute",
             "Assets/DryCycle/Shaders/DryCycleHeatWaveComposite.shader",
-            "Assets/DryCycle/Compute/DryCycleHeatWaveThermal.compute"
+            "Assets/DryCycle/Compute/DryCycleHeatWaveThermal.compute",
+            "Assets/DryCycle/Compute/DryCycleHeatWavePlumes.compute"
         };
 
         [MenuItem("DryCycle/Build Weather AssetBundle (Windows x64)")]
@@ -130,6 +131,13 @@ namespace DryCycle.Editor
             {
                 throw new InvalidOperationException(
                     "DryCycle HeatWave thermal compute shader could not be imported: " + WeatherAssets[4]);
+            }
+
+            ComputeShader heatPlumes = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[5]);
+            if (heatPlumes == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle HeatWave plume compute shader could not be imported: " + WeatherAssets[5]);
             }
 
             Debug.Log(
