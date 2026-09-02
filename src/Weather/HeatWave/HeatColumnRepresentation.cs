@@ -6,9 +6,9 @@ using UnityEngine;
 namespace DryCycle.Weather.HeatWave;
 
 /// <summary>
-/// Full mapper authoring surface for HeatColumn. The center handle controls plume reach
-/// and preferred direction. The panel controls shape/energy separately, while the cyan
-/// envelope previews widening in room space without pretending to be the final fluid.
+/// Mapper authoring surface for HeatColumn. The center handle controls the local hot-air
+/// distortion reach/direction. The panel controls width, strength and motion separately,
+/// while the cyan envelope previews the authored distortion volume in room space.
 /// </summary>
 internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
 {
@@ -163,7 +163,7 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
             this,
             data.PanelPos,
             new Vector2(PanelWidth, PanelHeight),
-            "Heat Column / Thermal Emitter");
+            "Heat Column / Local Distortion");
         subNodes.Add(_panel);
 
         AddSlider(owner, idString, "Radius", ColumnField.Radius, 16f, 360f, 122f);
@@ -216,9 +216,9 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
         Vector2 direction = flow / length;
         Vector2 normal = new(-direction.y, direction.x);
 
-        // Preview is deliberately conservative: it displays the authored influence
-        // envelope, while the compute solver is still free to bend/split the actual
-        // thermal mass around terrain and other columns.
+        // The preview is the authored envelope used by the local HeatDistortion
+        // renderer. Runtime turbulence/pulse shifts the individual distortion slices
+        // inside this envelope, but there is no hidden fluid-simulation volume.
         float baseRadius = Mathf.Max(8f, data.Radius * 0.52f);
         float endRadius = baseRadius * Mathf.Clamp(data.Expansion, 0.35f, 2.6f);
         Vector2 start = absPos;
@@ -263,9 +263,6 @@ internal sealed class HeatColumnRepresentation : PlacedObjectRepresentation
 
     private FSprite MakeLine(Color color)
     {
-        // DevInterface's native control lines stretch the pixel sprite on Y and use
-        // Custom.VecToDeg (0 degrees = up). Match that convention exactly so editor
-        // previews do not rotate ninety degrees relative to their handles.
         FSprite line = new("pixel")
         {
             anchorX = 0.5f,
