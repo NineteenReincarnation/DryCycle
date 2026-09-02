@@ -152,7 +152,7 @@
       Text="DryCycle weather AssetBundle exists but has no Unity-version sidecar. Rebuild shader-src to restore runtime compatibility diagnostics." />
 
     <!-- These world text files are live-authored in the actual region mod. Seed them
-         only when missing; never overwrite mapper/weather tuning during a build. -->
+         only when missing; never overwrite mapper/weather/WorldLink tuning during a build. -->
     <MakeDir Directories="$(GameModRootDir)/world" />
     <Copy
       Condition="!Exists('$(GameModRootDir)/world/TemperatureSets.txt')"
@@ -162,6 +162,10 @@
       Condition="!Exists('$(GameModRootDir)/world/RegionClimate.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/RegionClimate.txt"
       DestinationFiles="$(GameModRootDir)/world/RegionClimate.txt" />
+    <Copy
+      Condition="!Exists('$(GameModRootDir)/world/GateUnlockRequirements.txt')"
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/GateUnlockRequirements.txt"
+      DestinationFiles="$(GameModRootDir)/world/GateUnlockRequirements.txt" />
 
     <Warning
       Condition="!Exists('$(GameModRootDir)/soundeffects/DC_DrinkWater.ogg')"

@@ -1,0 +1,16 @@
+# DryCycle WorldLink gate requirements
+#
+# One directed port per line:
+# Room : GateID : PortID : Requirement
+#
+# Numeric requirements use Rain World's normal karma convention (1..5).
+# Registered GateRequirement values are also accepted; the built-in aliases
+# DemoLock, RoboLock and OELock can be written by name. Unknown requirements
+# fail closed as DemoLock and produce a warning instead of opening accidentally.
+#
+# The reverse direction is a separate entry because WorldLink routes are directed.
+# Missing entries also fail closed.
+#
+# Example:
+# AS_GATEHUB01 : MainHub : East : 5
+# LF_GATE_AS01 : MainGate : AS   : 2
