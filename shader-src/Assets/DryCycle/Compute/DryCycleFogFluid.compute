@@ -266,7 +266,7 @@ float2 AmbientTargetVelocityUv(float2 uv, float2 cellUv)
         finePx;
     ambientPx.y +=
         sin(convectionPhase) *
-        1.55 *
+        2.015 *
         lerp(0.42, 1.0, convectionBreath) *
         openSpace;
 
