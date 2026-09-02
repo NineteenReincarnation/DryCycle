@@ -11,6 +11,7 @@ internal readonly struct HeatWaveDebugSnapshot
     internal readonly float ToneAmount;
     internal readonly float LevelHeatAmount;
     internal readonly bool LevelHeatApplied;
+    internal readonly bool SurfaceFieldAvailable;
     internal readonly int Emitters;
 
     internal HeatWaveDebugSnapshot(
@@ -19,6 +20,7 @@ internal readonly struct HeatWaveDebugSnapshot
         float toneAmount,
         float levelHeatAmount,
         bool levelHeatApplied,
+        bool surfaceFieldAvailable,
         int emitters)
     {
         Intensity = intensity;
@@ -26,19 +28,20 @@ internal readonly struct HeatWaveDebugSnapshot
         ToneAmount = toneAmount;
         LevelHeatAmount = levelHeatAmount;
         LevelHeatApplied = levelHeatApplied;
+        SurfaceFieldAvailable = surfaceFieldAvailable;
         Emitters = emitters;
     }
 }
 
 /// <summary>
 /// Developer-only diagnostics for the actual HeatWave presentation layers.
-/// Ctrl+Shift+H cycles final/band/air/color/flow-mirage views.
+/// Ctrl+Shift+H cycles final/band/air/color/flow/surface/focus views.
 /// Ctrl+Shift+J forces HeatWave intensity 1 in the camera room without changing the
 /// climate schedule.
 /// </summary>
 internal static class HeatWaveDebugRuntime
 {
-    private const int MaxDebugMode = 4;
+    private const int MaxDebugMode = 6;
 
     private static bool _enabled;
     private static bool _forceWeather;
@@ -178,8 +181,8 @@ internal static class HeatWaveDebugRuntime
             anchorY = 1f,
             x = 12f,
             y = Futile.screen.pixelHeight - 12f,
-            scaleX = 560f,
-            scaleY = 108f,
+            scaleX = 590f,
+            scaleY = 118f,
             color = Color.black,
             alpha = 0.78f
         };
@@ -224,10 +227,11 @@ internal static class HeatWaveDebugRuntime
         _label.text =
             "HeatWave Debug\n" +
             $"View: {mode}   Forced: {(_forceWeather ? "YES" : "NO")}   Atmosphere: {atmosphere}\n" +
-            $"OpticalTextures: {textures}   LevelHeat: {(snapshot.LevelHeatApplied ? "YES" : "NO")}   " +
-            $"LevelAmount {snapshot.LevelHeatAmount:0.00}\n" +
+            $"OpticalTextures: {textures}   SurfaceField: {(snapshot.SurfaceFieldAvailable ? "YES" : "NO")}   " +
+            $"LevelHeat: {(snapshot.LevelHeatApplied ? "YES" : "NO")}\n" +
             $"Intensity {snapshot.Intensity:0.00}   Solar {snapshot.SolarIntensity:0.00}   " +
-            $"Tone {snapshot.ToneAmount:0.00}   HeatColumns {snapshot.Emitters}\n" +
+            $"Tone {snapshot.ToneAmount:0.00}   Level {snapshot.LevelHeatAmount:0.00}   " +
+            $"HeatColumns {snapshot.Emitters}\n" +
             "Ctrl+Shift+H view   Ctrl+Shift+J force";
     }
 
@@ -239,6 +243,8 @@ internal static class HeatWaveDebugRuntime
             2 => "AIR MOTION",
             3 => "HEAT COLOR",
             4 => "FLOW / MIRAGE",
+            5 => "SURFACE / GROUND",
+            6 => "LENS FOCUS",
             _ => "FINAL"
         };
     }
