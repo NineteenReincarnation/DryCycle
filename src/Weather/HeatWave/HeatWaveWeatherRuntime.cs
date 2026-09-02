@@ -220,7 +220,12 @@ internal static class HeatWaveWeatherRuntime
                 return;
             }
 
+            Vector2 roomSizePx = new(
+                Mathf.Max(1, room.TileWidth) * 20f,
+                Mathf.Max(1, room.TileHeight) * 20f);
+
             HeatWaveRenderFrame frame = new(
+                roomSizePx,
                 intensity,
                 solar,
                 toneAmount,
