@@ -11,6 +11,7 @@ using DryCycle.Items.KingVultureSpear;
 using DryCycle.Misc;
 using DryCycle.Registration;
 using DryCycle.Rendering;
+using DryCycle.ShelterExts;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
@@ -76,6 +77,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             MiscRuntime.Disable();
+            OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
             FogForecastFlowRuntime.Disable();
@@ -185,6 +187,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DayNightRuntime.Enable();
             WorldClockRegionContinuityRuntime.Enable();
             ShelterCycleResetRuntime.Enable();
+            OpenShelterSleepRuntime.Enable();
             WeatherScheduleRuntime.Enable();
             FogWeatherRuntime.Enable();
             HeatWaveWeatherRuntime.Enable();
@@ -228,6 +231,7 @@ internal sealed class Plugin : BaseUnityPlugin
         catch (Exception ex)
         {
             MiscRuntime.Disable();
+            OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
             RainMeterFastForwardForecastFix.Disable();
             FogForecastFlowRuntime.Disable();
