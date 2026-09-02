@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.WorldLink;
@@ -47,8 +45,10 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
 
     internal void SetOpenFactor(float value)
     {
-        LastOpenFactor = OpenFactor;
+        float oldOpen = OpenFactor;
+        LastOpenFactor = oldOpen;
         OpenFactor = Mathf.Clamp01(value);
+        WorldLinkGateGraphics.OnOpenFactorChanged(this, oldOpen, OpenFactor);
     }
 
     internal void SetDenied(bool denied) => Denied = denied;
@@ -174,101 +174,23 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
             SlateForDeletion();
             return;
         }
-        // Enabled is mapper-authored live state. Keep the runtime object alive when it
-        // is toggled off so switching it back on in DevUI does not require reloading the room.
         if (!Placed.active || !Data.Enabled)
         {
             SetDenied(false);
             SetOpenFactor(0f);
             return;
         }
-        // If no controller owns this port, it deliberately remains fully closed.
     }
 
-    public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
-    {
-        // 0/1 are the exact visible surfaces backed by OrientedGateCollision. 2/3 are
-        // short jambs placed beyond the traversable width and intended to overlap the
-        // mapper's solid Tile frame. No non-colliding decoration crosses the aperture.
-        sLeaser.sprites = new FSprite[5];
-        for (int i = 0; i < 4; i++)
-        {
-            sLeaser.sprites[i] = new FSprite("pixel") { anchorX = 0.5f, anchorY = 0.5f };
-        }
-        sLeaser.sprites[4] = CreateGlyphSprite();
-        AddToContainer(sLeaser, rCam, null);
-    }
+    public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam) =>
+        WorldLinkGateGraphics.InitiateSprites(this, sLeaser, rCam);
 
-    public void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
-    {
-        bool visible = Placed?.active == true && Data.Enabled;
-        for (int i = 0; i < sLeaser.sprites.Length; i++) sLeaser.sprites[i].isVisible = visible;
-        if (!visible)
-        {
-            if (slatedForDeletetion || room != rCam.room) sLeaser.CleanSpritesAndRemove();
-            return;
-        }
+    public void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos) =>
+        WorldLinkGateGraphics.DrawSprites(this, sLeaser, rCam, timeStacker, camPos);
 
-        float open = Mathf.Lerp(LastOpenFactor, OpenFactor, timeStacker);
-        DrawLeaf(sLeaser.sprites[0], -1, open, camPos);
-        DrawLeaf(sLeaser.sprites[1], 1, open, camPos);
+    public void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette) =>
+        WorldLinkGateGraphics.ApplyPalette(this, sLeaser, rCam, palette);
 
-        DrawFrameJamb(sLeaser.sprites[2], -1, camPos);
-        DrawFrameJamb(sLeaser.sprites[3], 1, camPos);
-
-        FSprite glyph = sLeaser.sprites[4];
-        WorldLinkGlyphs.Refresh(glyph, Address);
-        Vector2 gp = Placed.pos + Data.GlyphOffset - camPos;
-        glyph.x = gp.x; glyph.y = gp.y;
-        glyph.color = Denied
-            ? Color.Lerp(Color.red, Color.white, 0.35f + 0.35f * Mathf.Sin((room.game.clock + timeStacker) / 7f))
-            : Color.Lerp(new Color(0.65f, 0.65f, 0.7f), Color.white, 0.35f + 0.25f * Mathf.Sin((room.game.clock + timeStacker) / 14f));
-
-        if (slatedForDeletetion || room != rCam.room)
-        {
-            sLeaser.CleanSpritesAndRemove();
-        }
-    }
-
-    public void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
-    {
-        sLeaser.sprites[0].color = palette.blackColor;
-        sLeaser.sprites[1].color = palette.blackColor;
-        sLeaser.sprites[2].color = Color.Lerp(palette.blackColor, Color.white, 0.08f);
-        sLeaser.sprites[3].color = Color.Lerp(palette.blackColor, Color.white, 0.08f);
-    }
-
-    public void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContainer)
-    {
-        newContainer ??= rCam.ReturnFContainer("Items");
-        for (int i = 0; i < sLeaser.sprites.Length; i++) newContainer.AddChild(sLeaser.sprites[i]);
-    }
-
-    private FSprite CreateGlyphSprite() => WorldLinkGlyphs.Create(Address);
-
-    private void DrawFrameJamb(FSprite sprite, int side, Vector2 camPos)
-    {
-        float sign = side < 0 ? -1f : 1f;
-        Vector2 center = Placed.pos + Data.Tangent * (sign * (Data.PassageWidth * 0.5f + 4f));
-        sprite.x = center.x - camPos.x;
-        sprite.y = center.y - camPos.y;
-        sprite.rotation = Custom.VecToDeg(Data.Normal);
-        sprite.scaleX = Mathf.Max(18f, Data.PanelThickness * 2.4f);
-        sprite.scaleY = 8f;
-    }
-
-    private void DrawLeaf(FSprite sprite, int side, float open, Vector2 camPos)
-    {
-        float half = Data.PassageWidth * 0.5f;
-        float inner = half * open;
-        float length = Mathf.Max(0f, half - inner);
-        float sign = side < 0 ? -1f : 1f;
-        Vector2 center = Placed.pos + Data.Tangent * (sign * (inner + length * 0.5f));
-        sprite.x = center.x - camPos.x;
-        sprite.y = center.y - camPos.y;
-        sprite.rotation = Custom.VecToDeg(Data.Tangent);
-        sprite.scaleX = length;
-        sprite.scaleY = Data.PanelThickness;
-        sprite.isVisible = length > 0.1f;
-    }
+    public void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer newContainer) =>
+        WorldLinkGateGraphics.AddToContainer(this, sLeaser, rCam, newContainer);
 }
