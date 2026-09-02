@@ -1,0 +1,262 @@
+#pragma kernel InitializePlumes
+#pragma kernel AdvectPlumes
+#pragma kernel InjectPlumes
+
+Texture2D<float4> _PlumeRead;
+RWTexture2D<float4> _PlumeWrite;
+Texture2D<float4> _ThermalTex;
+Texture2D<float4> _VelocityTex;
+Texture2D<float4> _TerrainTex;
+
+SamplerState LinearClampSampler
+{
+    Filter = MIN_MAG_MIP_LINEAR;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+float _DeltaTime;
+float _SimulationTime;
+float _HeatIntensity;
+float _RoomSolarIntensity;
+float4 _RoomSizePx;
+float _HasWater;
+float _WaterLevelPx;
+float _WaterInverted;
+
+static const float Tau = 6.28318530718;
+
+float Smooth01(float x)
+{
+    x = saturate(x);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+float Hash11(float p)
+{
+    p = frac(p * 0.1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return frac(p);
+}
+
+float Hash12(float2 p)
+{
+    float3 p3 = frac(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float2 GridUV(uint2 id, uint width, uint height)
+{
+    return (float2(id) + 0.5) / float2(width, height);
+}
+
+float4 TerrainAt(float2 uv)
+{
+    return _TerrainTex.SampleLevel(LinearClampSampler, saturate(uv), 0.0);
+}
+
+float WaterMask(float2 uv)
+{
+    if (_HasWater <= 0.5)
+        return 0.0;
+
+    float yPx = uv.y * _RoomSizePx.y;
+    if (_WaterInverted > 0.5)
+        return step(_WaterLevelPx, yPx);
+
+    return 1.0 - step(_WaterLevelPx, yPx);
+}
+
+float AirWaterCooling(float2 uv)
+{
+    if (_HasWater <= 0.5)
+        return 0.0;
+
+    float yPx = uv.y * _RoomSizePx.y;
+    float airDistance = _WaterInverted > 0.5
+        ? _WaterLevelPx - yPx
+        : yPx - _WaterLevelPx;
+
+    if (airDistance < 0.0)
+        return 1.0;
+
+    return exp(-airDistance / 42.0);
+}
+
+float GroundSource(float2 uv)
+{
+    float dy = 10.0 / max(_RoomSizePx.y, 1.0);
+    float source = TerrainAt(uv).b;
+    source = max(source, TerrainAt(uv - float2(0.0, dy)).b * 0.92);
+    source = max(source, TerrainAt(uv - float2(0.0, dy * 2.0)).b * 0.58);
+    return saturate(source);
+}
+
+float SpawnEnvelope(float worldX)
+{
+    // Wide lanes create coherent plume families. Each lane owns its own slow cycle,
+    // while a second offset lane breaks the obvious spacing so the horizon never reads
+    // as a row of synchronized emitters.
+    float lane = floor(worldX / 68.0);
+    float laneSeed = Hash11(lane * 1.731 + 7.13);
+    float speed = lerp(0.050, 0.091, Hash11(lane + 19.7));
+    float phase = frac(_SimulationTime * speed + laneSeed);
+    float birth = Smooth01(phase / 0.11);
+    float death = 1.0 - Smooth01((phase - 0.32) / 0.30);
+    float primary = saturate(birth * death);
+
+    float lane2 = floor((worldX + 31.0) / 103.0);
+    float seed2 = Hash11(lane2 * 2.173 + 3.91);
+    float phase2 = frac(_SimulationTime * 0.037 + seed2);
+    float secondary = Smooth01(phase2 / 0.14) *
+                      (1.0 - Smooth01((phase2 - 0.23) / 0.23));
+
+    return saturate(max(primary, secondary * 0.68));
+}
+
+[numthreads(8, 8, 1)]
+void InitializePlumes(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PlumeWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    _PlumeWrite[dispatchId.xy] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void AdvectPlumes(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PlumeWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    float4 terrain = TerrainAt(uv);
+    if (terrain.r > 0.5 || WaterMask(uv) > 0.5)
+    {
+        _PlumeWrite[id] = 0.0;
+        return;
+    }
+
+    float4 thermal = _ThermalTex.SampleLevel(LinearClampSampler, uv, 0.0);
+    float2 velocity = _VelocityTex.SampleLevel(LinearClampSampler, uv, 0.0).xy;
+
+    // The physical field decides the broad route. Presentation adds a restrained
+    // buoyant rise so visually coherent plumes do not disappear when the pressure
+    // projection temporarily flattens a weak local velocity cell.
+    float risePx = lerp(24.0, 58.0, saturate(thermal.r * 1.45 + _HeatIntensity * 0.34));
+    float swayPhase = uv.y * 11.7 + uv.x * 7.3 + _SimulationTime * 0.31;
+    float swayPx = sin(swayPhase) * 5.5 + sin(swayPhase * 0.47 + 1.9) * 3.2;
+    float2 visualFlow = velocity + float2(
+        swayPx / max(_RoomSizePx.x, 1.0),
+        risePx / max(_RoomSizePx.y, 1.0));
+
+    float2 backUv = saturate(uv - visualFlow * _DeltaTime);
+    float2 texel = 1.0 / float2(width, height);
+    float4 center = _PlumeRead.SampleLevel(LinearClampSampler, backUv, 0.0);
+    float4 left = _PlumeRead.SampleLevel(
+        LinearClampSampler,
+        saturate(backUv - float2(texel.x, 0.0)),
+        0.0);
+    float4 right = _PlumeRead.SampleLevel(
+        LinearClampSampler,
+        saturate(backUv + float2(texel.x, 0.0)),
+        0.0);
+    float4 down = _PlumeRead.SampleLevel(
+        LinearClampSampler,
+        saturate(backUv - float2(0.0, texel.y)),
+        0.0);
+    float4 up = _PlumeRead.SampleLevel(
+        LinearClampSampler,
+        saturate(backUv + float2(0.0, texel.y)),
+        0.0);
+
+    // Horizontal diffusion is intentionally stronger than vertical diffusion. Hot
+    // columns widen and mushroom as they rise instead of turning into long thin smoke.
+    float densityWide = (left.r + right.r) * 0.5;
+    float densityVertical = (down.r + up.r) * 0.5;
+    float spread = saturate(_DeltaTime * (3.0 + center.b * 2.2));
+    float density = lerp(
+        center.r,
+        densityWide * 0.72 + densityVertical * 0.28,
+        spread * 0.17);
+
+    float age = saturate(center.b + _DeltaTime * lerp(0.075, 0.16, 1.0 - thermal.r));
+    float cooling = AirWaterCooling(uv);
+    float dissipationPerSecond = lerp(0.16, 0.42, age) + cooling * 1.75;
+    density *= exp(-_DeltaTime * dissipationPerSecond);
+
+    // Slow coherent erosion tears one plume into lobes without frame-random noise.
+    float erosion =
+        sin(uv.x * 41.0 + uv.y * 27.0 - _SimulationTime * 0.43 + center.a * Tau) * 0.5 +
+        sin(uv.x * 19.0 - uv.y * 35.0 + _SimulationTime * 0.29 + 1.4) * 0.5;
+    density *= lerp(0.988, 1.0, saturate(erosion * 0.5 + 0.5));
+
+    float core = max(center.g * exp(-_DeltaTime * 0.34), thermal.r * density * 0.92);
+    float identity = center.a;
+    _PlumeWrite[id] = float4(
+        saturate(density),
+        saturate(core),
+        age,
+        identity);
+}
+
+[numthreads(8, 8, 1)]
+void InjectPlumes(uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _PlumeWrite.GetDimensions(width, height);
+    if (dispatchId.x >= width || dispatchId.y >= height)
+        return;
+
+    uint2 id = dispatchId.xy;
+    float2 uv = GridUV(id, width, height);
+    float4 terrain = TerrainAt(uv);
+    if (terrain.r > 0.5 || WaterMask(uv) > 0.5)
+    {
+        _PlumeWrite[id] = 0.0;
+        return;
+    }
+
+    float4 previous = _PlumeRead.Load(int3(id, 0));
+    float boundary = GroundSource(uv);
+    float4 thermal = _ThermalTex.SampleLevel(LinearClampSampler, uv, 0.0);
+    float worldX = uv.x * _RoomSizePx.x;
+    float spawn = SpawnEnvelope(worldX);
+
+    // Small-scale spatial breakup prevents an exposed platform from injecting one
+    // continuous curtain. The wide spawn envelope above still keeps neighboring cells
+    // coherent enough to form a readable rising body.
+    float cellPattern = lerp(
+        0.48,
+        1.0,
+        Hash12(float2(floor(worldX / 17.0), floor(uv.y * 61.0))));
+    float solarDrive = lerp(0.46, 1.0, saturate(_RoomSolarIntensity));
+    float thermalDrive = lerp(0.58, 1.18, saturate(thermal.r * 1.35));
+    float source = boundary *
+                   saturate(_HeatIntensity) *
+                   solarDrive *
+                   spawn *
+                   cellPattern *
+                   thermalDrive;
+
+    float density = saturate(previous.r + source * _DeltaTime * 5.6);
+    float core = saturate(max(previous.g, source * 0.92 + thermal.r * 0.32));
+    float age = source > 0.018
+        ? min(previous.b, 0.055)
+        : previous.b;
+    float identity = source > 0.018
+        ? lerp(previous.a, Hash11(floor(worldX / 68.0) + 5.17), 0.46)
+        : previous.a;
+
+    _PlumeWrite[id] = float4(density, core, age, identity);
+}
