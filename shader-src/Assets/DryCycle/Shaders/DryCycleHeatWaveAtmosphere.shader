@@ -26,7 +26,6 @@ Shader "DryCycle/HeatWaveAtmosphere"
                 #pragma fragment frag
                 #include "UnityCG.cginc"
 
-                sampler2D _MainTex;
                 sampler2D _GrabTexture;
                 sampler2D _LevelTex;
                 sampler2D _DryCycleHeatMacroNoise;
@@ -35,7 +34,7 @@ Shader "DryCycle/HeatWaveAtmosphere"
                 uniform float4 _spriteRect;
                 uniform float4 _camInRoomRect;
                 uniform float2 _screenSize;
-                uniform float2 _DryCycleRoomSizePx;
+                uniform float2 _DryCycleHeatRoomSizePx;
                 uniform float _DryCycleHeatWaveIntensity;
                 uniform float _DryCycleHeatSolarIntensity;
                 uniform float _DryCycleHeatToneAmount;
@@ -47,15 +46,13 @@ Shader "DryCycle/HeatWaveAtmosphere"
                 struct v2f
                 {
                     float4 pos : SV_POSITION;
-                    float2 uv : TEXCOORD0;
-                    float4 screenPos : TEXCOORD1;
-                    float4 grabPos : TEXCOORD2;
+                    float4 screenPos : TEXCOORD0;
+                    float4 grabPos : TEXCOORD1;
                 };
 
                 struct HeatFieldSample
                 {
                     float band;
-                    float broad;
                     float fine;
                     float2 offsetPx;
                     float depth;
@@ -65,16 +62,9 @@ Shader "DryCycle/HeatWaveAtmosphere"
                 {
                     v2f o;
                     o.pos = UnityObjectToClipPos(v.vertex);
-                    o.uv = v.texcoord.xy;
                     o.screenPos = ComputeScreenPos(o.pos);
                     o.grabPos = ComputeGrabScreenPos(o.pos);
                     return o;
-                }
-
-                float Smooth01(float x)
-                {
-                    x = saturate(x);
-                    return x * x * (3.0 - 2.0 * x);
                 }
 
                 float2 RoomUV(float2 screenUV)
@@ -113,24 +103,23 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     return float3(a, b, c);
                 }
 
-                float2 MicroNoise(float2 screenUV, float time)
+                float2 MicroNoise(float2 roomPx, float time)
                 {
                     if (_DryCycleHasHeatCustomNoise > 0.5)
                     {
-                        float2 scale = max(_screenSize, float2(1.0, 1.0)) / 46.0;
                         float2 p = frac(
-                            screenUV * scale +
+                            roomPx / 46.0 +
                             float2(time * 0.103, time * 0.167));
                         float2 q = frac(
-                            screenUV * scale * 1.73 +
+                            roomPx / 27.0 +
                             float2(-time * 0.079, time * 0.121) + 0.347);
                         float2 a = tex2D(_DryCycleHeatMicroNoise, p).rg * 2.0 - 1.0;
                         float2 b = tex2D(_DryCycleHeatMicroNoise, q).gb * 2.0 - 1.0;
                         return a * 0.63 + b * 0.37;
                     }
 
-                    float a = sin((screenUV.x * 97.0 + screenUV.y * 71.0 + time * 1.39) * 6.2831853);
-                    float b = cos((screenUV.x * 67.0 - screenUV.y * 109.0 - time * 1.71) * 6.2831853);
+                    float a = sin((roomPx.x / 43.0 + roomPx.y / 61.0 + time * 0.22) * 6.2831853);
+                    float b = cos((roomPx.x / 57.0 - roomPx.y / 37.0 - time * 0.27) * 6.2831853);
                     return float2(a, b);
                 }
 
@@ -154,20 +143,23 @@ Shader "DryCycle/HeatWaveAtmosphere"
 
                 HeatFieldSample EvaluateHeatField(
                     float2 roomUV,
-                    float2 screenUV,
                     float depth)
                 {
                     HeatFieldSample result;
                     float time = _DryCycleHeatTime;
+                    float2 roomPx = roomUV * max(
+                        _DryCycleHeatRoomSizePx,
+                        float2(1.0, 1.0));
 
-                    // Broad vertical heat bodies. They drift predominantly upward and
-                    // only slowly sideways; this is intentionally unlike a water normal
-                    // map that scrolls uniformly across the whole screen.
-                    float2 broadUv = roomUV * float2(1.28, 0.62) +
+                    // Heat structures live in room-world pixel space. Their periods are
+                    // therefore consistent between tiny rooms, huge rooms and camera
+                    // positions instead of stretching to whatever fraction of a room is
+                    // currently on screen.
+                    float2 broadUv = roomPx / float2(720.0, 1120.0) +
                                      float2(time * 0.0041, -time * 0.0107);
-                    float2 mesoUv = roomUV * float2(3.15, 1.34) +
+                    float2 mesoUv = roomPx / float2(310.0, 560.0) +
                                     float2(-time * 0.0063, time * 0.0159) + 0.271;
-                    float2 breakupUv = roomUV * float2(6.3, 2.15) +
+                    float2 breakupUv = roomPx / float2(145.0, 285.0) +
                                        float2(time * 0.0117, -time * 0.0213) + 0.613;
 
                     float3 n0 = MacroNoise(broadUv);
@@ -175,34 +167,43 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float3 n2 = MacroNoise(breakupUv);
 
                     float broad = saturate(n0.r * 0.58 + n1.g * 0.30 + n2.b * 0.12);
-                    float ridge = saturate(abs(n0.b - n1.r) * 1.55 + abs(n1.b - n2.g) * 0.55);
-                    float band = smoothstep(0.37, 0.78, broad * 0.78 + ridge * 0.22);
+                    float ridge = saturate(
+                        abs(n0.b - n1.r) * 1.55 +
+                        abs(n1.b - n2.g) * 0.55);
+                    float band = smoothstep(
+                        0.37,
+                        0.78,
+                        broad * 0.78 + ridge * 0.22);
                     band = saturate(band * (0.82 + n1.r * 0.38));
 
                     float2 gradient = MacroGradient(mesoUv);
-                    float2 micro = MicroNoise(screenUV, time);
-                    float heat = saturate(max(_DryCycleHeatWaveIntensity, _DryCycleHeatLevelAmount));
+                    float2 micro = MicroNoise(roomPx, time);
+                    float heat = saturate(max(
+                        _DryCycleHeatWaveIntensity,
+                        _DryCycleHeatLevelAmount));
                     float depthWeight = lerp(0.62, 1.12, depth);
                     float bandWeight = 0.48 + band * 0.82;
 
-                    // Meso air movement: vertical displacement carries most of the
-                    // visual energy. Horizontal motion remains deliberately smaller so
-                    // the result reads as rising/refracting hot air rather than water.
+                    // Whole-air meso motion: the vertical component is intentionally
+                    // dominant. Large coherent regions stretch/compress upward while X
+                    // only wanders slightly, preventing the classic underwater look.
                     float2 mesoOffset = float2(
                         gradient.x * 0.38 + (n1.r - 0.5) * 0.28,
                         gradient.y * 0.92 + (broad - 0.5) * 2.05);
                     mesoOffset *= heat * depthWeight * bandWeight;
 
-                    // Fine high-frequency shimmer rides on the larger field. Again Y is
-                    // stronger than X, producing compression/stretch and edge jitter.
+                    // Fine shimmer belongs to the same world-space air mass. It moves
+                    // faster than the broad bands but stays sub-pixel to ~1 px in most
+                    // regions, vibrating edges instead of translating whole objects.
                     float2 fineOffset = float2(
                         micro.x * 0.31,
                         micro.y * 0.72 +
-                        sin((screenUV.x * 17.0 + time * 0.73) * 6.2831853) * 0.14);
-                    fineOffset *= heat * lerp(0.52, 1.0, band) * lerp(0.76, 1.05, depth);
+                        sin((roomPx.x / 185.0 + time * 0.73) * 6.2831853) * 0.14);
+                    fineOffset *= heat *
+                                  lerp(0.52, 1.0, band) *
+                                  lerp(0.76, 1.05, depth);
 
                     result.band = band;
-                    result.broad = broad;
                     result.fine = saturate(length(fineOffset) / 1.2);
                     result.offsetPx = ClampMagnitude(mesoOffset + fineOffset, 3.35);
                     result.depth = depth;
@@ -211,44 +212,58 @@ Shader "DryCycle/HeatWaveAtmosphere"
 
                 float3 ApplyHeatTone(
                     float3 color,
-                    HeatFieldSample field,
-                    float2 grabUV)
+                    HeatFieldSample field)
                 {
+                    float heat = saturate(_DryCycleHeatWaveIntensity);
                     float tone = saturate(_DryCycleHeatToneAmount);
-                    float solar = saturate(_DryCycleHeatSolarIntensity * _DryCycleHeatWaveIntensity);
+                    float solar = saturate(_DryCycleHeatSolarIntensity * heat);
                     float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
                     float shadow = 1.0 - smoothstep(0.10, 0.31, luma);
                     float mid = smoothstep(0.17, 0.76, luma);
                     float high = smoothstep(0.43, 0.89, luma);
 
-                    // Desert heat reads first as loss of color. Mid/high values bleach
-                    // much more strongly than shadows, preserving Rain World's graphic
-                    // black shapes instead of covering the whole scene with a pale veil.
+                    // Heat first removes color. Mid/high values bleach substantially,
+                    // while Rain World's deep graphic shadows remain nearly untouched.
                     float desaturation = tone *
-                        (0.16 + solar * 0.25 + field.depth * 0.08 + field.band * 0.11) *
+                        (0.18 + solar * 0.27 + field.depth * 0.08 + field.band * 0.12) *
                         mid * (1.0 - shadow * 0.94);
                     float gray = dot(color, float3(0.235, 0.705, 0.060));
                     color = lerp(color, gray.xxx, saturate(desaturation));
 
                     float3 hotWhite = float3(1.0, 0.982, 0.915);
-                    float bleach = solar * high *
-                        (0.20 + _DryCycleHeatWaveIntensity * 0.27 + field.band * 0.13) *
-                        (1.0 - shadow * 0.96);
-                    color = lerp(color, hotWhite, saturate(bleach));
 
-                    // Distant hot air loses contrast and trends toward bone-white. This
-                    // is depth-weighted and luminance-aware, not a global fog overlay.
-                    float distantVeil = tone * solar * field.depth *
-                        (0.030 + field.band * 0.026) *
+                    // Even residual extreme heat slightly dries bright values; direct
+                    // desert sun then provides the much stronger bone-white overheat
+                    // response. This keeps HeatWave readable in a static screenshot
+                    // without turning sheltered darkness into luminous fog.
+                    float residualBleach = tone * high * 0.075 *
+                                           (1.0 - shadow * 0.97);
+                    float solarBleach = solar * high *
+                        (0.22 + heat * 0.30 + field.band * 0.14) *
+                        (1.0 - shadow * 0.96);
+                    color = lerp(
+                        color,
+                        hotWhite,
+                        saturate(residualBleach + solarBleach));
+
+                    // Distant hot air loses a little contrast and trends warm-white.
+                    // This is deliberately modest; it is atmospheric compression, not
+                    // a fog layer.
+                    float distantVeil = tone *
+                        lerp(0.35, 1.0, solar) *
+                        field.depth *
+                        (0.022 + field.band * 0.028) *
                         (1.0 - shadow * 0.92);
                     color = lerp(color, hotWhite, saturate(distantVeil));
 
-                    // Heat bands subtly change exposure as they pass through the scene,
-                    // making the air state readable even over broad low-detail regions.
+                    // Broad heat bodies have a tiny exposure modulation. This makes hot
+                    // air visible over low-detail expanses where UV refraction alone
+                    // would sample almost the same flat color.
                     float exposureBreath =
                         (field.band - 0.42) *
-                        tone * solar *
-                        (1.0 - shadow) * 0.055;
+                        tone *
+                        lerp(0.30, 1.0, solar) *
+                        (1.0 - shadow) * 0.058;
                     color *= 1.0 + exposureBreath;
 
                     return saturate(color);
@@ -282,7 +297,7 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float2 grabUV = i.grabPos.xy / max(i.grabPos.w, 0.0001);
                     float2 roomUV = RoomUV(screenUV);
                     float depth = DecodePseudoDepth(LevelUV(screenUV));
-                    HeatFieldSample field = EvaluateHeatField(roomUV, screenUV, depth);
+                    HeatFieldSample field = EvaluateHeatField(roomUV, depth);
 
                     if (_DryCycleHeatDebugMode == 1)
                     {
@@ -301,7 +316,9 @@ Shader "DryCycle/HeatWaveAtmosphere"
 
                     if (_DryCycleHeatDebugMode == 3)
                     {
-                        float solar = saturate(_DryCycleHeatSolarIntensity * _DryCycleHeatWaveIntensity);
+                        float solar = saturate(
+                            _DryCycleHeatSolarIntensity *
+                            _DryCycleHeatWaveIntensity);
                         return float4(
                             saturate(_DryCycleHeatToneAmount),
                             solar,
@@ -318,7 +335,7 @@ Shader "DryCycle/HeatWaveAtmosphere"
                     float2 refractedUv = grabUV + field.offsetPx * pxToUv;
                     float3 color = tex2D(_GrabTexture, refractedUv).rgb;
                     color = ApplyLocalHeatSoftening(color, refractedUv, field);
-                    color = ApplyHeatTone(color, field, refractedUv);
+                    color = ApplyHeatTone(color, field);
 
                     return float4(color, 1.0);
                 }
