@@ -30,8 +30,7 @@ internal static class WeatherTypeRegistry
                 normalized == "HEAVYRAIN" ||
                 normalized == "FOG" ||
                 normalized == "DENSEFOG" ||
-                normalized == "HEATWAVE" ||
-                normalized == "FOEHN")
+                normalized == "HEATWAVE")
             {
                 return true;
             }
