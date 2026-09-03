@@ -122,9 +122,19 @@ internal static partial class WeatherSpatialRegistry
         }
         foreach (string weather in room.Weather.Keys)
         {
-            if (!WeatherSpatialCatalog.TryParseWeatherKey(weather, out _, out _))
+            if (!WeatherSpatialCatalog.TryParseWeatherKey(
+                    weather,
+                    out WeatherScheduleEventKind kind,
+                    out string id))
             {
                 result.Error($"{regionId}/{roomName}: unknown weather '{weather}'.");
+                continue;
+            }
+
+            if (WeatherSpatialCatalog.TryGetFamily(kind, id, out WeatherSpatialFamily family) &&
+                !IsFamilyAllowed(regionId, roomName, family.Id))
+            {
+                result.Warn($"{regionId}/{roomName}: '{weather}' is configured but parent family '{family.Id}' is not allowed in this room; the child rule is inactive.");
             }
         }
     }
