@@ -1,4 +1,5 @@
 using System;
+using DryCycle.DayNight;
 using DryCycle.TemperatureSystem;
 using RWCustom;
 using UnityEngine;
@@ -99,13 +100,21 @@ internal static class IntenseHeatSolarField
             return 0f;
         }
 
+        if (room.world != null &&
+            WorldClockHooks.TryGetClock(room.world, out WorldClock clock) &&
+            clock.IsNight)
+        {
+            return 0f;
+        }
+
         float roomSun = Mathf.Clamp01(SolarEnvironment.GetSunlightIntensity(room));
         float roomTransmission = 1f - Mathf.Clamp01(SolarEnvironment.GetRoomShade(room));
         float localTransmission = 1f - Mathf.Clamp01(SolarEnvironment.GetLocalShadeAt(room, worldPos));
         float geometry = EvaluateGeometryExposure(room, worldPos);
 
-        // IntenseHeat represents exceptional direct solar load. Authored Sunlight still
-        // matters, but a normally outdoor room is never allowed to look like weak sun.
+        // IntenseHeat represents exceptional daytime direct solar load. Authored
+        // Sunlight still matters, but a normally outdoor room is never allowed to look
+        // like weak sun while the hazard is active.
         float hazardSun = Mathf.Lerp(0.82f, 1f, roomSun);
         return Mathf.Clamp01(geometry * localTransmission * roomTransmission * hazardSun);
     }
