@@ -9,9 +9,12 @@ namespace DryCycle.WorldLink;
 
 internal sealed class MultiGateControllerRepresentation : PlacedObjectRepresentation
 {
+    private const int RetryDelayFrames = 120;
+
     private ControllerPanel _panel;
     private int _linkSprite = -1;
-    private bool _panelBuildAttempted;
+    private int _panelRetryDelay;
+    private int _panelFailures;
 
     private MultiGateControllerData Data => pObj?.data as MultiGateControllerData;
 
@@ -19,14 +22,14 @@ internal sealed class MultiGateControllerRepresentation : PlacedObjectRepresenta
         : base(owner, "WorldLink_ControllerRep", parent, pObj, "MultiGate Controller")
     {
         defaultColor = new Color(0.82f, 0.64f, 0.2f);
-        // Intentionally no child construction here. PlacedObjectRepresentation creates
-        // its root label immediately in Futile; if a child constructor throws before the
-        // root is attached to ObjectsPage, that label is exactly what leaks at (0,0).
+        // Keep the root constructor minimal. All complex widgets are attached only after
+        // a complete successful build so a failing child can never orphan half a panel.
     }
 
     public override void Update()
     {
         base.Update();
+        if (_panelRetryDelay > 0) _panelRetryDelay--;
         EnsurePanel();
         if (_panel != null && _panel.dragged && Data != null) Data.PanelPos = _panel.pos;
         if (_panel != null) Refresh();
@@ -43,39 +46,52 @@ internal sealed class MultiGateControllerRepresentation : PlacedObjectRepresenta
 
     private void EnsurePanel()
     {
-        if (_panel != null || _panelBuildAttempted) return;
-        _panelBuildAttempted = true;
-        if (Data == null)
+        if (_panel != null || _panelRetryDelay > 0) return;
+        MultiGateControllerData data = Data;
+        if (data == null)
         {
-            Plugin.Logger?.LogError("WorldLink DevUI: MultiGateController has no MultiGateControllerData after placement; panel was not built.");
+            if (_panelFailures++ == 0)
+                Plugin.Logger?.LogError("WorldLink DevUI: MultiGateController has no MultiGateControllerData after placement.");
+            _panelRetryDelay = RetryDelayFrames;
             return;
         }
 
+        ControllerPanel candidate = null;
+        FSprite link = null;
         try
         {
-            _panel = new ControllerPanel(owner, this, Data);
-            subNodes.Add(_panel);
-            _panel.BuildContents();
+            candidate = new ControllerPanel(owner, this, data);
+            candidate.BuildContents();
+            link = NewLine(defaultColor);
+
+            subNodes.Add(candidate);
+            _panel = candidate;
+            candidate = null;
 
             _linkSprite = fSprites.Count;
-            FSprite link = NewLine(defaultColor);
             fSprites.Add(link);
-            owner?.placedObjectsContainer?.AddChild(link);
+            owner.placedObjectsContainer.AddChild(link);
+            link = null;
+            _panelFailures = 0;
             Refresh();
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogError($"WorldLink DevUI: controller panel build failed; root representation remains usable: {ex}");
-            if (_panel != null)
-            {
-                _panel.ClearSprites();
-                subNodes.Remove(_panel);
-                _panel = null;
-            }
+            link?.RemoveFromContainer();
+            candidate?.ClearSprites();
+            _panelFailures++;
+            _panelRetryDelay = RetryDelayFrames;
+            Plugin.Logger?.LogError($"WorldLink DevUI: controller panel build failed transactionally (attempt {_panelFailures}): {ex}");
         }
     }
 
-    internal static FSprite NewLine(Color color) => new("pixel") { anchorY = 0f, color = color, alpha = 0.8f };
+    internal static FSprite NewLine(Color color) => new("pixel")
+    {
+        anchorX = 0.5f,
+        anchorY = 0f,
+        color = color,
+        alpha = 0.8f
+    };
 
     internal static void DrawLine(FSprite sprite, Vector2 a, Vector2 b, float width)
     {
@@ -118,6 +134,7 @@ internal sealed class MultiGateControllerRepresentation : PlacedObjectRepresenta
 
 internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, IDevUISignals
 {
+    private const int RetryDelayFrames = 120;
     private static readonly Color GeometryColor = new(0.2f, 0.78f, 1f);
     private static readonly Color TriggerColor = new(1f, 0.7f, 0.15f);
     private static readonly Color GlyphColor = new(0.9f, 0.3f, 0.9f);
@@ -133,8 +150,10 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
     private PortHandle _mapGlyph;
     private PortPanel _panel;
     private int _lineStart = -1;
-    private bool _geometryBuildAttempted;
-    private bool _panelBuildAttempted;
+    private int _geometryRetryDelay;
+    private int _panelRetryDelay;
+    private int _geometryFailures;
+    private int _panelFailures;
 
     private MultiGatePortData Data => pObj?.data as MultiGatePortData;
 
@@ -142,17 +161,16 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
         : base(owner, "WorldLink_PortRep", parent, pObj, "MultiGate Port")
     {
         defaultColor = GeometryColor;
-        // Child construction is deferred until Update; see controller representation.
     }
 
     public override void Update()
     {
         base.Update();
-        EnsureGeometry();
-        if (!_geometryBuildAttempted || _direction == null) return;
+        if (_geometryRetryDelay > 0) _geometryRetryDelay--;
+        if (_panelRetryDelay > 0) _panelRetryDelay--;
 
-        // Delay the large panel by one update after geometry. If any complex numeric/text
-        // editor fails, mapper-critical geometry handles still survive and remain usable.
+        EnsureGeometry();
+        if (_direction == null) return;
         EnsurePanel();
 
         MultiGatePortData d = Data;
@@ -165,11 +183,13 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
 
         Vector2 n = d.Normal;
         Vector2 t = d.Tangent;
-        if (_widthA.dragged || _widthB.dragged)
+        if (_widthA.dragged)
         {
-            float a = Mathf.Abs(Vector2.Dot(_widthA.pos, t));
-            float b = Mathf.Abs(Vector2.Dot(_widthB.pos, t));
-            d.PassageWidth = Mathf.Clamp(a + b, 40f, 900f);
+            d.PassageWidth = Mathf.Clamp(2f * Mathf.Abs(Vector2.Dot(_widthA.pos, t)), 40f, 900f);
+        }
+        else if (_widthB.dragged)
+        {
+            d.PassageWidth = Mathf.Clamp(2f * Mathf.Abs(Vector2.Dot(_widthB.pos, t)), 40f, 900f);
         }
         if (_trigger.dragged)
         {
@@ -190,7 +210,7 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
         if (_panel != null && _panel.dragged) d.PanelPos = _panel.pos;
 
         _panel?.RefreshButtons(d);
-        _panel?.RefreshSupport(owner?.room, pObj);
+        _panel?.RefreshDiagnostics(owner?.room, pObj);
         Refresh();
     }
 
@@ -225,76 +245,133 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
 
     private void EnsureGeometry()
     {
-        if (_geometryBuildAttempted) return;
-        _geometryBuildAttempted = true;
+        if (_direction != null || _geometryRetryDelay > 0) return;
         MultiGatePortData data = Data;
         if (data == null)
         {
-            Plugin.Logger?.LogError("WorldLink DevUI: MultiGatePort has no MultiGatePortData after placement; geometry editor was not built.");
+            if (_geometryFailures++ == 0)
+                Plugin.Logger?.LogError("WorldLink DevUI: MultiGatePort has no MultiGatePortData after placement.");
+            _geometryRetryDelay = RetryDelayFrames;
             return;
         }
 
+        PortHandle[] handles = new PortHandle[8];
+        FSprite[] lines = new FSprite[8];
         try
         {
             Vector2 n = data.Normal;
             Vector2 t = data.Tangent;
-            _direction = H("Dir", n * 80f, GeometryColor);
-            _widthA = H("WidthA", t * data.PassageWidth * 0.5f, GeometryColor);
-            _widthB = H("WidthB", -t * data.PassageWidth * 0.5f, GeometryColor);
-            _trigger = H("Trigger", -n * data.TriggerDepth, TriggerColor);
-            _glyph = H("Glyph", data.GlyphWorldOffset, GlyphColor);
-            _mapAnchor = H("MapAnchor", data.MapAnchorOffset, MapColor);
-            _mapDirection = H("MapDir", data.MapAnchorOffset + data.EffectiveMapDirection * 70f, MapColor);
-            _mapGlyph = H("MapGlyph", data.MapAnchorOffset + data.MapGlyphOffset, MapColor);
+            handles[0] = NewHandle("Dir", n * 80f, GeometryColor);
+            handles[1] = NewHandle("WidthA", t * data.PassageWidth * 0.5f, GeometryColor);
+            handles[2] = NewHandle("WidthB", -t * data.PassageWidth * 0.5f, GeometryColor);
+            handles[3] = NewHandle("Trigger", -n * data.TriggerDepth, TriggerColor);
+            handles[4] = NewHandle("Glyph", data.GlyphWorldOffset, GlyphColor);
+            handles[5] = NewHandle("MapAnchor", data.MapAnchorOffset, MapColor);
+            handles[6] = NewHandle("MapDir", data.MapAnchorOffset + data.EffectiveMapDirection * 70f, MapColor);
+            handles[7] = NewHandle("MapGlyph", data.MapAnchorOffset + data.MapGlyphOffset, MapColor);
+
+            lines[0] = MultiGateControllerRepresentation.NewLine(GeometryColor);
+            lines[1] = MultiGateControllerRepresentation.NewLine(GeometryColor);
+            lines[2] = MultiGateControllerRepresentation.NewLine(TriggerColor);
+            lines[3] = MultiGateControllerRepresentation.NewLine(TriggerColor);
+            lines[4] = MultiGateControllerRepresentation.NewLine(GlyphColor);
+            lines[5] = MultiGateControllerRepresentation.NewLine(MapColor);
+            lines[6] = MultiGateControllerRepresentation.NewLine(MapColor);
+            lines[7] = MultiGateControllerRepresentation.NewLine(MapColor);
+
+            // Commit only after every constructor succeeded. Until this point none of
+            // the handles are reachable from subNodes and none of the lines are in the
+            // representation's sprite list.
+            for (int i = 0; i < handles.Length; i++) subNodes.Add(handles[i]);
+            _direction = handles[0];
+            _widthA = handles[1];
+            _widthB = handles[2];
+            _trigger = handles[3];
+            _glyph = handles[4];
+            _mapAnchor = handles[5];
+            _mapDirection = handles[6];
+            _mapGlyph = handles[7];
 
             _lineStart = fSprites.Count;
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < lines.Length; i++)
             {
-                FSprite line = MultiGateControllerRepresentation.NewLine(i < 4 ? GeometryColor : (i == 4 ? TriggerColor : MapColor));
-                fSprites.Add(line);
-                owner?.placedObjectsContainer?.AddChild(line);
+                fSprites.Add(lines[i]);
+                owner.placedObjectsContainer.AddChild(lines[i]);
+                lines[i] = null;
             }
+
+            _geometryFailures = 0;
             Refresh();
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogError($"WorldLink DevUI: port geometry editor build failed: {ex}");
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i] != null && !subNodes.Contains(handles[i])) handles[i].ClearSprites();
+            }
+            for (int i = 0; i < lines.Length; i++) lines[i]?.RemoveFromContainer();
+
+            // If the exception occurred during the final commit, remove every partially
+            // attached child/sprite and reset all field references before retrying.
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i] != null && subNodes.Contains(handles[i]))
+                {
+                    handles[i].ClearSprites();
+                    subNodes.Remove(handles[i]);
+                }
+            }
+            while (_lineStart >= 0 && fSprites.Count > _lineStart)
+            {
+                FSprite sprite = fSprites[fSprites.Count - 1];
+                sprite?.RemoveFromContainer();
+                fSprites.RemoveAt(fSprites.Count - 1);
+            }
+
+            _direction = null;
+            _widthA = null;
+            _widthB = null;
+            _trigger = null;
+            _glyph = null;
+            _mapAnchor = null;
+            _mapDirection = null;
+            _mapGlyph = null;
+            _lineStart = -1;
+            _geometryFailures++;
+            _geometryRetryDelay = RetryDelayFrames;
+            Plugin.Logger?.LogError($"WorldLink DevUI: port geometry editor build failed transactionally (attempt {_geometryFailures}): {ex}");
         }
     }
 
     private void EnsurePanel()
     {
-        if (_panel != null || _panelBuildAttempted) return;
-        _panelBuildAttempted = true;
+        if (_panel != null || _panelRetryDelay > 0) return;
         MultiGatePortData data = Data;
         if (data == null) return;
 
+        PortPanel candidate = null;
         try
         {
-            _panel = new PortPanel(owner, this, data);
-            subNodes.Add(_panel);
-            _panel.BuildContents();
-            _panel.RefreshSupport(owner?.room, pObj);
+            candidate = new PortPanel(owner, this, data);
+            candidate.BuildContents();
+            candidate.RefreshDiagnostics(owner?.room, pObj);
+            subNodes.Add(candidate);
+            _panel = candidate;
+            candidate = null;
+            _panelFailures = 0;
             Refresh();
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogError($"WorldLink DevUI: port parameter panel build failed; geometry handles remain available: {ex}");
-            if (_panel != null)
-            {
-                _panel.ClearSprites();
-                subNodes.Remove(_panel);
-                _panel = null;
-            }
+            candidate?.ClearSprites();
+            _panelFailures++;
+            _panelRetryDelay = RetryDelayFrames;
+            Plugin.Logger?.LogError($"WorldLink DevUI: port parameter panel build failed transactionally (attempt {_panelFailures}); geometry handles remain available: {ex}");
         }
     }
 
-    private PortHandle H(string id, Vector2 pos, Color color)
-    {
-        var handle = new PortHandle(owner, "WorldLink_" + id, this, pos, color);
-        subNodes.Add(handle);
-        return handle;
-    }
+    private PortHandle NewHandle(string id, Vector2 pos, Color color) =>
+        new(owner, "WorldLink_" + id, this, pos, color);
 
     private void Line(int index, Vector2 a, Vector2 b, float width) =>
         MultiGateControllerRepresentation.DrawLine(fSprites[index], a, b, width);
@@ -330,6 +407,7 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
         }
 
         _panel.RefreshButtons(Data);
+        _panel.RefreshDiagnostics(owner?.room, pObj);
     }
 
     private sealed class PortHandle : Handle
@@ -338,7 +416,11 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
             : base(owner, id, parent, pos)
         {
             defaultColor = color;
-            if (fSprites.Count > 0) fSprites[0].scale = 0.38f;
+            if (fSprites.Count > 0)
+            {
+                fSprites[0].scale = 0.38f;
+                fSprites[0].color = color;
+            }
         }
     }
 
@@ -346,6 +428,7 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
     {
         private readonly MultiGatePortData _data;
         private DevUILabel _support;
+        private DevUILabel _routeStatus;
 
         internal DryCycleTextField GateId;
         internal DryCycleTextField PortId;
@@ -365,23 +448,23 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
         internal Button MapDirectionMode;
 
         internal PortPanel(DevUIOwner owner, DevUINode parent, MultiGatePortData data)
-            : base(owner, "WorldLink_PortPanel", parent, data.PanelPos, new Vector2(330f, 430f), "MultiGate Port")
+            : base(owner, "WorldLink_PortPanel", parent, data.PanelPos, new Vector2(330f, 454f), "MultiGate Port")
         {
             _data = data;
         }
 
         internal void BuildContents()
         {
-            int row = 386;
+            int row = 410;
             GateId = IdText("Gate", row, _data.GateId, false, t => _data.GateId = MultiGateControllerData.SafeId(t, "MainGate")); row -= 24;
             PortId = IdText("Port", row, _data.PortId, false, t => _data.PortId = MultiGateControllerData.SafeId(t, "PortA")); row -= 24;
             Label("Transit", row); Mode = new Button(owner, "WorldLink_Mode", this, new Vector2(100f, row), 210f, "Mode: " + _data.TransitMode); subNodes.Add(Mode); row -= 24;
-            Node = Int("Node", row, _data.VanillaNodeIndex, -1, 255, v => _data.VanillaNodeIndex = v); row -= 24;
-            Width = Float("Width", row, _data.PassageWidth, 40f, 900f, v => _data.PassageWidth = v); row -= 24;
-            Thickness = Float("Thickness", row, _data.PanelThickness, 2f, 60f, v => _data.PanelThickness = v); row -= 24;
-            Trigger = Float("Trigger", row, _data.TriggerDepth, 30f, 600f, v => _data.TriggerDepth = v); row -= 24;
-            OpenFrames = Float("Open frames", row, _data.OpenFrames, 15f, 600f, v => _data.OpenFrames = v); row -= 24;
-            CloseFrames = Float("Close frames", row, _data.CloseFrames, 15f, 600f, v => _data.CloseFrames = v); row -= 24;
+            Node = Int("Node", row, _data.VanillaNodeIndex, -1, 255, () => _data.VanillaNodeIndex, v => _data.VanillaNodeIndex = v); row -= 24;
+            Width = Float("Width", row, _data.PassageWidth, 40f, 900f, () => _data.PassageWidth, v => _data.PassageWidth = v); row -= 24;
+            Thickness = Float("Thickness", row, _data.PanelThickness, 2f, 60f, () => _data.PanelThickness, v => _data.PanelThickness = v); row -= 24;
+            Trigger = Float("Trigger", row, _data.TriggerDepth, 30f, 600f, () => _data.TriggerDepth, v => _data.TriggerDepth = v); row -= 24;
+            OpenFrames = Float("Open frames", row, _data.OpenFrames, 15f, 600f, () => _data.OpenFrames, v => _data.OpenFrames = v); row -= 24;
+            CloseFrames = Float("Close frames", row, _data.CloseFrames, 15f, 600f, () => _data.CloseFrames, v => _data.CloseFrames = v); row -= 24;
             DestRegion = IdText("Dest region", row, _data.DestinationRegion, true, t => _data.DestinationRegion = MultiGateControllerData.SafeId(t, string.Empty)); row -= 24;
             DestRoom = IdText("Dest room", row, _data.DestinationRoom, true, t => _data.DestinationRoom = MultiGateControllerData.SafeId(t, string.Empty)); row -= 24;
             DestGate = IdText("Dest gate", row, _data.DestinationGateId, true, t => _data.DestinationGateId = MultiGateControllerData.SafeId(t, string.Empty)); row -= 24;
@@ -390,8 +473,8 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
             Enabled = new Button(owner, "WorldLink_Enabled", this, new Vector2(8f, row), 145f, string.Empty); subNodes.Add(Enabled);
             HideDestination = new Button(owner, "WorldLink_HideDest", this, new Vector2(165f, row), 145f, string.Empty); subNodes.Add(HideDestination); row -= 28;
             MapDirectionMode = new Button(owner, "WorldLink_MapDirMode", this, new Vector2(8f, row), 302f, string.Empty); subNodes.Add(MapDirectionMode); row -= 24;
-            _support = new DevUILabel(owner, "WorldLink_FrameSupport", this, new Vector2(8f, row), 302f, "Frame support: checking...");
-            subNodes.Add(_support);
+            _routeStatus = new DevUILabel(owner, "WorldLink_RouteStatus", this, new Vector2(8f, row), 302f, "Route: checking..."); subNodes.Add(_routeStatus); row -= 24;
+            _support = new DevUILabel(owner, "WorldLink_FrameSupport", this, new Vector2(8f, row), 302f, "Frame support: checking..."); subNodes.Add(_support);
             RefreshButtons(_data);
         }
 
@@ -403,12 +486,15 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
             if (MapDirectionMode != null) MapDirectionMode.Text = data.MapDirectionOverride ? "Map direction: MANUAL" : "Map direction: AUTO (physical)";
         }
 
-        internal void RefreshSupport(Room room, PlacedObject placed)
+        internal void RefreshDiagnostics(Room room, PlacedObject placed)
         {
-            if (_support == null || room == null || placed == null)
-            {
-                return;
-            }
+            RefreshSupport(room, placed);
+            RefreshRouteStatus(room, placed);
+        }
+
+        private void RefreshSupport(Room room, PlacedObject placed)
+        {
+            if (_support == null || room == null || placed == null) return;
 
             bool a = HasJambSupport(room, placed.pos, _data, -1);
             bool b = HasJambSupport(room, placed.pos, _data, 1);
@@ -422,6 +508,43 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
                 _support.Text = "Frame support: " + (!a && !b ? "MISSING A+B" : (!a ? "MISSING A" : "MISSING B"));
                 _support.textColor = Color.red;
             }
+        }
+
+        private void RefreshRouteStatus(Room room, PlacedObject placed)
+        {
+            if (_routeStatus == null || room == null || placed == null) return;
+
+            string status;
+            bool valid;
+            if (!_data.Enabled)
+            {
+                status = "Route status: DISABLED";
+                valid = false;
+            }
+            else if (_data.TransitMode == WorldLinkTransitMode.DirectTransit)
+            {
+                status = "Route status: DIRECT TRANSIT RESERVED";
+                valid = false;
+            }
+            else if (_data.TransitMode == WorldLinkTransitMode.VanillaNode)
+            {
+                bool nodeValid = room.abstractRoom?.connections != null && _data.VanillaNodeIndex >= 0 &&
+                                 _data.VanillaNodeIndex < room.abstractRoom.connections.Length &&
+                                 room.abstractRoom.connections[_data.VanillaNodeIndex] >= 0;
+                status = nodeValid ? "Route status: NODE OK" : "Route status: INVALID NODE";
+                valid = nodeValid;
+            }
+            else
+            {
+                bool fields = !string.IsNullOrWhiteSpace(_data.DestinationRoom) &&
+                              !string.IsNullOrWhiteSpace(_data.DestinationGateId) &&
+                              !string.IsNullOrWhiteSpace(_data.DestinationPortId);
+                status = fields ? "Route status: CROSS-REGION CONFIGURED" : "Route status: DESTINATION INCOMPLETE";
+                valid = fields;
+            }
+
+            _routeStatus.Text = status;
+            _routeStatus.textColor = valid ? new Color(0.1f, 0.45f, 0.1f) : Color.red;
         }
 
         private DryCycleTextField IdText(string label, int y, string value, bool allowEmpty, Action<string> write)
@@ -439,18 +562,20 @@ internal sealed class MultiGatePortRepresentation : PlacedObjectRepresentation, 
             return field;
         }
 
-        private DryCycleIntegerField Int(string label, int y, int value, int min, int max, Action<int> write)
+        private DryCycleIntegerField Int(string label, int y, int value, int min, int max, Func<int> read, Action<int> write)
         {
             Label(label, y);
-            var field = new DryCycleIntegerField(owner, "WorldLink_" + label, this, new Vector2(100f, y), 210f, value, min, max, writeValue: write);
+            var field = new DryCycleIntegerField(owner, "WorldLink_" + label, this, new Vector2(100f, y), 210f,
+                value, min, max, readValue: read, writeValue: write);
             subNodes.Add(field);
             return field;
         }
 
-        private DryCycleFloatField Float(string label, int y, float value, float min, float max, Action<float> write)
+        private DryCycleFloatField Float(string label, int y, float value, float min, float max, Func<float> read, Action<float> write)
         {
             Label(label, y);
-            var field = new DryCycleFloatField(owner, "WorldLink_" + label, this, new Vector2(100f, y), 210f, value, min, max, 2, writeValue: write);
+            var field = new DryCycleFloatField(owner, "WorldLink_" + label, this, new Vector2(100f, y), 210f,
+                value, min, max, 2, readValue: read, writeValue: write);
             subNodes.Add(field);
             return field;
         }

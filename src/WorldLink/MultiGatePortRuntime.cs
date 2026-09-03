@@ -61,6 +61,34 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
 
     internal void SetDenied(bool denied) => Denied = denied;
 
+    internal bool CanArmOutgoing()
+    {
+        if (Placed?.active != true || !Data.Enabled || room == null ||
+            !WorldLinkRoomRegistry.IsUniquePortAddress(room, this))
+        {
+            return false;
+        }
+
+        return Data.TransitMode switch
+        {
+            WorldLinkTransitMode.VanillaNode => HasValidVanillaNode() && WorldLinkRoomRegistry.IsUniqueVanillaNodeBinding(room, this),
+            WorldLinkTransitMode.CrossRegion => WorldLinkTraversal.HasBasicCrossRegionConfiguration(this),
+            _ => false
+        };
+    }
+
+    internal bool HasValidVanillaNode()
+    {
+        if (room?.abstractRoom?.connections == null || Data.VanillaNodeIndex < 0 ||
+            Data.VanillaNodeIndex >= room.abstractRoom.connections.Length)
+        {
+            return false;
+        }
+
+        int targetIndex = room.abstractRoom.connections[Data.VanillaNodeIndex];
+        return targetIndex >= 0 && room.world?.GetAbstractRoom(targetIndex) != null;
+    }
+
     internal bool IsWithinTransitEnvelope(Vector2 pos, float scale = 1f)
     {
         Vector2 d = pos - Placed.pos;
@@ -88,6 +116,34 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
             seen++;
         }
         return seen > 0;
+    }
+
+    internal bool AllProgressPlayersClearInside()
+    {
+        if (room?.game == null) return false;
+        List<AbstractCreature> players = room.game.PlayersToProgressOrWin;
+        if (players == null || players.Count == 0) return false;
+
+        for (int i = 0; i < players.Count; i++)
+        {
+            if (players[i]?.realizedCreature is not Player player || player.room != room || player.bodyChunks == null || player.bodyChunks.Length == 0)
+            {
+                // During cooperative shortcut travel another progression player may not
+                // have been spat into this room yet. Keep the inbound gate open rather
+                // than closing on the first arrival and trapping a later vessel outside.
+                return false;
+            }
+
+            for (int c = 0; c < player.bodyChunks.Length; c++)
+            {
+                BodyChunk chunk = player.bodyChunks[c];
+                if (chunk == null) continue;
+                float depth = Vector2.Dot(chunk.pos - Placed.pos, Data.Normal);
+                float safeInside = -(Data.PanelThickness * 0.5f + chunk.TerrainRad + 4f);
+                if (depth > safeInside) return false;
+            }
+        }
+        return true;
     }
 
     internal bool AllPresentProgressPlayersOutsideOrGone()
@@ -225,19 +281,13 @@ internal sealed class MultiGatePortRuntime : UpdatableAndDeletable, IDrawable
     private void ValidateVanillaNode()
     {
         if (Data.TransitMode != WorldLinkTransitMode.VanillaNode || room?.abstractRoom == null) return;
-        if (Data.VanillaNodeIndex < 0 || room.abstractRoom.connections == null || Data.VanillaNodeIndex >= room.abstractRoom.connections.Length)
+        if (!HasValidVanillaNode())
         {
-            Plugin.Logger?.LogWarning($"WorldLink: {Address} has invalid VanillaNode index {Data.VanillaNodeIndex}.");
+            Plugin.Logger?.LogWarning($"WorldLink: {Address} has invalid or disconnected VanillaNode index {Data.VanillaNodeIndex}. The outgoing route is fail-closed.");
             return;
         }
 
         int targetIndex = room.abstractRoom.connections[Data.VanillaNodeIndex];
-        if (targetIndex < 0)
-        {
-            Plugin.Logger?.LogWarning($"WorldLink: {Address} VanillaNode {Data.VanillaNodeIndex} is not connected.");
-            return;
-        }
-
         string actual = room.world?.GetAbstractRoom(targetIndex)?.name;
         if (!string.IsNullOrWhiteSpace(Data.DestinationRoom) && !string.IsNullOrWhiteSpace(actual) &&
             !string.Equals(Data.DestinationRoom, actual, StringComparison.OrdinalIgnoreCase))

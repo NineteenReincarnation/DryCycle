@@ -55,18 +55,80 @@ internal static class OrientedGateCollision
         for (int i = 0; i < ports.Count; i++)
         {
             MultiGatePortRuntime port = ports[i];
-            if (port == null || port.slatedForDeletetion || !port.ShouldCollide ||
-                !port.IsWithinTransitEnvelope(self.pos, 1.15f)) continue;
-
-            ResolveLeaf(port, self, -1);
-            ResolveLeaf(port, self, 1);
+            if (port == null || port.slatedForDeletetion || !port.ShouldCollide || !MayCrossPortEnvelope(port, self)) continue;
+            ResolvePort(port, self);
         }
     }
 
-    private static void ResolveLeaf(MultiGatePortRuntime port, BodyChunk chunk, int side)
+    private static bool MayCrossPortEnvelope(MultiGatePortRuntime port, BodyChunk chunk)
     {
-        if (!port.TryGetLeaf(side, previous: false, out GateLeaf leaf)) return;
+        if (port.IsWithinTransitEnvelope(chunk.pos, 1.15f) || port.IsWithinTransitEnvelope(chunk.lastPos, 1.15f)) return true;
 
+        Vector2 a = chunk.lastPos - port.Placed.pos;
+        Vector2 b = chunk.pos - port.Placed.pos;
+        Vector2 p0 = new(Vector2.Dot(a, port.Data.Tangent), Vector2.Dot(a, port.Data.Normal));
+        Vector2 p1 = new(Vector2.Dot(b, port.Data.Tangent), Vector2.Dot(b, port.Data.Normal));
+        float halfU = port.Data.PassageWidth * 0.5f * 1.15f + 24f + chunk.TerrainRad;
+        float halfV = port.Data.TriggerDepth * 1.15f + 30f + chunk.TerrainRad;
+        return SegmentIntersectsAabb(p0, p1, halfU, halfV);
+    }
+
+    private static bool SegmentIntersectsAabb(Vector2 from, Vector2 to, float halfX, float halfY)
+    {
+        Vector2 d = to - from;
+        float tMin = 0f;
+        float tMax = 1f;
+        if (!IntervalSlab(from.x, d.x, -halfX, halfX, ref tMin, ref tMax)) return false;
+        if (!IntervalSlab(from.y, d.y, -halfY, halfY, ref tMin, ref tMax)) return false;
+        return tMin <= tMax && tMax >= 0f && tMin <= 1f;
+    }
+
+    private static bool IntervalSlab(float p, float d, float min, float max, ref float tMin, ref float tMax)
+    {
+        if (Mathf.Abs(d) < 0.000001f) return p >= min && p <= max;
+        float inv = 1f / d;
+        float t1 = (min - p) * inv;
+        float t2 = (max - p) * inv;
+        if (t1 > t2) (t1, t2) = (t2, t1);
+        tMin = Mathf.Max(tMin, t1);
+        tMax = Mathf.Min(tMax, t2);
+        return tMin <= tMax;
+    }
+
+    private static void ResolvePort(MultiGatePortRuntime port, BodyChunk chunk)
+    {
+        bool hasLeft = port.TryGetLeaf(-1, previous: false, out GateLeaf left);
+        bool hasRight = port.TryGetLeaf(1, previous: false, out GateLeaf right);
+        if (!hasLeft && !hasRight) return;
+
+        // Once the visible aperture is narrower than this BodyChunk's terrain diameter,
+        // the Minkowski-expanded left/right leaves overlap. Solving two opposing inner
+        // edges sequentially is order-dependent and makes a chunk at the center seam
+        // oscillate left/right. In that no-fit regime the two leaves form one connected
+        // configuration-space barrier, so resolve one deterministic full-width slab.
+        float gap = port.Data.PassageWidth * port.OpenFactor;
+        if (hasLeft && hasRight && gap < chunk.TerrainRad * 2f - 0.001f)
+        {
+            float half = port.Data.PassageWidth * 0.5f;
+            GateLeaf unified = new(
+                port.Placed.pos,
+                port.Data.Tangent,
+                port.Data.Normal,
+                half,
+                port.Data.PanelThickness * 0.5f,
+                0,
+                half,
+                port.OpenFactor);
+            ResolveLeafGeometry(port, chunk, unified, unifiedNoFitBarrier: true);
+            return;
+        }
+
+        if (hasLeft) ResolveLeafGeometry(port, chunk, left, unifiedNoFitBarrier: false);
+        if (hasRight) ResolveLeafGeometry(port, chunk, right, unifiedNoFitBarrier: false);
+    }
+
+    private static void ResolveLeafGeometry(MultiGatePortRuntime port, BodyChunk chunk, GateLeaf leaf, bool unifiedNoFitBarrier)
+    {
         Vector2 rel = chunk.pos - leaf.Center;
         float u = Vector2.Dot(rel, leaf.Tangent);
         float v = Vector2.Dot(rel, leaf.Normal);
@@ -87,6 +149,14 @@ internal static class OrientedGateCollision
                 if (!SweptExpandedBox(chunk.lastPos, chunk.pos, leaf, radius, out float hitT, out normal)) return;
                 chunk.pos = Vector2.Lerp(chunk.lastPos, chunk.pos, Mathf.Max(0f, hitT - 0.001f));
                 penetration = 0.01f;
+
+                // Recompute a representative contact point after CCD rewinds the chunk.
+                rel = chunk.pos - leaf.Center;
+                u = Vector2.Dot(rel, leaf.Tangent);
+                v = Vector2.Dot(rel, leaf.Normal);
+                cu = Mathf.Clamp(u, -leaf.HalfLength, leaf.HalfLength);
+                cv = Mathf.Clamp(v, -leaf.HalfThickness, leaf.HalfThickness);
+                closest = leaf.Center + leaf.Tangent * cu + leaf.Normal * cv;
             }
             else
             {
@@ -110,8 +180,26 @@ internal static class OrientedGateCollision
         if (ShouldYieldToNativeTerrainAtSeam(chunk, leaf, u, normal, penetration)) return;
 
         chunk.pos += normal * penetration;
-        Vector2 surfaceVelocity = port.SurfaceVelocityAt(leaf, closest);
+        Vector2 surfaceVelocity = unifiedNoFitBarrier
+            ? UnifiedBarrierSurfaceVelocity(port, closest)
+            : port.SurfaceVelocityAt(leaf, closest);
         ResolveRainWorldSurfaceResponse(chunk, normal, surfaceVelocity);
+    }
+
+    private static Vector2 UnifiedBarrierSurfaceVelocity(MultiGatePortRuntime port, Vector2 point)
+    {
+        // Away from the center opening, keep the real supporting leaf's tangential
+        // velocity so a creature standing on a moving diagonal panel is still carried.
+        // Inside the sub-diameter opening both inner edges are equally constraining and
+        // move in opposite directions; zero is the stable symmetric manifold velocity.
+        float localU = Vector2.Dot(point - port.Placed.pos, port.Data.Tangent);
+        float aperture = port.Data.PassageWidth * 0.5f * port.OpenFactor;
+        if (Mathf.Abs(localU) <= aperture + 0.5f) return Vector2.zero;
+
+        int side = localU < 0f ? -1 : 1;
+        return port.TryGetLeaf(side, previous: false, out GateLeaf realLeaf)
+            ? port.SurfaceVelocityAt(realLeaf, point)
+            : Vector2.zero;
     }
 
     private static bool ShouldYieldToNativeTerrainAtSeam(

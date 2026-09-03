@@ -18,6 +18,7 @@ internal static class WorldLinkRuntime
             GateUnlockRequirements.Reload();
             WorldLinkTraversal.ClearSession();
             WorldLinkPlacedObjects.Enable();
+            WorldLinkTraversal.Enable();
             OrientedGateCollision.Enable();
             WorldLinkMapRuntime.Enable();
             _enabled = true;
@@ -25,12 +26,12 @@ internal static class WorldLinkRuntime
         }
         catch (Exception ex)
         {
-            // Enable is transactional: Plugin's outer initialization guard cannot clean
-            // a subsystem that failed before MiscRuntime marked itself enabled.
+            // Enable is transactional: tear down every hook that may have installed
+            // before the failing step, including same-region inbound authorization.
             WorldLinkMapRuntime.Disable();
             OrientedGateCollision.Disable();
+            WorldLinkTraversal.Disable();
             WorldLinkPlacedObjects.Disable();
-            WorldLinkTraversal.ClearSession();
             Plugin.Logger?.LogError($"WorldLink: initialization failed and was rolled back: {ex}");
             throw;
         }
@@ -38,21 +39,11 @@ internal static class WorldLinkRuntime
 
     internal static void Disable()
     {
-        if (!_enabled)
-        {
-            // Still perform idempotent cleanup in case a future partial initialization
-            // path calls Disable defensively.
-            WorldLinkMapRuntime.Disable();
-            OrientedGateCollision.Disable();
-            WorldLinkPlacedObjects.Disable();
-            WorldLinkTraversal.ClearSession();
-            return;
-        }
-
         _enabled = false;
+        // Stop accepting new inbound shortcut events before removing room runtimes.
+        WorldLinkTraversal.Disable();
         WorldLinkMapRuntime.Disable();
         OrientedGateCollision.Disable();
         WorldLinkPlacedObjects.Disable();
-        WorldLinkTraversal.ClearSession();
     }
 }

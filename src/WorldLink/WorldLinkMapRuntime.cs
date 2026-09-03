@@ -24,6 +24,7 @@ internal static class WorldLinkMapRuntime
         internal string DestinationRegion;
         internal bool HideExternalDestination;
         internal bool Enabled;
+        internal bool DuplicateAddress;
     }
 
     private sealed class ConnectionInfo
@@ -88,7 +89,7 @@ internal static class WorldLinkMapRuntime
                     WorldLinkPlacedObjects.EnsureWorldLinkData(po);
                     if (po.data is not MultiGatePortData pd) continue;
 
-                    PortInfo info = new()
+                    state.Ports.Add(new PortInfo
                     {
                         Address = pd.Address(roomName),
                         RoomIndex = roomIndex,
@@ -103,9 +104,7 @@ internal static class WorldLinkMapRuntime
                         DestinationRegion = pd.DestinationRegion?.Trim() ?? string.Empty,
                         HideExternalDestination = pd.HideExternalDestinationUntilTraversed,
                         Enabled = pd.Enabled
-                    };
-                    state.Ports.Add(info);
-                    AddPortMarker(map, info);
+                    });
                 }
             }
             catch (Exception ex)
@@ -113,6 +112,9 @@ internal static class WorldLinkMapRuntime
                 Plugin.Logger?.LogWarning($"WorldLink map: could not read RoomSettings for {roomName}: {ex.Message}");
             }
         }
+
+        MarkDuplicateAddresses(state.Ports);
+        for (int i = 0; i < state.Ports.Count; i++) AddPortMarker(map, state.Ports[i]);
 
         for (int i = 0; i < map.mapConnections.Count; i++)
         {
@@ -126,39 +128,74 @@ internal static class WorldLinkMapRuntime
         }
     }
 
+    private static void MarkDuplicateAddresses(List<PortInfo> ports)
+    {
+        Dictionary<WorldLinkPortAddress, int> counts = new();
+        for (int i = 0; i < ports.Count; i++)
+        {
+            WorldLinkPortAddress address = ports[i].Address;
+            counts.TryGetValue(address, out int count);
+            counts[address] = count + 1;
+        }
+
+        for (int i = 0; i < ports.Count; i++)
+        {
+            if (counts.TryGetValue(ports[i].Address, out int count) && count > 1)
+            {
+                ports[i].DuplicateAddress = true;
+                ports[i].Enabled = false;
+            }
+        }
+    }
+
     private static PortInfo MatchPort(Map map, List<PortInfo> ports, int sourceRoom, int targetRoom, IntVector2 vanillaPos)
     {
         string targetName = map.mapData.NameOfRoom(targetRoom);
-        PortInfo nearest = null;
-        float nearestDistance = 100f * 100f;
         Vector2 vp = vanillaPos.ToVector2() * 20f;
+        PortInfo best = null;
+        float bestDistance = float.MaxValue;
 
         for (int i = 0; i < ports.Count; i++)
         {
             PortInfo p = ports[i];
-            if (p.RoomIndex != sourceRoom || p.Mode != WorldLinkTransitMode.VanillaNode) continue;
-            string configuredOrResolved = ResolveVanillaDestination(map, p);
-            if (configuredOrResolved.Length > 0 && string.Equals(configuredOrResolved, targetName, StringComparison.OrdinalIgnoreCase)) return p;
+            if (p.RoomIndex != sourceRoom || p.Mode != WorldLinkTransitMode.VanillaNode || p.DuplicateAddress) continue;
 
-            float d = Vector2.SqrMagnitude(p.PhysicalPosInRoom - vp);
-            if (d < nearestDistance)
+            string resolved = ResolveVanillaDestination(map, p);
+            if (resolved.Length == 0 || !string.Equals(resolved, targetName, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Multiple node exits can target the same room. Prefer the authored gate
+            // physically closest to the vanilla map endpoint instead of list order.
+            float distance = Vector2.SqrMagnitude(p.PhysicalPosInRoom - vp);
+            if (distance < bestDistance)
             {
-                nearestDistance = d;
-                nearest = p;
+                bestDistance = distance;
+                best = p;
             }
         }
-        return nearest;
+        return best;
     }
 
     private static string ResolveVanillaDestination(Map map, PortInfo port)
     {
-        if (!string.IsNullOrWhiteSpace(port.DestinationRoom)) return port.DestinationRoom;
-        if (port.NodeIndex < 0 || map?.hud?.rainWorld?.processManager?.currentMainLoop is not RainWorldGame game) return string.Empty;
-        World world = game.overWorld?.activeWorld;
-        AbstractRoom room = world?.GetAbstractRoom(port.RoomName);
-        if (room?.connections == null || port.NodeIndex >= room.connections.Length) return string.Empty;
-        int targetIndex = room.connections[port.NodeIndex];
-        return targetIndex >= 0 ? world.GetAbstractRoom(targetIndex)?.name ?? string.Empty : string.Empty;
+        // When the active world is available, the real AbstractRoom connection is the
+        // topology authority. DestinationRoom is only an offline/map fallback and must
+        // never override a live VanillaNode that points somewhere else.
+        if (port.NodeIndex >= 0 && map?.hud?.rainWorld?.processManager?.currentMainLoop is RainWorldGame game)
+        {
+            World world = game.overWorld?.activeWorld;
+            AbstractRoom room = world?.GetAbstractRoom(port.RoomName);
+            if (room?.connections != null && port.NodeIndex < room.connections.Length)
+            {
+                int targetIndex = room.connections[port.NodeIndex];
+                if (targetIndex >= 0)
+                {
+                    string actual = world.GetAbstractRoom(targetIndex)?.name ?? string.Empty;
+                    if (actual.Length > 0) return actual;
+                }
+            }
+        }
+
+        return port.DestinationRoom ?? string.Empty;
     }
 
     private static void AddPortMarker(Map map, PortInfo info)
@@ -217,8 +254,11 @@ internal static class WorldLinkMapRuntime
             prev = next;
         }
 
-        bool enabled = (info.A?.Enabled ?? true) && (info.B?.Enabled ?? true);
-        self.lineSprite.alpha *= enabled ? 1f : 0.35f;
+        // The connection mesh represents the physical world graph, not a bidirectional
+        // permission flag. Directed availability is shown independently by each port's
+        // arrow/glyph. Never multiply alpha here: FSprite.alpha is not reset by vanilla
+        // OnMapConnection.DrawSprites and repeated multiplication fades the line away.
+        self.lineSprite.alpha = 1f;
     }
 
     private class PortMarker : Map.FadeInMarker
@@ -339,9 +379,7 @@ internal static class WorldLinkMapRuntime
         private string DestinationText()
         {
             RainWorldGame game = map?.hud?.rainWorld?.processManager?.currentMainLoop as RainWorldGame;
-            if (Info.HideExternalDestination &&
-                !WorldLinkTraversal.HasTraversed(game, Info.Address) &&
-                !GateUnlockRequirements.IsUnlocked(game, Info.Address)) return "?";
+            if (Info.HideExternalDestination && !WorldLinkTraversal.HasTraversed(game, Info.Address)) return "?";
             if (!string.IsNullOrWhiteSpace(Info.DestinationRegion)) return Info.DestinationRegion.ToUpperInvariant();
             int underscore = Info.DestinationRoom.IndexOf('_');
             return underscore > 0 ? Info.DestinationRoom.Substring(0, underscore).ToUpperInvariant() : "OUT";

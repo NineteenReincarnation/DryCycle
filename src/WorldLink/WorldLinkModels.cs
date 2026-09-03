@@ -26,6 +26,7 @@ internal readonly struct WorldLinkPortAddress : IEquatable<WorldLinkPortAddress>
 
     internal bool IsValid => Room.Length > 0 && Gate.Length > 0 && Port.Length > 0;
     internal string SaveKey => $"DRYCYCLE_WORLDLINK|{Room}|{Gate}|{Port}";
+    internal string TraversalSaveKey => $"DRYCYCLE_WORLDLINK_TRAVERSED|{Room}|{Gate}|{Port}";
 
     public bool Equals(WorldLinkPortAddress other) =>
         string.Equals(Room, other.Room, StringComparison.OrdinalIgnoreCase) &&

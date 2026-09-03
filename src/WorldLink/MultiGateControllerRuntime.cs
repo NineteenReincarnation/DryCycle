@@ -7,6 +7,7 @@ namespace DryCycle.WorldLink;
 internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
 {
     private enum State { Idle, Opening, Open, Closing, SafeClosing, WarpPending }
+    private const int WarpPendingTimeoutFrames = 1800;
 
     internal readonly MultiGateControllerData Data;
     internal PlacedObject Placed => _placed;
@@ -14,11 +15,13 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
     private readonly PlacedObject _placed;
     private readonly List<MultiGatePortRuntime> _allPorts;
     private MultiGatePortRuntime _active;
+    private MultiGatePortRuntime _armingPort;
     private State _state;
     private bool _inbound;
     private bool _retireAfterClose;
     private int _armCounter;
     private int _openSafeCounter;
+    private int _warpPendingCounter;
 
     internal MultiGateControllerRuntime(Room room, PlacedObject placed, MultiGateControllerData data, List<MultiGatePortRuntime> allPorts)
     {
@@ -63,6 +66,7 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
 
         if (!_placed.active || !primary || !activePortPhysicallyOwned || !activeRouteStillAvailable)
         {
+            ResetArming();
             if (_active != null)
             {
                 RequestSafeClose();
@@ -82,20 +86,27 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
             case State.Open: UpdateOpen(); break;
             case State.Closing: UpdateClosing(); break;
             case State.SafeClosing: UpdateSafeClosing(); break;
-            case State.WarpPending: break;
+            case State.WarpPending: UpdateWarpPending(); break;
         }
     }
 
     internal bool BeginInbound(MultiGatePortRuntime port)
     {
-        // Directed routes are independent. The target port's outgoing Enabled flag must
-        // not reject an arrival from a valid source route.
-        if (port == null || !Belongs(port) || port.Placed?.active != true || _state != State.Idle) return false;
+        // Inbound is an explicit authorization path. Cross-region traversal calls this
+        // from its successful world-load callback; same-region traversal calls it only
+        // after Player.SpitOutOfShortCut reports the exact configured VanillaNode.
+        if (port == null || !Belongs(port) || port.Placed?.active != true || _state != State.Idle ||
+            !WorldLinkRoomRegistry.IsUniquePortAddress(room, port))
+        {
+            return false;
+        }
 
         _active = port;
+        _armingPort = null;
         _inbound = true;
         _armCounter = 0;
         _openSafeCounter = 0;
+        _warpPendingCounter = 0;
         _active.SetDenied(false);
         _state = State.Opening;
         return true;
@@ -104,43 +115,70 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
     private void UpdateIdle()
     {
         MultiGatePortRuntime inside = null;
-        MultiGatePortRuntime outside = null;
+        bool ambiguous = false;
 
         for (int i = 0; i < _allPorts.Count; i++)
         {
             MultiGatePortRuntime port = _allPorts[i];
             if (!Belongs(port) || port.Placed?.active != true) continue;
 
+            bool inZone = port.AllProgressPlayersOnSide(interior: true);
+
+            if (!WorldLinkRoomRegistry.IsUniquePortAddress(room, port))
+            {
+                if (inZone) port.SetDenied(true);
+                continue;
+            }
+
             if (!port.Data.Enabled)
             {
-                bool denied = port.AllProgressPlayersOnSide(interior: true) || port.AllProgressPlayersOnSide(interior: false);
-                port.SetDenied(denied);
+                port.SetDenied(inZone);
                 continue;
             }
 
             port.SetDenied(false);
-            if (port.AllProgressPlayersOnSide(interior: true)) inside ??= port;
-            if (port.AllProgressPlayersOnSide(interior: false)) outside ??= port;
+            if (!inZone) continue;
+
+            if (inside == null)
+            {
+                inside = port;
+            }
+            else if (!ReferenceEquals(inside, port))
+            {
+                inside.SetDenied(true);
+                port.SetDenied(true);
+                ambiguous = true;
+            }
         }
 
-        if (outside != null)
+        // Overlapping activation envelopes must never select a route by authored-list
+        // order. A multi-port hub either resolves to one unambiguous outgoing port or
+        // stays shut. Standing behind a port is not inbound authorization.
+        if (ambiguous)
         {
-            // Same-region native-node returns can arrive from the outside of this port.
-            BeginInbound(outside);
+            ResetArming();
             return;
         }
 
         if (inside == null)
         {
-            _armCounter = 0;
+            ResetArming();
             return;
         }
 
-        if (inside.Data.TransitMode == WorldLinkTransitMode.DirectTransit)
+        if (!inside.CanArmOutgoing())
         {
             inside.SetDenied(true);
-            _armCounter = 0;
+            ResetArming();
             return;
+        }
+
+        // The 60-frame arming delay belongs to a specific directed port. Moving from
+        // one overlapping/adjacent activation zone to another must never carry progress.
+        if (!ReferenceEquals(_armingPort, inside))
+        {
+            _armingPort = inside;
+            _armCounter = 0;
         }
 
         bool requirement = GateUnlockRequirements.Meets(room.game, room, inside.Address);
@@ -154,9 +192,22 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
         _armCounter++;
         if (_armCounter < 60) return;
 
+        // A cross-region endpoint is part of the route's validity, not a late warp
+        // detail. Resolve it before writing vanilla-like permanent gate unlock state;
+        // otherwise a typo could permanently unlock a door that can never traverse.
+        if (inside.Data.TransitMode == WorldLinkTransitMode.CrossRegion &&
+            !WorldLinkTraversal.CanResolveCrossRegionDestination(inside))
+        {
+            inside.SetDenied(true);
+            ResetArming();
+            return;
+        }
+
         _active = inside;
+        _armingPort = null;
         _inbound = false;
         _armCounter = 0;
+        _warpPendingCounter = 0;
         GateUnlockRequirements.UnlockIfAllowed(room.game, _active.Address);
         room.game.manager.musicPlayer?.GateEvent();
         _state = State.Opening;
@@ -165,7 +216,8 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
     private void UpdateOpening()
     {
         if (_active == null) { CompleteReset(); return; }
-        if (_active.Placed?.active != true || !Belongs(_active) || (!_inbound && !_active.Data.Enabled))
+        if (_active.Placed?.active != true || !Belongs(_active) ||
+            !WorldLinkRoomRegistry.IsUniquePortAddress(room, _active) || (!_inbound && !_active.Data.Enabled))
         {
             RequestSafeClose();
             UpdateSafeClosing();
@@ -185,7 +237,8 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
     private void UpdateOpen()
     {
         if (_active == null) { CompleteReset(); return; }
-        if (_active.Placed?.active != true || !Belongs(_active) || (!_inbound && !_active.Data.Enabled))
+        if (_active.Placed?.active != true || !Belongs(_active) ||
+            !WorldLinkRoomRegistry.IsUniquePortAddress(room, _active) || (!_inbound && !_active.Data.Enabled))
         {
             RequestSafeClose();
             UpdateSafeClosing();
@@ -197,7 +250,12 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
 
         if (_inbound)
         {
-            if (_openSafeCounter > 10 && (_active.AllProgressPlayersOnSide(interior: true) || !AnyProgressPlayerNearActivePort()))
+            // In co-op, shortcut arrivals are emitted one player at a time. Do not use
+            // "nobody is near the gate" as a close condition: the first player can move
+            // away before another player's vessel is spat into this room. Close only
+            // after every progression player exists in this room and every BodyChunk is
+            // safely beyond the physical panel on the interior side.
+            if (_openSafeCounter > 10 && _active.AllProgressPlayersClearInside())
             {
                 _state = State.Closing;
             }
@@ -210,6 +268,7 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
             {
                 if (WorldLinkTraversal.BeginCrossRegion(_active))
                 {
+                    _warpPendingCounter = 0;
                     _state = State.WarpPending;
                 }
                 else
@@ -225,6 +284,23 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
         {
             _state = State.Closing;
         }
+    }
+
+    private void UpdateWarpPending()
+    {
+        if (_active == null)
+        {
+            CompleteReset();
+            return;
+        }
+
+        _active.HoldCurrentPose();
+        _warpPendingCounter++;
+        if (_warpPendingCounter <= WarpPendingTimeoutFrames) return;
+
+        Plugin.Logger?.LogError($"WorldLink: cross-region warp from {_active.Address} did not hand off after {WarpPendingTimeoutFrames} frames. Closing the source gate fail-safe.");
+        _state = State.SafeClosing;
+        UpdateSafeClosing();
     }
 
     private void UpdateClosing() => AdvanceClosing(safeReset: false);
@@ -262,10 +338,11 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
 
     private void RequestSafeClose()
     {
-        if (_active == null || _state == State.WarpPending) return;
+        if (_active == null) return;
         _inbound = false;
-        _armCounter = 0;
+        ResetArming();
         _openSafeCounter = 0;
+        _warpPendingCounter = 0;
         _active.SetDenied(false);
         _state = State.SafeClosing;
     }
@@ -293,6 +370,12 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
         }
     }
 
+    private void ResetArming()
+    {
+        _armingPort = null;
+        _armCounter = 0;
+    }
+
     private void CompleteReset()
     {
         if (_active != null)
@@ -303,8 +386,9 @@ internal sealed class MultiGateControllerRuntime : UpdatableAndDeletable
 
         _active = null;
         _inbound = false;
-        _armCounter = 0;
+        ResetArming();
         _openSafeCounter = 0;
+        _warpPendingCounter = 0;
         _state = State.Idle;
 
         if (_retireAfterClose)
