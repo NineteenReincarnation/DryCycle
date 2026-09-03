@@ -250,6 +250,7 @@ internal static class WeatherSpatialMapMenuRuntime
                 panel.collapsed = false;
             }
 
+            AddTargetPicker(editor);
             AddShortcutLegend(editor);
             mapPage.subNodes.Add(editor);
             editor.Refresh();
@@ -259,6 +260,241 @@ internal static class WeatherSpatialMapMenuRuntime
         {
             Plugin.Logger?.LogError("DryCycle Weather Zones: failed to open map editor: " + ex);
             CloseEditor(mapPage, refresh: true);
+        }
+    }
+
+    private static void AddTargetPicker(DevUINode editor)
+    {
+        if (editor == null)
+        {
+            return;
+        }
+
+        RemoveLegacyTargetControls(editor);
+        TargetPickerNode picker = new(editor.owner, editor, editor);
+        editor.subNodes.Add(picker);
+    }
+
+    private static void RemoveLegacyTargetControls(DevUINode editor)
+    {
+        for (int i = editor.subNodes.Count - 1; i >= 0; i--)
+        {
+            DevUINode node = editor.subNodes[i];
+            if (node == null ||
+                (node.IDstring != "TargetPrev" &&
+                 node.IDstring != "Target" &&
+                 node.IDstring != "TargetNext"))
+            {
+                continue;
+            }
+
+            editor.subNodes.RemoveAt(i);
+            node.ClearSprites();
+        }
+    }
+
+    private sealed class TargetPickerNode : DevUINode, IDevUISignals
+    {
+        private const string MainButtonId = "DryCycle_Weather_Target_Picker";
+        private const string ItemPrefix = "DryCycle_Weather_Target_Item_";
+
+        private readonly DevUINode _editor;
+        private readonly FieldInfo _targetIndexField;
+        private readonly MethodInfo _refreshPreviewTargetMethod;
+        private readonly MethodInfo _updateStateLabelsMethod;
+        private readonly Button _button;
+        private TargetPickerPopup _popup;
+
+        internal TargetPickerNode(
+            DevInterface.DevUI owner,
+            DevUINode parent,
+            DevUINode editor)
+            : base(owner, "DryCycle_Weather_Target_Picker_Node", parent)
+        {
+            _editor = editor;
+            Type editorType = editor.GetType();
+            _targetIndexField = editorType.GetField(
+                "_targetIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            _refreshPreviewTargetMethod = editorType.GetMethod(
+                "RefreshPreviewTarget",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            _updateStateLabelsMethod = editorType.GetMethod(
+                "UpdateStateLabels",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            _button = new Button(
+                owner,
+                MainButtonId,
+                this,
+                new Vector2(8f, 536f),
+                284f,
+                string.Empty);
+            subNodes.Add(_button);
+            RefreshButtonText();
+        }
+
+        public override void Update()
+        {
+            base.Update();
+            RefreshButtonText();
+
+            if (_popup != null &&
+                owner != null &&
+                owner.mouseClick &&
+                !_button.MouseOver &&
+                !_popup.MouseOver)
+            {
+                ClosePopup();
+            }
+        }
+
+        public override void ClearSprites()
+        {
+            ClosePopup();
+            base.ClearSprites();
+        }
+
+        public void Signal(DevUISignalType type, DevUINode sender, string message)
+        {
+            if (type != DevUISignalType.ButtonClick || sender == null)
+            {
+                return;
+            }
+
+            if (sender.IDstring == MainButtonId)
+            {
+                if (_popup == null)
+                {
+                    OpenPopup();
+                }
+                else
+                {
+                    ClosePopup();
+                }
+                return;
+            }
+
+            if (sender.IDstring.StartsWith(ItemPrefix, StringComparison.Ordinal) &&
+                int.TryParse(sender.IDstring.Substring(ItemPrefix.Length), out int index))
+            {
+                SelectTarget(index);
+            }
+        }
+
+        private void OpenPopup()
+        {
+            if (_popup != null)
+            {
+                return;
+            }
+
+            int count = WeatherSpatialCatalog.AllTargets.Count;
+            float rowHeight = 20f;
+            float height = Mathf.Max(70f, 34f + count * rowHeight);
+            float bottom = 536f - height;
+
+            _popup = new TargetPickerPopup(
+                owner,
+                this,
+                new Vector2(8f, bottom),
+                new Vector2(284f, height),
+                this);
+            subNodes.Add(_popup);
+            _popup.BuildItems(ItemPrefix, rowHeight);
+            _popup.Refresh();
+        }
+
+        private void ClosePopup()
+        {
+            if (_popup == null)
+            {
+                return;
+            }
+
+            subNodes.Remove(_popup);
+            _popup.ClearSprites();
+            _popup = null;
+        }
+
+        private void SelectTarget(int index)
+        {
+            int count = WeatherSpatialCatalog.AllTargets.Count;
+            if (count <= 0 || index < 0 || index >= count || _targetIndexField == null)
+            {
+                ClosePopup();
+                return;
+            }
+
+            _targetIndexField.SetValue(_editor, index);
+            _refreshPreviewTargetMethod?.Invoke(_editor, null);
+            _updateStateLabelsMethod?.Invoke(_editor, null);
+            ClosePopup();
+            RefreshButtonText();
+        }
+
+        private int GetTargetIndex()
+        {
+            if (_targetIndexField == null || _editor == null)
+            {
+                return 0;
+            }
+
+            object value = _targetIndexField.GetValue(_editor);
+            return value is int index ? index : 0;
+        }
+
+        private void RefreshButtonText()
+        {
+            int count = WeatherSpatialCatalog.AllTargets.Count;
+            if (count <= 0)
+            {
+                _button.Text = "Select Weather";
+                return;
+            }
+
+            int index = Mathf.Clamp(GetTargetIndex(), 0, count - 1);
+            _button.Text = "▼  " + WeatherSpatialCatalog.AllTargets[index].DisplayName;
+        }
+    }
+
+    private sealed class TargetPickerPopup : Panel, IDevUISignals
+    {
+        private readonly TargetPickerNode _picker;
+
+        internal TargetPickerPopup(
+            DevInterface.DevUI owner,
+            DevUINode parent,
+            Vector2 pos,
+            Vector2 size,
+            TargetPickerNode picker)
+            : base(owner, "DryCycle_Weather_Target_Popup", parent, pos, size, "Select Weather")
+        {
+            _picker = picker;
+        }
+
+        internal void BuildItems(string itemPrefix, float rowHeight)
+        {
+            int count = WeatherSpatialCatalog.AllTargets.Count;
+            float y = size.y - 28f - rowHeight;
+            for (int i = 0; i < count; i++)
+            {
+                WeatherSpatialTarget target = WeatherSpatialCatalog.AllTargets[i];
+                Button item = new(
+                    owner,
+                    itemPrefix + i,
+                    this,
+                    new Vector2(8f, y),
+                    size.x - 16f,
+                    target.DisplayName);
+                subNodes.Add(item);
+                y -= rowHeight;
+            }
+        }
+
+        public void Signal(DevUISignalType type, DevUINode sender, string message)
+        {
+            _picker?.Signal(type, sender, message);
         }
     }
 
