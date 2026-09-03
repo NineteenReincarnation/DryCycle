@@ -28,8 +28,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 owner,
                 "DryCycle_Weather_Preview_Percent_Input",
                 parent,
-                new Vector2(226f, 470f),
-                66f,
+                new Vector2(250f, 470f),
+                42f,
                 "75%")
         {
             _editor = editor;
@@ -56,10 +56,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 "DryCycle_Weather_Preview_Percent_Label",
                 parent,
                 new Vector2(152f, 470f),
-                70f,
-                "Intensity %");
-            label.spriteColor = new Color(0f, 0f, 0f);
-            label.textColor = new Color(1f, 1f, 1f);
+                96f,
+                "PreviewIntensity");
             parent.subNodes.Add(label);
         }
 
