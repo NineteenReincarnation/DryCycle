@@ -23,7 +23,7 @@ internal readonly struct FoehnDebugSnapshot
 
 /// <summary>
 /// Developer diagnostics for Foehn. Ctrl+Shift+K forces full Foehn in the camera
-/// room; Ctrl+Shift+L cycles final/flow/terrain/streak debug views.
+/// room; Ctrl+Shift+L cycles final/flow/terrain/dust-pressure debug views.
 /// </summary>
 internal static class FoehnDebugRuntime
 {
@@ -168,7 +168,7 @@ internal static class FoehnDebugRuntime
             anchorY = 1f,
             x = 12f,
             y = Futile.screen.pixelHeight - 142f,
-            scaleX = 590f,
+            scaleX = 610f,
             scaleY = 100f,
             color = Color.black,
             alpha = 0.78f
@@ -198,13 +198,14 @@ internal static class FoehnDebugRuntime
 
         string atmosphere = DryCycleShaderAssets.HasFoehnAtmosphere ? "YES" : "NO";
         string textures = FoehnWindField.IsAvailable ? "YES" : "NO";
+        string dust = FoehnDustField.IsAvailable ? "YES" : "NO";
 
         if (!FoehnWeatherRuntime.TryGetDebugSnapshot(room, out FoehnDebugSnapshot snapshot))
         {
             _label.text =
                 "Foehn Debug\n" +
                 $"View: {DebugModeName(_debugMode)}   Forced: {(_forceWeather ? "YES" : "NO")}   Atmosphere: {atmosphere}\n" +
-                $"WindTextures: {textures}\n" +
+                $"WindTextures: {textures}   DustField: {dust}\n" +
                 "No Foehn controller in camera room\n" +
                 "Ctrl+Shift+K force   Ctrl+Shift+L view";
             return;
@@ -213,7 +214,7 @@ internal static class FoehnDebugRuntime
         _label.text =
             "Foehn Debug\n" +
             $"View: {DebugModeName(_debugMode)}   Forced: {(_forceWeather ? "YES" : "NO")}   Atmosphere: {atmosphere}\n" +
-            $"WindTextures: {textures}   TerrainField: {(snapshot.TerrainFieldAvailable ? "YES" : "NO")}\n" +
+            $"WindTextures: {textures}   DustField: {dust}   TerrainField: {(snapshot.TerrainFieldAvailable ? "YES" : "NO")}\n" +
             $"Intensity {snapshot.Intensity:0.00}   Wind ({snapshot.WindDirection.x:0.00}, {snapshot.WindDirection.y:0.00})\n" +
             "Ctrl+Shift+K force   Ctrl+Shift+L view";
     }
@@ -224,7 +225,7 @@ internal static class FoehnDebugRuntime
         {
             1 => "FLOW / GUST",
             2 => "TERRAIN FIELD",
-            3 => "WIND STREAKS",
+            3 => "DUST / PRESSURE",
             _ => "FINAL"
         };
     }
