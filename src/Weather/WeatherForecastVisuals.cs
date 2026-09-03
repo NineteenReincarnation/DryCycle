@@ -21,7 +21,8 @@ internal enum WeatherForecastVisualKind
     DeathRain,
     Fog,
     DenseFog,
-    HeatWave
+    HeatWave,
+    Foehn
 }
 
 internal enum WeatherForecastAnimation
@@ -78,6 +79,10 @@ internal static class WeatherForecastVisualCatalog
     // dangerous high-temperature weather window on the RainMeter.
     internal static readonly Color HeatWaveColor = new(0.96f, 0.12f, 0.075f);
 
+    // Foehn is hot ochre/orange: visibly hotter and more directional in character than
+    // SandStorm's pale sand yellow, while remaining distinct from HeatWave's red.
+    internal static readonly Color FoehnColor = new(0.95f, 0.43f, 0.105f);
+
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
     {
         return kind switch
@@ -127,6 +132,12 @@ internal static class WeatherForecastVisualCatalog
                 WeatherForecastAnimation.HeatShimmer,
                 shakeAmplitudePixels: 0.42f),
 
+            WeatherForecastVisualKind.Foehn => new WeatherForecastVisualStyle(
+                FoehnColor,
+                FoehnColor,
+                WeatherForecastAnimation.HeatShimmer,
+                shakeAmplitudePixels: 0.58f),
+
             _ => new WeatherForecastVisualStyle(
                 Color.clear,
                 Color.clear,
@@ -172,6 +183,10 @@ internal static class WeatherForecastVisualCatalog
 
             case "HEATWAVE" when eventKind == WeatherScheduleEventKind.Weather:
                 visualKind = WeatherForecastVisualKind.HeatWave;
+                return true;
+
+            case "FOEHN" when eventKind == WeatherScheduleEventKind.Weather:
+                visualKind = WeatherForecastVisualKind.Foehn;
                 return true;
 
             case "SANDSTORM":
