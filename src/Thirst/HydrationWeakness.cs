@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using DryCycle.TemperatureSystem;
 using RWCustom;
@@ -63,11 +64,12 @@ internal static class HydrationWeakness
     internal const float InitialResistance = 50f;
 
     private const float TickSeconds = 1f / ThirstConstants.SimulationTicksPerSecond;
+    private const string CarrySaveKey = "DRYCYCLEDEHYDRATIONV1";
 
     // Bind physiological debt to the abstract creature rather than the current
     // realized Player instance. Rain World can destroy/recreate Player objects during
     // abstraction, room transitions and Jolly processing; the AbstractCreature is the
-    // stable identity that survives those transitions.
+    // stable identity that survives those transitions inside a running StorySession.
     private static ConditionalWeakTable<AbstractCreature, DehydrationState> _states = new();
     private static bool _enabled;
 
@@ -356,24 +358,28 @@ internal static class HydrationWeakness
         bool survived,
         bool newMalnourished)
     {
-        orig(self, game, survived, newMalnourished);
-
-        // Watcher's spinning-top encounter uses SessionEnded as a special warp/save
-        // path. It is not a shelter sleep and must not restore dehydration resistance.
         bool specialWarpSave = self != null && self.sessionEndingFromSpinningTopEncounter;
-        if (!survived || specialWarpSave || game?.Players == null)
-        {
-            return;
-        }
 
-        foreach (AbstractCreature abstractPlayer in game.Players)
+        if (survived)
         {
-            if (abstractPlayer != null &&
-                _states.TryGetValue(abstractPlayer, out DehydrationState state))
+            if (specialWarpSave)
             {
-                state.ResetForNewCycle();
+                // Watcher's spinning-top/warp-point path ends the current StorySession
+                // and can immediately construct a new Game process. Preserve the current
+                // physiological state in unrecognized save data so that process switch
+                // does not become a free dehydration cure.
+                WriteCarryToSave(self, game);
+            }
+            else
+            {
+                // A genuine successful hibernation is the only session end that resets
+                // dehydration and grants the next cycle's 50-point resistance buffer.
+                ClearSavedCarry(self);
+                ResetRuntimeStatesForNewCycle(game);
             }
         }
+
+        orig(self, game, survived, newMalnourished);
     }
 
     private static void UpdateDebt(Player player, DehydrationState state)
@@ -884,7 +890,20 @@ internal static class HydrationWeakness
     private static DehydrationState GetOrCreateState(Player player)
     {
         AbstractCreature abstractPlayer = player?.abstractCreature;
-        return abstractPlayer == null ? null : _states.GetOrCreateValue(abstractPlayer);
+        if (abstractPlayer == null)
+        {
+            return null;
+        }
+
+        if (_states.TryGetValue(abstractPlayer, out DehydrationState existing))
+        {
+            return existing;
+        }
+
+        DehydrationState created = new();
+        RestoreSavedCarry(player, created);
+        _states.Add(abstractPlayer, created);
+        return created;
     }
 
     private static bool TryGetState(Player player, out DehydrationState state)
@@ -897,6 +916,139 @@ internal static class HydrationWeakness
 
         state = null;
         return false;
+    }
+
+    private static void RestoreSavedCarry(Player player, DehydrationState state)
+    {
+        RainWorldGame game = player?.room?.game ?? player?.abstractCreature?.world?.game;
+        SaveState saveState = game?.GetStorySession?.saveState;
+        int playerNumber = player?.playerState?.playerNumber ?? 0;
+
+        if (!TryReadSavedCarry(saveState, playerNumber, out float debt, out float resistance))
+        {
+            return;
+        }
+
+        state.Debt = Mathf.Clamp(debt, 0f, LethalDebt);
+        state.Resistance = Mathf.Clamp(resistance, 0f, InitialResistance);
+    }
+
+    private static void WriteCarryToSave(SaveState saveState, RainWorldGame game)
+    {
+        ClearSavedCarry(saveState);
+
+        if (saveState?.unrecognizedSaveStrings == null || game?.Players == null)
+        {
+            return;
+        }
+
+        foreach (AbstractCreature abstractPlayer in game.Players)
+        {
+            if (abstractPlayer?.state is not PlayerState playerState ||
+                !_states.TryGetValue(abstractPlayer, out DehydrationState state))
+            {
+                continue;
+            }
+
+            // Default state needs no serialized marker. Partial resistance depletion is
+            // still meaningful even when Debt is zero, so preserve either deviation.
+            if (state.Debt <= 0.0001f &&
+                Mathf.Abs(state.Resistance - InitialResistance) <= 0.0001f)
+            {
+                continue;
+            }
+
+            saveState.unrecognizedSaveStrings.Add(
+                GetCarrySavePrefix(playerState.playerNumber) +
+                state.Debt.ToString("0.###", CultureInfo.InvariantCulture) + "," +
+                state.Resistance.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static void ResetRuntimeStatesForNewCycle(RainWorldGame game)
+    {
+        if (game?.Players == null)
+        {
+            return;
+        }
+
+        foreach (AbstractCreature abstractPlayer in game.Players)
+        {
+            if (abstractPlayer != null &&
+                _states.TryGetValue(abstractPlayer, out DehydrationState state))
+            {
+                state.ResetForNewCycle();
+            }
+        }
+    }
+
+    private static void ClearSavedCarry(SaveState saveState)
+    {
+        if (saveState?.unrecognizedSaveStrings == null)
+        {
+            return;
+        }
+
+        string mainPrefix = GetCarrySavePrefix(0);
+        string coopPrefix = CarrySaveKey + "P";
+        saveState.unrecognizedSaveStrings.RemoveAll(entry =>
+            entry != null &&
+            (entry.StartsWith(mainPrefix, StringComparison.Ordinal) ||
+             entry.StartsWith(coopPrefix, StringComparison.Ordinal)));
+    }
+
+    private static bool TryReadSavedCarry(
+        SaveState saveState,
+        int playerNumber,
+        out float debt,
+        out float resistance)
+    {
+        debt = 0f;
+        resistance = InitialResistance;
+
+        if (saveState?.unrecognizedSaveStrings == null)
+        {
+            return false;
+        }
+
+        string prefix = GetCarrySavePrefix(playerNumber);
+        foreach (string entry in saveState.unrecognizedSaveStrings)
+        {
+            if (entry == null || !entry.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string payload = entry.Substring(prefix.Length);
+            string[] parts = payload.Split(',');
+            if (parts.Length < 2 ||
+                !float.TryParse(
+                    parts[0],
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out float parsedDebt) ||
+                !float.TryParse(
+                    parts[1],
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out float parsedResistance))
+            {
+                continue;
+            }
+
+            debt = parsedDebt;
+            resistance = parsedResistance;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string GetCarrySavePrefix(int playerNumber)
+    {
+        return playerNumber <= 0
+            ? CarrySaveKey + "<svB>"
+            : CarrySaveKey + "P" + playerNumber + "<svB>";
     }
 
     private static float GetAverageBodyHeat(Player player)
