@@ -21,7 +21,7 @@ internal static class VanillaDevUIShortcutRuntime
     private const int MaxHistory = 64;
     private const string WeatherEditorId = "DryCycle_WeatherSpatial";
 
-    private static ConditionalWeakTable<DevUI, SessionState> _states = new();
+    private static ConditionalWeakTable<global::DevInterface.DevUI, SessionState> _states = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -43,11 +43,13 @@ internal static class VanillaDevUIShortcutRuntime
         }
 
         On.DevInterface.DevUI.Update -= DevUI_Update;
-        _states = new ConditionalWeakTable<DevUI, SessionState>();
+        _states = new ConditionalWeakTable<global::DevInterface.DevUI, SessionState>();
         _enabled = false;
     }
 
-    private static void DevUI_Update(On.DevInterface.DevUI.orig_Update orig, DevUI self)
+    private static void DevUI_Update(
+        On.DevInterface.DevUI.orig_Update orig,
+        global::DevInterface.DevUI self)
     {
         if (self == null)
         {
@@ -104,7 +106,7 @@ internal static class VanillaDevUIShortcutRuntime
         state.PointerDown = pointerDownAfter;
     }
 
-    private static bool TriggerNativeSave(DevUI ui)
+    private static bool TriggerNativeSave(global::DevInterface.DevUI ui)
     {
         Page page = ui?.activePage;
         if (page == null)
@@ -176,7 +178,7 @@ internal static class VanillaDevUIShortcutRuntime
         internal bool PointerDown;
         internal bool HasPendingPointerEdit => _pointerStart != null;
 
-        internal void SyncScope(DevUI ui)
+        internal void SyncScope(global::DevInterface.DevUI ui)
         {
             if (!IsSameScope(ui))
             {
@@ -184,14 +186,14 @@ internal static class VanillaDevUIShortcutRuntime
             }
         }
 
-        internal bool IsSameScope(DevUI ui)
+        internal bool IsSameScope(global::DevInterface.DevUI ui)
         {
             return ReferenceEquals(_page, ui?.activePage) &&
                    ReferenceEquals(_roomSettings, ui?.room?.roomSettings) &&
                    ReferenceEquals(_world, ResolveWorld(ui));
         }
 
-        internal void ResetScope(DevUI ui)
+        internal void ResetScope(global::DevInterface.DevUI ui)
         {
             _page = ui?.activePage;
             _roomSettings = ui?.room?.roomSettings;
@@ -201,12 +203,12 @@ internal static class VanillaDevUIShortcutRuntime
             _redo.Clear();
         }
 
-        internal void BeginPointerEdit(DevUI ui)
+        internal void BeginPointerEdit(global::DevInterface.DevUI ui)
         {
             _pointerStart = DevSnapshot.Capture(ui);
         }
 
-        internal void CommitPointerEdit(DevUI ui)
+        internal void CommitPointerEdit(global::DevInterface.DevUI ui)
         {
             DevSnapshot before = _pointerStart;
             _pointerStart = null;
@@ -229,7 +231,7 @@ internal static class VanillaDevUIShortcutRuntime
             _redo.Clear();
         }
 
-        internal void Undo(DevUI ui)
+        internal void Undo(global::DevInterface.DevUI ui)
         {
             if (_pointerStart != null || _undo.Count == 0)
             {
@@ -247,7 +249,7 @@ internal static class VanillaDevUIShortcutRuntime
             _redo.Add(entry);
         }
 
-        internal void Redo(DevUI ui)
+        internal void Redo(global::DevInterface.DevUI ui)
         {
             if (_pointerStart != null || _redo.Count == 0)
             {
@@ -265,7 +267,7 @@ internal static class VanillaDevUIShortcutRuntime
             _undo.Add(entry);
         }
 
-        private static World ResolveWorld(DevUI ui)
+        private static World ResolveWorld(global::DevInterface.DevUI ui)
         {
             if (ui?.activePage is MapPage mapPage)
             {
@@ -303,9 +305,9 @@ internal static class VanillaDevUIShortcutRuntime
         internal bool SameState(DevSnapshot other) =>
             IsCompatibleWith(other) && string.Equals(Fingerprint, other.Fingerprint, StringComparison.Ordinal);
 
-        internal abstract bool Restore(DevUI ui);
+        internal abstract bool Restore(global::DevInterface.DevUI ui);
 
-        internal static DevSnapshot Capture(DevUI ui)
+        internal static DevSnapshot Capture(global::DevInterface.DevUI ui)
         {
             Page page = ui?.activePage;
             if (page == null)
@@ -379,7 +381,7 @@ internal static class VanillaDevUIShortcutRuntime
             return serialized == null ? null : new RoomSettingsSnapshot(settings, serialized);
         }
 
-        internal override bool Restore(DevUI ui)
+        internal override bool Restore(global::DevInterface.DevUI ui)
         {
             RoomSettings current = ui?.room?.roomSettings;
             if (current == null || !ReferenceEquals(current, _target))
@@ -506,7 +508,7 @@ internal static class VanillaDevUIShortcutRuntime
             return new RelationshipSnapshot(copy, RelationshipFingerprint(copy));
         }
 
-        internal override bool Restore(DevUI ui)
+        internal override bool Restore(global::DevInterface.DevUI ui)
         {
             if (ui?.activePage is not RelationshipPage page)
             {
@@ -665,7 +667,7 @@ internal static class VanillaDevUIShortcutRuntime
             return new MapSnapshot(page.world, rooms, defaultAttractions, defaultNamed, materials, fingerprint);
         }
 
-        internal override bool Restore(DevUI ui)
+        internal override bool Restore(global::DevInterface.DevUI ui)
         {
             if (ui?.activePage is not MapPage page || !ReferenceEquals(page.world, _world))
             {

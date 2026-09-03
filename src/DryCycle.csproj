@@ -159,10 +159,6 @@
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.txt"
       DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt" />
     <Copy
-      Condition="!Exists('$(GameModRootDir)/world/RegionClimate.txt')"
-      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/RegionClimate.txt"
-      DestinationFiles="$(GameModRootDir)/world/RegionClimate.txt" />
-    <Copy
       Condition="!Exists('$(GameModRootDir)/world/GateUnlockRequirements.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/GateUnlockRequirements.txt"
       DestinationFiles="$(GameModRootDir)/world/GateUnlockRequirements.txt" />

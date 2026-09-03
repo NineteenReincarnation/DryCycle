@@ -10,6 +10,7 @@ using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Misc;
 using DryCycle.OptimizedVanilla;
+using DryCycle.PlayerAbility.SlugCatKarmicArmor;
 using DryCycle.Registration;
 using DryCycle.Rendering;
 using DryCycle.ShelterExts;
@@ -119,6 +120,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodPlantHooks.Disable();
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
+            SlugCatKarmicArmorRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
@@ -157,6 +159,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
+            SlugCatKarmicArmorRuntime.Enable();
             TemperatureSystemRuntime.Enable();
             DewPodHooks.Enable();
 
@@ -265,6 +268,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodPlantHooks.Disable();
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
+            SlugCatKarmicArmorRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
