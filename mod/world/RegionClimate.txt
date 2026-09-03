@@ -14,7 +14,6 @@ SU {
 
 B5 {
     HeatWave : 100
-    Foehn : 100
     SandStorm : 100
 }
 
@@ -57,10 +56,6 @@ ABCDEFG {
     HeatWave : 50
     //HeatWave 以地表热、竖向 mirage、thermal sheet 和热空气折射为核心；
     //不是独立 RoomSettings effect，也不与玩家生理状态绑定。
-
-    Foehn : 50
-    //Foehn 是强方向性的干热下沉风：room.windDirection 可覆盖默认风向；
-    //运行时会生成风场纹理、背风尾流/狭道加速地形场、强折射、阵风和风沙颗粒。
 
     SandStorm : 50
     //气象类型，当日允许该气象进入排表的概率
