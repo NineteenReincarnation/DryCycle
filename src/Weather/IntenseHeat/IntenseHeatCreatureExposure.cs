@@ -196,13 +196,7 @@ internal static class IntenseHeatCreatureExposure
                 continue;
             }
 
-            float exposure = GetExposure(creature);
-            if (exposure <= 0.001f)
-            {
-                continue;
-            }
-
-            ApplyTint(leaser, exposure);
+            ApplyTint(leaser, GetExposure(creature));
         }
     }
 
