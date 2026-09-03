@@ -179,7 +179,7 @@ internal static partial class WeatherSpatialRegistry
         Dirty = true;
     }
 
-    internal static void SetRoomRule(
+    internal static bool CanSetRoomRule(
         string regionId,
         string roomName,
         in WeatherSpatialTarget target,
@@ -189,7 +189,43 @@ internal static partial class WeatherSpatialRegistry
         string roomKey = (roomName ?? string.Empty).Trim();
         if (regionKey.Length == 0 || roomKey.Length == 0)
         {
-            return;
+            return false;
+        }
+
+        // Family rows establish the parent scope. Inherit is always allowed so old
+        // orphaned child overrides can still be removed after this prerequisite was added.
+        if (target.IsFamily || rule == WeatherSpatialRule.Inherit)
+        {
+            return true;
+        }
+
+        if (!WeatherSpatialCatalog.TryGetFamily(
+                target.Kind,
+                target.WeatherId,
+                out WeatherSpatialFamily family))
+        {
+            return false;
+        }
+
+        return IsFamilyAllowed(regionKey, roomKey, family.Id);
+    }
+
+    internal static bool SetRoomRule(
+        string regionId,
+        string roomName,
+        in WeatherSpatialTarget target,
+        WeatherSpatialRule rule)
+    {
+        string regionKey = NormalizeRegion(regionId);
+        string roomKey = (roomName ?? string.Empty).Trim();
+        if (regionKey.Length == 0 || roomKey.Length == 0)
+        {
+            return false;
+        }
+
+        if (!CanSetRoomRule(regionKey, roomKey, target, rule))
+        {
+            return false;
         }
 
         WeatherSpatialRegionRules region = GetOrCreateRegion(regionKey);
@@ -214,5 +250,6 @@ internal static partial class WeatherSpatialRegistry
         }
         TrimRegion(regionKey, region);
         Dirty = true;
+        return true;
     }
 }
