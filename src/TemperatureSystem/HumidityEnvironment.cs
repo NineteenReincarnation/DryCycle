@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using DryCycle.Weather.HeatWave;
+using DryCycle.Weather.IntenseHeat;
 using UnityEngine;
 
 namespace DryCycle.TemperatureSystem;
@@ -6,10 +9,12 @@ namespace DryCycle.TemperatureSystem;
 /// Room/local humidity query plus hydration and thermal correction rules.
 ///
 /// Humidity is signed in [-1,1]: -1 = extremely dry, 0 = neutral,
-/// +1 = extremely humid. The room value is the baseline. A unified Environment
-/// Zone carries an absolute local Humidity value; when a sample is inside one or
-/// more zones, the overlapping zone values are averaged. With no local zone, the
-/// room baseline is used.
+/// +1 = extremely humid. TemperatureSets supplies the authored room baseline.
+/// HeatWave and IntenseHeat may gradually dry the runtime room humidity without
+/// modifying that authored value. A unified Environment Zone still carries an
+/// absolute local Humidity value; when a sample is inside one or more zones, the
+/// overlapping zone values are averaged. With no local zone, the weather-adjusted
+/// room humidity is used.
 /// </summary>
 internal static class HumidityEnvironment
 {
@@ -17,10 +22,62 @@ internal static class HumidityEnvironment
     internal const float MaximumDryCoolingBonus = 0.25f;
     internal const float MaximumHumidCoolingPenalty = 0.55f;
 
+    // Weather humidity targets at full scheduled intensity.
+    internal const float HeatWaveHumidityTarget = -0.3f;
+    internal const float IntenseHeatHumidityTarget = -1f;
+
+    // Signed-humidity units changed per real-time second at the normal 40 Hz update.
+    internal const float HeatWaveDryingRatePerSecond = 0.04f;
+    internal const float IntenseHeatDryingRatePerSecond = 0.08f;
+    internal const float HumidityRecoveryRatePerSecond = 0.025f;
+
+    private const float SimulationTicksPerSecond = 40f;
+    private const float TickSeconds = 1f / SimulationTicksPerSecond;
+    private const float WeatherEpsilon = 0.0001f;
+
+    private sealed class RoomHumidityState
+    {
+        internal float CurrentHumidity;
+        internal bool Initialized;
+    }
+
+    private static ConditionalWeakTable<Room, RoomHumidityState> _roomStates = new();
+    private static bool _enabled;
+
+    internal static void Enable()
+    {
+        if (_enabled)
+        {
+            return;
+        }
+
+        _enabled = true;
+        On.Room.Update += Room_Update;
+    }
+
+    internal static void Disable()
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        On.Room.Update -= Room_Update;
+        _roomStates = new ConditionalWeakTable<Room, RoomHumidityState>();
+        _enabled = false;
+    }
+
     internal static float GetRoomHumidity(Room room)
     {
-        GetRoomNames(room, out string regionName, out string roomName);
-        return TemperatureSetsLoader.GetHumidity(regionName, roomName);
+        float authoredHumidity = GetAuthoredRoomHumidity(room);
+        if (!_enabled || room == null)
+        {
+            return authoredHumidity;
+        }
+
+        RoomHumidityState state = _roomStates.GetOrCreateValue(room);
+        EnsureInitialized(state, authoredHumidity);
+        return RoomEnvironmentProfile.ClampSigned(state.CurrentHumidity);
     }
 
     internal static float GetEffectiveHumidity(Player player)
@@ -130,9 +187,10 @@ internal static class HumidityEnvironment
     /// </summary>
     internal static float GetBodyHeatCoolingMultiplier(float bodyHeat, float humidity)
     {
-        float heatStress = Mathf.Clamp01(
-            (bodyHeat - CoolingHeatStressThreshold) /
-            (PlayerThermalModel.MaximumBodyHeat - CoolingHeatStressThreshold));
+        float heatStressRange = PlayerThermalModel.MaximumBodyHeat - CoolingHeatStressThreshold;
+        float heatStress = heatStressRange > 0f
+            ? Mathf.Clamp01((bodyHeat - CoolingHeatStressThreshold) / heatStressRange)
+            : bodyHeat > CoolingHeatStressThreshold ? 1f : 0f;
 
         if (heatStress <= 0f)
         {
@@ -153,6 +211,97 @@ internal static class HumidityEnvironment
         return GetBodyHeatCoolingMultiplier(
             bodyHeat,
             GetEffectiveHumidity(player, bodyIndex));
+    }
+
+    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    {
+        if (_enabled && self != null)
+        {
+            UpdateWeatherHumidity(self, TickSeconds);
+        }
+
+        orig(self);
+    }
+
+    private static void UpdateWeatherHumidity(Room room, float deltaTime)
+    {
+        float authoredHumidity = GetAuthoredRoomHumidity(room);
+        RoomHumidityState state = _roomStates.GetOrCreateValue(room);
+        EnsureInitialized(state, authoredHumidity);
+
+        float heatWaveIntensity = Mathf.Clamp01(
+            HeatWaveWeatherRuntime.GetAmbientHeatInfluence(room));
+        float intenseHeatIntensity = Mathf.Clamp01(
+            IntenseHeatWeatherRuntime.GetAmbientHeatInfluence(room));
+
+        float heatWaveFloor = Mathf.Min(authoredHumidity, HeatWaveHumidityTarget);
+        float heatWaveTarget = Mathf.Lerp(
+            authoredHumidity,
+            heatWaveFloor,
+            heatWaveIntensity);
+
+        float intenseHeatTarget = Mathf.Lerp(
+            authoredHumidity,
+            IntenseHeatHumidityTarget,
+            intenseHeatIntensity);
+
+        // Weather can only make the authored room climate drier, never wetter.
+        float targetHumidity = Mathf.Min(
+            authoredHumidity,
+            Mathf.Min(heatWaveTarget, intenseHeatTarget));
+        targetHumidity = RoomEnvironmentProfile.ClampSigned(targetHumidity);
+
+        float currentHumidity = state.CurrentHumidity;
+        if (Mathf.Abs(currentHumidity - targetHumidity) <= WeatherEpsilon)
+        {
+            state.CurrentHumidity = targetHumidity;
+            return;
+        }
+
+        float ratePerSecond;
+        if (currentHumidity > targetHumidity)
+        {
+            // Whichever weather currently demands the drier target controls the
+            // drying rate. IntenseHeat therefore takes over naturally as its
+            // intensity becomes strong enough to undercut HeatWave's target.
+            bool intenseHeatControls =
+                intenseHeatIntensity > WeatherEpsilon &&
+                intenseHeatTarget <= heatWaveTarget + WeatherEpsilon;
+
+            ratePerSecond = intenseHeatControls
+                ? IntenseHeatDryingRatePerSecond
+                : HeatWaveDryingRatePerSecond;
+        }
+        else
+        {
+            // Fade-out and post-weather recovery deliberately use the slower common
+            // recovery rate, preserving residual dryness after the heat has passed.
+            ratePerSecond = HumidityRecoveryRatePerSecond;
+        }
+
+        state.CurrentHumidity = Mathf.MoveTowards(
+            currentHumidity,
+            targetHumidity,
+            Mathf.Max(0f, ratePerSecond * deltaTime));
+        state.CurrentHumidity = RoomEnvironmentProfile.ClampSigned(state.CurrentHumidity);
+    }
+
+    private static float GetAuthoredRoomHumidity(Room room)
+    {
+        GetRoomNames(room, out string regionName, out string roomName);
+        return RoomEnvironmentProfile.ClampSigned(
+            TemperatureSetsLoader.GetHumidity(regionName, roomName));
+    }
+
+    private static void EnsureInitialized(RoomHumidityState state, float authoredHumidity)
+    {
+        if (state.Initialized)
+        {
+            return;
+        }
+
+        state.CurrentHumidity = RoomEnvironmentProfile.ClampSigned(authoredHumidity);
+        state.Initialized = true;
     }
 
     private static bool ContainsWorldPoint(
