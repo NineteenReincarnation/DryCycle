@@ -1,26 +1,26 @@
 using System;
 using DryCycle.DayNight;
 using DryCycle.TemperatureSystem;
-using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather.IntenseHeat;
 
 /// <summary>
-/// Room-anchored direct-sun field for IntenseHeat.
+/// Room-anchored solar field for IntenseHeat.
 ///
-/// R = direct solar exposure after terrain/local-shade occlusion
-/// G = penumbra / sun-shadow boundary response
-/// B = open-sky confidence
+/// Ordinary room terrain deliberately does NOT block this hazard. IntenseHeat is a
+/// region-scale extreme-sun event, so normal buildings do not carve the presentation
+/// into hard illuminated/shadowed pieces. Only authored environmental shade remains:
+/// RoomShade controls the room-wide transmission and SolarShadeZone controls deliberate
+/// local relief areas.
+///
+/// R = local solar transmission after SolarShadeZone attenuation
+/// G = authored shade-boundary response
+/// B = broad open solar load (room-wide; actual daylight is supplied at runtime)
 /// A = stable spatial phase
-///
-/// The field is deliberately geometry-driven instead of being a screen-space mask, so
-/// the same sun/shade logic can drive rendering, creature exposure and gameplay heat.
 /// </summary>
 internal static class IntenseHeatSolarField
 {
-    private static readonly Vector2 TowardSun = new(-0.36f, 0.933f);
-
     internal static Texture2D Build(Room room)
     {
         if (room == null || room.TileWidth <= 0 || room.TileHeight <= 0)
@@ -32,8 +32,7 @@ internal static class IntenseHeatSolarField
         {
             int width = room.TileWidth;
             int height = room.TileHeight;
-            float[] exposure = new float[width * height];
-            float[] sky = new float[width * height];
+            float[] transmission = new float[width * height];
             Color32[] pixels = new Color32[width * height];
 
             for (int y = 0; y < height; y++)
@@ -41,12 +40,8 @@ internal static class IntenseHeatSolarField
                 for (int x = 0; x < width; x++)
                 {
                     Vector2 worldPos = room.MiddleOfTile(x, y);
-                    float geometryExposure = EvaluateGeometryExposure(room, worldPos);
                     float localShade = SolarEnvironment.GetLocalShadeAt(room, worldPos);
-                    float localTransmission = 1f - Mathf.Clamp01(localShade);
-                    float direct = geometryExposure * localTransmission;
-                    exposure[y * width + x] = direct;
-                    sky[y * width + x] = EvaluateOpenSky(room, worldPos);
+                    transmission[y * width + x] = 1f - Mathf.Clamp01(localShade);
                 }
             }
 
@@ -55,16 +50,23 @@ internal static class IntenseHeatSolarField
                 for (int x = 0; x < width; x++)
                 {
                     int index = y * width + x;
-                    float center = exposure[index];
-                    float neighborhood = AverageExposure(exposure, x, y, width, height, 2);
-                    float penumbra = Mathf.Clamp01(Mathf.Abs(center - neighborhood) * 2.8f +
-                                                   neighborhood * (1f - center) * 0.75f);
+                    float center = transmission[index];
+                    float neighborhood = AverageTransmission(
+                        transmission,
+                        x,
+                        y,
+                        width,
+                        height,
+                        2);
+                    float shadeBoundary = Mathf.Clamp01(
+                        Mathf.Abs(center - neighborhood) * 3.2f +
+                        neighborhood * (1f - center) * 0.55f);
                     float phase = Hash01(x, y, width, height);
 
                     pixels[index] = new Color32(
                         ToByte(center),
-                        ToByte(penumbra),
-                        ToByte(sky[index]),
+                        ToByte(shadeBoundary),
+                        255,
                         ToByte(phase));
                 }
             }
@@ -80,13 +82,14 @@ internal static class IntenseHeatSolarField
             texture.Apply(updateMipmaps: false, makeNoLongerReadable: true);
 
             Plugin.Logger?.LogInfo(
-                $"DryCycle IntenseHeat solar exposure field generated: {width}x{height}.");
+                $"DryCycle IntenseHeat solar field generated without terrain occlusion: " +
+                $"{width}x{height}.");
             return texture;
         }
         catch (Exception ex)
         {
             Plugin.Logger?.LogWarning(
-                "DryCycle IntenseHeat could not generate the room solar field. " +
+                "DryCycle IntenseHeat could not generate its local shade field. " +
                 "The hazard will continue with room-wide sunlight fallback.");
             Plugin.Logger?.LogWarning(ex);
             return null;
@@ -109,14 +112,13 @@ internal static class IntenseHeatSolarField
 
         float roomSun = Mathf.Clamp01(SolarEnvironment.GetSunlightIntensity(room));
         float roomTransmission = 1f - Mathf.Clamp01(SolarEnvironment.GetRoomShade(room));
-        float localTransmission = 1f - Mathf.Clamp01(SolarEnvironment.GetLocalShadeAt(room, worldPos));
-        float geometry = EvaluateGeometryExposure(room, worldPos);
+        float localTransmission = 1f - Mathf.Clamp01(
+            SolarEnvironment.GetLocalShadeAt(room, worldPos));
 
-        // IntenseHeat represents exceptional daytime direct solar load. Authored
-        // Sunlight still matters, but a normally outdoor room is never allowed to look
-        // like weak sun while the hazard is active.
+        // IntenseHeat is an extreme direct-sun hazard. Ordinary terrain never blocks
+        // it; only explicit environmental shade can provide relief.
         float hazardSun = Mathf.Lerp(0.82f, 1f, roomSun);
-        return Mathf.Clamp01(geometry * localTransmission * roomTransmission * hazardSun);
+        return Mathf.Clamp01(localTransmission * roomTransmission * hazardSun);
     }
 
     internal static void Dispose(Texture2D texture)
@@ -127,85 +129,7 @@ internal static class IntenseHeatSolarField
         }
     }
 
-    private static float EvaluateGeometryExposure(Room room, Vector2 worldPos)
-    {
-        if (room == null)
-        {
-            return 0f;
-        }
-
-        Vector2 direction = TowardSun.normalized;
-        float maxDistance = Mathf.Max(room.PixelWidth, room.PixelHeight) * 1.45f;
-        float step = 12f;
-        int steps = Mathf.CeilToInt(maxDistance / step);
-
-        for (int i = 1; i <= steps; i++)
-        {
-            Vector2 sample = worldPos + direction * (i * step);
-            IntVector2 tilePos = room.GetTilePosition(sample);
-
-            // Leaving through the top/side toward the sun counts as open sky.
-            if (tilePos.x < 0 || tilePos.x >= room.TileWidth ||
-                tilePos.y < 0 || tilePos.y >= room.TileHeight)
-            {
-                return 1f;
-            }
-
-            Room.Tile tile = room.GetTile(tilePos);
-            if (IsSolarBlocker(tile))
-            {
-                return 0f;
-            }
-        }
-
-        return 1f;
-    }
-
-    private static float EvaluateOpenSky(Room room, Vector2 worldPos)
-    {
-        if (room == null)
-        {
-            return 0f;
-        }
-
-        IntVector2 origin = room.GetTilePosition(worldPos);
-        int clear = 0;
-        int total = 5;
-
-        for (int offset = -2; offset <= 2; offset++)
-        {
-            bool blocked = false;
-            int x = Mathf.Clamp(origin.x + offset, 0, room.TileWidth - 1);
-            for (int y = origin.y + 1; y < room.TileHeight; y++)
-            {
-                if (IsSolarBlocker(room.GetTile(x, y)))
-                {
-                    blocked = true;
-                    break;
-                }
-            }
-
-            if (!blocked)
-            {
-                clear++;
-            }
-        }
-
-        return clear / (float)total;
-    }
-
-    private static bool IsSolarBlocker(Room.Tile tile)
-    {
-        if (tile == null)
-        {
-            return false;
-        }
-
-        return tile.Terrain == Room.Tile.TerrainType.Solid ||
-               tile.Terrain == Room.Tile.TerrainType.Slope;
-    }
-
-    private static float AverageExposure(
+    private static float AverageTransmission(
         float[] values,
         int x,
         int y,
@@ -236,7 +160,7 @@ internal static class IntenseHeatSolarField
             }
         }
 
-        return count > 0 ? total / count : 0f;
+        return count > 0 ? total / count : 1f;
     }
 
     private static float Hash01(int x, int y, int width, int height)
