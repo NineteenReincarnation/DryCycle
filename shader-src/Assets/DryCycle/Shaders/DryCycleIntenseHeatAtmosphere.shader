@@ -230,24 +230,24 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                         h.penumbra * 0.22);
                     float heatDrive = intensity * exposureDrive;
 
-                    // The dominant displacement remains vertical. Horizontal offset is
-                    // coherent and slower, so extreme heat reads as refractive air rather
-                    // than water-like isotropic wobble.
+                    // Keep the air violently hot without making the whole camera feel
+                    // seasick. Large-scale displacement is reduced; smaller refraction
+                    // layers still provide dense boiling detail.
                     float2 macroOffset = float2(
-                        (largeA * 0.56 + largeB * 0.24) * 5.2,
-                        (largeA * 0.72 - largeB * 0.44 + largeC * 0.20) * 9.4);
+                        (largeA * 0.56 + largeB * 0.24) * 3.8,
+                        (largeA * 0.72 - largeB * 0.44 + largeC * 0.20) * 6.8);
                     macroOffset *= h.boil * heatDrive;
 
                     float2 normalOffset = float2(
-                        baseNormal.x * 4.4 + detailNormal.x * 2.0,
-                        baseNormal.y * 8.6 + detailNormal.y * 4.2);
-                    normalOffset *= heatDrive * (0.58 + h.sheet * 0.84);
+                        baseNormal.x * 3.5 + detailNormal.x * 1.55,
+                        baseNormal.y * 6.7 + detailNormal.y * 3.15);
+                    normalOffset *= heatDrive * (0.56 + h.sheet * 0.76);
 
                     float groundMirage = h.ground * h.directSun * intensity;
                     float2 mirageOffset = float2(
-                        detailNormal.x * 3.8,
-                        (mirage.g * 2.0 - 1.0) * 17.2 + baseNormal.y * 6.8);
-                    mirageOffset *= groundMirage * (0.48 + mirageBand * 0.92);
+                        detailNormal.x * 3.0,
+                        (mirage.g * 2.0 - 1.0) * 13.0 + baseNormal.y * 5.0);
+                    mirageOffset *= groundMirage * (0.44 + mirageBand * 0.82);
 
                     h.shimmer = saturate(
                         length(detailNormal) * 0.32 +
@@ -255,17 +255,17 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                         h.penumbra * 0.28);
 
                     float2 micro = float2(
-                        detailNormal.x * 1.7,
-                        detailNormal.y * 3.1) *
+                        detailNormal.x * 1.25,
+                        detailNormal.y * 2.20) *
                         intensity *
-                        (0.36 + h.directSun * 0.84);
+                        (0.34 + h.directSun * 0.76);
 
                     h.offsetPx = ClampMagnitude(
                         macroOffset + normalOffset + mirageOffset + micro,
-                        lerp(12.0, 25.5, intensity * (0.48 + h.directSun * 0.52)));
+                        lerp(9.5, 19.0, intensity * (0.48 + h.directSun * 0.52)));
                     h.blur = saturate(
                         intensity *
-                        (h.sheet * 0.48 + h.boil * 0.24 + groundMirage * 0.52));
+                        (h.sheet * 0.42 + h.boil * 0.19 + groundMirage * 0.43));
                     return h;
                 }
 
@@ -277,15 +277,41 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     if (blur <= 0.025)
                         return center;
 
-                    float2 axis = SafeNormalize(float2(flow.x * 0.44, 1.0)) * pixel * (1.1 + blur * 2.7);
+                    float2 axis = SafeNormalize(float2(flow.x * 0.44, 1.0)) * pixel * (1.0 + blur * 2.1);
                     float4 a = tex2D(_GrabTexture, uv - axis);
                     float4 b = tex2D(_GrabTexture, uv + axis);
-                    float4 c = tex2D(_GrabTexture, uv - axis * 2.15);
-                    float4 d = tex2D(_GrabTexture, uv + axis * 2.15);
-                    return lerp(center, center * 0.42 + (a + b) * 0.19 + (c + d) * 0.10, blur * 0.72);
+                    float4 c = tex2D(_GrabTexture, uv - axis * 2.05);
+                    float4 d = tex2D(_GrabTexture, uv + axis * 2.05);
+                    return lerp(center, center * 0.46 + (a + b) * 0.18 + (c + d) * 0.09, blur * 0.58);
                 }
 
-                float3 ApplyDisasterGrade(float3 color, HeatSample h, float2 screenUV)
+                float SolarBlotchField(float2 roomPx)
+                {
+                    float t = _DryCycleIntenseHeatTime;
+
+                    // Large soft hot-light islands drift diagonally through world space.
+                    // Two scales are multiplied so the result looks like irregular
+                    // sunlight breaking through turbulent dry air rather than water caustics.
+                    float2 p0 = roomPx / float2(430.0, 310.0) + float2(t * 0.030, -t * 0.014);
+                    float2 p1 = roomPx / float2(265.0, 205.0) + float2(-t * 0.021, t * 0.019);
+                    float broad =
+                        sin(p0.x * 6.2831853) * 0.46 +
+                        sin(p0.y * 6.2831853 + 1.37) * 0.34 +
+                        sin((p0.x + p0.y) * 6.2831853 + 2.21) * 0.20;
+                    float detail =
+                        sin(p1.x * 6.2831853 + 0.74) * 0.42 +
+                        cos(p1.y * 6.2831853 + 2.03) * 0.34 +
+                        sin((p1.x - p1.y) * 6.2831853 + 4.12) * 0.24;
+
+                    float islands = smoothstep(0.27, 0.79, broad * 0.70 + detail * 0.30);
+                    float breakup = 0.72 + 0.28 * smoothstep(
+                        -0.20,
+                        0.62,
+                        sin((p0.x * 1.7 - p0.y * 1.1) * 6.2831853 + t * 0.11));
+                    return saturate(islands * breakup);
+                }
+
+                float3 ApplyDisasterGrade(float3 color, HeatSample h, float2 screenUV, float2 roomPx)
                 {
                     float intensity = saturate(_DryCycleIntenseHeatIntensity);
                     float solar = saturate(_DryCycleIntenseSolarIntensity);
@@ -293,8 +319,6 @@ Shader "DryCycle/IntenseHeatAtmosphere"
 
                     // Keep the whole room unmistakably hot, but preserve enough of the
                     // source palette that the image does not collapse into one flat orange.
-                    // Blue is still strongly suppressed; it now survives as dirty neutral
-                    // contrast instead of being converted into the same ochre as everything.
                     float3 warmBase = saturate(
                         color * float3(1.10, 0.965, 0.70) +
                         luma * float3(0.065, 0.018, -0.010));
@@ -304,19 +328,25 @@ Shader "DryCycle/IntenseHeatAtmosphere"
 
                     float gradedLuma = dot(color, float3(0.299, 0.587, 0.114));
                     float shadow = 1.0 - smoothstep(0.10, 0.37, gradedLuma);
+                    float lowMid = smoothstep(0.16, 0.40, gradedLuma) *
+                                   (1.0 - smoothstep(0.48, 0.68, gradedLuma));
                     float mid = smoothstep(0.12, 0.42, gradedLuma) *
                                 (1.0 - smoothstep(0.68, 0.91, gradedLuma));
                     float highlight = smoothstep(0.52, 0.91, gradedLuma);
 
-                    // Deep burnt umber / red-brown shadows give the scene weight and
-                    // preserve silhouettes instead of lifting every dark area into orange.
+                    // More red is carried by the shadows and low mids. This creates a
+                    // burnt red-brown floor under the gold sunlight instead of flattening
+                    // the whole room into one orange-yellow hue.
                     float3 burntShadow = saturate(
-                        color * float3(0.70, 0.54, 0.44) +
-                        float3(0.026, 0.007, 0.002));
-                    color = lerp(color, burntShadow, intensity * shadow * 0.58);
+                        color * float3(0.76, 0.49, 0.38) +
+                        float3(0.036, 0.005, 0.001));
+                    color = lerp(color, burntShadow, intensity * shadow * 0.62);
 
-                    // Midtones move through ochre and antique gold. Heat-sheet variation
-                    // changes the balance spatially so broad surfaces do not share one hue.
+                    float3 rustRed = saturate(
+                        color * float3(1.06, 0.61, 0.43) +
+                        float3(0.085, 0.010, 0.001));
+                    color = lerp(color, rustRed, intensity * lowMid * 0.16);
+
                     float heatVariation = saturate(
                         0.42 + h.boil * 0.34 + h.sheet * 0.24);
                     float3 ochre = saturate(
@@ -331,29 +361,35 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                         midTone,
                         intensity * mid * (0.24 + h.directSun * 0.19));
 
-                    // The hottest luminous regions become gold/yellow, not pale orange
-                    // and never white. Only small boiling/sheet regions reach amber-orange.
                     float direct = intensity * h.directSun;
                     float3 solarGold = float3(1.0, 0.72, 0.18);
                     color = lerp(color, solarGold, highlight * direct * 0.15);
 
+                    // Dense boiling pockets now lean red-orange before they reach the
+                    // hottest gold highlights, widening the heat palette.
                     float hotPocket = intensity * h.boil * h.sheet *
                                       smoothstep(0.26, 0.82, gradedLuma);
-                    float3 amberPocket = float3(0.98, 0.46, 0.055);
-                    color = lerp(color, amberPocket, hotPocket * 0.085);
+                    float3 emberPocket = float3(0.94, 0.285, 0.028);
+                    color = lerp(color, emberPocket, hotPocket * 0.12);
 
-                    // Broad sunlight comes from above across the room rather than from a
-                    // single orange spotlight. This keeps the giant-sun feeling while
-                    // avoiding a local blob that could be mistaken for terrain exposure.
                     float verticalSun = smoothstep(0.04, 0.96, screenUV.y);
                     float solarWash = intensity * solar *
                         (0.030 + verticalSun * 0.075);
                     color = lerp(color, float3(1.0, 0.76, 0.24), solarWash);
 
-                    // Tiny spatial temperature contrast: hot rising cells lean amber,
-                    // quieter cells stay darker ochre. This is color variation, not fog.
+                    // Moving solar blotches: soft, world-space hot-light patches whose
+                    // cores are gold and whose shoulders carry orange-red. They brighten
+                    // by color shift rather than by pushing the scene toward white.
+                    float blotch = SolarBlotchField(roomPx) * intensity * solar;
+                    float blotchCore = smoothstep(0.28, 0.90, blotch) * h.directSun;
+                    float blotchRim = smoothstep(0.10, 0.66, blotch) * (1.0 - blotchCore * 0.55);
+                    float3 blotchRed = float3(0.88, 0.205, 0.028);
+                    float3 blotchGold = float3(1.0, 0.61, 0.095);
+                    color = lerp(color, blotchRed, blotchRim * 0.075);
+                    color = lerp(color, blotchGold, blotchCore * 0.105);
+
                     float thermalContrast = (h.boil - 0.5) * intensity;
-                    color += float3(0.030, 0.010, -0.012) * max(0.0, thermalContrast);
+                    color += float3(0.038, 0.006, -0.014) * max(0.0, thermalContrast);
                     color *= 1.0 - max(0.0, -thermalContrast) * float3(0.045, 0.030, 0.010);
 
                     return saturate(color);
@@ -371,26 +407,21 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                         _DryCycleIntenseHeatTime * 0.77 + screenUV.y * 5.1);
                     float amount = edge * intensity * pulse;
 
-                    // Sides glow burnt amber while corners run deeper red-brown. The
-                    // peripheral heat therefore frames the image instead of becoming a
-                    // uniform orange vignette.
                     float corner = saturate(edgeAxis.x * edgeAxis.y);
                     float lowerEdge = saturate(1.0 - screenUV.y);
-                    float3 edgeAmber = float3(0.86, 0.31, 0.035);
-                    float3 edgeBurnt = float3(0.39, 0.075, 0.018);
+                    float3 edgeAmber = float3(0.90, 0.235, 0.025);
+                    float3 edgeBurnt = float3(0.43, 0.045, 0.012);
                     float edgeDepth = saturate(corner * 0.68 + lowerEdge * 0.18);
                     float3 peripheral = lerp(edgeAmber, edgeBurnt, edgeDepth);
-                    color = lerp(color, peripheral, amount * 0.22);
+                    color = lerp(color, peripheral, amount * 0.24);
 
-                    // Very small edge-only spectral separation: an eye-overload cue,
-                    // not the central visual effect.
                     float2 radial = SafeNormalize(screenUV - 0.5);
                     float2 pixel = 1.0 / max(_screenSize, float2(1.0, 1.0));
-                    float shift = amount * 0.72;
+                    float shift = amount * 0.62;
                     float r = tex2D(_GrabTexture, grabUV + radial * pixel * shift).r;
                     float b = tex2D(_GrabTexture, grabUV - radial * pixel * shift).b;
-                    color.r = lerp(color.r, max(color.r, r), amount * 0.12);
-                    color.b = lerp(color.b, b * 0.72, amount * 0.08);
+                    color.r = lerp(color.r, max(color.r, r), amount * 0.10);
+                    color.b = lerp(color.b, b * 0.72, amount * 0.07);
                     return saturate(color);
                 }
 
@@ -412,7 +443,7 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     if (_DryCycleIntenseDebugMode == 2)
                     {
                         return float4(
-                            saturate(length(h.offsetPx) / 25.5),
+                            saturate(length(h.offsetPx) / 19.0),
                             h.boil,
                             h.ground,
                             1.0);
@@ -423,7 +454,7 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     }
 
                     float4 scene = SampleScene(grabUV, h.offsetPx, h.blur, flow);
-                    float3 color = ApplyDisasterGrade(scene.rgb, h, screenUV);
+                    float3 color = ApplyDisasterGrade(scene.rgb, h, screenUV, roomPx);
                     color = ApplyPeripheralHeat(color, grabUV, screenUV);
 
                     if (_DryCycleIntenseDebugMode == 4)
