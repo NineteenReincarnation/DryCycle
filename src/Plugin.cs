@@ -17,7 +17,6 @@ using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
 using DryCycle.Weather;
 using DryCycle.Weather.Climate;
-using DryCycle.Weather.Foehn;
 using DryCycle.Weather.HeatWave;
 using DryCycle.Weather.Scheduling;
 
@@ -91,7 +90,6 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
-            FoehnWeatherRuntime.Disable();
             HeatWaveWeatherRuntime.Disable();
             FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
@@ -197,7 +195,6 @@ internal sealed class Plugin : BaseUnityPlugin
             WeatherScheduleRuntime.Enable();
             FogWeatherRuntime.Enable();
             HeatWaveWeatherRuntime.Enable();
-            FoehnWeatherRuntime.Enable();
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
@@ -251,7 +248,6 @@ internal sealed class Plugin : BaseUnityPlugin
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
             SandstormWeatherRuntime.Disable();
-            FoehnWeatherRuntime.Disable();
             HeatWaveWeatherRuntime.Disable();
             FogWeatherRuntime.Disable();
             WeatherScheduleRuntime.Disable();
