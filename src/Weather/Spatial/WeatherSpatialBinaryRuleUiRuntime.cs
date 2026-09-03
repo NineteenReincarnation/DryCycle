@@ -13,10 +13,12 @@ namespace DryCycle.Weather.Spatial;
 internal static class WeatherSpatialBinaryRuleUiRuntime
 {
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
+    private const string OverlayPrefix = "WeatherOverlay_";
 
     private static bool _enabled;
     private static Type _editorType;
     private static FieldInfo _brushField;
+    private static FieldInfo _overviewField;
     private static FieldInfo _regionIdField;
     private static FieldInfo _targetIndexField;
     private static FieldInfo _undoField;
@@ -224,6 +226,43 @@ internal static class WeatherSpatialBinaryRuleUiRuntime
                     ? WeatherSpatialRule.Deny
                     : WeatherSpatialRule.Allow);
         }
+
+        bool overview = _overviewField?.GetValue(editor) is bool value && value;
+        if (!overview)
+        {
+            RewriteOverlayLabels(editor, regionId, target);
+        }
+    }
+
+    private static void RewriteOverlayLabels(
+        DevUINode editor,
+        string regionId,
+        in WeatherSpatialTarget target)
+    {
+        if (editor?.subNodes == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < editor.subNodes.Count; i++)
+        {
+            DevUINode node = editor.subNodes[i];
+            if (node == null ||
+                node.IDstring == null ||
+                !node.IDstring.StartsWith(OverlayPrefix, StringComparison.Ordinal) ||
+                node.fLabels == null ||
+                node.fLabels.Count == 0)
+            {
+                continue;
+            }
+
+            string roomName = node.IDstring.Substring(OverlayPrefix.Length);
+            bool allowed = target.IsFamily
+                ? WeatherSpatialRegistry.IsFamilyAllowed(regionId, roomName, target.FamilyId)
+                : WeatherSpatialRegistry.IsAllowed(regionId, roomName, target.Kind, target.WeatherId);
+
+            node.fLabels[0].text = allowed ? "A" : "F";
+        }
     }
 
     private static string RuleText(WeatherSpatialRule rule)
@@ -336,6 +375,7 @@ internal static class WeatherSpatialBinaryRuleUiRuntime
         _editorType = type;
         BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
         _brushField = type.GetField("_brush", fields);
+        _overviewField = type.GetField("_overview", fields);
         _regionIdField = type.GetField("_regionId", fields);
         _targetIndexField = type.GetField("_targetIndex", fields);
         _undoField = type.GetField("_undo", fields);
@@ -347,6 +387,7 @@ internal static class WeatherSpatialBinaryRuleUiRuntime
     {
         _editorType = null;
         _brushField = null;
+        _overviewField = null;
         _regionIdField = null;
         _targetIndexField = null;
         _undoField = null;
