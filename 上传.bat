@@ -45,10 +45,7 @@ if errorlevel 2 (
 
 git diff --cached --quiet
 if errorlevel 1 (
-    set "COMMIT_MSG="
-    set /p "COMMIT_MSG=请输入提交说明（直接回车使用 Update DryCycle）: "
-    if not defined COMMIT_MSG set "COMMIT_MSG=Update DryCycle"
-    git commit -m "%COMMIT_MSG%"
+    call :commit_changes
     if errorlevel 1 goto :fail
 ) else (
     echo [信息] 没有新的工作区修改需要提交；将尝试推送已有本地提交。
@@ -67,6 +64,13 @@ git status -sb
 echo.
 pause
 exit /b 0
+
+:commit_changes
+set "COMMIT_MSG="
+set /p "COMMIT_MSG=请输入提交说明（直接回车使用 Update DryCycle）: "
+if not defined COMMIT_MSG set "COMMIT_MSG=Update DryCycle"
+git commit -m "%COMMIT_MSG%"
+exit /b %errorlevel%
 
 :fail
 echo.
