@@ -20,6 +20,10 @@ internal static class ThermalWaterLoss
     internal const float BodyHeatWaterLossExponent = 2f;
     internal const float MaxNominalBodyHeatWaterLossPerSecond = 1f;
 
+    // Compatibility alias: 1.0 remains the nominal BodyHeat stress point and still
+    // corresponds to 1 WV/s before the >1.0 extreme-heat ladder takes over.
+    internal const float MaxBodyHeatWaterLossPerSecond = MaxNominalBodyHeatWaterLossPerSecond;
+
     // BodyHeat above the nominal 1.0 stress point enters a deliberately discrete
     // dehydration ladder. Runtime BodyHeat itself is capped at 2.0 by
     // PlayerThermalModel; this function also clamps independently so callers cannot
