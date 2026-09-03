@@ -286,15 +286,20 @@ internal static class WeatherSpatialSelectionUiCleanup
             }
 
             int count = WeatherSpatialCatalog.AllTargets.Count;
-            float rowHeight = 20f;
+            const float rowHeight = 20f;
+            const float popupWidth = 300f;
+            const float popupGap = 10f;
             float height = Mathf.Max(70f, 34f + count * rowHeight);
             float bottom = 532f - height;
 
+            // Keep the picker outside the main Weather Zones panel. Its right edge
+            // stops 10 px before the panel, so selecting weather never covers or
+            // accidentally activates Overview/Brush/Preview/Save controls underneath.
             _popup = new PickerPopup(
                 owner,
                 this,
-                new Vector2(8f, bottom),
-                new Vector2(284f, height),
+                new Vector2(-(popupWidth + popupGap), bottom),
+                new Vector2(popupWidth, height),
                 this);
             subNodes.Add(_popup);
             _popup.BuildItems(ItemPrefix, rowHeight);
@@ -403,8 +408,7 @@ internal static class WeatherSpatialSelectionUiCleanup
                 base.Update();
                 if (owner != null && owner.mouseClick && MouseOver)
                 {
-                    // Prevent a popup click from falling through to the old editor
-                    // controls covered by the list.
+                    // Prevent a popup click from falling through to the map below it.
                     owner.mouseClick = false;
                 }
             }

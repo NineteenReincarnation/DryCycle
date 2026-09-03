@@ -16,6 +16,7 @@ internal static class WeatherSpatialMapMenuRuntime
 {
     private const string MenuButtonId = "DryCycle_Weather_Zones_Button";
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
+    private const string TargetPopupId = "DryCycle_Weather_Target_Popup_Fixed";
 
     private static bool _enabled;
     private static ConstructorInfo _editorConstructor;
@@ -137,6 +138,14 @@ internal static class WeatherSpatialMapMenuRuntime
             return true;
         }
 
+        // The weather picker deliberately opens to the left of the main editor panel.
+        // Because that popup sits outside editorRect, include it explicitly so LMB does
+        // not pan the map and RMB does not paint rooms through the popup.
+        if (IsMouseOverNode(editor, TargetPopupId))
+        {
+            return true;
+        }
+
         if (mapPage?.subNodes == null)
         {
             return false;
@@ -150,6 +159,35 @@ internal static class WeatherSpatialMapMenuRuntime
                 continue;
             }
             if (node is Button button && button.MouseOver)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsMouseOverNode(DevUINode root, string id)
+    {
+        if (root == null)
+        {
+            return false;
+        }
+
+        if (string.Equals(root.IDstring, id, StringComparison.Ordinal) &&
+            root is RectangularDevUINode rect &&
+            rect.MouseOver)
+        {
+            return true;
+        }
+
+        if (root.subNodes == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < root.subNodes.Count; i++)
+        {
+            if (IsMouseOverNode(root.subNodes[i], id))
             {
                 return true;
             }
