@@ -79,6 +79,7 @@ internal static partial class WeatherSpatialRegistry
         string regionId,
         out WeatherSpatialRegionSchedule schedule)
     {
+        EnsureLegacyScheduleMigration();
         return RegionSchedules.TryGetValue(NormalizeRegion(regionId), out schedule);
     }
 
@@ -86,6 +87,7 @@ internal static partial class WeatherSpatialRegistry
         string regionId,
         out RegionClimateProfile profile)
     {
+        EnsureLegacyScheduleMigration();
         profile = null;
         string regionKey = NormalizeRegion(regionId);
         if (regionKey.Length == 0 ||
