@@ -11,7 +11,7 @@ namespace DryCycle.Weather.Spatial;
 /// weather picker so it lives in the editor's coordinate space, and replaces the
 /// preview +/- controls with a directly editable percentage field.
 /// </summary>
-internal static class WeatherSpatialSelectionUiCleanup
+internal static partial class WeatherSpatialSelectionUiCleanup
 {
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string MarkerId = "DryCycle_Weather_SelectionUi_Clean";
@@ -48,8 +48,14 @@ internal static class WeatherSpatialSelectionUiCleanup
         orig(self);
 
         DevUINode editor = FindEditor(self);
-        if (editor == null || HasMarker(editor))
+        if (editor == null)
         {
+            return;
+        }
+
+        if (HasMarker(editor))
+        {
+            RefreshForbiddenTerminology(editor);
             return;
         }
 
@@ -99,6 +105,7 @@ internal static class WeatherSpatialSelectionUiCleanup
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
         editor.subNodes.Add(new CleanupMarker(editor.owner, editor));
+        RefreshForbiddenTerminology(editor);
         editor.Refresh();
     }
 
@@ -187,425 +194,33 @@ internal static class WeatherSpatialSelectionUiCleanup
         node.Refresh();
     }
 
-    private sealed class FixedTargetPicker : PositionedDevUINode, IDevUISignals
+    private static void RefreshForbiddenTerminology(DevUINode root)
     {
-        private const string MainButtonId = "DryCycle_Weather_Target_Picker_Fixed";
-        private const string ItemPrefix = "DryCycle_Weather_Target_Item_Fixed_";
-
-        private readonly DevUINode _editor;
-        private readonly FieldInfo _targetIndexField;
-        private readonly MethodInfo _refreshPreviewTargetMethod;
-        private readonly MethodInfo _updateStateLabelsMethod;
-        private readonly Button _button;
-        private PickerPopup _popup;
-
-        internal FixedTargetPicker(
-            DevInterface.DevUI owner,
-            DevUINode parent,
-            DevUINode editor)
-            : base(owner, "DryCycle_Weather_Target_Picker_Fixed_Node", parent, Vector2.zero)
+        if (root == null)
         {
-            _editor = editor;
-            Type editorType = editor.GetType();
-            _targetIndexField = editorType.GetField(
-                "_targetIndex",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            _refreshPreviewTargetMethod = editorType.GetMethod(
-                "RefreshPreviewTarget",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            _updateStateLabelsMethod = editorType.GetMethod(
-                "UpdateStateLabels",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-
-            _button = new Button(
-                owner,
-                MainButtonId,
-                this,
-                new Vector2(8f, 536f),
-                284f,
-                string.Empty);
-            subNodes.Add(_button);
-            RefreshButtonText();
+            return;
         }
 
-        public override void Update()
+        if (root is Button button && !string.IsNullOrEmpty(button.Text))
         {
-            base.Update();
-            RefreshButtonText();
-
-            if (_popup != null &&
-                owner != null &&
-                owner.mouseClick &&
-                !_button.MouseOver &&
-                !_popup.MouseOver)
-            {
-                ClosePopup();
-            }
+            // Internal enum value remains Deny for save compatibility/migration code,
+            // but developer-facing terminology is now consistently Forbidden.
+            button.Text = button.Text
+                .Replace("DENY", "FORBIDDEN")
+                .Replace("Deny", "Forbidden");
         }
 
-        public override void ClearSprites()
+        if (root.subNodes == null)
         {
-            ClosePopup();
-            base.ClearSprites();
+            return;
         }
 
-        public void Signal(DevUISignalType type, DevUINode sender, string message)
+        for (int i = 0; i < root.subNodes.Count; i++)
         {
-            if (type != DevUISignalType.ButtonClick || sender == null)
-            {
-                return;
-            }
-
-            if (sender.IDstring == MainButtonId)
-            {
-                if (_popup == null)
-                {
-                    OpenPopup();
-                }
-                else
-                {
-                    ClosePopup();
-                }
-                ConsumeLeftClick();
-                return;
-            }
-
-            if (sender.IDstring.StartsWith(ItemPrefix, StringComparison.Ordinal) &&
-                int.TryParse(sender.IDstring.Substring(ItemPrefix.Length), out int index))
-            {
-                SelectTarget(index);
-                ConsumeLeftClick();
-            }
-        }
-
-        private void OpenPopup()
-        {
-            if (_popup != null)
-            {
-                return;
-            }
-
-            int count = WeatherSpatialCatalog.AllTargets.Count;
-            const float rowHeight = 20f;
-            const float popupWidth = 300f;
-            const float popupGap = 10f;
-            float height = Mathf.Max(70f, 34f + count * rowHeight);
-            float bottom = 532f - height;
-
-            // Keep the picker outside the main Weather Zones panel. Its right edge
-            // stops 10 px before the panel, so selecting weather never covers or
-            // accidentally activates Overview/Brush/Preview/Save controls underneath.
-            _popup = new PickerPopup(
-                owner,
-                this,
-                new Vector2(-(popupWidth + popupGap), bottom),
-                new Vector2(popupWidth, height),
-                this);
-            subNodes.Add(_popup);
-            _popup.BuildItems(ItemPrefix, rowHeight);
-            _popup.Refresh();
-        }
-
-        private void ClosePopup()
-        {
-            if (_popup == null)
-            {
-                return;
-            }
-
-            subNodes.Remove(_popup);
-            _popup.ClearSprites();
-            _popup = null;
-        }
-
-        private void SelectTarget(int index)
-        {
-            int count = WeatherSpatialCatalog.AllTargets.Count;
-            if (count <= 0 || index < 0 || index >= count || _targetIndexField == null)
-            {
-                ClosePopup();
-                return;
-            }
-
-            _targetIndexField.SetValue(_editor, index);
-            _refreshPreviewTargetMethod?.Invoke(_editor, null);
-            _updateStateLabelsMethod?.Invoke(_editor, null);
-            ClosePopup();
-            RefreshButtonText();
-        }
-
-        private int GetTargetIndex()
-        {
-            if (_targetIndexField == null || _editor == null)
-            {
-                return 0;
-            }
-
-            object value = _targetIndexField.GetValue(_editor);
-            return value is int index ? index : 0;
-        }
-
-        private void RefreshButtonText()
-        {
-            int count = WeatherSpatialCatalog.AllTargets.Count;
-            if (count <= 0)
-            {
-                _button.Text = "Select Weather";
-                return;
-            }
-
-            int index = Mathf.Clamp(GetTargetIndex(), 0, count - 1);
-            _button.Text = (_popup == null ? "▼  " : "▲  ") +
-                           WeatherSpatialCatalog.AllTargets[index].DisplayName;
-        }
-
-        private void ConsumeLeftClick()
-        {
-            if (owner == null)
-            {
-                return;
-            }
-
-            owner.mouseClick = false;
-        }
-
-        private sealed class PickerPopup : Panel, IDevUISignals
-        {
-            private readonly FixedTargetPicker _picker;
-
-            internal PickerPopup(
-                DevInterface.DevUI owner,
-                DevUINode parent,
-                Vector2 pos,
-                Vector2 size,
-                FixedTargetPicker picker)
-                : base(owner, "DryCycle_Weather_Target_Popup_Fixed", parent, pos, size, "Select Weather")
-            {
-                _picker = picker;
-            }
-
-            internal void BuildItems(string itemPrefix, float rowHeight)
-            {
-                int count = WeatherSpatialCatalog.AllTargets.Count;
-                float y = size.y - 28f - rowHeight;
-                for (int i = 0; i < count; i++)
-                {
-                    WeatherSpatialTarget target = WeatherSpatialCatalog.AllTargets[i];
-                    Button item = new(
-                        owner,
-                        itemPrefix + i,
-                        this,
-                        new Vector2(8f, y),
-                        size.x - 16f,
-                        target.DisplayName);
-                    subNodes.Add(item);
-                    y -= rowHeight;
-                }
-            }
-
-            public override void Update()
-            {
-                base.Update();
-                if (owner != null && owner.mouseClick && MouseOver)
-                {
-                    // Prevent a popup click from falling through to the map below it.
-                    owner.mouseClick = false;
-                }
-            }
-
-            public void Signal(DevUISignalType type, DevUINode sender, string message)
-            {
-                _picker?.Signal(type, sender, message);
-            }
+            RefreshForbiddenTerminology(root.subNodes[i]);
         }
     }
 
-    private sealed class PreviewPercentInput : Button
-    {
-        private readonly DevUINode _editor;
-        private readonly FieldInfo _previewIntensityField;
-        private readonly FieldInfo _statusField;
-        private readonly MethodInfo _refreshPreviewTargetMethod;
-        private readonly MethodInfo _updateStateLabelsMethod;
-
-        private bool _editing;
-        private string _buffer;
-        private float _lastValidIntensity;
-
-        internal PreviewPercentInput(
-            DevInterface.DevUI owner,
-            DevUINode parent,
-            DevUINode editor)
-            : base(
-                owner,
-                "DryCycle_Weather_Preview_Percent_Input",
-                parent,
-                new Vector2(226f, 470f),
-                66f,
-                "75%")
-        {
-            _editor = editor;
-            Type editorType = editor.GetType();
-            _previewIntensityField = editorType.GetField(
-                "_previewIntensity",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            _statusField = editorType.GetField(
-                "_status",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            _refreshPreviewTargetMethod = editorType.GetMethod(
-                "RefreshPreviewTarget",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            _updateStateLabelsMethod = editorType.GetMethod(
-                "UpdateStateLabels",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-
-            _lastValidIntensity = ReadIntensity();
-            _buffer = PercentText(_lastValidIntensity);
-            Text = _buffer + "%";
-
-            DevUILabel label = new(
-                owner,
-                "DryCycle_Weather_Preview_Percent_Label",
-                parent,
-                new Vector2(152f, 470f),
-                70f,
-                "Intensity %");
-            label.spriteColor = new Color(0f, 0f, 0f);
-            label.textColor = new Color(1f, 1f, 1f);
-            parent.subNodes.Add(label);
-        }
-
-        public override void Clicked()
-        {
-            _editing = true;
-            _lastValidIntensity = ReadIntensity();
-            _buffer = PercentText(_lastValidIntensity);
-            Text = _buffer + "_";
-            if (owner != null)
-            {
-                owner.mouseClick = false;
-            }
-        }
-
-        public override void Update()
-        {
-            base.Update();
-
-            if (!_editing)
-            {
-                float current = ReadIntensity();
-                if (Mathf.Abs(current - _lastValidIntensity) > 0.0001f)
-                {
-                    _lastValidIntensity = current;
-                }
-                Text = PercentText(_lastValidIntensity) + "%";
-                return;
-            }
-
-            bool commit = false;
-            bool cancel = false;
-            string typed = Input.inputString ?? string.Empty;
-            for (int i = 0; i < typed.Length; i++)
-            {
-                char c = typed[i];
-                if (c >= '0' && c <= '9')
-                {
-                    if (_buffer.Length < 3)
-                    {
-                        _buffer += c;
-                    }
-                }
-                else if (c == '\b')
-                {
-                    if (_buffer.Length > 0)
-                    {
-                        _buffer = _buffer.Substring(0, _buffer.Length - 1);
-                    }
-                }
-                else if (c == '\n' || c == '\r')
-                {
-                    commit = true;
-                }
-                else if (!char.IsControl(c))
-                {
-                    SetStatus("Preview intensity accepts digits only (1-100).");
-                }
-            }
-
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                cancel = true;
-            }
-            if (owner != null && owner.mouseClick && !MouseOver)
-            {
-                commit = true;
-            }
-
-            if (cancel)
-            {
-                _editing = false;
-                _buffer = PercentText(_lastValidIntensity);
-                Text = _buffer + "%";
-                return;
-            }
-
-            if (commit)
-            {
-                CommitBuffer();
-                return;
-            }
-
-            Text = (_buffer.Length == 0 ? "_" : _buffer + "_");
-        }
-
-        private void CommitBuffer()
-        {
-            if (!int.TryParse(_buffer, NumberStyles.None, CultureInfo.InvariantCulture, out int percent))
-            {
-                SetStatus("Preview intensity is empty or invalid; enter 1-100.");
-                Text = (_buffer.Length == 0 ? "_" : _buffer + "_");
-                return;
-            }
-
-            if (percent < 1 || percent > 100)
-            {
-                SetStatus("Preview intensity must be between 1 and 100.");
-                Text = _buffer + "_";
-                return;
-            }
-
-            float value = percent / 100f;
-            _previewIntensityField?.SetValue(_editor, value);
-            _lastValidIntensity = value;
-            _editing = false;
-            _buffer = percent.ToString(CultureInfo.InvariantCulture);
-            SetStatus("Preview intensity: " + percent + "%");
-            _refreshPreviewTargetMethod?.Invoke(_editor, null);
-            _updateStateLabelsMethod?.Invoke(_editor, null);
-            Text = _buffer + "%";
-        }
-
-        private float ReadIntensity()
-        {
-            if (_previewIntensityField?.GetValue(_editor) is float value)
-            {
-                return Mathf.Clamp01(value);
-            }
-            return 0.75f;
-        }
-
-        private void SetStatus(string text)
-        {
-            _statusField?.SetValue(_editor, text);
-            _updateStateLabelsMethod?.Invoke(_editor, null);
-        }
-
-        private static string PercentText(float intensity)
-        {
-            return Mathf.RoundToInt(Mathf.Clamp01(intensity) * 100f)
-                .ToString(CultureInfo.InvariantCulture);
-        }
-    }
 
     private sealed class CleanupMarker : DevUINode
     {
