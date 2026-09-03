@@ -3,19 +3,16 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Climate;
+using DryCycle.Weather.Spatial;
 
 namespace DryCycle.Weather.Scheduling;
 
 /// <summary>
 /// Converts a RegionClimate profile into one concrete schedule for the current
-/// day OR night phase. Schedules are regenerated when the region changes, while the
-/// WorldClock itself is never reset; entering a new region therefore observes that
-/// region's schedule at the already-elapsed global time.
+/// day or night phase, then exposes room-local intensity through WeatherSpatialRuntime.
 /// </summary>
 internal static class WeatherScheduleRuntime
 {
-    // Scheduled HeavyRain is intentionally capped below the native full-strength
-    // RoomEffect. The event envelope still fades 0..1, then this cap is applied.
     private const float HeavyRainMaxIntensity = 0.70f;
 
     private sealed class GameState
@@ -37,6 +34,7 @@ internal static class WeatherScheduleRuntime
             return;
         }
 
+        WeatherSpatialRuntime.Enable();
         _enabled = true;
         On.RainCycle.Update += RainCycle_Update;
     }
@@ -51,6 +49,7 @@ internal static class WeatherScheduleRuntime
         On.RainCycle.Update -= RainCycle_Update;
         _states = new ConditionalWeakTable<RainWorldGame, GameState>();
         WeatherForecastTimeline.Reset();
+        WeatherSpatialRuntime.Disable();
         _enabled = false;
     }
 
@@ -98,16 +97,29 @@ internal static class WeatherScheduleRuntime
             return 0f;
         }
 
-        // Intensity reads happen from GlobalRain, RoomRain, Player and Watcher hooks,
-        // not only RainCycle.Update. A region/world replacement can therefore occur
-        // before the next RainCycle tick. Synchronize here so no caller can observe the
-        // previous region/day/phase schedule for even one frame.
+        float bestIntensity = 0f;
+        if (WeatherSpatialPreview.TryGetIntensity(
+                world,
+                kind,
+                ids,
+                out float previewIntensity,
+                out string previewId))
+        {
+            bestIntensity = WeatherSpatialRuntime.ApplyIntensity(
+                world,
+                kind,
+                previewId,
+                previewIntensity);
+        }
+
+        // GetIntensity is called from many owners, not only RainCycle.Update. Keep the
+        // schedule synchronized here so a world/region replacement cannot leak the old
+        // region schedule for one frame.
         Synchronize(world, clock);
 
-        if (!_states.TryGetValue(world.game, out GameState state) ||
-            state.Schedule == null)
+        if (!_states.TryGetValue(world.game, out GameState state) || state.Schedule == null)
         {
-            return 0f;
+            return bestIntensity;
         }
 
         string regionId = world.region?.name?.Trim().ToUpperInvariant();
@@ -116,8 +128,6 @@ internal static class WeatherScheduleRuntime
             : WeatherSchedulePhase.Day;
         int expectedPips = WeatherPhaseScheduler.FullPipsFromTicks(clock.CurrentHalfLength);
 
-        // Fail closed if synchronization could not establish a schedule for this exact
-        // world state (for example during an incomplete region transition frame).
         if (string.IsNullOrEmpty(regionId) ||
             !string.Equals(state.RegionId, regionId, StringComparison.OrdinalIgnoreCase) ||
             state.DayIndex != clock.DayIndex ||
@@ -126,7 +136,7 @@ internal static class WeatherScheduleRuntime
             state.Schedule.Phase != expectedPhase ||
             state.Schedule.PhasePipCount != expectedPips)
         {
-            return 0f;
+            return bestIntensity;
         }
 
         long phaseTicks = CurrentPhaseTicks(clock);
@@ -150,7 +160,6 @@ internal static class WeatherScheduleRuntime
                     break;
                 }
             }
-
             if (!idMatch)
             {
                 continue;
@@ -161,22 +170,27 @@ internal static class WeatherScheduleRuntime
             {
                 intensity *= HeavyRainMaxIntensity;
             }
-
-            if (intensity > 0f)
+            if (intensity <= 0f)
             {
-                return intensity;
+                continue;
+            }
+
+            float localIntensity = WeatherSpatialRuntime.ApplyIntensity(
+                world,
+                kind,
+                scheduled.Candidate.Id,
+                intensity);
+            if (localIntensity > bestIntensity)
+            {
+                bestIntensity = localIntensity;
             }
         }
 
-        return 0f;
+        return bestIntensity;
     }
 
-    private static void RainCycle_Update(
-        On.RainCycle.orig_Update orig,
-        RainCycle self)
+    private static void RainCycle_Update(On.RainCycle.orig_Update orig, RainCycle self)
     {
-        // WorldClockHooks is registered before this runtime. Calling orig first lets
-        // its clock advance for this tick; scheduling then observes the new phase/time.
         orig(self);
 
         if (self?.world?.game == null ||
@@ -290,9 +304,6 @@ internal static class WeatherScheduleRuntime
                 continue;
             }
 
-            // Validate child runtimes before the family probability roll. A family
-            // whose variants are all future/unimplemented weather therefore consumes
-            // neither a schedule slot nor RNG state used by implemented weather.
             bool hasSchedulableVariant = false;
             for (int variantIndex = 0; variantIndex < family.Variants.Count; variantIndex++)
             {
@@ -322,11 +333,6 @@ internal static class WeatherScheduleRuntime
                 continue;
             }
 
-            // Variant percentages are independent probabilities, never normalized
-            // weights. Multiple variants may pass; the phase scheduler later applies
-            // the day/night event count and spacing limits. Removed or unsupported IDs
-            // are skipped before rolling so stale/future climate entries cannot consume
-            // a schedule slot or perturb the implemented variant RNG stream.
             for (int variantIndex = 0; variantIndex < family.Variants.Count; variantIndex++)
             {
                 ClimateChanceEntry variant = family.Variants[variantIndex];
@@ -392,24 +398,14 @@ internal static class WeatherScheduleRuntime
         {
             return false;
         }
-
         if (chancePercent >= 100f)
         {
             return true;
         }
-
         return random.NextDouble() * 100d < chancePercent;
     }
 
-    /// <summary>
-    /// Every scheduled Weather and DangerType uses the same external envelope:
-    /// 15 seconds fade-in before the first authored pip, the authored pips use the
-    /// full base schedule envelope, then 15 seconds fade-out after the final pip.
-    /// The transition time is deliberately outside DurationPips.
-    /// </summary>
-    private static float EventEnvelope(
-        ScheduledWeatherEvent scheduled,
-        long phaseTicks)
+    private static float EventEnvelope(ScheduledWeatherEvent scheduled, long phaseTicks)
     {
         if (scheduled == null)
         {
@@ -426,7 +422,6 @@ internal static class WeatherScheduleRuntime
         {
             return 0f;
         }
-
         if (phaseTicks < mainStart)
         {
             float t = transition <= 0
@@ -434,7 +429,6 @@ internal static class WeatherScheduleRuntime
                 : (phaseTicks - effectStart) / (float)transition;
             return Smooth01(t);
         }
-
         if (phaseTicks < mainEnd)
         {
             return 1f;
@@ -477,7 +471,6 @@ internal static class WeatherScheduleRuntime
         {
             return 0;
         }
-
         return (long)Math.Round(
             Math.Max(0f, Math.Min(1f, clock.HalfProgress)) * clock.CurrentHalfLength);
     }
@@ -518,7 +511,6 @@ internal static class WeatherScheduleRuntime
                 hash ^= char.ToUpperInvariant(normalized[i]);
                 hash *= 16777619u;
             }
-
             return (int)(hash & 0x7FFFFFFF);
         }
     }
