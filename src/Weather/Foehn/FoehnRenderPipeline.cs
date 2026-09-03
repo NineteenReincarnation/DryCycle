@@ -52,6 +52,7 @@ internal static class FoehnRenderPipeline
     private static readonly int TerrainFieldId = Shader.PropertyToID("_DryCycleFoehnTerrainField");
     private static readonly int HasWindTexturesId = Shader.PropertyToID("_DryCycleHasFoehnTextures");
     private static readonly int HasTerrainFieldId = Shader.PropertyToID("_DryCycleHasFoehnTerrainField");
+    private static readonly int DebugModeId = Shader.PropertyToID("_DryCycleFoehnDebugMode");
 
     internal static FSprite[] CreateSprites(RoomCamera camera)
     {
@@ -119,7 +120,8 @@ internal static class FoehnRenderPipeline
     internal static void DrawAtmosphere(
         FSprite[] sprites,
         RoomCamera camera,
-        in FoehnRenderFrame frame)
+        in FoehnRenderFrame frame,
+        int debugMode)
     {
         if (sprites == null || camera == null || sprites.Length <= AtmosphereSprite)
         {
@@ -127,7 +129,10 @@ internal static class FoehnRenderPipeline
         }
 
         FSprite sprite = sprites[AtmosphereSprite];
-        if (sprite == null || frame.Intensity <= 0.0001f || !DryCycleShaderAssets.HasFoehnAtmosphere)
+        bool debugVisible = debugMode > 0;
+        if (sprite == null ||
+            (frame.Intensity <= 0.0001f && !debugVisible) ||
+            !DryCycleShaderAssets.HasFoehnAtmosphere)
         {
             if (sprite != null)
             {
@@ -150,7 +155,7 @@ internal static class FoehnRenderPipeline
         sprite.isVisible = true;
         sprite.MoveToFront();
 
-        ApplyProperties(sprite, frame, screenWidth, screenHeight);
+        ApplyProperties(sprite, frame, screenWidth, screenHeight, debugMode);
     }
 
     internal static void Hide(FSprite[] sprites)
@@ -173,7 +178,8 @@ internal static class FoehnRenderPipeline
         FSprite sprite,
         in FoehnRenderFrame frame,
         float screenWidth,
-        float screenHeight)
+        float screenHeight,
+        int debugMode)
     {
         bool hasTextures = FoehnWindField.IsAvailable;
         bool hasTerrain = frame.TerrainField != null;
@@ -194,6 +200,7 @@ internal static class FoehnRenderPipeline
         Shader.SetGlobalTexture(TerrainFieldId, terrain);
         Shader.SetGlobalFloat(HasWindTexturesId, hasTextures ? 1f : 0f);
         Shader.SetGlobalFloat(HasTerrainFieldId, hasTerrain ? 1f : 0f);
+        Shader.SetGlobalFloat(DebugModeId, Mathf.Clamp(debugMode, 0, 3));
 
         Renderer renderer = sprite?._renderLayer?._meshRenderer;
         if (renderer == null)
@@ -213,6 +220,7 @@ internal static class FoehnRenderPipeline
         MaterialProperties.SetTexture(TerrainFieldId, terrain);
         MaterialProperties.SetFloat(HasWindTexturesId, hasTextures ? 1f : 0f);
         MaterialProperties.SetFloat(HasTerrainFieldId, hasTerrain ? 1f : 0f);
+        MaterialProperties.SetFloat(DebugModeId, Mathf.Clamp(debugMode, 0, 3));
         renderer.SetPropertyBlock(MaterialProperties);
     }
 }
