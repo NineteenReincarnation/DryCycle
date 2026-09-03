@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.WorldLink;
@@ -19,8 +17,14 @@ internal readonly struct GateLeaf
 
     internal GateLeaf(Vector2 center, Vector2 tangent, Vector2 normal, float halfLength, float halfThickness, int side, float outerHalfWidth, float open)
     {
-        Center = center; Tangent = tangent; Normal = normal; HalfLength = halfLength; HalfThickness = halfThickness;
-        Side = side; OuterHalfWidth = outerHalfWidth; Open = open;
+        Center = center;
+        Tangent = tangent;
+        Normal = normal;
+        HalfLength = halfLength;
+        HalfThickness = halfThickness;
+        Side = side;
+        OuterHalfWidth = outerHalfWidth;
+        Open = open;
     }
 }
 
@@ -46,11 +50,14 @@ internal static class OrientedGateCollision
     {
         orig(self);
         if (self?.owner?.room == null || !self.collideWithTerrain || self.actAsTrigger) return;
+
         IReadOnlyList<MultiGatePortRuntime> ports = WorldLinkRoomRegistry.Ports(self.owner.room);
         for (int i = 0; i < ports.Count; i++)
         {
             MultiGatePortRuntime port = ports[i];
-            if (port.slatedForDeletetion || !port.Data.Enabled || !port.Placed.active || !port.IsWithinTransitEnvelope(self.pos, 1.15f)) continue;
+            if (port == null || port.slatedForDeletetion || !port.ShouldCollide ||
+                !port.IsWithinTransitEnvelope(self.pos, 1.15f)) continue;
+
             ResolveLeaf(port, self, -1);
             ResolveLeaf(port, self, 1);
         }
@@ -59,6 +66,7 @@ internal static class OrientedGateCollision
     private static void ResolveLeaf(MultiGatePortRuntime port, BodyChunk chunk, int side)
     {
         if (!port.TryGetLeaf(side, previous: false, out GateLeaf leaf)) return;
+
         Vector2 rel = chunk.pos - leaf.Center;
         float u = Vector2.Dot(rel, leaf.Tangent);
         float v = Vector2.Dot(rel, leaf.Normal);
@@ -76,8 +84,6 @@ internal static class OrientedGateCollision
             float dist = Mathf.Sqrt(distSq);
             if (dist >= radius)
             {
-                // Swept center against the box expanded by radius prevents high-speed
-                // bodies and spears from crossing a closed panel in one frame.
                 if (!SweptExpandedBox(chunk.lastPos, chunk.pos, leaf, radius, out float hitT, out normal)) return;
                 chunk.pos = Vector2.Lerp(chunk.lastPos, chunk.pos, Mathf.Max(0f, hitT - 0.001f));
                 penetration = 0.01f;
@@ -97,18 +103,52 @@ internal static class OrientedGateCollision
             penetration = radius + Mathf.Min(du, dv);
         }
 
+        // Vanilla terrain has already resolved during orig(BodyChunk.Update). At the
+        // finite frame endpoint only, yield when the native contact is effectively the
+        // same support plane. This prevents Tile + gate double-resolution jitter while
+        // preserving the oriented collider throughout the real passage aperture.
+        if (ShouldYieldToNativeTerrainAtSeam(chunk, leaf, u, normal, penetration)) return;
+
         chunk.pos += normal * penetration;
         Vector2 surfaceVelocity = port.SurfaceVelocityAt(leaf, closest);
         ResolveRainWorldSurfaceResponse(chunk, normal, surfaceVelocity);
     }
 
-    /// <summary>
-    /// Mirrors BodyChunk's native TerrainCurve response, but operates in the moving
-    /// gate surface's reference frame. This is what makes an angled closed gate feel
-    /// like Rain World terrain rather than a generic OBB collider: shallow normals use
-    /// the walkable-curve branch, steep normals use the slide branch, and vertical/
-    /// horizontal faces retain the normal wall/ceiling contact semantics.
-    /// </summary>
+    private static bool ShouldYieldToNativeTerrainAtSeam(
+        BodyChunk chunk,
+        GateLeaf leaf,
+        float localU,
+        Vector2 normal,
+        float penetration)
+    {
+        float edgeDistance = leaf.HalfLength - Mathf.Abs(localU);
+        if (edgeDistance > chunk.TerrainRad * 1.5f + 6f) return false;
+        if (penetration > Mathf.Max(2.5f, chunk.TerrainRad * 0.4f)) return false;
+
+        if (normal.y > 0.05f && chunk.contactPoint.y == -1)
+        {
+            Vector2 native = chunk.terrainCurveNormal;
+            if (native.sqrMagnitude > 0.001f)
+            {
+                if (Vector2.Dot(native.normalized, normal.normalized) > 0.84f) return true;
+            }
+            else if (normal.y > 0.55f)
+            {
+                return true;
+            }
+        }
+
+        if (normal.y < -0.5f && chunk.contactPoint.y == 1) return true;
+
+        if (Mathf.Abs(normal.x) > 0.55f && Mathf.Abs(normal.x) > Mathf.Abs(normal.y))
+        {
+            int expected = normal.x < 0f ? 1 : -1;
+            if (chunk.contactPoint.x == expected) return true;
+        }
+
+        return false;
+    }
+
     private static void ResolveRainWorldSurfaceResponse(BodyChunk chunk, Vector2 normal, Vector2 surfaceVelocity)
     {
         Vector2 relativeVelocity = chunk.vel - surfaceVelocity;
@@ -129,9 +169,6 @@ internal static class OrientedGateCollision
             }
             else
             {
-                // Native BodyChunk TerrainCurve walkable-surface branch. Preserve the
-                // incoming speed cap and convert horizontal motion through the slope
-                // normal exactly like vanilla before applying surface friction.
                 chunk.contactPoint.y = -1;
                 float magnitude = relativeVelocity.magnitude;
                 float slopeTransfer = relativeVelocity.x * (-normal.x) / Mathf.Max(0.0001f, normal.y);
@@ -158,10 +195,7 @@ internal static class OrientedGateCollision
                                     Mathf.Clamp01(1f - chunk.owner.surfaceFriction * 2f) * tangent;
             }
 
-            if (normal.y < -0.5f)
-            {
-                chunk.contactPoint.y = 1;
-            }
+            if (normal.y < -0.5f) chunk.contactPoint.y = 1;
         }
 
         if (Mathf.Abs(normal.x) > 0.55f && Mathf.Abs(normal.x) > Mathf.Abs(normal.y))
@@ -185,10 +219,7 @@ internal static class OrientedGateCollision
         }
 
         float intoSpeed = -Vector2.Dot(relativeVelocity, normal);
-        if (intoSpeed <= chunk.owner.impactTreshhold)
-        {
-            return;
-        }
+        if (intoSpeed <= chunk.owner.impactTreshhold) return;
 
         if (normal.y < -0.5f && Mathf.Abs(normal.y) >= Mathf.Abs(normal.x))
         {
@@ -211,8 +242,10 @@ internal static class OrientedGateCollision
         Vector2 d = p1 - p0;
         float ex = leaf.HalfLength + radius;
         float ey = leaf.HalfThickness + radius;
-        float tMin = 0f, tMax = 1f;
+        float tMin = 0f;
+        float tMax = 1f;
         hitNormal = Vector2.zero;
+
         if (!Slab(p0.x, d.x, -ex, ex, ref tMin, ref tMax, leaf.Tangent, ref hitNormal)) { hitT = 0f; return false; }
         if (!Slab(p0.y, d.y, -ey, ey, ref tMin, ref tMax, leaf.Normal, ref hitNormal)) { hitT = 0f; return false; }
         hitT = tMin;
@@ -226,7 +259,7 @@ internal static class OrientedGateCollision
         float t1 = (min - p) * inv;
         float t2 = (max - p) * inv;
         Vector2 n1 = axis * -Mathf.Sign(d);
-        if (t1 > t2) { (t1, t2) = (t2, t1); }
+        if (t1 > t2) (t1, t2) = (t2, t1);
         if (t1 > tMin) { tMin = t1; normal = n1; }
         tMax = Mathf.Min(tMax, t2);
         return tMin <= tMax;

@@ -6,12 +6,9 @@ using UnityEngine;
 namespace DryCycle.WorldLink;
 
 /// <summary>
-/// Complete RegionGate-inspired mechanical assembly for a WorldLink port.
-/// The whole assembly is authored in the port's local (Tangent, Normal) frame so
-/// horizontal, vertical and diagonal gates use the exact same visual machinery.
-/// The two leaf-body sprites are the visible surfaces backed by OrientedGateCollision;
-/// every other sprite is a rail, actuator, lock or housing detail that either lives
-/// outside the traversable aperture or is attached to a moving leaf.
+/// RegionGate-inspired mechanical assembly authored entirely in the port-local
+/// Tangent/Normal frame. MechanicalFactor drives lock/rail choreography; OpenFactor is
+/// the only source of truth for the visible physical leaves and their colliders.
 /// </summary>
 internal static class WorldLinkGateGraphics
 {
@@ -49,9 +46,7 @@ internal static class WorldLinkGateGraphics
         sLeaser.sprites[LeafPlate1] = Atlas("RegionGate_Pansar2");
 
         for (int i = 0; i < 4; i++)
-        {
             sLeaser.sprites[TrackStart + i] = Atlas(i < 2 ? "RegionGate_TrackA" : "RegionGate_TrackB");
-        }
 
         sLeaser.sprites[CenterTrackStart] = Atlas("RegionGate_CenterTrackA");
         sLeaser.sprites[CenterTrackStart + 1] = Atlas("RegionGate_CenterTrackB");
@@ -64,33 +59,15 @@ internal static class WorldLinkGateGraphics
             sLeaser.sprites[ArmStart + i].anchorY = 0f;
         }
 
-        for (int i = 0; i < 8; i++)
-        {
-            sLeaser.sprites[CogStart + i] = Atlas("RegionGate_Cog");
-        }
+        for (int i = 0; i < 8; i++) sLeaser.sprites[CogStart + i] = Atlas("RegionGate_Cog");
 
-        string[] clampNames =
-        {
-            "RegionGate_ClampA1", "RegionGate_ClampB1", "RegionGate_ClampA2", "RegionGate_ClampB2"
-        };
-        for (int i = 0; i < 12; i++)
-        {
-            sLeaser.sprites[ClampStart + i] = Atlas(clampNames[i % clampNames.Length]);
-        }
-
-        for (int i = 0; i < 4; i++)
-        {
-            sLeaser.sprites[BoltStart + i] = Atlas("RegionGate_Bolt");
-        }
-
-        for (int i = 0; i < 9; i++)
-        {
-            sLeaser.sprites[PansarSegmentStart + i] = Atlas((i & 1) == 0 ? "RegionGate_PansarSegment" : "RegionGate_PansarLock");
-        }
+        string[] clampNames = { "RegionGate_ClampA1", "RegionGate_ClampB1", "RegionGate_ClampA2", "RegionGate_ClampB2" };
+        for (int i = 0; i < 12; i++) sLeaser.sprites[ClampStart + i] = Atlas(clampNames[i % clampNames.Length]);
+        for (int i = 0; i < 4; i++) sLeaser.sprites[BoltStart + i] = Atlas("RegionGate_Bolt");
+        for (int i = 0; i < 9; i++) sLeaser.sprites[PansarSegmentStart + i] = Atlas((i & 1) == 0 ? "RegionGate_PansarSegment" : "RegionGate_PansarLock");
 
         sLeaser.sprites[BigScrewStart] = Atlas("RegionGate_BigScrew");
         sLeaser.sprites[BigScrewStart + 1] = Atlas("RegionGate_BigScrew");
-
         for (int i = 0; i < 4; i++) sLeaser.sprites[PoleStart + i] = Pixel();
         sLeaser.sprites[JambStart] = Pixel();
         sLeaser.sprites[JambStart + 1] = Pixel();
@@ -112,7 +89,7 @@ internal static class WorldLinkGateGraphics
 
     internal static void DrawSprites(MultiGatePortRuntime port, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
     {
-        bool visible = port.Placed?.active == true && port.Data.Enabled;
+        bool visible = port.ShouldRender;
         for (int i = 0; i < sLeaser.sprites.Length; i++) sLeaser.sprites[i].isVisible = visible;
         if (!visible)
         {
@@ -120,6 +97,7 @@ internal static class WorldLinkGateGraphics
             return;
         }
 
+        float mechanical = Mathf.Clamp01(Mathf.Lerp(port.LastMechanicalFactor, port.MechanicalFactor, timeStacker));
         float open = Mathf.Clamp01(Mathf.Lerp(port.LastOpenFactor, port.OpenFactor, timeStacker));
         float leafHalf = port.Data.PassageWidth * 0.5f;
         float leafInner = leafHalf * open;
@@ -128,11 +106,11 @@ internal static class WorldLinkGateGraphics
         float detailScale = Mathf.Clamp(port.Data.PassageWidth / 180f, 0.68f, 1.55f);
         float axisRotation = GateAxisRotation(port);
 
-        float unlock = Smooth01(Mathf.InverseLerp(0.02f, 0.18f, open));
-        float unclamp = Smooth01(Mathf.InverseLerp(0.10f, 0.38f, open));
-        float armorRelease = Smooth01(Mathf.InverseLerp(0.24f, 0.62f, open));
-        float railRelease = Smooth01(Mathf.InverseLerp(0.48f, 0.88f, open));
-        float gearMotion = Smooth01(Mathf.InverseLerp(0.04f, 0.88f, open));
+        float unlock = Smooth01(Mathf.InverseLerp(0.00f, 0.18f, mechanical));
+        float unclamp = Smooth01(Mathf.InverseLerp(0.08f, 0.30f, mechanical));
+        float armorRelease = Smooth01(Mathf.InverseLerp(0.18f, 0.50f, mechanical));
+        float railRelease = Smooth01(Mathf.InverseLerp(0.68f, 0.94f, mechanical));
+        float gearMotion = Smooth01(Mathf.InverseLerp(0.00f, 0.96f, mechanical));
 
         DrawLeaf(port, sLeaser.sprites[LeafBody0], sLeaser.sprites[LeafPlate0], -1, leafInner, leafLength, thickness, detailScale, armorRelease, camPos);
         DrawLeaf(port, sLeaser.sprites[LeafBody1], sLeaser.sprites[LeafPlate1], 1, leafInner, leafLength, thickness, detailScale, armorRelease, camPos);
@@ -145,7 +123,6 @@ internal static class WorldLinkGateGraphics
         DrawPoles(port, sLeaser, leafHalf, thickness, detailScale, railRelease, camPos);
         DrawJambs(port, sLeaser, leafHalf, thickness, camPos);
         DrawGlyphAssembly(port, sLeaser, detailScale, gearMotion, timeStacker, camPos);
-
         CleanupIfNeeded(port, sLeaser, rCam);
     }
 
@@ -185,22 +162,22 @@ internal static class WorldLinkGateGraphics
         }
     }
 
-    internal static void OnOpenFactorChanged(MultiGatePortRuntime port, float oldOpen, float newOpen)
+    internal static void OnMechanicalFactorChanged(MultiGatePortRuntime port, float oldMechanical, float newMechanical)
     {
-        if (port?.room == null || port.Placed == null || Mathf.Abs(newOpen - oldOpen) < 0.00001f) return;
-        if (newOpen > oldOpen)
+        if (port?.room == null || port.Placed == null || Mathf.Abs(newMechanical - oldMechanical) < 0.00001f) return;
+        if (newMechanical > oldMechanical)
         {
-            Cross(port, oldOpen, newOpen, 0.04f, SoundID.Gate_Secure_Rail_Up, 0.95f);
-            Cross(port, oldOpen, newOpen, 0.18f, SoundID.Gate_Panser_Off, 1.00f);
-            Cross(port, oldOpen, newOpen, 0.38f, SoundID.Gate_Pillows_Move_Out, 0.98f);
-            Cross(port, oldOpen, newOpen, 0.72f, SoundID.Gate_Poles_Out, 1.00f);
+            Cross(port, oldMechanical, newMechanical, 0.04f, SoundID.Gate_Secure_Rail_Up, 0.95f);
+            Cross(port, oldMechanical, newMechanical, 0.22f, SoundID.Gate_Panser_Off, 1.00f);
+            Cross(port, oldMechanical, newMechanical, 0.52f, SoundID.Gate_Pillows_Move_Out, 0.98f);
+            Cross(port, oldMechanical, newMechanical, 0.92f, SoundID.Gate_Poles_Out, 1.00f);
         }
         else
         {
-            CrossDown(port, oldOpen, newOpen, 0.72f, SoundID.Gate_Poles_And_Rails_In, 1.00f);
-            CrossDown(port, oldOpen, newOpen, 0.38f, SoundID.Gate_Pillows_Move_In, 0.98f);
-            CrossDown(port, oldOpen, newOpen, 0.18f, SoundID.Gate_Panser_On, 1.00f);
-            if (oldOpen > 0.04f && newOpen <= 0.04f)
+            CrossDown(port, oldMechanical, newMechanical, 0.92f, SoundID.Gate_Poles_And_Rails_In, 1.00f);
+            CrossDown(port, oldMechanical, newMechanical, 0.52f, SoundID.Gate_Pillows_Move_In, 0.98f);
+            CrossDown(port, oldMechanical, newMechanical, 0.22f, SoundID.Gate_Panser_On, 1.00f);
+            if (oldMechanical > 0.04f && newMechanical <= 0.04f)
             {
                 port.room.PlaySound(SoundID.Gate_Secure_Rail_Down, port.Placed.pos, 1f, 1f);
                 port.room.ScreenMovement(port.Placed.pos, Vector2.zero, 0.35f);
@@ -242,7 +219,6 @@ internal static class WorldLinkGateGraphics
             Size(track, Mathf.Max(6f, 8f * detailScale), port.Data.PassageWidth + 24f * detailScale);
             track.alpha = Mathf.Lerp(0.95f, 0.70f, release);
         }
-
         for (int i = 0; i < 2; i++)
         {
             FSprite center = sLeaser.sprites[CenterTrackStart + i];
@@ -270,8 +246,7 @@ internal static class WorldLinkGateGraphics
                 block.alpha = 0.96f;
                 for (int cog = 0; cog < 2; cog++)
                 {
-                    int cogIndex = CogStart + idx * 2 + cog;
-                    FSprite sprite = sLeaser.sprites[cogIndex];
+                    FSprite sprite = sLeaser.sprites[CogStart + idx * 2 + cog];
                     float cogU = side * (housingU + (cog == 0 ? -8f : 8f) * detailScale);
                     float cogV = face * (normalSpread + (cog == 0 ? 7f : 19f) * detailScale);
                     Place(port, sprite, cogU, cogV, axisRotation + side * face * gearMotion * (cog == 0 ? 230f : -150f), camPos);
@@ -279,7 +254,6 @@ internal static class WorldLinkGateGraphics
                     sprite.alpha = cog == 0 ? 0.76f : 0.58f;
                 }
             }
-
             FSprite screw = sLeaser.sprites[BigScrewStart + sideIndex];
             Place(port, screw, side * (half + 6f * detailScale), 0f, axisRotation + side * gearMotion * 720f, camPos);
             screw.scale = detailScale * 0.85f;
@@ -372,7 +346,7 @@ internal static class WorldLinkGateGraphics
                 segment.isVisible = false;
                 continue;
             }
-            float normalized = wanted == 1 ? 0f : ((i - first) / (float)(wanted - 1)) * 2f - 1f;
+            float normalized = ((i - first) / (float)Mathf.Max(1, wanted - 1)) * 2f - 1f;
             float side = normalized < 0f ? -1f : 1f;
             if (Mathf.Abs(normalized) < 0.001f) side = (i & 1) == 0 ? -1f : 1f;
             float s = Mathf.Clamp01(Mathf.Abs(normalized));
@@ -422,10 +396,11 @@ internal static class WorldLinkGateGraphics
 
     private static void DrawGlyphAssembly(MultiGatePortRuntime port, RoomCamera.SpriteLeaser sLeaser, float detailScale, float gearMotion, float timeStacker, Vector2 camPos)
     {
-        Vector2 gp = port.Placed.pos + port.Data.GlyphOffset;
+        Vector2 gp = port.Placed.pos + port.Data.GlyphWorldOffset;
         float clock = (port.room?.game?.clock ?? 0) + timeStacker;
         float pulse = 0.5f + 0.5f * Mathf.Sin(clock / (port.Denied ? 7f : 14f));
         float housingScale = Mathf.Clamp(detailScale, 0.78f, 1.35f);
+
         FSprite back = sLeaser.sprites[GlyphBack];
         back.x = gp.x - camPos.x;
         back.y = gp.y - camPos.y;
@@ -433,12 +408,14 @@ internal static class WorldLinkGateGraphics
         back.scaleX = 36f * housingScale;
         back.scaleY = 36f * housingScale;
         back.alpha = 0.88f;
+
         FSprite gear = sLeaser.sprites[GlyphGear];
         gear.x = gp.x - camPos.x;
         gear.y = gp.y - camPos.y;
         gear.rotation = gearMotion * 180f + clock * 0.12f;
         gear.scale = 0.88f * housingScale;
         gear.alpha = 0.72f;
+
         FSprite glow = sLeaser.sprites[GlyphGlow];
         glow.x = gp.x - camPos.x;
         glow.y = gp.y - camPos.y;
@@ -446,6 +423,7 @@ internal static class WorldLinkGateGraphics
         glow.scaleY = 28f * housingScale;
         glow.alpha = port.Denied ? 0.12f + 0.18f * pulse : 0.04f + 0.08f * pulse;
         glow.color = port.Denied ? Color.red : Color.white;
+
         FSprite glyph = sLeaser.sprites[Glyph];
         WorldLinkGlyphs.Refresh(glyph, port.Address);
         glyph.x = gp.x - camPos.x;
@@ -457,10 +435,18 @@ internal static class WorldLinkGateGraphics
             : Color.Lerp(new Color(0.65f, 0.65f, 0.70f), Color.white, 0.28f + 0.34f * pulse);
     }
 
-    private static bool IsBackLayer(int index) =>
-        (index >= TrackStart && index < BlockStart) ||
-        (index >= CogStart && index < ClampStart) ||
-        (index >= PoleStart && index < JambStart);
+    private static bool IsBackLayer(int index)
+    {
+        // Gameplay-facing silhouette contains only geometry that is either actually
+        // collidable (leaf bodies) or explicitly authored as a Tile-supported frame /
+        // non-contact indicator. All decorative armor, clamps, hands, bolts, rails and
+        // cogs live in Midground so they never imply a collision surface that does not
+        // exist in OrientedGateCollision.
+        return index != LeafBody0 && index != LeafBody1 &&
+               index != JambStart && index != JambStart + 1 &&
+               index != GlyphBack && index != GlyphGear &&
+               index != GlyphGlow && index != Glyph;
+    }
 
     private static void CleanupIfNeeded(MultiGatePortRuntime port, RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
@@ -470,8 +456,7 @@ internal static class WorldLinkGateGraphics
     private static Vector2 Local(MultiGatePortRuntime port, float tangent, float normal) =>
         port.Placed.pos + port.Data.Tangent * tangent + port.Data.Normal * normal;
 
-    private static float GateAxisRotation(MultiGatePortRuntime port) =>
-        Custom.VecToDeg(port.Data.Tangent) - 90f;
+    private static float GateAxisRotation(MultiGatePortRuntime port) => Custom.VecToDeg(port.Data.Tangent) - 90f;
 
     private static void Place(MultiGatePortRuntime port, FSprite sprite, float u, float v, float rotation, Vector2 camPos)
     {
@@ -521,9 +506,7 @@ internal static class WorldLinkGateGraphics
         catch (Exception ex)
         {
             if (MissingAtlasWarnings.Add(name))
-            {
                 Plugin.Logger?.LogWarning($"WorldLink gate graphics could not load atlas element '{name}': {ex.Message}. Falling back to pixel geometry.");
-            }
             return Pixel();
         }
     }
@@ -535,9 +518,7 @@ internal static class WorldLinkGateGraphics
             if (index == Glyph || index == LeafBody0 || index == LeafBody1 ||
                 index == JambStart || index == JambStart + 1 || index == GlyphBack || index == GlyphGlow) return;
             if (port?.room?.game?.rainWorld?.Shaders != null && port.room.game.rainWorld.Shaders.ContainsKey("ColoredSprite2"))
-            {
                 sprite.shader = port.room.game.rainWorld.Shaders["ColoredSprite2"];
-            }
         }
         catch (Exception ex)
         {

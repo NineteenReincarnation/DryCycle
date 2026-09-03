@@ -23,6 +23,7 @@ internal static class WorldLinkMapRuntime
         internal string DestinationRoom;
         internal string DestinationRegion;
         internal bool HideExternalDestination;
+        internal bool Enabled;
     }
 
     private sealed class ConnectionInfo
@@ -62,10 +63,7 @@ internal static class WorldLinkMapRuntime
         orig(self);
         if (self?.mapData == null || self.mapObjects == null || self.notRevealedFadeMarkers == null) return;
         MapState state = States.GetOrCreateValue(self);
-        if (!state.Initialized)
-        {
-            Initialize(self, state);
-        }
+        if (!state.Initialized) Initialize(self, state);
     }
 
     private static void Initialize(Map map, MapState state)
@@ -79,13 +77,17 @@ internal static class WorldLinkMapRuntime
             string roomName = map.mapData.roomNames[i];
             if (string.IsNullOrWhiteSpace(roomName)) continue;
             int roomIndex = map.mapData.firstRoomIndex + i;
+
             try
             {
                 RoomSettings settings = new(roomName, null, template: false, firstTemplate: false, timeline, null);
                 for (int j = 0; j < settings.placedObjects.Count; j++)
                 {
                     PlacedObject po = settings.placedObjects[j];
-                    if (po?.type != WorldLinkPlacedObjects.PortType || !po.active || po.data is not MultiGatePortData pd || !pd.Enabled) continue;
+                    if (po == null || !po.active || !WorldLinkPlacedObjects.IsPortType(po.type)) continue;
+                    WorldLinkPlacedObjects.EnsureWorldLinkData(po);
+                    if (po.data is not MultiGatePortData pd) continue;
+
                     PortInfo info = new()
                     {
                         Address = pd.Address(roomName),
@@ -99,7 +101,8 @@ internal static class WorldLinkMapRuntime
                         NodeIndex = pd.VanillaNodeIndex,
                         DestinationRoom = pd.DestinationRoom?.Trim() ?? string.Empty,
                         DestinationRegion = pd.DestinationRegion?.Trim() ?? string.Empty,
-                        HideExternalDestination = pd.HideExternalDestinationUntilTraversed
+                        HideExternalDestination = pd.HideExternalDestinationUntilTraversed,
+                        Enabled = pd.Enabled
                     };
                     state.Ports.Add(info);
                     AddPortMarker(map, info);
@@ -129,12 +132,14 @@ internal static class WorldLinkMapRuntime
         PortInfo nearest = null;
         float nearestDistance = 100f * 100f;
         Vector2 vp = vanillaPos.ToVector2() * 20f;
+
         for (int i = 0; i < ports.Count; i++)
         {
             PortInfo p = ports[i];
             if (p.RoomIndex != sourceRoom || p.Mode != WorldLinkTransitMode.VanillaNode) continue;
             string configuredOrResolved = ResolveVanillaDestination(map, p);
             if (configuredOrResolved.Length > 0 && string.Equals(configuredOrResolved, targetName, StringComparison.OrdinalIgnoreCase)) return p;
+
             float d = Vector2.SqrMagnitude(p.PhysicalPosInRoom - vp);
             if (d < nearestDistance)
             {
@@ -144,7 +149,6 @@ internal static class WorldLinkMapRuntime
         }
         return nearest;
     }
-
 
     private static string ResolveVanillaDestination(Map map, PortInfo port)
     {
@@ -164,10 +168,12 @@ internal static class WorldLinkMapRuntime
             : new PortMarker(map, info);
         map.mapObjects.Add(marker);
         marker.SetInvisible();
+
         if (map.discoverTexture != null)
         {
             IntVector2 px = IntVector2.FromVector2(map.OnTexturePos(marker.inRoomPos, marker.room, accountForLayer: true) / map.DiscoverResolution);
-            if (px.x >= 0 && px.y >= 0 && px.x < ((Texture)map.discoverTexture).width && px.y < ((Texture)map.discoverTexture).height && map.discoverTexture.GetPixel(px.x, px.y).r > 0f)
+            if (px.x >= 0 && px.y >= 0 && px.x < ((Texture)map.discoverTexture).width && px.y < ((Texture)map.discoverTexture).height &&
+                map.discoverTexture.GetPixel(px.x, px.y).r > 0f)
             {
                 marker.FadeIn(0.1f);
                 return;
@@ -179,8 +185,9 @@ internal static class WorldLinkMapRuntime
     private static void DrawConnection(On.HUD.Map.OnMapConnection.orig_DrawSprites orig, Map.OnMapConnection self, float timeStacker)
     {
         orig(self, timeStacker);
-        if (self?.map == null || self.lineSprite is not TriangleMesh mesh || !States.TryGetValue(self.map, out MapState state) || !state.Connections.TryGetValue(self, out ConnectionInfo info)) return;
-        if (!self.lineSprite.isVisible) return;
+        if (self?.map == null || self.lineSprite is not TriangleMesh mesh ||
+            !States.TryGetValue(self.map, out MapState state) || !state.Connections.TryGetValue(self, out ConnectionInfo info) ||
+            !self.lineSprite.isVisible) return;
 
         Vector2 a = info.A != null ? self.map.RoomToMapPos(info.A.MapPosInRoom, self.roomA, timeStacker) : new Vector2(self.dotA.x, self.dotA.y);
         Vector2 b = info.B != null ? self.map.RoomToMapPos(info.B.MapPosInRoom, self.roomB, timeStacker) : new Vector2(self.dotB.x, self.dotB.y);
@@ -188,7 +195,8 @@ internal static class WorldLinkMapRuntime
         Vector2 dirB = info.B != null ? info.B.MapDirection : Custom.fourDirections[self.dirB].ToVector2();
         if (dirA.sqrMagnitude < 0.001f) dirA = Vector2.right;
         if (dirB.sqrMagnitude < 0.001f) dirB = Vector2.left;
-        dirA.Normalize(); dirB.Normalize();
+        dirA.Normalize();
+        dirB.Normalize();
 
         self.dotA.x = a.x; self.dotA.y = a.y;
         self.dotB.x = b.x; self.dotB.y = b.y;
@@ -196,6 +204,7 @@ internal static class WorldLinkMapRuntime
         if (distance > 300f) distance = Mathf.Lerp(distance, 300f, 0.5f);
         float control = distance / 3f;
         Vector2 prev = a;
+
         for (int i = 0; i < self.segments; i++)
         {
             float t = (i + 1f) / self.segments;
@@ -207,12 +216,16 @@ internal static class WorldLinkMapRuntime
             mesh.MoveVertice(i * 4 + 3, next + perpendicular);
             prev = next;
         }
+
+        bool enabled = (info.A?.Enabled ?? true) && (info.B?.Enabled ?? true);
+        self.lineSprite.alpha *= enabled ? 1f : 0.35f;
     }
 
     private class PortMarker : Map.FadeInMarker
     {
         protected readonly PortInfo Info;
         private readonly FSprite _routeArrow;
+
         internal PortMarker(Map map, PortInfo info) : base(map, info.RoomIndex, info.GlyphPosInRoom, 3f)
         {
             Info = info;
@@ -232,19 +245,24 @@ internal static class WorldLinkMapRuntime
             symbolSprite.isVisible = map.visible;
             _routeArrow.isVisible = map.visible;
             if (!map.visible) return;
+
             float alpha = Mathf.Lerp(map.lastFade, map.fade, timeStacker) * Mathf.Lerp(lastFade, fade, timeStacker);
             Vector2 pos = map.RoomToMapPos(inRoomPos, room, timeStacker);
             bkgFade.x = pos.x; bkgFade.y = pos.y; bkgFade.alpha = alpha * 0.45f; bkgFade.scale = 10f;
             symbolSprite.x = pos.x; symbolSprite.y = pos.y; symbolSprite.alpha = alpha;
+
             Vector2 mapAnchor = map.RoomToMapPos(Info.MapPosInRoom, room, timeStacker);
             Vector2 routeDir = Info.MapDirection.sqrMagnitude < 0.001f ? Vector2.right : Info.MapDirection.normalized;
             _routeArrow.x = mapAnchor.x + routeDir.x * 9f;
             _routeArrow.y = mapAnchor.y + routeDir.y * 9f;
             _routeArrow.rotation = Custom.VecToDeg(routeDir);
-            _routeArrow.alpha = alpha;
-            bool open = CanUseOnMap(map, Info.Address);
-            symbolSprite.color = Color.Lerp(open ? global::Menu.Menu.MenuRGB(global::Menu.Menu.MenuColors.DarkGrey) : Color.red,
-                global::Menu.Menu.MenuRGB(global::Menu.Menu.MenuColors.White), 0.5f + 0.5f * Mathf.Sin((map.counter + timeStacker) / 14f));
+            _routeArrow.alpha = alpha * (Info.Enabled ? 1f : 0.35f);
+
+            bool open = Info.Enabled && CanUseOnMap(map, Info.Address);
+            symbolSprite.color = Color.Lerp(
+                open ? global::Menu.Menu.MenuRGB(global::Menu.Menu.MenuColors.DarkGrey) : Color.red,
+                global::Menu.Menu.MenuRGB(global::Menu.Menu.MenuColors.White),
+                0.5f + 0.5f * Mathf.Sin((map.counter + timeStacker) / 14f));
         }
 
         public override void Destroy()
@@ -282,8 +300,11 @@ internal static class WorldLinkMapRuntime
             base.Draw(timeStacker);
             float alpha = Mathf.Lerp(map.lastFade, map.fade, timeStacker) * Mathf.Lerp(lastFade, fade, timeStacker);
             bool visible = map.visible && alpha > 0f;
-            _line.isVisible = visible; _arrow.isVisible = visible; _label.isVisible = visible;
+            _line.isVisible = visible;
+            _arrow.isVisible = visible;
+            _label.isVisible = visible;
             if (!visible) return;
+
             Vector2 start = map.RoomToMapPos(Info.MapPosInRoom, room, timeStacker);
             Vector2 dir = Info.MapDirection.sqrMagnitude < 0.001f ? Vector2.right : Info.MapDirection.normalized;
             Vector2 end = start + dir * 58f;
@@ -299,16 +320,20 @@ internal static class WorldLinkMapRuntime
                 _line.MoveVertice(i * 4 + 3, next + p);
                 prev = next;
             }
-            _line.alpha = alpha;
-            _arrow.x = end.x; _arrow.y = end.y; _arrow.alpha = alpha; _arrow.scale = 0.65f;
-            _label.x = end.x + dir.x * 12f; _label.y = end.y + dir.y * 12f; _label.alpha = alpha;
+
+            float routeAlpha = alpha * (Info.Enabled ? 1f : 0.35f);
+            _line.alpha = routeAlpha;
+            _arrow.x = end.x; _arrow.y = end.y; _arrow.alpha = routeAlpha; _arrow.scale = 0.65f;
+            _label.x = end.x + dir.x * 12f; _label.y = end.y + dir.y * 12f; _label.alpha = routeAlpha;
             _label.text = DestinationText();
         }
 
         public override void Destroy()
         {
             base.Destroy();
-            _line.RemoveFromContainer(); _arrow.RemoveFromContainer(); _label.RemoveFromContainer();
+            _line.RemoveFromContainer();
+            _arrow.RemoveFromContainer();
+            _label.RemoveFromContainer();
         }
 
         private string DestinationText()

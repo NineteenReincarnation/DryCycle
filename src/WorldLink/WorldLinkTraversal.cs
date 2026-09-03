@@ -28,7 +28,8 @@ internal static class WorldLinkTraversal
 
     internal static bool BeginCrossRegion(MultiGatePortRuntime source)
     {
-        if (source?.room?.game?.overWorld == null || source.Data.TransitMode != WorldLinkTransitMode.CrossRegion)
+        if (source?.room?.game?.overWorld == null || source.Data.TransitMode != WorldLinkTransitMode.CrossRegion ||
+            !source.Data.Enabled || source.Placed?.active != true)
         {
             return false;
         }
@@ -37,6 +38,7 @@ internal static class WorldLinkTraversal
         string region = string.IsNullOrWhiteSpace(data.DestinationRegion)
             ? InferRegion(data.DestinationRoom)
             : data.DestinationRegion.Trim();
+
         if (region.Length == 0 || string.IsNullOrWhiteSpace(data.DestinationRoom) ||
             string.IsNullOrWhiteSpace(data.DestinationGateId) || string.IsNullOrWhiteSpace(data.DestinationPortId))
         {
@@ -64,9 +66,13 @@ internal static class WorldLinkTraversal
             Plugin.Logger?.LogError($"WorldLink: destination port {targetAddress} could not be found in RoomSettings.");
             return false;
         }
-        if (!targetObject.active || !targetData.Enabled)
+
+        // Directed routes are asymmetric. The target port's outgoing Data.Enabled flag
+        // must not reject inbound travel. Only the target physical object itself must be
+        // authored active; its controller will validate/arm the arrival after world load.
+        if (!targetObject.active)
         {
-            Plugin.Logger?.LogError($"WorldLink: destination port {targetAddress} is disabled/inactive; traversal was refused.");
+            Plugin.Logger?.LogError($"WorldLink: destination port {targetAddress} is physically inactive; traversal was refused.");
             return false;
         }
 
@@ -107,7 +113,9 @@ internal static class WorldLinkTraversal
             for (int i = 0; i < settings.placedObjects.Count; i++)
             {
                 PlacedObject po = settings.placedObjects[i];
-                if (po?.type != WorldLinkPlacedObjects.PortType || po.data is not MultiGatePortData pd) continue;
+                if (po == null || !WorldLinkPlacedObjects.IsPortType(po.type)) continue;
+                WorldLinkPlacedObjects.EnsureWorldLinkData(po);
+                if (po.data is not MultiGatePortData pd) continue;
                 if (!string.Equals(pd.GateId, address.Gate, StringComparison.OrdinalIgnoreCase) ||
                     !string.Equals(pd.PortId, address.Port, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -190,13 +198,11 @@ internal static class WorldLinkTraversal
             MarkTraversed(newRoom.game, _target);
             WorldLinkRoomRegistry.BuildForRoom(newRoom);
             MultiGatePortRuntime targetPort = WorldLinkRoomRegistry.FindPort(newRoom, _target);
-            if (targetPort != null)
-            {
-                PlaceArrivingPlayers(newRoom, targetPort);
-            }
+            if (targetPort != null) PlaceArrivingPlayers(newRoom, targetPort);
+
             if (!WorldLinkRoomRegistry.RequestInbound(newRoom, _target))
             {
-                Plugin.Logger?.LogWarning($"WorldLink: arrived at {_target}, but its controller could not arm inbound traversal.");
+                Plugin.Logger?.LogWarning($"WorldLink: arrived at {_target}, but its active matching controller could not arm inbound traversal.");
             }
         }
     }

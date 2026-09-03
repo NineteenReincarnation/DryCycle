@@ -50,17 +50,9 @@ internal readonly struct WorldLinkPortAddress : IEquatable<WorldLinkPortAddress>
     internal static bool TryParse(string text, out WorldLinkPortAddress address)
     {
         address = default;
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
+        if (string.IsNullOrWhiteSpace(text)) return false;
         string[] parts = text.Trim().Split('/');
-        if (parts.Length != 3)
-        {
-            return false;
-        }
-
+        if (parts.Length != 3) return false;
         address = new WorldLinkPortAddress(parts[0], parts[1], parts[2]);
         return address.IsValid;
     }
@@ -96,13 +88,7 @@ internal sealed class MultiGateControllerData : PlacedObject.Data
 
     public override string ToString()
     {
-        string result = string.Join("~", new[]
-        {
-            Version,
-            GateId,
-            F(PanelPos.x),
-            F(PanelPos.y)
-        });
+        string result = string.Join("~", new[] { Version, GateId, F(PanelPos.x), F(PanelPos.y) });
         result = SaveState.SetCustomData(this, result);
         return SaveUtils.AppendUnrecognizedStringAttrs(result, "~", unrecognizedAttributes);
     }
@@ -129,16 +115,16 @@ internal sealed class MultiGateControllerData : PlacedObject.Data
     internal static int ParseInt(string s, int fallback) =>
         int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : fallback;
 
-    internal static bool ParseBool(string s, bool fallback) =>
-        bool.TryParse(s, out bool value) ? value : fallback;
-
+    internal static bool ParseBool(string s, bool fallback) => bool.TryParse(s, out bool value) ? value : fallback;
     internal static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
 }
 
 internal sealed class MultiGatePortData : PlacedObject.Data
 {
+    private const string VersionV4 = "V4";
     private const string VersionV3 = "V3";
     private const string VersionV2 = "V2";
+    private const int V4FieldCount = 28;
     private const int V3FieldCount = 28;
     private const int V2FieldCount = 27;
 
@@ -156,7 +142,9 @@ internal sealed class MultiGatePortData : PlacedObject.Data
     public string DestinationRoom = string.Empty;
     public string DestinationGateId = string.Empty;
     public string DestinationPortId = string.Empty;
-    public Vector2 GlyphOffset = new(-32f, 0f);
+
+    // V4: gate-local coordinates. X follows Tangent, Y follows Normal.
+    public Vector2 GlyphOffset = new(0f, -32f);
     public Vector2 MapAnchorOffset = Vector2.zero;
     public Vector2 MapDirection = Vector2.right;
     public bool MapDirectionOverride;
@@ -172,10 +160,7 @@ internal sealed class MultiGatePortData : PlacedObject.Data
         get
         {
             Vector2 d = Direction;
-            if (d.sqrMagnitude < 0.0001f)
-            {
-                d = Vector2.right;
-            }
+            if (d.sqrMagnitude < 0.0001f) d = Vector2.right;
             return d.normalized;
         }
     }
@@ -189,24 +174,21 @@ internal sealed class MultiGatePortData : PlacedObject.Data
         }
     }
 
+    internal Vector2 GlyphWorldOffset => Tangent * GlyphOffset.x + Normal * GlyphOffset.y;
+    internal Vector2 ToGateLocal(Vector2 worldOffset) => new(Vector2.Dot(worldOffset, Tangent), Vector2.Dot(worldOffset, Normal));
     internal Vector2 EffectiveMapDirection => MapDirectionOverride ? SafeDirection(MapDirection) : Normal;
-
     internal WorldLinkPortAddress Address(string roomName) => new(roomName, GateId, PortId);
-
-    internal WorldLinkPortAddress DestinationAddress =>
-        new(DestinationRoom, DestinationGateId, DestinationPortId);
+    internal WorldLinkPortAddress DestinationAddress => new(DestinationRoom, DestinationGateId, DestinationPortId);
 
     public override void FromString(string s)
     {
         try
         {
             string[] p = (s ?? string.Empty).Split('~');
+            bool v4 = p.Length >= V4FieldCount && p[0] == VersionV4;
             bool v3 = p.Length >= V3FieldCount && p[0] == VersionV3;
             bool v2 = p.Length >= V2FieldCount && p[0] == VersionV2;
-            if (!v3 && !v2)
-            {
-                return;
-            }
+            if (!v4 && !v3 && !v2) return;
 
             GateId = MultiGateControllerData.SafeId(p[1], "MainGate");
             PortId = MultiGateControllerData.SafeId(p[2], "PortA");
@@ -222,22 +204,27 @@ internal sealed class MultiGatePortData : PlacedObject.Data
             DestinationRoom = Clean(p[13]);
             DestinationGateId = MultiGateControllerData.SafeId(p[14], string.Empty);
             DestinationPortId = MultiGateControllerData.SafeId(p[15], string.Empty);
-            GlyphOffset = new Vector2(PF(p[16], GlyphOffset.x), PF(p[17], GlyphOffset.y));
+
+            // V2/V3 stored a world-space vector. Convert it after Direction has been
+            // parsed so the glyph keeps the exact old world position, then rotates with
+            // the gate from this point forward.
+            Vector2 serializedGlyph = new(PF(p[16], v4 ? GlyphOffset.x : -32f), PF(p[17], v4 ? GlyphOffset.y : 0f));
+            GlyphOffset = v4 ? serializedGlyph : ToGateLocal(serializedGlyph);
+
             MapAnchorOffset = new Vector2(PF(p[18], 0f), PF(p[19], 0f));
             MapDirection = SafeDirection(new Vector2(PF(p[20], Direction.x), PF(p[21], Direction.y)));
-            if (v3)
+
+            if (v4 || v3)
             {
                 MapDirectionOverride = MultiGateControllerData.ParseBool(p[22], false);
                 MapGlyphOffset = new Vector2(PF(p[23], MapGlyphOffset.x), PF(p[24], MapGlyphOffset.y));
                 HideExternalDestinationUntilTraversed = MultiGateControllerData.ParseBool(p[25], true);
                 Enabled = MultiGateControllerData.ParseBool(p[26], true);
                 PanelPos = ParseVector(p[27], PanelPos);
-                unrecognizedAttributes = SaveUtils.PopulateUnrecognizedStringAttrs(p, V3FieldCount);
+                unrecognizedAttributes = SaveUtils.PopulateUnrecognizedStringAttrs(p, v4 ? V4FieldCount : V3FieldCount);
             }
             else
             {
-                // V2 always serialized a concrete map vector. Preserve it as a manual
-                // override when reading old development rooms.
                 MapDirectionOverride = true;
                 MapGlyphOffset = new Vector2(PF(p[22], MapGlyphOffset.x), PF(p[23], MapGlyphOffset.y));
                 HideExternalDestinationUntilTraversed = MultiGateControllerData.ParseBool(p[24], true);
@@ -256,7 +243,7 @@ internal sealed class MultiGatePortData : PlacedObject.Data
     {
         string result = string.Join("~", new[]
         {
-            VersionV3,
+            VersionV4,
             GateId,
             PortId,
             FF(Direction.x), FF(Direction.y),

@@ -31,10 +31,7 @@ internal static class GateUnlockRequirements
         try
         {
             string[] lines = File.ReadAllLines(_loadedPath);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                ParseLine(lines[i], i + 1);
-            }
+            for (int i = 0; i < lines.Length; i++) ParseLine(lines[i], i + 1);
             _lastWriteUtc = File.GetLastWriteTimeUtc(_loadedPath);
             Plugin.Logger?.LogInfo($"WorldLink: loaded {Requirements.Count} gate requirement(s) from '{_loadedPath}'.");
         }
@@ -47,31 +44,20 @@ internal static class GateUnlockRequirements
 
     internal static void PollHotReload(int frame)
     {
-        // RainWorldGame.clock can restart when returning to the menu/new session.
-        // Treat a backwards jump as an immediate poll instead of waiting for the new
-        // clock to catch up to an old absolute threshold.
-        if (_lastPollFrame != int.MinValue && frame >= _lastPollFrame && frame - _lastPollFrame < 120)
-        {
-            return;
-        }
+        if (_lastPollFrame != int.MinValue && frame >= _lastPollFrame && frame - _lastPollFrame < 120) return;
         _lastPollFrame = frame;
+
         if (string.IsNullOrEmpty(_loadedPath) || !File.Exists(_loadedPath))
         {
             string resolved = ResolvePath();
-            if (!string.Equals(resolved, _loadedPath, StringComparison.OrdinalIgnoreCase))
-            {
-                Reload();
-            }
+            if (!string.Equals(resolved, _loadedPath, StringComparison.OrdinalIgnoreCase)) Reload();
             return;
         }
 
         try
         {
             DateTime write = File.GetLastWriteTimeUtc(_loadedPath);
-            if (write != _lastWriteUtc)
-            {
-                Reload();
-            }
+            if (write != _lastWriteUtc) Reload();
         }
         catch { }
     }
@@ -85,11 +71,7 @@ internal static class GateUnlockRequirements
 
     internal static bool IsUnlocked(RainWorldGame game, WorldLinkPortAddress address)
     {
-        if (game == null || !game.IsStorySession || !address.IsValid)
-        {
-            return false;
-        }
-
+        if (game == null || !game.IsStorySession || !address.IsValid) return false;
         List<string> unlocked = game.GetStorySession.saveState.deathPersistentSaveData.unlockedGates;
         if (unlocked == null) return false;
         for (int i = 0; i < unlocked.Count; i++)
@@ -101,16 +83,9 @@ internal static class GateUnlockRequirements
 
     internal static void UnlockIfAllowed(RainWorldGame game, WorldLinkPortAddress address)
     {
-        if (game == null || !game.IsStorySession || !address.IsValid)
-        {
-            return;
-        }
-
+        if (game == null || !game.IsStorySession || !address.IsValid) return;
         DeathPersistentSaveData data = game.GetStorySession.saveState.deathPersistentSaveData;
-        if (!data.CanUseUnlockedGates(game.StoryCharacter))
-        {
-            return;
-        }
+        if (!data.CanUseUnlockedGates(game.StoryCharacter)) return;
 
         data.unlockedGates ??= new List<string>();
         for (int i = 0; i < data.unlockedGates.Count; i++)
@@ -122,112 +97,62 @@ internal static class GateUnlockRequirements
 
     internal static bool Meets(RainWorldGame game, Room room, WorldLinkPortAddress address)
     {
-        if (game == null || room == null)
-        {
-            return false;
-        }
-
-        if (IsUnlocked(game, address))
-        {
-            return true;
-        }
+        if (game == null || room == null) return false;
+        if (IsUnlocked(game, address)) return true;
 
         AbstractCreature first = game.FirstAlivePlayer;
         Player player = first?.realizedCreature as Player;
-        if (player == null || player.maxRippleLevel >= 1f)
-        {
-            return false;
-        }
+        if (player == null || player.maxRippleLevel >= 1f) return false;
 
         RegionGate.GateRequirement requirement = Get(address);
-        if (requirement == null)
-        {
-            return true;
-        }
+        if (requirement == null) return true;
 
-        int numeric;
-        if (int.TryParse(requirement.value, NumberStyles.Integer, CultureInfo.InvariantCulture, out numeric))
+        if (int.TryParse(requirement.value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric))
         {
-            if (ModManager.MMF && MMF.cfgDisableGateKarma.Value)
-            {
-                numeric = 1;
-            }
+            if (ModManager.MMF && MMF.cfgDisableGateKarma.Value) numeric = 1;
             int karma = player.Karma;
-            if (game.bestHeldScavenger != null)
-            {
-                karma += game.karmaOfBestHeldScavenger;
-            }
+            if (game.bestHeldScavenger != null) karma += game.karmaOfBestHeldScavenger;
             return numeric - 1 <= karma;
         }
 
         if (ModManager.MSC && requirement == MoreSlugcatsEnums.GateRequirement.RoboLock)
-        {
             return MeetsRoboLock(game, room.world?.region?.name ?? string.Empty, room.abstractRoom?.name ?? string.Empty);
-        }
 
         if (ModManager.MSC && requirement == MoreSlugcatsEnums.GateRequirement.OELock)
-        {
             return MeetsOuterExpanseLock(game);
-        }
 
-        // DemoLock and unsupported registered requirements stay closed unless the
-        // directed port has already been persisted as unlocked.
         return false;
     }
 
     internal static bool MeetsForMap(RainWorldGame game, string roomName, WorldLinkPortAddress address, int currentKarma)
     {
-        if (game != null && IsUnlocked(game, address))
-        {
-            return true;
-        }
-
+        if (game != null && IsUnlocked(game, address)) return true;
         RegionGate.GateRequirement requirement = Get(address);
-        if (requirement == null)
-        {
-            return true;
-        }
+        if (requirement == null) return true;
 
         if (game?.IsStorySession == true && game.GetStorySession.saveState.deathPersistentSaveData.maximumRippleLevel >= 1f)
-        {
             return false;
-        }
 
         if (int.TryParse(requirement.value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric))
         {
-            if (ModManager.MMF && MMF.cfgDisableGateKarma.Value)
-            {
-                numeric = 1;
-            }
+            if (ModManager.MMF && MMF.cfgDisableGateKarma.Value) numeric = 1;
             return numeric - 1 <= currentKarma;
         }
 
-        if (game == null)
-        {
-            return false;
-        }
-
+        if (game == null) return false;
         if (ModManager.MSC && requirement == MoreSlugcatsEnums.GateRequirement.RoboLock)
         {
             string region = game.overWorld?.activeWorld?.region?.name ?? InferRegion(roomName);
             return MeetsRoboLock(game, region, roomName ?? string.Empty);
         }
-
         if (ModManager.MSC && requirement == MoreSlugcatsEnums.GateRequirement.OELock)
-        {
             return MeetsOuterExpanseLock(game);
-        }
-
         return false;
     }
 
     private static bool MeetsRoboLock(RainWorldGame game, string region, string roomName)
     {
-        if (game == null)
-        {
-            return false;
-        }
-
+        if (game == null) return false;
         if (ModManager.Expedition && game.rainWorld.ExpeditionMode &&
             ExpeditionData.slugcatPlayer == MoreSlugcatsEnums.SlugcatStatsName.Artificer &&
             string.Equals(region, "UW", StringComparison.OrdinalIgnoreCase) &&
@@ -236,11 +161,7 @@ internal static class GateUnlockRequirements
             return true;
         }
 
-        if (game.session is not StoryGameSession story)
-        {
-            return false;
-        }
-
+        if (game.session is not StoryGameSession story) return false;
         return story.saveState.hasRobo &&
                story.saveState.deathPersistentSaveData.theMark &&
                !string.Equals(region, "SL", StringComparison.OrdinalIgnoreCase) &&
@@ -250,10 +171,7 @@ internal static class GateUnlockRequirements
 
     private static bool MeetsOuterExpanseLock(RainWorldGame game)
     {
-        if (game?.session is not StoryGameSession story)
-        {
-            return false;
-        }
+        if (game?.session is not StoryGameSession story) return false;
 
         bool gourmandProgress =
             game.rainWorld.progression.miscProgressionData.beaten_Gourmand ||
@@ -261,20 +179,14 @@ internal static class GateUnlockRequirements
             global::MoreSlugcats.MoreSlugcats.chtUnlockOuterExpanse.Value;
 
         if (game.StoryCharacter == MoreSlugcatsEnums.SlugcatStatsName.Gourmand)
-        {
             return story.saveState.deathPersistentSaveData.theMark || gourmandProgress;
-        }
 
-        return (game.StoryCharacter == SlugcatStats.Name.White || game.StoryCharacter == SlugcatStats.Name.Yellow) &&
-               gourmandProgress;
+        return (game.StoryCharacter == SlugcatStats.Name.White || game.StoryCharacter == SlugcatStats.Name.Yellow) && gourmandProgress;
     }
 
     private static string InferRegion(string roomName)
     {
-        if (string.IsNullOrWhiteSpace(roomName))
-        {
-            return string.Empty;
-        }
+        if (string.IsNullOrWhiteSpace(roomName)) return string.Empty;
         int underscore = roomName.IndexOf('_');
         return underscore > 0 ? roomName.Substring(0, underscore) : string.Empty;
     }
@@ -282,10 +194,7 @@ internal static class GateUnlockRequirements
     private static void ParseLine(string raw, int lineNumber)
     {
         string line = StripComment(raw).Trim();
-        if (line.Length == 0)
-        {
-            return;
-        }
+        if (line.Length == 0) return;
 
         string[] parts = line.Split(':');
         WorldLinkPortAddress address;
@@ -311,14 +220,20 @@ internal static class GateUnlockRequirements
             return;
         }
 
+        if (Requirements.ContainsKey(address))
+        {
+            // A duplicated directed address is ambiguous authoring, not a legitimate
+            // override mechanism. Fail closed so editing mistakes can never silently
+            // weaken a route requirement because of file ordering.
+            Plugin.Logger?.LogError($"WorldLink: GateUnlockRequirements.txt line {lineNumber} duplicates {address}. The route is fail-closed with DemoLock.");
+            Requirements[address] = RegionGate.GateRequirement.DemoLock;
+            return;
+        }
+
         if (!TryNormalizeRequirement(requirementText, out string value))
         {
             Plugin.Logger?.LogWarning($"WorldLink: GateUnlockRequirements.txt line {lineNumber} uses unknown requirement '{requirementText}'. The route is fail-closed with DemoLock.");
             value = RegionGate.GateRequirement.DemoLock.value;
-        }
-        if (Requirements.ContainsKey(address))
-        {
-            Plugin.Logger?.LogWarning($"WorldLink: GateUnlockRequirements.txt line {lineNumber} replaces duplicate entry for {address}.");
         }
         Requirements[address] = new RegionGate.GateRequirement(value);
     }
@@ -331,9 +246,7 @@ internal static class GateUnlockRequirements
         else if (value.Equals("OELock", StringComparison.OrdinalIgnoreCase)) value = "L";
 
         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric))
-        {
             return numeric >= 1 && numeric <= 5;
-        }
 
         if (ExtEnumBase.TryParse(typeof(RegionGate.GateRequirement), value, ignoreCase: true, out ExtEnumBase parsed) &&
             parsed is RegionGate.GateRequirement requirement)
@@ -341,7 +254,6 @@ internal static class GateUnlockRequirements
             value = requirement.value;
             return true;
         }
-
         return false;
     }
 
@@ -364,10 +276,7 @@ internal static class GateUnlockRequirements
                 for (int i = 0; i < ModManager.ActiveMods.Count; i++)
                 {
                     ModManager.Mod mod = ModManager.ActiveMods[i];
-                    if (mod == null || !string.Equals(mod.id, Plugin.RainWorldModId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
+                    if (mod == null || !string.Equals(mod.id, Plugin.RainWorldModId, StringComparison.OrdinalIgnoreCase)) continue;
 
                     string[] candidates =
                     {
@@ -378,10 +287,7 @@ internal static class GateUnlockRequirements
                     };
                     for (int j = 0; j < candidates.Length; j++)
                     {
-                        if (!string.IsNullOrEmpty(candidates[j]) && File.Exists(candidates[j]))
-                        {
-                            return candidates[j];
-                        }
+                        if (!string.IsNullOrEmpty(candidates[j]) && File.Exists(candidates[j])) return candidates[j];
                     }
                 }
             }
