@@ -21,7 +21,7 @@ internal static class WeatherSpatialRuntime
         }
 
         WeatherSpatialRegistry.Reload();
-        WeatherSpatialDevUI.Enable();
+        WeatherSpatialMapMenuRuntime.Enable();
         On.Room.Update += Room_Update;
         On.RoomCamera.Update += RoomCamera_Update;
         _enabled = true;
@@ -36,6 +36,7 @@ internal static class WeatherSpatialRuntime
 
         On.Room.Update -= Room_Update;
         On.RoomCamera.Update -= RoomCamera_Update;
+        WeatherSpatialMapMenuRuntime.Disable();
         WeatherSpatialDevUI.Disable();
         WeatherSpatialPreview.Clear();
         _queryRoom = null;
