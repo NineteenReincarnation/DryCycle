@@ -25,6 +25,7 @@ internal static class FoehnWeatherRuntime
         }
 
         _enabled = true;
+        FoehnDebugRuntime.Enable();
         On.Room.Loaded += Room_Loaded;
     }
 
@@ -36,6 +37,7 @@ internal static class FoehnWeatherRuntime
         }
 
         On.Room.Loaded -= Room_Loaded;
+        FoehnDebugRuntime.Disable();
         _controllers = new ConditionalWeakTable<Room, FoehnController>();
         _enabled = false;
     }
@@ -46,6 +48,12 @@ internal static class FoehnWeatherRuntime
         if (!_enabled)
         {
             return false;
+        }
+
+        if (FoehnDebugRuntime.TryGetForcedIntensity(room, out float forced))
+        {
+            intensity = forced;
+            return true;
         }
 
         World world = room?.world;
@@ -79,6 +87,14 @@ internal static class FoehnWeatherRuntime
         // Stable default: strong descending lee-side flow. Rooms can still author
         // WindDirection and Foehn will honor it without requiring a new RoomSettings UI.
         return new Vector2(1f, -0.16f).normalized;
+    }
+
+    internal static bool TryGetDebugSnapshot(Room room, out FoehnDebugSnapshot snapshot)
+    {
+        snapshot = default;
+        return room != null &&
+               _controllers.TryGetValue(room, out FoehnController controller) &&
+               controller.TryGetDebugSnapshot(out snapshot);
     }
 
     private static void Room_Loaded(On.Room.orig_Loaded orig, Room self)
@@ -148,7 +164,8 @@ internal static class FoehnWeatherRuntime
             _windDirection = nextWindDirection;
             _visualTime += 1f / 40f;
 
-            if (_intensity > Epsilon)
+            bool debugVisible = FoehnDebugRuntime.DebugMode > 0;
+            if (_intensity > Epsilon || debugVisible)
             {
                 FoehnWindField.Ensure();
                 EnsureTerrainField();
@@ -185,7 +202,8 @@ internal static class FoehnWeatherRuntime
             }
 
             float intensity = Mathf.Lerp(_lastIntensity, _intensity, timeStacker);
-            if (intensity <= Epsilon)
+            bool debugVisible = FoehnDebugRuntime.DebugMode > 0;
+            if (intensity <= Epsilon && !debugVisible)
             {
                 FoehnRenderPipeline.Hide(sLeaser.sprites);
                 base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
@@ -213,7 +231,11 @@ internal static class FoehnWeatherRuntime
                 intensity,
                 _windDirection,
                 _terrainField);
-            FoehnRenderPipeline.DrawAtmosphere(sLeaser.sprites, rCam, frame);
+            FoehnRenderPipeline.DrawAtmosphere(
+                sLeaser.sprites,
+                rCam,
+                frame,
+                FoehnDebugRuntime.DebugMode);
 
             base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
         }
@@ -247,6 +269,15 @@ internal static class FoehnWeatherRuntime
             }
 
             base.Destroy();
+        }
+
+        internal bool TryGetDebugSnapshot(out FoehnDebugSnapshot snapshot)
+        {
+            snapshot = new FoehnDebugSnapshot(
+                _intensity,
+                _windDirection,
+                _terrainField != null);
+            return true;
         }
 
         private void EnsureTerrainField()
