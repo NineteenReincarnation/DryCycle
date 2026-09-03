@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using DryCycle.TemperatureSystem;
 using UnityEngine;
@@ -9,9 +8,9 @@ namespace DryCycle.Weather.IntenseHeat;
 /// Persistent short-term solar exposure state for creatures during IntenseHeat.
 /// Exposure is gameplay/world state, not inferred from shader output.
 ///
-/// The same value drives a post-draw palette shift so creatures visibly dry, yellow
-/// and scorch after sustained direct sun. Player body heat also receives an additional
-/// hazard-grade solar input on top of the normal temperature model.
+/// Creature recoloring is intentionally not performed here. The exposure state remains
+/// available for hazard/gameplay logic, while players still receive additional direct
+/// solar heating during IntenseHeat.
 /// </summary>
 internal static class IntenseHeatCreatureExposure
 {
@@ -26,16 +25,7 @@ internal static class IntenseHeatCreatureExposure
         internal float Exposure;
     }
 
-    private sealed class VisualState
-    {
-        internal Color[] BaseColors;
-        internal Color[] LastTintedColors;
-        internal Color[][] BaseVertexColors;
-        internal Color[][] LastTintedVertexColors;
-    }
-
     private static ConditionalWeakTable<Creature, CreatureState> _states = new();
-    private static ConditionalWeakTable<RoomCamera.SpriteLeaser, VisualState> _visualStates = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -45,7 +35,6 @@ internal static class IntenseHeatCreatureExposure
             return;
         }
 
-        On.RoomCamera.DrawUpdate += RoomCamera_DrawUpdate;
         _enabled = true;
     }
 
@@ -56,9 +45,7 @@ internal static class IntenseHeatCreatureExposure
             return;
         }
 
-        On.RoomCamera.DrawUpdate -= RoomCamera_DrawUpdate;
         _states = new ConditionalWeakTable<Creature, CreatureState>();
-        _visualStates = new ConditionalWeakTable<RoomCamera.SpriteLeaser, VisualState>();
         _enabled = false;
     }
 
@@ -170,166 +157,5 @@ internal static class IntenseHeatCreatureExposure
         }
 
         return count > 0 ? total / count : creature.mainBodyChunk?.pos ?? Vector2.zero;
-    }
-
-    private static void RoomCamera_DrawUpdate(
-        On.RoomCamera.orig_DrawUpdate orig,
-        RoomCamera self,
-        float timeStacker,
-        float timeSpeed)
-    {
-        orig(self, timeStacker, timeSpeed);
-
-        if (!_enabled || self?.room == null || self.spriteLeasers == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < self.spriteLeasers.Count; i++)
-        {
-            RoomCamera.SpriteLeaser leaser = self.spriteLeasers[i];
-            if (leaser?.drawableObject is not GraphicsModule graphics ||
-                graphics.owner is not Creature creature ||
-                creature.room != self.room ||
-                leaser.sprites == null)
-            {
-                continue;
-            }
-
-            ApplyTint(leaser, GetExposure(creature));
-        }
-    }
-
-    private static void ApplyTint(RoomCamera.SpriteLeaser leaser, float exposure)
-    {
-        VisualState visual = _visualStates.GetOrCreateValue(leaser);
-        EnsureVisualArrays(leaser, visual);
-
-        float tint = Smooth01(Mathf.InverseLerp(0.08f, 0.92f, exposure));
-        float scorch = Smooth01(Mathf.InverseLerp(0.58f, 1f, exposure));
-
-        for (int i = 0; i < leaser.sprites.Length; i++)
-        {
-            FSprite sprite = leaser.sprites[i];
-            if (sprite == null)
-            {
-                continue;
-            }
-
-            Color current = sprite.color;
-            if (!ApproximatelyColor(current, visual.LastTintedColors[i]))
-            {
-                visual.BaseColors[i] = current;
-            }
-
-            Color output = TintColor(visual.BaseColors[i], tint, scorch);
-            sprite.color = output;
-            visual.LastTintedColors[i] = output;
-
-            if (sprite is TriangleMesh mesh && mesh.verticeColors != null)
-            {
-                EnsureVertexArrays(visual, i, mesh.verticeColors);
-                for (int v = 0; v < mesh.verticeColors.Length; v++)
-                {
-                    Color vertex = mesh.verticeColors[v];
-                    if (!ApproximatelyColor(vertex, visual.LastTintedVertexColors[i][v]))
-                    {
-                        visual.BaseVertexColors[i][v] = vertex;
-                    }
-
-                    Color vertexOutput = TintColor(
-                        visual.BaseVertexColors[i][v],
-                        tint,
-                        scorch);
-                    mesh.verticeColors[v] = vertexOutput;
-                    visual.LastTintedVertexColors[i][v] = vertexOutput;
-                }
-            }
-        }
-    }
-
-    private static Color TintColor(Color source, float tint, float scorch)
-    {
-        float luma = source.r * 0.299f + source.g * 0.587f + source.b * 0.114f;
-        float chroma = Mathf.Max(source.r, Mathf.Max(source.g, source.b)) -
-                       Mathf.Min(source.r, Mathf.Min(source.g, source.b));
-
-        Color dried = new(
-            Mathf.Clamp01(source.r * 1.12f + luma * 0.18f),
-            Mathf.Clamp01(source.g * 0.90f + luma * 0.095f),
-            Mathf.Clamp01(source.b * 0.56f + luma * 0.025f),
-            source.a);
-
-        Color scorched = new(
-            Mathf.Clamp01(dried.r * 0.92f + 0.105f),
-            Mathf.Clamp01(dried.g * 0.70f + 0.045f),
-            Mathf.Clamp01(dried.b * 0.42f + 0.010f),
-            source.a);
-
-        float biologicalProtection = Mathf.Lerp(1f, 0.72f, Mathf.Clamp01(chroma * 1.5f));
-        Color result = Color.Lerp(source, dried, tint * biologicalProtection);
-        result = Color.Lerp(result, scorched, scorch * 0.72f);
-        result.a = source.a;
-        return result;
-    }
-
-    private static void EnsureVisualArrays(
-        RoomCamera.SpriteLeaser leaser,
-        VisualState visual)
-    {
-        int count = leaser.sprites?.Length ?? 0;
-        if (visual.BaseColors != null && visual.BaseColors.Length == count)
-        {
-            return;
-        }
-
-        visual.BaseColors = new Color[count];
-        visual.LastTintedColors = new Color[count];
-        visual.BaseVertexColors = new Color[count][];
-        visual.LastTintedVertexColors = new Color[count][];
-
-        for (int i = 0; i < count; i++)
-        {
-            Color color = leaser.sprites[i]?.color ?? Color.white;
-            visual.BaseColors[i] = color;
-            visual.LastTintedColors[i] = color;
-        }
-    }
-
-    private static void EnsureVertexArrays(
-        VisualState visual,
-        int spriteIndex,
-        Color[] currentColors)
-    {
-        int count = currentColors?.Length ?? 0;
-        if (visual.BaseVertexColors[spriteIndex] != null &&
-            visual.BaseVertexColors[spriteIndex].Length == count)
-        {
-            return;
-        }
-
-        visual.BaseVertexColors[spriteIndex] = new Color[count];
-        visual.LastTintedVertexColors[spriteIndex] = new Color[count];
-        for (int i = 0; i < count; i++)
-        {
-            Color current = currentColors[i];
-            visual.BaseVertexColors[spriteIndex][i] = current;
-            visual.LastTintedVertexColors[spriteIndex][i] = current;
-        }
-    }
-
-    private static bool ApproximatelyColor(Color a, Color b)
-    {
-        float difference = Mathf.Abs(a.r - b.r) +
-                           Mathf.Abs(a.g - b.g) +
-                           Mathf.Abs(a.b - b.b) +
-                           Mathf.Abs(a.a - b.a);
-        return difference < 0.012f;
-    }
-
-    private static float Smooth01(float value)
-    {
-        float t = Mathf.Clamp01(value);
-        return t * t * (3f - 2f * t);
     }
 }
