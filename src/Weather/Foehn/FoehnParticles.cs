@@ -28,7 +28,7 @@ internal sealed class FoehnParticleField
     }
 
     private readonly Particle[] _particles = new Particle[ParticleCount];
-    private readonly Random _random;
+    private readonly System.Random _random;
     private readonly float _roomWidth;
     private readonly float _roomHeight;
 
@@ -36,7 +36,7 @@ internal sealed class FoehnParticleField
     {
         _roomWidth = Mathf.Max(20f, (room?.TileWidth ?? 1) * 20f);
         _roomHeight = Mathf.Max(20f, (room?.TileHeight ?? 1) * 20f);
-        _random = new Random(BuildSeed(room));
+        _random = new System.Random(BuildSeed(room));
 
         for (int i = 0; i < _particles.Length; i++)
         {
@@ -132,8 +132,6 @@ internal sealed class FoehnParticleField
             return;
         }
 
-        Vector2 forward = SafeNormalize(windDirection);
-        float baseRotation = Mathf.Atan2(forward.y, forward.x) * Mathf.Rad2Deg;
         float drive = Mathf.Clamp01(intensity);
 
         for (int i = 0; i < _particles.Length; i++)
@@ -168,8 +166,7 @@ internal sealed class FoehnParticleField
                            Mathf.Lerp(0.75f, 1.48f, Mathf.InverseLerp(5f, 18f, speed));
 
             sprite.SetPosition(position - camPos);
-            sprite.rotation = baseRotation +
-                              Mathf.Atan2(particle.Velocity.y, particle.Velocity.x) * Mathf.Rad2Deg * 0.08f;
+            sprite.rotation = Mathf.Atan2(particle.Velocity.y, particle.Velocity.x) * Mathf.Rad2Deg;
             sprite.scaleX = Mathf.Max(2f, length);
             sprite.scaleY = particle.Width;
             sprite.alpha = Mathf.Clamp01(visibility);
