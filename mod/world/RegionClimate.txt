@@ -25,6 +25,7 @@ SU {
 }
 
 B5 {
+    IntenseHeat : 100
     SandStorm : 100
 }
 
@@ -70,6 +71,9 @@ ABCDEFG {
 
     DeathRain : 100
     DeathSandStorm : 50
+    IntenseHeat : 50
+    //IntenseHeat 是极端直晒热灾害：强烈太阳、橙黄/赭色压色、更猛烈热折射、
+    //屏幕边缘热晕，并让长期无遮挡暴晒的生物逐渐出现干黄/焦褐变色。
 
     //气象类型，当日允许该气象进入排表的概率
 }
