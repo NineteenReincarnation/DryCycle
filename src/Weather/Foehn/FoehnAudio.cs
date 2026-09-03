@@ -4,9 +4,8 @@ using UnityEngine;
 namespace DryCycle.Weather.Foehn;
 
 /// <summary>
-/// Procedural Foehn gale bed. Unlike HeatWave's quiet ambience this is intentionally
-/// obvious: low pressure, fast dry-air hiss and gust modulation reinforce the same
-/// large directional pulses used by the optical, particle and physics systems.
+/// Low, restrained procedural Foehn gale bed. The visual/physical wind should carry
+/// most of the event; audio only reinforces gust fronts instead of dominating the mix.
 /// </summary>
 internal sealed class FoehnAudio : IDisposable
 {
@@ -39,26 +38,26 @@ internal sealed class FoehnAudio : IDisposable
         }
 
         float drive = Mathf.Clamp01(intensity);
-        float gust = Mathf.Clamp01(gustBody * 0.68f + gustFront * 0.92f);
+        float gust = Mathf.Clamp01(gustBody * 0.62f + gustFront * 0.92f);
 
         float target = IsCameraRoom()
-            ? Mathf.Pow(drive, 0.72f) *
-              Mathf.Lerp(0.085f, 0.225f, gust) *
+            ? Mathf.Pow(drive, 0.78f) *
+              Mathf.Lerp(0.026f, 0.086f, gust) *
               ResolveSfxVolume()
             : 0f;
 
         _smoothedVolume = Mathf.MoveTowards(
             _smoothedVolume,
             target,
-            target > _smoothedVolume ? 0.0095f : 0.0042f);
+            target > _smoothedVolume ? 0.0045f : 0.0032f);
 
-        if (_smoothedVolume > 0.0004f && EnsureSource())
+        if (_smoothedVolume > 0.00035f && EnsureSource())
         {
             _source.volume = _smoothedVolume;
             _source.pitch =
-                0.925f + drive * 0.085f +
-                gustBody * 0.028f + gustFront * 0.055f +
-                Mathf.Sin(visualTime * 0.43f) * 0.006f;
+                0.935f + drive * 0.052f +
+                gustBody * 0.016f + gustFront * 0.030f +
+                Mathf.Sin(visualTime * 0.43f) * 0.004f;
 
             if (!_source.isPlaying)
             {
@@ -176,30 +175,26 @@ internal sealed class FoehnAudio : IDisposable
         float[] mono = new float[frames];
         System.Random random = new(0x1F0E4A7);
 
-        // Broad pressure body.
-        AddOscillatorBand(mono, random, 18, 24f, 145f, 0.080f);
-        AddOscillatorBand(mono, random, 22, 145f, 620f, 0.047f);
-
-        // Dry-air hiss: many small high-frequency components rather than white noise,
-        // so the loop remains seamless and does not sound like rain static.
-        AddOscillatorBand(mono, random, 30, 620f, 2200f, 0.0105f);
-        AddOscillatorBand(mono, random, 22, 2200f, 4800f, 0.0048f);
+        // Keep the pressure body, but substantially reduce the high dry hiss that made
+        // the first pass tiring over long rooms.
+        AddOscillatorBand(mono, random, 16, 24f, 145f, 0.065f);
+        AddOscillatorBand(mono, random, 20, 145f, 620f, 0.036f);
+        AddOscillatorBand(mono, random, 24, 620f, 2200f, 0.0068f);
+        AddOscillatorBand(mono, random, 14, 2200f, 4200f, 0.0026f);
 
         for (int i = 0; i < frames; i++)
         {
             float phase = i / (float)frames;
             float macroGust =
-                0.73f +
-                Mathf.Sin(phase * Mathf.PI * 4f + 0.31f) * 0.14f +
-                Mathf.Sin(phase * Mathf.PI * 10f + 1.91f) * 0.065f +
-                Mathf.Sin(phase * Mathf.PI * 18f + 0.73f) * 0.028f;
-            mono[i] = SoftClip(mono[i] * macroGust * 1.18f);
+                0.78f +
+                Mathf.Sin(phase * Mathf.PI * 4f + 0.31f) * 0.10f +
+                Mathf.Sin(phase * Mathf.PI * 10f + 1.91f) * 0.045f +
+                Mathf.Sin(phase * Mathf.PI * 18f + 0.73f) * 0.018f;
+            mono[i] = SoftClip(mono[i] * macroGust);
         }
 
-        Normalize(mono, 0.72f);
+        Normalize(mono, 0.56f);
 
-        // Stereo decorrelation uses loop-safe delays. The moderate offset makes the
-        // gale feel wide without pinning a fake source to either side of the screen.
         float[] stereo = new float[frames * 2];
         int delayA = Mathf.RoundToInt(SampleRate * 0.021f);
         int delayB = Mathf.RoundToInt(SampleRate * 0.057f);
