@@ -4,13 +4,18 @@ using UnityEngine;
 namespace DryCycle.Weather.Foehn;
 
 /// <summary>
-/// Strong visible carrier for otherwise invisible hot wind. Particles are sparse
-/// elongated mineral/dust streaks, not a sandstorm veil: they expose direction,
-/// gust timing, wakes and nozzle acceleration while leaving the scene readable.
+/// Camera-local visual carrier for otherwise invisible hot wind. The pool is dense on
+/// purpose: far hairline streaks establish direction, mid particles expose gust/wake
+/// motion, and a small near layer provides occasional large foreground sweeps. Particles
+/// are recycled around the camera rather than diluted across an entire multi-screen room.
 /// </summary>
 internal sealed class FoehnParticleField
 {
-    internal const int ParticleCount = 92;
+    internal const int ParticleCount = 360;
+
+    private const int FarLayer = 0;
+    private const int MidLayer = 1;
+    private const int NearLayer = 2;
 
     private sealed class Particle
     {
@@ -24,6 +29,8 @@ internal sealed class FoehnParticleField
         internal float Alpha;
         internal float Depth;
         internal float Phase;
+        internal float Gust;
+        internal int Layer;
         internal bool Active;
     }
 
@@ -31,6 +38,7 @@ internal sealed class FoehnParticleField
     private readonly System.Random _random;
     private readonly float _roomWidth;
     private readonly float _roomHeight;
+    private bool _primed;
 
     internal FoehnParticleField(Room room)
     {
@@ -49,7 +57,10 @@ internal sealed class FoehnParticleField
         float intensity,
         Vector2 windDirection,
         FoehnTerrainField terrainField,
-        float visualTime)
+        float visualTime,
+        float gustSeed,
+        Vector2 cameraPos,
+        Vector2 cameraSize)
     {
         float drive = Mathf.Clamp01(intensity);
         if (drive <= 0.0001f)
@@ -58,14 +69,31 @@ internal sealed class FoehnParticleField
             {
                 _particles[i].Active = false;
             }
+            _primed = false;
             return;
         }
 
         Vector2 forward = SafeNormalize(windDirection);
         Vector2 cross = new(-forward.y, forward.x);
-        int targetActive = Mathf.RoundToInt(Mathf.Lerp(24f, ParticleCount, Mathf.Pow(drive, 0.72f)));
-        int activeCount = 0;
+        float buffer = Mathf.Lerp(185f, 265f, drive);
+        Rect viewBounds = BuildViewBounds(cameraPos, cameraSize, buffer);
 
+        Vector2 cameraCenter = cameraPos + cameraSize * 0.5f;
+        FoehnGustSample cameraGust = FoehnGustField.Sample(
+            cameraCenter,
+            visualTime,
+            drive,
+            forward,
+            gustSeed);
+        int targetActive = Mathf.Clamp(
+            Mathf.RoundToInt(
+                Mathf.Lerp(118f, 326f, Mathf.Pow(drive, 0.62f)) +
+                cameraGust.Body * 13f +
+                cameraGust.Front * 28f),
+            0,
+            ParticleCount);
+
+        int activeCount = 0;
         for (int i = 0; i < _particles.Length; i++)
         {
             Particle particle = _particles[i];
@@ -78,34 +106,65 @@ internal sealed class FoehnParticleField
             particle.LastPosition = particle.Position;
             particle.Life -= 1f;
 
-            FoehnTerrainSample terrain = terrainField?.Sample(particle.Position) ?? FoehnTerrainSample.OpenAir;
-            float localExposure = Mathf.Lerp(0.30f, 1f, terrain.Exposure);
+            FoehnTerrainSample terrain =
+                terrainField?.Sample(particle.Position) ?? FoehnTerrainSample.OpenAir;
+            FoehnGustSample gust = FoehnGustField.Sample(
+                particle.Position,
+                visualTime,
+                drive,
+                forward,
+                gustSeed);
+
+            float localExposure = Mathf.Lerp(0.34f, 1f, terrain.Exposure);
             float nozzle = terrain.Nozzle;
             float wake = terrain.Wake;
             float edge = terrain.Edge;
+            float layerSpeed = particle.Layer switch
+            {
+                FarLayer => 1.08f,
+                MidLayer => 0.98f,
+                _ => 1.18f
+            };
 
-            float waveA = Mathf.Sin(visualTime * 3.7f + particle.Phase * 17.13f);
-            float waveB = Mathf.Sin(visualTime * 7.9f + particle.Phase * 31.71f);
-            float gust = Mathf.Clamp01(0.64f + waveA * 0.23f + waveB * 0.13f + nozzle * 0.46f);
-            float speed = Mathf.Lerp(6.8f, 15.6f, drive) *
-                          Mathf.Lerp(0.55f, 1.24f, gust) *
-                          Mathf.Lerp(0.72f, 1.34f, nozzle) *
+            float speed = Mathf.Lerp(8.4f, 18.8f, drive) *
+                          layerSpeed *
+                          (0.70f + gust.Body * 0.48f + gust.Front * 0.66f) *
+                          Mathf.Lerp(0.82f, 1.38f, nozzle) *
                           localExposure;
 
-            float wakeCurl = wake * (waveA * 0.85f + waveB * 0.35f);
-            float edgeFlutter = edge * waveB * 0.52f;
-            Vector2 targetVelocity = forward * speed + cross * (wakeCurl + edgeFlutter);
-            particle.Velocity = Vector2.Lerp(particle.Velocity, targetVelocity, 0.16f + drive * 0.08f);
-            particle.Position += particle.Velocity;
+            float waveA = Mathf.Sin(visualTime * 4.1f + particle.Phase * 17.13f);
+            float waveB = Mathf.Sin(visualTime * 8.7f + particle.Phase * 31.71f);
+            float wakeCurl = wake *
+                             (waveA * 1.35f + waveB * 0.58f) *
+                             (0.48f + gust.Turbulence * 0.74f);
+            float edgeFlutter = edge * waveB * (0.36f + gust.Front * 0.54f);
+            float frontKick = gust.Front * waveA * 0.72f;
 
-            if (particle.Life <= 0f || IsOutside(particle.Position, forward))
+            Vector2 targetVelocity =
+                forward * speed +
+                cross * (wakeCurl + edgeFlutter + frontKick);
+            particle.Velocity = Vector2.Lerp(
+                particle.Velocity,
+                targetVelocity,
+                0.18f + drive * 0.07f + gust.Front * 0.08f);
+            particle.Position += particle.Velocity;
+            particle.Gust = Mathf.Clamp01(gust.Body * 0.66f + gust.Front * 0.92f);
+
+            if (particle.Life <= 0f || !Contains(viewBounds, particle.Position, 18f))
             {
                 particle.Active = false;
                 activeCount--;
             }
         }
 
-        int spawnBudget = Mathf.Min(7, targetActive - activeCount);
+        if (!_primed && activeCount >= targetActive * 0.82f)
+        {
+            _primed = true;
+        }
+
+        int deficit = Mathf.Max(0, targetActive - activeCount);
+        int spawnBudget = Mathf.Min(_primed ? 28 : 112, deficit);
+        bool fillInsideView = !_primed || activeCount < targetActive * 0.56f;
         for (int spawn = 0; spawn < spawnBudget; spawn++)
         {
             int slot = FindInactiveSlot();
@@ -114,7 +173,17 @@ internal sealed class FoehnParticleField
                 break;
             }
 
-            Spawn(_particles[slot], room, drive, forward, terrainField);
+            Spawn(
+                _particles[slot],
+                room,
+                drive,
+                forward,
+                cross,
+                terrainField,
+                visualTime,
+                gustSeed,
+                viewBounds,
+                fillInsideView);
         }
     }
 
@@ -153,32 +222,50 @@ internal sealed class FoehnParticleField
                 continue;
             }
 
-            Vector2 position = Vector2.Lerp(particle.LastPosition, particle.Position, timeStacker);
-            FoehnTerrainSample terrain = terrainField?.Sample(position) ?? FoehnTerrainSample.OpenAir;
-            float lifeFade = Mathf.Clamp01(Mathf.Min(
-                particle.Life / 15f,
-                (particle.MaxLife - particle.Life) / 10f));
-            float visibility = lifeFade * particle.Alpha * drive *
-                               Mathf.Lerp(0.42f, 1f, terrain.Exposure);
+            Vector2 position = Vector2.Lerp(
+                particle.LastPosition,
+                particle.Position,
+                timeStacker);
+            FoehnTerrainSample terrain =
+                terrainField?.Sample(position) ?? FoehnTerrainSample.OpenAir;
+
+            float spawnFade = Mathf.Clamp01(
+                (particle.MaxLife - particle.Life) /
+                (particle.Layer == FarLayer ? 5f : 8f));
+            float deathFade = Mathf.Clamp01(particle.Life / 13f);
+            float lifeFade = Mathf.Min(spawnFade, deathFade);
+            float visibility =
+                lifeFade *
+                particle.Alpha *
+                drive *
+                Mathf.Lerp(0.54f, 1f, terrain.Exposure) *
+                Mathf.Lerp(0.82f, 1.34f, particle.Gust);
 
             float speed = particle.Velocity.magnitude;
+            float lengthFactor = Mathf.Lerp(
+                0.82f,
+                1.62f,
+                Mathf.InverseLerp(6f, 24f, speed));
             float length = particle.BaseLength *
-                           Mathf.Lerp(0.75f, 1.48f, Mathf.InverseLerp(5f, 18f, speed));
+                           lengthFactor *
+                           Mathf.Lerp(0.94f, 1.30f, particle.Gust);
 
             sprite.SetPosition(position - camPos);
-            sprite.rotation = Mathf.Atan2(particle.Velocity.y, particle.Velocity.x) * Mathf.Rad2Deg;
+            sprite.rotation = Mathf.Atan2(
+                particle.Velocity.y,
+                particle.Velocity.x) * Mathf.Rad2Deg;
             sprite.scaleX = Mathf.Max(2f, length);
             sprite.scaleY = particle.Width;
             sprite.alpha = Mathf.Clamp01(visibility);
 
-            // Warm mineral dust. Near particles are brighter and longer; far particles
-            // are dimmer so the system reads as depth, not a flat screen overlay.
             float near = 1f - particle.Depth;
+            Color farColor = new(0.58f, 0.43f, 0.25f);
+            Color nearColor = new(0.98f, 0.81f, 0.47f);
             sprite.color = Color.Lerp(
-                new Color(0.63f, 0.46f, 0.25f),
-                new Color(0.96f, 0.79f, 0.46f),
-                Mathf.Lerp(0.28f, 0.82f, near));
-            sprite.isVisible = sprite.alpha > 0.012f;
+                farColor,
+                nearColor,
+                Mathf.Lerp(0.22f, 0.90f, near));
+            sprite.isVisible = sprite.alpha > 0.010f;
         }
     }
 
@@ -204,43 +291,163 @@ internal sealed class FoehnParticleField
         Room room,
         float intensity,
         Vector2 forward,
-        FoehnTerrainField terrainField)
+        Vector2 cross,
+        FoehnTerrainField terrainField,
+        float visualTime,
+        float gustSeed,
+        Rect viewBounds,
+        bool fillInsideView)
     {
+        int layer = ChooseLayer();
         Vector2 position = Vector2.zero;
         FoehnTerrainSample terrain = FoehnTerrainSample.OpenAir;
 
-        for (int attempt = 0; attempt < 8; attempt++)
+        for (int attempt = 0; attempt < 10; attempt++)
         {
-            float x = (float)_random.NextDouble() * _roomWidth;
-            float y = (float)_random.NextDouble() * _roomHeight;
-            position = new Vector2(x, y);
+            position = fillInsideView
+                ? RandomPointInView(viewBounds)
+                : RandomPointOnUpwindEdge(viewBounds, forward, cross);
+            position = ClampToRoom(position, 55f);
             terrain = terrainField?.Sample(position) ?? FoehnTerrainSample.OpenAir;
 
-            float preference = terrain.Exposure * 0.68f + terrain.Nozzle * 0.42f + 0.12f;
+            float preference =
+                0.16f +
+                terrain.Exposure * 0.62f +
+                terrain.Nozzle * 0.36f +
+                terrain.Wake * 0.14f;
             if (_random.NextDouble() <= Mathf.Clamp01(preference))
             {
                 break;
             }
         }
 
-        float speed = Mathf.Lerp(6.5f, 15.0f, intensity) *
-                      Mathf.Lerp(0.72f, 1.22f, (float)_random.NextDouble()) *
-                      Mathf.Lerp(0.72f, 1.32f, terrain.Nozzle);
-        Vector2 cross = new(-forward.y, forward.x);
+        FoehnGustSample gust = FoehnGustField.Sample(
+            position,
+            visualTime,
+            intensity,
+            forward,
+            gustSeed);
+
+        float layerSpeed = layer switch
+        {
+            FarLayer => 1.08f,
+            MidLayer => 0.98f,
+            _ => 1.18f
+        };
+        float speed = Mathf.Lerp(8.2f, 18.4f, intensity) *
+                      layerSpeed *
+                      Mathf.Lerp(0.82f, 1.24f, (float)_random.NextDouble()) *
+                      (0.72f + gust.Body * 0.46f + gust.Front * 0.58f) *
+                      Mathf.Lerp(0.82f, 1.34f, terrain.Nozzle);
         float lateral = ((float)_random.NextDouble() * 2f - 1f) *
-                        Mathf.Lerp(0.25f, 1.6f, terrain.Wake + terrain.Edge * 0.5f);
+                        Mathf.Lerp(
+                            0.18f,
+                            1.95f,
+                            Mathf.Clamp01(terrain.Wake + terrain.Edge * 0.62f));
 
         particle.Position = position;
         particle.LastPosition = position - forward * speed;
         particle.Velocity = forward * speed + cross * lateral;
-        particle.MaxLife = Mathf.Lerp(45f, 150f, (float)_random.NextDouble());
+        particle.MaxLife = Mathf.Lerp(54f, 170f, (float)_random.NextDouble());
         particle.Life = particle.MaxLife;
-        particle.Width = Mathf.Lerp(0.45f, 1.35f, (float)_random.NextDouble());
-        particle.BaseLength = Mathf.Lerp(6f, 27f, (float)_random.NextDouble());
-        particle.Alpha = Mathf.Lerp(0.22f, 0.76f, (float)_random.NextDouble());
-        particle.Depth = (float)_random.NextDouble();
         particle.Phase = (float)_random.NextDouble();
+        particle.Layer = layer;
+        particle.Gust = Mathf.Clamp01(gust.Body * 0.66f + gust.Front * 0.92f);
+
+        switch (layer)
+        {
+            case FarLayer:
+                particle.Width = Mathf.Lerp(0.26f, 0.62f, (float)_random.NextDouble());
+                particle.BaseLength = Mathf.Lerp(8f, 24f, (float)_random.NextDouble());
+                particle.Alpha = Mathf.Lerp(0.12f, 0.34f, (float)_random.NextDouble());
+                particle.Depth = Mathf.Lerp(0.72f, 1f, (float)_random.NextDouble());
+                break;
+
+            case MidLayer:
+                particle.Width = Mathf.Lerp(0.52f, 1.16f, (float)_random.NextDouble());
+                particle.BaseLength = Mathf.Lerp(10f, 34f, (float)_random.NextDouble());
+                particle.Alpha = Mathf.Lerp(0.22f, 0.60f, (float)_random.NextDouble());
+                particle.Depth = Mathf.Lerp(0.30f, 0.74f, (float)_random.NextDouble());
+                break;
+
+            default:
+                particle.Width = Mathf.Lerp(1.05f, 2.05f, (float)_random.NextDouble());
+                particle.BaseLength = Mathf.Lerp(17f, 48f, (float)_random.NextDouble());
+                particle.Alpha = Mathf.Lerp(0.30f, 0.78f, (float)_random.NextDouble());
+                particle.Depth = Mathf.Lerp(0f, 0.30f, (float)_random.NextDouble());
+                break;
+        }
+
         particle.Active = true;
+    }
+
+    private int ChooseLayer()
+    {
+        double roll = _random.NextDouble();
+        if (roll < 0.57)
+        {
+            return FarLayer;
+        }
+
+        if (roll < 0.91)
+        {
+            return MidLayer;
+        }
+
+        return NearLayer;
+    }
+
+    private Vector2 RandomPointInView(Rect viewBounds)
+    {
+        return new Vector2(
+            Mathf.Lerp(viewBounds.xMin, viewBounds.xMax, (float)_random.NextDouble()),
+            Mathf.Lerp(viewBounds.yMin, viewBounds.yMax, (float)_random.NextDouble()));
+    }
+
+    private Vector2 RandomPointOnUpwindEdge(
+        Rect viewBounds,
+        Vector2 forward,
+        Vector2 cross)
+    {
+        Vector2 center = viewBounds.center;
+        float halfAlong =
+            Mathf.Abs(forward.x) * viewBounds.width * 0.5f +
+            Mathf.Abs(forward.y) * viewBounds.height * 0.5f;
+        float halfCross =
+            Mathf.Abs(cross.x) * viewBounds.width * 0.5f +
+            Mathf.Abs(cross.y) * viewBounds.height * 0.5f;
+        float lane = Mathf.Lerp(-halfCross, halfCross, (float)_random.NextDouble());
+        Vector2 position =
+            center - forward * Mathf.Max(20f, halfAlong - 14f) + cross * lane;
+        position.x = Mathf.Clamp(position.x, viewBounds.xMin, viewBounds.xMax);
+        position.y = Mathf.Clamp(position.y, viewBounds.yMin, viewBounds.yMax);
+        return position;
+    }
+
+    private Rect BuildViewBounds(Vector2 cameraPos, Vector2 cameraSize, float buffer)
+    {
+        float minX = Mathf.Max(-55f, cameraPos.x - buffer);
+        float minY = Mathf.Max(-55f, cameraPos.y - buffer);
+        float maxX = Mathf.Min(_roomWidth + 55f, cameraPos.x + cameraSize.x + buffer);
+        float maxY = Mathf.Min(_roomHeight + 55f, cameraPos.y + cameraSize.y + buffer);
+
+        if (maxX <= minX)
+        {
+            maxX = minX + 20f;
+        }
+        if (maxY <= minY)
+        {
+            maxY = minY + 20f;
+        }
+
+        return Rect.MinMaxRect(minX, minY, maxX, maxY);
+    }
+
+    private Vector2 ClampToRoom(Vector2 position, float margin)
+    {
+        return new Vector2(
+            Mathf.Clamp(position.x, -margin, _roomWidth + margin),
+            Mathf.Clamp(position.y, -margin, _roomHeight + margin));
     }
 
     private int FindInactiveSlot()
@@ -258,31 +465,19 @@ internal sealed class FoehnParticleField
         return -1;
     }
 
-    private bool IsOutside(Vector2 position, Vector2 forward)
+    private static bool Contains(Rect bounds, Vector2 position, float margin)
     {
-        const float margin = 140f;
-        if (position.x < -margin || position.x > _roomWidth + margin ||
-            position.y < -margin || position.y > _roomHeight + margin)
-        {
-            return true;
-        }
-
-        // Keep particles from spending too long in the invisible upwind reserve.
-        if (forward.x > 0f && position.x > _roomWidth + 40f)
-        {
-            return true;
-        }
-        if (forward.x < 0f && position.x < -40f)
-        {
-            return true;
-        }
-
-        return false;
+        return position.x >= bounds.xMin - margin &&
+               position.x <= bounds.xMax + margin &&
+               position.y >= bounds.yMin - margin &&
+               position.y <= bounds.yMax + margin;
     }
 
     private static Vector2 SafeNormalize(Vector2 value)
     {
-        return value.sqrMagnitude > 0.0001f ? value.normalized : new Vector2(1f, -0.16f).normalized;
+        return value.sqrMagnitude > 0.0001f
+            ? value.normalized
+            : new Vector2(1f, -0.16f).normalized;
     }
 
     private static int BuildSeed(Room room)
