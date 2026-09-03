@@ -39,6 +39,7 @@ Shader "DryCycle/FoehnAtmosphere"
                 uniform float2 _DryCycleFoehnWindDir;
                 uniform float _DryCycleHasFoehnTextures;
                 uniform float _DryCycleHasFoehnTerrainField;
+                uniform float _DryCycleFoehnDebugMode;
 
                 struct v2f
                 {
@@ -68,12 +69,6 @@ Shader "DryCycle/FoehnAtmosphere"
                     if (len <= maximum || len <= 0.00001)
                         return value;
                     return value * (maximum / len);
-                }
-
-                float Smooth01(float value)
-                {
-                    float t = saturate(value);
-                    return t * t * (3.0 - 2.0 * t);
                 }
 
                 float PhaseBlend(float phase)
@@ -185,10 +180,7 @@ Shader "DryCycle/FoehnAtmosphere"
                     float2 roomPx = roomUv * max(_DryCycleFoehnRoomSizePx, float2(1.0, 1.0));
 
                     float intensity = saturate(_DryCycleFoehnIntensity);
-                    if (intensity <= 0.0001)
-                        return tex2D(_GrabTexture, grabUv);
-
-                    float heatDrive = pow(intensity, 0.66);
+                    float heatDrive = pow(max(intensity, 0.00001), 0.66);
                     float2 windDir = SafeNormalize(_DryCycleFoehnWindDir);
                     float2 crossDir = float2(-windDir.y, windDir.x);
                     float4 terrain = SampleTerrain(roomPx);
@@ -219,6 +211,29 @@ Shader "DryCycle/FoehnAtmosphere"
                     float sheetEdge = (streakUp.r - streakDown.r) * 1.42 +
                                       (streakUp.g - streakDown.g) * 0.52;
                     float gust = saturate(flowSample.b * 0.66 + sheet * 0.72 + streak.a * 0.18);
+
+                    int debugMode = (int)floor(_DryCycleFoehnDebugMode + 0.5);
+                    if (debugMode == 1)
+                    {
+                        // R/G = tangent-space flow, B = resolved gust strength.
+                        return fixed4(flowSample.r, flowSample.g, gust, 1.0);
+                    }
+                    if (debugMode == 2)
+                    {
+                        // R = exposure, G = lee wake, B = nozzle; edge turbulence is
+                        // added as a faint white contour so terrain boundaries remain clear.
+                        float3 debugTerrain = float3(exposure, wake, nozzle);
+                        debugTerrain += edgeTurbulence * 0.18;
+                        return fixed4(saturate(debugTerrain), 1.0);
+                    }
+                    if (debugMode == 3)
+                    {
+                        // R = macro sheet, G = fine sheet, B = dust propensity.
+                        return fixed4(streak.r, streak.g, streak.a, 1.0);
+                    }
+
+                    if (intensity <= 0.0001)
+                        return tex2D(_GrabTexture, grabUv);
 
                     // Lee wakes remain turbulent even when mean exposure falls. Narrow
                     // channels accelerate the coherent component instead of merely
