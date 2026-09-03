@@ -1,5 +1,6 @@
 using System;
 using DryCycle.TemperatureSystem;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather.IntenseHeat;
