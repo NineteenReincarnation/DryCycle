@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using DryCycle.Weather.Scheduling;
 using UnityEngine;
 
@@ -23,6 +24,7 @@ internal static class WeatherSpatialRuntime
         WeatherSpatialRegistry.Reload();
         WeatherSpatialMapMenuRuntime.Enable();
         WeatherSpatialSelectionUiCleanup.Enable();
+        WeatherSpatialPreviewPersistenceRuntime.Enable();
         On.Room.Update += Room_Update;
         On.RoomCamera.Update += RoomCamera_Update;
         _enabled = true;
@@ -37,6 +39,7 @@ internal static class WeatherSpatialRuntime
 
         On.Room.Update -= Room_Update;
         On.RoomCamera.Update -= RoomCamera_Update;
+        WeatherSpatialPreviewPersistenceRuntime.Disable();
         WeatherSpatialSelectionUiCleanup.Disable();
         WeatherSpatialMapMenuRuntime.Disable();
         WeatherSpatialDevUI.Disable();
@@ -120,6 +123,7 @@ internal static class WeatherSpatialPreview
     private static WeatherScheduleEventKind _kind;
     private static string _weatherId;
     private static float _intensity;
+    private static string _targetKey;
 
     internal static bool Active =>
         _world != null &&
@@ -131,6 +135,14 @@ internal static class WeatherSpatialPreview
     internal static string WeatherId => _weatherId;
     internal static WeatherScheduleEventKind Kind => _kind;
     internal static float Intensity => _intensity;
+    internal static string TargetKey => _targetKey;
+
+    internal static bool IsActiveFor(World world)
+    {
+        return Active &&
+               world != null &&
+               ReferenceEquals(_world.Target, world);
+    }
 
     internal static void Set(
         World world,
@@ -144,17 +156,45 @@ internal static class WeatherSpatialPreview
             return;
         }
 
+        bool sameWorld = Active && ReferenceEquals(_world.Target, world);
+        if (!sameWorld)
+        {
+            _targetKey = null;
+        }
+
         _world = new WeakReference(world);
         _kind = kind;
         _weatherId = WeatherSpatialCatalog.CanonicalWeatherId(kind, weatherId);
         _intensity = Mathf.Clamp01(intensity);
     }
 
-    internal static void Clear()
+    internal static void SetEditorTargetKey(string targetKey)
     {
+        if (!Active)
+        {
+            return;
+        }
+
+        _targetKey = string.IsNullOrWhiteSpace(targetKey)
+            ? null
+            : targetKey.Trim();
+    }
+
+    internal static void Clear([CallerMemberName] string caller = null)
+    {
+        // Closing/toggling DevUI destroys its visual nodes and can switch away from the
+        // Map page. Those are UI lifecycle events, not an explicit request to stop the
+        // weather test. Keep Preview alive so H can be closed while testing in-game.
+        if (string.Equals(caller, "ClearSprites", StringComparison.Ordinal) ||
+            string.Equals(caller, "DevUI_SwitchPage", StringComparison.Ordinal))
+        {
+            return;
+        }
+
         _world = null;
         _weatherId = null;
         _intensity = 0f;
+        _targetKey = null;
     }
 
     internal static bool TryGetIntensity(
