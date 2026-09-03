@@ -6,24 +6,21 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Authored room environmental heat baseline.
+/// Authored room environmental heat baseline plus explicit heat-weather bonuses.
 ///
-/// RoomHeat is not a target that automatically heats the player. The thermal model
-/// only uses it as the lower baseline for room cooling: a body node above RoomHeat can
-/// dissipate heat toward it, while a body node at or below RoomHeat receives no
-/// room-driven temperature change.
-///
-/// Scheduled heat weather may raise this baseline from deterministic schedule intensity
-/// only. Visual shader state is deliberately excluded so rendering behavior can never
-/// change gameplay temperature.
+/// The authored TemperatureSets value remains the normal room baseline. HeatWave and
+/// IntenseHeat are applied afterwards as additive gameplay bonuses from the current
+/// schedule intensity, so fade-in/fade-out participates continuously and weather can
+/// intentionally push RoomHeat above the nominal authored maximum of 1.
 /// </summary>
 internal static class RoomHeatFactor
 {
     internal const float MinimumHeat = -1f;
     internal const float MaximumHeat = 1f;
     internal const float DefaultHeat = 0f;
-    internal const float MaximumHeatWaveAmbientBaseline = 0.86f;
-    internal const float MaximumIntenseHeatAmbientBaseline = 0.97f;
+
+    internal const float HeatWaveRoomHeatBonus = 0.3f;
+    internal const float IntenseHeatRoomHeatBonus = 0.7f;
 
     internal static float GetRoomHeat(Room room)
     {
@@ -45,40 +42,24 @@ internal static class RoomHeatFactor
         }
 
         float authored = TemperatureSetsLoader.GetRoomHeat(regionName, roomName);
-        float heatWave = CalculateHeatWaveBaseline(room);
-        float intenseHeat = CalculateIntenseHeatBaseline(room);
-        return ClampHeat(Mathf.Max(authored, Mathf.Max(heatWave, intenseHeat)));
+        float heatWaveIntensity = HeatWaveWeatherRuntime.TryEvaluate(room, out float h)
+            ? Mathf.Clamp01(h)
+            : 0f;
+        float intenseHeatIntensity = IntenseHeatWeatherRuntime.TryEvaluate(room, out float i)
+            ? Mathf.Clamp01(i)
+            : 0f;
+
+        // Do not clamp the final weather-adjusted value. The explicit purpose of these
+        // additive weather bonuses is to allow RoomHeat to exceed the authored range.
+        return authored +
+               heatWaveIntensity * HeatWaveRoomHeatBonus +
+               intenseHeatIntensity * IntenseHeatRoomHeatBonus;
     }
 
     internal static float ClampHeat(float value)
     {
+        // This remains the authored-data clamp. Weather bonuses are added after it.
         return Mathf.Clamp(value, MinimumHeat, MaximumHeat);
-    }
-
-    private static float CalculateHeatWaveBaseline(Room room)
-    {
-        float intensity = HeatWaveWeatherRuntime.GetAmbientHeatInfluence(room);
-        if (intensity <= 0f)
-        {
-            return DefaultHeat;
-        }
-
-        float t = Mathf.Clamp01(intensity);
-        t = t * t * (3f - 2f * t);
-        return MaximumHeatWaveAmbientBaseline * t;
-    }
-
-    private static float CalculateIntenseHeatBaseline(Room room)
-    {
-        float intensity = IntenseHeatWeatherRuntime.GetAmbientHeatInfluence(room);
-        if (intensity <= 0f)
-        {
-            return DefaultHeat;
-        }
-
-        float t = Mathf.Clamp01(intensity);
-        t = t * t * (3f - 2f * t);
-        return MaximumIntenseHeatAmbientBaseline * t;
     }
 
     private static string InferRegionFromRoomName(string roomName)
