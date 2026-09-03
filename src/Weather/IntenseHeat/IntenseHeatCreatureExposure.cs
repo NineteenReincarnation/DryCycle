@@ -8,9 +8,8 @@ namespace DryCycle.Weather.IntenseHeat;
 /// Persistent short-term solar exposure state for creatures during IntenseHeat.
 /// Exposure is gameplay/world state, not inferred from shader output.
 ///
-/// Creature recoloring is intentionally not performed here. The exposure state remains
-/// available for hazard/gameplay logic, while players still receive additional direct
-/// solar heating during IntenseHeat.
+/// This component only owns the creature exposure state. Player BodyHeat changes are
+/// handled centrally by PlayerThermalModel so IntenseHeat has a single thermal rule.
 /// </summary>
 internal static class IntenseHeatCreatureExposure
 {
@@ -18,7 +17,6 @@ internal static class IntenseHeatCreatureExposure
     private const float ExposureGainPerSecond = 0.070f;
     private const float ShadeRecoveryPerSecond = 0.018f;
     private const float DeepShadeRecoveryPerSecond = 0.032f;
-    private const float PlayerHazardHeatingPerSecond = 0.030f;
 
     private sealed class CreatureState
     {
@@ -108,32 +106,6 @@ internal static class IntenseHeatCreatureExposure
                 : ShadeRecoveryPerSecond;
             state.Exposure = Mathf.Clamp01(state.Exposure - recovery * TickSeconds);
         }
-
-        if (creature is Player player && intensity > 0.0001f && !player.inShortcut)
-        {
-            ApplyPlayerHazardHeat(player, intensity);
-        }
-    }
-
-    private static void ApplyPlayerHazardHeat(Player player, float intensity)
-    {
-        PlayerThermalState thermal = PlayerThermalModel.For(player);
-        if (thermal == null || player.bodyChunks == null || player.bodyChunks.Length == 0)
-        {
-            return;
-        }
-
-        float exposure0 = IntenseHeatSolarField.SampleExposure(
-            player.room,
-            player.bodyChunks[0].pos) * intensity;
-        float exposure1 = player.bodyChunks.Length > 1
-            ? IntenseHeatSolarField.SampleExposure(player.room, player.bodyChunks[1].pos) * intensity
-            : exposure0;
-
-        thermal.BodyHeat0 = Mathf.Clamp01(
-            thermal.BodyHeat0 + exposure0 * PlayerHazardHeatingPerSecond * TickSeconds);
-        thermal.BodyHeat1 = Mathf.Clamp01(
-            thermal.BodyHeat1 + exposure1 * PlayerHazardHeatingPerSecond * TickSeconds);
     }
 
     private static Vector2 GetCreatureCenter(Creature creature)
