@@ -9,6 +9,7 @@ internal readonly struct FoehnRenderFrame
     internal readonly float Intensity;
     internal readonly float Time;
     internal readonly Vector2 WindDirection;
+    internal readonly float GustSeed;
     internal readonly Texture2D TerrainField;
 
     internal FoehnRenderFrame(
@@ -16,6 +17,7 @@ internal readonly struct FoehnRenderFrame
         float intensity,
         float time,
         Vector2 windDirection,
+        float gustSeed,
         Texture2D terrainField)
     {
         RoomSizePx = new Vector2(Mathf.Max(1f, roomSizePx.x), Mathf.Max(1f, roomSizePx.y));
@@ -24,15 +26,15 @@ internal readonly struct FoehnRenderFrame
         WindDirection = windDirection.sqrMagnitude > 0.0001f
             ? windDirection.normalized
             : new Vector2(1f, -0.16f).normalized;
+        GustSeed = Mathf.Repeat(gustSeed, 1f);
         TerrainField = terrainField;
     }
 }
 
 /// <summary>
-/// Foehn visual resolve. The fullscreen pass owns directional air shear, coherent
-/// gust sheets, refraction and directional streak blur. Windblown mineral particles
-/// are rendered into Foreground before the GrabPass so the same hot-air field bends
-/// both the level and the visible dust carriers together.
+/// Foehn visual resolve. The fullscreen pass owns restrained directional air shear,
+/// moving gust fronts and directional streak blur. Windblown mineral particles are
+/// rendered into Foreground before the GrabPass so air and dust remain one wind system.
 /// </summary>
 internal static class FoehnRenderPipeline
 {
@@ -47,6 +49,7 @@ internal static class FoehnRenderPipeline
     private static readonly int IntensityId = Shader.PropertyToID("_DryCycleFoehnIntensity");
     private static readonly int TimeId = Shader.PropertyToID("_DryCycleFoehnTime");
     private static readonly int WindDirectionId = Shader.PropertyToID("_DryCycleFoehnWindDir");
+    private static readonly int GustSeedId = Shader.PropertyToID("_DryCycleFoehnGustSeed");
     private static readonly int FlowFieldId = Shader.PropertyToID("_DryCycleFoehnFlowField");
     private static readonly int StreakFieldId = Shader.PropertyToID("_DryCycleFoehnStreakField");
     private static readonly int TerrainFieldId = Shader.PropertyToID("_DryCycleFoehnTerrainField");
@@ -195,6 +198,7 @@ internal static class FoehnRenderPipeline
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(TimeId, frame.Time);
         Shader.SetGlobalVector(WindDirectionId, windDirection);
+        Shader.SetGlobalFloat(GustSeedId, frame.GustSeed);
         Shader.SetGlobalTexture(FlowFieldId, flow);
         Shader.SetGlobalTexture(StreakFieldId, streak);
         Shader.SetGlobalTexture(TerrainFieldId, terrain);
@@ -215,6 +219,7 @@ internal static class FoehnRenderPipeline
         MaterialProperties.SetFloat(IntensityId, frame.Intensity);
         MaterialProperties.SetFloat(TimeId, frame.Time);
         MaterialProperties.SetVector(WindDirectionId, windDirection);
+        MaterialProperties.SetFloat(GustSeedId, frame.GustSeed);
         MaterialProperties.SetTexture(FlowFieldId, flow);
         MaterialProperties.SetTexture(StreakFieldId, streak);
         MaterialProperties.SetTexture(TerrainFieldId, terrain);
