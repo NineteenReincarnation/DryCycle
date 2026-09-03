@@ -23,7 +23,7 @@ internal readonly struct FoehnDebugSnapshot
 
 /// <summary>
 /// Developer diagnostics for Foehn. Ctrl+Shift+K forces full Foehn in the camera
-/// room; Ctrl+Shift+L cycles final/flow/terrain/dust-pressure debug views.
+/// room; Ctrl+Shift+L cycles final/flow/terrain/dust-thermal-brush debug views.
 /// </summary>
 internal static class FoehnDebugRuntime
 {
@@ -225,7 +225,7 @@ internal static class FoehnDebugRuntime
         {
             1 => "FLOW / GUST",
             2 => "TERRAIN FIELD",
-            3 => "DUST / PRESSURE",
+            3 => "DUST / THERMAL BRUSH",
             _ => "FINAL"
         };
     }
