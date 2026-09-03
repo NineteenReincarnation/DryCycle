@@ -3,8 +3,6 @@ namespace DryCycle.Thirst;
 internal static class ThirstConstants
 {
     public const int WaterValuePerPip = 400;
-    public const int HalfPipWaterValue = WaterValuePerPip / 2;
-    public const int WeaknessWaterValueThreshold = HalfPipWaterValue;
 
     public const float SimulationTicksPerSecond = 40f;
     public const float DrinkPerTick = 0.0125f;
