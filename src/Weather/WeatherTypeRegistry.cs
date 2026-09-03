@@ -43,7 +43,9 @@ internal static class WeatherTypeRegistry
             return false;
         }
 
-        if (normalized == "DEATHRAIN" || normalized == "RAIN")
+        if (normalized == "DEATHRAIN" ||
+            normalized == "RAIN" ||
+            normalized == "INTENSEHEAT")
         {
             return true;
         }
