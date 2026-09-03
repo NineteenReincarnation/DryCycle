@@ -471,12 +471,22 @@ internal static class WeatherSpatialDevUI
             }
 
             WeatherSpatialTarget target = CurrentTarget;
+            if (!WeatherSpatialRegistry.CanSetRoomRule(_regionId, roomName, target, _brush))
+            {
+                SetFamilyPrerequisiteStatus(roomName, target);
+                return;
+            }
+
             WeatherSpatialRule before = WeatherSpatialRegistry.GetRoomRule(_regionId, roomName, target);
             if (before == _brush)
             {
                 return;
             }
-            WeatherSpatialRegistry.SetRoomRule(_regionId, roomName, target, _brush);
+            if (!WeatherSpatialRegistry.SetRoomRule(_regionId, roomName, target, _brush))
+            {
+                SetFamilyPrerequisiteStatus(roomName, target);
+                return;
+            }
             _paintCommand.Changes.Add(new RuleChange(
                 _regionId,
                 roomName,
@@ -544,14 +554,25 @@ internal static class WeatherSpatialDevUI
 
             WeatherSpatialTarget target = CurrentTarget;
             EditCommand command = new() { Label = label };
+            int prerequisiteSkipped = 0;
             foreach (string roomName in _selection)
             {
+                if (!WeatherSpatialRegistry.CanSetRoomRule(_regionId, roomName, target, rule))
+                {
+                    prerequisiteSkipped++;
+                    continue;
+                }
+
                 WeatherSpatialRule before = WeatherSpatialRegistry.GetRoomRule(_regionId, roomName, target);
                 if (before == rule)
                 {
                     continue;
                 }
-                WeatherSpatialRegistry.SetRoomRule(_regionId, roomName, target, rule);
+                if (!WeatherSpatialRegistry.SetRoomRule(_regionId, roomName, target, rule))
+                {
+                    prerequisiteSkipped++;
+                    continue;
+                }
                 command.Changes.Add(new RuleChange(
                     _regionId,
                     roomName,
@@ -563,6 +584,32 @@ internal static class WeatherSpatialDevUI
             if (command.Changes.Count > 0)
             {
                 PushUndo(command);
+            }
+
+            if (prerequisiteSkipped > 0)
+            {
+                if (WeatherSpatialCatalog.TryGetFamily(target.Kind, target.WeatherId, out WeatherSpatialFamily family))
+                {
+                    _status = prerequisiteSkipped + " room(s) skipped: allow [Family] " + family.Id + " first.";
+                }
+                else
+                {
+                    _status = prerequisiteSkipped + " room(s) skipped: parent family is not allowed.";
+                }
+            }
+        }
+
+        private void SetFamilyPrerequisiteStatus(
+            string roomName,
+            in WeatherSpatialTarget target)
+        {
+            if (WeatherSpatialCatalog.TryGetFamily(target.Kind, target.WeatherId, out WeatherSpatialFamily family))
+            {
+                _status = roomName + ": allow [Family] " + family.Id + " before editing " + target.DisplayName + ".";
+            }
+            else
+            {
+                _status = roomName + ": parent family is not allowed.";
             }
         }
 
