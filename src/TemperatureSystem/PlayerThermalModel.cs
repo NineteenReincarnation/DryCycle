@@ -21,9 +21,10 @@ internal sealed class PlayerThermalState
 /// Dynamic two-node body-heat model.
 ///
 /// RoomHeat is an environmental cooling baseline, not a temperature target. A body
-/// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight and
-/// active heat weather add heat directly. Humidity and Wetness independently modify
-/// room-cooling efficiency. Internal body-to-body transfer remains conservative.
+/// node only loses heat to the room while BodyHeat is above its locally sampled
+/// RoomHeat. Sunlight and active heat weather add heat directly. Humidity and Wetness
+/// independently modify room-cooling efficiency. Internal body-to-body transfer remains
+/// conservative.
 /// </summary>
 internal static class PlayerThermalModel
 {
@@ -115,6 +116,8 @@ internal static class PlayerThermalModel
         {
             float effectiveSunlight0 = SolarEnvironment.GetEffectiveSunlight(self, 0);
             float effectiveSunlight1 = SolarEnvironment.GetEffectiveSunlight(self, 1);
+            float roomHeat0 = RoomHeatFactor.GetEffectiveRoomHeat(self, 0);
+            float roomHeat1 = RoomHeatFactor.GetEffectiveRoomHeat(self, 1);
             float humidity0 = HumidityEnvironment.GetEffectiveHumidity(self, 0);
             float humidity1 = HumidityEnvironment.GetEffectiveHumidity(self, 1);
             float wetness0 = PlayerWetnessModel.GetWetness(self, 0);
@@ -130,7 +133,8 @@ internal static class PlayerThermalModel
 
             ApplyRoomCooling(
                 state,
-                RoomHeatFactor.GetRoomHeat(self.room),
+                roomHeat0,
+                roomHeat1,
                 humidity0,
                 humidity1,
                 wetness0,
@@ -187,7 +191,8 @@ internal static class PlayerThermalModel
 
     private static void ApplyRoomCooling(
         PlayerThermalState state,
-        float roomHeat,
+        float roomHeat0,
+        float roomHeat1,
         float humidity0,
         float humidity1,
         float wetness0,
@@ -196,13 +201,13 @@ internal static class PlayerThermalModel
     {
         state.BodyHeat0 -= CalculateRoomCoolingRate(
             state.BodyHeat0,
-            roomHeat,
+            roomHeat0,
             humidity0,
             wetness0) * deltaTime;
 
         state.BodyHeat1 -= CalculateRoomCoolingRate(
             state.BodyHeat1,
-            roomHeat,
+            roomHeat1,
             humidity1,
             wetness1) * deltaTime;
     }
