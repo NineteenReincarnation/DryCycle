@@ -64,7 +64,11 @@ internal static class HydrationWeakness
 
     private const float TickSeconds = 1f / ThirstConstants.SimulationTicksPerSecond;
 
-    private static ConditionalWeakTable<Player, DehydrationState> _states = new();
+    // Bind physiological debt to the abstract creature rather than the current
+    // realized Player instance. Rain World can destroy/recreate Player objects during
+    // abstraction, room transitions and Jolly processing; the AbstractCreature is the
+    // stable identity that survives those transitions.
+    private static ConditionalWeakTable<AbstractCreature, DehydrationState> _states = new();
     private static bool _enabled;
 
     public static void Enable()
@@ -76,6 +80,7 @@ internal static class HydrationWeakness
 
         _enabled = true;
         On.Player.Update += Player_Update;
+        On.Player.MovementUpdate += Player_MovementUpdate;
         On.Player.AerobicIncrease += Player_AerobicIncrease;
         On.Player.Jump += Player_Jump;
         On.Player.WallJump += Player_WallJump;
@@ -92,33 +97,32 @@ internal static class HydrationWeakness
 
         _enabled = false;
         On.Player.Update -= Player_Update;
+        On.Player.MovementUpdate -= Player_MovementUpdate;
         On.Player.AerobicIncrease -= Player_AerobicIncrease;
         On.Player.Jump -= Player_Jump;
         On.Player.WallJump -= Player_WallJump;
         On.Weapon.Thrown -= Weapon_Thrown;
         On.SaveState.SessionEnded -= SaveState_SessionEnded;
-        _states = new ConditionalWeakTable<Player, DehydrationState>();
+        _states = new ConditionalWeakTable<AbstractCreature, DehydrationState>();
     }
 
     internal static float GetDebt(Player player)
     {
-        return player != null && _states.TryGetValue(player, out DehydrationState state)
+        return TryGetState(player, out DehydrationState state)
             ? state.Debt
             : 0f;
     }
 
     internal static float GetResistance(Player player)
     {
-        return player != null && _states.TryGetValue(player, out DehydrationState state)
+        return TryGetState(player, out DehydrationState state)
             ? state.Resistance
             : InitialResistance;
     }
 
     internal static bool IsDehydrated(Player player)
     {
-        return player != null &&
-               _states.TryGetValue(player, out DehydrationState state) &&
-               state.IsWeak;
+        return TryGetState(player, out DehydrationState state) && state.IsWeak;
     }
 
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
@@ -129,7 +133,13 @@ internal static class HydrationWeakness
             return;
         }
 
-        DehydrationState state = _states.GetOrCreateValue(self);
+        DehydrationState state = GetOrCreateState(self);
+        if (state == null)
+        {
+            orig(self, eu);
+            return;
+        }
+
         state.FailureCheckedThisUpdate = false;
         AdvanceFailureTimers(state);
 
@@ -137,37 +147,7 @@ internal static class HydrationWeakness
         float previousVerticalSpeed = GetVerticalSpeed(self);
         bool wasGrounded = IsGrounded(self);
 
-        SlugcatStats stats = self.slugcatStats;
-        float originalRun = 0f;
-        float originalPole = 0f;
-        float originalCorridor = 0f;
-        bool statsModified = stats != null;
-
-        if (statsModified)
-        {
-            originalRun = stats.runspeedFac;
-            originalPole = stats.poleClimbSpeedFac;
-            originalCorridor = stats.corridorClimbSpeedFac;
-
-            float failureMovement = GetFailureMovementMultiplier(state);
-            stats.runspeedFac *= GetRunMultiplier(state.Debt) * failureMovement;
-            stats.poleClimbSpeedFac *= GetPoleMultiplier(state.Debt) * failureMovement;
-            stats.corridorClimbSpeedFac *= GetCorridorMultiplier(state.Debt) * failureMovement;
-        }
-
-        try
-        {
-            orig(self, eu);
-        }
-        finally
-        {
-            if (statsModified)
-            {
-                stats.runspeedFac = originalRun;
-                stats.poleClimbSpeedFac = originalPole;
-                stats.corridorClimbSpeedFac = originalCorridor;
-            }
-        }
+        orig(self, eu);
 
         if (self.dead)
         {
@@ -186,6 +166,50 @@ internal static class HydrationWeakness
         ApplyFailurePostEffects(self, state);
     }
 
+    private static void Player_MovementUpdate(
+        On.Player.orig_MovementUpdate orig,
+        Player self,
+        bool eu)
+    {
+        if (!IsStoryPlayer(self))
+        {
+            orig(self, eu);
+            return;
+        }
+
+        DehydrationState state = GetOrCreateState(self);
+        SlugcatStats stats = self.slugcatStats;
+        if (state == null || stats == null)
+        {
+            orig(self, eu);
+            return;
+        }
+
+        // WatcherUpdate runs before MovementUpdate and can intentionally change
+        // runspeedFac (for example levitation). Capture those final values here, apply
+        // dehydration only for the movement routine itself, then restore immediately.
+        // This also minimizes interference with other character/stat mods.
+        float originalRun = stats.runspeedFac;
+        float originalPole = stats.poleClimbSpeedFac;
+        float originalCorridor = stats.corridorClimbSpeedFac;
+
+        float failureMovement = GetFailureMovementMultiplier(state);
+        stats.runspeedFac *= GetRunMultiplier(state.Debt) * failureMovement;
+        stats.poleClimbSpeedFac *= GetPoleMultiplier(state.Debt) * failureMovement;
+        stats.corridorClimbSpeedFac *= GetCorridorMultiplier(state.Debt) * failureMovement;
+
+        try
+        {
+            orig(self, eu);
+        }
+        finally
+        {
+            stats.runspeedFac = originalRun;
+            stats.poleClimbSpeedFac = originalPole;
+            stats.corridorClimbSpeedFac = originalCorridor;
+        }
+    }
+
     private static void Player_AerobicIncrease(
         On.Player.orig_AerobicIncrease orig,
         Player self,
@@ -197,8 +221,8 @@ internal static class HydrationWeakness
             return;
         }
 
-        DehydrationState state = _states.GetOrCreateValue(self);
-        orig(self, amount * GetAerobicAccumulationMultiplier(state.Debt));
+        DehydrationState state = GetOrCreateState(self);
+        orig(self, amount * GetAerobicAccumulationMultiplier(state?.Debt ?? 0f));
     }
 
     private static void Player_Jump(On.Player.orig_Jump orig, Player self)
@@ -209,7 +233,13 @@ internal static class HydrationWeakness
             return;
         }
 
-        DehydrationState state = _states.GetOrCreateValue(self);
+        DehydrationState state = GetOrCreateState(self);
+        if (state == null)
+        {
+            orig(self);
+            return;
+        }
+
         if (state.FailureTicks > 0 || state.RecoveryLockTicks > 0)
         {
             return;
@@ -249,7 +279,13 @@ internal static class HydrationWeakness
             return;
         }
 
-        DehydrationState state = _states.GetOrCreateValue(self);
+        DehydrationState state = GetOrCreateState(self);
+        if (state == null)
+        {
+            orig(self, direction);
+            return;
+        }
+
         if (state.FailureTicks > 0 || state.RecoveryLockTicks > 0)
         {
             return;
@@ -292,7 +328,13 @@ internal static class HydrationWeakness
             return;
         }
 
-        DehydrationState state = _states.GetOrCreateValue(player);
+        DehydrationState state = GetOrCreateState(player);
+        if (state == null)
+        {
+            orig(self, thrownBy, thrownPos, firstFrameTraceFromPos, throwDir, force, eu);
+            return;
+        }
+
         float weakenedForce = force * GetThrowForceMultiplier(state.Debt);
 
         orig(self, thrownBy, thrownPos, firstFrameTraceFromPos, throwDir, weakenedForce, eu);
@@ -316,16 +358,20 @@ internal static class HydrationWeakness
     {
         orig(self, game, survived, newMalnourished);
 
-        if (!survived || game?.Players == null)
+        // Watcher's spinning-top encounter uses SessionEnded as a special warp/save
+        // path. It is not a shelter sleep and must not restore dehydration resistance.
+        bool specialWarpSave = self != null && self.sessionEndingFromSpinningTopEncounter;
+        if (!survived || specialWarpSave || game?.Players == null)
         {
             return;
         }
 
         foreach (AbstractCreature abstractPlayer in game.Players)
         {
-            if (abstractPlayer?.realizedCreature is Player player && IsStoryPlayer(player))
+            if (abstractPlayer != null &&
+                _states.TryGetValue(abstractPlayer, out DehydrationState state))
             {
-                _states.GetOrCreateValue(player).ResetForNewCycle();
+                state.ResetForNewCycle();
             }
         }
     }
@@ -376,9 +422,14 @@ internal static class HydrationWeakness
         DehydrationState state,
         float before)
     {
-        // Do not alter the oxygen/drowning floor. This multiplier only slows normal
-        // stamina recovery while the lungs are otherwise full.
-        if (player.airInLungs < 0.999f || player.aerobicLevel >= before)
+        // Only intercept ordinary conscious stamina recovery. Sleeping, unconscious
+        // states and MSC's Wounded logic can directly force aerobicLevel and must not
+        // be mistaken for normal recovery. The oxygen/drowning floor is also preserved.
+        if (!player.Consious ||
+            player.Sleeping ||
+            (ModManager.MSC && player.Wounded) ||
+            player.airInLungs < 0.999f ||
+            player.aerobicLevel >= before)
         {
             return;
         }
@@ -828,6 +879,24 @@ internal static class HydrationWeakness
         }
 
         return Mathf.Lerp(at590, at600, Mathf.InverseLerp(FinalStruggleDebt, LethalDebt, debt));
+    }
+
+    private static DehydrationState GetOrCreateState(Player player)
+    {
+        AbstractCreature abstractPlayer = player?.abstractCreature;
+        return abstractPlayer == null ? null : _states.GetOrCreateValue(abstractPlayer);
+    }
+
+    private static bool TryGetState(Player player, out DehydrationState state)
+    {
+        AbstractCreature abstractPlayer = player?.abstractCreature;
+        if (abstractPlayer != null && _states.TryGetValue(abstractPlayer, out state))
+        {
+            return true;
+        }
+
+        state = null;
+        return false;
     }
 
     private static float GetAverageBodyHeat(Player player)
