@@ -29,6 +29,7 @@ Shader "DryCycle/FoehnAtmosphere"
                 sampler2D _GrabTexture;
                 sampler2D _DryCycleFoehnFlowField;
                 sampler2D _DryCycleFoehnStreakField;
+                sampler2D _DryCycleFoehnDustField;
                 sampler2D _DryCycleFoehnTerrainField;
 
                 uniform float4 _camInRoomRect;
@@ -39,6 +40,7 @@ Shader "DryCycle/FoehnAtmosphere"
                 uniform float2 _DryCycleFoehnWindDir;
                 uniform float _DryCycleFoehnGustSeed;
                 uniform float _DryCycleHasFoehnTextures;
+                uniform float _DryCycleHasFoehnDustField;
                 uniform float _DryCycleHasFoehnTerrainField;
                 uniform float _DryCycleFoehnDebugMode;
 
@@ -156,9 +158,56 @@ Shader "DryCycle/FoehnAtmosphere"
                         saturate(macro * 0.28 + fine * 0.20 + 0.52));
                 }
 
+                float4 SampleDust(float2 roomPx, float2 windDir, float2 crossDir)
+                {
+                    float along = dot(roomPx, windDir);
+                    float across = dot(roomPx, crossDir);
+
+                    if (_DryCycleHasFoehnDustField > 0.5)
+                    {
+                        float phaseA = frac(_DryCycleFoehnTime * 0.185 + _DryCycleFoehnGustSeed * 0.13);
+                        float phaseB = frac(phaseA + 0.5);
+                        float blendA = PhaseBlend(phaseA);
+                        float2 uvA = float2(along / 980.0, across / 470.0);
+                        float4 a = tex2D(
+                            _DryCycleFoehnDustField,
+                            frac(uvA - float2(phaseA * 0.94, phaseA * 0.035)));
+                        float4 b = tex2D(
+                            _DryCycleFoehnDustField,
+                            frac(uvA - float2(phaseB * 0.94, phaseB * 0.035) + float2(0.347, 0.211)));
+                        float4 broad = lerp(a, b, blendA);
+
+                        float phaseC = frac(_DryCycleFoehnTime * 0.315 + 0.37);
+                        float phaseD = frac(phaseC + 0.5);
+                        float blendB = PhaseBlend(phaseC);
+                        float2 uvB = float2(along / 430.0, across / 225.0);
+                        float4 c = tex2D(
+                            _DryCycleFoehnDustField,
+                            frac(uvB - float2(phaseC * 1.14, -phaseC * 0.045) + float2(0.193, 0.417)));
+                        float4 d = tex2D(
+                            _DryCycleFoehnDustField,
+                            frac(uvB - float2(phaseD * 1.14, -phaseD * 0.045) + float2(0.661, 0.083)));
+                        float4 detail = lerp(c, d, blendB);
+
+                        return float4(
+                            saturate(broad.r * 0.74 + detail.r * 0.34),
+                            saturate(broad.g * 0.60 + detail.g * 0.52),
+                            saturate(broad.b * 0.38 + detail.b * 0.72),
+                            frac(broad.a * 0.63 + detail.a * 0.57));
+                    }
+
+                    float broadWave = sin(
+                        (along / 610.0 - across / 430.0 - _DryCycleFoehnTime * 0.78) * 6.2831853);
+                    float clumpWave = sin(
+                        (along / 260.0 + across / 170.0 - _DryCycleFoehnTime * 1.34) * 6.2831853);
+                    return float4(
+                        saturate(broadWave * 0.30 + 0.50),
+                        saturate(clumpWave * 0.36 + 0.48),
+                        saturate(abs(clumpWave) * 0.72),
+                        frac(along / 719.0 + across / 331.0));
+                }
+
                 // x = broad gust body, y = narrow leading front, z = turbulence.
-                // Constants mirror FoehnGustField.cs so particles, physics, audio and
-                // the fullscreen resolve all react to the same moving wind event.
                 float3 SampleSharedGust(
                     float2 roomPx,
                     float2 windDir,
@@ -206,6 +255,47 @@ Shader "DryCycle/FoehnAtmosphere"
                     return float3(body, front, turbulence);
                 }
 
+                // x = signed compression/rebound wave, y = pressure-front envelope.
+                // A narrow oscillatory derivative-like profile reads as an air-pressure
+                // front sweeping through the scene instead of a persistent water wobble.
+                float2 SamplePressureWave(
+                    float2 roomPx,
+                    float2 windDir,
+                    float2 crossDir,
+                    float intensity)
+                {
+                    float along = dot(roomPx, windDir);
+                    float across = dot(roomPx, crossDir);
+                    float speed = lerp(178.0, 286.0, pow(saturate(intensity), 0.72));
+
+                    float warpA =
+                        sin(across / 244.0 + _DryCycleFoehnGustSeed * 6.2831853) * 54.0 +
+                        sin(across / 91.0 - _DryCycleFoehnTime * 0.29 +
+                            _DryCycleFoehnGustSeed * 13.7) * 18.0;
+                    float coordA =
+                        along - _DryCycleFoehnTime * speed + warpA +
+                        _DryCycleFoehnGustSeed * 1080.0 * 3.17;
+                    float phaseA = frac(coordA / 1080.0) * 1080.0;
+                    float signedA = phaseA > 540.0 ? phaseA - 1080.0 : phaseA;
+                    float envA = 1.0 - smoothstep(18.0, 142.0, abs(signedA));
+                    float waveA = sin(signedA / 18.0 * 3.14159265) * envA * envA;
+
+                    float warpB =
+                        sin(across / 137.0 + _DryCycleFoehnTime * 0.18 +
+                            _DryCycleFoehnGustSeed * 21.1) * 27.0;
+                    float coordB =
+                        along - _DryCycleFoehnTime * speed * 1.09 + warpB +
+                        _DryCycleFoehnGustSeed * 640.0 * 7.41;
+                    float phaseB = frac(coordB / 640.0) * 640.0;
+                    float signedB = phaseB > 320.0 ? phaseB - 640.0 : phaseB;
+                    float envB = 1.0 - smoothstep(14.0, 104.0, abs(signedB));
+                    float waveB = sin(signedB / 14.0 * 3.14159265) * envB * envB;
+
+                    return float2(
+                        waveA * 0.86 + waveB * 0.36,
+                        saturate(max(envA, envB * 0.64)));
+                }
+
                 float3 SampleDirectionalBlur(
                     float2 grabUv,
                     float2 windDir,
@@ -216,11 +306,11 @@ Shader "DryCycle/FoehnAtmosphere"
                         return center;
 
                     float2 stepUv = windDir * blurPx / max(_screenSize, float2(1.0, 1.0));
-                    float3 a = tex2D(_GrabTexture, grabUv - stepUv * 1.60).rgb;
-                    float3 b = tex2D(_GrabTexture, grabUv - stepUv * 0.72).rgb;
-                    float3 c = tex2D(_GrabTexture, grabUv + stepUv * 0.72).rgb;
-                    float3 d = tex2D(_GrabTexture, grabUv + stepUv * 1.60).rgb;
-                    return center * 0.40 + (b + c) * 0.19 + (a + d) * 0.11;
+                    float3 a = tex2D(_GrabTexture, grabUv - stepUv * 1.55).rgb;
+                    float3 b = tex2D(_GrabTexture, grabUv - stepUv * 0.68).rgb;
+                    float3 c = tex2D(_GrabTexture, grabUv + stepUv * 0.68).rgb;
+                    float3 d = tex2D(_GrabTexture, grabUv + stepUv * 1.55).rgb;
+                    return center * 0.42 + (b + c) * 0.19 + (a + d) * 0.10;
                 }
 
                 fixed4 frag(v2f i) : SV_Target
@@ -244,38 +334,43 @@ Shader "DryCycle/FoehnAtmosphere"
                     float2 localFlow = flowSample.rg * 2.0 - 1.0;
                     localFlow.x = max(0.18, localFlow.x);
                     float2 flowDir = SafeNormalize(
-                        windDir * localFlow.x + crossDir * localFlow.y * 0.82);
+                        windDir * localFlow.x + crossDir * localFlow.y * 0.78);
 
                     float4 streak = SampleStreak(roomPx, windDir, crossDir, flowSample.a * 0.37);
                     float4 streakUp = SampleStreak(
-                        roomPx + crossDir * 7.5,
+                        roomPx + crossDir * 8.0,
                         windDir,
                         crossDir,
                         flowSample.a * 0.37);
                     float4 streakDown = SampleStreak(
-                        roomPx - crossDir * 7.5,
+                        roomPx - crossDir * 8.0,
                         windDir,
                         crossDir,
                         flowSample.a * 0.37);
+                    float4 dust = SampleDust(roomPx, windDir, crossDir);
 
-                    float sheet = saturate(streak.r * 0.78 + streak.g * 0.42);
-                    float sheetEdge = (streakUp.r - streakDown.r) * 1.42 +
-                                      (streakUp.g - streakDown.g) * 0.52;
+                    float sheet = saturate(streak.r * 0.72 + streak.g * 0.36);
+                    float sheetEdge = (streakUp.r - streakDown.r) * 1.16 +
+                                      (streakUp.g - streakDown.g) * 0.42;
                     float3 sharedGust = SampleSharedGust(
+                        roomPx,
+                        windDir,
+                        crossDir,
+                        intensity);
+                    float2 pressureWave = SamplePressureWave(
                         roomPx,
                         windDir,
                         crossDir,
                         intensity);
                     float gust = saturate(max(
                         sharedGust.x,
-                        flowSample.b * 0.46 + sheet * 0.37 + streak.a * 0.12));
+                        flowSample.b * 0.42 + sheet * 0.30 + streak.a * 0.10));
                     float gustFront = sharedGust.y;
                     float gustTurbulence = sharedGust.z;
 
                     int debugMode = (int)floor(_DryCycleFoehnDebugMode + 0.5);
                     if (debugMode == 1)
                     {
-                        // R/G = tangent-space flow, B = the shared resolved gust signal.
                         return fixed4(flowSample.r, flowSample.g, gust, 1.0);
                     }
                     if (debugMode == 2)
@@ -286,59 +381,57 @@ Shader "DryCycle/FoehnAtmosphere"
                     }
                     if (debugMode == 3)
                     {
-                        return fixed4(streak.r, streak.g, streak.a, 1.0);
+                        return fixed4(dust.r, dust.g, max(dust.b, pressureWave.y), 1.0);
                     }
 
                     if (intensity <= 0.0001)
                         return tex2D(_GrabTexture, grabUv);
 
-                    // Mean air stays comparatively stable. Stronger refraction is now
-                    // concentrated into moving gust fronts, which stops the whole scene
-                    // from reading as permanent underwater/HeatWave wobble.
                     float localStrength =
-                        0.40 + exposure * 0.48 + wake * 0.22 + nozzle * 0.36;
+                        0.42 + exposure * 0.44 + wake * 0.16 + nozzle * 0.30;
                     float wakeWave = sin(
                         (dot(roomPx, windDir) / 184.0 -
                          dot(roomPx, crossDir) / 117.0 -
                          _DryCycleFoehnTime * 2.20 + streak.b * 3.7) * 6.2831853);
                     float frontShear = sin(
-                        (dot(roomPx, crossDir) / 71.0 -
-                         _DryCycleFoehnTime * 1.32 + streak.b * 2.6) * 6.2831853);
+                        (dot(roomPx, crossDir) / 79.0 -
+                         _DryCycleFoehnTime * 1.26 + dust.a * 3.1) * 6.2831853);
 
-                    float alongPulse =
-                        sheetEdge * (4.8 + nozzle * 2.2) +
-                        (gust - 0.48) * 2.6 +
-                        frontShear * gustFront * 2.25 +
-                        sin((dot(roomPx, crossDir) / 152.0 -
-                             _DryCycleFoehnTime * 1.48) * 6.2831853) *
-                            (0.55 + sheet * 0.75);
-                    float crossPulse =
-                        localFlow.y * 2.9 +
-                        sheetEdge * 1.75 +
-                        wakeWave * (wake * 3.8 + edgeTurbulence * 1.4) +
-                        frontShear * gustTurbulence * 0.85;
+                    // Low continuous shear. This stays much weaker than the moving
+                    // pressure front so the room no longer looks permanently liquefied.
+                    float ambientAlong =
+                        sheetEdge * (2.75 + nozzle * 1.45) +
+                        (gust - 0.50) * 1.55 +
+                        sin((dot(roomPx, crossDir) / 168.0 -
+                             _DryCycleFoehnTime * 1.34) * 6.2831853) *
+                            (0.30 + sheet * 0.46);
+                    float ambientCross =
+                        localFlow.y * 1.85 +
+                        sheetEdge * 0.92 +
+                        wakeWave * (wake * 2.75 + edgeTurbulence * 0.92);
 
-                    float distortionDrive =
-                        heatDrive *
-                        (0.38 + gust * 0.24 + gustFront * 0.48);
+                    float ambientDrive = heatDrive * (0.24 + gust * 0.18);
                     float2 offsetPx =
-                        windDir * alongPulse +
-                        crossDir * crossPulse +
-                        (flowDir - windDir) * (1.65 + flowSample.a * 1.25);
-                    offsetPx *= distortionDrive * localStrength;
+                        (windDir * ambientAlong +
+                         crossDir * ambientCross +
+                         (flowDir - windDir) * (0.92 + flowSample.a * 0.72)) *
+                        ambientDrive * localStrength;
 
-                    float secondary = sin(
-                        (dot(roomPx, crossDir) / 43.0 +
-                         dot(roomPx, windDir) / 520.0 -
-                         _DryCycleFoehnTime * 2.73 + streak.b * 4.0) * 6.2831853);
-                    offsetPx += crossDir * secondary *
-                                (0.30 + 0.92 * sheet) * heatDrive *
-                                (0.42 + gustFront * 0.58) *
-                                (0.52 + exposure * 0.48);
+                    // Pressure-wave displacement is intentionally stronger than the
+                    // ambient heat refraction: geometry compresses, overshoots and
+                    // rebounds as the gust front crosses it, like a visible air shock.
+                    float shockStrength =
+                        heatDrive *
+                        (6.8 + gustFront * 3.2 + nozzle * 1.7) *
+                        (0.62 + exposure * 0.38);
+                    offsetPx += windDir * pressureWave.x * shockStrength;
+                    offsetPx += crossDir *
+                                frontShear *
+                                pressureWave.y *
+                                heatDrive *
+                                (0.55 + wake * 1.65 + edgeTurbulence * 0.62);
 
-                    // Previous Foehn allowed ~18.5px sustained displacement. The new
-                    // ceiling is ~12.8px and typical non-front air is much lower.
-                    offsetPx = ClampMagnitude(offsetPx, 12.8 * heatDrive);
+                    offsetPx = ClampMagnitude(offsetPx, 14.6 * heatDrive);
 
                     float2 displacedUv = grabUv +
                         offsetPx / max(_screenSize, float2(1.0, 1.0));
@@ -347,39 +440,83 @@ Shader "DryCycle/FoehnAtmosphere"
                     float blurPx =
                         heatDrive *
                         saturate(
-                            sheet * 0.36 +
-                            gust * 0.24 +
-                            nozzle * 0.20 +
-                            gustFront * 0.56 - 0.39) *
-                        (0.56 + exposure * 0.70);
+                            sheet * 0.20 +
+                            gust * 0.16 +
+                            nozzle * 0.14 +
+                            pressureWave.y * 0.68 - 0.30) *
+                        (0.46 + exposure * 0.58);
                     float3 blurred = SampleDirectionalBlur(
                         displacedUv,
                         windDir,
-                        blurPx * 1.95,
+                        blurPx * 1.82,
                         scene);
-                    scene = lerp(scene, blurred, saturate(blurPx * 0.34));
+                    scene = lerp(scene, blurred, saturate(blurPx * 0.30));
 
-                    // Dry-hot color treatment remains readable and warm without becoming
-                    // an opaque sandstorm filter or bleaching highlights toward white.
+                    // Thin Sandstorm-inspired suspended dust layer. Unlike Watcher's
+                    // storm this never owns visibility: it is advected, terrain-aware,
+                    // gust-reactive mineral air that sits underneath the point grains.
+                    float roomHeight01 = saturate(
+                        roomPx.y / max(_DryCycleFoehnRoomSizePx.y, 1.0));
+                    float lowerAir = lerp(1.24, 0.72, roomHeight01);
+                    float dustDensity = saturate(
+                        dust.r * 0.58 +
+                        dust.g * 0.34 +
+                        dust.b * 0.12 +
+                        streak.a * 0.12);
+                    float terrainDust =
+                        exposure * 0.72 +
+                        nozzle * 0.24 +
+                        wake * 0.20 +
+                        edgeTurbulence * 0.08;
+                    float dustAmount = saturate(
+                        dustDensity *
+                        heatDrive *
+                        lowerAir *
+                        terrainDust *
+                        (0.040 + gust * 0.055 + gustFront * 0.045));
+                    dustAmount += saturate(
+                        dust.g * wake * heatDrive * (0.018 + gustTurbulence * 0.026));
+                    dustAmount = min(dustAmount, 0.145);
+
+                    float3 dustDark = float3(0.30, 0.225, 0.105);
+                    float3 dustGold = float3(0.66, 0.485, 0.205);
+                    float3 dustColor = lerp(dustDark, dustGold, saturate(dust.r * 0.68 + dust.g * 0.32));
+                    scene = lerp(scene, dustColor, dustAmount);
+
+                    // Deeper, duskier ochre grade: lower overall luminance, reduce blue,
+                    // retain hot amber midtones, and keep shadows heavy rather than gray.
                     float luma = dot(scene, float3(0.299, 0.587, 0.114));
                     float midtone = 1.0 - abs(luma * 2.0 - 1.0);
-                    float tintAmount = heatDrive *
-                        (0.068 + gust * 0.060 + sheet * 0.036 + gustFront * 0.022) *
-                        (0.70 + exposure * 0.30);
-                    float3 dryScene = scene * float3(1.055, 1.005, 0.885);
-                    dryScene += float3(0.115, 0.062, -0.018) * midtone;
-                    scene = lerp(scene, dryScene, saturate(tintAmount * 2.05));
+                    float3 deepScene = scene * (0.945 - heatDrive * 0.040);
+                    float3 ochreScene =
+                        deepScene * float3(1.105, 0.982, 0.705) +
+                        luma * float3(0.082, 0.030, -0.012) * midtone;
+                    float gradeAmount = heatDrive *
+                        (0.285 + gust * 0.070 + pressureWave.y * 0.035 + dustAmount * 0.70);
+                    scene = lerp(deepScene, ochreScene, saturate(gradeAmount));
+
+                    float shadow = 1.0 - smoothstep(0.10, 0.40, luma);
+                    scene *= 1.0 - shadow * heatDrive * 0.055;
+                    scene += float3(0.022, 0.010, -0.010) *
+                             shadow * heatDrive * 0.34;
+
+                    // Fine dust breakup is a tiny luminance flutter, not another line
+                    // layer. It helps the suspended dust feel particulate in motion.
+                    float microDust = (dust.b - 0.5) *
+                                      dustAmount *
+                                      (0.045 + gustTurbulence * 0.025);
+                    scene += microDust * float3(0.78, 0.58, 0.27);
 
                     float focus = clamp(
-                        sheetEdge * 0.028 +
-                        (nozzle - wake) * 0.016 +
-                        gustFront * frontShear * 0.010,
-                        -0.036,
-                        0.046);
+                        sheetEdge * 0.018 +
+                        (nozzle - wake) * 0.012 +
+                        pressureWave.x * pressureWave.y * 0.020,
+                        -0.032,
+                        0.038);
                     scene *= 1.0 + focus * heatDrive;
-                    scene = saturate((scene - 0.5) * (1.0 + heatDrive * 0.034) + 0.5);
+                    scene = saturate((scene - 0.40) * (1.0 + heatDrive * 0.072) + 0.40);
 
-                    return fixed4(scene, 1.0);
+                    return fixed4(saturate(scene), 1.0);
                 }
                 ENDCG
             }
