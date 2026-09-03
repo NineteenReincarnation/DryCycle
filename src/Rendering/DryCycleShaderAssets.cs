@@ -14,7 +14,6 @@ internal static class DryCycleShaderAssets
 {
     internal const string FogCompositeShaderKey = "DryCycleFogComposite";
     internal const string HeatWaveAtmosphereShaderKey = "DryCycleHeatWaveAtmosphere";
-    internal const string FoehnAtmosphereShaderKey = "DryCycleFoehnAtmosphere";
     internal const string BundleRelativePath = "assets/drycycle/drycycleweather";
     internal const string BundleVersionRelativePath =
         "assets/drycycle/drycycleweather.version.txt";
@@ -27,8 +26,6 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/compute/drycyclefognoise.compute";
     private const string HeatWaveAtmosphereAssetPath =
         "assets/drycycle/shaders/drycycleheatwaveatmosphere.shader";
-    private const string FoehnAtmosphereAssetPath =
-        "assets/drycycle/shaders/drycyclefoehnatmosphere.shader";
 
     private static AssetBundle _bundle;
     private static bool _enabled;
@@ -38,13 +35,11 @@ internal static class DryCycleShaderAssets
     internal static ComputeShader FogFluidCompute { get; private set; }
     internal static ComputeShader FogNoiseCompute { get; private set; }
     internal static FShader HeatWaveAtmosphere { get; private set; }
-    internal static FShader FoehnAtmosphere { get; private set; }
 
     internal static bool HasFogComposite => FogComposite != null;
     internal static bool HasFluidCompute => FogFluidCompute != null;
     internal static bool HasNoiseCompute => FogNoiseCompute != null;
     internal static bool HasHeatWaveAtmosphere => HeatWaveAtmosphere != null;
-    internal static bool HasFoehnAtmosphere => FoehnAtmosphere != null;
 
     internal static void Enable()
     {
@@ -102,8 +97,8 @@ internal static class DryCycleShaderAssets
                 Plugin.Logger?.LogWarning(
                     $"DryCycle weather AssetBundle not found at '{path}'. " +
                     "Fog will use the compatibility renderer. HeatWave will retain " +
-                    "Rain World's LevelHeat core, and Foehn can retain its particle " +
-                    "carrier, but custom atmosphere passes remain unavailable until " +
+                    "Rain World's LevelHeat core, but custom atmosphere passes remain " +
+                    "unavailable until " +
                     $"'{BundleRelativePath}' is built and installed. " +
                     $"Runtime Unity version: {Application.unityVersion}.");
             }
@@ -125,14 +120,13 @@ internal static class DryCycleShaderAssets
 
             LoadFogAssets(rainWorld);
             LoadHeatWaveAssets(rainWorld);
-            LoadFoehnAssets(rainWorld);
 
             if (!SystemInfo.supportsComputeShaders)
             {
                 Plugin.Logger?.LogWarning(
                     "This graphics device reports no compute-shader support. DryCycle " +
-                    "fog will use its non-fluid fallback. HeatWave and Foehn do not " +
-                    "depend on compute shaders.");
+                    "fog will use its non-fluid fallback. HeatWave does not depend on " +
+                    "compute shaders.");
             }
 
             Plugin.Logger?.LogInfo(
@@ -141,7 +135,6 @@ internal static class DryCycleShaderAssets
                 $"FogFluid={(FogFluidCompute != null ? "yes" : "no")}, " +
                 $"FogNoise={(FogNoiseCompute != null ? "yes" : "no")}, " +
                 $"HeatWaveAtmosphere={(HeatWaveAtmosphere != null ? "yes" : "no")}, " +
-                $"FoehnAtmosphere={(FoehnAtmosphere != null ? "yes" : "no")}, " +
                 $"ComputeSupported={SystemInfo.supportsComputeShaders}, " +
                 $"Unity={Application.unityVersion}, GPU='{SystemInfo.graphicsDeviceName}'.");
         }
@@ -151,7 +144,6 @@ internal static class DryCycleShaderAssets
             FogFluidCompute = null;
             FogNoiseCompute = null;
             HeatWaveAtmosphere = null;
-            FoehnAtmosphere = null;
             Plugin.Logger?.LogError(
                 "DryCycle failed to initialize custom weather shaders. " +
                 "Compatibility renderers will remain available where implemented.");
@@ -225,30 +217,6 @@ internal static class DryCycleShaderAssets
         {
             HeatWaveAtmosphere = FShader.CreateShader(HeatWaveAtmosphereShaderKey, heatShader);
             rainWorld.Shaders[HeatWaveAtmosphereShaderKey] = HeatWaveAtmosphere;
-        }
-    }
-
-    private static void LoadFoehnAssets(RainWorld rainWorld)
-    {
-        Shader foehnShader = _bundle.LoadAsset<Shader>(FoehnAtmosphereAssetPath);
-        if (foehnShader == null)
-        {
-            Plugin.Logger?.LogError(
-                $"DryCycle weather bundle is missing shader '{FoehnAtmosphereAssetPath}'. " +
-                "Foehn windblown particles will remain visible, but the directional " +
-                "hot-air refraction pass requires rebuilding the weather bundle.");
-        }
-        else if (!foehnShader.isSupported)
-        {
-            Plugin.Logger?.LogError(
-                $"DryCycle Foehn atmosphere shader '{foehnShader.name}' is not " +
-                $"supported by '{SystemInfo.graphicsDeviceName}' " +
-                $"({SystemInfo.graphicsDeviceType}).");
-        }
-        else
-        {
-            FoehnAtmosphere = FShader.CreateShader(FoehnAtmosphereShaderKey, foehnShader);
-            rainWorld.Shaders[FoehnAtmosphereShaderKey] = FoehnAtmosphere;
         }
     }
 
