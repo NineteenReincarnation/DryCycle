@@ -234,7 +234,7 @@ internal static class IntenseHeatCreatureExposure
 
             if (sprite is TriangleMesh mesh && mesh.verticeColors != null)
             {
-                EnsureVertexArrays(visual, i, mesh.verticeColors.Length);
+                EnsureVertexArrays(visual, i, mesh.verticeColors);
                 for (int v = 0; v < mesh.verticeColors.Length; v++)
                 {
                     Color vertex = mesh.verticeColors[v];
@@ -272,8 +272,6 @@ internal static class IntenseHeatCreatureExposure
             Mathf.Clamp01(dried.b * 0.42f + 0.010f),
             source.a);
 
-        // Highly saturated biological markings remain readable longer than neutral
-        // body surfaces; severe exposure eventually drags both toward the same dry range.
         float biologicalProtection = Mathf.Lerp(1f, 0.72f, Mathf.Clamp01(chroma * 1.5f));
         Color result = Color.Lerp(source, dried, tint * biologicalProtection);
         result = Color.Lerp(result, scorched, scorch * 0.72f);
@@ -304,8 +302,12 @@ internal static class IntenseHeatCreatureExposure
         }
     }
 
-    private static void EnsureVertexArrays(VisualState visual, int spriteIndex, int count)
+    private static void EnsureVertexArrays(
+        VisualState visual,
+        int spriteIndex,
+        Color[] currentColors)
     {
+        int count = currentColors?.Length ?? 0;
         if (visual.BaseVertexColors[spriteIndex] != null &&
             visual.BaseVertexColors[spriteIndex].Length == count)
         {
@@ -316,8 +318,9 @@ internal static class IntenseHeatCreatureExposure
         visual.LastTintedVertexColors[spriteIndex] = new Color[count];
         for (int i = 0; i < count; i++)
         {
-            visual.BaseVertexColors[spriteIndex][i] = Color.white;
-            visual.LastTintedVertexColors[spriteIndex][i] = Color.white;
+            Color current = currentColors[i];
+            visual.BaseVertexColors[spriteIndex][i] = current;
+            visual.LastTintedVertexColors[spriteIndex][i] = current;
         }
     }
 
