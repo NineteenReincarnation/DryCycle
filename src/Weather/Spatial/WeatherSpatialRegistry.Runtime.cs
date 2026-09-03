@@ -29,6 +29,13 @@ internal static partial class WeatherSpatialRegistry
             return _globalDefault != WeatherSpatialRule.Deny;
         }
 
+        // Exact child rules can only refine a family that is already allowed in the
+        // room. An old/orphaned child Allow must never bypass a Forbidden parent.
+        if (!IsFamilyAllowed(regionId, roomName, family.Id))
+        {
+            return false;
+        }
+
         string regionKey = NormalizeRegion(regionId);
         string roomKey = (roomName ?? string.Empty).Trim();
         string exactKey = WeatherSpatialCatalog.WeatherKey(kind, weatherId);
@@ -42,12 +49,6 @@ internal static partial class WeatherSpatialRegistry
                 {
                     return exactRoom == WeatherSpatialRule.Allow;
                 }
-
-                WeatherSpatialRule familyRoom = GetRule(room.Families, family.Id);
-                if (familyRoom != WeatherSpatialRule.Inherit)
-                {
-                    return familyRoom == WeatherSpatialRule.Allow;
-                }
             }
 
             WeatherSpatialRule exactDefault = GetRule(region.WeatherDefaults, exactKey);
@@ -55,15 +56,10 @@ internal static partial class WeatherSpatialRegistry
             {
                 return exactDefault == WeatherSpatialRule.Allow;
             }
-
-            WeatherSpatialRule familyDefault = GetRule(region.FamilyDefaults, family.Id);
-            if (familyDefault != WeatherSpatialRule.Inherit)
-            {
-                return familyDefault == WeatherSpatialRule.Allow;
-            }
         }
 
-        return _globalDefault != WeatherSpatialRule.Deny;
+        // No exact override: inherit the already-resolved parent Family Allow.
+        return true;
     }
 
     internal static bool IsFamilyAllowed(string regionId, string roomName, string familyId)
