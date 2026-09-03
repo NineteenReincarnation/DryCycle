@@ -1,12 +1,14 @@
 using System.Runtime.CompilerServices;
+using DryCycle.Weather.HeatWave;
+using DryCycle.Weather.IntenseHeat;
 using UnityEngine;
 
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// Runtime thermal state for a player. The two body-heat values correspond to the
-/// player's two primary body chunks so local sunlight, water and later heat sources
-/// can affect them independently before internal heat transfer equalizes them.
+/// player's two primary body chunks so local sunlight, water and heat sources can
+/// affect them independently before internal heat transfer equalizes them.
 /// </summary>
 internal sealed class PlayerThermalState
 {
@@ -19,14 +21,16 @@ internal sealed class PlayerThermalState
 /// Dynamic two-node body-heat model.
 ///
 /// RoomHeat is an environmental cooling baseline, not a temperature target. A body
-/// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight adds
-/// heat directly to each body node according to that chunk's EffectiveSunlight.
-/// Humidity and Wetness independently modify room-cooling efficiency. Internal
-/// body-to-body transfer remains conservative and smooths local differences.
+/// node only loses heat to the room while BodyHeat is above RoomHeat. Sunlight and
+/// active heat weather add heat directly. Humidity and Wetness independently modify
+/// room-cooling efficiency. Internal body-to-body transfer remains conservative.
 /// </summary>
 internal static class PlayerThermalModel
 {
     internal const float MinimumBodyHeat = 0f;
+
+    // Nominal normalization point used by existing heat-stress formulas. Runtime
+    // BodyHeat is deliberately allowed to exceed this value.
     internal const float MaximumBodyHeat = 1f;
 
     // Agreed room-cooling model before humidity/wetness correction:
@@ -36,6 +40,11 @@ internal static class PlayerThermalModel
 
     // Agreed solar heat input at EffectiveSunlight == 1.
     internal const float BaseSolarHeatingRatePerSecond = 0.01f;
+
+    // Explicit weather-driven BodyHeat gain. Current schedule intensity participates
+    // continuously, including fade-in and fade-out.
+    internal const float HeatWaveBodyHeatGainPerSecond = 0.02f;
+    internal const float IntenseHeatBodyHeatGainPerSecond = 0.05f;
 
     internal const float InternalDifferenceSlowModeHalfLifeSeconds = 8f;
     internal const float InternalHeatFlowHalfLifeSeconds = 1.5f;
@@ -100,8 +109,8 @@ internal static class PlayerThermalModel
 
         PlayerThermalState state = _states.GetOrCreateValue(self);
 
-        // Room exchange and direct solar heating stop while travelling through a
-        // shortcut. Stored body heat and internal transfer continue to exist.
+        // Room exchange and active environmental heating stop while travelling through
+        // a shortcut. Stored body heat and internal transfer continue to exist.
         if (self.room != null && !self.inShortcut)
         {
             float effectiveSunlight0 = SolarEnvironment.GetEffectiveSunlight(self, 0);
@@ -117,6 +126,8 @@ internal static class PlayerThermalModel
                 effectiveSunlight1,
                 TickSeconds);
 
+            ApplyWeatherHeating(state, self.room, TickSeconds);
+
             ApplyRoomCooling(
                 state,
                 RoomHeatFactor.GetRoomHeat(self.room),
@@ -128,7 +139,7 @@ internal static class PlayerThermalModel
         }
 
         ApplyInternalTransfer(state, TickSeconds);
-        ClampBodyHeat(state);
+        ClampMinimumBodyHeat(state);
     }
 
     private static void ApplySolarHeating(
@@ -146,6 +157,32 @@ internal static class PlayerThermalModel
             RoomEnvironmentProfile.ClampUnit(effectiveSunlight1) *
             BaseSolarHeatingRatePerSecond *
             deltaTime;
+    }
+
+    private static void ApplyWeatherHeating(
+        PlayerThermalState state,
+        Room room,
+        float deltaTime)
+    {
+        float heatWaveIntensity = HeatWaveWeatherRuntime.TryEvaluate(room, out float h)
+            ? Mathf.Clamp01(h)
+            : 0f;
+        float intenseHeatIntensity = IntenseHeatWeatherRuntime.TryEvaluate(room, out float i)
+            ? Mathf.Clamp01(i)
+            : 0f;
+
+        float heatingRate =
+            heatWaveIntensity * HeatWaveBodyHeatGainPerSecond +
+            intenseHeatIntensity * IntenseHeatBodyHeatGainPerSecond;
+
+        if (heatingRate <= 0f)
+        {
+            return;
+        }
+
+        float gainedHeat = heatingRate * deltaTime;
+        state.BodyHeat0 += gainedHeat;
+        state.BodyHeat1 += gainedHeat;
     }
 
     private static void ApplyRoomCooling(
@@ -247,10 +284,12 @@ internal static class PlayerThermalModel
         state.BodyHeat1 += transferredHeat;
     }
 
-    private static void ClampBodyHeat(PlayerThermalState state)
+    private static void ClampMinimumBodyHeat(PlayerThermalState state)
     {
-        state.BodyHeat0 = Mathf.Clamp(state.BodyHeat0, MinimumBodyHeat, MaximumBodyHeat);
-        state.BodyHeat1 = Mathf.Clamp(state.BodyHeat1, MinimumBodyHeat, MaximumBodyHeat);
+        // There is intentionally no upper clamp. Heat weather can push BodyHeat above
+        // the nominal 1.0 reference level, after which room cooling still acts normally.
+        state.BodyHeat0 = Mathf.Max(MinimumBodyHeat, state.BodyHeat0);
+        state.BodyHeat1 = Mathf.Max(MinimumBodyHeat, state.BodyHeat1);
     }
 
     private static float HalfLifeBlend(float deltaTime, float halfLifeSeconds)
