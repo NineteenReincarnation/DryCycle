@@ -4,12 +4,6 @@ using UnityEngine;
 
 namespace DryCycle.TemperatureSystem;
 
-/// <summary>
-/// Registers the unified local Environment Zone in DevInterface.
-/// New rooms use DryCycleEnvironmentZone. The former DryCycleShadeZone identifier
-/// is still recognized (without registering it in the add-object menu) so existing
-/// room files continue to load.
-/// </summary>
 internal static class SolarShadeZoneHooks
 {
     private const string PlacedTypeName = "DryCycleEnvironmentZone";
@@ -24,8 +18,7 @@ internal static class SolarShadeZoneHooks
 
     internal static bool IsEnvironmentZoneType(PlacedObject.Type type)
     {
-        return type != null &&
-               (type == PlacedType || type == LegacyPlacedType);
+        return type != null && (type == PlacedType || type == LegacyPlacedType);
     }
 
     internal static void Enable()
@@ -37,15 +30,11 @@ internal static class SolarShadeZoneHooks
 
         _enabled = true;
         PlacedType = new PlacedObject.Type(PlacedTypeName, register: true);
-        // Do not register the legacy name: registering it would make a second
-        // obsolete button appear in DevTools. ExtEnum equality is value-based, so
-        // unregistered instances still match old serialized room objects.
         LegacyPlacedType = new PlacedObject.Type(LegacyPlacedTypeName, register: false);
         DevCategory = new ObjectsPage.DevObjectCategories(DevCategoryName, register: true);
 
         On.PlacedObject.GenerateEmptyData += PlacedObject_GenerateEmptyData;
-        On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType +=
-            ObjectsPage_DevObjectGetCategoryFromPlacedType;
+        On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType += ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep += ObjectsPage_CreateObjRep;
     }
 
@@ -58,24 +47,19 @@ internal static class SolarShadeZoneHooks
 
         _enabled = false;
         On.PlacedObject.GenerateEmptyData -= PlacedObject_GenerateEmptyData;
-        On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType -=
-            ObjectsPage_DevObjectGetCategoryFromPlacedType;
+        On.DevInterface.ObjectsPage.DevObjectGetCategoryFromPlacedType -= ObjectsPage_DevObjectGetCategoryFromPlacedType;
         On.DevInterface.ObjectsPage.CreateObjRep -= ObjectsPage_CreateObjRep;
 
         DevCategory?.Unregister();
         DevCategory = null;
-
         PlacedType?.Unregister();
         PlacedType = null;
         LegacyPlacedType = null;
     }
 
-    private static void PlacedObject_GenerateEmptyData(
-        On.PlacedObject.orig_GenerateEmptyData orig,
-        PlacedObject self)
+    private static void PlacedObject_GenerateEmptyData(On.PlacedObject.orig_GenerateEmptyData orig, PlacedObject self)
     {
         orig(self);
-
         if (self != null && IsEnvironmentZoneType(self.type))
         {
             self.data = new SolarShadeZoneData(self);
@@ -87,12 +71,7 @@ internal static class SolarShadeZoneHooks
         ObjectsPage self,
         PlacedObject.Type type)
     {
-        if (IsEnvironmentZoneType(type))
-        {
-            return DevCategory;
-        }
-
-        return orig(self, type);
+        return IsEnvironmentZoneType(type) ? DevCategory : orig(self, type);
     }
 
     private static void ObjectsPage_CreateObjRep(
@@ -125,15 +104,17 @@ internal static class SolarShadeZoneHooks
             placedObject.data = data;
         }
 
+        Room room = self.owner?.room;
         if (newlyPlaced)
         {
-            // New Environment Zones start from this room's authored values.
-            // Example: RoomShade=0.25 and Humidity=-0.40 => the new panel opens
-            // with Shade 0.25 and Humidity -0.40 before any manual edit.
-            Room room = self.owner?.room;
             data.SetDefaultsFromRoom(
+                RoomHeatFactor.GetAuthoredRoomHeat(room),
                 SolarEnvironment.GetRoomShade(room),
                 HumidityEnvironment.GetRoomHumidity(room));
+        }
+        else if (!data.HasRoomHeat)
+        {
+            data.SetInheritedRoomHeatPreview(RoomHeatFactor.GetAuthoredRoomHeat(room));
         }
 
         PlacedObjectRepresentation representation = new SolarShadeZoneRepresentation(
