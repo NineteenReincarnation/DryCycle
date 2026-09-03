@@ -30,9 +30,13 @@ internal static class PlayerThermalModel
 {
     internal const float MinimumBodyHeat = 0f;
 
-    // Nominal normalization point used by existing heat-stress formulas. Runtime
-    // BodyHeat is deliberately allowed to exceed this value.
+    // Nominal normalization point used by the existing heat-stress/water-loss formulas.
+    // This remains 1.0 so their tuning does not change when the runtime ceiling is raised.
     internal const float MaximumBodyHeat = 1f;
+
+    // Absolute runtime ceiling agreed for BodyHeat. Heat sources may push beyond the
+    // nominal 1.0 stress point, but never beyond 2.0.
+    internal const float MaximumRuntimeBodyHeat = 2f;
 
     // Agreed room-cooling model before humidity/wetness correction:
     // CoolingRate = 0.0175 * max(0, BodyHeat - RoomHeat)^1.25
@@ -143,7 +147,7 @@ internal static class PlayerThermalModel
         }
 
         ApplyInternalTransfer(state, TickSeconds);
-        ClampMinimumBodyHeat(state);
+        ClampBodyHeat(state);
     }
 
     private static void ApplySolarHeating(
@@ -289,12 +293,16 @@ internal static class PlayerThermalModel
         state.BodyHeat1 += transferredHeat;
     }
 
-    private static void ClampMinimumBodyHeat(PlayerThermalState state)
+    private static void ClampBodyHeat(PlayerThermalState state)
     {
-        // There is intentionally no upper clamp. Heat weather can push BodyHeat above
-        // the nominal 1.0 reference level, after which room cooling still acts normally.
-        state.BodyHeat0 = Mathf.Max(MinimumBodyHeat, state.BodyHeat0);
-        state.BodyHeat1 = Mathf.Max(MinimumBodyHeat, state.BodyHeat1);
+        state.BodyHeat0 = Mathf.Clamp(
+            state.BodyHeat0,
+            MinimumBodyHeat,
+            MaximumRuntimeBodyHeat);
+        state.BodyHeat1 = Mathf.Clamp(
+            state.BodyHeat1,
+            MinimumBodyHeat,
+            MaximumRuntimeBodyHeat);
     }
 
     private static float HalfLifeBlend(float deltaTime, float halfLifeSeconds)
