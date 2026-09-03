@@ -4,7 +4,7 @@ using UnityEngine;
 namespace DryCycle.Weather.Spatial;
 
 /// <summary>
-/// Removes the no-longer-used bulk-selection controls from the Weather Zones panel
+/// Removes no-longer-used bulk-selection controls from the Weather Zones panel
 /// and compacts the remaining authoring controls after the editor is created.
 /// </summary>
 internal static class WeatherSpatialSelectionUiCleanup
@@ -52,27 +52,27 @@ internal static class WeatherSpatialSelectionUiCleanup
         Remove(editor, "SelectOffscreen");
         Remove(editor, "StopGate");
         Remove(editor, "StopSubregion");
+        Remove(editor, "ForceAllow");
+        Remove(editor, "ForceDeny");
+        Remove(editor, "ForceInherit");
 
         Stretch(editor, "SelectSubregion", 8f, 284f);
         Stretch(editor, "SelectShelters", 8f, 140f);
         Stretch(editor, "SelectGates", 152f, 140f);
 
-        // The deleted Stop-* row occupied 25 px including spacing. Move every
-        // control below it upward so the panel remains compact instead of leaving
-        // an empty band in the middle.
-        ShiftY(editor, "ForceAllow", 25f);
-        ShiftY(editor, "ForceDeny", 25f);
-        ShiftY(editor, "ForceInherit", 25f);
-        ShiftY(editor, "Undo", 25f);
-        ShiftY(editor, "Redo", 25f);
-        ShiftY(editor, "Validate", 25f);
-        ShiftY(editor, "Save", 25f);
-        ShiftY(editor, "Repair", 25f);
-        ShiftY(editor, "Status", 25f);
-        ShiftY(editor, "Path", 25f);
+        // Two deleted rows sat above the history/validation controls: the old Stop-*
+        // row and the explicit Sel Allow/Deny/Inherit row. Move everything below
+        // them upward by 50 px so the panel remains compact.
+        ShiftY(editor, "Undo", 50f);
+        ShiftY(editor, "Redo", 50f);
+        ShiftY(editor, "Validate", 50f);
+        ShiftY(editor, "Save", 50f);
+        ShiftY(editor, "Repair", 50f);
+        ShiftY(editor, "Status", 50f);
+        ShiftY(editor, "Path", 50f);
         for (int i = 0; i < 7; i++)
         {
-            ShiftY(editor, "Issue" + i, 25f);
+            ShiftY(editor, "Issue" + i, 50f);
         }
 
         editor.subNodes.Add(new CleanupMarker(editor.owner, editor));
