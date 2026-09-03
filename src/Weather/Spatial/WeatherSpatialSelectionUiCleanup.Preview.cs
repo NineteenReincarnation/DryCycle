@@ -30,7 +30,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 parent,
                 new Vector2(250f, 470f),
                 42f,
-                "75%")
+                "100%")
         {
             _editor = editor;
             Type editorType = editor.GetType();
@@ -46,6 +46,17 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             _updateStateLabelsMethod = editorType.GetMethod(
                 "UpdateStateLabels",
                 BindingFlags.Instance | BindingFlags.NonPublic);
+
+            FieldInfo worldField = editorType.GetField(
+                "_world",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            bool restoringActivePreview =
+                worldField?.GetValue(editor) is World world &&
+                WeatherSpatialPreview.IsActiveFor(world);
+            if (!restoringActivePreview)
+            {
+                _previewIntensityField?.SetValue(_editor, 1f);
+            }
 
             _lastValidIntensity = ReadIntensity();
             _buffer = PercentText(_lastValidIntensity);
@@ -177,7 +188,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             {
                 return Mathf.Clamp01(value);
             }
-            return 0.75f;
+            return 1f;
         }
 
         private void SetStatus(string text)
