@@ -274,13 +274,19 @@ internal static class IntenseHeatWeatherRuntime
                 WorldClockHooks.TryGetClock(targetRoom.world, out clock);
             }
 
+            if (clock?.IsNight == true)
+            {
+                return 0f;
+            }
+
             float directLight = Mathf.Clamp01(clock?.Lighting.DirectLight ?? 1f);
             float roomShade = Mathf.Clamp01(SolarEnvironment.GetRoomShade(targetRoom));
             float authoredSun = Mathf.Clamp01(SolarEnvironment.GetSunlightIntensity(targetRoom));
             float transmission = 1f - roomShade;
 
-            // IntenseHeat's identity is brutal direct sun. As long as the room is not
-            // authored as strongly enclosed, daylight is pushed close to full solar load.
+            // IntenseHeat's identity is brutal daytime direct sun. As long as the room
+            // is not authored as strongly enclosed, daylight is pushed close to full
+            // solar load rather than inheriting a weak ordinary-weather sun value.
             float daylight = Mathf.Lerp(0.88f, 1f, Mathf.Max(directLight, authoredSun));
             return Mathf.Clamp01(daylight * transmission);
         }
