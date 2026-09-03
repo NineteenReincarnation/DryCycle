@@ -102,11 +102,13 @@ internal static class FoehnWeatherRuntime
     private sealed class FoehnController : CosmeticSprite, INotifyWhenRoomUnloaded
     {
         private readonly FoehnParticleField _particles;
+        private readonly FoehnAudio _audio;
 
         private float _lastIntensity;
         private float _intensity;
         private float _visualTime;
         private Vector2 _windDirection;
+        private Vector2 _terrainFieldDirection;
         private FoehnTerrainField _terrainField;
         private bool _terrainFieldAttempted;
         private bool _disposed;
@@ -115,7 +117,9 @@ internal static class FoehnWeatherRuntime
         {
             room = ownerRoom;
             _windDirection = ResolveWindDirection(ownerRoom);
+            _terrainFieldDirection = _windDirection;
             _particles = new FoehnParticleField(ownerRoom);
+            _audio = new FoehnAudio(this);
         }
 
         public override void Update(bool eu)
@@ -131,7 +135,17 @@ internal static class FoehnWeatherRuntime
             _intensity = TryEvaluate(room, out float scheduled)
                 ? Mathf.Clamp01(scheduled)
                 : 0f;
-            _windDirection = ResolveWindDirection(room);
+
+            Vector2 nextWindDirection = ResolveWindDirection(room);
+            if (_terrainField != null &&
+                Vector2.Dot(nextWindDirection, _terrainFieldDirection) < 0.94f)
+            {
+                _terrainField.Dispose();
+                _terrainField = null;
+                _terrainFieldAttempted = false;
+            }
+
+            _windDirection = nextWindDirection;
             _visualTime += 1f / 40f;
 
             if (_intensity > Epsilon)
@@ -146,6 +160,7 @@ internal static class FoehnWeatherRuntime
                 _windDirection,
                 _terrainField,
                 _visualTime);
+            _audio.Update(_intensity, _visualTime);
         }
 
         public override void InitiateSprites(
@@ -221,6 +236,7 @@ internal static class FoehnWeatherRuntime
             if (!_disposed)
             {
                 _disposed = true;
+                _audio.Dispose();
                 _terrainField?.Dispose();
                 _terrainField = null;
             }
@@ -241,6 +257,7 @@ internal static class FoehnWeatherRuntime
             }
 
             _terrainFieldAttempted = true;
+            _terrainFieldDirection = _windDirection;
             _terrainField = FoehnTerrainField.Build(room, _windDirection);
         }
     }
