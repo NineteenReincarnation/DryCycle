@@ -22,7 +22,8 @@ namespace DryCycle.Editor
             "Assets/DryCycle/Shaders/DryCycleFogComposite.shader",
             "Assets/DryCycle/Compute/DryCycleFogFluid.compute",
             "Assets/DryCycle/Compute/DryCycleFogNoise.compute",
-            "Assets/DryCycle/Shaders/DryCycleHeatWaveAtmosphere.shader"
+            "Assets/DryCycle/Shaders/DryCycleHeatWaveAtmosphere.shader",
+            "Assets/DryCycle/Shaders/DryCycleIntenseHeatAtmosphere.shader"
         };
 
         [MenuItem("DryCycle/Build Weather AssetBundle (Windows x64)")]
@@ -122,6 +123,13 @@ namespace DryCycle.Editor
             {
                 throw new InvalidOperationException(
                     "DryCycle HeatWave atmosphere shader could not be imported: " + WeatherAssets[3]);
+            }
+
+            Shader intenseHeatAtmosphere = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[4]);
+            if (intenseHeatAtmosphere == null)
+            {
+                throw new InvalidOperationException(
+                    "DryCycle IntenseHeat atmosphere shader could not be imported: " + WeatherAssets[4]);
             }
 
             Debug.Log(
