@@ -172,6 +172,7 @@ internal static partial class WeatherSpatialRegistry
         }
 
         Regions.Clear();
+        RegionSchedules.Clear();
         ParseWarnings.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
         FatalLoadError = null;
@@ -180,5 +181,4 @@ internal static partial class WeatherSpatialRegistry
         LoadedPath = path;
         return Save();
     }
-
 }

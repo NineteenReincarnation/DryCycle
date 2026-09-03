@@ -1,5 +1,45 @@
 {
-  "version": 1,
+  "version": 2,
   "globalDefault": "Forbidden",
-  "regions": {}
+  "regions": {
+    "B5": {
+      "schedule": {
+        "weather": {
+          "HeatWave": {
+            "chance": 100
+          },
+          "SandStorm": {
+            "chance": 100
+          }
+        },
+        "dangerTypes": {
+          "IntenseHeat": 100,
+          "SandStorm": 100
+        }
+      }
+    },
+    "SU": {
+      "schedule": {
+        "weather": {
+          "Rain": {
+            "chance": 80,
+            "variants": {
+              "LightRain": 70,
+              "HeavyRain": 45
+            }
+          },
+          "Fog": {
+            "chance": 100,
+            "variants": {
+              "Fog": 100,
+              "DenseFog": 100
+            }
+          }
+        },
+        "dangerTypes": {
+          "DeathRain": 25
+        }
+      }
+    }
+  }
 }

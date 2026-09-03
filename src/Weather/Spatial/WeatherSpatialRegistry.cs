@@ -9,7 +9,7 @@ namespace DryCycle.Weather.Spatial;
 
 internal static partial class WeatherSpatialRegistry
 {
-    private const int CurrentVersion = 1;
+    private const int CurrentVersion = 2;
     private const int HotReloadFrames = 120;
     internal const string FileName = "WeatherSpatial.json";
 
@@ -42,6 +42,7 @@ internal static partial class WeatherSpatialRegistry
         FatalLoadError = null;
         ParseWarnings.Clear();
         Regions.Clear();
+        RegionSchedules.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
 
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -71,6 +72,7 @@ internal static partial class WeatherSpatialRegistry
         }
 
         Regions.Clear();
+        RegionSchedules.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
         Dirty = false;
         FatalLoadError = File.Exists(backupPath)
@@ -213,5 +215,4 @@ internal static partial class WeatherSpatialRegistry
         TrimRegion(regionKey, region);
         Dirty = true;
     }
-
 }
