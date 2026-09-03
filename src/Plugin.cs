@@ -50,8 +50,6 @@ internal sealed class Plugin : BaseUnityPlugin
             _contentRegistered = true;
         }
 
-        // This only installs RainWorld.LoadResources. Unity shader assets themselves
-        // are intentionally not touched until Rain World executes that hook.
         DryCycleShaderAssets.Enable();
 
         DryCycleContent.Enable();
@@ -86,7 +84,6 @@ internal sealed class Plugin : BaseUnityPlugin
             WeatherForecastHudRuntime.Disable();
             WeatherCameraEffectsRuntime.Disable();
             SyntheticRoomRainTakeoverRuntime.Disable();
-            RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();
@@ -143,10 +140,7 @@ internal sealed class Plugin : BaseUnityPlugin
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
-        // LoadResources can run before Rain World's mod paths are fully available.
-        // Retry here so the mod-local shader bundle is guaranteed a second chance.
         DryCycleShaderAssets.EnsureLoaded(self);
-
         RegionDayNightOptions.Register();
 
         if (_initialized)
@@ -201,32 +195,20 @@ internal sealed class Plugin : BaseUnityPlugin
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
-            // One GlobalRain layer owns the entire Scheduled HeavyRain split: it first
-            // records native/authored intensity, then overlays the nonlethal regional
-            // contribution. All impact/DangerType guards read that same baseline.
+            // One GlobalRain layer owns the Scheduled HeavyRain split: record the native
+            // intensity first, then overlay DryCycle's nonlethal regional contribution.
             ScheduledHeavyRainTraversalRuntime.Enable();
 
-            // Creature.TerrainImpact has a separate rainDeath path through
-            // RoomRain.CreatureSmashedInGround; isolate Scheduled HeavyRain there too.
+            // Creature.TerrainImpact has a second rainDeath entry point; keep Scheduled
+            // HeavyRain out of it and let DryCycle DeathRain handle its own impact path.
             ScheduledHeavyRainImpactGuardRuntime.Enable();
 
-            // Authored/default DangerType RoomRain objects never run their vanilla
-            // flood/rain-cycle hazard branch while DryCycle owns the region.
-            RoomDangerTypeTakeoverRuntime.Enable();
-
-            // Install last on RoomRain. DryCycle-created carriers in DangerType=None
-            // rooms use a rain-only update and never enter vanilla RoomRain.Update.
+            // DryCycle-created RoomRain carriers are rain-only render/physics carriers.
+            // Native room DangerType objects are not intercepted or used as weather data.
             SyntheticRoomRainTakeoverRuntime.Enable();
 
-            // Install after all rain owners so pickup-hold hydration observes the final
-            // scheduled/authored rain state and the same RoomRain shelter mask.
             RainDrinkingRuntime.Enable();
-
-            // WorldClock keeps RainCycle.timer out of RainGameOver, so RoomCamera cannot
-            // receive scheduled rain shake through RainCycle.ScreenShake. Bridge the
-            // already-scheduled HeavyRain/DeathRain outputs directly into the camera.
             WeatherCameraEffectsRuntime.Enable();
-
             RainMeterRoundPipRuntime.Enable();
             FogForecastFlowRuntime.Enable();
             RainMeterFastForwardForecastFix.Enable();
@@ -246,7 +228,6 @@ internal sealed class Plugin : BaseUnityPlugin
             WeatherForecastHudRuntime.Disable();
             WeatherCameraEffectsRuntime.Disable();
             SyntheticRoomRainTakeoverRuntime.Disable();
-            RoomDangerTypeTakeoverRuntime.Disable();
             ScheduledHeavyRainImpactGuardRuntime.Disable();
             ScheduledHeavyRainTraversalRuntime.Disable();
             RainWeatherRuntime.Disable();

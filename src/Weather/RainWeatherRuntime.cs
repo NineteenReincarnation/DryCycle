@@ -7,10 +7,9 @@ using DryCycle.Weather.Scheduling;
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Owns DryCycle's GlobalRain bridge and creates regional RoomRain rendering carriers.
-/// RoomRain.Update itself is deliberately owned by the dedicated authored-DangerType
-/// and synthetic-carrier takeover runtimes; this class never rewrites a room's
-/// DangerType or calls vanilla RoomRain.Update for scheduled weather.
+/// Owns DryCycle's GlobalRain bridge and creates rain-only RoomRain carriers in rooms
+/// that do not already have one. Scheduled weather is sourced only from DryCycle's
+/// weather schedule; native RoomSettings DangerType is not a DryCycle weather input.
 /// </summary>
 internal static class RainWeatherRuntime
 {
@@ -98,12 +97,13 @@ internal static class RainWeatherRuntime
             return;
         }
 
-        // Region weather needs Rain World's shelter mask, splash data and sound-loop
-        // fields, but the carrier must never run the native RainCycle/Flood update.
-        // Broken shelters deliberately receive a carrier just like vanilla Room.Loaded.
+        // The RoomRain class supplies Rain World's shelter mask, splash data and sound
+        // loops. DryCycle marks this carrier and owns its Update completely; assigning
+        // None explicitly prevents the constructor-copied room DangerType from becoming
+        // part of DryCycle's weather semantics.
         RoomRain roomRain = new(self.game.globalRain, self)
         {
-            dangerType = RoomRain.DangerType.Rain
+            dangerType = RoomRain.DangerType.None
         };
         self.roomRain = roomRain;
         self.AddObject(roomRain);
@@ -151,8 +151,7 @@ internal static class RainWeatherRuntime
             world,
             clock,
             WeatherScheduleEventKind.DangerType,
-            "DeathRain",
-            "Rain");
+            "DeathRain");
 
         GlobalRainState state = _globalStates.GetOrCreateValue(self);
         if (death > 0.0001f)
@@ -169,9 +168,6 @@ internal static class RainWeatherRuntime
 
             orig(self);
 
-            // Only scale/restore when the exact DeathRain object created by DryCycle is
-            // still current. If another system replaced it during orig(), ownership and
-            // all shared GlobalRain fields immediately belong to that system.
             if (!OwnsDeathRain(self))
             {
                 return;
@@ -230,8 +226,8 @@ internal static class RainWeatherRuntime
         }
 
         // Scheduled HeavyRain is layered only after the native GlobalRain pass by
-        // ScheduledHeavyRainTraversalRuntime. RoomEffect.HeavyRain and BulletRain
-        // therefore remain purely room-authored inputs to native physics.
+        // ScheduledHeavyRainTraversalRuntime. RoomEffect.HeavyRain therefore remains a
+        // room-authored effect, not a proxy for DryCycle's scheduled weather.
         return authored;
     }
 
@@ -250,9 +246,6 @@ internal static class RainWeatherRuntime
                 return;
             }
 
-            // Our old instance is no longer the current GlobalRain DeathRain. Detach
-            // only that retired object and relinquish ownership; never clear the new
-            // current object that replaced it.
             if (state.OwnedDeathRain != null &&
                 ReferenceEquals(state.OwnedDeathRain.globalRain, rain))
             {
@@ -304,8 +297,6 @@ internal static class RainWeatherRuntime
 
         if (!stillCurrent)
         {
-            // Another system has already replaced our DeathRain. Do not reset any
-            // GlobalRain outputs/flood fields that may now belong to that system.
             return;
         }
 
@@ -326,7 +317,6 @@ internal static class RainWeatherRuntime
         return RegionClimateRegistry.RegionCanUseWeather(regionId, "Rain") ||
                RegionClimateRegistry.RegionCanUseWeather(regionId, "LightRain") ||
                RegionClimateRegistry.RegionCanUseWeather(regionId, "HeavyRain") ||
-               RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathRain") ||
-               RegionClimateRegistry.RegionCanUseDanger(regionId, "Rain");
+               RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathRain");
     }
 }

@@ -1,14 +1,16 @@
 using System;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Owns safe rain-only updates for DryCycle-created RoomRain carriers and for the
-/// vanilla DangerType=None RoomRain objects created solely by WaterCycleBottom/Top.
-/// DryCycle carriers never enter vanilla rain/flood hazard branches.
+/// Owns RoomRain.Update only for carriers created explicitly by DryCycle. Native room
+/// DangerType objects are left to Rain World and are never used as DryCycle schedule
+/// inputs. The synthetic carrier renders LightRain/HeavyRain/DeathRain and implements
+/// DeathRain pressure directly from GlobalRain without switching RoomRain.dangerType.
 /// </summary>
 internal static class SyntheticRoomRainTakeoverRuntime
 {
@@ -42,9 +44,7 @@ internal static class SyntheticRoomRainTakeoverRuntime
         RoomRain self,
         bool eu)
     {
-        bool dryCycleCarrier = RainWeatherRuntime.IsSyntheticRoomRain(self);
-        bool waterCycleCarrier = IsNativeWaterCycleCarrier(self);
-        if (!dryCycleCarrier && !waterCycleCarrier)
+        if (!RainWeatherRuntime.IsSyntheticRoomRain(self))
         {
             orig(self, eu);
             return;
@@ -52,24 +52,13 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         Room room = self?.room;
         World world = room?.world;
-        WorldClock clock = null;
-        bool validDryCycleContext =
-            room?.roomSettings != null &&
-            world?.game != null &&
-            world.game.IsStorySession &&
-            RegionDayNightOptions.IsEnabled(world) &&
-            WorldClockHooks.TryGetClock(world, out clock);
-
-        if (!validDryCycleContext)
+        if (room?.roomSettings == null ||
+            world?.game == null ||
+            !world.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(world) ||
+            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
         {
-            if (dryCycleCarrier)
-            {
-                Quiesce(self);
-            }
-            else
-            {
-                orig(self, eu);
-            }
+            Quiesce(self);
             return;
         }
 
@@ -89,64 +78,28 @@ internal static class SyntheticRoomRainTakeoverRuntime
             world,
             clock,
             WeatherScheduleEventKind.DangerType,
-            "DeathRain",
-            "Rain");
+            "DeathRain");
 
         GlobalRain global = self.globalRain;
         bool foreignDeathRain = global?.deathRain != null &&
                                 !RainWeatherRuntime.OwnsDeathRain(global);
-
-        // A native WaterCycle carrier already existed before DryCycle. If another
-        // system owns DeathRain, return that carrier completely to the native/foreign
-        // hook chain rather than approximating the foreign disaster in our rain-only
-        // path. DryCycle-created carriers have no native lifecycle, so they still need
-        // our safe rain-only renderer for that external GlobalRain state.
-        if (foreignDeathRain && waterCycleCarrier)
-        {
-            orig(self, eu);
-            return;
-        }
-
         bool scheduledRain = light > Epsilon || heavy > Epsilon || death > Epsilon;
         if (!scheduledRain && !foreignDeathRain)
         {
-            if (dryCycleCarrier)
-            {
-                Quiesce(self);
-            }
-            else
-            {
-                orig(self, eu);
-            }
+            Quiesce(self);
             return;
         }
 
         UpdateRainOnly(
             self,
             eu,
-            lethalDeathRain: death > Epsilon || foreignDeathRain,
-            preserveNativeCarrier: waterCycleCarrier);
-    }
-
-    private static bool IsNativeWaterCycleCarrier(RoomRain rain)
-    {
-        if (rain == null || RainWeatherRuntime.IsSyntheticRoomRain(rain))
-        {
-            return false;
-        }
-
-        Room room = rain.room;
-        return room?.roomSettings != null &&
-               room.roomSettings.DangerType == RoomRain.DangerType.None &&
-               rain.dangerType == RoomRain.DangerType.None &&
-               (rain.waterLevelMin != null || rain.waterLevelMax != null);
+            lethalDeathRain: death > Epsilon || foreignDeathRain);
     }
 
     private static void UpdateRainOnly(
         RoomRain rain,
         bool eu,
-        bool lethalDeathRain,
-        bool preserveNativeCarrier)
+        bool lethalDeathRain)
     {
         Room room = rain?.room;
         GlobalRain global = rain?.globalRain;
@@ -164,32 +117,140 @@ internal static class SyntheticRoomRainTakeoverRuntime
 
         if (lethalDeathRain && global.AnyPushAround)
         {
-            // Only DeathRain may use native rain-pressure/rainDeath physics on a
-            // DryCycle regional carrier. Scheduled HeavyRain never enters this path.
-            float? previousRainIntensity = room.roomSettings.rInts;
-            RoomRain.DangerType previousDanger = rain.dangerType;
-            room.roomSettings.rInts = 1f;
-            rain.dangerType = RoomRain.DangerType.Rain;
-            try
-            {
-                rain.ThrowAroundObjects();
-            }
-            finally
-            {
-                room.roomSettings.rInts = previousRainIntensity;
-                rain.dangerType = previousDanger;
-            }
+            ApplyDeathRainPressure(rain);
         }
 
         PreserveWaterAccessibility(rain);
-
-        float bulletGate = lethalDeathRain
-            ? 1f
-            : preserveNativeCarrier
-                ? Mathf.Clamp01(room.roomSettings.RainIntensity)
-                : 0f;
-        UpdateBulletDrips(rain, bulletGate);
+        UpdateBulletDrips(rain, lethalDeathRain ? 1f : 0f);
         UpdateRainSounds(rain);
+    }
+
+    private static void ApplyDeathRainPressure(RoomRain rain)
+    {
+        Room room = rain?.room;
+        GlobalRain global = rain?.globalRain;
+        if (room?.physicalObjects == null || rain.rainReach == null || global == null)
+        {
+            return;
+        }
+
+        float insidePush = Mathf.Max(0f, global.InsidePushAround);
+        float outsidePush = Mathf.Max(0f, global.OutsidePushAround);
+        if (insidePush <= Epsilon && outsidePush <= Epsilon)
+        {
+            return;
+        }
+
+        for (int layer = 0; layer < room.physicalObjects.Length; layer++)
+        {
+            var objects = room.physicalObjects[layer];
+            if (objects == null)
+            {
+                continue;
+            }
+
+            for (int objectIndex = 0; objectIndex < objects.Count; objectIndex++)
+            {
+                PhysicalObject item = objects[objectIndex];
+                if (item?.bodyChunks == null)
+                {
+                    continue;
+                }
+
+                if (ModManager.Watcher &&
+                    room.game.IsStorySession &&
+                    item.abstractPhysicalObject != null &&
+                    item.abstractPhysicalObject.rippleLayer != 0)
+                {
+                    continue;
+                }
+
+                for (int chunkIndex = 0; chunkIndex < item.bodyChunks.Length; chunkIndex++)
+                {
+                    BodyChunk chunk = item.bodyChunks[chunkIndex];
+                    if (chunk == null)
+                    {
+                        continue;
+                    }
+
+                    IntVector2 tile = room.GetTilePosition(
+                        chunk.pos + new Vector2(
+                            Mathf.Lerp(-chunk.rad, chunk.rad, UnityEngine.Random.value),
+                            Mathf.Lerp(-chunk.rad, chunk.rad, UnityEngine.Random.value)));
+                    int x = Custom.IntClamp(tile.x, 0, room.TileWidth - 1);
+                    bool exposed = rain.rainReach[x] < tile.y;
+                    float pressure = exposed
+                        ? Mathf.Max(outsidePush, insidePush)
+                        : insidePush;
+
+                    if (room.water)
+                    {
+                        pressure *= Mathf.InverseLerp(
+                            room.FloatWaterLevel(chunk.pos) - 100f,
+                            room.FloatWaterLevel(chunk.pos),
+                            chunk.pos.y);
+                    }
+
+                    if (pressure <= Epsilon)
+                    {
+                        continue;
+                    }
+
+                    if (chunk.ContactPoint.y < 0)
+                    {
+                        int sideBias = 0;
+                        if (rain.rainReach[Custom.IntClamp(tile.x - 1, 0, room.TileWidth - 1)] >= tile.y &&
+                            !room.GetTile(tile + new IntVector2(-1, 0)).Solid)
+                        {
+                            sideBias--;
+                        }
+                        if (rain.rainReach[Custom.IntClamp(tile.x + 1, 0, room.TileWidth - 1)] >= tile.y &&
+                            !room.GetTile(tile + new IntVector2(1, 0)).Solid)
+                        {
+                            sideBias++;
+                        }
+
+                        chunk.vel += Custom.DegToVec(
+                            Mathf.Lerp(-30f, 30f, UnityEngine.Random.value) + sideBias * 16f) *
+                            (UnityEngine.Random.value * (exposed ? 9f : 4f) * pressure) /
+                            chunk.mass;
+                    }
+                    else
+                    {
+                        chunk.vel.y -= Mathf.Pow(UnityEngine.Random.value, 5f) *
+                                       16.5f * pressure /
+                                       chunk.mass;
+                    }
+
+                    if (chunk.owner is Creature creature)
+                    {
+                        if (Mathf.Pow(UnityEngine.Random.value, 1.2f) *
+                            2f * creature.bodyChunks.Length < pressure)
+                        {
+                            creature.Stun(UnityEngine.Random.Range(
+                                1,
+                                1 + (int)(9f * pressure)));
+                        }
+
+                        if (chunk == creature.mainBodyChunk)
+                        {
+                            creature.rainDeath += pressure / 20f;
+                        }
+
+                        if (pressure > 0.5f &&
+                            creature.rainDeath > 1f &&
+                            UnityEngine.Random.value < 0.025f)
+                        {
+                            creature.Die();
+                        }
+                    }
+
+                    chunk.vel += Custom.DegToVec(
+                        Mathf.Lerp(90f, 270f, UnityEngine.Random.value)) *
+                        (UnityEngine.Random.value * 5f * insidePush);
+                }
+            }
+        }
     }
 
     private static void PreserveWaterAccessibility(RoomRain rain)

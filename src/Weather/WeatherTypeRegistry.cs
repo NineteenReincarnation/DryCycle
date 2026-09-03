@@ -43,9 +43,9 @@ internal static class WeatherTypeRegistry
             return false;
         }
 
-        if (normalized == "DEATHRAIN" ||
-            normalized == "RAIN" ||
-            normalized == "INTENSEHEAT")
+        // DryCycle owns DeathRain explicitly. Native RoomRain.DangerType.Rain is not a
+        // DryCycle schedule ID and must never be promoted into this registry as an alias.
+        if (normalized == "DEATHRAIN" || normalized == "INTENSEHEAT")
         {
             return true;
         }

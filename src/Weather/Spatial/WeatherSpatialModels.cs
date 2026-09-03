@@ -86,8 +86,7 @@ internal static class WeatherSpatialCatalog
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "HeavyRain"),
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "LightRain"),
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "HeavyRain"),
-            new WeatherSpatialMember(WeatherScheduleEventKind.DangerType, "DeathRain"),
-            new WeatherSpatialMember(WeatherScheduleEventKind.DangerType, "Rain")),
+            new WeatherSpatialMember(WeatherScheduleEventKind.DangerType, "DeathRain")),
         new(
             "Fog",
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "Fog"),

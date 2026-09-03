@@ -7,7 +7,7 @@ namespace DryCycle.Weather;
 /// <summary>
 /// Bridges DryCycle's scheduled rain outputs into RoomCamera without relying on the
 /// legacy RainCycle.timer reaching RainGameOver. WorldClock deliberately keeps that
-/// timer in safe territory, so scheduled HeavyRain/DeathRain must feed camera shake
+/// timer in safe territory, so scheduled HeavyRain/DeathRain feed camera shake
 /// directly while preserving native/foreign shake already present on the camera.
 /// </summary>
 internal static class WeatherCameraEffectsRuntime
@@ -68,8 +68,7 @@ internal static class WeatherCameraEffectsRuntime
             world,
             clock,
             WeatherScheduleEventKind.DangerType,
-            "DeathRain",
-            "Rain");
+            "DeathRain");
 
         float scheduledScreenShake = Math.Max(0f, heavy);
         float scheduledMicroShake = 0f;
@@ -95,10 +94,6 @@ internal static class WeatherCameraEffectsRuntime
 
         if (scheduledMicroShake > Epsilon)
         {
-            // RoomCamera.Update normally decays microShake by 0.025 before using it in
-            // DangerType=None rooms. Replenishing that amount keeps the scheduled
-            // value stable for the current frame while still letting native MMF screen-
-            // shake suppression run inside the original camera update.
             camera.microShake = Math.Max(
                 camera.microShake,
                 scheduledMicroShake + 0.025f);

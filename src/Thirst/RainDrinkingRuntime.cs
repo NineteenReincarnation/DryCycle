@@ -10,10 +10,10 @@ namespace DryCycle.Thirst;
 
 /// <summary>
 /// Lets story players collect hydration directly from exposed rainfall by holding
-/// pickup. Rain source detection accepts DryCycle scheduled LightRain/HeavyRain,
-/// scheduled rain DangerTypes, active native/foreign rain hazards, and authored
-/// RoomSettings LightRain/HeavyRain effects. Exposure follows RoomRain.rainReach so
-/// drinking uses the same shelter boundary as Rain World's rain physics.
+/// pickup. Rain source detection accepts DryCycle scheduled LightRain/HeavyRain/
+/// DeathRain and authored RoomSettings LightRain/HeavyRain effects. Native room
+/// DangerType is not a DryCycle drinking source. Exposure follows RoomRain.rainReach
+/// when available so drinking uses the same shelter boundary as rain rendering.
 /// </summary>
 internal static class RainDrinkingRuntime
 {
@@ -66,9 +66,6 @@ internal static class RainDrinkingRuntime
             return;
         }
 
-        // Preserve the initial tap/pickup window, then reserve the continued hold for
-        // drinking so vanilla swallow/eat/back interactions do not repeatedly compete
-        // with the rain-drink gesture once the player is clearly holding the button.
         bool pickupHeld = self.input[0].pckp;
         self.input[0].pckp = false;
 
@@ -113,9 +110,6 @@ internal static class RainDrinkingRuntime
             return;
         }
 
-        // ThirstHooks executes earlier in the Player.Update hook chain and owns the
-        // underwater-drinking baseline. Only promote IsDrinking here; never clear it,
-        // so moving between rain drinking and underwater drinking cannot fight state.
         thirstState.IsDrinking = true;
         ThirstMeter.ShowDrinking(self);
         ThirstStore.AddRuntime(self, ThirstConstants.DrinkPerTick);
@@ -221,9 +215,6 @@ internal static class RainDrinkingRuntime
             return roomRain.rainReach[x] < y;
         }
 
-        // Authored RoomSettings rain can exist in rooms where no RoomRain carrier was
-        // created by another system. Match GenerateShelterTex's top-down solid test as
-        // a safe fallback rather than treating the whole room as exposed.
         for (int scanY = y; scanY < room.TileHeight; scanY++)
         {
             if (room.HasAnySolid(x, scanY))
@@ -264,33 +255,15 @@ internal static class RainDrinkingRuntime
                 clock,
                 WeatherScheduleEventKind.Weather,
                 "HeavyRain");
-            float scheduledDangerRain = WeatherScheduleRuntime.GetIntensity(
+            float scheduledDeathRain = WeatherScheduleRuntime.GetIntensity(
                 world,
                 clock,
                 WeatherScheduleEventKind.DangerType,
-                "DeathRain",
-                "Rain");
+                "DeathRain");
 
             intensity = Math.Max(
                 intensity,
-                Math.Max(scheduledDangerRain, Math.Max(scheduledLight, scheduledHeavy)));
-        }
-
-        RoomRain rain = room.roomRain;
-        GlobalRain globalRain = rain?.globalRain;
-        if (globalRain == null)
-        {
-            return intensity;
-        }
-
-        bool roomDangerUsesRain = rain.dangerType == RoomRain.DangerType.Rain ||
-                                  rain.dangerType == RoomRain.DangerType.FloodAndRain ||
-                                  settings?.DangerType == RoomRain.DangerType.Rain ||
-                                  settings?.DangerType == RoomRain.DangerType.FloodAndRain;
-
-        if (globalRain.deathRain != null || roomDangerUsesRain)
-        {
-            intensity = Math.Max(intensity, globalRain.Intensity);
+                Math.Max(scheduledDeathRain, Math.Max(scheduledLight, scheduledHeavy)));
         }
 
         return intensity;

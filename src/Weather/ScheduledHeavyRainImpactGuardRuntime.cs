@@ -1,22 +1,15 @@
 using System;
 using DryCycle.DayNight;
 using DryCycle.Weather.Scheduling;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Weather;
 
 /// <summary>
-/// Closes the second native rain-death path used by Creature.TerrainImpact.
-///
-/// Creature.TerrainImpact calls RoomRain.CreatureSmashedInGround whenever the current
-/// GlobalRain reports AnyPushAround. Scheduled HeavyRain deliberately raises the visual
-/// GlobalRain intensity, so without this guard a RoomRain carrier can still add
-/// rainDeath on ground impacts even though ThrowAroundObjects is isolated.
-///
-/// During DryCycle Scheduled HeavyRain, only a native RoomRain that genuinely existed
-/// without DryCycle may preserve its own baseline impact behavior. DryCycle-created
-/// synthetic carriers never receive impact rainDeath from Scheduled HeavyRain.
-/// Scheduled/foreign DeathRain remains untouched and fully lethal.
+/// Keeps DryCycle Scheduled HeavyRain out of Rain World's lethal terrain-impact path.
+/// DryCycle Scheduled DeathRain is handled explicitly from GlobalRain pressure and does
+/// not depend on a room's native DangerType.
 /// </summary>
 internal static class ScheduledHeavyRainImpactGuardRuntime
 {
@@ -65,9 +58,8 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
 
         WeatherScheduleRuntime.Synchronize(world);
 
-        // A DeathRain state owned by somebody else is authoritative. Scheduled
-        // HeavyRain is already prevented from layering onto it in GlobalRain, so the
-        // impact guard must not suppress any of that foreign disaster's native paths.
+        // Foreign DeathRain remains completely foreign. DryCycle does not reinterpret
+        // or suppress another owner's native RoomRain path.
         if (self.globalRain.deathRain != null &&
             !RainWeatherRuntime.OwnsDeathRain(self.globalRain))
         {
@@ -79,12 +71,10 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
             world,
             clock,
             WeatherScheduleEventKind.DangerType,
-            "DeathRain",
-            "Rain");
+            "DeathRain");
         if (deathRain > Epsilon)
         {
-            // DryCycle Scheduled DeathRain intentionally keeps the complete lethal path.
-            orig(self, crit, speed);
+            ApplyScheduledDeathRainImpact(self, crit, speed);
             return;
         }
 
@@ -99,23 +89,9 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
             return;
         }
 
-        // This carrier did not exist in vanilla. There is therefore no native impact
-        // rainDeath behavior to preserve. In particular, do not call vanilla
-        // CreatureSmashedInGround with dangerType=Rain merely because the carrier uses
-        // that value for rendering; vanilla's Mathf.Lerp(num, 1, .5) would add
-        // rainDeath even when the local pressure is zero.
+        // A DryCycle-created carrier has no native lethal rain behavior to preserve.
         if (RainWeatherRuntime.IsSyntheticRoomRain(self))
         {
-            return;
-        }
-
-        // Rooms with an authored/default DangerType are handled by the outer
-        // RoomDangerTypeTakeoverRuntime. If hook ordering changes, defer to that/native
-        // chain instead of trying to duplicate its authored-danger policy here.
-        RoomRain.DangerType authoredDanger = room.roomSettings?.DangerType;
-        if (authoredDanger != null && authoredDanger != RoomRain.DangerType.None)
-        {
-            orig(self, crit, speed);
             return;
         }
 
@@ -123,9 +99,8 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
                 self.globalRain,
                 out float nativeIntensity))
         {
-            // Failing closed is important here: current GlobalRain.Intensity can contain
-            // Scheduled HeavyRain, so delegating without a baseline could reintroduce
-            // the exact rainDeath leak this guard exists to remove.
+            // Current GlobalRain.Intensity may contain Scheduled HeavyRain. Without the
+            // native baseline, delegating would leak DryCycle HeavyRain into rainDeath.
             return;
         }
 
@@ -133,8 +108,6 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
         float nativeInside = PushInside(nativeIntensity);
         if (nativeOutside <= Epsilon && nativeInside <= Epsilon)
         {
-            // Without Scheduled HeavyRain, Creature.TerrainImpact would never have
-            // entered this callback because native GlobalRain.AnyPushAround was false.
             return;
         }
 
@@ -142,14 +115,52 @@ internal static class ScheduledHeavyRainImpactGuardRuntime
         self.globalRain.Intensity = nativeIntensity;
         try
         {
-            // This is a native DangerType=None WaterCycle carrier (or equivalent
-            // foreign RoomRain), so preserve the baseline behavior it already had.
+            // Preserve whatever behavior this pre-existing native/foreign RoomRain
+            // already had, but only at its pre-DryCycle GlobalRain intensity.
             orig(self, crit, speed);
         }
         finally
         {
             self.globalRain.Intensity = scheduledIntensity;
         }
+    }
+
+    private static void ApplyScheduledDeathRainImpact(
+        RoomRain rain,
+        Creature crit,
+        float speed)
+    {
+        if (rain?.room == null ||
+            rain.globalRain == null ||
+            rain.rainReach == null ||
+            crit?.bodyChunks == null ||
+            crit.bodyChunks.Length == 0 ||
+            speed < 2.5f)
+        {
+            return;
+        }
+
+        float inside = Mathf.Max(0f, rain.globalRain.InsidePushAround);
+        float outside = Mathf.Max(0f, rain.globalRain.OutsidePushAround);
+        BodyChunk chunk = crit.bodyChunks[UnityEngine.Random.Range(0, crit.bodyChunks.Length)];
+        if (chunk == null)
+        {
+            return;
+        }
+
+        IntVector2 tile = rain.room.GetTilePosition(
+            chunk.pos + new Vector2(
+                Mathf.Lerp(-chunk.rad, chunk.rad, UnityEngine.Random.value),
+                Mathf.Lerp(-chunk.rad, chunk.rad, UnityEngine.Random.value)));
+        int x = Custom.IntClamp(tile.x, 0, rain.room.TileWidth - 1);
+        float pressure = rain.rainReach[x] < tile.y
+            ? Mathf.Max(outside, inside)
+            : inside;
+
+        crit.rainDeath += Mathf.InverseLerp(-2.5f, -15f, speed) *
+                          Mathf.Lerp(pressure, 1f, 0.5f) *
+                          0.65f /
+                          crit.bodyChunks.Length;
     }
 
     private static float PushOutside(float intensity)

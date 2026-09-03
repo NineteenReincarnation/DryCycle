@@ -75,12 +75,7 @@ internal static class WeatherForecastVisualCatalog
     internal static readonly Color FogColor = new(168f / 255f, 186f / 255f, 189f / 255f);
     internal static readonly Color DenseFogColor = new(82f / 255f, 99f / 255f, 102f / 255f);
 
-    // HeatWave forecast marker is deliberately hot red so it reads immediately as a
-    // dangerous high-temperature weather window on the RainMeter.
     internal static readonly Color HeatWaveColor = new(0.96f, 0.12f, 0.075f);
-
-    // IntenseHeat is a solar-orange hazard marker. It stays distinct from HeatWave's
-    // red while reading much harsher than SandStorm's pale sand yellow.
     internal static readonly Color IntenseHeatColor = new(1.00f, 0.37f, 0.015f);
 
     internal static WeatherForecastVisualStyle Get(WeatherForecastVisualKind kind)
@@ -197,10 +192,6 @@ internal static class WeatherForecastVisualCatalog
 
             case "DEATHSANDSTORM":
                 visualKind = WeatherForecastVisualKind.DeathSandStorm;
-                return true;
-
-            case "RAIN" when eventKind == WeatherScheduleEventKind.DangerType:
-                visualKind = WeatherForecastVisualKind.DeathRain;
                 return true;
         }
 
