@@ -32,10 +32,11 @@ internal readonly struct FoehnRenderFrame
 }
 
 /// <summary>
-/// Foehn visual resolve. The fullscreen pass owns directional pressure-wave refraction,
-/// thin advected environmental dust and the deep dry-hot grade. Individual mineral
-/// particles are rendered into Foreground before the GrabPass so air and dust stay one
-/// coherent wind system instead of becoming unrelated overlays.
+/// Foehn background resolve. The atmosphere pass sits at the front of Midground so its
+/// GrabPass only sees already-rendered background/midground scenery. Players, items,
+/// foreground props and the point-grain dust are rendered afterwards and therefore are
+/// never turned into a full-screen jelly/refraction field. The shader paints moving
+/// hot-air/dust sheets across the scenery with soft edges and modest internal refraction.
 /// </summary>
 internal static class FoehnRenderPipeline
 {
@@ -118,7 +119,8 @@ internal static class FoehnRenderPipeline
         if (atmosphere != null)
         {
             atmosphere.RemoveFromContainer();
-            camera.ReturnFContainer("GrabShaders").AddChild(atmosphere);
+            FContainer midground = camera.ReturnFContainer("Midground");
+            midground.AddChild(atmosphere);
             atmosphere.MoveToFront();
         }
     }
