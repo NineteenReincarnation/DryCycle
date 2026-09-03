@@ -20,6 +20,8 @@ internal static class WeatherSpatialMapMenuRuntime
     private static bool _enabled;
     private static ConstructorInfo _editorConstructor;
     private static bool _constructorResolved;
+    private static MapPage _leftPanPage;
+    private static bool _leftPanActive;
 
     internal static void Enable()
     {
@@ -30,6 +32,7 @@ internal static class WeatherSpatialMapMenuRuntime
 
         On.DevInterface.MapPage.NewMode += MapPage_NewMode;
         On.DevInterface.MapPage.Signal += MapPage_Signal;
+        On.DevInterface.MapPage.Update += MapPage_Update;
         _enabled = true;
     }
 
@@ -42,10 +45,116 @@ internal static class WeatherSpatialMapMenuRuntime
 
         On.DevInterface.MapPage.NewMode -= MapPage_NewMode;
         On.DevInterface.MapPage.Signal -= MapPage_Signal;
+        On.DevInterface.MapPage.Update -= MapPage_Update;
         WeatherSpatialPreview.Clear();
+        _leftPanPage = null;
+        _leftPanActive = false;
         _editorConstructor = null;
         _constructorResolved = false;
         _enabled = false;
+    }
+
+    private static void MapPage_Update(
+        On.DevInterface.MapPage.orig_Update orig,
+        MapPage self)
+    {
+        DevUINode editor = FindEditor(self);
+        DevInterface.DevUI owner = self?.owner;
+        if (editor == null || owner == null)
+        {
+            ClearLeftPan(self);
+            orig(self);
+            return;
+        }
+
+        bool realLeftDown = owner.mouseDown;
+        bool realLeftClick = owner.mouseClick;
+        bool rightDown = Input.GetMouseButton(1);
+        bool rightClick = Input.GetMouseButtonDown(1);
+        bool overInteractiveUi = IsMouseOverInteractiveUi(self, editor);
+
+        if (realLeftClick)
+        {
+            _leftPanPage = self;
+            _leftPanActive = !overInteractiveUi;
+        }
+        if (!realLeftDown && ReferenceEquals(_leftPanPage, self))
+        {
+            _leftPanActive = false;
+            _leftPanPage = null;
+        }
+
+        bool panWithLeft = realLeftDown &&
+                           _leftPanActive &&
+                           ReferenceEquals(_leftPanPage, self);
+        bool authorWithRight = (rightDown || rightClick) && !overInteractiveUi;
+
+        // The existing weather editor is written against DevUI's left-button fields.
+        // While Weather Zones is open, feed it RMB instead; LMB is reserved for the
+        // native map pan gesture. This keeps all brush/selection behavior in one place
+        // (including Shift+RMB) without allowing RoomPanel dragging.
+        if (authorWithRight)
+        {
+            owner.mouseDown = rightDown;
+            owner.mouseClick = rightClick;
+        }
+        else if (panWithLeft)
+        {
+            owner.mouseDown = false;
+            owner.mouseClick = false;
+        }
+
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            owner.mouseDown = realLeftDown;
+            owner.mouseClick = realLeftClick;
+        }
+
+        if (panWithLeft)
+        {
+            self.panPos -= owner.lastMousePos - owner.mousePos;
+            self.Refresh();
+        }
+    }
+
+    private static void ClearLeftPan(MapPage self)
+    {
+        if (ReferenceEquals(_leftPanPage, self))
+        {
+            _leftPanPage = null;
+            _leftPanActive = false;
+        }
+    }
+
+    private static bool IsMouseOverInteractiveUi(MapPage mapPage, DevUINode editor)
+    {
+        if (editor is RectangularDevUINode editorRect && editorRect.MouseOver)
+        {
+            return true;
+        }
+
+        if (mapPage?.subNodes == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < mapPage.subNodes.Count; i++)
+        {
+            DevUINode node = mapPage.subNodes[i];
+            if (ReferenceEquals(node, editor) || node is RoomPanel)
+            {
+                continue;
+            }
+            if (node is Button button && button.MouseOver)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void MapPage_NewMode(
@@ -141,6 +250,7 @@ internal static class WeatherSpatialMapMenuRuntime
                 panel.collapsed = false;
             }
 
+            AddShortcutLegend(editor);
             mapPage.subNodes.Add(editor);
             editor.Refresh();
             mapPage.Refresh();
@@ -150,6 +260,34 @@ internal static class WeatherSpatialMapMenuRuntime
             Plugin.Logger?.LogError("DryCycle Weather Zones: failed to open map editor: " + ex);
             CloseEditor(mapPage, refresh: true);
         }
+    }
+
+    private static void AddShortcutLegend(DevUINode editor)
+    {
+        if (editor == null)
+        {
+            return;
+        }
+
+        AddLegendLabel(editor, "WeatherShortcutHeader", 92f, "Shortcuts");
+        AddLegendLabel(editor, "WeatherShortcutPan", 74f, "LMB Drag  - Pan Map");
+        AddLegendLabel(editor, "WeatherShortcutPaint", 56f, "RMB Drag  - Paint Brush");
+        AddLegendLabel(editor, "WeatherShortcutSelect", 38f, "Shift + RMB  - Toggle Room Select");
+        AddLegendLabel(editor, "WeatherShortcutKeys", 20f, "Ctrl+S Save   Ctrl+Z Undo   Ctrl+Y Redo");
+    }
+
+    private static void AddLegendLabel(DevUINode editor, string id, float y, string text)
+    {
+        DevUILabel label = new(
+            editor.owner,
+            id,
+            editor,
+            new Vector2(8f, y),
+            284f,
+            text);
+        label.spriteColor = new Color(0f, 0f, 0f);
+        label.textColor = new Color(1f, 1f, 1f);
+        editor.subNodes.Add(label);
     }
 
     private static void CloseAttractiveness(MapPage mapPage)
