@@ -18,7 +18,15 @@ internal static class ThermalWaterLoss
 
     internal const float BodyHeatWaterLossThreshold = 0.25f;
     internal const float BodyHeatWaterLossExponent = 2f;
-    internal const float MaxBodyHeatWaterLossPerSecond = 1f;
+    internal const float MaxNominalBodyHeatWaterLossPerSecond = 1f;
+
+    // BodyHeat above the nominal 1.0 stress point enters a deliberately discrete
+    // dehydration ladder. Runtime BodyHeat itself is capped at 2.0 by
+    // PlayerThermalModel; this function also clamps independently so callers cannot
+    // produce loss above the agreed maximum.
+    internal const float ExtremeBodyHeatStepSize = 0.25f;
+    internal const float ExtremeBodyHeatLossStep = 0.5f;
+    internal const float MaximumExtremeBodyHeatWaterLossPerSecond = 3f;
 
     // Final weather multipliers. No numeric multipliers were specified yet, so these
     // remain neutral until explicitly tuned.
@@ -76,22 +84,48 @@ internal static class ThermalWaterLoss
 
     internal static float CalculateBodyNodeWaterLossRate(float bodyHeat)
     {
-        if (bodyHeat <= BodyHeatWaterLossThreshold)
+        float clampedBodyHeat = Mathf.Clamp(
+            bodyHeat,
+            PlayerThermalModel.MinimumBodyHeat,
+            PlayerThermalModel.MaximumRuntimeBodyHeat);
+
+        if (clampedBodyHeat <= BodyHeatWaterLossThreshold)
         {
             return 0f;
         }
 
-        float range = PlayerThermalModel.MaximumBodyHeat - BodyHeatWaterLossThreshold;
-        if (range <= 0f)
+        // Keep the existing 0.25..1.0 tuning exactly as before. BodyHeat == 1.0
+        // therefore still produces 1 WV/s from the BodyHeat branch.
+        if (clampedBodyHeat <= PlayerThermalModel.MaximumBodyHeat)
         {
-            return 0f;
+            float range = PlayerThermalModel.MaximumBodyHeat - BodyHeatWaterLossThreshold;
+            if (range <= 0f)
+            {
+                return 0f;
+            }
+
+            float normalized = Mathf.Clamp01(
+                (clampedBodyHeat - BodyHeatWaterLossThreshold) / range);
+
+            return MaxNominalBodyHeatWaterLossPerSecond *
+                   Mathf.Pow(normalized, BodyHeatWaterLossExponent);
         }
 
-        float normalized = Mathf.Clamp01(
-            (bodyHeat - BodyHeatWaterLossThreshold) / range);
+        // Above 1.0 the dehydration penalty becomes intentionally stepped rather than
+        // smoothly interpolated:
+        // (1.00, 1.25] => 1.5 WV/s
+        // (1.25, 1.50] => 2.0 WV/s
+        // (1.50, 1.75] => 2.5 WV/s
+        // (1.75, 2.00] => 3.0 WV/s
+        float excess = clampedBodyHeat - PlayerThermalModel.MaximumBodyHeat;
+        int step = Mathf.Clamp(
+            Mathf.CeilToInt(excess / ExtremeBodyHeatStepSize),
+            1,
+            4);
 
-        return MaxBodyHeatWaterLossPerSecond *
-               Mathf.Pow(normalized, BodyHeatWaterLossExponent);
+        return Mathf.Min(
+            MaximumExtremeBodyHeatWaterLossPerSecond,
+            MaxNominalBodyHeatWaterLossPerSecond + step * ExtremeBodyHeatLossStep);
     }
 
     internal static float GetSolarWaterLossFinalMultiplier(Player player)
