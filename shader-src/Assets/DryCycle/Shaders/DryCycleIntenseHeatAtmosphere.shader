@@ -291,43 +291,70 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     float solar = saturate(_DryCycleIntenseSolarIntensity);
                     float luma = dot(color, float3(0.299, 0.587, 0.114));
 
-                    // Collapse the scene into a narrow dry-hot range. Blue/cyan survive
-                    // only as dirty gray-brown traces while deep shadows stay readable.
-                    float3 dryBase = saturate(
-                        color * float3(1.17, 0.91, 0.49) +
-                        luma * float3(0.15, 0.048, 0.000));
-                    float gradeAmount = intensity * (0.64 + h.directSun * 0.25 + solar * 0.08);
-                    color = lerp(color, dryBase, saturate(gradeAmount));
+                    // Keep the whole room unmistakably hot, but preserve enough of the
+                    // source palette that the image does not collapse into one flat orange.
+                    // Blue is still strongly suppressed; it now survives as dirty neutral
+                    // contrast instead of being converted into the same ochre as everything.
+                    float3 warmBase = saturate(
+                        color * float3(1.10, 0.965, 0.70) +
+                        luma * float3(0.065, 0.018, -0.010));
+                    float gradeAmount = intensity *
+                        (0.43 + solar * 0.15 + h.directSun * 0.12);
+                    color = lerp(color, warmBase, saturate(gradeAmount));
 
                     float gradedLuma = dot(color, float3(0.299, 0.587, 0.114));
-                    float shadow = 1.0 - smoothstep(0.10, 0.39, gradedLuma);
-                    float mid = smoothstep(0.11, 0.44, gradedLuma) *
-                                (1.0 - smoothstep(0.67, 0.92, gradedLuma));
+                    float shadow = 1.0 - smoothstep(0.10, 0.37, gradedLuma);
+                    float mid = smoothstep(0.12, 0.42, gradedLuma) *
+                                (1.0 - smoothstep(0.68, 0.91, gradedLuma));
+                    float highlight = smoothstep(0.52, 0.91, gradedLuma);
 
-                    float3 caramel = saturate(
-                        color * float3(0.91, 0.73, 0.42) +
-                        float3(0.075, 0.030, 0.000));
-                    color = lerp(color, caramel, intensity * shadow * 0.46);
+                    // Deep burnt umber / red-brown shadows give the scene weight and
+                    // preserve silhouettes instead of lifting every dark area into orange.
+                    float3 burntShadow = saturate(
+                        color * float3(0.70, 0.54, 0.44) +
+                        float3(0.026, 0.007, 0.002));
+                    color = lerp(color, burntShadow, intensity * shadow * 0.58);
 
+                    // Midtones move through ochre and antique gold. Heat-sheet variation
+                    // changes the balance spatially so broad surfaces do not share one hue.
+                    float heatVariation = saturate(
+                        0.42 + h.boil * 0.34 + h.sheet * 0.24);
                     float3 ochre = saturate(
-                        color * float3(1.11, 0.86, 0.54) +
-                        gradedLuma * float3(0.105, 0.036, 0.000));
-                    color = lerp(color, ochre, intensity * mid * (0.35 + h.directSun * 0.38));
+                        color * float3(1.075, 0.91, 0.64) +
+                        gradedLuma * float3(0.070, 0.025, 0.000));
+                    float3 oldGold = saturate(
+                        color * float3(1.13, 0.99, 0.68) +
+                        float3(0.060, 0.032, 0.002));
+                    float3 midTone = lerp(ochre, oldGold, heatVariation * 0.62);
+                    color = lerp(
+                        color,
+                        midTone,
+                        intensity * mid * (0.24 + h.directSun * 0.19));
 
+                    // The hottest luminous regions become gold/yellow, not pale orange
+                    // and never white. Only small boiling/sheet regions reach amber-orange.
                     float direct = intensity * h.directSun;
-                    float hotMask = smoothstep(0.40, 0.92, gradedLuma) * direct;
-                    float3 burningAmber = float3(1.0, 0.60, 0.075);
-                    color = lerp(color, burningAmber, hotMask * 0.24);
+                    float3 solarGold = float3(1.0, 0.72, 0.18);
+                    color = lerp(color, solarGold, highlight * direct * 0.15);
 
-                    // Direct sun raises warm luminance but never targets white.
-                    color += float3(0.070, 0.028, 0.000) * direct *
-                             (0.42 + h.sky * 0.38 + h.boil * 0.20);
+                    float hotPocket = intensity * h.boil * h.sheet *
+                                      smoothstep(0.26, 0.82, gradedLuma);
+                    float3 amberPocket = float3(0.98, 0.46, 0.055);
+                    color = lerp(color, amberPocket, hotPocket * 0.085);
 
-                    // A soft solar wash from the upper-left makes the room read as being
-                    // under a giant directional sun without drawing a literal sun disk.
-                    float solarWash = saturate(1.0 - length((screenUV - float2(0.16, 0.88)) * float2(0.82, 1.08)));
-                    solarWash = solarWash * solarWash * intensity * solar * 0.12;
-                    color = lerp(color, float3(1.0, 0.55, 0.055), solarWash);
+                    // Broad sunlight comes from above across the room rather than from a
+                    // single orange spotlight. This keeps the giant-sun feeling while
+                    // avoiding a local blob that could be mistaken for terrain exposure.
+                    float verticalSun = smoothstep(0.04, 0.96, screenUV.y);
+                    float solarWash = intensity * solar *
+                        (0.030 + verticalSun * 0.075);
+                    color = lerp(color, float3(1.0, 0.76, 0.24), solarWash);
+
+                    // Tiny spatial temperature contrast: hot rising cells lean amber,
+                    // quieter cells stay darker ochre. This is color variation, not fog.
+                    float thermalContrast = (h.boil - 0.5) * intensity;
+                    color += float3(0.030, 0.010, -0.012) * max(0.0, thermalContrast);
+                    color *= 1.0 - max(0.0, -thermalContrast) * float3(0.045, 0.030, 0.010);
 
                     return saturate(color);
                 }
@@ -340,10 +367,20 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     edge = smoothstep(0.53, 1.0, edge);
                     edge = edge * edge;
 
-                    float pulse = 0.88 + 0.12 * sin(_DryCycleIntenseHeatTime * 0.77 + screenUV.y * 5.1);
+                    float pulse = 0.88 + 0.12 * sin(
+                        _DryCycleIntenseHeatTime * 0.77 + screenUV.y * 5.1);
                     float amount = edge * intensity * pulse;
-                    float3 peripheral = float3(0.94, 0.29, 0.025);
-                    color = lerp(color, peripheral, amount * 0.24);
+
+                    // Sides glow burnt amber while corners run deeper red-brown. The
+                    // peripheral heat therefore frames the image instead of becoming a
+                    // uniform orange vignette.
+                    float corner = saturate(edgeAxis.x * edgeAxis.y);
+                    float lowerEdge = saturate(1.0 - screenUV.y);
+                    float3 edgeAmber = float3(0.86, 0.31, 0.035);
+                    float3 edgeBurnt = float3(0.39, 0.075, 0.018);
+                    float edgeDepth = saturate(corner * 0.68 + lowerEdge * 0.18);
+                    float3 peripheral = lerp(edgeAmber, edgeBurnt, edgeDepth);
+                    color = lerp(color, peripheral, amount * 0.22);
 
                     // Very small edge-only spectral separation: an eye-overload cue,
                     // not the central visual effect.
