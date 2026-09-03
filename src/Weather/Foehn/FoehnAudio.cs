@@ -6,7 +6,7 @@ namespace DryCycle.Weather.Foehn;
 /// <summary>
 /// Procedural Foehn gale bed. Unlike HeatWave's quiet ambience this is intentionally
 /// obvious: low pressure, fast dry-air hiss and gust modulation reinforce the same
-/// large directional pulses used by the optical and particle systems.
+/// large directional pulses used by the optical, particle and physics systems.
 /// </summary>
 internal sealed class FoehnAudio : IDisposable
 {
@@ -27,7 +27,11 @@ internal sealed class FoehnAudio : IDisposable
         _owner = owner;
     }
 
-    internal void Update(float intensity, float visualTime)
+    internal void Update(
+        float intensity,
+        float gustBody,
+        float gustFront,
+        float visualTime)
     {
         if (_disposed)
         {
@@ -35,27 +39,26 @@ internal sealed class FoehnAudio : IDisposable
         }
 
         float drive = Mathf.Clamp01(intensity);
-        float gustA = Mathf.Sin(visualTime * 1.71f + 0.31f);
-        float gustB = Mathf.Sin(visualTime * 3.83f + 1.77f);
-        float gust = Mathf.Clamp01(0.66f + gustA * 0.22f + gustB * 0.12f);
+        float gust = Mathf.Clamp01(gustBody * 0.68f + gustFront * 0.92f);
 
         float target = IsCameraRoom()
             ? Mathf.Pow(drive, 0.72f) *
-              Mathf.Lerp(0.095f, 0.205f, gust) *
+              Mathf.Lerp(0.085f, 0.225f, gust) *
               ResolveSfxVolume()
             : 0f;
 
         _smoothedVolume = Mathf.MoveTowards(
             _smoothedVolume,
             target,
-            target > _smoothedVolume ? 0.0065f : 0.0040f);
+            target > _smoothedVolume ? 0.0095f : 0.0042f);
 
         if (_smoothedVolume > 0.0004f && EnsureSource())
         {
             _source.volume = _smoothedVolume;
             _source.pitch =
-                0.93f + drive * 0.10f + gust * 0.035f +
-                Mathf.Sin(visualTime * 0.43f) * 0.008f;
+                0.925f + drive * 0.085f +
+                gustBody * 0.028f + gustFront * 0.055f +
+                Mathf.Sin(visualTime * 0.43f) * 0.006f;
 
             if (!_source.isPlaying)
             {
