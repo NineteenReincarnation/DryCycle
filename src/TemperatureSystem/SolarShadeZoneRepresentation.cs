@@ -8,8 +8,8 @@ namespace DryCycle.TemperatureSystem;
 
 /// <summary>
 /// DevInterface representation for the unified local Environment Zone.
-/// The blue polygon carries both Shade [0,1] and Humidity [-1,1].
-/// Both values are edited by direct keyboard input.
+/// The blue polygon carries RoomHeat [-1,1], Shade [0,1] and Humidity [-1,1].
+/// All values are edited by direct keyboard input.
 /// </summary>
 internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 {
@@ -22,6 +22,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 
     private enum ZoneField
     {
+        RoomHeat,
         Shade,
         Humidity
     }
@@ -247,13 +248,17 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 return;
             }
 
-            if (_field == ZoneField.Shade)
+            switch (_field)
             {
-                data.SetShade(value);
-            }
-            else
-            {
-                data.SetHumidity(value);
+                case ZoneField.RoomHeat:
+                    data.SetRoomHeat(value);
+                    break;
+                case ZoneField.Shade:
+                    data.SetShade(value);
+                    break;
+                default:
+                    data.SetHumidity(value);
+                    break;
             }
 
             _lastKnownDataValue = GetDataValue();
@@ -294,7 +299,12 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 return 0f;
             }
 
-            return _field == ZoneField.Shade ? data.Shade : data.Humidity;
+            return _field switch
+            {
+                ZoneField.RoomHeat => data.RoomHeat,
+                ZoneField.Shade => data.Shade,
+                _ => data.Humidity
+            };
         }
 
         private bool TryParseDraft(out float value)
@@ -349,6 +359,7 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
 
     private sealed class EnvironmentControlPanel : Panel
     {
+        private readonly ZoneTextInput _roomHeatInput;
         private readonly ZoneTextInput _shadeInput;
         private readonly ZoneTextInput _humidityInput;
 
@@ -362,9 +373,26 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
                 idString,
                 parentNode,
                 position,
-                new Vector2(270f, 78f),
+                new Vector2(270f, 106f),
                 "Environment Zone")
         {
+            subNodes.Add(new DevUILabel(
+                owner,
+                "DryCycleEnvironment_RoomHeatLabel",
+                this,
+                new Vector2(8f, 64f),
+                120f,
+                "RoomHeat"));
+
+            _roomHeatInput = new ZoneTextInput(
+                owner,
+                "DryCycleEnvironment_RoomHeatInput",
+                this,
+                new Vector2(136f, 64f),
+                120f,
+                ZoneField.RoomHeat);
+            subNodes.Add(_roomHeatInput);
+
             subNodes.Add(new DevUILabel(
                 owner,
                 "DryCycleEnvironment_ShadeLabel",
@@ -403,7 +431,8 @@ internal sealed class SolarShadeZoneRepresentation : PlacedObjectRepresentation
         public override void Refresh()
         {
             base.Refresh();
-            bool valid = (_shadeInput?.IsDraftValid ?? true) &&
+            bool valid = (_roomHeatInput?.IsDraftValid ?? true) &&
+                         (_shadeInput?.IsDraftValid ?? true) &&
                          (_humidityInput?.IsDraftValid ?? true);
 
             Title = valid
