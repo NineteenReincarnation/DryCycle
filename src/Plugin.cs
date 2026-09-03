@@ -9,6 +9,7 @@ using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Misc;
+using DryCycle.OptimizedVanilla;
 using DryCycle.Registration;
 using DryCycle.Rendering;
 using DryCycle.ShelterExts;
@@ -75,6 +76,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
@@ -213,12 +215,14 @@ internal sealed class Plugin : BaseUnityPlugin
             FogForecastFlowRuntime.Enable();
             RainMeterFastForwardForecastFix.Enable();
 
+            VanillaDevUIShortcutRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
         }
         catch (Exception ex)
         {
+            VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
