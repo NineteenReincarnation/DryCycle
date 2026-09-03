@@ -32,9 +32,10 @@ internal readonly struct FoehnRenderFrame
 }
 
 /// <summary>
-/// Foehn visual resolve. The fullscreen pass owns restrained directional air shear,
-/// moving gust fronts and directional streak blur. Windblown mineral particles are
-/// rendered into Foreground before the GrabPass so air and dust remain one wind system.
+/// Foehn visual resolve. The fullscreen pass owns directional pressure-wave refraction,
+/// thin advected environmental dust and the deep dry-hot grade. Individual mineral
+/// particles are rendered into Foreground before the GrabPass so air and dust stay one
+/// coherent wind system instead of becoming unrelated overlays.
 /// </summary>
 internal static class FoehnRenderPipeline
 {
@@ -52,8 +53,10 @@ internal static class FoehnRenderPipeline
     private static readonly int GustSeedId = Shader.PropertyToID("_DryCycleFoehnGustSeed");
     private static readonly int FlowFieldId = Shader.PropertyToID("_DryCycleFoehnFlowField");
     private static readonly int StreakFieldId = Shader.PropertyToID("_DryCycleFoehnStreakField");
+    private static readonly int DustFieldId = Shader.PropertyToID("_DryCycleFoehnDustField");
     private static readonly int TerrainFieldId = Shader.PropertyToID("_DryCycleFoehnTerrainField");
     private static readonly int HasWindTexturesId = Shader.PropertyToID("_DryCycleHasFoehnTextures");
+    private static readonly int HasDustFieldId = Shader.PropertyToID("_DryCycleHasFoehnDustField");
     private static readonly int HasTerrainFieldId = Shader.PropertyToID("_DryCycleHasFoehnTerrainField");
     private static readonly int DebugModeId = Shader.PropertyToID("_DryCycleFoehnDebugMode");
 
@@ -145,6 +148,7 @@ internal static class FoehnRenderPipeline
         }
 
         FoehnWindField.Ensure();
+        FoehnDustField.Ensure();
 
         float screenWidth = camera.game.rainWorld.options.ScreenSize.x;
         float screenHeight = camera.game.rainWorld.options.ScreenSize.y;
@@ -185,9 +189,11 @@ internal static class FoehnRenderPipeline
         int debugMode)
     {
         bool hasTextures = FoehnWindField.IsAvailable;
+        bool hasDust = FoehnDustField.IsAvailable;
         bool hasTerrain = frame.TerrainField != null;
         Texture flow = hasTextures ? FoehnWindField.FlowTexture : Texture2D.grayTexture;
         Texture streak = hasTextures ? FoehnWindField.StreakTexture : Texture2D.grayTexture;
+        Texture dust = hasDust ? FoehnDustField.DustTexture : Texture2D.grayTexture;
         Texture terrain = hasTerrain ? frame.TerrainField : Texture2D.whiteTexture;
 
         Vector4 roomSize = new(frame.RoomSizePx.x, frame.RoomSizePx.y, 0f, 0f);
@@ -201,8 +207,10 @@ internal static class FoehnRenderPipeline
         Shader.SetGlobalFloat(GustSeedId, frame.GustSeed);
         Shader.SetGlobalTexture(FlowFieldId, flow);
         Shader.SetGlobalTexture(StreakFieldId, streak);
+        Shader.SetGlobalTexture(DustFieldId, dust);
         Shader.SetGlobalTexture(TerrainFieldId, terrain);
         Shader.SetGlobalFloat(HasWindTexturesId, hasTextures ? 1f : 0f);
+        Shader.SetGlobalFloat(HasDustFieldId, hasDust ? 1f : 0f);
         Shader.SetGlobalFloat(HasTerrainFieldId, hasTerrain ? 1f : 0f);
         Shader.SetGlobalFloat(DebugModeId, Mathf.Clamp(debugMode, 0, 3));
 
@@ -222,8 +230,10 @@ internal static class FoehnRenderPipeline
         MaterialProperties.SetFloat(GustSeedId, frame.GustSeed);
         MaterialProperties.SetTexture(FlowFieldId, flow);
         MaterialProperties.SetTexture(StreakFieldId, streak);
+        MaterialProperties.SetTexture(DustFieldId, dust);
         MaterialProperties.SetTexture(TerrainFieldId, terrain);
         MaterialProperties.SetFloat(HasWindTexturesId, hasTextures ? 1f : 0f);
+        MaterialProperties.SetFloat(HasDustFieldId, hasDust ? 1f : 0f);
         MaterialProperties.SetFloat(HasTerrainFieldId, hasTerrain ? 1f : 0f);
         MaterialProperties.SetFloat(DebugModeId, Mathf.Clamp(debugMode, 0, 3));
         renderer.SetPropertyBlock(MaterialProperties);
