@@ -7,7 +7,7 @@ namespace DryCycle.Weather.Foehn;
 
 /// <summary>
 /// Scheduled Foehn owner. Foehn is intentionally distinct from HeatWave: the dominant
-/// signature is fast directional air, coherent gust sheets, lee wakes/nozzles and
+/// signature is fast directional air, coherent gust fronts, lee wakes/nozzles and
 /// wind-carried mineral streaks. Any hot-air refraction is subordinate to that flow.
 /// </summary>
 internal static class FoehnWeatherRuntime
@@ -26,6 +26,7 @@ internal static class FoehnWeatherRuntime
 
         _enabled = true;
         FoehnDebugRuntime.Enable();
+        FoehnWindPhysics.Enable();
         On.Room.Loaded += Room_Loaded;
     }
 
@@ -37,6 +38,7 @@ internal static class FoehnWeatherRuntime
         }
 
         On.Room.Loaded -= Room_Loaded;
+        FoehnWindPhysics.Disable();
         FoehnDebugRuntime.Disable();
         _controllers = new ConditionalWeakTable<Room, FoehnController>();
         _enabled = false;
@@ -89,6 +91,18 @@ internal static class FoehnWeatherRuntime
         return new Vector2(1f, -0.16f).normalized;
     }
 
+    internal static bool TrySampleWind(
+        Room room,
+        Vector2 worldPosition,
+        out FoehnWindSample sample)
+    {
+        sample = default;
+        return _enabled &&
+               room != null &&
+               _controllers.TryGetValue(room, out FoehnController controller) &&
+               controller.TrySampleWind(worldPosition, out sample);
+    }
+
     internal static bool TryGetDebugSnapshot(Room room, out FoehnDebugSnapshot snapshot)
     {
         snapshot = default;
@@ -119,6 +133,7 @@ internal static class FoehnWeatherRuntime
     {
         private readonly FoehnParticleField _particles;
         private readonly FoehnAudio _audio;
+        private readonly float _gustSeed;
 
         private float _lastIntensity;
         private float _intensity;
@@ -134,6 +149,7 @@ internal static class FoehnWeatherRuntime
             room = ownerRoom;
             _windDirection = ResolveWindDirection(ownerRoom);
             _terrainFieldDirection = _windDirection;
+            _gustSeed = FoehnGustField.BuildRoomSeed(ownerRoom);
             _particles = new FoehnParticleField(ownerRoom);
             _audio = new FoehnAudio(this);
         }
@@ -171,13 +187,28 @@ internal static class FoehnWeatherRuntime
                 EnsureTerrainField();
             }
 
+            ResolveCameraViewport(out Vector2 cameraPos, out Vector2 cameraSize);
+            FoehnGustSample cameraGust = FoehnGustField.Sample(
+                cameraPos + cameraSize * 0.5f,
+                _visualTime,
+                _intensity,
+                _windDirection,
+                _gustSeed);
+
             _particles.Update(
                 room,
                 _intensity,
                 _windDirection,
                 _terrainField,
+                _visualTime,
+                _gustSeed,
+                cameraPos,
+                cameraSize);
+            _audio.Update(
+                _intensity,
+                cameraGust.Body,
+                cameraGust.Front,
                 _visualTime);
-            _audio.Update(_intensity, _visualTime);
         }
 
         public override void InitiateSprites(
@@ -221,6 +252,7 @@ internal static class FoehnWeatherRuntime
                 intensity,
                 _visualTime,
                 _windDirection,
+                _gustSeed,
                 _terrainField?.Texture);
 
             _particles.Draw(
@@ -271,6 +303,32 @@ internal static class FoehnWeatherRuntime
             base.Destroy();
         }
 
+        internal bool TrySampleWind(
+            Vector2 worldPosition,
+            out FoehnWindSample sample)
+        {
+            sample = default;
+            if (_disposed || room == null || _intensity <= Epsilon)
+            {
+                return false;
+            }
+
+            FoehnTerrainSample terrain =
+                _terrainField?.Sample(worldPosition) ?? FoehnTerrainSample.OpenAir;
+            FoehnGustSample gust = FoehnGustField.Sample(
+                worldPosition,
+                _visualTime,
+                _intensity,
+                _windDirection,
+                _gustSeed);
+            sample = new FoehnWindSample(
+                _windDirection,
+                _intensity,
+                gust,
+                terrain);
+            return true;
+        }
+
         internal bool TryGetDebugSnapshot(out FoehnDebugSnapshot snapshot)
         {
             snapshot = new FoehnDebugSnapshot(
@@ -290,6 +348,41 @@ internal static class FoehnWeatherRuntime
             _terrainFieldAttempted = true;
             _terrainFieldDirection = _windDirection;
             _terrainField = FoehnTerrainField.Build(room, _windDirection);
+        }
+
+        private void ResolveCameraViewport(out Vector2 cameraPos, out Vector2 cameraSize)
+        {
+            cameraSize = new Vector2(1366f, 768f);
+            try
+            {
+                if (room?.game?.rainWorld?.options != null)
+                {
+                    cameraSize = new Vector2(
+                        Mathf.Max(1f, room.game.rainWorld.options.ScreenSize.x),
+                        Mathf.Max(1f, room.game.rainWorld.options.ScreenSize.y));
+                }
+            }
+            catch
+            {
+                cameraSize = new Vector2(1366f, 768f);
+            }
+
+            RoomCamera camera = room?.game?.cameras != null &&
+                                room.game.cameras.Length > 0
+                ? room.game.cameras[0]
+                : null;
+            if (camera?.room == room)
+            {
+                cameraPos = camera.pos;
+                return;
+            }
+
+            Vector2 roomSize = new(
+                Mathf.Max(20f, (room?.TileWidth ?? 1) * 20f),
+                Mathf.Max(20f, (room?.TileHeight ?? 1) * 20f));
+            cameraPos = Vector2.Max(
+                Vector2.zero,
+                roomSize * 0.5f - cameraSize * 0.5f);
         }
     }
 }
