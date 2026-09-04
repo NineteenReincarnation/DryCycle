@@ -101,7 +101,6 @@ internal static class WeatherSpatialCatalog
             "Sand",
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "SandStorm"),
             new WeatherSpatialMember(WeatherScheduleEventKind.Weather, "SandStorm"),
-            new WeatherSpatialMember(WeatherScheduleEventKind.DangerType, "SandStorm"),
             new WeatherSpatialMember(WeatherScheduleEventKind.DangerType, "DeathSandStorm"))
     };
 
