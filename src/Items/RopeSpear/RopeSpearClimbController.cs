@@ -38,8 +38,7 @@ internal static class RopeSpearClimbController
             player.room != spear.room ||
             player.dead ||
             player.inShortcut ||
-            player.enteringShortCut.HasValue ||
-            PlayerIsHoldingHandle(player, spear))
+            player.enteringShortCut.HasValue)
         {
             ResetVinePose(player);
             return false;
@@ -81,7 +80,6 @@ internal static class RopeSpearClimbController
         {
             normalizedPosition = AdvanceGrabPosition(
                 rope,
-                spear,
                 normalizedPosition,
                 input.y);
             poseCycle += 0.22f * Mathf.Abs(input.y);
@@ -166,6 +164,30 @@ internal static class RopeSpearClimbController
         return true;
     }
 
+    /// <summary>
+    /// A freshly thrown RopeSpear normally puts its RopeHandle into the thrower's
+    /// newly-free hand. When that same player deliberately climbs onto the rope,
+    /// transfer from the handle to the rope by dropping only the associated handle.
+    /// This mirrors physically letting the free end dangle before climbing.
+    /// </summary>
+    internal static void ReleaseAssociatedHandleForClimb(Player player, RopeSpear spear)
+    {
+        if (player?.grasps == null || spear?.abstractPhysicalObject == null)
+        {
+            return;
+        }
+
+        EntityID spearId = spear.abstractPhysicalObject.ID;
+        for (int i = player.grasps.Length - 1; i >= 0; i--)
+        {
+            if (player.grasps[i]?.grabbed is RopeHandle handle &&
+                handle.ParentSpearID == spearId)
+            {
+                player.ReleaseGrasp(i);
+            }
+        }
+    }
+
     internal static void PrepareHands(
         PlayerGraphics graphics,
         RopeSpear spear,
@@ -229,31 +251,6 @@ internal static class RopeSpearClimbController
             : RopeSystemField?.GetValue(spear) as RopeSpearRopeSystem;
     }
 
-    private static bool PlayerIsHoldingHandle(Player player, RopeSpear spear)
-    {
-        if (player?.room?.physicalObjects == null || spear?.abstractPhysicalObject == null)
-        {
-            return false;
-        }
-
-        EntityID spearId = spear.abstractPhysicalObject.ID;
-        for (int layer = 0; layer < player.room.physicalObjects.Length; layer++)
-        {
-            var objects = player.room.physicalObjects[layer];
-            for (int i = 0; i < objects.Count; i++)
-            {
-                if (objects[i] is RopeHandle handle &&
-                    handle.ParentSpearID == spearId &&
-                    handle.Holder == player)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     private static void ConnectMainChunkToRope(
         BodyChunk chunk,
         RopeSpearRopeSystem rope,
@@ -284,7 +281,6 @@ internal static class RopeSpearClimbController
 
     private static float AdvanceGrabPosition(
         RopeSpearRopeSystem rope,
-        RopeSpear spear,
         float current,
         int verticalInput)
     {
