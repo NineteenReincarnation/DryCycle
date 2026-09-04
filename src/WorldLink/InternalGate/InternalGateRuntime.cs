@@ -1,19 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace DryCycle.WorldLink.InternalGate;
 
 /// <summary>
-/// Makes a vanilla RegionGate work as an intra-region gate when its world.txt room line
-/// carries the "InternalGate" tag. The room remains a normal vanilla gate room, but the
-/// gate hand-off no longer asks OverWorld to infer/load another region from the room name.
+/// Lets a vanilla karma gate connect two rooms inside the same loaded region.
+///
+/// No world.txt tag is required. A room listed in World/Gates/locks.txt is promoted into
+/// WorldLoader.gatesList during world mapping, which gives it a normal AbstractRoom.gateIndex
+/// and therefore the complete vanilla WaterGate/ElectricGate runtime. Once realized, a gate is
+/// treated as internal only when two distinct connections resolve inside the currently loaded World.
 /// </summary>
 internal static class InternalGateRuntime
 {
-    internal const string Tag = "InternalGate";
+    private const string LocksRelativePath = "World/Gates/locks.txt";
 
+    private static readonly HashSet<string> DeclaredGateRooms = new(StringComparer.OrdinalIgnoreCase);
     private static bool _enabled;
-    private static readonly HashSet<string> ReportedInvalidRooms = new(StringComparer.OrdinalIgnoreCase);
 
     internal static void Enable()
     {
@@ -22,13 +26,17 @@ internal static class InternalGateRuntime
             return;
         }
 
+        ReloadGateDeclarations();
+
         _enabled = true;
         On.WorldLoader.MappingRooms += WorldLoader_MappingRooms;
         On.RegionGate.customKarmaGateRequirements += RegionGate_CustomKarmaGateRequirements;
         On.OverWorld.GateRequestsSwitchInitiation += OverWorld_GateRequestsSwitchInitiation;
         On.RegionGate.Update += RegionGate_Update;
 
-        Plugin.Logger?.LogInfo("InternalGate: enabled world.txt tag support.");
+        Plugin.Logger?.LogInfo(
+            $"InternalGate: automatic karma-gate registration enabled; " +
+            $"{DeclaredGateRooms.Count} locks.txt room(s) can work without world.txt GATE/InternalGate tags.");
     }
 
     internal static void Disable()
@@ -43,52 +51,42 @@ internal static class InternalGateRuntime
         On.OverWorld.GateRequestsSwitchInitiation -= OverWorld_GateRequestsSwitchInitiation;
         On.RegionGate.Update -= RegionGate_Update;
 
-        ReportedInvalidRooms.Clear();
+        DeclaredGateRooms.Clear();
         _enabled = false;
     }
 
     /// <summary>
-    /// WorldLoader normally reserves gateIndex only for the vanilla GATE tag. InternalGate
-    /// is deliberately also inserted into gatesList so Room.IsGateRoom(), RegionState gate
-    /// persistence and the vanilla WaterGate/ElectricGate constructor continue to work.
-    /// The InternalGate tag itself is still preserved in AbstractRoom.roomTags by vanilla's
-    /// generic room-tag path.
+    /// Vanilla's world.txt GATE tag only contributes the current room index to gatesList.
+    /// Mirror that step for every room declared in locks.txt. The rest of the gate pipeline
+    /// stays vanilla: gateIndex, IsGateRoom(), WaterGate/ElectricGate, graphics and persistence.
     /// </summary>
     private static void WorldLoader_MappingRooms(On.WorldLoader.orig_MappingRooms orig, WorldLoader self)
     {
-        // MappingRooms increments rmcntr internally, so capture the current room number and
-        // tag state before calling vanilla. Otherwise InternalGate would be registered as the
-        // next room's gateIndex.
-        bool internalGateLine = _enabled && CurrentWorldLineHasTag(self);
-        int roomCounter = self?.rmcntr ?? -1;
+        int roomCounter = -1;
+        string roomName = null;
+
+        if (_enabled && TryGetCurrentRoomName(self, out roomName) && DeclaredGateRooms.Contains(roomName))
+        {
+            // MappingRooms increments rmcntr internally, so capture it before calling vanilla.
+            roomCounter = self.rmcntr;
+        }
 
         orig(self);
 
-        if (!internalGateLine || roomCounter < 0 || self?.world == null)
+        if (roomCounter < 0 || self?.world == null)
         {
             return;
         }
 
-        try
+        int roomIndex = roomCounter + self.world.firstRoomIndex;
+        if (!self.gatesList.Contains(roomIndex))
         {
-            int roomIndex = roomCounter + self.world.firstRoomIndex;
-            if (!self.gatesList.Contains(roomIndex))
-            {
-                self.gatesList.Add(roomIndex);
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger?.LogError($"InternalGate: failed to register gate index while mapping world.txt: {ex}");
+            self.gatesList.Add(roomIndex);
+            Plugin.Logger?.LogDebug(
+                $"InternalGate: auto-registered '{roomName}' as a vanilla gate from locks.txt.");
         }
     }
 
-    /// <summary>
-    /// Vanilla RegionGate expects every real gate room to have an entry in World/Gates/locks.txt.
-    /// Keep that file fully supported, but make InternalGate authoring fail-safe: if either side
-    /// has no authored requirement, default only that missing side to one karma instead of letting
-    /// the vanilla constructor reach GateKarmaGlyph with a null requirement.
-    /// </summary>
     private static void RegionGate_CustomKarmaGateRequirements(
         On.RegionGate.orig_customKarmaGateRequirements orig,
         RegionGate self)
@@ -104,12 +102,6 @@ internal static class InternalGateRuntime
         orig(self);
     }
 
-    /// <summary>
-    /// This is the actual behavioral split from a regional gate. Vanilla derives a destination
-    /// region from names such as GATE_SU_HI and starts a WorldLoader. InternalGate never does that:
-    /// both exits are already resolved in the current World by world.txt, so the active world must
-    /// stay untouched.
-    /// </summary>
     private static void OverWorld_GateRequestsSwitchInitiation(
         On.OverWorld.orig_GateRequestsSwitchInitiation orig,
         OverWorld self,
@@ -121,82 +113,39 @@ internal static class InternalGateRuntime
             return;
         }
 
-        if (!HasTwoResolvedInternalSides(reportBackToGate.room.abstractRoom))
-        {
-            reportBackToGate.dontOpen = true;
-            ReportInvalidConfiguration(reportBackToGate.room.abstractRoom);
-            return;
-        }
-
         MarkGatePassed(reportBackToGate);
 
-        // Do not assign OverWorld.reportBackToGate and do not create a WorldLoader.
-        // RegionGate.Update sets waitingForWorldLoader immediately after this call;
-        // RegionGate_Update below completes the same callback on the next line of the
-        // vanilla state machine without changing worlds.
+        // Both sides already live in the active World. Do not infer another region from the
+        // room name and do not create an OverWorld WorldLoader.
         Plugin.Logger?.LogDebug(
-            $"InternalGate: '{reportBackToGate.room.abstractRoom.name}' kept traversal inside region " +
+            $"InternalGate: '{reportBackToGate.room.abstractRoom.name}' stayed inside region " +
             $"'{reportBackToGate.room.world?.region?.name ?? reportBackToGate.room.world?.name ?? "?"}'.");
     }
 
     private static void RegionGate_Update(On.RegionGate.orig_Update orig, RegionGate self, bool eu)
     {
         bool internalGate = _enabled && IsInternalGate(self?.room?.abstractRoom);
-        bool valid = !internalGate || HasTwoResolvedInternalSides(self.room.abstractRoom);
-
-        // Invalid internal gates fail closed before vanilla can enter ClosingAirLock.
-        if (internalGate && !valid)
-        {
-            self.dontOpen = true;
-            ReportInvalidConfiguration(self.room.abstractRoom);
-        }
 
         orig(self, eu);
 
-        if (!internalGate)
+        if (internalGate && self.waitingForWorldLoader)
         {
-            return;
-        }
-
-        if (!valid)
-        {
-            // Vanilla resets dontOpen when the player leaves the activation zone.
-            // Reassert fail-closed state until the world.txt connections are fixed.
-            self.dontOpen = true;
-            self.waitingForWorldLoader = false;
-            return;
-        }
-
-        if (self.waitingForWorldLoader)
-        {
-            // Preserve the vanilla completion callback (including MMF's gate tutorial flag),
-            // but report the same already-loaded room because no world hand-off occurred.
+            // RegionGate.Update sets this after requesting a region switch. For an internal gate
+            // no loader exists, so complete the vanilla callback against the already-loaded room.
             self.NewWorldLoaded(self.room);
         }
     }
 
+    /// <summary>
+    /// A real gate must have a vanilla gateIndex, either authored with GATE or auto-promoted
+    /// from locks.txt. It becomes an internal gate only when two distinct connections resolve
+    /// to rooms in this same loaded World.
+    /// </summary>
     internal static bool IsInternalGate(AbstractRoom room)
     {
-        if (room?.roomTags == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < room.roomTags.Count; i++)
-        {
-            if (string.Equals(room.roomTags[i], Tag, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return room != null && room.gateIndex >= 0 && HasTwoResolvedInternalSides(room);
     }
 
-    /// <summary>
-    /// InternalGate requires two distinct, resolved connections in the same loaded World.
-    /// This intentionally uses world.txt connectivity, not the gate room's acronym/name.
-    /// </summary>
     private static bool HasTwoResolvedInternalSides(AbstractRoom gateRoom)
     {
         if (gateRoom?.world == null || gateRoom.connections == null)
@@ -241,6 +190,96 @@ internal static class InternalGateRuntime
         return false;
     }
 
+    private static bool TryGetCurrentRoomName(WorldLoader loader, out string roomName)
+    {
+        roomName = null;
+        if (loader?.lines == null || loader.cntr < 0 || loader.cntr >= loader.lines.Count)
+        {
+            return false;
+        }
+
+        string line = loader.lines[loader.cntr];
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        int separator = line.IndexOf(" : ", StringComparison.Ordinal);
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        roomName = line.Substring(0, separator).Trim();
+        return roomName.Length > 0;
+    }
+
+    private static void ReloadGateDeclarations()
+    {
+        DeclaredGateRooms.Clear();
+
+        try
+        {
+            string path = AssetManager.ResolveFilePath(LocksRelativePath);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                Plugin.Logger?.LogWarning(
+                    $"InternalGate: could not resolve '{LocksRelativePath}'. Tagless gates cannot be auto-registered.");
+                return;
+            }
+
+            string[] lines = File.ReadAllLines(path);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = StripComment(lines[i]).Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                string[] fields = line.Split(new[] { " : " }, StringSplitOptions.None);
+                if (fields.Length < 3)
+                {
+                    continue;
+                }
+
+                string roomName = fields[0].Trim();
+                if (roomName.Length > 0)
+                {
+                    DeclaredGateRooms.Add(roomName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DeclaredGateRooms.Clear();
+            Plugin.Logger?.LogError($"InternalGate: failed to read locks.txt gate declarations: {ex}");
+        }
+    }
+
+    private static string StripComment(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        int hash = text.IndexOf('#');
+        int slash = text.IndexOf("//", StringComparison.Ordinal);
+        int cut = -1;
+
+        if (hash >= 0)
+        {
+            cut = hash;
+        }
+        if (slash >= 0 && (cut < 0 || slash < cut))
+        {
+            cut = slash;
+        }
+
+        return cut >= 0 ? text.Substring(0, cut) : text;
+    }
+
     private static void MarkGatePassed(RegionGate gate)
     {
         try
@@ -258,43 +297,5 @@ internal static class InternalGateRuntime
         {
             Plugin.Logger?.LogWarning($"InternalGate: could not persist gate-used state: {ex.Message}");
         }
-    }
-
-    private static bool CurrentWorldLineHasTag(WorldLoader loader)
-    {
-        if (loader?.lines == null || loader.cntr < 0 || loader.cntr >= loader.lines.Count)
-        {
-            return false;
-        }
-
-        string line = loader.lines[loader.cntr];
-        if (string.IsNullOrEmpty(line) || !line.Contains(" : "))
-        {
-            return false;
-        }
-
-        string[] fields = line.Split(new[] { " : " }, StringSplitOptions.None);
-        for (int i = 2; i < fields.Length; i++)
-        {
-            if (string.Equals(fields[i].Trim(), Tag, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static void ReportInvalidConfiguration(AbstractRoom room)
-    {
-        string name = room?.name ?? "<unknown>";
-        if (!ReportedInvalidRooms.Add(name))
-        {
-            return;
-        }
-
-        Plugin.Logger?.LogError(
-            $"InternalGate: '{name}' is tagged {Tag} but does not have two distinct resolved same-world " +
-            "room connections. Author both sides directly in this region's world.txt; the gate is fail-closed.");
     }
 }
