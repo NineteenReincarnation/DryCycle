@@ -38,7 +38,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.116";
+    public const string Version = "0.2.117";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
