@@ -107,14 +107,16 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         private void OpenConfirmation()
         {
-            if (_confirmationPanel != null || _mapPage == null || _editor == null)
+            if (_confirmationPanel != null ||
+                _mapPage == null ||
+                _editor is not PositionedDevUINode positionedEditor)
             {
                 return;
             }
 
             string regionId = RegionId;
             float rowY = _button.pos.y;
-            Vector2 popupPos = _editor.pos + new Vector2(
+            Vector2 popupPos = positionedEditor.pos + new Vector2(
                 -(PopupWidth + PopupGap),
                 rowY - 36f);
 
