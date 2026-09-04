@@ -22,6 +22,7 @@ using DryCycle.Weather.Climate;
 using DryCycle.Weather.HeatWave;
 using DryCycle.Weather.IntenseHeat;
 using DryCycle.Weather.Scheduling;
+using DryCycle.WorldLink.InternalGate;
 
 #pragma warning disable CS0618
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
@@ -36,7 +37,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.111";
+    public const string Version = "0.2.112";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -77,6 +78,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            InternalGateRuntime.Disable();
             VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
@@ -220,6 +222,7 @@ internal sealed class Plugin : BaseUnityPlugin
             FogForecastFlowRuntime.Enable();
             RainMeterFastForwardForecastFix.Enable();
 
+            InternalGateRuntime.Enable();
             VanillaDevUIShortcutRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
@@ -227,6 +230,7 @@ internal sealed class Plugin : BaseUnityPlugin
         }
         catch (Exception ex)
         {
+            InternalGateRuntime.Disable();
             VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
