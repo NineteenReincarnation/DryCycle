@@ -31,6 +31,7 @@ internal static class RopeSpearHooks
         HandleObjectType = new AbstractPhysicalObject.AbstractObjectType(HandleObjectTypeName, register: true);
 
         On.AbstractPhysicalObject.Realize += AbstractPhysicalObject_Realize;
+        On.AbstractSpear.StuckInWallTick += AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability += Player_Grabability;
         On.Player.ThrowObject += Player_ThrowObject;
@@ -46,6 +47,7 @@ internal static class RopeSpearHooks
         }
 
         On.AbstractPhysicalObject.Realize -= AbstractPhysicalObject_Realize;
+        On.AbstractSpear.StuckInWallTick -= AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString -= SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability -= Player_Grabability;
         On.Player.ThrowObject -= Player_ThrowObject;
@@ -78,6 +80,22 @@ internal static class RopeSpearHooks
         {
             self.realizedObject = new RopeHandle(self);
         }
+    }
+
+    private static void AbstractSpear_StuckInWallTick(
+        On.AbstractSpear.orig_StuckInWallTick orig,
+        AbstractSpear self,
+        int ticks)
+    {
+        // A rope with both ends deliberately fixed is a player-built room feature,
+        // not a temporary vanilla wall spear. Keep it in RegionState until the
+        // player removes one of the anchors or picks the RopeSpear back up.
+        if (self is AbstractRopeSpear ropeSpear && ropeSpear.HasPersistentHandleAnchor)
+        {
+            return;
+        }
+
+        orig(self, ticks);
     }
 
     private static Player.ObjectGrabability Player_Grabability(
