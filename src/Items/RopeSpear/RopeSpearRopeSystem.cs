@@ -104,11 +104,9 @@ internal sealed class RopeSpearRopeSystem
 
     internal Vector2 GetNode(int index)
     {
-        if (!_initialized)
-        {
-            return Vector2.zero;
-        }
-
+        // Keep the last valid node positions available even after Reset(). Vanilla
+        // VineGrab can query a vine for one final frame while it is detaching; a
+        // zeroed path here would feed TotalLength=0 into the vanilla climb math.
         return _nodes[Mathf.Clamp(index, 0, NodeCount - 1)].Pos;
     }
 
