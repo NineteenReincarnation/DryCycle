@@ -57,6 +57,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         if (HasMarker(editor))
         {
             RefreshForbiddenTerminology(editor);
+            RefreshInactiveChanceFields(editor);
             return;
         }
 
@@ -120,6 +121,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         editor.subNodes.Add(new CleanupMarker(editor.owner, editor));
         RefreshForbiddenTerminology(editor);
         editor.Refresh();
+        RefreshInactiveChanceFields(editor);
     }
 
     private static void ExpandForFamilyScheduleTable(DevUINode editor)
