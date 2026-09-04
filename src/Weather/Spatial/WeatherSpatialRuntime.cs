@@ -24,6 +24,7 @@ internal static class WeatherSpatialRuntime
         WeatherSpatialRegistry.Reload();
         WeatherSpatialMapMenuRuntime.Enable();
         WeatherSpatialSelectionUiCleanup.Enable();
+        WeatherSpatialTogglePaintRuntime.Enable();
         WeatherSpatialBinaryRuleUiRuntime.Enable();
         WeatherSpatialIssueWrapRuntime.Enable();
         WeatherSpatialPreviewPersistenceRuntime.Enable();
@@ -44,6 +45,7 @@ internal static class WeatherSpatialRuntime
         WeatherSpatialPreviewPersistenceRuntime.Disable();
         WeatherSpatialIssueWrapRuntime.Disable();
         WeatherSpatialBinaryRuleUiRuntime.Disable();
+        WeatherSpatialTogglePaintRuntime.Disable();
         WeatherSpatialSelectionUiCleanup.Disable();
         WeatherSpatialMapMenuRuntime.Disable();
         WeatherSpatialDevUI.Disable();
