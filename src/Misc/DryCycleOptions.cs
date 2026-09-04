@@ -43,20 +43,23 @@ internal sealed class DryCycleOptions : OptionInterface
 
     internal static void Register()
     {
-        if (_instance != null)
+        OptionInterface registered = MachineConnector.GetRegisteredOI(Plugin.RainWorldModId);
+        if (_instance != null && ReferenceEquals(registered, _instance))
         {
             return;
         }
 
-        if (MachineConnector.GetRegisteredOI(Plugin.RainWorldModId) is DryCycleOptions existing)
+        if (registered is DryCycleOptions existing)
         {
             _instance = existing;
             return;
         }
 
+        _instance = null;
         DryCycleOptions options = new();
         if (!MachineConnector.SetRegisteredOI(Plugin.RainWorldModId, options))
         {
+            Plugin.Logger?.LogWarning("DryCycle could not register its Remix options page; Ctrl+Z/S/Y gameplay input remains locked by default in O+H mode.");
             return;
         }
 
