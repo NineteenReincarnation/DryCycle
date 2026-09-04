@@ -8,8 +8,10 @@ using UnityEngine;
 namespace DryCycle.Weather.Spatial;
 
 /// <summary>
-/// Binary Weather Zones authoring: RMB toggles the effective state of every room
-/// touched by the current stroke. Shift+RMB toggles the complete room selection once.
+/// Binary Weather Zones authoring.
+/// Shift+LMB marquee builds a persistent room selection. RMB on any selected room
+/// toggles the complete selection; RMB elsewhere clears that selection and starts a
+/// normal per-room toggle stroke. Ordinary LMB outside the selected set clears it.
 /// </summary>
 internal static class WeatherSpatialTogglePaintRuntime
 {
@@ -17,10 +19,13 @@ internal static class WeatherSpatialTogglePaintRuntime
 
     private static bool _enabled;
     private static bool _rightWasDown;
+    private static bool _leftWasDown;
+    private static bool _batchToggledThisStroke;
+    private static int _rightUndoStart = -1;
+    private static readonly HashSet<string> _rightTouched = new(StringComparer.OrdinalIgnoreCase);
     private static DevUINode _lastEditor;
 
     private static Type _editorType;
-    private static FieldInfo _brushField;
     private static FieldInfo _overviewField;
     private static FieldInfo _regionIdField;
     private static FieldInfo _targetIndexField;
@@ -52,6 +57,10 @@ internal static class WeatherSpatialTogglePaintRuntime
         On.DevInterface.Button.Clicked -= Button_Clicked;
         On.DevInterface.MapPage.Update -= MapPage_Update;
         _rightWasDown = false;
+        _leftWasDown = false;
+        _batchToggledThisStroke = false;
+        _rightUndoStart = -1;
+        _rightTouched.Clear();
         _lastEditor = null;
         ClearReflectionCache();
         _enabled = false;
@@ -63,6 +72,7 @@ internal static class WeatherSpatialTogglePaintRuntime
     {
         DevUINode editor = FindEditor(self);
         bool rightDown = Input.GetMouseButton(1);
+        bool leftDown = Input.GetMouseButton(0);
 
         if (editor != null)
         {
@@ -73,16 +83,20 @@ internal static class WeatherSpatialTogglePaintRuntime
             bool overview = _overviewField?.GetValue(editor) is bool overviewValue && overviewValue;
             bool collapsed = editor is Panel panel && panel.collapsed;
 
-            if (rightDown && shift && !_rightWasDown && !overview && !collapsed)
+            if (!overview && !collapsed)
             {
-                ToggleSelection(editor);
-            }
-            else if (rightDown && !shift && !overview && !collapsed)
-            {
-                RoomPanel hovered = HoveredRoom(self);
-                if (hovered?.roomRep?.room != null)
+                if (leftDown && !_leftWasDown && !shift)
                 {
-                    SetBrushForToggle(editor, hovered.roomRep.room.name);
+                    ClearSelectionWhenClickingElsewhere(self, editor);
+                }
+
+                if (rightDown && !_rightWasDown)
+                {
+                    BeginRightStroke(self, editor);
+                }
+                else if (rightDown && !_batchToggledThisStroke)
+                {
+                    ToggleHoveredOnce(self, editor);
                 }
             }
         }
@@ -91,9 +105,7 @@ internal static class WeatherSpatialTogglePaintRuntime
 
         if (_rightWasDown && !rightDown && _lastEditor != null)
         {
-            EnsureReflection(_lastEditor);
-            _runValidationMethod?.Invoke(_lastEditor, null);
-            _updateStateLabelsMethod?.Invoke(_lastEditor, null);
+            EndRightStroke(_lastEditor);
         }
 
         if (editor != null)
@@ -102,6 +114,7 @@ internal static class WeatherSpatialTogglePaintRuntime
         }
 
         _rightWasDown = rightDown;
+        _leftWasDown = leftDown;
         if (!rightDown && editor == null)
         {
             _lastEditor = null;
@@ -123,12 +136,69 @@ internal static class WeatherSpatialTogglePaintRuntime
         orig(self);
     }
 
-    private static void SetBrushForToggle(DevUINode editor, string roomName)
+    private static void BeginRightStroke(MapPage mapPage, DevUINode editor)
     {
-        if (_brushField == null ||
-            _regionIdField == null ||
-            _targetIndexField == null ||
-            string.IsNullOrWhiteSpace(roomName))
+        EnsureReflection(editor);
+        _rightTouched.Clear();
+        _batchToggledThisStroke = false;
+        _rightUndoStart = _undoField?.GetValue(editor) is IList undo ? undo.Count : -1;
+
+        RoomPanel hovered = HoveredRoom(mapPage);
+        string roomName = hovered?.roomRep?.room?.name;
+
+        if (_selectionField?.GetValue(editor) is HashSet<string> selection && selection.Count > 0)
+        {
+            // Standard selection semantics: RMB on any selected room acts on the whole
+            // selected set. No modifier is required after the Shift+LMB marquee.
+            if (!string.IsNullOrWhiteSpace(roomName) && selection.Contains(roomName))
+            {
+                ToggleSelection(editor);
+                _batchToggledThisStroke = true;
+                return;
+            }
+
+            // RMB somewhere outside the selection starts a new single-room operation,
+            // so the old marquee selection is no longer relevant.
+            selection.Clear();
+            _updateStateLabelsMethod?.Invoke(editor, null);
+        }
+
+        ToggleHoveredOnce(mapPage, editor);
+    }
+
+    private static void EndRightStroke(DevUINode editor)
+    {
+        EnsureReflection(editor);
+        if (_rightUndoStart >= 0 && _undoField?.GetValue(editor) is IList undo)
+        {
+            MergeNewUndoCommands(undo, _rightUndoStart, "Toggle Weather Zone");
+        }
+
+        _runValidationMethod?.Invoke(editor, null);
+        _updateStateLabelsMethod?.Invoke(editor, null);
+        _rightTouched.Clear();
+        _batchToggledThisStroke = false;
+        _rightUndoStart = -1;
+    }
+
+    private static void ToggleHoveredOnce(MapPage mapPage, DevUINode editor)
+    {
+        RoomPanel hovered = HoveredRoom(mapPage);
+        string roomName = hovered?.roomRep?.room?.name;
+        if (string.IsNullOrWhiteSpace(roomName) || !_rightTouched.Add(roomName))
+        {
+            return;
+        }
+
+        ToggleSingleRoom(editor, roomName);
+    }
+
+    private static void ToggleSingleRoom(DevUINode editor, string roomName)
+    {
+        EnsureReflection(editor);
+        if (string.IsNullOrWhiteSpace(roomName) ||
+            _selectionField?.GetValue(editor) is not HashSet<string> selection ||
+            _applyRuleToSelectionMethod == null)
         {
             return;
         }
@@ -142,9 +212,48 @@ internal static class WeatherSpatialTogglePaintRuntime
             ? WeatherSpatialRegistry.IsFamilyAllowed(regionId, roomName, target.FamilyId)
             : WeatherSpatialRegistry.IsAllowed(regionId, roomName, target.Kind, target.WeatherId);
 
-        _brushField.SetValue(
+        List<string> original = new(selection);
+        selection.Clear();
+        selection.Add(roomName);
+        _applyRuleToSelectionMethod.Invoke(
             editor,
-            currentlyAllowed ? WeatherSpatialRule.Deny : WeatherSpatialRule.Allow);
+            new object[]
+            {
+                currentlyAllowed ? WeatherSpatialRule.Deny : WeatherSpatialRule.Allow,
+                "Toggle " + roomName
+            });
+
+        selection.Clear();
+        for (int i = 0; i < original.Count; i++)
+        {
+            selection.Add(original[i]);
+        }
+        _updateStateLabelsMethod?.Invoke(editor, null);
+    }
+
+    private static void ClearSelectionWhenClickingElsewhere(MapPage mapPage, DevUINode editor)
+    {
+        if (_selectionField?.GetValue(editor) is not HashSet<string> selection || selection.Count == 0)
+        {
+            return;
+        }
+
+        // Interacting with the right-side editor itself must not destroy the selection;
+        // buttons such as Toggle Sel are expected to keep using it.
+        if (editor is RectangularDevUINode editorRect && editorRect.MouseOver)
+        {
+            return;
+        }
+
+        RoomPanel hovered = HoveredRoom(mapPage);
+        string roomName = hovered?.roomRep?.room?.name;
+        if (!string.IsNullOrWhiteSpace(roomName) && selection.Contains(roomName))
+        {
+            return;
+        }
+
+        selection.Clear();
+        _updateStateLabelsMethod?.Invoke(editor, null);
     }
 
     private static void ToggleSelection(DevUINode editor)
@@ -152,17 +261,9 @@ internal static class WeatherSpatialTogglePaintRuntime
         EnsureReflection(editor);
         if (_selectionField?.GetValue(editor) is not HashSet<string> selection ||
             _applyRuleToSelectionMethod == null ||
-            _undoField?.GetValue(editor) is not IList undo)
+            _undoField?.GetValue(editor) is not IList undo ||
+            selection.Count == 0)
         {
-            return;
-        }
-
-        if (selection.Count == 0)
-        {
-            _applyRuleToSelectionMethod.Invoke(
-                editor,
-                new object[] { WeatherSpatialRule.Allow, "Toggle selected rooms" });
-            _updateStateLabelsMethod?.Invoke(editor, null);
             return;
         }
 
@@ -316,7 +417,7 @@ internal static class WeatherSpatialTogglePaintRuntime
         }
         if (FindDirect(editor, "WeatherShortcutSelect") is DevUILabel select)
         {
-            select.Text = "Shift + RMB  - Toggle Selected Rooms";
+            select.Text = "RMB Selected  - Toggle Selected Rooms";
         }
     }
 
@@ -382,7 +483,6 @@ internal static class WeatherSpatialTogglePaintRuntime
 
         _editorType = type;
         BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        _brushField = type.GetField("_brush", flags);
         _overviewField = type.GetField("_overview", flags);
         _regionIdField = type.GetField("_regionId", flags);
         _targetIndexField = type.GetField("_targetIndex", flags);
@@ -396,7 +496,6 @@ internal static class WeatherSpatialTogglePaintRuntime
     private static void ClearReflectionCache()
     {
         _editorType = null;
-        _brushField = null;
         _overviewField = null;
         _regionIdField = null;
         _targetIndexField = null;
