@@ -310,7 +310,7 @@ internal static class RopeSpearHooks
                 {
                     string value = attr.Substring(AbstractRopeSpear.FixedHandlePrefix.Length);
                     result.HasPersistentHandleAnchor = value == "1" ||
-                                                       bool.TryParse(value, out bool parsed) && parsed;
+                                                       bool.TryParse(value, out bool fixedParsed) && fixedParsed;
                 }
                 else if (attr.StartsWith(AbstractRopeSpear.FixedHandleAnchorPrefix, StringComparison.Ordinal) &&
                          TryParseVector2(
