@@ -14,11 +14,14 @@ internal static class RopeSpearHooks
     private const string LengthPrefix = "DRYCYCLE_ROPESPEAR_LENGTH=";
     private const string BrokenPrefix = "DRYCYCLE_ROPESPEAR_BROKEN=";
     private const float RopeGrabRange = 27f;
+    private const int RopeRegrabDelay = 10;
 
     private sealed class PlayerRopeGrabState
     {
         internal RopeSpear Spear;
         internal float NormalizedPosition;
+        internal float PoseCycle;
+        internal int RegrabDelay;
     }
 
     private static readonly ConditionalWeakTable<Player, PlayerRopeGrabState> RopeGrabStates = new();
@@ -45,6 +48,7 @@ internal static class RopeSpearHooks
         On.Player.Grabability += Player_Grabability;
         On.Player.GrabUpdate += Player_GrabUpdate;
         On.Player.ThrowObject += Player_ThrowObject;
+        On.PlayerGraphics.Update += PlayerGraphics_Update;
 
         RopeSpearDevConsoleSupport.TryRegister();
     }
@@ -62,6 +66,7 @@ internal static class RopeSpearHooks
         On.Player.Grabability -= Player_Grabability;
         On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.ThrowObject -= Player_ThrowObject;
+        On.PlayerGraphics.Update -= PlayerGraphics_Update;
 
         RopeSpearDevConsoleSupport.ResetRegistration();
 
@@ -154,11 +159,8 @@ internal static class RopeSpearHooks
         }
 
         // Weapon.Update normally gives every freshly thrown weapon a three-frame
-        // window in which it can reverse to Player.ThrowDirection. That is useful
-        // for vanilla throws, but RopeSpear creates a physical handle at release;
-        // airborne body/handle motion can make ThrowDirection flip for one frame
-        // and reverse only this spear after the throw has already been committed.
-        // Freeze the direction chosen by Player.ThrowObject at release instead.
+        // window in which it can reverse to Player.ThrowDirection. RopeSpear freezes
+        // the release direction so the newly spawned handle cannot perturb it.
         ropeSpearBeingThrown.changeDirCounter = 0;
         if (ropeSpearBeingThrown.throwDir.x != 0)
         {
@@ -182,16 +184,27 @@ internal static class RopeSpearHooks
         }
 
         PlayerRopeGrabState state = RopeGrabStates.GetOrCreateValue(self);
-        bool pickupPressed = self.input != null &&
+        if (state.RegrabDelay > 0)
+        {
+            state.RegrabDelay--;
+        }
+
+        bool hasInput = self.input != null && self.input.Length > 0;
+        bool pickupPressed = hasInput &&
                              self.input.Length > 1 &&
                              self.input[0].pckp &&
                              !self.input[1].pckp;
+        bool upHeld = hasInput && self.input[0].y > 0;
 
         if (state.Spear != null)
         {
+            // Pickup remains an explicit manual detach. Jump detach is handled in
+            // RopeSpearClimbController so it can preserve swing momentum.
             if (pickupPressed)
             {
+                RopeSpearClimbController.ResetVinePose(self);
                 state.Spear = null;
+                state.RegrabDelay = RopeRegrabDelay;
                 self.wantToPickUp = 0;
                 orig(self, eu);
                 return;
@@ -200,30 +213,104 @@ internal static class RopeSpearHooks
             self.wantToPickUp = 0;
             orig(self, eu);
 
-            if (!state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition))
+            if (!RopeSpearClimbController.Update(
+                    self,
+                    state.Spear,
+                    ref state.NormalizedPosition,
+                    ref state.PoseCycle))
             {
                 state.Spear = null;
+                state.RegrabDelay = RopeRegrabDelay;
             }
             return;
         }
 
-        if (pickupPressed &&
-            self.FreeHand() >= 0 &&
+        // Vanilla vines allow Up to acquire them without consuming a hand. Keep
+        // that input behaviour, but do the overlap test against our own rope chain
+        // instead of registering RopeSpear as IClimbableVine.
+        bool wantsRope = state.RegrabDelay == 0 && (upHeld || pickupPressed);
+        if (wantsRope &&
+            CanStartRopeGrab(self) &&
             TryFindNearestRope(self, out RopeSpear spear, out float normalizedPosition))
         {
             state.Spear = spear;
             state.NormalizedPosition = normalizedPosition;
+            state.PoseCycle = 0f;
             self.wantToPickUp = 0;
             orig(self, eu);
 
-            if (!state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition))
+            if (!RopeSpearClimbController.Update(
+                    self,
+                    state.Spear,
+                    ref state.NormalizedPosition,
+                    ref state.PoseCycle))
             {
                 state.Spear = null;
+                state.RegrabDelay = RopeRegrabDelay;
             }
             return;
         }
 
         orig(self, eu);
+    }
+
+    private static void PlayerGraphics_Update(
+        On.PlayerGraphics.orig_Update orig,
+        PlayerGraphics self)
+    {
+        Player player = self?.player;
+        bool active = player != null &&
+                      RopeGrabStates.TryGetValue(player, out PlayerRopeGrabState state) &&
+                      state.Spear != null;
+
+        // Prime the hand targets before SlugcatHand.Update so free hands actually
+        // move onto the rope this frame. Reapply afterwards to keep the target
+        // stable for the next graphics tick if another generic hand behaviour ran.
+        if (active)
+        {
+            RopeSpearClimbController.PrepareHands(
+                self,
+                state.Spear,
+                state.NormalizedPosition,
+                state.PoseCycle);
+        }
+
+        orig(self);
+
+        if (active && state.Spear != null)
+        {
+            RopeSpearClimbController.PrepareHands(
+                self,
+                state.Spear,
+                state.NormalizedPosition,
+                state.PoseCycle);
+        }
+    }
+
+    private static bool CanStartRopeGrab(Player player)
+    {
+        if (player == null ||
+            player.dead ||
+            !player.Consious ||
+            player.inShortcut ||
+            player.enteringShortCut.HasValue)
+        {
+            return false;
+        }
+
+        if (player.bodyMode == Player.BodyModeIndex.CorridorClimb ||
+            player.bodyMode == Player.BodyModeIndex.ClimbIntoShortCut ||
+            player.bodyMode == Player.BodyModeIndex.Swimming)
+        {
+            return false;
+        }
+
+        return player.animation != Player.AnimationIndex.ClimbOnBeam &&
+               player.animation != Player.AnimationIndex.HangFromBeam &&
+               player.animation != Player.AnimationIndex.GetUpOnBeam &&
+               player.animation != Player.AnimationIndex.GetUpToBeamTip &&
+               player.animation != Player.AnimationIndex.HangUnderVerticalBeam &&
+               player.animation != Player.AnimationIndex.DeepSwim;
     }
 
     private static bool TryFindNearestRope(
@@ -239,27 +326,39 @@ internal static class RopeSpearHooks
         }
 
         float bestDistance = float.MaxValue;
-        Vector2 position = player.mainBodyChunk.pos;
+        float travel = Vector2.Distance(
+            player.mainBodyChunk.lastPos,
+            player.mainBodyChunk.pos);
+        int samples = Custom.IntClamp((int)(travel / 5f) + 1, 1, 8);
 
-        for (int layer = 0; layer < player.room.physicalObjects.Length; layer++)
+        for (int sample = 0; sample < samples; sample++)
         {
-            List<PhysicalObject> objects = player.room.physicalObjects[layer];
-            for (int i = 0; i < objects.Count; i++)
-            {
-                if (objects[i] is not RopeSpear spear ||
-                    !spear.TryFindNearestRopePoint(
-                        position,
-                        RopeGrabRange,
-                        out float candidatePosition,
-                        out float distance) ||
-                    distance >= bestDistance)
-                {
-                    continue;
-                }
+            float t = samples <= 1 ? 1f : sample / (samples - 1f);
+            Vector2 position = Vector2.Lerp(
+                player.mainBodyChunk.lastPos,
+                player.mainBodyChunk.pos,
+                t);
 
-                bestDistance = distance;
-                bestSpear = spear;
-                normalizedPosition = candidatePosition;
+            for (int layer = 0; layer < player.room.physicalObjects.Length; layer++)
+            {
+                List<PhysicalObject> objects = player.room.physicalObjects[layer];
+                for (int i = 0; i < objects.Count; i++)
+                {
+                    if (objects[i] is not RopeSpear spear ||
+                        !spear.TryFindNearestRopePoint(
+                            position,
+                            RopeGrabRange,
+                            out float candidatePosition,
+                            out float distance) ||
+                        distance >= bestDistance)
+                    {
+                        continue;
+                    }
+
+                    bestDistance = distance;
+                    bestSpear = spear;
+                    normalizedPosition = candidatePosition;
+                }
             }
         }
 
