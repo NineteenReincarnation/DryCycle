@@ -125,6 +125,14 @@ internal static class RopeSpearHooks
         int grasp,
         bool eu)
     {
+        RopeSpear ropeSpearBeingThrown = null;
+        if (self?.grasps != null &&
+            grasp >= 0 &&
+            grasp < self.grasps.Length)
+        {
+            ropeSpearBeingThrown = self.grasps[grasp]?.grabbed as RopeSpear;
+        }
+
         bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
         if (altHeld &&
             self?.grasps != null &&
@@ -138,6 +146,28 @@ internal static class RopeSpearHooks
         }
 
         orig(self, grasp, eu);
+
+        if (ropeSpearBeingThrown == null ||
+            ropeSpearBeingThrown.mode != Weapon.Mode.Thrown)
+        {
+            return;
+        }
+
+        // Weapon.Update normally gives every freshly thrown weapon a three-frame
+        // window in which it can reverse to Player.ThrowDirection. That is useful
+        // for vanilla throws, but RopeSpear creates a physical handle at release;
+        // airborne body/handle motion can make ThrowDirection flip for one frame
+        // and reverse only this spear after the throw has already been committed.
+        // Freeze the direction chosen by Player.ThrowObject at release instead.
+        ropeSpearBeingThrown.changeDirCounter = 0;
+        if (ropeSpearBeingThrown.throwDir.x != 0)
+        {
+            ropeSpearBeingThrown.firstChunk.vel.x =
+                Mathf.Abs(ropeSpearBeingThrown.firstChunk.vel.x) *
+                ropeSpearBeingThrown.throwDir.x;
+            ropeSpearBeingThrown.setRotation = ropeSpearBeingThrown.throwDir.ToVector2();
+            ropeSpearBeingThrown.rotationSpeed = 0f;
+        }
     }
 
     private static void Player_GrabUpdate(
