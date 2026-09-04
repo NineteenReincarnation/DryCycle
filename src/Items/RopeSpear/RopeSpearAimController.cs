@@ -15,7 +15,11 @@ internal static class RopeSpearAimController
     // Rain World updates gameplay at roughly 40 Hz. Eight frames is long enough to
     // distinguish an intentional hold while keeping ordinary taps responsive.
     private const int HoldThresholdFrames = 8;
-    private const float SweepDegreesPerFrame = 4f;
+
+    // Deliberately slow enough to let the player release on a chosen angle instead
+    // of having the spear race through the arc. At ~40 Hz this is ~50 degrees/sec:
+    // horizontal -> straight up takes about 1.8 seconds.
+    private const float SweepDegreesPerFrame = 1.25f;
     private const float MinAimAngle = -90f;
     private const float MaxAimAngle = 90f;
 
@@ -28,6 +32,7 @@ internal static class RopeSpearAimController
         internal bool Charging;
         internal float AngleDegrees;
         internal int SweepDirection = 1;
+        internal RopeSpearAimIndicator Indicator;
     }
 
     private static readonly ConditionalWeakTable<Player, AimState> States = new();
@@ -55,6 +60,27 @@ internal static class RopeSpearAimController
         On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.GraphicsModuleUpdated -= Player_GraphicsModuleUpdated;
         _enabled = false;
+    }
+
+    internal static bool TryGetAimVisualState(
+        Player player,
+        out int facing,
+        out float angleDegrees)
+    {
+        facing = 1;
+        angleDegrees = 0f;
+
+        if (player == null ||
+            !States.TryGetValue(player, out AimState state) ||
+            !state.Charging ||
+            !AimStateStillValid(player, state))
+        {
+            return false;
+        }
+
+        facing = state.Facing;
+        angleDegrees = state.AngleDegrees;
+        return true;
     }
 
     private static void Player_GrabUpdate(
@@ -116,6 +142,11 @@ internal static class RopeSpearAimController
             else if (state.Charging)
             {
                 AdvanceSweep(state);
+            }
+
+            if (state.Charging)
+            {
+                EnsureAimIndicator(self, state);
             }
 
             RunGrabUpdateWithThrowMasked(orig, self, eu);
@@ -192,6 +223,12 @@ internal static class RopeSpearAimController
         RopeSpear spear,
         int graspIndex)
     {
+        if (state.Indicator != null)
+        {
+            state.Indicator.Destroy();
+            state.Indicator = null;
+        }
+
         state.Spear = spear;
         state.GraspIndex = graspIndex;
         state.HoldFrames = 0;
@@ -205,6 +242,22 @@ internal static class RopeSpearAimController
             facing = player.flipDirection;
         }
         state.Facing = facing < 0 ? -1 : 1;
+    }
+
+    private static void EnsureAimIndicator(Player player, AimState state)
+    {
+        if (player?.room == null || !state.Charging)
+        {
+            return;
+        }
+
+        if (state.Indicator != null && !state.Indicator.slatedForDeletetion)
+        {
+            return;
+        }
+
+        state.Indicator = new RopeSpearAimIndicator(player);
+        player.room.AddObject(state.Indicator);
     }
 
     private static bool CanStartAim(Player player)
@@ -441,6 +494,12 @@ internal static class RopeSpearAimController
         if (state == null)
         {
             return;
+        }
+
+        if (state.Indicator != null)
+        {
+            state.Indicator.Destroy();
+            state.Indicator = null;
         }
 
         state.Spear = null;
