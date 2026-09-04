@@ -99,6 +99,7 @@ internal sealed class Plugin : BaseUnityPlugin
             WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
+            DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
@@ -184,6 +185,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodAudioHooks.Enable();
             KingVultureSpearCombat.Enable();
             HydrationWeakness.Enable();
+            DehydrationVisualRuntime.Enable();
             HydrationDivider.Enable();
 
             WorldClockHooks.TestScheduleEnabled = false;
@@ -247,6 +249,7 @@ internal sealed class Plugin : BaseUnityPlugin
             WorldClockRegionContinuityRuntime.Disable();
             DayNightRuntime.Disable();
             HydrationDivider.Disable();
+            DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             QuicksandSubmersionCleanup.Disable();
