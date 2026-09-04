@@ -78,8 +78,7 @@ internal static class RopeSpearAimController
         AimState state = States.GetOrCreateValue(self);
         bool throwHeld = self.input[0].thrw;
         bool throwPressed = throwHeld &&
-                            self.input.Length > 1 &&
-                            !self.input[1].thrw;
+                            (self.input.Length < 2 || !self.input[1].thrw);
 
         if (state.Spear == null)
         {
@@ -183,7 +182,7 @@ internal static class RopeSpearAimController
             self.grasps != null &&
             grasp >= 0 &&
             grasp < self.grasps.Length &&
-            ReferenceEquals(self.grasps[grasp]?.grabbed, state.Spear))
+            object.ReferenceEquals(self.grasps[grasp]?.grabbed, state.Spear))
         {
             expectedSpear = state.Spear;
             requestedDirection = state.PendingDirection;
@@ -286,7 +285,7 @@ internal static class RopeSpearAimController
         // would throw. Only intercept the input when that same candidate is ours.
         for (int i = 0; i < player.grasps.Length; i++)
         {
-            PhysicalObject.Grasp grasp = player.grasps[i];
+            var grasp = player.grasps[i];
             if (grasp == null ||
                 grasp.grabbed == null ||
                 !player.IsObjectThrowable(grasp.grabbed))
@@ -321,7 +320,7 @@ internal static class RopeSpearAimController
             return false;
         }
 
-        return ReferenceEquals(
+        return object.ReferenceEquals(
             player.grasps[state.GraspIndex]?.grabbed,
             state.Spear);
     }
@@ -423,7 +422,7 @@ internal static class RopeSpearAimController
         }
         else
         {
-            vanillaDirection = new Vector2(stateFacingFallback(player), 0f);
+            vanillaDirection = new Vector2(StateFacingFallback(player), 0f);
         }
 
         spear.firstChunk.vel = direction * throwSpeed;
@@ -471,7 +470,7 @@ internal static class RopeSpearAimController
         }
     }
 
-    private static int stateFacingFallback(Player player)
+    private static int StateFacingFallback(Player player)
     {
         int facing = player.ThrowDirection;
         if (facing == 0)
