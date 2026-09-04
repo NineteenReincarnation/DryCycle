@@ -62,7 +62,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 this,
                 new Vector2(ButtonX, rowY),
                 ButtonWidth,
-                "Clear Region Zones",
+                "Clear Region Weather",
                 ToggleConfirmation);
             subNodes.Add(_button);
         }
@@ -126,7 +126,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 _mapPage,
                 popupPos,
                 new Vector2(PopupWidth, PopupHeight),
-                "Delete Region Weather Zones?");
+                "Delete Region Weather?");
 
             DevUILabel question = new(
                 owner,
@@ -134,7 +134,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 _confirmationPanel,
                 new Vector2(8f, 60f),
                 PopupWidth - 16f,
-                "Delete all Weather Zones in region " + regionId + "?");
+                "Delete ALL weather config for " + regionId + "?");
             question.spriteColor = new Color(0f, 0f, 0f);
             question.textColor = new Color(1f, 1f, 1f);
             _confirmationPanel.subNodes.Add(question);
@@ -145,7 +145,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 _confirmationPanel,
                 new Vector2(8f, 40f),
                 PopupWidth - 16f,
-                "Schedule settings will be kept.");
+                "Zones, schedule and chances will be deleted.");
             note.spriteColor = new Color(0f, 0f, 0f);
             note.textColor = new Color(1f, 1f, 1f);
             _confirmationPanel.subNodes.Add(note);
@@ -186,14 +186,14 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             _endPaintMethod?.Invoke(_editor, null);
 
             string regionId = RegionId;
-            bool cleared = WeatherSpatialRegistry.ClearRegionSpatialRules(regionId);
+            bool cleared = WeatherSpatialRegistry.ClearRegionWeatherConfiguration(regionId);
             if (cleared)
             {
                 ClearHistory();
             }
 
             // Refresh the issue list immediately so stale warnings from the deleted
-            // spatial rules disappear before the developer presses Validate again.
+            // region configuration disappear before the developer presses Validate.
             _runValidationMethod?.Invoke(_editor, null);
 
             if (_statusField != null)
@@ -201,8 +201,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 _statusField.SetValue(
                     _editor,
                     cleared
-                        ? "Cleared Weather Zones for " + regionId + ". Save WeatherSpatial to persist."
-                        : "No Weather Zones configured for " + regionId + ".");
+                        ? "Cleared all weather config for " + regionId + ". Save WeatherSpatial to persist."
+                        : "No DryCycle weather config for " + regionId + ".");
             }
 
             _updateStateLabelsMethod?.Invoke(_editor, null);

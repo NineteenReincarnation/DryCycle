@@ -92,22 +92,32 @@ internal static partial class WeatherSpatialRegistry
         return _globalDefault != WeatherSpatialRule.Deny;
     }
 
-    internal static bool ClearRegionSpatialRules(string regionId)
+    internal static bool ClearRegionWeatherConfiguration(string regionId)
     {
+        EnsureLegacyScheduleMigration();
+
         string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 ||
-            !Regions.TryGetValue(regionKey, out WeatherSpatialRegionRules region) ||
-            region == null ||
-            region.IsEmpty)
+        if (regionKey.Length == 0)
         {
             return false;
         }
 
-        // RegionSchedules deliberately lives in a separate dictionary. Removing this
-        // entry clears only Weather Zones (defaults + room spatial rules) and leaves the
-        // region's schedule/chances untouched.
-        Regions.Remove(regionKey);
+        bool removedSpatial = Regions.Remove(regionKey);
+        bool removedSchedule = RegionSchedules.Remove(regionKey);
+        if (!removedSpatial && !removedSchedule)
+        {
+            return false;
+        }
+
+        // Clear means a true region reset: room/default spatial rules and all regional
+        // schedule/chance data disappear together. BuildJsonRoot unions these two
+        // dictionaries, so a region with no remaining data vanishes from JSON on Save.
         Dirty = true;
+
+        // The current day/night phase may already have been rolled before the developer
+        // clears the region. Invalidate both the concrete schedule state and HUD timeline
+        // so stale forecast/weather cannot survive the destructive reset in this session.
+        WeatherScheduleCacheInvalidation.InvalidateAll();
         return true;
     }
 
