@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.Scheduling;
+using DryCycle.Weather.Spatial;
 using RWCustom;
 using UnityEngine;
 using Watcher;
@@ -88,12 +89,27 @@ internal static class SandstormWeatherRuntime
 
     internal static WeatherSample Evaluate(World world, WorldClock clock)
     {
-        if (clock == null)
+        // Explicit Weather Zones Preview owns the sample even when the separate
+        // fixed test schedule is enabled in DevUI.
+        if (IsSandstormPreview(world))
         {
-            return default;
+            float previewNormal = WeatherScheduleRuntime.GetIntensity(
+                world,
+                clock,
+                WeatherScheduleEventKind.Weather,
+                "SandStorm",
+                "Sandstorm");
+            float previewHazard = WeatherScheduleRuntime.GetIntensity(
+                world,
+                clock,
+                WeatherScheduleEventKind.DangerType,
+                "SandStorm",
+                "Sandstorm",
+                "DeathSandStorm");
+            return new WeatherSample(previewNormal, previewHazard);
         }
 
-        if (WorldClockHooks.TestScheduleEnabled)
+        if (clock != null && WorldClockHooks.TestScheduleEnabled)
         {
             if (clock.IsNight)
             {
@@ -183,17 +199,44 @@ internal static class SandstormWeatherRuntime
             RegionClimateRegistry.RegionCanUseDanger(regionId, "Sandstorm") ||
             RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathSandStorm");
 
-        if (!WorldClockHooks.TestScheduleEnabled && !scheduledRegion)
+        if (!WorldClockHooks.TestScheduleEnabled &&
+            !scheduledRegion &&
+            !IsSandstormPreview(self.world))
         {
             return;
         }
 
-        if (self.sandstorm == null)
+        EnsureStorm(self);
+    }
+
+    /// <summary>
+    /// Creates Watcher's native renderer/physics carrier when Preview is enabled after
+    /// the current room has already finished loading.
+    /// </summary>
+    internal static void EnsurePreviewStorm(Room room)
+    {
+        if (!_enabled ||
+            !ModManager.Watcher ||
+            room?.world?.game == null ||
+            !room.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(room.world))
         {
-            self.sandstorm = new Sandstorm(self);
-            self.AddObject(self.sandstorm);
-            _syntheticSandstorms.Add(self.sandstorm, new SyntheticSandstormMarker());
+            return;
         }
+
+        EnsureStorm(room);
+    }
+
+    private static void EnsureStorm(Room room)
+    {
+        if (room == null || room.sandstorm != null)
+        {
+            return;
+        }
+
+        room.sandstorm = new Sandstorm(room);
+        room.AddObject(room.sandstorm);
+        _syntheticSandstorms.Add(room.sandstorm, new SyntheticSandstormMarker());
     }
 
     private static float RoomSettings_GetEffectAmount(
@@ -232,7 +275,8 @@ internal static class SandstormWeatherRuntime
                               world.game.IsStorySession &&
                               RegionDayNightOptions.IsEnabled(world);
 
-        if (!TryGetClock(self, out WorldClock clock))
+        bool hasClock = TryGetClock(self, out WorldClock clock);
+        if (!hasClock && !IsSandstormPreview(world))
         {
             // Synthetic/default-danger storms must never fall into Watcher's native
             // lifecycle during world/camera transition frames. Pure authored surface
@@ -444,7 +488,8 @@ internal static class SandstormWeatherRuntime
             return;
         }
 
-        if (!TryGetClock(self, out WorldClock clock))
+        bool hasClock = TryGetClock(self, out WorldClock clock);
+        if (!hasClock && !IsSandstormPreview(world))
         {
             if (!synthetic)
             {
@@ -599,5 +644,22 @@ internal static class SandstormWeatherRuntime
                game.cameras.Length > 0 &&
                game.cameras[0]?.room != null &&
                WorldClockHooks.TryGetClock(world, out clock);
+    }
+
+    private static bool IsSandstormPreview(World world)
+    {
+        if (!WeatherSpatialPreview.IsActiveFor(world))
+        {
+            return false;
+        }
+
+        string id = WeatherSpatialCatalog.NormalizeId(WeatherSpatialPreview.WeatherId);
+        if (WeatherSpatialPreview.Kind == WeatherScheduleEventKind.Weather)
+        {
+            return id == "SANDSTORM";
+        }
+
+        return WeatherSpatialPreview.Kind == WeatherScheduleEventKind.DangerType &&
+               (id == "SANDSTORM" || id == "DEATHSANDSTORM");
     }
 }

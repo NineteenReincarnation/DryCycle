@@ -122,6 +122,15 @@ internal static class IntenseHeatWeatherRuntime
         private float _intensity;
         private float _lastSolar;
         private float _solar;
+        // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+        private float _lastSolarExposure;
+        private float _solarExposure;
+        private float _lastEntryFlash;
+        private float _entryFlash;
+        private float _lastAfterimage;
+        private float _afterimage;
+        private float _previousViewerSolarLoad;
+        // [IH-OPT-03_SOLAR_MEMORY] END
         private float _visualTime;
         private Texture2D _solarField;
         private Texture2D _surfaceField;
@@ -145,6 +154,11 @@ internal static class IntenseHeatWeatherRuntime
 
             _lastIntensity = _intensity;
             _lastSolar = _solar;
+            // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+            _lastSolarExposure = _solarExposure;
+            _lastEntryFlash = _entryFlash;
+            _lastAfterimage = _afterimage;
+            // [IH-OPT-03_SOLAR_MEMORY] END
 
             if (!TryEvaluate(room, out float scheduled))
             {
@@ -153,6 +167,9 @@ internal static class IntenseHeatWeatherRuntime
 
             _intensity = Mathf.Clamp01(scheduled);
             _solar = EvaluateSolar(room);
+            // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+            UpdateSolarMemory(EvaluateViewerSolarLoad());
+            // [IH-OPT-03_SOLAR_MEMORY] END
             _visualTime += 1f / 40f;
 
             if (_intensity > Epsilon)
@@ -187,8 +204,21 @@ internal static class IntenseHeatWeatherRuntime
 
             float intensity = Mathf.Lerp(_lastIntensity, _intensity, timeStacker);
             float solar = Mathf.Lerp(_lastSolar, _solar, timeStacker);
+            // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+            float solarExposure = Mathf.Lerp(
+                _lastSolarExposure,
+                _solarExposure,
+                timeStacker);
+            float entryFlash = Mathf.Lerp(_lastEntryFlash, _entryFlash, timeStacker);
+            float afterimage = Mathf.Lerp(_lastAfterimage, _afterimage, timeStacker);
+            // [IH-OPT-03_SOLAR_MEMORY] END
             bool debugVisible = IntenseHeatDebugRuntime.DebugMode > 0;
             bool active = intensity > Epsilon || debugVisible;
+            // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+            // Keep the compositor alive briefly after direct heat disappears so the
+            // retained retinal image can actually decay on screen.
+            active = active || entryFlash > Epsilon || afterimage > Epsilon;
+            // [IH-OPT-03_SOLAR_MEMORY] END
 
             if (!active)
             {
@@ -208,6 +238,9 @@ internal static class IntenseHeatWeatherRuntime
                 roomSizePx,
                 intensity,
                 solar,
+                solarExposure,
+                entryFlash,
+                afterimage,
                 _visualTime,
                 _solarField,
                 _surfaceField,
@@ -265,6 +298,56 @@ internal static class IntenseHeatWeatherRuntime
             _solarField = IntenseHeatSolarField.Build(room);
             _surfaceField = HeatWaveSurfaceField.Build(room);
         }
+
+        // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+        // Persistent ocular adaptation makes entering direct sun sting immediately and
+        // leaving it retain a short purple-brown negative image. This state belongs to
+        // the room controller so it survives frame-to-frame instead of becoming a
+        // periodic shader pulse.
+        private void UpdateSolarMemory(float viewerLoad)
+        {
+            viewerLoad = Mathf.Clamp01(viewerLoad);
+            float adaptationStep = viewerLoad > _solarExposure ? 0.015f : 0.006f;
+            _solarExposure = Mathf.MoveTowards(
+                _solarExposure,
+                viewerLoad,
+                adaptationStep);
+
+            float enteredSun = Mathf.Max(0f, viewerLoad - _previousViewerSolarLoad);
+            _entryFlash = Mathf.Max(
+                Mathf.MoveTowards(_entryFlash, 0f, 0.035f),
+                Mathf.SmoothStep(0f, 0.82f, Mathf.Clamp01(enteredSun * 3.2f)));
+
+            float adaptationLag = Mathf.Max(0f, _solarExposure - viewerLoad);
+            _afterimage = Mathf.Max(
+                Mathf.MoveTowards(_afterimage, 0f, 0.0045f),
+                adaptationLag * 0.88f);
+
+            _previousViewerSolarLoad = viewerLoad;
+        }
+
+        private float EvaluateViewerSolarLoad()
+        {
+            if (room?.game?.cameras != null)
+            {
+                for (int i = 0; i < room.game.cameras.Length; i++)
+                {
+                    RoomCamera camera = room.game.cameras[i];
+                    if (camera?.room != room ||
+                        camera.followAbstractCreature?.realizedCreature is not Player player)
+                    {
+                        continue;
+                    }
+
+                    Vector2 position = player.mainBodyChunk?.pos ?? player.firstChunk.pos;
+                    return Mathf.Clamp01(
+                        IntenseHeatSolarField.SampleExposure(room, position) * _intensity);
+                }
+            }
+
+            return Mathf.Clamp01(_intensity * _solar);
+        }
+        // [IH-OPT-03_SOLAR_MEMORY] END
 
         private static float EvaluateSolar(Room targetRoom)
         {

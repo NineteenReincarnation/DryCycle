@@ -88,7 +88,6 @@ internal static class WeatherScheduleRuntime
         params string[] ids)
     {
         if (world?.game == null ||
-            clock == null ||
             ids == null ||
             ids.Length == 0 ||
             !world.game.IsStorySession ||
@@ -109,6 +108,14 @@ internal static class WeatherScheduleRuntime
                 out _))
         {
             return previewIntensity;
+        }
+
+        // A missing clock blocks the random phase schedule, but must not block the
+        // explicit developer Preview checked above. This is common while DevUI is
+        // open during camera/room transitions.
+        if (clock == null)
+        {
+            return 0f;
         }
 
         float bestIntensity = 0f;

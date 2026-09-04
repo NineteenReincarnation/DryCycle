@@ -15,6 +15,7 @@ internal static class DryCycleShaderAssets
     internal const string FogCompositeShaderKey = "DryCycleFogComposite";
     internal const string HeatWaveAtmosphereShaderKey = "DryCycleHeatWaveAtmosphere";
     internal const string IntenseHeatAtmosphereShaderKey = "DryCycleIntenseHeatAtmosphere";
+    internal const string DehydrationCompositeShaderKey = "DryCycleDehydrationComposite";
     internal const string BundleRelativePath = "assets/drycycle/drycycleweather";
     internal const string BundleVersionRelativePath =
         "assets/drycycle/drycycleweather.version.txt";
@@ -29,6 +30,8 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/shaders/drycycleheatwaveatmosphere.shader";
     private const string IntenseHeatAtmosphereAssetPath =
         "assets/drycycle/shaders/drycycleintenseheatatmosphere.shader";
+    private const string DehydrationCompositeAssetPath =
+        "assets/drycycle/shaders/drycycledehydrationcomposite.shader";
 
     private static AssetBundle _bundle;
     private static bool _enabled;
@@ -39,12 +42,14 @@ internal static class DryCycleShaderAssets
     internal static ComputeShader FogNoiseCompute { get; private set; }
     internal static FShader HeatWaveAtmosphere { get; private set; }
     internal static FShader IntenseHeatAtmosphere { get; private set; }
+    internal static FShader DehydrationComposite { get; private set; }
 
     internal static bool HasFogComposite => FogComposite != null;
     internal static bool HasFluidCompute => FogFluidCompute != null;
     internal static bool HasNoiseCompute => FogNoiseCompute != null;
     internal static bool HasHeatWaveAtmosphere => HeatWaveAtmosphere != null;
     internal static bool HasIntenseHeatAtmosphere => IntenseHeatAtmosphere != null;
+    internal static bool HasDehydrationComposite => DehydrationComposite != null;
 
     internal static void Enable()
     {
@@ -127,6 +132,7 @@ internal static class DryCycleShaderAssets
             LoadFogAssets(rainWorld);
             LoadHeatWaveAssets(rainWorld);
             LoadIntenseHeatAssets(rainWorld);
+            LoadDehydrationAssets(rainWorld);
 
             if (!SystemInfo.supportsComputeShaders)
             {
@@ -143,6 +149,7 @@ internal static class DryCycleShaderAssets
                 $"FogNoise={(FogNoiseCompute != null ? "yes" : "no")}, " +
                 $"HeatWaveAtmosphere={(HeatWaveAtmosphere != null ? "yes" : "no")}, " +
                 $"IntenseHeatAtmosphere={(IntenseHeatAtmosphere != null ? "yes" : "no")}, " +
+                $"DehydrationComposite={(DehydrationComposite != null ? "yes" : "no")}, " +
                 $"ComputeSupported={SystemInfo.supportsComputeShaders}, " +
                 $"Unity={Application.unityVersion}, GPU='{SystemInfo.graphicsDeviceName}'.");
         }
@@ -153,6 +160,7 @@ internal static class DryCycleShaderAssets
             FogNoiseCompute = null;
             HeatWaveAtmosphere = null;
             IntenseHeatAtmosphere = null;
+            DehydrationComposite = null;
             Plugin.Logger?.LogError(
                 "DryCycle failed to initialize custom weather shaders. " +
                 "Compatibility renderers will remain available where implemented.");
@@ -252,6 +260,33 @@ internal static class DryCycleShaderAssets
                 IntenseHeatAtmosphereShaderKey,
                 intenseShader);
             rainWorld.Shaders[IntenseHeatAtmosphereShaderKey] = IntenseHeatAtmosphere;
+        }
+    }
+
+    private static void LoadDehydrationAssets(RainWorld rainWorld)
+    {
+        Shader dehydrationShader = _bundle.LoadAsset<Shader>(DehydrationCompositeAssetPath);
+        if (dehydrationShader == null)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle weather bundle is missing shader '{DehydrationCompositeAssetPath}'. " +
+                "Dehydration will keep its mesh-based compatibility presentation, but " +
+                "advanced tear-film, focus and retinal processing require rebuilding " +
+                "the weather bundle.");
+        }
+        else if (!dehydrationShader.isSupported)
+        {
+            Plugin.Logger?.LogError(
+                $"DryCycle dehydration composite shader '{dehydrationShader.name}' is not " +
+                $"supported by '{SystemInfo.graphicsDeviceName}' " +
+                $"({SystemInfo.graphicsDeviceType}).");
+        }
+        else
+        {
+            DehydrationComposite = FShader.CreateShader(
+                DehydrationCompositeShaderKey,
+                dehydrationShader);
+            rainWorld.Shaders[DehydrationCompositeShaderKey] = DehydrationComposite;
         }
     }
 

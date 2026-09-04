@@ -6,6 +6,7 @@ using DryCycle.Rendering;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.Fog;
 using DryCycle.Weather.Scheduling;
+using DryCycle.Weather.Spatial;
 using MoreSlugcats;
 using UnityEngine;
 
@@ -940,15 +941,43 @@ internal static class FogWeatherRuntime
             !RegionDayNightOptions.IsEnabled(world) ||
             string.IsNullOrWhiteSpace(regionId) ||
             (!RegionClimateRegistry.RegionCanUseWeather(regionId, "Fog") &&
-             !RegionClimateRegistry.RegionCanUseWeather(regionId, "DenseFog")) ||
+             !RegionClimateRegistry.RegionCanUseWeather(regionId, "DenseFog") &&
+             !IsFogPreview(world)) ||
             _controllers.TryGetValue(self, out _))
         {
             return;
         }
 
-        FogWeatherController controller = new(self);
-        _controllers.Add(self, controller);
-        self.AddObject(controller);
+        EnsureController(self);
+    }
+
+    /// <summary>
+    /// Preview is allowed to materialize the controller after Room.Loaded, regardless
+    /// of whether this region's random climate table normally rolls Fog.
+    /// </summary>
+    internal static void EnsurePreviewController(Room room)
+    {
+        if (!_enabled ||
+            room?.world?.game == null ||
+            !room.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(room.world))
+        {
+            return;
+        }
+
+        EnsureController(room);
+    }
+
+    private static void EnsureController(Room room)
+    {
+        if (room == null || _controllers.TryGetValue(room, out _))
+        {
+            return;
+        }
+
+        FogWeatherController controller = new(room);
+        _controllers.Add(room, controller);
+        room.AddObject(controller);
     }
 
     private static bool TryEvaluate(Room room, out float fog, out float denseFog)
@@ -959,11 +988,12 @@ internal static class FogWeatherRuntime
         World world = room?.world;
         if (world?.game == null ||
             !world.game.IsStorySession ||
-            !RegionDayNightOptions.IsEnabled(world) ||
-            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
+            !RegionDayNightOptions.IsEnabled(world))
         {
             return false;
         }
+
+        WorldClockHooks.TryGetClock(world, out WorldClock clock);
 
         WeatherScheduleRuntime.Synchronize(world);
         fog = WeatherScheduleRuntime.GetIntensity(
@@ -977,6 +1007,18 @@ internal static class FogWeatherRuntime
             WeatherScheduleEventKind.Weather,
             "DenseFog");
         return fog > Epsilon || denseFog > Epsilon;
+    }
+
+    private static bool IsFogPreview(World world)
+    {
+        if (!WeatherSpatialPreview.IsActiveFor(world) ||
+            WeatherSpatialPreview.Kind != WeatherScheduleEventKind.Weather)
+        {
+            return false;
+        }
+
+        string id = WeatherSpatialCatalog.NormalizeId(WeatherSpatialPreview.WeatherId);
+        return id == "FOG" || id == "DENSEFOG";
     }
 
     private static TriangleMesh CreateFallbackVeilMesh(float width, float height)

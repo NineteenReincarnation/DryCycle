@@ -38,6 +38,11 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                 uniform float2 _DryCycleIntenseRoomSizePx;
                 uniform float _DryCycleIntenseHeatIntensity;
                 uniform float _DryCycleIntenseSolarIntensity;
+                // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+                uniform float _DryCycleIntenseSolarExposure;
+                uniform float _DryCycleIntenseEntryFlash;
+                uniform float _DryCycleIntenseAfterimage;
+                // [IH-OPT-03_SOLAR_MEMORY] END
                 uniform float _DryCycleIntenseHeatTime;
                 uniform float _DryCycleIntenseHasOpticalTextures;
                 uniform float _DryCycleIntenseHasSurfaceField;
@@ -62,6 +67,18 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     float sky;
                     float shimmer;
                     float blur;
+                    // [IH-OPT-01_SURFACE_PLUMES] BEGIN
+                    float plume;
+                    float2 plumeFlow;
+                    // [IH-OPT-01_SURFACE_PLUMES] END
+                    // [IH-OPT-02_DRY_AIR] BEGIN
+                    float dryDust;
+                    // [IH-OPT-02_DRY_AIR] END
+                    // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                    float backHaze;
+                    float midShear;
+                    float frontGrain;
+                    // [IH-OPT-04_DEPTH_LAYERS] END
                 };
 
                 v2f vert(appdata_full v)
@@ -98,6 +115,18 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     p = frac(p * float2(123.34, 345.45));
                     p += dot(p, p + 34.345);
                     return frac(p.x * p.y);
+                }
+
+                float ValueNoise(float2 p)
+                {
+                    float2 cell = floor(p);
+                    float2 local = frac(p);
+                    local = local * local * (3.0 - 2.0 * local);
+                    float a = Hash21(cell);
+                    float b = Hash21(cell + float2(1.0, 0.0));
+                    float c = Hash21(cell + float2(0.0, 1.0));
+                    float d = Hash21(cell + float2(1.0, 1.0));
+                    return lerp(lerp(a, b, local.x), lerp(c, d, local.x), local.y);
                 }
 
                 float2 RoomUV(float2 screenUV)
@@ -150,6 +179,82 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     return lerp(a, b, blend);
                 }
 
+                // [IH-OPT-01_SURFACE_PLUMES] BEGIN
+                // Local heat columns are anchored to the room surface field. They are
+                // narrow near hot terrain, break apart as they rise, and move mostly
+                // upward so the room no longer deforms as one coherent jelly sheet.
+                float EvaluateSurfacePlume(
+                    float2 roomPx,
+                    float4 surface,
+                    float directSun,
+                    out float2 plumeFlow)
+                {
+                    float t = _DryCycleIntenseHeatTime;
+                    float phase = surface.a * 6.2831853;
+                    float rise = roomPx.y * 0.0105 - t * 0.92;
+                    float lane =
+                        sin(roomPx.x * 0.051 + rise * 0.41 + phase) * 0.52 +
+                        sin(roomPx.x * 0.093 - rise * 0.23 + phase * 1.7) * 0.28 +
+                        sin(roomPx.x * 0.021 + rise * 0.67 - phase * 0.8) * 0.20;
+                    float breakup = ValueNoise(
+                        roomPx / float2(78.0, 128.0) +
+                        float2(sin(t * 0.11) * 0.08, -t * 0.075));
+                    float column = smoothstep(-0.08, 0.66, lane + (breakup - 0.5) * 0.72);
+                    float source = saturate(
+                        surface.r * 0.88 +
+                        surface.g * 0.20 -
+                        (1.0 - surface.b) * 0.85);
+                    float plume = source * directSun * Smooth01(column);
+                    plumeFlow = SafeNormalize(float2(
+                        lane * 0.36 + (breakup - 0.5) * 0.34,
+                        0.92 + breakup * 0.18));
+                    return plume;
+                }
+                // [IH-OPT-01_SURFACE_PLUMES] END
+
+                // [IH-OPT-02_DRY_AIR] BEGIN
+                float EvaluateDryAir(float2 roomPx, float intensity, float directSun)
+                {
+                    float t = _DryCycleIntenseHeatTime;
+                    float broad = ValueNoise(
+                        roomPx / float2(185.0, 132.0) +
+                        float2(t * 0.008, -t * 0.021));
+                    float fibrous = ValueNoise(
+                        roomPx / float2(42.0, 96.0) +
+                        float2(-t * 0.018, -t * 0.052));
+                    float suspended = smoothstep(0.38, 0.86, broad * 0.64 + fibrous * 0.36);
+                    return suspended * intensity * (0.58 + directSun * 0.42);
+                }
+                // [IH-OPT-02_DRY_AIR] END
+
+                // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                // Three different spatial/temporal scales approximate Rain World's
+                // back, middle and foreground planes without requiring a depth buffer.
+                void EvaluateDepthLayers(
+                    float2 roomPx,
+                    float intensity,
+                    float sky,
+                    out float backHaze,
+                    out float midShear,
+                    out float frontGrain)
+                {
+                    float t = _DryCycleIntenseHeatTime;
+                    float back = ValueNoise(
+                        roomPx / float2(460.0, 330.0) +
+                        float2(t * 0.006, -t * 0.004));
+                    float middle = ValueNoise(
+                        roomPx / float2(170.0, 235.0) +
+                        float2(-t * 0.015, -t * 0.034));
+                    float front = ValueNoise(
+                        roomPx / float2(31.0, 57.0) +
+                        float2(t * 0.026, -t * 0.083));
+                    backHaze = intensity * (0.34 + sky * 0.66) *
+                        smoothstep(0.20, 0.86, back);
+                    midShear = intensity * smoothstep(0.30, 0.80, middle);
+                    frontGrain = intensity * smoothstep(0.58, 0.94, front);
+                }
+                // [IH-OPT-04_DEPTH_LAYERS] END
+
                 HeatSample EvaluateHeat(float2 screenUV, float2 roomUV, float2 roomPx)
                 {
                     HeatSample h;
@@ -166,6 +271,26 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     h.directSun = saturate(sun.r * solar);
                     h.penumbra = sun.g;
                     h.sky = sun.b;
+
+                    // [IH-OPT-01_SURFACE_PLUMES] BEGIN
+                    h.plume = EvaluateSurfacePlume(
+                        roomPx,
+                        surface,
+                        h.directSun,
+                        h.plumeFlow);
+                    // [IH-OPT-01_SURFACE_PLUMES] END
+                    // [IH-OPT-02_DRY_AIR] BEGIN
+                    h.dryDust = EvaluateDryAir(roomPx, intensity, h.directSun);
+                    // [IH-OPT-02_DRY_AIR] END
+                    // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                    EvaluateDepthLayers(
+                        roomPx,
+                        intensity,
+                        h.sky,
+                        h.backHaze,
+                        h.midShear,
+                        h.frontGrain);
+                    // [IH-OPT-04_DEPTH_LAYERS] END
 
                     float largeA = sin(
                         roomPx.x * 0.0068 +
@@ -231,23 +356,24 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     float heatDrive = intensity * exposureDrive;
 
                     // Keep the air violently hot without making the whole camera feel
-                    // seasick. Large-scale displacement is reduced; smaller refraction
-                    // layers still provide dense boiling detail.
+                    // gelatinous. Restrain the broad coherent displacement more than
+                    // the fine refraction so the heat still boils without dragging the
+                    // entire room back and forth as one soft sheet.
                     float2 macroOffset = float2(
                         (largeA * 0.56 + largeB * 0.24) * 3.8,
                         (largeA * 0.72 - largeB * 0.44 + largeC * 0.20) * 6.8);
-                    macroOffset *= h.boil * heatDrive;
+                    macroOffset *= h.boil * heatDrive * 0.84;
 
                     float2 normalOffset = float2(
                         baseNormal.x * 3.5 + detailNormal.x * 1.55,
                         baseNormal.y * 6.7 + detailNormal.y * 3.15);
-                    normalOffset *= heatDrive * (0.56 + h.sheet * 0.76);
+                    normalOffset *= heatDrive * (0.56 + h.sheet * 0.76) * 0.92;
 
                     float groundMirage = h.ground * h.directSun * intensity;
                     float2 mirageOffset = float2(
                         detailNormal.x * 3.0,
                         (mirage.g * 2.0 - 1.0) * 13.0 + baseNormal.y * 5.0);
-                    mirageOffset *= groundMirage * (0.44 + mirageBand * 0.82);
+                    mirageOffset *= groundMirage * (0.44 + mirageBand * 0.82) * 0.96;
 
                     h.shimmer = saturate(
                         length(detailNormal) * 0.32 +
@@ -260,12 +386,28 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                         intensity *
                         (0.34 + h.directSun * 0.76);
 
+                    // [IH-OPT-01_SURFACE_PLUMES] BEGIN
+                    float2 plumeOffset = float2(
+                        h.plumeFlow.x * 3.4,
+                        h.plumeFlow.y * 5.2) *
+                        h.plume * intensity;
+                    // [IH-OPT-01_SURFACE_PLUMES] END
+
+                    // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                    float2 depthOffset = float2(
+                        sin(roomPx.y * 0.012 - _DryCycleIntenseHeatTime * 0.54),
+                        cos(roomPx.x * 0.006 + _DryCycleIntenseHeatTime * 0.27) * 0.42) *
+                        h.midShear * 1.55;
+                    // [IH-OPT-04_DEPTH_LAYERS] END
+
                     h.offsetPx = ClampMagnitude(
-                        macroOffset + normalOffset + mirageOffset + micro,
-                        lerp(9.5, 19.0, intensity * (0.48 + h.directSun * 0.52)));
+                        macroOffset + normalOffset + mirageOffset + micro +
+                        plumeOffset + depthOffset,
+                        lerp(9.0, 17.8, intensity * (0.48 + h.directSun * 0.52)));
                     h.blur = saturate(
                         intensity *
-                        (h.sheet * 0.42 + h.boil * 0.19 + groundMirage * 0.43));
+                        (h.sheet * 0.42 + h.boil * 0.19 + groundMirage * 0.43) +
+                        h.plume * 0.10 + h.backHaze * 0.07);
                     return h;
                 }
 
@@ -284,6 +426,102 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     float4 d = tex2D(_GrabTexture, uv + axis * 2.05);
                     return lerp(center, center * 0.46 + (a + b) * 0.18 + (c + d) * 0.09, blur * 0.58);
                 }
+
+                // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                float3 ApplyDepthLayers(
+                    float3 color,
+                    float2 grabUV,
+                    float2 roomPx,
+                    HeatSample h)
+                {
+                    float2 pixel = 1.0 / max(_screenSize, float2(1.0, 1.0));
+                    float2 midAxis = float2(
+                        sin(roomPx.y * 0.009 - _DryCycleIntenseHeatTime * 0.37),
+                        cos(roomPx.x * 0.004 + _DryCycleIntenseHeatTime * 0.19) * 0.38);
+                    float3 middleScene = tex2D(
+                        _GrabTexture,
+                        saturate(grabUV + midAxis * pixel * (0.55 + h.midShear * 1.40))).rgb;
+                    color = lerp(color, middleScene, h.midShear * 0.085);
+
+                    float luma = dot(color, float3(0.299, 0.587, 0.114));
+                    float3 distantDryAir = lerp(
+                        float3(0.42, 0.205, 0.070),
+                        float3(0.91, 0.62, 0.22),
+                        saturate(luma * 0.78 + 0.18));
+                    color = lerp(color, distantDryAir, h.backHaze * 0.105);
+
+                    float foreground = (ValueNoise(
+                        roomPx / float2(8.0, 14.0) +
+                        float2(_DryCycleIntenseHeatTime * 0.021, -_DryCycleIntenseHeatTime * 0.071)) - 0.5) *
+                        h.frontGrain * 0.018;
+                    color += foreground * float3(1.0, 0.72, 0.34);
+                    return saturate(color);
+                }
+                // [IH-OPT-04_DEPTH_LAYERS] END
+
+                // [IH-OPT-02_DRY_AIR] BEGIN
+                float3 ApplyDryAirTexture(float3 color, float2 roomPx, HeatSample h)
+                {
+                    float t = _DryCycleIntenseHeatTime;
+                    float luma = dot(color, float3(0.299, 0.587, 0.114));
+                    float fine = ValueNoise(
+                        roomPx / float2(11.0, 19.0) +
+                        float2(-t * 0.018, -t * 0.063));
+                    float filament = abs(sin(
+                        roomPx.x * 0.073 +
+                        roomPx.y * 0.019 -
+                        t * 0.31 +
+                        fine * 3.2));
+                    float floatingFiber = smoothstep(0.965, 0.998, filament) *
+                        smoothstep(0.54, 0.94, fine) * h.dryDust;
+                    float mineralSpeck = smoothstep(0.86, 0.985, fine) * h.dryDust;
+
+                    float3 bleachedDust = float3(0.93, 0.73, 0.40);
+                    color = lerp(
+                        color,
+                        color * float3(1.035, 0.985, 0.88) + bleachedDust * 0.035,
+                        h.dryDust * 0.16);
+                    color.b *= 1.0 - h.dryDust * (0.025 + (1.0 - luma) * 0.025);
+                    color += bleachedDust * mineralSpeck * 0.032;
+                    color += float3(1.0, 0.79, 0.47) * floatingFiber * 0.050;
+                    return saturate(color);
+                }
+                // [IH-OPT-02_DRY_AIR] END
+
+                // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+                float3 ApplySolarMemory(float3 color, float2 roomPx, HeatSample h)
+                {
+                    float exposure = saturate(_DryCycleIntenseSolarExposure);
+                    float entryFlash = saturate(_DryCycleIntenseEntryFlash);
+                    float afterimage = saturate(_DryCycleIntenseAfterimage);
+                    float luma = dot(color, float3(0.299, 0.587, 0.114));
+                    float highlight = smoothstep(0.42, 0.91, luma);
+
+                    // Sustained direct light chalks highlights toward a dry ivory-gold.
+                    float burn = exposure * h.directSun;
+                    float3 sunBleach = saturate(
+                        color * float3(1.065, 1.005, 0.82) +
+                        float3(0.085, 0.050, 0.008));
+                    color = lerp(color, sunBleach, burn * (0.075 + highlight * 0.16));
+
+                    // Crossing into a bright zone produces one short adaptation sting,
+                    // driven by runtime exposure change rather than a repeating pulse.
+                    float flash = entryFlash * h.directSun;
+                    color = 1.0 - (1.0 - color) * (1.0 - flash * 0.12);
+                    color = lerp(color, float3(1.0, 0.79, 0.34), flash * 0.055);
+
+                    // When the viewer reaches shade before the adapted eye recovers, a
+                    // slow purple-brown negative remains in broad retinal islands.
+                    float retinal = 0.64 + 0.36 * ValueNoise(
+                        roomPx / float2(205.0, 154.0) + float2(13.7, 7.9));
+                    float residual = afterimage * retinal * (1.0 - h.directSun * 0.58);
+                    float3 negativeTint = saturate(
+                        (1.0 - color) * float3(0.30, 0.105, 0.32) +
+                        color * float3(0.50, 0.34, 0.47));
+                    color = lerp(color, negativeTint, residual * 0.19);
+                    return saturate(color);
+                }
+                // [IH-OPT-03_SOLAR_MEMORY] END
 
                 float SolarBlotchField(float2 roomPx)
                 {
@@ -372,6 +610,18 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     float3 emberPocket = float3(0.94, 0.285, 0.028);
                     color = lerp(color, emberPocket, hotPocket * 0.12);
 
+                    // [IH-OPT-01_SURFACE_PLUMES] BEGIN
+                    // Plume cores carry localized copper-gold density. The spatial
+                    // distortion is applied earlier; this restrained color response
+                    // lets the player read where the hot air is actually rising from.
+                    float plumeHeat = h.plume * intensity;
+                    float3 plumeCopper = float3(0.96, 0.39, 0.055);
+                    color = lerp(
+                        color,
+                        plumeCopper,
+                        plumeHeat * (0.035 + highlight * 0.045));
+                    // [IH-OPT-01_SURFACE_PLUMES] END
+
                     float verticalSun = smoothstep(0.04, 0.96, screenUV.y);
                     float solarWash = intensity * solar *
                         (0.030 + verticalSun * 0.075);
@@ -452,9 +702,18 @@ Shader "DryCycle/IntenseHeatAtmosphere"
                     {
                         return float4(h.directSun, h.sheet, h.boil, 1.0);
                     }
-
                     float4 scene = SampleScene(grabUV, h.offsetPx, h.blur, flow);
-                    float3 color = ApplyDisasterGrade(scene.rgb, h, screenUV, roomPx);
+                    float3 color = scene.rgb;
+                    // [IH-OPT-04_DEPTH_LAYERS] BEGIN
+                    color = ApplyDepthLayers(color, grabUV, roomPx, h);
+                    // [IH-OPT-04_DEPTH_LAYERS] END
+                    color = ApplyDisasterGrade(color, h, screenUV, roomPx);
+                    // [IH-OPT-02_DRY_AIR] BEGIN
+                    color = ApplyDryAirTexture(color, roomPx, h);
+                    // [IH-OPT-02_DRY_AIR] END
+                    // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+                    color = ApplySolarMemory(color, roomPx, h);
+                    // [IH-OPT-03_SOLAR_MEMORY] END
                     color = ApplyPeripheralHeat(color, grabUV, screenUV);
 
                     if (_DryCycleIntenseDebugMode == 4)

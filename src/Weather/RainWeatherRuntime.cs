@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using DryCycle.DayNight;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.Scheduling;
+using DryCycle.Weather.Spatial;
 
 namespace DryCycle.Weather;
 
@@ -91,8 +92,38 @@ internal static class RainWeatherRuntime
             !RegionDayNightOptions.IsEnabled(self.world) ||
             self.abstractRoom == null ||
             IsIntactShelter(self) ||
-            !RegionSupportsRain(self.world.region.name) ||
+            (!RegionSupportsRain(self.world.region.name) &&
+             !IsDeathRainPreview(self.world)) ||
             self.roomRain != null)
+        {
+            return;
+        }
+
+        EnsureRoomRainCarrier(self);
+    }
+
+    /// <summary>
+    /// DeathRain Preview can be selected after the current room was loaded and must not
+    /// depend on that region having a random rain entry in RegionClimate.json.
+    /// </summary>
+    internal static void EnsurePreviewCarrier(Room room)
+    {
+        if (!_enabled ||
+            room?.world?.game == null ||
+            room.abstractRoom == null ||
+            !room.game.IsStorySession ||
+            !RegionDayNightOptions.IsEnabled(room.world) ||
+            IsIntactShelter(room))
+        {
+            return;
+        }
+
+        EnsureRoomRainCarrier(room);
+    }
+
+    private static void EnsureRoomRainCarrier(Room room)
+    {
+        if (room?.game?.globalRain == null || room.roomRain != null)
         {
             return;
         }
@@ -101,12 +132,12 @@ internal static class RainWeatherRuntime
         // loops. DryCycle marks this carrier and owns its Update completely; assigning
         // None explicitly prevents the constructor-copied room DangerType from becoming
         // part of DryCycle's weather semantics.
-        RoomRain roomRain = new(self.game.globalRain, self)
+        RoomRain roomRain = new(room.game.globalRain, room)
         {
             dangerType = RoomRain.DangerType.None
         };
-        self.roomRain = roomRain;
-        self.AddObject(roomRain);
+        room.roomRain = roomRain;
+        room.AddObject(roomRain);
         _syntheticRoomRain.Add(roomRain, new SyntheticRoomRainMarker());
     }
 
@@ -134,13 +165,14 @@ internal static class RainWeatherRuntime
         World world = self?.game?.world;
         if (world?.game == null ||
             !world.game.IsStorySession ||
-            !RegionDayNightOptions.IsEnabled(world) ||
-            !WorldClockHooks.TryGetClock(world, out WorldClock clock))
+            !RegionDayNightOptions.IsEnabled(world))
         {
             StopOwnedDeathRain(self);
             orig(self);
             return;
         }
+
+        WorldClockHooks.TryGetClock(world, out WorldClock clock);
 
         float light = WeatherScheduleRuntime.GetIntensity(
             world,
@@ -152,6 +184,13 @@ internal static class RainWeatherRuntime
             clock,
             WeatherScheduleEventKind.DangerType,
             "DeathRain");
+
+        if (clock == null && light <= 0.0001f && death <= 0.0001f)
+        {
+            StopOwnedDeathRain(self);
+            orig(self);
+            return;
+        }
 
         GlobalRainState state = _globalStates.GetOrCreateValue(self);
         if (death > 0.0001f)
@@ -318,5 +357,13 @@ internal static class RainWeatherRuntime
                RegionClimateRegistry.RegionCanUseWeather(regionId, "LightRain") ||
                RegionClimateRegistry.RegionCanUseWeather(regionId, "HeavyRain") ||
                RegionClimateRegistry.RegionCanUseDanger(regionId, "DeathRain");
+    }
+
+    private static bool IsDeathRainPreview(World world)
+    {
+        return WeatherSpatialPreview.IsActiveFor(world) &&
+               WeatherSpatialPreview.Kind == WeatherScheduleEventKind.DangerType &&
+               WeatherSpatialCatalog.NormalizeId(WeatherSpatialPreview.WeatherId) ==
+               "DEATHRAIN";
     }
 }

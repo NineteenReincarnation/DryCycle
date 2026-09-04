@@ -12,6 +12,8 @@ namespace DryCycle.Thirst;
 internal static class DehydrationVisualRuntime
 {
     private const int DustCount = 14;
+    private const int VignetteSegments = 48;
+    private const int VignetteRings = 4;
     private const float Epsilon = 0.0001f;
 
     private static readonly Dictionary<RoomCamera, CameraVisualState> CameraStates = new();
@@ -45,6 +47,7 @@ internal static class DehydrationVisualRuntime
         On.RainWorldGame.ShutDownProcess -= RainWorldGame_ShutDownProcess;
         On.RoomCamera.Update -= RoomCamera_Update;
         DestroyAllCameraStates();
+        DehydrationVisualTextures.Dispose();
     }
 
     private static void RainWorldGame_Update(
@@ -96,8 +99,7 @@ internal static class DehydrationVisualRuntime
         Player player = camera.followAbstractCreature?.realizedCreature as Player;
         bool validPlayer = camera.game.IsStorySession &&
                            player != null &&
-                           !player.isNPC &&
-                           !player.dead;
+                           !player.isNPC;
         float debt = validPlayer ? HydrationWeakness.GetDebt(player) : 0f;
 
         CameraVisualState state = GetOrCreateCameraState(camera);
@@ -197,12 +199,13 @@ internal static class DehydrationVisualRuntime
 
     private sealed class CameraVisualState
     {
-        private static readonly Color DryWashColor = new(0.82f, 0.75f, 0.59f);
+        private static readonly Color DryWashColor = new(0.93f, 0.87f, 0.73f);
         private static readonly Color DryDustColor = new(0.92f, 0.82f, 0.62f);
 
         private readonly RainWorldGame _game;
         private readonly int _seed;
         private readonly FContainer _root;
+        private readonly FSprite _composite;
         private readonly FSprite _wash;
         private readonly TriangleMesh _vignette;
         private readonly FSprite[] _dust = new FSprite[DustCount];
@@ -210,14 +213,16 @@ internal static class DehydrationVisualRuntime
 
         private float _smoothedDebt;
         private float _smoothedExertion;
-        private float _lastWidth = -1f;
-        private float _lastHeight = -1f;
+        private bool _deathLocked;
+        private float _lockedDebt;
 
         internal CameraVisualState(RoomCamera camera, int seed)
         {
             _game = camera.game;
             _seed = seed;
             _root = new FContainer { isVisible = false };
+            _composite = DehydrationRenderPipeline.CreateSprite(camera);
+            DehydrationRenderPipeline.AddToContainer(_composite, camera);
 
             _wash = CreateFullscreenSprite(DryWashColor);
             _vignette = CreateVignetteMesh();
@@ -247,7 +252,25 @@ internal static class DehydrationVisualRuntime
 
         internal void Update(RoomCamera camera, Player player, float debt)
         {
-            float targetDebt = Mathf.Clamp(debt, 0f, HydrationWeakness.LethalDebt);
+            if (player != null && !player.isNPC)
+            {
+                if (player.dead && (debt > Epsilon || _smoothedDebt > Epsilon))
+                {
+                    _deathLocked = true;
+                    _lockedDebt = Mathf.Max(_lockedDebt, Mathf.Max(debt, _smoothedDebt));
+                }
+                else if (!player.dead && _deathLocked)
+                {
+                    // A living followed player means a new attempt/session owns this
+                    // camera. Only then may a dehydration-death image clear.
+                    _deathLocked = false;
+                    _lockedDebt = 0f;
+                }
+            }
+
+            float targetDebt = _deathLocked
+                ? _lockedDebt
+                : Mathf.Clamp(debt, 0f, HydrationWeakness.LethalDebt);
             _smoothedDebt = Mathf.Lerp(_smoothedDebt, targetDebt, targetDebt > _smoothedDebt ? 0.055f : 0.09f);
 
             float targetExertion = player == null ? 0f : Mathf.Clamp01(player.aerobicLevel);
@@ -257,6 +280,7 @@ internal static class DehydrationVisualRuntime
             {
                 _smoothedDebt = 0f;
                 _root.isVisible = false;
+                DehydrationRenderPipeline.Hide(_composite);
                 return;
             }
 
@@ -285,6 +309,37 @@ internal static class DehydrationVisualRuntime
             float pulse = 0.5f + 0.5f * Mathf.Sin(
                 time * Mathf.Lerp(1.35f, 2.8f, dying) + _seed * 0.71f);
             float exertionDrive = severe * _smoothedExertion;
+            // The final fraction of the dying stage is a one-way eyelid closure.
+            // Periodic weakness blinks may reopen; terminal closure may not, and a
+            // dehydration death holds it at fully closed until a living player owns
+            // the camera again.
+            float terminalClosure = _deathLocked
+                ? 1f
+                : StageAmount(0.72f, 1f, dying);
+            float blink = Mathf.Max(
+                ComputeBlink(time, collapse, dying),
+                terminalClosure);
+
+            DehydrationRenderFrame renderFrame = new(
+                mild,
+                moderate,
+                severe,
+                collapse,
+                dying,
+                _smoothedExertion,
+                blink,
+                pulse,
+                _deathLocked,
+                time,
+                active: true);
+            if (DehydrationRenderPipeline.Draw(_composite, camera, renderFrame))
+            {
+                // The GrabPass owns the complete presentation when available. Keep the
+                // mesh/sprite implementation as a true compatibility fallback only.
+                _root.isVisible = false;
+                ApplyMinimalInstability(camera, player, collapse, dying, pulse);
+                return;
+            }
 
             _root.isVisible = true;
             _root.x = 0f;
@@ -292,103 +347,140 @@ internal static class DehydrationVisualRuntime
 
             UpdateFullscreenSprite(_wash, width, height);
             _wash.alpha = Mathf.Clamp01(
-                0.018f * mild +
-                0.026f * moderate +
-                0.035f * severe +
+                0.035f * mild +
+                0.045f * moderate +
+                0.050f * severe +
                 0.045f * collapse +
-                0.060f * dying +
-                0.018f * exertionDrive);
+                0.045f * dying +
+                0.012f * exertionDrive);
             _wash.isVisible = _wash.alpha > Epsilon;
 
             float vignetteAlpha = Mathf.Clamp01(
-                0.055f * mild +
-                0.11f * moderate +
-                0.17f * severe +
-                0.26f * collapse +
-                0.27f * dying +
-                0.035f * pulse * collapse);
+                0.16f * mild +
+                0.20f * moderate +
+                0.20f * severe +
+                0.20f * collapse +
+                0.14f * dying +
+                0.025f * pulse * collapse);
             float apertureDrive = Mathf.Clamp01(
                 0.18f * mild +
                 0.24f * moderate +
                 0.24f * severe +
                 0.22f * collapse +
                 0.22f * dying);
-            UpdateVignette(width, height, apertureDrive, vignetteAlpha);
+            UpdateVignette(
+                width,
+                height,
+                time,
+                apertureDrive,
+                Mathf.Max(vignetteAlpha, blink * 0.96f),
+                blink,
+                severe,
+                collapse,
+                dying);
 
             UpdateDust(width, height, time, moderate, severe, collapse, dying);
 
             UpdateFullscreenSprite(_blackout, width, height);
-            _blackout.alpha = ComputeBlackout(time, collapse, dying, pulse);
+            // Fainting closes the detailed vignette like eyelids. A small central dim
+            // remains, but the old generic full-screen black flash is deliberately gone.
+            float fallbackDim = Mathf.Clamp01(
+                collapse * 0.012f +
+                dying * 0.045f * pulse +
+                blink * dying * 0.055f);
+            // The mesh fallback still reaches complete darkness at the terminal
+            // point. The custom shader renders the preferred curved upper/lower lids.
+            _blackout.alpha = Mathf.Max(
+                fallbackDim,
+                terminalClosure * terminalClosure * terminalClosure);
             _blackout.isVisible = _blackout.alpha > Epsilon;
 
-            if (player != null && severe > Epsilon)
-            {
-                float instability = severe * Mathf.Lerp(0.008f, 0.055f, _smoothedExertion);
-                instability += collapse * 0.012f * pulse;
-                camera.microShake = Mathf.Max(camera.microShake, instability);
-            }
+            ApplyMinimalInstability(camera, player, collapse, dying, pulse);
         }
 
         internal void Destroy()
         {
+            _composite.RemoveFromContainer();
             _root.RemoveFromContainer();
+        }
+
+        private void ApplyMinimalInstability(
+            RoomCamera camera,
+            Player player,
+            float collapse,
+            float dying,
+            float pulse)
+        {
+            if (player == null || player.dead || collapse <= Epsilon)
+            {
+                return;
+            }
+
+            // Dehydration reads primarily through ocular failure. Camera motion remains
+            // below the visual pipeline and appears only under late-stage exertion.
+            float instability = collapse * Mathf.Lerp(0.002f, 0.010f, _smoothedExertion);
+            instability += dying * 0.002f * pulse;
+            camera.microShake = Mathf.Max(camera.microShake, instability);
         }
 
         private void UpdateVignette(
             float width,
             float height,
+            float time,
             float apertureDrive,
-            float alpha)
+            float alpha,
+            float blink,
+            float severe,
+            float collapse,
+            float dying)
         {
-            float insetX = width * Mathf.Lerp(0.08f, 0.34f, apertureDrive);
-            float insetY = height * Mathf.Lerp(0.10f, 0.31f, apertureDrive);
-            Color outer = new(0.075f, 0.042f, 0.022f, alpha);
-            Color inner = new(0.075f, 0.042f, 0.022f, 0f);
+            Vector2 center = new(
+                width * 0.5f,
+                height * (0.5f + Mathf.Sin(time * 0.37f + _seed) * 0.004f * collapse));
+            float innerRadiusX = width * Mathf.Lerp(0.46f, 0.20f, apertureDrive);
+            float innerRadiusY = height * Mathf.Lerp(0.43f, 0.15f, apertureDrive);
 
-            SetQuad(
-                _vignette,
-                0,
-                new Vector2(0f, 0f),
-                new Vector2(width, 0f),
-                new Vector2(0f, insetY),
-                new Vector2(width, insetY),
-                outer,
-                outer,
-                inner,
-                inner);
-            SetQuad(
-                _vignette,
-                4,
-                new Vector2(0f, height - insetY),
-                new Vector2(width, height - insetY),
-                new Vector2(0f, height),
-                new Vector2(width, height),
-                inner,
-                inner,
-                outer,
-                outer);
-            SetQuad(
-                _vignette,
-                8,
-                new Vector2(0f, insetY),
-                new Vector2(insetX, insetY),
-                new Vector2(0f, height - insetY),
-                new Vector2(insetX, height - insetY),
-                outer,
-                inner,
-                outer,
-                inner);
-            SetQuad(
-                _vignette,
-                12,
-                new Vector2(width - insetX, insetY),
-                new Vector2(width, insetY),
-                new Vector2(width - insetX, height - insetY),
-                new Vector2(width, height - insetY),
-                inner,
-                outer,
-                inner,
-                outer);
+            // Eye closure compresses vertically and only slightly horizontally. This
+            // produces an organic narrowing slit instead of a uniform black opacity.
+            innerRadiusX *= Mathf.Lerp(1f, 0.82f, blink);
+            innerRadiusY *= Mathf.Lerp(1f, 0.018f, blink);
+
+            float outerRadiusX = width * 0.79f;
+            float outerRadiusY = height * 0.79f;
+            float irregularity = 0.008f * severe + 0.014f * collapse + 0.018f * dying;
+
+            for (int ring = 0; ring < VignetteRings; ring++)
+            {
+                float ringT = ring / (float)(VignetteRings - 1);
+                float shapedT = ringT * ringT * (3f - 2f * ringT);
+                float radiusX = Mathf.Lerp(innerRadiusX, outerRadiusX, shapedT);
+                float radiusY = Mathf.Lerp(innerRadiusY, outerRadiusY, shapedT);
+                float ringAlpha = ring == 0
+                    ? 0f
+                    : ring == 1
+                        ? alpha * 0.20f
+                        : ring == 2
+                            ? alpha * 0.58f
+                            : alpha;
+
+                for (int segment = 0; segment <= VignetteSegments; segment++)
+                {
+                    float angle = segment / (float)VignetteSegments * Mathf.PI * 2f;
+                    float dryEdge = 1f + irregularity * (
+                        Mathf.Sin(angle * 3f + _seed * 0.83f) * 0.55f +
+                        Mathf.Sin(angle * 7f - _seed * 1.17f) * 0.30f +
+                        Mathf.Sin(angle * 11f + time * 0.12f) * 0.15f);
+                    int index = ring * (VignetteSegments + 1) + segment;
+                    _vignette.vertices[index] = center + new Vector2(
+                        Mathf.Cos(angle) * radiusX * dryEdge,
+                        Mathf.Sin(angle) * radiusY * dryEdge);
+                    _vignette.verticeColors[index] = new Color(
+                        0.035f,
+                        0.018f,
+                        0.008f,
+                        ringAlpha);
+                }
+            }
 
             _vignette.isVisible = alpha > Epsilon;
             _vignette.Refresh();
@@ -404,10 +496,11 @@ internal static class DehydrationVisualRuntime
             float dying)
         {
             float strength = Mathf.Clamp01(
-                0.025f * moderate +
-                0.06f * severe +
-                0.10f * collapse +
-                0.12f * dying);
+                0.035f +
+                0.045f * moderate +
+                0.060f * severe +
+                0.080f * collapse +
+                0.080f * dying);
 
             for (int i = 0; i < _dust.Length; i++)
             {
@@ -438,7 +531,7 @@ internal static class DehydrationVisualRuntime
                     speck.y = a * height;
                 }
 
-                float size = 0.07f + 0.11f * Hash01(i * 43 + _seed * 19 + 3);
+                float size = 0.09f + 0.14f * Hash01(i * 43 + _seed * 19 + 3);
                 speck.scaleX = size * (0.7f + a * 1.5f);
                 speck.scaleY = size * (0.45f + b * 0.75f);
                 speck.alpha = strength * (0.45f + 0.55f * Mathf.Sin(time * 0.31f + i * 2.17f) * 0.5f + 0.275f);
@@ -446,11 +539,10 @@ internal static class DehydrationVisualRuntime
             }
         }
 
-        private float ComputeBlackout(
+        private float ComputeBlink(
             float time,
             float collapse,
-            float dying,
-            float pulse)
+            float dying)
         {
             if (collapse <= Epsilon)
             {
@@ -465,11 +557,9 @@ internal static class DehydrationVisualRuntime
             if (phase < duration)
             {
                 float close = Mathf.Sin(Mathf.Clamp01(phase / duration) * Mathf.PI);
-                blink = close * Mathf.Lerp(0.16f, 0.88f, critical);
+                blink = close * Mathf.Lerp(0.30f, 1f, critical);
             }
-
-            float dimPulse = collapse * Mathf.Lerp(0.012f, 0.075f, dying) * pulse;
-            return Mathf.Clamp01(Mathf.Max(blink, dimPulse));
+            return Mathf.Clamp01(blink);
         }
 
         private static FSprite CreateFullscreenSprite(Color color)
@@ -486,13 +576,6 @@ internal static class DehydrationVisualRuntime
 
         private void UpdateFullscreenSprite(FSprite sprite, float width, float height)
         {
-            if (Mathf.Abs(_lastWidth - width) > Epsilon ||
-                Mathf.Abs(_lastHeight - height) > Epsilon)
-            {
-                _lastWidth = width;
-                _lastHeight = height;
-            }
-
             sprite.x = 0f;
             sprite.y = 0f;
             sprite.scaleX = width / 16f;
@@ -501,12 +584,27 @@ internal static class DehydrationVisualRuntime
 
         private static TriangleMesh CreateVignetteMesh()
         {
-            TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[8];
-            for (int i = 0; i < 4; i++)
+            TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[
+                (VignetteRings - 1) * VignetteSegments * 2];
+            int triangleIndex = 0;
+            int row = VignetteSegments + 1;
+            for (int ring = 0; ring < VignetteRings - 1; ring++)
             {
-                int vertex = i * 4;
-                triangles[i * 2] = new TriangleMesh.Triangle(vertex, vertex + 1, vertex + 2);
-                triangles[i * 2 + 1] = new TriangleMesh.Triangle(vertex + 1, vertex + 3, vertex + 2);
+                for (int segment = 0; segment < VignetteSegments; segment++)
+                {
+                    int innerLeft = ring * row + segment;
+                    int innerRight = innerLeft + 1;
+                    int outerLeft = innerLeft + row;
+                    int outerRight = outerLeft + 1;
+                    triangles[triangleIndex++] = new TriangleMesh.Triangle(
+                        innerLeft,
+                        innerRight,
+                        outerLeft);
+                    triangles[triangleIndex++] = new TriangleMesh.Triangle(
+                        innerRight,
+                        outerRight,
+                        outerLeft);
+                }
             }
 
             TriangleMesh mesh = new("Futile_White", triangles, customColor: true)
@@ -514,28 +612,6 @@ internal static class DehydrationVisualRuntime
                 isVisible = false
             };
             return mesh;
-        }
-
-        private static void SetQuad(
-            TriangleMesh mesh,
-            int start,
-            Vector2 bottomLeft,
-            Vector2 bottomRight,
-            Vector2 topLeft,
-            Vector2 topRight,
-            Color bottomLeftColor,
-            Color bottomRightColor,
-            Color topLeftColor,
-            Color topRightColor)
-        {
-            mesh.vertices[start] = bottomLeft;
-            mesh.vertices[start + 1] = bottomRight;
-            mesh.vertices[start + 2] = topLeft;
-            mesh.vertices[start + 3] = topRight;
-            mesh.verticeColors[start] = bottomLeftColor;
-            mesh.verticeColors[start + 1] = bottomRightColor;
-            mesh.verticeColors[start + 2] = topLeftColor;
-            mesh.verticeColors[start + 3] = topRightColor;
         }
 
         private static float StageAmount(float start, float end, float value)

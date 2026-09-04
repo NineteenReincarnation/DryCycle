@@ -174,6 +174,11 @@ internal static class WeatherSpatialPreview
         _kind = kind;
         _weatherId = WeatherSpatialCatalog.CanonicalWeatherId(kind, weatherId);
         _intensity = Mathf.Clamp01(intensity);
+
+        // Preview can be enabled after the viewed room has already completed Loaded().
+        // Provision visual/native carriers immediately instead of waiting for a room
+        // reload that may never happen during the editing session.
+        WeatherSpatialPreviewProvisioning.Ensure(world, _kind, _weatherId);
     }
 
     internal static void SetEditorTargetKey(string targetKey)

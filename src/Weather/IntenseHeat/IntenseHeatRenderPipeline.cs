@@ -9,6 +9,11 @@ internal readonly struct IntenseHeatRenderFrame
     internal readonly Vector2 RoomSizePx;
     internal readonly float Intensity;
     internal readonly float SolarIntensity;
+    // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+    internal readonly float SolarExposure;
+    internal readonly float EntryFlash;
+    internal readonly float Afterimage;
+    // [IH-OPT-03_SOLAR_MEMORY] END
     internal readonly float Time;
     internal readonly Texture2D SolarField;
     internal readonly Texture2D SurfaceField;
@@ -18,6 +23,9 @@ internal readonly struct IntenseHeatRenderFrame
         Vector2 roomSizePx,
         float intensity,
         float solarIntensity,
+        float solarExposure,
+        float entryFlash,
+        float afterimage,
         float time,
         Texture2D solarField,
         Texture2D surfaceField,
@@ -28,6 +36,11 @@ internal readonly struct IntenseHeatRenderFrame
             Mathf.Max(1f, roomSizePx.y));
         Intensity = Mathf.Clamp01(intensity);
         SolarIntensity = Mathf.Clamp01(solarIntensity);
+        // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+        SolarExposure = Mathf.Clamp01(solarExposure);
+        EntryFlash = Mathf.Clamp01(entryFlash);
+        Afterimage = Mathf.Clamp01(afterimage);
+        // [IH-OPT-03_SOLAR_MEMORY] END
         Time = time;
         SolarField = solarField;
         SurfaceField = surfaceField;
@@ -50,6 +63,11 @@ internal static class IntenseHeatRenderPipeline
     private static readonly int RoomSizePxId = Shader.PropertyToID("_DryCycleIntenseRoomSizePx");
     private static readonly int IntensityId = Shader.PropertyToID("_DryCycleIntenseHeatIntensity");
     private static readonly int SolarIntensityId = Shader.PropertyToID("_DryCycleIntenseSolarIntensity");
+    // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+    private static readonly int SolarExposureId = Shader.PropertyToID("_DryCycleIntenseSolarExposure");
+    private static readonly int EntryFlashId = Shader.PropertyToID("_DryCycleIntenseEntryFlash");
+    private static readonly int AfterimageId = Shader.PropertyToID("_DryCycleIntenseAfterimage");
+    // [IH-OPT-03_SOLAR_MEMORY] END
     private static readonly int TimeId = Shader.PropertyToID("_DryCycleIntenseHeatTime");
     private static readonly int FlowFieldId = Shader.PropertyToID("_DryCycleIntenseFlowField");
     private static readonly int NormalFieldId = Shader.PropertyToID("_DryCycleIntenseNormalField");
@@ -182,6 +200,11 @@ internal static class IntenseHeatRenderPipeline
         Shader.SetGlobalVector(RoomSizePxId, roomSize);
         Shader.SetGlobalFloat(IntensityId, frame.Intensity);
         Shader.SetGlobalFloat(SolarIntensityId, frame.SolarIntensity);
+        // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+        Shader.SetGlobalFloat(SolarExposureId, frame.SolarExposure);
+        Shader.SetGlobalFloat(EntryFlashId, frame.EntryFlash);
+        Shader.SetGlobalFloat(AfterimageId, frame.Afterimage);
+        // [IH-OPT-03_SOLAR_MEMORY] END
         Shader.SetGlobalFloat(TimeId, shaderTime);
         Shader.SetGlobalTexture(FlowFieldId, flow);
         Shader.SetGlobalTexture(NormalFieldId, normal);
@@ -205,6 +228,11 @@ internal static class IntenseHeatRenderPipeline
         MaterialProperties.SetVector(RoomSizePxId, roomSize);
         MaterialProperties.SetFloat(IntensityId, frame.Intensity);
         MaterialProperties.SetFloat(SolarIntensityId, frame.SolarIntensity);
+        // [IH-OPT-03_SOLAR_MEMORY] BEGIN
+        MaterialProperties.SetFloat(SolarExposureId, frame.SolarExposure);
+        MaterialProperties.SetFloat(EntryFlashId, frame.EntryFlash);
+        MaterialProperties.SetFloat(AfterimageId, frame.Afterimage);
+        // [IH-OPT-03_SOLAR_MEMORY] END
         MaterialProperties.SetFloat(TimeId, shaderTime);
         MaterialProperties.SetTexture(FlowFieldId, flow);
         MaterialProperties.SetTexture(NormalFieldId, normal);
