@@ -13,27 +13,15 @@ internal static class RopeSpearHooks
     private const string HandleObjectTypeName = "RopeSpearHandle";
     private const string LengthPrefix = "DRYCYCLE_ROPESPEAR_LENGTH=";
     private const string BrokenPrefix = "DRYCYCLE_ROPESPEAR_BROKEN=";
+    private const float RopeGrabRange = 27f;
 
-    // While the spear is actually flying, the rope is allowed to pay out freely.
-    // The extra slack keeps the Verlet chain and vanilla corner topology from
-    // producing a transient pull when the projectile crosses a tile edge.
-    private const float FlightPayoutSlack = 220f;
-    private const float SettledPayoutSlack = 24f;
-    private const float SpearEndExitDistance = 38f;
-
-    private sealed class FlightState
+    private sealed class PlayerRopeGrabState
     {
-        internal bool InFlight;
-        internal float PreThrowLength;
+        internal RopeSpear Spear;
+        internal float NormalizedPosition;
     }
 
-    private static readonly ConditionalWeakTable<RopeSpear, FlightState> FlightStates = new();
-
-    // ClimbableVinesSystem.VineOverlap has no Creature parameter. Player.Update is
-    // the caller for normal slugcat vine acquisition, so keep the active player in
-    // a short-lived context while vanilla movement runs. This lets RopeSpear require
-    // an explicit pickup press instead of stealing Up input at ledges.
-    private static Player _playerUpdating;
+    private static readonly ConditionalWeakTable<Player, PlayerRopeGrabState> RopeGrabStates = new();
     private static bool _enabled;
 
     public static AbstractPhysicalObject.AbstractObjectType ObjectType { get; private set; }
@@ -55,10 +43,8 @@ internal static class RopeSpearHooks
         On.AbstractSpear.StuckInWallTick += AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability += Player_Grabability;
+        On.Player.GrabUpdate += Player_GrabUpdate;
         On.Player.ThrowObject += Player_ThrowObject;
-        On.Player.Update += Player_Update;
-        On.ClimbableVinesSystem.VineOverlap += ClimbableVinesSystem_VineOverlap;
-        On.Spear.Update += Spear_Update;
 
         RopeSpearDevConsoleSupport.TryRegister();
     }
@@ -74,12 +60,9 @@ internal static class RopeSpearHooks
         On.AbstractSpear.StuckInWallTick -= AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString -= SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability -= Player_Grabability;
+        On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.ThrowObject -= Player_ThrowObject;
-        On.Player.Update -= Player_Update;
-        On.ClimbableVinesSystem.VineOverlap -= ClimbableVinesSystem_VineOverlap;
-        On.Spear.Update -= Spear_Update;
 
-        _playerUpdating = null;
         RopeSpearDevConsoleSupport.ResetRegistration();
 
         HandleObjectType?.Unregister();
@@ -115,9 +98,6 @@ internal static class RopeSpearHooks
         AbstractSpear self,
         int ticks)
     {
-        // A rope with both ends deliberately fixed is a player-built room feature,
-        // not a temporary vanilla wall spear. Keep it in RegionState until the
-        // player removes one of the anchors or picks the RopeSpear back up.
         if (self is AbstractRopeSpear ropeSpear && ropeSpear.HasPersistentHandleAnchor)
         {
             return;
@@ -160,250 +140,100 @@ internal static class RopeSpearHooks
         orig(self, grasp, eu);
     }
 
-    private static void Player_Update(
-        On.Player.orig_Update orig,
+    private static void Player_GrabUpdate(
+        On.Player.orig_GrabUpdate orig,
         Player self,
         bool eu)
     {
-        Player previous = _playerUpdating;
-        _playerUpdating = self;
-        try
-        {
-            orig(self, eu);
-        }
-        finally
-        {
-            _playerUpdating = previous;
-        }
-
-        TryExitRopeAtSpear(self);
-    }
-
-    private static ClimbableVinesSystem.VinePosition ClimbableVinesSystem_VineOverlap(
-        On.ClimbableVinesSystem.orig_VineOverlap orig,
-        ClimbableVinesSystem self,
-        Vector2 pos,
-        float rad)
-    {
-        ClimbableVinesSystem.VinePosition result = orig(self, pos, rad);
-        if (result?.vine is not RopeSpear || _playerUpdating == null)
-        {
-            return result;
-        }
-
-        bool alreadyHoldingThisRope =
-            _playerUpdating.animation == Player.AnimationIndex.VineGrab &&
-            _playerUpdating.vinePos?.vine == result.vine;
-        if (alreadyHoldingThisRope)
-        {
-            return result;
-        }
-
-        // Vanilla vines can be acquired merely by pressing Up. That is useful for
-        // plants, but a player-built rope often lies against a ledge where Up is
-        // also used for movement. RopeSpear therefore requires the pickup button
-        // to be held for the initial grab. Once grabbed, vanilla climbing remains
-        // fully in control and no further pickup input is required.
-        bool explicitPickup = _playerUpdating.input != null &&
-                              _playerUpdating.input.Length > 0 &&
-                              _playerUpdating.input[0].pckp;
-        return explicitPickup ? result : null;
-    }
-
-    private static void Spear_Update(
-        On.Spear.orig_Update orig,
-        Spear self,
-        bool eu)
-    {
-        if (self is not RopeSpear rope ||
-            rope.abstractPhysicalObject is not AbstractRopeSpear data)
+        if (self == null)
         {
             orig(self, eu);
             return;
         }
 
-        FlightState state = FlightStates.GetOrCreateValue(rope);
-        bool thrownOnEntry = rope.mode == Weapon.Mode.Thrown;
-        if (thrownOnEntry && !state.InFlight)
+        PlayerRopeGrabState state = RopeGrabStates.GetOrCreateValue(self);
+        bool pickupPressed = self.input != null &&
+                             self.input.Length > 1 &&
+                             self.input[0].pckp &&
+                             !self.input[1].pckp;
+
+        if (state.Spear != null)
         {
-            state.InFlight = true;
-            state.PreThrowLength = data.RopeLength;
+            if (pickupPressed)
+            {
+                state.Spear = null;
+                self.wantToPickUp = 0;
+                orig(self, eu);
+                return;
+            }
+
+            self.wantToPickUp = 0;
+            orig(self, eu);
+
+            if (!state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition))
+            {
+                state.Spear = null;
+            }
+            return;
+        }
+
+        if (pickupPressed &&
+            self.FreeHand() >= 0 &&
+            TryFindNearestRope(self, out RopeSpear spear, out float normalizedPosition))
+        {
+            state.Spear = spear;
+            state.NormalizedPosition = normalizedPosition;
+            self.wantToPickUp = 0;
+            orig(self, eu);
+
+            if (!state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition))
+            {
+                state.Spear = null;
+            }
+            return;
         }
 
         orig(self, eu);
-
-        if (!state.InFlight)
-        {
-            return;
-        }
-
-        if (rope.mode == Weapon.Mode.Thrown)
-        {
-            // Pay rope out to the projectile instead of using rope tension as a
-            // projectile range limiter. This is deliberately written directly to
-            // AbstractRopeSpear so a previously shortened rope cannot pull a fresh
-            // throw back toward the player.
-            float span = MeasureHandleToSpearSpan(rope);
-            data.RopeLength = Mathf.Max(state.PreThrowLength, span + FlightPayoutSlack);
-            return;
-        }
-
-        // Picking the spear back up is an explicit full reset handled by
-        // RopeSpear.PickedUp; do not undo that reset with the flight settlement.
-        if (rope.mode == Weapon.Mode.Carried)
-        {
-            state.InFlight = false;
-            return;
-        }
-
-        // Once the projectile has stuck or otherwise left Thrown mode, keep only
-        // the amount of rope actually paid out plus a small neutral slack. From
-        // this point Alt+Up/Down and normal rope tension take over again.
-        float settledSpan = MeasureHandleToSpearSpan(rope);
-        data.RopeLength = Mathf.Max(state.PreThrowLength, settledSpan + SettledPayoutSlack);
-        state.InFlight = false;
     }
 
-    private static float MeasureHandleToSpearSpan(RopeSpear rope)
+    private static bool TryFindNearestRope(
+        Player player,
+        out RopeSpear bestSpear,
+        out float normalizedPosition)
     {
-        if (rope?.room?.physicalObjects == null || rope.abstractPhysicalObject == null)
-        {
-            return 0f;
-        }
-
-        EntityID spearID = rope.abstractPhysicalObject.ID;
-        for (int layer = 0; layer < rope.room.physicalObjects.Length; layer++)
-        {
-            List<PhysicalObject> objects = rope.room.physicalObjects[layer];
-            for (int i = 0; i < objects.Count; i++)
-            {
-                if (objects[i] is RopeHandle handle &&
-                    !handle.slatedForDeletetion &&
-                    handle.ParentSpearID == spearID)
-                {
-                    return Vector2.Distance(handle.firstChunk.pos, rope.firstChunk.pos);
-                }
-            }
-        }
-
-        return 0f;
-    }
-
-    private static void TryExitRopeAtSpear(Player player)
-    {
-        if (player?.room?.climbableVines == null ||
-            player.animation != Player.AnimationIndex.VineGrab ||
-            player.vinePos?.vine is not RopeSpear rope ||
-            player.input == null ||
-            player.input.Length == 0 ||
-            player.input[0].y <= 0 ||
-            rope.mode != Weapon.Mode.StuckInWall)
-        {
-            return;
-        }
-
-        float totalLength = player.room.climbableVines.TotalLength(rope);
-        float remaining = Mathf.Max(0f, 1f - player.vinePos.floatPos) * totalLength;
-        if (remaining > SpearEndExitDistance)
-        {
-            return;
-        }
-
-        int last = rope.TotalPositions() - 1;
-        Vector2 spearEnd = rope.Pos(last);
-        if (spearEnd.y + 5f < player.mainBodyChunk.pos.y ||
-            !Custom.DistLess(player.mainBodyChunk.pos, spearEnd, 48f))
-        {
-            return;
-        }
-
-        player.vineGrabDelay = 15;
-        player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
-
-        if (TryFindHorizontalSpearBeam(player.room, rope.firstChunk.pos, player.mainBodyChunk.pos, out Vector2 beamCenter))
-        {
-            // Hand control from VineGrab directly to vanilla's horizontal-beam
-            // pull-up animation. This avoids the stock vine endpoint rule
-            // (floatPos==1 -> speed -1) that otherwise sends the player straight
-            // back down after reaching the spear.
-            int outsideDir = rope.rotation.x >= 0f ? -1 : 1;
-            player.flipDirection = outsideDir;
-            player.pullupSoftlockSafety = 0;
-            player.straightUpOnHorizontalBeam = true;
-            player.forceFeetToHorizontalBeamTile = 20;
-            player.upOnHorizontalBeamPos = beamCenter + new Vector2(0f, 20f);
-            player.animation = Player.AnimationIndex.GetUpOnBeam;
-            player.bodyMode = Player.BodyModeIndex.ClimbingOnBeam;
-            player.standing = false;
-
-            player.mainBodyChunk.pos = beamCenter;
-            player.mainBodyChunk.lastPos = beamCenter;
-            player.mainBodyChunk.vel = Vector2.zero;
-
-            if (player.bodyChunks != null && player.bodyChunks.Length > 1)
-            {
-                Vector2 lower = beamCenter + new Vector2(0f, -17f);
-                player.bodyChunks[1].pos = lower;
-                player.bodyChunks[1].lastPos = lower;
-                player.bodyChunks[1].vel = Vector2.zero;
-            }
-
-            return;
-        }
-
-        // Fallback for unusual spear states where the vanilla horizontal-beam tile
-        // has not been installed yet: release upward instead of allowing the vine
-        // endpoint to reverse the player's climb direction.
-        player.animation = Player.AnimationIndex.None;
-        player.bodyMode = Player.BodyModeIndex.Default;
-        player.mainBodyChunk.vel.y = Mathf.Max(player.mainBodyChunk.vel.y, 5.5f);
-        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
-        {
-            player.bodyChunks[1].vel.y = Mathf.Max(player.bodyChunks[1].vel.y, 4.2f);
-        }
-    }
-
-    private static bool TryFindHorizontalSpearBeam(
-        Room room,
-        Vector2 spearPosition,
-        Vector2 playerPosition,
-        out Vector2 beamCenter)
-    {
-        beamCenter = Vector2.zero;
-        if (room == null)
+        bestSpear = null;
+        normalizedPosition = 0f;
+        if (player?.room?.physicalObjects == null)
         {
             return false;
         }
 
-        IntVector2 origin = room.GetTilePosition(spearPosition);
         float bestDistance = float.MaxValue;
-        bool found = false;
+        Vector2 position = player.mainBodyChunk.pos;
 
-        for (int x = -2; x <= 2; x++)
+        for (int layer = 0; layer < player.room.physicalObjects.Length; layer++)
         {
-            for (int y = -1; y <= 1; y++)
+            List<PhysicalObject> objects = player.room.physicalObjects[layer];
+            for (int i = 0; i < objects.Count; i++)
             {
-                IntVector2 tilePos = origin + new IntVector2(x, y);
-                Room.Tile tile = room.GetTile(tilePos);
-                if (!tile.horizontalBeam || tile.Solid)
-                {
-                    continue;
-                }
-
-                Vector2 center = room.MiddleOfTile(tilePos);
-                float distance = Vector2.Distance(playerPosition, center);
-                if (distance >= bestDistance)
+                if (objects[i] is not RopeSpear spear ||
+                    !spear.TryFindNearestRopePoint(
+                        position,
+                        RopeGrabRange,
+                        out float candidatePosition,
+                        out float distance) ||
+                    distance >= bestDistance)
                 {
                     continue;
                 }
 
                 bestDistance = distance;
-                beamCenter = center;
-                found = true;
+                bestSpear = spear;
+                normalizedPosition = candidatePosition;
             }
         }
 
-        return found;
+        return bestSpear != null;
     }
 
     private static AbstractPhysicalObject SaveState_AbstractPhysicalObjectFromString(
