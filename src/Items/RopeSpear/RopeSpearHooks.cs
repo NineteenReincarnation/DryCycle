@@ -306,6 +306,19 @@ internal static class RopeSpearHooks
                     result.RopeBroken = value == "1" ||
                                         bool.TryParse(value, out bool parsed) && parsed;
                 }
+                else if (attr.StartsWith(AbstractRopeSpear.FixedHandlePrefix, StringComparison.Ordinal))
+                {
+                    string value = attr.Substring(AbstractRopeSpear.FixedHandlePrefix.Length);
+                    result.HasPersistentHandleAnchor = value == "1" ||
+                                                       bool.TryParse(value, out bool parsed) && parsed;
+                }
+                else if (attr.StartsWith(AbstractRopeSpear.FixedHandleAnchorPrefix, StringComparison.Ordinal) &&
+                         TryParseVector2(
+                             attr.Substring(AbstractRopeSpear.FixedHandleAnchorPrefix.Length),
+                             out Vector2 fixedAnchor))
+                {
+                    result.PersistentHandleAnchor = fixedAnchor;
+                }
                 else if (!string.IsNullOrEmpty(attr))
                 {
                     unrecognized.Add(attr);
