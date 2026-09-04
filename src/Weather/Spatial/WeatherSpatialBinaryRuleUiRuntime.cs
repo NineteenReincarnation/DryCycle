@@ -182,11 +182,11 @@ internal static class WeatherSpatialBinaryRuleUiRuntime
         }
 
         // A Family without an explicit region override follows the global default.
-        // An exact child without an override adds no extra restriction once its parent
-        // Family has passed the prerequisite gate, so its binary effective state is Allow.
+        // A child without an explicit rule is not placed, even when its Family is
+        // allowed, so its effective binary state is Forbidden.
         return target.IsFamily
             ? WeatherSpatialRegistry.GlobalDefault
-            : WeatherSpatialRule.Allow;
+            : WeatherSpatialRule.Deny;
     }
 
     private static void RewriteBinaryLabels(DevUINode editor)

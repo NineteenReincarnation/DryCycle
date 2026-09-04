@@ -86,6 +86,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Stretch(editor, "SelectShelters", 8f, 140f);
         Stretch(editor, "SelectGates", 152f, 140f);
         Stretch(editor, "Preview", 8f, 140f);
+        Stretch(editor, "Selection", 8f, 140f);
 
         // Two deleted selection rows sat above history/validation controls.
         ShiftY(editor, "Undo", 50f);
@@ -104,6 +105,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         // above the older editor controls that the popup temporarily covers.
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
+        editor.subNodes.Add(new ClearRegionZonesControl(editor.owner, editor, editor));
         editor.subNodes.Add(new CleanupMarker(editor.owner, editor));
         RefreshForbiddenTerminology(editor);
         editor.Refresh();

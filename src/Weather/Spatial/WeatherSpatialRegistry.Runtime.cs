@@ -29,8 +29,8 @@ internal static partial class WeatherSpatialRegistry
             return _globalDefault != WeatherSpatialRule.Deny;
         }
 
-        // Exact child rules can only refine a family that is already allowed in the
-        // room. An old/orphaned child Allow must never bypass a Forbidden parent.
+        // A Family is only the prerequisite/container for its members. It never
+        // implicitly enables every child weather in the room.
         if (!IsFamilyAllowed(regionId, roomName, family.Id))
         {
             return false;
@@ -58,8 +58,9 @@ internal static partial class WeatherSpatialRegistry
             }
         }
 
-        // No exact override: inherit the already-resolved parent Family Allow.
-        return true;
+        // No explicit child rule means the child was never placed. The parent Family
+        // only unlocks editing; it does not supply an implicit Allow.
+        return false;
     }
 
     internal static bool IsFamilyAllowed(string regionId, string roomName, string familyId)
@@ -89,6 +90,25 @@ internal static partial class WeatherSpatialRegistry
             }
         }
         return _globalDefault != WeatherSpatialRule.Deny;
+    }
+
+    internal static bool ClearRegionSpatialRules(string regionId)
+    {
+        string regionKey = NormalizeRegion(regionId);
+        if (regionKey.Length == 0 ||
+            !Regions.TryGetValue(regionKey, out WeatherSpatialRegionRules region) ||
+            region == null ||
+            region.IsEmpty)
+        {
+            return false;
+        }
+
+        // RegionSchedules deliberately lives in a separate dictionary. Removing this
+        // entry clears only Weather Zones (defaults + room spatial rules) and leaves the
+        // region's schedule/chances untouched.
+        Regions.Remove(regionKey);
+        Dirty = true;
+        return true;
     }
 
     internal static bool Save()
