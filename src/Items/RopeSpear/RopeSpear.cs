@@ -4,25 +4,30 @@ using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
-internal sealed class RopeSpear : Spear, IClimbableVine
+internal sealed class RopeSpear : Spear
 {
     private const int RopeMeshSegments = RopeSpearRopeSystem.NodeCount - 1;
     private const float RopeThickness = 1.15f;
     private const float ReelSpeed = 2.15f;
+    private const float ClimbSpeed = 2.65f;
     private const float TensionSpring = 0.032f;
     private const float TensionDamping = 0.06f;
     private const float MaxPlayerPullImpulse = 2.4f;
     private const float MaxAnchorPullImpulse = 1.8f;
+    private const float FlightSimulationSlack = 420f;
+    private const float SettledPayoutSlack = 26f;
+    private const float SpearMountRange = 44f;
 
     private readonly RopeSpearRopeSystem _ropeSystem = new();
     private readonly Vector2[] _drawNodes = new Vector2[RopeSpearRopeSystem.NodeCount];
 
     private RopeHandle _handle;
     private Player _pendingHandleOwner;
-    private Room _vineRoom;
     private int _ropeSpriteIndex = -1;
     private float _lastRouteLength;
+    private float _preThrowRopeLength;
     private bool _ropeDeployed;
+    private bool _flightPayout;
 
     public RopeSpear(AbstractPhysicalObject abstractPhysicalObject, World world)
         : base(abstractPhysicalObject, world)
@@ -60,19 +65,18 @@ internal sealed class RopeSpear : Spear, IClimbableVine
     public override void PlaceInRoom(Room placeRoom)
     {
         base.PlaceInRoom(placeRoom);
-        EnsureVineRegistration(placeRoom);
+        RemoveLegacyVineRegistration(placeRoom);
     }
 
     public override void NewRoom(Room newRoom)
     {
-        RemoveVineRegistration();
         base.NewRoom(newRoom);
-        EnsureVineRegistration(newRoom);
+        RemoveLegacyVineRegistration(newRoom);
     }
 
     public override void Destroy()
     {
-        RemoveVineRegistration();
+        RemoveLegacyVineRegistration(room);
         _ropeSystem.Reset();
         base.Destroy();
     }
@@ -100,6 +104,8 @@ internal sealed class RopeSpear : Spear, IClimbableVine
 
         _ropeDeployed = true;
         _pendingHandleOwner = player;
+        _preThrowRopeLength = RopeLength;
+        _flightPayout = true;
         EnsureHandle(player);
         _ropeSystem.Reset();
     }
@@ -118,6 +124,8 @@ internal sealed class RopeSpear : Spear, IClimbableVine
 
         _ropeDeployed = false;
         _pendingHandleOwner = null;
+        _flightPayout = false;
+        _preThrowRopeLength = AbstractRopeSpear.DefaultRopeLength;
         _ropeSystem.Reset();
         RemoveAssociatedHandles();
         _handle = null;
@@ -126,7 +134,7 @@ internal sealed class RopeSpear : Spear, IClimbableVine
     public override void Update(bool eu)
     {
         base.Update(eu);
-        EnsureVineRegistration(room);
+        RemoveLegacyVineRegistration(room);
 
         if (!_ropeDeployed && !IsBroken)
         {
@@ -177,21 +185,280 @@ internal sealed class RopeSpear : Spear, IClimbableVine
         }
 
         TryGiveHandleToPendingOwner();
-        HandleReelingInput();
+        if (mode != Mode.Thrown)
+        {
+            HandleReelingInput();
+        }
         SynchronizePersistentAnchorState();
 
         Vector2 handlePoint = GetHandleRopePoint(1f);
         Vector2 spearPoint = GetSpearRopePoint(1f);
-        _ropeSystem.Update(room, handlePoint, spearPoint, RopeLength, RopeThickness);
+        bool spearFlying = mode == Mode.Thrown;
+
+        // The projectile never feels a rope-length cap while it is in Thrown mode.
+        // Give the simulated chain generous temporary slack, then record only the
+        // distance actually paid out. This prevents the first taut frame from
+        // pulling a left/right throw back into the player or a nearby corner.
+        float simulationLength = RopeLength;
+        if (spearFlying)
+        {
+            simulationLength = Mathf.Max(
+                simulationLength,
+                Vector2.Distance(handlePoint, spearPoint) + FlightSimulationSlack);
+        }
+
+        _ropeSystem.Update(room, handlePoint, spearPoint, simulationLength, RopeThickness);
 
         float routeLength = _ropeSystem.RouteLength;
+        if (spearFlying)
+        {
+            RopeLength = Mathf.Max(RopeLength, routeLength + SettledPayoutSlack);
+            _lastRouteLength = routeLength;
+            return;
+        }
+
+        if (_flightPayout)
+        {
+            RopeLength = Mathf.Max(
+                Mathf.Max(_preThrowRopeLength, RopeLength),
+                routeLength + SettledPayoutSlack);
+            _flightPayout = false;
+        }
+
         float stretch = routeLength - RopeLength;
-        if (stretch > 0f)
+        if (stretch > 0.75f)
         {
             ApplyRopeConstraint(stretch, routeLength);
         }
 
         _lastRouteLength = routeLength;
+    }
+
+    internal bool TryFindNearestRopePoint(
+        Vector2 worldPosition,
+        float maxDistance,
+        out float normalizedPosition,
+        out float distance)
+    {
+        normalizedPosition = 0f;
+        distance = float.MaxValue;
+        return RopeActive &&
+               mode != Mode.Thrown &&
+               _ropeSystem.TryFindNearestPoint(
+                   worldPosition,
+                   maxDistance,
+                   out normalizedPosition,
+                   out distance);
+    }
+
+    internal bool UpdatePlayerRopeGrab(Player player, ref float normalizedPosition)
+    {
+        if (!RopeActive ||
+            player == null ||
+            player.room != room ||
+            player.dead ||
+            player.inShortcut ||
+            player.enteringShortCut.HasValue ||
+            mode == Mode.Thrown ||
+            _handle?.Holder == player)
+        {
+            return false;
+        }
+
+        if (player.input == null || player.input.Length == 0)
+        {
+            return false;
+        }
+
+        Player.InputPackage input = player.input[0];
+        Player.InputPackage previousInput = player.input.Length > 1
+            ? player.input[1]
+            : default;
+
+        if (input.jmp && !previousInput.jmp)
+        {
+            // Jump is an intentional rope release. Preserve the player's existing
+            // swing velocity and add only a small upward kick.
+            player.mainBodyChunk.vel.y = Mathf.Max(player.mainBodyChunk.vel.y, 3.2f);
+            if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+            {
+                player.bodyChunks[1].vel.y = Mathf.Max(player.bodyChunks[1].vel.y, 2.5f);
+            }
+            return false;
+        }
+
+        if (input.y != 0)
+        {
+            normalizedPosition = AdvanceGrabPosition(normalizedPosition, input.y);
+        }
+
+        if (input.y > 0 && TryMountSpearFromRope(player, normalizedPosition))
+        {
+            return false;
+        }
+
+        Vector2 ropePoint = _ropeSystem.GetPoint(normalizedPosition);
+        Vector2 targetBodyPosition = ropePoint + new Vector2(0f, -11f);
+        Vector2 delta = targetBodyPosition - player.mainBodyChunk.pos;
+        if (delta.magnitude > 105f)
+        {
+            return false;
+        }
+
+        // Soft attachment: strong enough to keep the hand/body on the rope, but it
+        // never HardSetPositions the slugcat. Momentum and gravity remain available
+        // for swinging, and the rope receives the opposite local deformation.
+        Vector2 pull = Vector2.ClampMagnitude(delta * 0.145f, 3.5f);
+        player.mainBodyChunk.vel += pull;
+        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+        {
+            player.bodyChunks[1].vel += pull * 0.76f;
+        }
+
+        if (input.x != 0)
+        {
+            float swing = input.x * 0.115f;
+            player.mainBodyChunk.vel.x += swing;
+            if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+            {
+                player.bodyChunks[1].vel.x += swing * 0.72f;
+            }
+        }
+
+        player.standing = false;
+        _ropeSystem.ApplyExternalPull(
+            normalizedPosition,
+            player.mainBodyChunk.pos + new Vector2(0f, 7f),
+            0.095f);
+        return true;
+    }
+
+    private float AdvanceGrabPosition(float current, int verticalInput)
+    {
+        float referenceLength = Mathf.Max(80f, _ropeSystem.RouteLength);
+        float step = Mathf.Clamp(ClimbSpeed / referenceLength, 0.004f, 0.035f);
+        float lowerT = Mathf.Clamp01(current - step);
+        float upperT = Mathf.Clamp01(current + step);
+        Vector2 lower = _ropeSystem.GetPoint(lowerT);
+        Vector2 upper = _ropeSystem.GetPoint(upperT);
+
+        float direction;
+        if (Mathf.Abs(upper.y - lower.y) > 0.45f)
+        {
+            direction = upper.y > lower.y ? 1f : -1f;
+        }
+        else
+        {
+            // Near-horizontal local sections have no meaningful world-up tangent.
+            // Keep the previous endpoint convention so holding Up does not jitter
+            // back and forth from frame to frame.
+            direction = GetSpearRopePoint(1f).y >= GetHandleRopePoint(1f).y ? 1f : -1f;
+        }
+
+        if (verticalInput < 0)
+        {
+            direction = -direction;
+        }
+
+        return Mathf.Clamp01(current + step * direction);
+    }
+
+    private bool TryMountSpearFromRope(Player player, float normalizedPosition)
+    {
+        if (mode != Mode.StuckInWall ||
+            Data == null ||
+            Data.stuckInWallCycles < 0 ||
+            normalizedPosition < 0.88f)
+        {
+            return false;
+        }
+
+        Vector2 ropePoint = _ropeSystem.GetPoint(normalizedPosition);
+        Vector2 spearPoint = GetSpearRopePoint(1f);
+        if (!Custom.DistLess(ropePoint, spearPoint, SpearMountRange) ||
+            spearPoint.y < player.mainBodyChunk.pos.y - 14f)
+        {
+            return false;
+        }
+
+        if (!TryFindHorizontalSpearBeam(player.room, firstChunk.pos, player.mainBodyChunk.pos, out Vector2 beamCenter))
+        {
+            return false;
+        }
+
+        player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
+        player.forceFeetToHorizontalBeamTile = 20;
+        player.pullupSoftlockSafety = 0;
+        player.straightUpOnHorizontalBeam = true;
+        player.upOnHorizontalBeamPos = new Vector2(
+            beamCenter.x,
+            player.room.MiddleOfTile(beamCenter).y + 20f);
+        player.animation = Player.AnimationIndex.GetUpOnBeam;
+        player.bodyMode = Player.BodyModeIndex.ClimbingOnBeam;
+        player.standing = false;
+
+        player.mainBodyChunk.pos = beamCenter;
+        player.mainBodyChunk.lastPos = beamCenter;
+        player.mainBodyChunk.vel = Vector2.zero;
+
+        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+        {
+            Vector2 lower = beamCenter + new Vector2(0f, -17f);
+            player.bodyChunks[1].pos = lower;
+            player.bodyChunks[1].lastPos = lower;
+            player.bodyChunks[1].vel = Vector2.zero;
+        }
+
+        player.room.PlaySound(
+            SoundID.Slugcat_Get_Up_On_Horizontal_Beam,
+            player.mainBodyChunk,
+            loop: false,
+            0.75f,
+            1f);
+        return true;
+    }
+
+    private static bool TryFindHorizontalSpearBeam(
+        Room targetRoom,
+        Vector2 spearPosition,
+        Vector2 playerPosition,
+        out Vector2 beamCenter)
+    {
+        beamCenter = Vector2.zero;
+        if (targetRoom == null)
+        {
+            return false;
+        }
+
+        IntVector2 origin = targetRoom.GetTilePosition(spearPosition);
+        float bestDistance = float.MaxValue;
+        bool found = false;
+
+        for (int x = -2; x <= 2; x++)
+        {
+            for (int y = -1; y <= 1; y++)
+            {
+                IntVector2 tilePos = origin + new IntVector2(x, y);
+                Room.Tile tile = targetRoom.GetTile(tilePos);
+                if (!tile.horizontalBeam || tile.Solid)
+                {
+                    continue;
+                }
+
+                Vector2 center = targetRoom.MiddleOfTile(tilePos);
+                float distance = Vector2.Distance(playerPosition, center);
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                beamCenter = center;
+                found = true;
+            }
+        }
+
+        return found;
     }
 
     private bool AttachedCreatureEnteredShortcut()
@@ -446,6 +713,7 @@ internal sealed class RopeSpear : Spear, IClimbableVine
 
         _ropeDeployed = false;
         _pendingHandleOwner = null;
+        _flightPayout = false;
         _ropeSystem.Reset();
     }
 
@@ -511,81 +779,20 @@ internal sealed class RopeSpear : Spear, IClimbableVine
         return center - direction * 17f;
     }
 
-    private void EnsureVineRegistration(Room targetRoom)
+    private void RemoveLegacyVineRegistration(Room targetRoom)
     {
-        if (targetRoom == null)
+        if (targetRoom?.climbableVines?.vines == null)
         {
             return;
         }
 
-        if (_vineRoom == targetRoom &&
-            targetRoom.climbableVines != null &&
-            targetRoom.climbableVines.vines.Contains(this))
+        for (int i = targetRoom.climbableVines.vines.Count - 1; i >= 0; i--)
         {
-            return;
+            if (ReferenceEquals(targetRoom.climbableVines.vines[i], this))
+            {
+                targetRoom.climbableVines.vines.RemoveAt(i);
+            }
         }
-
-        RemoveVineRegistration();
-
-        if (targetRoom.climbableVines == null)
-        {
-            targetRoom.climbableVines = new ClimbableVinesSystem();
-            targetRoom.AddObject(targetRoom.climbableVines);
-        }
-
-        if (!targetRoom.climbableVines.vines.Contains(this))
-        {
-            targetRoom.climbableVines.vines.Add(this);
-        }
-
-        _vineRoom = targetRoom;
-    }
-
-    private void RemoveVineRegistration()
-    {
-        if (_vineRoom?.climbableVines != null)
-        {
-            _vineRoom.climbableVines.vines.Remove(this);
-        }
-
-        _vineRoom = null;
-    }
-
-    // IClimbableVine lets the vanilla player movement/hand-animation code own
-    // grabbing, climbing, swinging and jump-release behavior. Our RopeNodes only
-    // provide the dynamic positions and accept the forces vanilla applies.
-    public int TotalPositions()
-    {
-        return RopeSpearRopeSystem.NodeCount;
-    }
-
-    public Vector2 Pos(int index)
-    {
-        return _ropeSystem.GetNode(index);
-    }
-
-    public float Rad(int index)
-    {
-        return 2.1f;
-    }
-
-    public float Mass(int index)
-    {
-        return 0.18f;
-    }
-
-    public void Push(int index, Vector2 movement)
-    {
-        _ropeSystem.PushNode(index, movement);
-    }
-
-    public void BeingClimbedOn(Creature crit)
-    {
-    }
-
-    public bool CurrentlyClimbable()
-    {
-        return RopeActive && !slatedForDeletetion;
     }
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
