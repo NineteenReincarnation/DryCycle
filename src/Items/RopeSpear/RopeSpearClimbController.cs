@@ -16,7 +16,8 @@ internal static class RopeSpearClimbController
     private const float GrabConnectionRadius = 2.35f;
     private const float MaxGrabSeparation = 62f;
     private const float ClimbSpeed = 2.65f;
-    private const float SpearMountRange = 44f;
+    private const float SpearMountRange = 22f;
+    private const float SpearMountStart = 0.965f;
     private const float RopeReaction = 0.12f;
 
     private static readonly FieldInfo RopeSystemField = typeof(RopeSpear).GetField(
@@ -95,6 +96,10 @@ internal static class RopeSpearClimbController
             poseCycle += 0.035f * Mathf.Abs(input.x);
         }
 
+        // Do not snap the player onto the spear. Climb all the way to the rope
+        // endpoint first; only when the main body is physically inside the
+        // horizontal-beam tile created by the stuck spear do we hand control to
+        // vanilla GetUpOnBeam. Vanilla then performs the pull-up using velocity.
         if (input.y > 0 && TryMountSpearFromRope(player, spear, rope, normalizedPosition))
         {
             player.vineClimbCursor *= 0.2f;
@@ -349,46 +354,47 @@ internal static class RopeSpearClimbController
         if (spear.mode != Weapon.Mode.StuckInWall ||
             spear.abstractPhysicalObject is not AbstractRopeSpear data ||
             data.stuckInWallCycles < 0 ||
-            normalizedPosition < 0.88f)
+            normalizedPosition < SpearMountStart ||
+            player.room == null)
         {
             return false;
         }
 
-        Vector2 ropePoint = rope.GetPoint(normalizedPosition);
         Vector2 spearPoint = rope.GetPoint(1f);
-        if (!Custom.DistLess(ropePoint, spearPoint, SpearMountRange) ||
-            spearPoint.y < player.mainBodyChunk.pos.y - 14f ||
-            !TryFindHorizontalSpearBeam(
-                player.room,
-                spear.firstChunk.pos,
-                player.mainBodyChunk.pos,
-                out Vector2 beamCenter))
+
+        // The player must physically finish the climb. Being near the endpoint in
+        // normalized rope space is not enough: the main body itself has to arrive
+        // at the spear tail and enter one of the horizontal-beam tiles created by
+        // vanilla Spear.ChangeMode(StuckInWall).
+        if (!Custom.DistLess(player.mainBodyChunk.pos, spearPoint, SpearMountRange))
         {
             return false;
         }
 
-        player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
-        player.forceFeetToHorizontalBeamTile = 20;
+        Room.Tile bodyTile = player.room.GetTile(player.mainBodyChunk.pos);
+        if (!bodyTile.horizontalBeam || bodyTile.Solid)
+        {
+            return false;
+        }
+
+        // Mirror vanilla's own HangFromBeam -> GetUpOnBeam handoff. Crucially, do
+        // not write body chunk positions, lastPos, or zero velocities here. The
+        // GetUpOnBeam animation moves the cat from its real current position by
+        // applying velocity toward upOnHorizontalBeamPos over subsequent frames.
+        Vector2 pullupTarget = new Vector2(
+            player.mainBodyChunk.pos.x,
+            player.room.MiddleOfTile(player.mainBodyChunk.pos).y + 20f);
+
+        if (!Custom.DistLess(player.mainBodyChunk.pos, pullupTarget, 25f))
+        {
+            return false;
+        }
+
         player.pullupSoftlockSafety = 0;
         player.straightUpOnHorizontalBeam = true;
-        player.upOnHorizontalBeamPos = new Vector2(
-            beamCenter.x,
-            player.room.MiddleOfTile(beamCenter).y + 20f);
-        player.animation = Player.AnimationIndex.GetUpOnBeam;
-        player.bodyMode = Player.BodyModeIndex.ClimbingOnBeam;
+        player.upOnHorizontalBeamPos = pullupTarget;
         player.standing = false;
-
-        player.mainBodyChunk.pos = beamCenter;
-        player.mainBodyChunk.lastPos = beamCenter;
-        player.mainBodyChunk.vel = Vector2.zero;
-
-        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
-        {
-            Vector2 lower = beamCenter + new Vector2(0f, -17f);
-            player.bodyChunks[1].pos = lower;
-            player.bodyChunks[1].lastPos = lower;
-            player.bodyChunks[1].vel = Vector2.zero;
-        }
+        player.animation = Player.AnimationIndex.GetUpOnBeam;
 
         player.room.PlaySound(
             SoundID.Slugcat_Get_Up_On_Horizontal_Beam,
@@ -397,48 +403,5 @@ internal static class RopeSpearClimbController
             0.75f,
             1f);
         return true;
-    }
-
-    private static bool TryFindHorizontalSpearBeam(
-        Room targetRoom,
-        Vector2 spearPosition,
-        Vector2 playerPosition,
-        out Vector2 beamCenter)
-    {
-        beamCenter = Vector2.zero;
-        if (targetRoom == null)
-        {
-            return false;
-        }
-
-        IntVector2 origin = targetRoom.GetTilePosition(spearPosition);
-        float bestDistance = float.MaxValue;
-        bool found = false;
-
-        for (int x = -2; x <= 2; x++)
-        {
-            for (int y = -1; y <= 1; y++)
-            {
-                IntVector2 tilePos = origin + new IntVector2(x, y);
-                Room.Tile tile = targetRoom.GetTile(tilePos);
-                if (!tile.horizontalBeam || tile.Solid)
-                {
-                    continue;
-                }
-
-                Vector2 center = targetRoom.MiddleOfTile(tilePos);
-                float distance = Vector2.Distance(playerPosition, center);
-                if (distance >= bestDistance)
-                {
-                    continue;
-                }
-
-                bestDistance = distance;
-                beamCenter = center;
-                found = true;
-            }
-        }
-
-        return found;
     }
 }
