@@ -38,7 +38,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.113";
+    public const string Version = "0.2.114";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -209,16 +209,8 @@ internal sealed class Plugin : BaseUnityPlugin
             SandstormWeatherRuntime.Enable();
             RainWeatherRuntime.Enable();
 
-            // One GlobalRain layer owns the Scheduled HeavyRain split: record the native
-            // intensity first, then overlay DryCycle's nonlethal regional contribution.
             ScheduledHeavyRainTraversalRuntime.Enable();
-
-            // Creature.TerrainImpact has a second rainDeath entry point; keep Scheduled
-            // HeavyRain out of it and let DryCycle DeathRain handle its own impact path.
             ScheduledHeavyRainImpactGuardRuntime.Enable();
-
-            // DryCycle-created RoomRain carriers are rain-only render/physics carriers.
-            // Native room DangerType objects are not intercepted or used as weather data.
             SyntheticRoomRainTakeoverRuntime.Enable();
 
             RainDrinkingRuntime.Enable();
