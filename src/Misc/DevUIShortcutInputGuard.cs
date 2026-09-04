@@ -5,13 +5,14 @@ namespace DryCycle.Misc;
 
 /// <summary>
 /// Keeps keyboard input owned by DryCycle DevUI text fields from leaking into Rain
-/// World's gameplay/dev-tool shortcuts. A focused text field is treated as a modal
-/// keyboard target: gameplay input is neutralized, vanilla DevTools hotkeys are skipped,
-/// and the DevUI itself is updated once manually so text entry still receives the keys.
+/// World's gameplay/dev-tool shortcuts. Text entry is processed exactly once per raw
+/// frame while the vanilla single-letter DevTools hotkeys are temporarily bypassed.
 /// </summary>
 internal static class DevUIShortcutInputGuard
 {
     private static bool _enabled;
+    private static RainWorldGame _capturedGame;
+    private static int _capturedUnityFrame = -1;
 
     internal static void Enable()
     {
@@ -21,6 +22,7 @@ internal static class DevUIShortcutInputGuard
         }
 
         On.Player.checkInput += Player_checkInput;
+        On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
         On.RainWorldGame.Update += RainWorldGame_Update;
         _enabled = true;
     }
@@ -33,56 +35,85 @@ internal static class DevUIShortcutInputGuard
         }
 
         On.Player.checkInput -= Player_checkInput;
+        On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate;
         On.RainWorldGame.Update -= RainWorldGame_Update;
+        _capturedGame = null;
+        _capturedUnityFrame = -1;
         _enabled = false;
     }
 
-    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, RainWorldGame self)
+    private static void RainWorldGame_RawUpdate(
+        On.RainWorldGame.orig_RawUpdate orig,
+        RainWorldGame self,
+        float dt)
     {
         if (!HasFocusedTextField(self))
         {
-            orig(self);
+            orig(self, dt);
             return;
         }
 
-        // Vanilla RainWorldGame.Update owns a number of raw single-letter DevTools
-        // shortcuts (A/S/Q/E/M/H/P/K/L/O/R). They use UnityEngine.Input directly, so
-        // consuming Input.inputString in the text field is not enough to stop them.
-        // Temporarily hide DevTools from vanilla's update, then update the already-open
-        // DevUI exactly once ourselves after the game update has finished.
+        MarkKeyboardCaptured(self);
+
         bool devToolsWasActive = self.devToolsActive;
         DevInterface.DevUI focusedDevUi = self.devUI;
 
-        // Preserve edge-trigger latches while typing. This also prevents a held key from
-        // firing on the first frame after Enter/Escape/mouse focus release.
+        // RainWorldGame.RawUpdate owns the raw A/S/Q/E/M/H/P/K/L/O DevTools keys.
+        // Hide DevTools only for the vanilla RawUpdate call. This prevents those keys
+        // from firing while a text field is focused. We then run the already-open DevUI
+        // once ourselves, because vanilla skipped its normal update while hidden.
+        //
+        // Keep edge latches synchronized to the physical key state so releasing focus
+        // cannot immediately replay a held editor letter as a DevTools command.
         self.mDown = Input.GetKey(KeyCode.M);
         self.hDown = Input.GetKey(KeyCode.H);
         self.pDown = Input.GetKey(KeyCode.P);
         self.kDown = Input.GetKey(KeyCode.K);
-        self.oDown = true; // O is checked outside the devToolsActive block.
-        self.lastRestartButton = Input.GetKey(KeyCode.R);
-
-        // Escape belongs to the text field while editing. RainWorldGame checks the pause
-        // action later in Update, before our manual DevUI update gets a chance to cancel
-        // the field, so latch it as already handled for this frame.
-        self.lastPauseButton = true;
+        self.oDown = Input.GetKey(KeyCode.O);
 
         self.devToolsActive = false;
         try
         {
-            orig(self);
+            orig(self, dt);
         }
         finally
         {
             self.devToolsActive = devToolsWasActive;
         }
 
-        // Vanilla skipped this because devToolsActive was temporarily false. Keep the
-        // same DevUI instance alive and give it one update so the focused field receives
-        // Input.inputString, cursor keys, clipboard shortcuts, Enter, Escape, etc.
+        // Exactly one text-input update for this raw frame. The previous implementation
+        // did this from RainWorldGame.Update while vanilla had already updated DevUI in
+        // RawUpdate, causing Input.inputString to be consumed two or more times (for
+        // example one O keypress becoming several 'o' characters).
         if (devToolsWasActive && focusedDevUi != null && ReferenceEquals(self.devUI, focusedDevUi))
         {
             focusedDevUi.Update();
+        }
+    }
+
+    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, RainWorldGame self)
+    {
+        bool captured = IsKeyboardCapturedThisFrame(self) || HasFocusedTextField(self);
+        if (captured)
+        {
+            // RainWorldGame.Update owns the R restart shortcut and the pause edge. A text
+            // field may release focus during RawUpdate (Enter/Escape), so the raw-frame
+            // capture marker intentionally survives until this Update has completed.
+            self.lastRestartButton = Input.GetKey(KeyCode.R);
+            self.lastPauseButton = true;
+        }
+
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            if (ReferenceEquals(_capturedGame, self) && _capturedUnityFrame == Time.frameCount)
+            {
+                _capturedGame = null;
+                _capturedUnityFrame = -1;
+            }
         }
     }
 
@@ -96,7 +127,7 @@ internal static class DevUIShortcutInputGuard
         }
 
         RainWorldGame game = self?.room?.game;
-        if (HasFocusedTextField(game))
+        if (HasFocusedTextField(game) || IsKeyboardCapturedThisFrame(game))
         {
             Player.InputPackage focusedInput = self.input[0];
             NeutralizeGameplayInput(ref focusedInput);
@@ -181,6 +212,17 @@ internal static class DevUIShortcutInputGuard
         RecalculateDownDiagonal(ref input);
         self.input[0] = input;
         self.mapInput = input;
+    }
+
+    private static void MarkKeyboardCaptured(RainWorldGame game)
+    {
+        _capturedGame = game;
+        _capturedUnityFrame = Time.frameCount;
+    }
+
+    private static bool IsKeyboardCapturedThisFrame(RainWorldGame game)
+    {
+        return game != null && ReferenceEquals(_capturedGame, game) && _capturedUnityFrame == Time.frameCount;
     }
 
     private static bool HasFocusedTextField(RainWorldGame game)
