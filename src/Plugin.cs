@@ -38,7 +38,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.117";
+    public const string Version = "0.2.118";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -106,6 +106,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            RopeSpearWallStickRuntime.Disable();
             RopeSpearAimController.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
@@ -165,6 +166,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DryCycleContent.LoadResources(self);
             KingVultureSpearHooks.Enable();
             RopeSpearHooks.Enable();
+            RopeSpearWallStickRuntime.Enable();
             RopeSpearAimController.Enable();
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
@@ -255,6 +257,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            RopeSpearWallStickRuntime.Disable();
             RopeSpearAimController.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
