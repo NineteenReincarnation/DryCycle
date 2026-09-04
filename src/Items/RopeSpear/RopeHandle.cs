@@ -56,6 +56,7 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         firstChunk.lastPos = position;
         firstChunk.vel = Vector2.zero;
         firstChunk.collideWithTerrain = Data == null || !Data.Anchored;
+        GoThroughFloors = false;
     }
 
     public override void Update(bool eu)
@@ -84,10 +85,16 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
                 }
 
                 firstChunk.vel *= 0.35f;
+                GoThroughFloors = false;
             }
 
             return;
         }
+
+        // PhysicalObject.Grabbed sets GoThroughFloors=true. Generic carryable items
+        // do not reset it when a grasp is released, so explicitly restore ordinary
+        // floor collision once this handle is loose in the room.
+        GoThroughFloors = false;
 
         if (Data != null && Data.Anchored)
         {
@@ -158,6 +165,7 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         firstChunk.lastPos = position;
         firstChunk.vel = Vector2.zero;
         firstChunk.collideWithTerrain = false;
+        GoThroughFloors = false;
         room.PlaySound(SoundID.Spear_Stick_In_Wall, firstChunk, loop: false, 0.45f, 1.25f);
         return true;
     }
@@ -187,7 +195,9 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         Vector2 position = Vector2.Lerp(firstChunk.lastPos, firstChunk.pos, timeStacker) - camPos;
         sLeaser.sprites[0].SetPosition(position);
         sLeaser.sprites[1].SetPosition(position);
-        sLeaser.sprites[1].rotation = Anchored ? 90f : Custom.VecToDeg(firstChunk.vel.sqrMagnitude > 0.01f ? firstChunk.vel : Vector2.right);
+        sLeaser.sprites[1].rotation = Anchored
+            ? 90f
+            : Custom.VecToDeg(firstChunk.vel.sqrMagnitude > 0.01f ? firstChunk.vel : Vector2.right);
 
         if (slatedForDeletetion || room != rCam.room)
         {
