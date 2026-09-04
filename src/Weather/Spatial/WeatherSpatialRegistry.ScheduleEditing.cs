@@ -96,6 +96,10 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
+        TryGetTargetFamily(target, out WeatherSpatialFamily family);
+        WeatherSpatialRegionFamilySchedule familySetting =
+            EnsureFamilyScheduleStateForChildEditing(regionKey, family);
+
         chancePercent = WeatherSpatialScheduleWeather.ClampChance(chancePercent);
         if (!RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule))
         {
@@ -112,10 +116,11 @@ internal static partial class WeatherSpatialRegistry
             return true;
         }
 
-        if (TryGetTargetFamily(target, out WeatherSpatialFamily family) &&
+        if (family != null &&
             schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather familyEntry) &&
             familyEntry.IsFamily)
         {
+            familyEntry.ChancePercent = familySetting?.ChancePercent ?? familyEntry.ChancePercent;
             familyEntry.Variants[id] = chancePercent;
             Dirty = true;
             WeatherScheduleCacheInvalidation.InvalidateAll();
@@ -146,7 +151,7 @@ internal static partial class WeatherSpatialRegistry
             {
                 WeatherSpatialScheduleWeather created = new(
                     family.Id,
-                    100f,
+                    familySetting?.ChancePercent ?? StoredFamilyChanceOrDefault(regionKey, family.Id),
                     isFamily: true);
                 created.Variants[id] = chancePercent;
                 schedule.Weather[family.Id] = created;

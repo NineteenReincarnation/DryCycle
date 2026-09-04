@@ -196,20 +196,9 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
-        if (target.IsFamily || rule == WeatherSpatialRule.Inherit)
-        {
-            return true;
-        }
-
-        if (!WeatherSpatialCatalog.TryGetFamily(
-                target.Kind,
-                target.WeatherId,
-                out WeatherSpatialFamily family))
-        {
-            return false;
-        }
-
-        return IsFamilyAllowed(regionKey, roomKey, family.Id);
+        // FamWeather is no longer a room-editable target. Every concrete child can be
+        // authored directly as Allow/Forbidden without a parent Family prerequisite.
+        return !target.IsFamily;
     }
 
     internal static bool SetRoomRule(

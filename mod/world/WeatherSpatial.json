@@ -4,6 +4,24 @@
   "regions": {
     "B5": {
       "schedule": {
+        "families": {
+          "Heat": {
+            "enabled": true,
+            "chance": 100,
+            "subWeather": {
+              "Weather/HeatWave": true,
+              "DangerType/IntenseHeat": true
+            }
+          },
+          "Sand": {
+            "enabled": true,
+            "chance": 100,
+            "subWeather": {
+              "Weather/SandStorm": true,
+              "DangerType/SandStorm": true
+            }
+          }
+        },
         "weather": {
           "HeatWave": {
             "chance": 100
@@ -20,6 +38,25 @@
     },
     "SU": {
       "schedule": {
+        "families": {
+          "Rain": {
+            "enabled": true,
+            "chance": 80,
+            "subWeather": {
+              "Weather/LightRain": true,
+              "Weather/HeavyRain": true,
+              "DangerType/DeathRain": true
+            }
+          },
+          "Fog": {
+            "enabled": true,
+            "chance": 100,
+            "subWeather": {
+              "Weather/Fog": true,
+              "Weather/DenseFog": true
+            }
+          }
+        },
         "weather": {
           "Rain": {
             "chance": 80,

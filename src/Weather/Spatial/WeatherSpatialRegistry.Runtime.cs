@@ -24,12 +24,9 @@ internal static partial class WeatherSpatialRegistry
         WeatherScheduleEventKind kind,
         string weatherId)
     {
-        if (!WeatherSpatialCatalog.TryGetFamily(kind, weatherId, out WeatherSpatialFamily family))
-        {
-            return _globalDefault != WeatherSpatialRule.Deny;
-        }
-
-        if (!IsFamilyAllowed(regionId, roomName, family.Id))
+        // FamWeather is now a Region scheduling category only. Room authoring is exact
+        // SubWeather/DangerType Allow/Forbidden and never depends on a room Family rule.
+        if (!WeatherSpatialCatalog.IsKnownWeather(kind, weatherId))
         {
             return false;
         }
@@ -63,29 +60,20 @@ internal static partial class WeatherSpatialRegistry
     {
         if (!WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
         {
-            return _globalDefault != WeatherSpatialRule.Deny;
+            return false;
         }
 
-        string regionKey = NormalizeRegion(regionId);
-        string roomKey = (roomName ?? string.Empty).Trim();
-        if (Regions.TryGetValue(regionKey, out WeatherSpatialRegionRules region))
+        // Retained for Overview/hover compatibility: a Family is considered present in
+        // a room when at least one of its concrete children is allowed there.
+        for (int i = 0; i < family.Members.Count; i++)
         {
-            if (region.Rooms.TryGetValue(roomKey, out WeatherSpatialRoomRules room))
+            WeatherSpatialMember member = family.Members[i];
+            if (IsAllowed(regionId, roomName, member.Kind, member.Id))
             {
-                WeatherSpatialRule roomRule = GetRule(room.Families, family.Id);
-                if (roomRule != WeatherSpatialRule.Inherit)
-                {
-                    return roomRule == WeatherSpatialRule.Allow;
-                }
-            }
-
-            WeatherSpatialRule regionRule = GetRule(region.FamilyDefaults, family.Id);
-            if (regionRule != WeatherSpatialRule.Inherit)
-            {
-                return regionRule == WeatherSpatialRule.Allow;
+                return true;
             }
         }
-        return _globalDefault != WeatherSpatialRule.Deny;
+        return false;
     }
 
     internal static bool ClearRegionWeatherConfiguration(string regionId)
@@ -128,7 +116,27 @@ internal static partial class WeatherSpatialRegistry
                 Directory.CreateDirectory(directory);
             }
 
+            // FamWeather is no longer spatial authoring data. Drop legacy Family
+            // room/default rules on canonical save so JSON matches the current UI.
+            RemoveLegacyFamilySpatialRules();
+
+            // Materialize explicit Region FamWeather/SubWeather enable state for any
+            // legacy raw schedule before serializing the canonical file.
+            List<string> scheduleRegions = new(RegionSchedules.Keys);
+            for (int i = 0; i < scheduleRegions.Count; i++)
+            {
+                EnsureLegacyFamilySchedule(scheduleRegions[i]);
+                SynchronizeGroupedFamilyChances(scheduleRegions[i]);
+            }
+
             string json = Json.Serialize(BuildJsonRoot());
+            if (!TryMergeRegionFamilyScheduleState(json, out json))
+            {
+                Dirty = true;
+                Plugin.Logger?.LogError("DryCycle weather spatial: failed to build regional FamWeather JSON.");
+                return false;
+            }
+
             string temp = path + ".tmp";
             File.WriteAllText(temp, json);
 
@@ -147,13 +155,6 @@ internal static partial class WeatherSpatialRegistry
             }
             File.Move(temp, path);
 
-            if (!PersistRegionFamilyScheduleState(path))
-            {
-                Dirty = true;
-                Plugin.Logger?.LogError("DryCycle weather spatial: failed to persist regional FamWeather state.");
-                return false;
-            }
-
             LoadedPath = path;
             FatalLoadError = null;
             Dirty = false;
@@ -167,6 +168,34 @@ internal static partial class WeatherSpatialRegistry
         {
             Plugin.Logger?.LogError("DryCycle weather spatial save failed: " + ex);
             return false;
+        }
+    }
+
+    private static void RemoveLegacyFamilySpatialRules()
+    {
+        List<string> regionKeys = new(Regions.Keys);
+        for (int regionIndex = 0; regionIndex < regionKeys.Count; regionIndex++)
+        {
+            string regionKey = regionKeys[regionIndex];
+            if (!Regions.TryGetValue(regionKey, out WeatherSpatialRegionRules region))
+            {
+                continue;
+            }
+
+            region.FamilyDefaults.Clear();
+            List<string> roomKeys = new(region.Rooms.Keys);
+            for (int roomIndex = 0; roomIndex < roomKeys.Count; roomIndex++)
+            {
+                string roomKey = roomKeys[roomIndex];
+                WeatherSpatialRoomRules room = region.Rooms[roomKey];
+                room.Families.Clear();
+                if (room.IsEmpty)
+                {
+                    region.Rooms.Remove(roomKey);
+                }
+            }
+
+            TrimRegion(regionKey, region);
         }
     }
 

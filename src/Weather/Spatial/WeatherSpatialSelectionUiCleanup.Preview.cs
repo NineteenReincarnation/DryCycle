@@ -28,7 +28,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 owner,
                 "DryCycle_Weather_Preview_Percent_Input",
                 parent,
-                new Vector2(250f, 448f),
+                new Vector2(250f, 470f),
                 42f,
                 "100%")
         {
@@ -66,7 +66,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 owner,
                 "DryCycle_Weather_Preview_Percent_Label",
                 parent,
-                new Vector2(152f, 448f),
+                new Vector2(152f, 470f),
                 96f,
                 "PreviewIntensity");
             parent.subNodes.Add(label);

@@ -8,15 +8,15 @@ namespace DryCycle.Weather.Spatial;
 
 /// <summary>
 /// Final pass over the Weather Zones panel. Removes retired controls, fixes the
-/// weather picker so it lives in the editor's coordinate space, and replaces the
-/// preview +/- controls with directly editable percentage fields.
+/// weather picker so it lives in the editor's coordinate space, and installs the
+/// Region FamWeather scheduling table.
 /// </summary>
 internal static partial class WeatherSpatialSelectionUiCleanup
 {
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string MarkerId = "DryCycle_Weather_SelectionUi_Clean";
     private const string BrokenPickerId = "DryCycle_Weather_Target_Picker_Node";
-    private const float FamilyTableExpansion = 110f;
+    private const float FamilyTableExpansion = 160f;
 
     private static bool _enabled;
 
@@ -86,22 +86,21 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Remove(editor, "PreviewPlus");
         Remove(editor, "PreviewValue");
 
+        // Probability is Region scheduling data now. Room authoring only toggles
+        // exact weather Allow/Forbidden, so no chance input belongs below the picker.
+        Remove(editor, "DryCycle_Weather_Family_Chance_Input");
+        Remove(editor, "DryCycle_Weather_Family_Chance_Label");
+        Remove(editor, "DryCycle_Weather_SubWeather_Chance_Input");
+        Remove(editor, "DryCycle_Weather_SubWeather_Chance_Label");
+
         Stretch(editor, "SelectSubregion", 8f, 284f);
         Stretch(editor, "SelectShelters", 8f, 140f);
         Stretch(editor, "SelectGates", 152f, 140f);
         Stretch(editor, "Preview", 8f, 140f);
         Stretch(editor, "Selection", 8f, 140f);
 
-        // One dedicated SubWeather chance row sits between Toggle Sel and Preview.
-        ShiftY(editor, "Preview", -22f);
-        ShiftY(editor, "Selection", -22f);
-        ShiftY(editor, "SelectAll", -22f);
-        ShiftY(editor, "SelectNone", -22f);
-        ShiftY(editor, "SelectInvert", -22f);
-        ShiftY(editor, "SelectSubregion", -22f);
-        ShiftY(editor, "SelectShelters", -22f);
-        ShiftY(editor, "SelectGates", -22f);
-
+        // Compact the retired Force/Stop rows. Unlike the old layout there is no
+        // dedicated SubWeather chance row in the room-editing section.
         ShiftY(editor, "Undo", 50f);
         ShiftY(editor, "Redo", 50f);
         ShiftY(editor, "Validate", 50f);
@@ -114,23 +113,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             ShiftY(editor, "Issue" + i, 50f);
         }
 
-        ShiftY(editor, "Undo", -22f);
-        ShiftY(editor, "Redo", -22f);
-        ShiftY(editor, "Validate", -22f);
-        ShiftY(editor, "Save", -22f);
-        ShiftY(editor, "Repair", -22f);
-        ShiftY(editor, "Status", -22f);
-        ShiftY(editor, "Path", -22f);
-        for (int i = 0; i < 7; i++)
-        {
-            ShiftY(editor, "Issue" + i, -22f);
-        }
-
-        editor.subNodes.Add(new WeatherChanceInput(
-            editor.owner,
-            editor,
-            editor,
-            familyChance: false));
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
         editor.subNodes.Add(new FamilyScheduleTable(editor.owner, editor, editor));
@@ -148,12 +130,10 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             panel.size = new Vector2(panel.size.x, panel.size.y + FamilyTableExpansion);
         }
 
-        // Keep Region at its original screen position; everything below it moves down
-        // with the expanded panel, leaving a clean block for the four Family rows.
+        // Keep Region at its original screen position. Everything else moves down,
+        // creating a fixed accordion area for FamWeather plus one expanded family.
         ShiftY(editor, "Region", FamilyTableExpansion);
 
-        // The old hover panel lived directly below the main panel. The expanded panel
-        // now uses that vertical space, so park hover details immediately to the left.
         if (Find(editor, "DryCycle_Weather_Room_Hover_Info") is PositionedDevUINode hover)
         {
             hover.pos = new Vector2(-320f, 0f);

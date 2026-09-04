@@ -9,6 +9,7 @@ internal static partial class WeatherSpatialRegistry
 {
     internal static WeatherSpatialValidationResult Validate(World activeWorld)
     {
+        EnsureLegacyScheduleMigration();
         WeatherSpatialValidationResult result = new();
         if (!string.IsNullOrEmpty(FatalLoadError))
         {
@@ -23,16 +24,23 @@ internal static partial class WeatherSpatialRegistry
         {
             TryGetRegion(regionId, out WeatherSpatialRegionRules rules);
             TryGetScheduleRules(regionId, out WeatherSpatialRegionSchedule schedule);
+            EnsureLegacyFamilySchedule(NormalizeRegion(regionId));
+
+            ValidateFamilyScheduleState(regionId, schedule, result);
 
             if (rules != null)
             {
                 ValidateRuleKeys(regionId, rules, result);
             }
 
-            HashSet<string> knownRooms = LoadKnownRooms(regionId, activeWorld, out string roomSourceWarning);
-            if (!string.IsNullOrEmpty(roomSourceWarning))
+            HashSet<string> knownRooms = new(StringComparer.OrdinalIgnoreCase);
+            if (rules != null && rules.Rooms.Count > 0)
             {
-                result.Warn(roomSourceWarning);
+                knownRooms = LoadKnownRooms(regionId, activeWorld, out string roomSourceWarning);
+                if (!string.IsNullOrEmpty(roomSourceWarning))
+                {
+                    result.Warn(roomSourceWarning);
+                }
             }
 
             if (rules != null)
@@ -80,10 +88,53 @@ internal static partial class WeatherSpatialRegistry
         {
             ids.Add(regionId);
         }
+        foreach (string regionId in RegionFamilySchedules.Keys)
+        {
+            ids.Add(regionId);
+        }
 
         List<string> result = new(ids);
         result.Sort(StringComparer.OrdinalIgnoreCase);
         return result;
+    }
+
+    private static void ValidateFamilyScheduleState(
+        string regionId,
+        WeatherSpatialRegionSchedule schedule,
+        WeatherSpatialValidationResult result)
+    {
+        if (!RegionFamilySchedules.TryGetValue(
+                NormalizeRegion(regionId),
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
+        {
+            return;
+        }
+
+        List<WeatherSpatialRegionFamilySchedule> settings = new(families.Values);
+        foreach (WeatherSpatialRegionFamilySchedule setting in settings)
+        {
+            if (!WeatherSpatialCatalog.TryGetFamily(setting.FamilyId, out WeatherSpatialFamily family))
+            {
+                result.Error($"{regionId}: schedule/families contains unknown FamWeather '{setting.FamilyId}'.");
+                continue;
+            }
+
+            if (!setting.Enabled)
+            {
+                continue;
+            }
+
+            if (setting.ChancePercent <= 0f)
+            {
+                result.Warn($"{regionId}: FamWeather '{family.Id}' is YES but FamWeatherChance is 0%; it cannot schedule.");
+                continue;
+            }
+
+            if (!ScheduleHasAnyActiveMember(regionId, schedule, family))
+            {
+                result.Warn($"{regionId}: FamWeather '{family.Id}' is YES but no SubWeather has a non-zero active chance.");
+            }
+        }
     }
 
     private static void ValidateRuleKeys(
@@ -113,28 +164,13 @@ internal static partial class WeatherSpatialRegistry
         WeatherSpatialRoomRules room,
         WeatherSpatialValidationResult result)
     {
-        foreach (string family in room.Families.Keys)
-        {
-            if (!WeatherSpatialCatalog.IsKnownFamily(family))
-            {
-                result.Error($"{regionId}/{roomName}: unknown family '{family}'.");
-            }
-        }
+        // Legacy room Family rules are intentionally ignored. FamWeather now belongs
+        // to Region scheduling only; rooms author concrete SubWeather/DangerType rules.
         foreach (string weather in room.Weather.Keys)
         {
-            if (!WeatherSpatialCatalog.TryParseWeatherKey(
-                    weather,
-                    out WeatherScheduleEventKind kind,
-                    out string id))
+            if (!WeatherSpatialCatalog.TryParseWeatherKey(weather, out _, out _))
             {
                 result.Error($"{regionId}/{roomName}: unknown weather '{weather}'.");
-                continue;
-            }
-
-            if (WeatherSpatialCatalog.TryGetFamily(kind, id, out WeatherSpatialFamily family) &&
-                !IsFamilyAllowed(regionId, roomName, family.Id))
-            {
-                result.Warn($"{regionId}/{roomName}: '{weather}' is configured but parent family '{family.Id}' is not allowed in this room; the child rule is inactive.");
             }
         }
     }
@@ -225,38 +261,22 @@ internal static partial class WeatherSpatialRegistry
         WeatherSpatialRegionSchedule schedule,
         WeatherSpatialValidationResult result)
     {
-        HashSet<string> families = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string family in rules.FamilyDefaults.Keys)
-        {
-            families.Add(family);
-        }
-        foreach (WeatherSpatialRoomRules room in rules.Rooms.Values)
-        {
-            foreach (string family in room.Families.Keys)
-            {
-                families.Add(family);
-            }
-        }
-
-        foreach (string familyId in families)
-        {
-            if (WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family) &&
-                !ScheduleHasAnyMember(schedule, family))
-            {
-                result.Warn($"{regionId}: family '{family.Id}' has spatial rules but no member is enabled in WeatherSpatial.json schedule.");
-            }
-        }
-
         HashSet<string> exactKeys = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string key in rules.WeatherDefaults.Keys)
+        foreach (KeyValuePair<string, WeatherSpatialRule> weatherPair in rules.WeatherDefaults)
         {
-            exactKeys.Add(key);
+            if (weatherPair.Value == WeatherSpatialRule.Allow)
+            {
+                exactKeys.Add(weatherPair.Key);
+            }
         }
         foreach (WeatherSpatialRoomRules room in rules.Rooms.Values)
         {
-            foreach (string key in room.Weather.Keys)
+            foreach (KeyValuePair<string, WeatherSpatialRule> weatherPair in room.Weather)
             {
-                exactKeys.Add(key);
+                if (weatherPair.Value == WeatherSpatialRule.Allow)
+                {
+                    exactKeys.Add(weatherPair.Key);
+                }
             }
         }
 
@@ -270,18 +290,19 @@ internal static partial class WeatherSpatialRegistry
                 continue;
             }
 
-            if (schedule == null || !schedule.Contains(kind, id))
+            if (!RegionScheduleContains(regionId, kind, id))
             {
-                result.Warn($"{regionId}: '{key}' has spatial rules but is not enabled in WeatherSpatial.json schedule.");
+                result.Warn($"{regionId}: '{key}' is allowed in Weather Zones but its FamWeather/SubWeather schedule is not active.");
             }
         }
     }
 
-    private static bool ScheduleHasAnyMember(
+    private static bool ScheduleHasAnyActiveMember(
+        string regionId,
         WeatherSpatialRegionSchedule schedule,
         WeatherSpatialFamily family)
     {
-        if (schedule == null || family == null)
+        if (family == null)
         {
             return false;
         }
@@ -289,7 +310,7 @@ internal static partial class WeatherSpatialRegistry
         for (int i = 0; i < family.Members.Count; i++)
         {
             WeatherSpatialMember member = family.Members[i];
-            if (schedule.Contains(member.Kind, member.Id))
+            if (RegionScheduleContains(regionId, member.Kind, member.Id))
             {
                 return true;
             }

@@ -95,9 +95,7 @@ internal static partial class WeatherSpatialRegistry
         EnsureLegacyScheduleMigration();
         profile = null;
         string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 ||
-            !RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule) ||
-            schedule.IsEmpty)
+        if (regionKey.Length == 0)
         {
             return false;
         }
@@ -109,7 +107,9 @@ internal static partial class WeatherSpatialRegistry
         for (int familyIndex = 0; familyIndex < WeatherSpatialCatalog.AllFamilies.Count; familyIndex++)
         {
             WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[familyIndex];
-            if (!TryGetFamilySchedule(regionKey, family.Id, out bool enabled, out float familyChance) || !enabled)
+            if (!TryGetFamilySchedule(regionKey, family.Id, out bool familyEnabled, out float familyChance) ||
+                !familyEnabled ||
+                familyChance <= 0f)
             {
                 continue;
             }
@@ -118,7 +118,14 @@ internal static partial class WeatherSpatialRegistry
             for (int memberIndex = 0; memberIndex < family.Members.Count; memberIndex++)
             {
                 WeatherSpatialMember member = family.Members[memberIndex];
-                if (!TryGetConfiguredMemberChance(schedule, family, member, out float childChance))
+                if (!TryGetSubWeatherSchedule(
+                        regionKey,
+                        member.Kind,
+                        member.Id,
+                        out bool childEnabled,
+                        out float childChance) ||
+                    !childEnabled ||
+                    childChance <= 0f)
                 {
                     continue;
                 }
@@ -130,8 +137,8 @@ internal static partial class WeatherSpatialRegistry
                 }
                 else
                 {
-                    // Danger entries live in a flat compatibility list. Multiplying the
-                    // two independent probabilities preserves the same effective chance.
+                    // DangerType remains a flat compatibility list. Folding the Family
+                    // roll into its chance preserves the same independent probability.
                     built.AddDanger(new ClimateChanceEntry(
                         member.Id,
                         childChance * familyChance / 100f));
@@ -155,8 +162,23 @@ internal static partial class WeatherSpatialRegistry
         WeatherScheduleEventKind kind,
         string id)
     {
-        return TryGetScheduleRules(regionId, out WeatherSpatialRegionSchedule schedule) &&
-               schedule.Contains(kind, id);
+        string regionKey = NormalizeRegion(regionId);
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(kind, id, out WeatherSpatialFamily family) ||
+            !TryGetFamilySchedule(regionKey, family.Id, out bool familyEnabled, out float familyChance) ||
+            !familyEnabled ||
+            familyChance <= 0f ||
+            !TryGetSubWeatherSchedule(
+                regionKey,
+                kind,
+                id,
+                out bool childEnabled,
+                out float childChance))
+        {
+            return false;
+        }
+
+        return childEnabled && childChance > 0f;
     }
 
     private static bool TryGetConfiguredMemberChance(
@@ -166,6 +188,11 @@ internal static partial class WeatherSpatialRegistry
         out float chancePercent)
     {
         chancePercent = 0f;
+        if (schedule == null || family == null)
+        {
+            return false;
+        }
+
         string id = WeatherSpatialCatalog.CanonicalWeatherId(member.Kind, member.Id);
         if (member.Kind == WeatherScheduleEventKind.DangerType)
         {
@@ -179,7 +206,8 @@ internal static partial class WeatherSpatialRegistry
             return true;
         }
 
-        if (schedule.Weather.TryGetValue(id, out WeatherSpatialScheduleWeather exact) && !exact.IsFamily)
+        if (schedule.Weather.TryGetValue(id, out WeatherSpatialScheduleWeather exact) &&
+            !exact.IsFamily)
         {
             chancePercent = exact.ChancePercent;
             return true;

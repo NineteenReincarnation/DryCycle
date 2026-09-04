@@ -61,34 +61,19 @@ internal static partial class WeatherSpatialRegistry
                 return false;
             }
 
-            int version = ReadConfigVersion(root);
-            bool legacyV1 = version == 1;
-            bool buggyV2WithoutSchedule =
-                version == CurrentVersion &&
-                RegionSchedules.Count == 0 &&
-                Regions.Count > 0 &&
-                !HasAnyScheduleField(root);
-
-            if (!legacyV1 && !buggyV2WithoutSchedule)
+            // Only the explicit v1 format is unambiguously legacy. A v2 file with
+            // spatial rules but no schedule is now a valid authoring state (for example
+            // every Region FamWeather can intentionally be NO), so never resurrect
+            // historic SU/B5 defaults merely because a v2 schedule is absent.
+            if (ReadConfigVersion(root) != 1)
             {
                 return false;
             }
 
-            bool changed = MergeLegacyRegionClimateDefaults();
-            if (legacyV1)
-            {
-                RemoveExpectedV1VersionWarning();
-            }
-
-            if (!changed && !legacyV1)
-            {
-                return false;
-            }
-
+            MergeLegacyRegionClimateDefaults();
+            RemoveExpectedV1VersionWarning();
             Plugin.Logger?.LogInfo(
-                buggyV2WithoutSchedule
-                    ? "DryCycle repaired a WeatherSpatial v2 file created by the incomplete climate migration: legacy schedule defaults were restored in memory. Save WeatherSpatial to persist them."
-                    : "DryCycle migrated WeatherSpatial v1 climate data into the v2 schedule section in memory. Save WeatherSpatial to persist the migration.");
+                "DryCycle migrated WeatherSpatial v1 climate data into the v2 schedule section in memory. Save WeatherSpatial to persist the migration.");
             return true;
         }
         catch (Exception ex)
@@ -108,26 +93,6 @@ internal static partial class WeatherSpatialRegistry
             return (int)version;
         }
         return 0;
-    }
-
-    private static bool HasAnyScheduleField(Dictionary<string, object> root)
-    {
-        if (root == null ||
-            !root.TryGetValue("regions", out object regionsObj) ||
-            regionsObj is not Dictionary<string, object> regionMap)
-        {
-            return false;
-        }
-
-        foreach (object regionValue in regionMap.Values)
-        {
-            if (regionValue is Dictionary<string, object> regionObject &&
-                regionObject.ContainsKey("schedule"))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static bool MergeLegacyRegionClimateDefaults()

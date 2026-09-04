@@ -10,6 +10,8 @@ internal sealed class WeatherSpatialRegionFamilySchedule
     internal string FamilyId { get; }
     internal bool Enabled { get; set; }
     internal float ChancePercent { get; set; }
+    internal readonly Dictionary<string, bool> SubWeatherEnabled =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal WeatherSpatialRegionFamilySchedule(string familyId, bool enabled, float chancePercent)
     {
@@ -35,13 +37,16 @@ internal static partial class WeatherSpatialRegistry
         EnsureLegacyScheduleMigration();
 
         string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 || !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
         {
             return false;
         }
 
         EnsureLegacyFamilySchedule(regionKey);
-        if (!RegionFamilySchedules.TryGetValue(regionKey, out Dictionary<string, WeatherSpatialRegionFamilySchedule> families) ||
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families) ||
             !families.TryGetValue(family.Id, out WeatherSpatialRegionFamilySchedule setting))
         {
             return false;
@@ -55,7 +60,8 @@ internal static partial class WeatherSpatialRegistry
     internal static bool SetFamilyScheduleEnabled(string regionId, string familyId, bool enabled)
     {
         string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 || !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
         {
             return false;
         }
@@ -63,7 +69,9 @@ internal static partial class WeatherSpatialRegistry
         EnsureLegacyScheduleMigration();
         EnsureLegacyFamilySchedule(regionKey);
 
-        if (!RegionFamilySchedules.TryGetValue(regionKey, out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
         {
             if (!enabled)
             {
@@ -79,7 +87,7 @@ internal static partial class WeatherSpatialRegistry
             {
                 return true;
             }
-            setting = new WeatherSpatialRegionFamilySchedule(family.Id, enabled: true, chancePercent: 100f);
+            setting = new WeatherSpatialRegionFamilySchedule(family.Id, true, 100f);
             families[family.Id] = setting;
             Dirty = true;
             WeatherScheduleCacheInvalidation.InvalidateAll();
@@ -100,7 +108,8 @@ internal static partial class WeatherSpatialRegistry
     internal static bool SetFamilyScheduleChance(string regionId, string familyId, float chancePercent)
     {
         string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 || !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family))
         {
             return false;
         }
@@ -109,7 +118,169 @@ internal static partial class WeatherSpatialRegistry
         EnsureLegacyFamilySchedule(regionKey);
         chancePercent = WeatherSpatialScheduleWeather.ClampChance(chancePercent);
 
-        if (!RegionFamilySchedules.TryGetValue(regionKey, out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
+        WeatherSpatialRegionFamilySchedule setting = EnsureFamilyScheduleState(
+            regionKey,
+            family,
+            enabledWhenCreated: false,
+            defaultChance: chancePercent);
+        if (setting == null)
+        {
+            return false;
+        }
+
+        bool changed = Math.Abs(setting.ChancePercent - chancePercent) >= 0.001f;
+        setting.ChancePercent = chancePercent;
+        SynchronizeGroupedFamilyChance(regionKey, family.Id, chancePercent);
+        if (changed)
+        {
+            Dirty = true;
+            WeatherScheduleCacheInvalidation.InvalidateAll();
+        }
+        return true;
+    }
+
+    internal static bool TryGetSubWeatherSchedule(
+        string regionId,
+        WeatherScheduleEventKind kind,
+        string weatherId,
+        out bool enabled,
+        out float chancePercent)
+    {
+        enabled = false;
+        chancePercent = 0f;
+        EnsureLegacyScheduleMigration();
+
+        string regionKey = NormalizeRegion(regionId);
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(kind, weatherId, out WeatherSpatialFamily family))
+        {
+            return false;
+        }
+
+        EnsureLegacyFamilySchedule(regionKey);
+        string key = WeatherSpatialCatalog.WeatherKey(kind, weatherId);
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families) ||
+            !families.TryGetValue(family.Id, out WeatherSpatialRegionFamilySchedule familySetting) ||
+            !familySetting.SubWeatherEnabled.TryGetValue(key, out enabled))
+        {
+            return false;
+        }
+
+        WeatherSpatialTarget target = new(kind, weatherId, weatherId);
+        TryGetSubWeatherChance(regionKey, target, out chancePercent);
+        return true;
+    }
+
+    internal static bool SetSubWeatherScheduleEnabled(
+        string regionId,
+        WeatherScheduleEventKind kind,
+        string weatherId,
+        bool enabled)
+    {
+        string regionKey = NormalizeRegion(regionId);
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(kind, weatherId, out WeatherSpatialFamily family))
+        {
+            return false;
+        }
+
+        EnsureLegacyScheduleMigration();
+        EnsureLegacyFamilySchedule(regionKey);
+        WeatherSpatialRegionFamilySchedule familySetting = EnsureFamilyScheduleState(
+            regionKey,
+            family,
+            enabledWhenCreated: false,
+            defaultChance: 100f);
+        if (familySetting == null)
+        {
+            return false;
+        }
+
+        string key = WeatherSpatialCatalog.WeatherKey(kind, weatherId);
+        bool changed = !familySetting.SubWeatherEnabled.TryGetValue(key, out bool previous) ||
+                       previous != enabled;
+        familySetting.SubWeatherEnabled[key] = enabled;
+
+        if (enabled)
+        {
+            WeatherSpatialTarget target = new(kind, weatherId, weatherId);
+            if (!TryGetSubWeatherChance(regionKey, target, out _))
+            {
+                SetSubWeatherChance(regionKey, target, 100f);
+            }
+        }
+
+        if (changed)
+        {
+            Dirty = true;
+        }
+        WeatherScheduleCacheInvalidation.InvalidateAll();
+        return true;
+    }
+
+    internal static bool SetSubWeatherScheduleChance(
+        string regionId,
+        WeatherScheduleEventKind kind,
+        string weatherId,
+        float chancePercent)
+    {
+        string regionKey = NormalizeRegion(regionId);
+        if (regionKey.Length == 0 ||
+            !WeatherSpatialCatalog.TryGetFamily(kind, weatherId, out WeatherSpatialFamily family))
+        {
+            return false;
+        }
+
+        EnsureLegacyScheduleMigration();
+        EnsureLegacyFamilySchedule(regionKey);
+        WeatherSpatialRegionFamilySchedule familySetting = EnsureFamilyScheduleState(
+            regionKey,
+            family,
+            enabledWhenCreated: false,
+            defaultChance: 100f);
+        if (familySetting == null)
+        {
+            return false;
+        }
+
+        string key = WeatherSpatialCatalog.WeatherKey(kind, weatherId);
+        if (!familySetting.SubWeatherEnabled.ContainsKey(key))
+        {
+            familySetting.SubWeatherEnabled[key] = false;
+        }
+
+        WeatherSpatialTarget target = new(kind, weatherId, weatherId);
+        return SetSubWeatherChance(regionKey, target, chancePercent);
+    }
+
+    private static WeatherSpatialRegionFamilySchedule EnsureFamilyScheduleStateForChildEditing(
+        string regionKey,
+        WeatherSpatialFamily family)
+    {
+        return EnsureFamilyScheduleState(
+            regionKey,
+            family,
+            enabledWhenCreated: false,
+            defaultChance: 100f);
+    }
+
+    private static WeatherSpatialRegionFamilySchedule EnsureFamilyScheduleState(
+        string regionKey,
+        WeatherSpatialFamily family,
+        bool enabledWhenCreated,
+        float defaultChance)
+    {
+        if (string.IsNullOrEmpty(regionKey) || family == null)
+        {
+            return null;
+        }
+
+        EnsureLegacyFamilySchedule(regionKey);
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
         {
             families = new Dictionary<string, WeatherSpatialRegionFamilySchedule>(StringComparer.OrdinalIgnoreCase);
             RegionFamilySchedules[regionKey] = families;
@@ -117,23 +288,56 @@ internal static partial class WeatherSpatialRegistry
 
         if (!families.TryGetValue(family.Id, out WeatherSpatialRegionFamilySchedule setting))
         {
-            // Editing a chance while the Family is NO must not implicitly enable it.
-            setting = new WeatherSpatialRegionFamilySchedule(family.Id, enabled: false, chancePercent);
+            setting = new WeatherSpatialRegionFamilySchedule(
+                family.Id,
+                enabledWhenCreated,
+                defaultChance);
             families[family.Id] = setting;
-            Dirty = true;
-            WeatherScheduleCacheInvalidation.InvalidateAll();
-            return true;
         }
+        return setting;
+    }
 
-        if (Math.Abs(setting.ChancePercent - chancePercent) < 0.001f)
+    private static float StoredFamilyChanceOrDefault(
+        string regionKey,
+        string familyId,
+        float fallback = 100f)
+    {
+        if (RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families) &&
+            families.TryGetValue(familyId, out WeatherSpatialRegionFamilySchedule setting))
         {
-            return true;
+            return setting.ChancePercent;
+        }
+        return WeatherSpatialScheduleWeather.ClampChance(fallback);
+    }
+
+    private static void SynchronizeGroupedFamilyChance(
+        string regionKey,
+        string familyId,
+        float chancePercent)
+    {
+        if (RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule) &&
+            schedule.Weather.TryGetValue(familyId, out WeatherSpatialScheduleWeather grouped) &&
+            grouped.IsFamily)
+        {
+            grouped.ChancePercent = WeatherSpatialScheduleWeather.ClampChance(chancePercent);
+        }
+    }
+
+    private static void SynchronizeGroupedFamilyChances(string regionKey)
+    {
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
+        {
+            return;
         }
 
-        setting.ChancePercent = chancePercent;
-        Dirty = true;
-        WeatherScheduleCacheInvalidation.InvalidateAll();
-        return true;
+        foreach (WeatherSpatialRegionFamilySchedule setting in families.Values)
+        {
+            SynchronizeGroupedFamilyChance(regionKey, setting.FamilyId, setting.ChancePercent);
+        }
     }
 
     private static bool ClearRegionFamilyScheduleState(string regionId)
@@ -143,31 +347,30 @@ internal static partial class WeatherSpatialRegistry
 
     private static void EnsureLegacyFamilySchedule(string regionKey)
     {
-        if (string.IsNullOrEmpty(regionKey) || !RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule))
+        if (string.IsNullOrEmpty(regionKey) ||
+            !RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule))
         {
             return;
         }
 
-        if (!RegionFamilySchedules.TryGetValue(regionKey, out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
+        if (!RegionFamilySchedules.TryGetValue(
+                regionKey,
+                out Dictionary<string, WeatherSpatialRegionFamilySchedule> families))
         {
             families = new Dictionary<string, WeatherSpatialRegionFamilySchedule>(StringComparer.OrdinalIgnoreCase);
             RegionFamilySchedules[regionKey] = families;
         }
 
-        for (int i = 0; i < WeatherSpatialCatalog.AllFamilies.Count; i++)
+        for (int familyIndex = 0; familyIndex < WeatherSpatialCatalog.AllFamilies.Count; familyIndex++)
         {
-            WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[i];
-            if (families.ContainsKey(family.Id))
-            {
-                continue;
-            }
-
+            WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[familyIndex];
             bool configured = false;
-            float chance = 100f;
-            if (schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather grouped) && grouped.IsFamily)
+            float familyChance = 100f;
+            if (schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather grouped) &&
+                grouped.IsFamily)
             {
                 configured = true;
-                chance = grouped.ChancePercent;
+                familyChance = grouped.ChancePercent;
             }
             else
             {
@@ -182,12 +385,24 @@ internal static partial class WeatherSpatialRegistry
                 }
             }
 
-            if (configured)
+            if (!families.TryGetValue(family.Id, out WeatherSpatialRegionFamilySchedule setting))
             {
-                families[family.Id] = new WeatherSpatialRegionFamilySchedule(
-                    family.Id,
-                    enabled: true,
-                    chancePercent: chance);
+                if (!configured)
+                {
+                    continue;
+                }
+                setting = new WeatherSpatialRegionFamilySchedule(family.Id, true, familyChance);
+                families[family.Id] = setting;
+            }
+
+            for (int memberIndex = 0; memberIndex < family.Members.Count; memberIndex++)
+            {
+                WeatherSpatialMember member = family.Members[memberIndex];
+                if (!setting.SubWeatherEnabled.ContainsKey(member.Key) &&
+                    schedule.Contains(member.Kind, member.Id))
+                {
+                    setting.SubWeatherEnabled[member.Key] = true;
+                }
             }
         }
 
@@ -215,7 +430,8 @@ internal static partial class WeatherSpatialRegistry
                 foreach (KeyValuePair<string, object> regionPair in regions)
                 {
                     string regionKey = NormalizeRegion(regionPair.Key);
-                    if (regionKey.Length == 0 || regionPair.Value is not Dictionary<string, object> regionObject ||
+                    if (regionKey.Length == 0 ||
+                        regionPair.Value is not Dictionary<string, object> regionObject ||
                         !regionObject.TryGetValue("schedule", out object scheduleObj) ||
                         scheduleObj is not Dictionary<string, object> scheduleMap ||
                         !scheduleMap.TryGetValue("families", out object familyObj) ||
@@ -232,17 +448,49 @@ internal static partial class WeatherSpatialRegistry
                             familyPair.Value is not Dictionary<string, object> settingMap ||
                             !TryReadEnabled(settingMap, out bool enabled) ||
                             !settingMap.TryGetValue("chance", out object chanceObj) ||
-                            !TryNumber(chanceObj, out double number) ||
-                            double.IsNaN(number) || double.IsInfinity(number) || number < 0d || number > 100d)
+                            !TryNumber(chanceObj, out double chance) ||
+                            double.IsNaN(chance) ||
+                            double.IsInfinity(chance) ||
+                            chance < 0d ||
+                            chance > 100d)
                         {
-                            ParseWarnings.Add($"{regionKey}: malformed schedule/families entry '{familyPair.Key}' was ignored.");
+                            ParseWarnings.Add(
+                                $"{regionKey}: malformed schedule/families entry '{familyPair.Key}' was ignored.");
                             continue;
                         }
 
-                        loaded[family.Id] = new WeatherSpatialRegionFamilySchedule(
+                        WeatherSpatialRegionFamilySchedule setting = new(
                             family.Id,
                             enabled,
-                            (float)number);
+                            (float)chance);
+
+                        if (settingMap.TryGetValue("subWeather", out object subObj) && subObj != null)
+                        {
+                            if (subObj is Dictionary<string, object> subMap)
+                            {
+                                foreach (KeyValuePair<string, object> subPair in subMap)
+                                {
+                                    if (!TryParseFamilySubWeatherKey(
+                                            family,
+                                            subPair.Key,
+                                            out string canonicalKey) ||
+                                        !TryReadEnabledValue(subPair.Value, out bool subEnabled))
+                                    {
+                                        ParseWarnings.Add(
+                                            $"{regionKey}: malformed schedule/families/{family.Id}/subWeather entry '{subPair.Key}' was ignored.");
+                                        continue;
+                                    }
+                                    setting.SubWeatherEnabled[canonicalKey] = subEnabled;
+                                }
+                            }
+                            else
+                            {
+                                ParseWarnings.Add(
+                                    $"{regionKey}: schedule/families/{family.Id}/subWeather is not an object and was ignored.");
+                            }
+                        }
+
+                        loaded[family.Id] = setting;
                     }
 
                     if (loaded.Count > 0)
@@ -257,18 +505,29 @@ internal static partial class WeatherSpatialRegistry
             ParseWarnings.Add("Could not read schedule/families state: " + ex.Message);
         }
 
-        List<string> legacyRegions = new(RegionSchedules.Keys);
-        for (int i = 0; i < legacyRegions.Count; i++)
+        HashSet<string> relevantRegions = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string regionKey in RegionSchedules.Keys)
         {
-            EnsureLegacyFamilySchedule(legacyRegions[i]);
+            relevantRegions.Add(regionKey);
+        }
+        foreach (string regionKey in RegionFamilySchedules.Keys)
+        {
+            relevantRegions.Add(regionKey);
+        }
+
+        foreach (string regionKey in relevantRegions)
+        {
+            EnsureLegacyFamilySchedule(regionKey);
+            SynchronizeGroupedFamilyChances(regionKey);
         }
     }
 
-    private static bool PersistRegionFamilyScheduleState(string path)
+    private static bool TryMergeRegionFamilyScheduleState(string baseJson, out string mergedJson)
     {
+        mergedJson = baseJson ?? string.Empty;
         try
         {
-            object parsed = Json.Deserialize(File.ReadAllText(path));
+            object parsed = Json.Deserialize(mergedJson);
             if (parsed is not Dictionary<string, object> root)
             {
                 return false;
@@ -292,12 +551,14 @@ internal static partial class WeatherSpatialRegistry
                     continue;
                 }
 
-                if (!regions.TryGetValue(regionKey, out object regionObj) || regionObj is not Dictionary<string, object> regionMap)
+                if (!regions.TryGetValue(regionKey, out object regionObj) ||
+                    regionObj is not Dictionary<string, object> regionMap)
                 {
                     regionMap = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                     regions[regionKey] = regionMap;
                 }
-                if (!regionMap.TryGetValue("schedule", out object scheduleObj) || scheduleObj is not Dictionary<string, object> scheduleMap)
+                if (!regionMap.TryGetValue("schedule", out object scheduleObj) ||
+                    scheduleObj is not Dictionary<string, object> scheduleMap)
                 {
                     scheduleMap = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                     regionMap["schedule"] = scheduleMap;
@@ -309,38 +570,72 @@ internal static partial class WeatherSpatialRegistry
                 for (int familyIndex = 0; familyIndex < familyKeys.Count; familyIndex++)
                 {
                     WeatherSpatialRegionFamilySchedule setting = configured[familyKeys[familyIndex]];
-                    familyMap[setting.FamilyId] = new Dictionary<string, object>
+                    Dictionary<string, object> entry = new()
                     {
                         ["enabled"] = setting.Enabled,
                         ["chance"] = setting.ChancePercent
                     };
+
+                    if (setting.SubWeatherEnabled.Count > 0)
+                    {
+                        Dictionary<string, object> subWeather = new(StringComparer.OrdinalIgnoreCase);
+                        List<string> subKeys = new(setting.SubWeatherEnabled.Keys);
+                        subKeys.Sort(StringComparer.OrdinalIgnoreCase);
+                        for (int subIndex = 0; subIndex < subKeys.Count; subIndex++)
+                        {
+                            string key = subKeys[subIndex];
+                            subWeather[key] = setting.SubWeatherEnabled[key];
+                        }
+                        entry["subWeather"] = subWeather;
+                    }
+
+                    familyMap[setting.FamilyId] = entry;
                 }
                 scheduleMap["families"] = familyMap;
             }
 
-            string temp = path + ".families.tmp";
-            File.WriteAllText(temp, Json.Serialize(root));
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-            File.Move(temp, path);
+            mergedJson = Json.Serialize(root);
             return true;
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogError("DryCycle schedule/families save failed: " + ex);
+            Plugin.Logger?.LogError("DryCycle schedule/families JSON merge failed: " + ex);
             return false;
         }
+    }
+
+    private static bool TryParseFamilySubWeatherKey(
+        WeatherSpatialFamily family,
+        string rawKey,
+        out string canonicalKey)
+    {
+        canonicalKey = null;
+        if (family == null ||
+            !WeatherSpatialCatalog.TryParseWeatherKey(
+                rawKey,
+                out WeatherScheduleEventKind kind,
+                out string id) ||
+            !WeatherSpatialCatalog.TryGetFamily(kind, id, out WeatherSpatialFamily actualFamily) ||
+            !string.Equals(actualFamily.Id, family.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        canonicalKey = WeatherSpatialCatalog.WeatherKey(kind, id);
+        return true;
     }
 
     private static bool TryReadEnabled(Dictionary<string, object> map, out bool enabled)
     {
         enabled = false;
-        if (map == null || !map.TryGetValue("enabled", out object value))
-        {
-            return false;
-        }
+        return map != null &&
+               map.TryGetValue("enabled", out object value) &&
+               TryReadEnabledValue(value, out enabled);
+    }
+
+    private static bool TryReadEnabledValue(object value, out bool enabled)
+    {
+        enabled = false;
         if (value is bool boolean)
         {
             enabled = boolean;

@@ -43,6 +43,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 BindingFlags.Instance | BindingFlags.NonPublic);
 
             RestoreRememberedTarget();
+            EnsureSelectableTarget();
 
             _button = new Button(
                 owner,
@@ -59,6 +60,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         public override void Update()
         {
             base.Update();
+            EnsureSelectableTarget();
             RefreshButtonText();
             RememberCurrentTarget();
 
@@ -114,13 +116,11 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 return;
             }
 
+            CollapseFamilySchedulePopup();
             float contentHeight = VisibleContentHeight();
             float height = Mathf.Max(70f, 36f + contentHeight);
             float bottom = 532f - height;
 
-            // Keep the picker outside the main Weather Zones panel. Its right edge
-            // stops 10 px before the panel, so selecting weather never covers or
-            // accidentally activates Overview/Brush/Preview/Save controls underneath.
             _popup = new PickerPopup(
                 owner,
                 this,
@@ -147,10 +147,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         private void ToggleFamily(string familyId)
         {
             WeatherSpatialPickerState.ToggleCollapsed(familyId);
-
-            // Recreate the popup so its panel height and child layout immediately
-            // reflect the new fold state. Fold state itself lives outside DevUI and
-            // therefore survives closing/reopening H mode.
             ClosePopup();
             OpenPopup();
             ConsumeLeftClick();
@@ -159,7 +155,11 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         private void SelectTarget(int index)
         {
             int count = WeatherSpatialCatalog.AllTargets.Count;
-            if (count <= 0 || index < 0 || index >= count || _targetIndexField == null)
+            if (count <= 0 ||
+                index < 0 ||
+                index >= count ||
+                _targetIndexField == null ||
+                WeatherSpatialCatalog.AllTargets[index].IsFamily)
             {
                 ClosePopup();
                 return;
@@ -177,11 +177,11 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         {
             if (_targetIndexField == null || _editor == null)
             {
-                return 0;
+                return FirstSelectableTargetIndex();
             }
 
             object value = _targetIndexField.GetValue(_editor);
-            return value is int index ? index : 0;
+            return value is int index ? index : FirstSelectableTargetIndex();
         }
 
         private void RestoreRememberedTarget()
@@ -192,9 +192,37 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             }
 
             int index = WeatherSpatialPickerState.FindRememberedTargetIndex();
-            if (index >= 0 && index < WeatherSpatialCatalog.AllTargets.Count)
+            if (index >= 0 &&
+                index < WeatherSpatialCatalog.AllTargets.Count &&
+                !WeatherSpatialCatalog.AllTargets[index].IsFamily)
             {
                 _targetIndexField.SetValue(_editor, index);
+            }
+        }
+
+        private void EnsureSelectableTarget()
+        {
+            if (_targetIndexField == null || WeatherSpatialCatalog.AllTargets.Count <= 0)
+            {
+                return;
+            }
+
+            int index = Mathf.Clamp(GetTargetIndex(), 0, WeatherSpatialCatalog.AllTargets.Count - 1);
+            if (!WeatherSpatialCatalog.AllTargets[index].IsFamily)
+            {
+                return;
+            }
+
+            int replacement = FirstChildTargetIndex(WeatherSpatialCatalog.AllTargets[index].FamilyId);
+            if (replacement < 0)
+            {
+                replacement = FirstSelectableTargetIndex();
+            }
+            if (replacement >= 0)
+            {
+                _targetIndexField.SetValue(_editor, replacement);
+                _refreshPreviewTargetMethod?.Invoke(_editor, null);
+                _updateStateLabelsMethod?.Invoke(_editor, null);
             }
         }
 
@@ -207,7 +235,11 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             }
 
             int index = Mathf.Clamp(GetTargetIndex(), 0, count - 1);
-            WeatherSpatialPickerState.RememberTarget(WeatherSpatialCatalog.AllTargets[index]);
+            WeatherSpatialTarget target = WeatherSpatialCatalog.AllTargets[index];
+            if (!target.IsFamily)
+            {
+                WeatherSpatialPickerState.RememberTarget(target);
+            }
         }
 
         private void RefreshButtonText()
@@ -226,14 +258,31 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         private static string TargetText(in WeatherSpatialTarget target)
         {
-            if (target.IsFamily)
-            {
-                return "[Family] " + target.FamilyId;
-            }
-
             return target.Kind == WeatherScheduleEventKind.DangerType
                 ? "[Danger] " + target.WeatherId
                 : target.WeatherId;
+        }
+
+        private static int FirstSelectableTargetIndex()
+        {
+            for (int i = 0; i < WeatherSpatialCatalog.AllTargets.Count; i++)
+            {
+                if (!WeatherSpatialCatalog.AllTargets[i].IsFamily)
+                {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        private static int FirstChildTargetIndex(string familyId)
+        {
+            if (!WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family) ||
+                family.Members.Count == 0)
+            {
+                return -1;
+            }
+            return FindTargetIndex(family.Members[0].Key);
         }
 
         private static int FindTargetIndex(string targetKey)
@@ -263,7 +312,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             for (int i = 0; i < families; i++)
             {
                 WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[i];
-                rows++; // Family header always remains visible.
+                rows++; // Family category label remains visible but is not selectable.
                 if (!WeatherSpatialPickerState.IsCollapsed(family.Id))
                 {
                     rows += family.Members.Count;
@@ -275,12 +324,10 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         private void ConsumeLeftClick()
         {
-            if (owner == null)
+            if (owner != null)
             {
-                return;
+                owner.mouseClick = false;
             }
-
-            owner.mouseClick = false;
         }
 
         private sealed class PickerPopup : Panel, IDevUISignals
@@ -311,23 +358,17 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                     }
 
                     WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[familyIndex];
-                    int familyTargetIndex = FindTargetIndex("Family/" + family.Id);
                     bool collapsed = WeatherSpatialPickerState.IsCollapsed(family.Id);
-
-                    if (familyTargetIndex >= 0)
-                    {
-                        FamilyRowButton familyButton = new(
-                            owner,
-                            "DryCycle_Weather_Target_Family_" + familyIndex,
-                            this,
-                            new Vector2(8f, y),
-                            size.x - 16f,
-                            (collapsed ? "▶  " : "▼  ") + "[Family] " + family.Id,
-                            _picker,
-                            familyTargetIndex,
-                            family.Id);
-                        subNodes.Add(familyButton);
-                    }
+                    FamilyRowButton familyButton = new(
+                        owner,
+                        "DryCycle_Weather_Target_Family_" + familyIndex,
+                        this,
+                        new Vector2(8f, y),
+                        size.x - 16f,
+                        (collapsed ? "▶  " : "▼  ") + "[Family] " + family.Id,
+                        _picker,
+                        family.Id);
+                    subNodes.Add(familyButton);
                     y -= RowHeight;
 
                     if (collapsed)
@@ -358,7 +399,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                             text,
                             _picker,
                             targetIndex,
-                            isFamily: false,
                             isDanger: danger);
                         subNodes.Add(item);
                         y -= RowHeight;
@@ -371,7 +411,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 base.Update();
                 if (owner != null && owner.mouseClick && MouseOver)
                 {
-                    // Prevent a popup click from falling through to the map below it.
                     owner.mouseClick = false;
                 }
             }
@@ -382,11 +421,10 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             }
         }
 
-        private class PickerItemButton : Button
+        private sealed class PickerItemButton : Button
         {
             private readonly FixedTargetPicker _picker;
             private readonly int _targetIndex;
-            private readonly bool _isFamily;
             private readonly bool _isDanger;
 
             internal PickerItemButton(
@@ -398,57 +436,35 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 string text,
                 FixedTargetPicker picker,
                 int targetIndex,
-                bool isFamily,
                 bool isDanger)
                 : base(owner, id, parent, pos, width, text)
             {
                 _picker = picker;
                 _targetIndex = targetIndex;
-                _isFamily = isFamily;
                 _isDanger = isDanger;
             }
 
             public override void Update()
             {
                 base.Update();
-
-                bool selected = _picker != null &&
-                                _picker.GetTargetIndex() == _targetIndex;
+                bool selected = _picker != null && _picker.GetTargetIndex() == _targetIndex;
                 if (selected)
                 {
-                    // Keep the complete selected row visible even when the pointer
-                    // leaves it; vanilla Button only highlights while hovered/down.
                     spriteColor = new Color(0.62f, 0.08f, 0.08f);
-                    textColor = new Color(1f, 1f, 1f);
+                    textColor = Color.white;
                     return;
                 }
 
-                if (MouseOver)
+                if (!MouseOver && _isDanger)
                 {
-                    return;
-                }
-
-                if (_isFamily)
-                {
-                    // Family rows are headers, so give them a slightly darker band
-                    // than their indented children while retaining vanilla DevUI red.
-                    spriteColor = new Color(0.72f, 0.72f, 0.72f);
-                    textColor = new Color(0.78f, 0.08f, 0.08f);
-                }
-                else if (_isDanger)
-                {
-                    // Danger rows use a warm accent so the marker is distinguishable
-                    // from ordinary weather even before reading the prefix.
-                    spriteColor = new Color(1f, 1f, 1f);
+                    spriteColor = Color.white;
                     textColor = new Color(1f, 0.48f, 0.08f);
                 }
             }
         }
 
-        private sealed class FamilyRowButton : PickerItemButton
+        private sealed class FamilyRowButton : Button
         {
-            private const float FoldHotZoneWidth = 28f;
-
             private readonly FixedTargetPicker _picker;
             private readonly string _familyId;
 
@@ -460,43 +476,26 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 float width,
                 string text,
                 FixedTargetPicker picker,
-                int targetIndex,
                 string familyId)
-                : base(
-                    owner,
-                    id,
-                    parent,
-                    pos,
-                    width,
-                    text,
-                    picker,
-                    targetIndex,
-                    isFamily: true,
-                    isDanger: false)
+                : base(owner, id, parent, pos, width, text)
             {
                 _picker = picker;
                 _familyId = familyId;
             }
 
+            public override void Update()
+            {
+                base.Update();
+                if (!MouseOver)
+                {
+                    spriteColor = new Color(0.72f, 0.72f, 0.72f);
+                    textColor = new Color(0.78f, 0.08f, 0.08f);
+                }
+            }
+
             public override void Clicked()
             {
-                if (_picker == null)
-                {
-                    return;
-                }
-
-                // The arrow is a dedicated fold control; clicking the text portion
-                // selects the Family target without changing its fold state.
-                if (owner != null && owner.mousePos.x <= absPos.x + FoldHotZoneWidth)
-                {
-                    _picker.ToggleFamily(_familyId);
-                }
-                else
-                {
-                    int targetIndex = FindTargetIndex("Family/" + _familyId);
-                    _picker.SelectTarget(targetIndex);
-                    _picker.ConsumeLeftClick();
-                }
+                _picker?.ToggleFamily(_familyId);
             }
         }
     }
