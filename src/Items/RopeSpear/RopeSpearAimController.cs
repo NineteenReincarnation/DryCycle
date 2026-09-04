@@ -28,11 +28,6 @@ internal static class RopeSpearAimController
         internal bool Charging;
         internal float AngleDegrees;
         internal int SweepDirection = 1;
-
-        // Set only around the explicit ThrowObject call made on button release.
-        // Player_ThrowObject consumes this after vanilla has created the projectile.
-        internal bool PendingDirectionalThrow;
-        internal Vector2 PendingDirection;
     }
 
     private static readonly ConditionalWeakTable<Player, AimState> States = new();
@@ -47,7 +42,6 @@ internal static class RopeSpearAimController
 
         _enabled = true;
         On.Player.GrabUpdate += Player_GrabUpdate;
-        On.Player.ThrowObject += Player_ThrowObject;
         On.Player.GraphicsModuleUpdated += Player_GraphicsModuleUpdated;
     }
 
@@ -59,7 +53,6 @@ internal static class RopeSpearAimController
         }
 
         On.Player.GrabUpdate -= Player_GrabUpdate;
-        On.Player.ThrowObject -= Player_ThrowObject;
         On.Player.GraphicsModuleUpdated -= Player_GraphicsModuleUpdated;
         _enabled = false;
     }
@@ -144,66 +137,31 @@ internal static class RopeSpearAimController
             return;
         }
 
+        RopeSpear releasedSpear = state.Spear;
+        int releaseGrasp = state.GraspIndex;
         Vector2 releaseDirection = state.Charging
             ? GetAimDirection(state)
             : new Vector2(state.Facing, 0f);
 
-        state.PendingDirectionalThrow = true;
-        state.PendingDirection = releaseDirection;
-
-        int releaseGrasp = state.GraspIndex;
         try
         {
+            // Let vanilla and every existing ThrowObject hook finish first. The
+            // directional override is deliberately applied only after this entire
+            // call returns, so RopeSpearHooks' horizontal direction lock cannot
+            // overwrite an angled release regardless of HookGen ordering.
             self.ThrowObject(releaseGrasp, eu);
+
+            if (releasedSpear != null &&
+                !releasedSpear.slatedForDeletetion &&
+                releasedSpear.mode == Weapon.Mode.Thrown)
+            {
+                ApplyDirectionalThrow(self, releasedSpear, releaseDirection, eu);
+            }
         }
         finally
         {
-            state.PendingDirectionalThrow = false;
             ResetState(state);
         }
-    }
-
-    private static void Player_ThrowObject(
-        On.Player.orig_ThrowObject orig,
-        Player self,
-        int grasp,
-        bool eu)
-    {
-        AimState state = null;
-        RopeSpear expectedSpear = null;
-        Vector2 requestedDirection = Vector2.zero;
-        bool directionalThrow = false;
-
-        if (self != null &&
-            States.TryGetValue(self, out state) &&
-            state.PendingDirectionalThrow &&
-            state.GraspIndex == grasp &&
-            state.Spear != null &&
-            self.grasps != null &&
-            grasp >= 0 &&
-            grasp < self.grasps.Length &&
-            object.ReferenceEquals(self.grasps[grasp]?.grabbed, state.Spear))
-        {
-            expectedSpear = state.Spear;
-            requestedDirection = state.PendingDirection;
-            directionalThrow = requestedDirection.sqrMagnitude > 0.0001f;
-            if (directionalThrow)
-            {
-                requestedDirection.Normalize();
-            }
-        }
-
-        orig(self, grasp, eu);
-
-        if (!directionalThrow ||
-            expectedSpear == null ||
-            expectedSpear.slatedForDeletetion ||
-            expectedSpear.mode != Weapon.Mode.Thrown)
-        {
-            return;
-        }
-
-        ApplyDirectionalThrow(self, expectedSpear, requestedDirection, eu);
     }
 
     private static void Player_GraphicsModuleUpdated(
@@ -240,8 +198,6 @@ internal static class RopeSpearAimController
         state.Charging = false;
         state.AngleDegrees = 0f;
         state.SweepDirection = 1;
-        state.PendingDirectionalThrow = false;
-        state.PendingDirection = Vector2.zero;
 
         int facing = player.ThrowDirection;
         if (facing == 0)
@@ -494,7 +450,5 @@ internal static class RopeSpearAimController
         state.Charging = false;
         state.AngleDegrees = 0f;
         state.SweepDirection = 1;
-        state.PendingDirectionalThrow = false;
-        state.PendingDirection = Vector2.zero;
     }
 }
