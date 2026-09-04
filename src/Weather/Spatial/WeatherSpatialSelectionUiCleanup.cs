@@ -9,7 +9,7 @@ namespace DryCycle.Weather.Spatial;
 /// <summary>
 /// Final pass over the Weather Zones panel. Removes retired controls, fixes the
 /// weather picker so it lives in the editor's coordinate space, and replaces the
-/// preview +/- controls with a directly editable percentage field.
+/// preview +/- controls with directly editable percentage fields.
 /// </summary>
 internal static partial class WeatherSpatialSelectionUiCleanup
 {
@@ -68,6 +68,16 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Remove(editor, "ForceDeny");
         Remove(editor, "ForceInherit");
 
+        // Binary authoring no longer has a persistent brush mode. RMB derives the
+        // opposite state from each room as it is touched. The old apply button is kept
+        // but becomes a compact Toggle Sel bulk action handled by the toggle runtime.
+        Remove(editor, "Brush");
+        Stretch(editor, "ApplySelected", 208f, 84f);
+        if (Find(editor, "ApplySelected") is Button applySelected)
+        {
+            applySelected.Text = "Toggle Sel";
+        }
+
         // Remove both the original arrow selector and the first picker implementation.
         // The latter inherited directly from DevUINode, so its Positioned children were
         // accidentally screen-relative instead of Weather-Zones-panel-relative.
@@ -103,6 +113,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         // These are deliberately appended last so their sprites and click handling sit
         // above the older editor controls that the popup temporarily covers.
+        editor.subNodes.Add(new SubWeatherChanceInput(editor.owner, editor, editor));
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
         editor.subNodes.Add(new ClearRegionZonesControl(editor.owner, editor, editor));
@@ -222,7 +233,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             RefreshForbiddenTerminology(root.subNodes[i]);
         }
     }
-
 
     private sealed class CleanupMarker : DevUINode
     {
