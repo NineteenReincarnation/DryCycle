@@ -1,4 +1,5 @@
 using System.Globalization;
+using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
@@ -8,8 +9,13 @@ internal sealed class AbstractRopeSpear : AbstractSpear
     public const float MinRopeLength = 65f;
     public const float MaxRopeLength = 360f;
 
+    internal const string FixedHandlePrefix = "DRYCYCLE_ROPESPEAR_FIXED_HANDLE=";
+    internal const string FixedHandleAnchorPrefix = "DRYCYCLE_ROPESPEAR_FIXED_ANCHOR=";
+
     public float RopeLength;
     public bool RopeBroken;
+    public bool HasPersistentHandleAnchor;
+    public Vector2 PersistentHandleAnchor;
 
     public AbstractRopeSpear(
         World world,
@@ -20,8 +26,10 @@ internal sealed class AbstractRopeSpear : AbstractSpear
         : base(world, null, pos, id, explosive: false)
     {
         type = RopeSpearHooks.ObjectType;
-        RopeLength = UnityEngine.Mathf.Clamp(ropeLength, MinRopeLength, MaxRopeLength);
+        RopeLength = Mathf.Clamp(ropeLength, MinRopeLength, MaxRopeLength);
         RopeBroken = ropeBroken;
+        HasPersistentHandleAnchor = false;
+        PersistentHandleAnchor = Vector2.zero;
     }
 
     public override string ToString()
@@ -29,9 +37,17 @@ internal sealed class AbstractRopeSpear : AbstractSpear
         string baseString = base.ToString();
         return string.Format(
             CultureInfo.InvariantCulture,
-            "{0}<oA>DRYCYCLE_ROPESPEAR_LENGTH={1}<oA>DRYCYCLE_ROPESPEAR_BROKEN={2}",
+            "{0}<oA>DRYCYCLE_ROPESPEAR_LENGTH={1}" +
+            "<oA>DRYCYCLE_ROPESPEAR_BROKEN={2}" +
+            "<oA>{3}{4}" +
+            "<oA>{5}{6},{7}",
             baseString,
             RopeLength,
-            RopeBroken ? 1 : 0);
+            RopeBroken ? 1 : 0,
+            FixedHandlePrefix,
+            HasPersistentHandleAnchor ? 1 : 0,
+            FixedHandleAnchorPrefix,
+            PersistentHandleAnchor.x,
+            PersistentHandleAnchor.y);
     }
 }
