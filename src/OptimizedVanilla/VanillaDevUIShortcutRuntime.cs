@@ -7,14 +7,19 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Text;
 using DevInterface;
+using DryCycle.DevUI.Controls;
 using UnityEngine;
 
 namespace DryCycle.OptimizedVanilla;
 
 /// <summary>
-/// Adds desktop-style shortcuts to Rain World's vanilla H-mode DevUI.
-/// Ctrl+S forwards to the active page's native Save button. Ctrl+Z/Ctrl+Y provide
-/// a small in-session undo/redo history for the vanilla editable pages.
+/// Desktop-style DevUI shortcuts with hybrid transactional undo/redo.
+///
+/// Objects-page edits use in-memory PlacedObject snapshots that preserve object/data
+/// identity. Map/relationship editors use their existing domain snapshots. Other
+/// vanilla pages retain the RoomSettings serializer as a conservative fallback.
+/// DryCycle text controls can explicitly bracket keyboard edits so a whole focus/edit/
+/// commit sequence becomes one global history entry.
 /// </summary>
 internal static class VanillaDevUIShortcutRuntime
 {
@@ -47,6 +52,42 @@ internal static class VanillaDevUIShortcutRuntime
         _enabled = false;
     }
 
+    internal static void BeginExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+    {
+        if (!_enabled || ui == null || origin == null || IsWeatherEditorActive(ui.activePage))
+        {
+            return;
+        }
+
+        SessionState state = _states.GetOrCreateValue(ui);
+        state.SyncScope(ui);
+        state.BeginExternalEdit(ui, origin);
+    }
+
+    internal static void CommitExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+    {
+        if (!_enabled || ui == null || origin == null)
+        {
+            return;
+        }
+
+        SessionState state = _states.GetOrCreateValue(ui);
+        state.SyncScope(ui);
+        state.CommitExternalEdit(ui, origin);
+    }
+
+    internal static void CancelExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+    {
+        if (!_enabled || ui == null || origin == null)
+        {
+            return;
+        }
+
+        SessionState state = _states.GetOrCreateValue(ui);
+        state.SyncScope(ui);
+        state.CancelExternalEdit(ui, origin);
+    }
+
     private static void DevUI_Update(
         On.DevInterface.DevUI.orig_Update orig,
         global::DevInterface.DevUI self)
@@ -61,10 +102,12 @@ internal static class VanillaDevUIShortcutRuntime
         state.SyncScope(self);
 
         bool weatherEditorOwnsShortcuts = IsWeatherEditorActive(self.activePage);
-        bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-        bool pointerDownBefore = Input.GetMouseButton(0);
+        bool control = IsControlDown();
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        int pointerMaskBefore = CurrentPointerMask();
+        bool localTextEditing = DryCycleInputFocus.Focused != null || state.HasPendingExternalEdit;
 
-        if (!weatherEditorOwnsShortcuts && control && !pointerDownBefore)
+        if (!weatherEditorOwnsShortcuts && control && pointerMaskBefore == 0 && !localTextEditing)
         {
             if (Input.GetKeyDown(KeyCode.S))
             {
@@ -72,7 +115,14 @@ internal static class VanillaDevUIShortcutRuntime
             }
             else if (Input.GetKeyDown(KeyCode.Z))
             {
-                state.Undo(self);
+                if (shift)
+                {
+                    state.Redo(self);
+                }
+                else
+                {
+                    state.Undo(self);
+                }
             }
             else if (Input.GetKeyDown(KeyCode.Y))
             {
@@ -80,30 +130,54 @@ internal static class VanillaDevUIShortcutRuntime
             }
         }
 
-        if (!weatherEditorOwnsShortcuts && pointerDownBefore && !state.PointerDown)
+        if (!weatherEditorOwnsShortcuts && pointerMaskBefore != 0 && state.PointerMask == 0)
         {
             state.BeginPointerEdit(self);
         }
 
         orig(self);
 
-        // A page switch or room transition invalidates page-local history. Vanilla
-        // rebuilds those editors from their own backing data, so carrying snapshots
-        // across that boundary would restore into stale UI nodes.
+        // Page switches and room transitions invalidate page-local nodes. History does
+        // not cross this boundary; every snapshot otherwise targets the live backing
+        // objects for the current scope only.
         if (!state.IsSameScope(self))
         {
             state.ResetScope(self);
-            state.PointerDown = Input.GetMouseButton(0);
+            state.PointerMask = CurrentPointerMask();
             return;
         }
 
-        bool pointerDownAfter = Input.GetMouseButton(0);
-        if (state.HasPendingPointerEdit && !pointerDownAfter)
+        // Observe DryCycle text focus after controls have updated. A focus transition
+        // therefore brackets the model mutation performed by the field's commit event.
+        state.SyncExternalEditors(self);
+
+        int pointerMaskAfter = CurrentPointerMask();
+        if (state.HasPendingPointerEdit && pointerMaskAfter == 0)
         {
             state.CommitPointerEdit(self);
         }
 
-        state.PointerDown = pointerDownAfter;
+        state.PointerMask = pointerMaskAfter;
+    }
+
+    private static bool IsControlDown()
+    {
+        return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
+               Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
+    }
+
+    private static int CurrentPointerMask()
+    {
+        int result = 0;
+        if (Input.GetMouseButton(0))
+        {
+            result |= 1;
+        }
+        if (Input.GetMouseButton(1))
+        {
+            result |= 2;
+        }
+        return result;
     }
 
     private static bool TriggerNativeSave(global::DevInterface.DevUI ui)
@@ -119,9 +193,6 @@ internal static class VanillaDevUIShortcutRuntime
             if (page.subNodes[i] is Button button &&
                 string.Equals(button.IDstring, "Save_Settings", StringComparison.Ordinal))
             {
-                // Use the original button path rather than duplicating per-page save
-                // logic. Map, room settings, objects, sound, triggers and relationships
-                // therefore keep exactly their vanilla Save behavior.
                 button.Clicked();
                 return true;
             }
@@ -165,6 +236,79 @@ internal static class VanillaDevUIShortcutRuntime
         return null;
     }
 
+    private static DevUINode FindDeepestMouseNode(DevUINode root)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        // DevUINode updates children in reverse order, so walk in the same order and
+        // prefer the first deepest interactive child under the pointer.
+        for (int i = root.subNodes.Count - 1; i >= 0; i--)
+        {
+            DevUINode found = FindDeepestMouseNode(root.subNodes[i]);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return IsMouseOver(root) ? root : null;
+    }
+
+    private static bool IsMouseOver(DevUINode node)
+    {
+        if (node is Handle handle)
+        {
+            return handle.MouseOver;
+        }
+        if (node is RectangularDevUINode rectangular)
+        {
+            return rectangular.MouseOver;
+        }
+        return false;
+    }
+
+    private static PlacedObjectRepresentation FindPlacedObjectAncestor(DevUINode node)
+    {
+        DevUINode current = node;
+        while (current != null)
+        {
+            if (current is PlacedObjectRepresentation representation)
+            {
+                return representation;
+            }
+            current = current.parentNode;
+        }
+        return null;
+    }
+
+    private static bool IsLegacyEditorEditing(DevUINode node)
+    {
+        if (node == null)
+        {
+            return false;
+        }
+
+        Type type = node.GetType();
+        string fullName = type.FullName ?? string.Empty;
+        if (!fullName.EndsWith("SolarShadeZoneRepresentation+ZoneTextInput", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            FieldInfo field = type.GetField("_editing", BindingFlags.Instance | BindingFlags.NonPublic);
+            return field != null && field.FieldType == typeof(bool) && (bool)field.GetValue(node);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private sealed class SessionState
     {
         private readonly List<HistoryEntry> _undo = new();
@@ -173,10 +317,14 @@ internal static class VanillaDevUIShortcutRuntime
         private Page _page;
         private RoomSettings _roomSettings;
         private World _world;
-        private DevSnapshot _pointerStart;
+        private HistoryState _pointerStart;
+        private HistoryState _externalStart;
+        private DevUINode _externalOrigin;
+        private DevUINode _legacyExternalOrigin;
 
-        internal bool PointerDown;
+        internal int PointerMask;
         internal bool HasPendingPointerEdit => _pointerStart != null;
+        internal bool HasPendingExternalEdit => _externalStart != null;
 
         internal void SyncScope(global::DevInterface.DevUI ui)
         {
@@ -199,41 +347,169 @@ internal static class VanillaDevUIShortcutRuntime
             _roomSettings = ui?.room?.roomSettings;
             _world = ResolveWorld(ui);
             _pointerStart = null;
+            _externalStart = null;
+            _externalOrigin = null;
+            _legacyExternalOrigin = null;
             _undo.Clear();
             _redo.Clear();
         }
 
+        internal void SyncExternalEditors(global::DevInterface.DevUI ui)
+        {
+            DryCycleTextField focused = DryCycleInputFocus.Focused;
+            if (focused != null &&
+                (!ReferenceEquals(focused.owner, ui) || !ReferenceEquals(focused.Page, ui?.activePage)))
+            {
+                focused = null;
+            }
+
+            // Finish the currently tracked keyboard transaction first. This ordering
+            // matters when one click commits editor A and focuses editor B in the same
+            // DevUI.Update call.
+            if (_externalStart != null)
+            {
+                if (_externalOrigin is DryCycleTextField dryCycleField)
+                {
+                    if (!ReferenceEquals(dryCycleField, focused))
+                    {
+                        CommitExternalEdit(ui, dryCycleField);
+                    }
+                }
+                else if (_legacyExternalOrigin != null &&
+                         ReferenceEquals(_externalOrigin, _legacyExternalOrigin) &&
+                         !IsLegacyEditorEditing(_legacyExternalOrigin))
+                {
+                    DevUINode finished = _legacyExternalOrigin;
+                    _legacyExternalOrigin = null;
+                    CommitExternalEdit(ui, finished);
+                }
+            }
+
+            if (_externalStart != null)
+            {
+                return;
+            }
+
+            // DryCycleTextField uses a central focus manager, so it is the most reliable
+            // source of a keyboard transaction boundary.
+            if (focused != null)
+            {
+                BeginExternalEdit(ui, focused);
+                return;
+            }
+
+            // Environment Zone predates DryCycleTextField and owns a small private
+            // numeric editor. Keep it integrated without rewriting that mapper UI: the
+            // pointer frame identifies the editor once, then its private _editing flag
+            // is observed until commit/cancel.
+            DevUINode legacy = _legacyExternalOrigin;
+            if (legacy == null || !IsLegacyEditorEditing(legacy))
+            {
+                legacy = FindDeepestMouseNode(ui?.activePage);
+                if (legacy == null || !IsLegacyEditorEditing(legacy))
+                {
+                    _legacyExternalOrigin = null;
+                    return;
+                }
+                _legacyExternalOrigin = legacy;
+            }
+
+            BeginExternalEdit(ui, legacy);
+        }
+
         internal void BeginPointerEdit(global::DevInterface.DevUI ui)
         {
-            _pointerStart = DevSnapshot.Capture(ui);
+            _pointerStart = HistoryState.CaptureForPointer(ui);
         }
 
         internal void CommitPointerEdit(global::DevInterface.DevUI ui)
         {
-            DevSnapshot before = _pointerStart;
+            HistoryState before = _pointerStart;
             _pointerStart = null;
+            CommitStatePair(ui, before);
+        }
+
+        internal void BeginExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+        {
+            if (_externalStart != null)
+            {
+                // Focus manager commits the previous DryCycle field before beginning
+                // the next one. If a custom control violates that contract, discard the
+                // stale boundary rather than merging unrelated edits.
+                _externalStart = null;
+                _externalOrigin = null;
+            }
+
+            _externalStart = HistoryState.CaptureForNode(ui, origin);
+            _externalOrigin = origin;
+        }
+
+        internal void CommitExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+        {
+            if (_externalStart == null || !ReferenceEquals(_externalOrigin, origin))
+            {
+                return;
+            }
+
+            HistoryState before = _externalStart;
+            _externalStart = null;
+            _externalOrigin = null;
+            CommitStatePair(ui, before);
+            RebasePointerAfterExternalMutation(ui);
+        }
+
+        internal void CancelExternalEdit(global::DevInterface.DevUI ui, DevUINode origin)
+        {
+            if (_externalStart == null || !ReferenceEquals(_externalOrigin, origin))
+            {
+                return;
+            }
+
+            _externalStart = null;
+            _externalOrigin = null;
+            RebasePointerAfterExternalMutation(ui);
+        }
+
+        private void RebasePointerAfterExternalMutation(global::DevInterface.DevUI ui)
+        {
+            // Clicking away from a text field may commit it inside the same mouse-down
+            // frame that begins another pointer edit. Rebase the pointer transaction so
+            // the text commit is not recorded a second time by that click.
+            if (_pointerStart != null)
+            {
+                _pointerStart = _pointerStart.CaptureCurrent(ui);
+            }
+        }
+
+        private void CommitStatePair(global::DevInterface.DevUI ui, HistoryState before)
+        {
             if (before == null)
             {
                 return;
             }
 
-            DevSnapshot after = DevSnapshot.Capture(ui);
+            HistoryState after = before.CaptureCurrent(ui);
             if (after == null || !before.IsCompatibleWith(after) || before.SameState(after))
             {
                 return;
             }
 
-            _undo.Add(new HistoryEntry(before, after));
+            PushUndo(new HistoryEntry(before, after));
+            _redo.Clear();
+        }
+
+        private void PushUndo(HistoryEntry entry)
+        {
+            _undo.Add(entry);
             if (_undo.Count > MaxHistory)
             {
                 _undo.RemoveAt(0);
             }
-            _redo.Clear();
         }
 
         internal void Undo(global::DevInterface.DevUI ui)
         {
-            if (_pointerStart != null || _undo.Count == 0)
+            if (_pointerStart != null || _externalStart != null || _undo.Count == 0)
             {
                 return;
             }
@@ -251,7 +527,7 @@ internal static class VanillaDevUIShortcutRuntime
 
         internal void Redo(global::DevInterface.DevUI ui)
         {
-            if (_pointerStart != null || _redo.Count == 0)
+            if (_pointerStart != null || _externalStart != null || _redo.Count == 0)
             {
                 return;
             }
@@ -264,7 +540,7 @@ internal static class VanillaDevUIShortcutRuntime
             }
 
             _redo.RemoveAt(_redo.Count - 1);
-            _undo.Add(entry);
+            PushUndo(entry);
         }
 
         private static World ResolveWorld(global::DevInterface.DevUI ui)
@@ -279,38 +555,55 @@ internal static class VanillaDevUIShortcutRuntime
 
     private readonly struct HistoryEntry
     {
-        internal readonly DevSnapshot Before;
-        internal readonly DevSnapshot After;
+        internal readonly HistoryState Before;
+        internal readonly HistoryState After;
 
-        internal HistoryEntry(DevSnapshot before, DevSnapshot after)
+        internal HistoryEntry(HistoryState before, HistoryState after)
         {
             Before = before;
             After = after;
         }
     }
 
-    private abstract class DevSnapshot
+    private abstract class HistoryState
     {
-        protected DevSnapshot(string fingerprint)
+        protected HistoryState(string fingerprint)
         {
             Fingerprint = fingerprint ?? string.Empty;
         }
 
-        protected string Fingerprint { get; }
+        internal string Fingerprint { get; }
         protected abstract string Kind { get; }
 
-        internal bool IsCompatibleWith(DevSnapshot other) =>
+        internal bool IsCompatibleWith(HistoryState other) =>
             other != null && string.Equals(Kind, other.Kind, StringComparison.Ordinal);
 
-        internal bool SameState(DevSnapshot other) =>
+        internal bool SameState(HistoryState other) =>
             IsCompatibleWith(other) && string.Equals(Fingerprint, other.Fingerprint, StringComparison.Ordinal);
 
+        internal abstract HistoryState CaptureCurrent(global::DevInterface.DevUI ui);
         internal abstract bool Restore(global::DevInterface.DevUI ui);
 
-        internal static DevSnapshot Capture(global::DevInterface.DevUI ui)
+        internal static HistoryState CaptureForNode(global::DevInterface.DevUI ui, DevUINode origin)
+        {
+            if (ui == null || origin == null)
+            {
+                return null;
+            }
+
+            PlacedObjectRepresentation representation = FindPlacedObjectAncestor(origin);
+            if (representation?.pObj != null)
+            {
+                return PlacedObjectSnapshot.Capture(ui.room?.roomSettings, representation.pObj);
+            }
+
+            return CaptureGeneric(ui);
+        }
+
+        internal static HistoryState CaptureForPointer(global::DevInterface.DevUI ui)
         {
             Page page = ui?.activePage;
-            if (page == null)
+            if (page == null || page is DialogPage)
             {
                 return null;
             }
@@ -327,24 +620,306 @@ internal static class VanillaDevUIShortcutRuntime
                     return RelationshipSnapshot.Capture();
                 }
 
-                // Dialog is a read-only browser. The remaining vanilla editor pages
-                // all edit the current RoomSettings object.
-                if (page is DialogPage)
+                if (page is ObjectsPage)
                 {
-                    return null;
+                    // The owner mouse position is updated inside DevUI.Update, so the
+                    // pre-update hit target can be one frame stale. Capture the complete
+                    // placed-object collection in memory for pointer gestures instead of
+                    // risking a false target. This is still far cheaper than serializing
+                    // the entire RoomSettings to disk and it also covers add/delete and
+                    // custom gestures that begin on spline/edge space.
+                    return PlacedObjectsSnapshot.Capture(ui.room?.roomSettings);
                 }
 
                 return RoomSettingsSnapshot.Capture(ui.room?.roomSettings);
             }
             catch (Exception ex)
             {
-                Plugin.Logger?.LogWarning("DryCycle vanilla DevUI history capture failed: " + ex.Message);
+                Plugin.Logger?.LogWarning("DryCycle DevUI history capture failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static HistoryState CaptureGeneric(global::DevInterface.DevUI ui)
+        {
+            Page page = ui?.activePage;
+            if (page == null || page is DialogPage)
+            {
+                return null;
+            }
+
+            try
+            {
+                if (page is MapPage mapPage)
+                {
+                    return MapSnapshot.Capture(mapPage);
+                }
+                if (page is RelationshipPage)
+                {
+                    return RelationshipSnapshot.Capture();
+                }
+                return RoomSettingsSnapshot.Capture(ui.room?.roomSettings);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger?.LogWarning("DryCycle DevUI external history capture failed: " + ex.Message);
                 return null;
             }
         }
     }
 
-    private sealed class RoomSettingsSnapshot : DevSnapshot
+    private sealed class PlacedObjectRecord
+    {
+        internal readonly PlacedObject Target;
+        internal readonly PlacedObject.Type Type;
+        internal readonly Vector2 Pos;
+        internal readonly bool Active;
+        internal readonly bool DeactivatedByWarpFilter;
+        internal readonly bool Save;
+        internal readonly string[] UnrecognizedAttributes;
+        internal readonly PlacedObject.Data DataReference;
+        internal readonly string DataSerialized;
+        internal readonly string Fingerprint;
+
+        private PlacedObjectRecord(PlacedObject target)
+        {
+            Target = target;
+            Type = target.type;
+            Pos = target.pos;
+            Active = target.active;
+            DeactivatedByWarpFilter = target.deactivatedByWarpFilter;
+            Save = target.save;
+            UnrecognizedAttributes = CloneStrings(target.unrecognizedAttributes);
+            DataReference = target.data;
+            DataSerialized = target.data?.ToString() ?? string.Empty;
+            Fingerprint = BuildFingerprint();
+        }
+
+        internal static PlacedObjectRecord Capture(PlacedObject target)
+        {
+            return target == null ? null : new PlacedObjectRecord(target);
+        }
+
+        internal void Restore()
+        {
+            if (Target == null)
+            {
+                return;
+            }
+
+            Target.type = Type;
+            Target.pos = Pos;
+            Target.active = Active;
+            Target.deactivatedByWarpFilter = DeactivatedByWarpFilter;
+            Target.save = Save;
+            Target.unrecognizedAttributes = CloneStrings(UnrecognizedAttributes);
+            Target.data = DataReference;
+
+            if (DataReference != null)
+            {
+                DataReference.owner = Target;
+                DataReference.FromString(DataSerialized);
+                try
+                {
+                    DataReference.RefreshLiveVisuals();
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Logger?.LogWarning("DryCycle DevUI placed-object live refresh failed: " + ex.Message);
+                }
+            }
+        }
+
+        private string BuildFingerprint()
+        {
+            StringBuilder builder = new();
+            builder.Append(RuntimeHelpers.GetHashCode(Target)).Append('|')
+                .Append(Type?.value ?? string.Empty).Append('|')
+                .Append(Pos.x.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+                .Append(Pos.y.ToString("R", CultureInfo.InvariantCulture)).Append('|')
+                .Append(Active ? '1' : '0')
+                .Append(DeactivatedByWarpFilter ? '1' : '0')
+                .Append(Save ? '1' : '0').Append('|')
+                .Append(DataReference == null ? 0 : RuntimeHelpers.GetHashCode(DataReference)).Append('|')
+                .Append(DataSerialized).Append('|');
+
+            if (UnrecognizedAttributes != null)
+            {
+                for (int i = 0; i < UnrecognizedAttributes.Length; i++)
+                {
+                    builder.Append(UnrecognizedAttributes[i] ?? string.Empty).Append('\u001f');
+                }
+            }
+            return builder.ToString();
+        }
+    }
+
+    private sealed class PlacedObjectSnapshot : HistoryState
+    {
+        private readonly RoomSettings _settings;
+        private readonly PlacedObject _target;
+        private readonly int _index;
+        private readonly PlacedObjectRecord _record;
+
+        private PlacedObjectSnapshot(
+            RoomSettings settings,
+            PlacedObject target,
+            int index,
+            PlacedObjectRecord record)
+            : base(BuildFingerprint(index, record))
+        {
+            _settings = settings;
+            _target = target;
+            _index = index;
+            _record = record;
+        }
+
+        protected override string Kind => "PlacedObject:" + RuntimeHelpers.GetHashCode(_target);
+
+        internal static PlacedObjectSnapshot Capture(RoomSettings settings, PlacedObject target)
+        {
+            if (settings == null || target == null || settings.placedObjects == null)
+            {
+                return null;
+            }
+
+            int index = settings.placedObjects.IndexOf(target);
+            return new PlacedObjectSnapshot(settings, target, index, PlacedObjectRecord.Capture(target));
+        }
+
+        internal override HistoryState CaptureCurrent(global::DevInterface.DevUI ui)
+        {
+            RoomSettings current = ui?.room?.roomSettings;
+            return ReferenceEquals(current, _settings) ? Capture(current, _target) : null;
+        }
+
+        internal override bool Restore(global::DevInterface.DevUI ui)
+        {
+            RoomSettings current = ui?.room?.roomSettings;
+            if (!ReferenceEquals(current, _settings) || current?.placedObjects == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                // Remove all accidental duplicate references first. A redo after an add
+                // must reinsert the exact original object rather than constructing a copy.
+                for (int i = current.placedObjects.Count - 1; i >= 0; i--)
+                {
+                    if (ReferenceEquals(current.placedObjects[i], _target))
+                    {
+                        current.placedObjects.RemoveAt(i);
+                    }
+                }
+
+                if (_index >= 0)
+                {
+                    _record?.Restore();
+                    int insert = Mathf.Clamp(_index, 0, current.placedObjects.Count);
+                    current.placedObjects.Insert(insert, _target);
+                }
+
+                ui.activePage?.Refresh();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger?.LogWarning("DryCycle DevUI placed-object restore failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static string BuildFingerprint(int index, PlacedObjectRecord record)
+        {
+            return index.ToString(CultureInfo.InvariantCulture) + "|" + (record?.Fingerprint ?? string.Empty);
+        }
+    }
+
+    private sealed class PlacedObjectsSnapshot : HistoryState
+    {
+        private readonly RoomSettings _settings;
+        private readonly List<PlacedObjectRecord> _records;
+
+        private PlacedObjectsSnapshot(RoomSettings settings, List<PlacedObjectRecord> records, string fingerprint)
+            : base(fingerprint)
+        {
+            _settings = settings;
+            _records = records;
+        }
+
+        protected override string Kind => "PlacedObjects";
+
+        internal static PlacedObjectsSnapshot Capture(RoomSettings settings)
+        {
+            if (settings?.placedObjects == null)
+            {
+                return null;
+            }
+
+            List<PlacedObjectRecord> records = new(settings.placedObjects.Count);
+            StringBuilder fingerprint = new();
+            for (int i = 0; i < settings.placedObjects.Count; i++)
+            {
+                PlacedObjectRecord record = PlacedObjectRecord.Capture(settings.placedObjects[i]);
+                if (record == null)
+                {
+                    continue;
+                }
+                records.Add(record);
+                fingerprint.Append(i).Append(':').Append(record.Fingerprint).Append('\u001e');
+            }
+
+            return new PlacedObjectsSnapshot(settings, records, fingerprint.ToString());
+        }
+
+        internal override HistoryState CaptureCurrent(global::DevInterface.DevUI ui)
+        {
+            RoomSettings current = ui?.room?.roomSettings;
+            return ReferenceEquals(current, _settings) ? Capture(current) : null;
+        }
+
+        internal override bool Restore(global::DevInterface.DevUI ui)
+        {
+            if (!RestoreCollection(ui?.room?.roomSettings))
+            {
+                return false;
+            }
+
+            ui.activePage?.Refresh();
+            return true;
+        }
+
+        internal bool RestoreCollection(RoomSettings settings)
+        {
+            if (!ReferenceEquals(settings, _settings) || settings?.placedObjects == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                for (int i = 0; i < _records.Count; i++)
+                {
+                    _records[i].Restore();
+                }
+
+                settings.placedObjects.Clear();
+                for (int i = 0; i < _records.Count; i++)
+                {
+                    settings.placedObjects.Add(_records[i].Target);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger?.LogWarning("DryCycle DevUI placed-object collection restore failed: " + ex.Message);
+                return false;
+            }
+        }
+    }
+
+    private sealed class RoomSettingsSnapshot : HistoryState
     {
         private static readonly HashSet<string> IdentityFields = new(StringComparer.Ordinal)
         {
@@ -355,17 +930,24 @@ internal static class VanillaDevUIShortcutRuntime
             "game",
             "room",
             "name",
-            "filePath"
+            "filePath",
+            // Restored separately so PlacedObject/Data instances keep stable identity.
+            "placedObjects"
         };
 
         private readonly RoomSettings _target;
         private readonly string _serialized;
+        private readonly PlacedObjectsSnapshot _placedObjects;
 
-        private RoomSettingsSnapshot(RoomSettings target, string serialized)
-            : base(serialized)
+        private RoomSettingsSnapshot(
+            RoomSettings target,
+            string serialized,
+            PlacedObjectsSnapshot placedObjects)
+            : base(serialized + "\n@DryCyclePlacedObjects=" + (placedObjects?.Fingerprint ?? string.Empty))
         {
             _target = target;
             _serialized = serialized;
+            _placedObjects = placedObjects;
         }
 
         protected override string Kind => "RoomSettings";
@@ -378,7 +960,18 @@ internal static class VanillaDevUIShortcutRuntime
             }
 
             string serialized = Serialize(settings);
-            return serialized == null ? null : new RoomSettingsSnapshot(settings, serialized);
+            if (serialized == null)
+            {
+                return null;
+            }
+
+            return new RoomSettingsSnapshot(settings, serialized, PlacedObjectsSnapshot.Capture(settings));
+        }
+
+        internal override HistoryState CaptureCurrent(global::DevInterface.DevUI ui)
+        {
+            RoomSettings current = ui?.room?.roomSettings;
+            return ReferenceEquals(current, _target) ? Capture(current) : null;
         }
 
         internal override bool Restore(global::DevInterface.DevUI ui)
@@ -417,12 +1010,17 @@ internal static class VanillaDevUIShortcutRuntime
                 }
 
                 CopyEditableFields(parsed, current);
+                if (_placedObjects != null && !_placedObjects.RestoreCollection(current))
+                {
+                    return false;
+                }
+
                 ui.activePage?.Refresh();
                 return true;
             }
             catch (Exception ex)
             {
-                Plugin.Logger?.LogWarning("DryCycle vanilla DevUI RoomSettings restore failed: " + ex.Message);
+                Plugin.Logger?.LogWarning("DryCycle DevUI RoomSettings restore failed: " + ex.Message);
                 return false;
             }
             finally
@@ -478,7 +1076,7 @@ internal static class VanillaDevUIShortcutRuntime
         }
     }
 
-    private sealed class RelationshipSnapshot : DevSnapshot
+    private sealed class RelationshipSnapshot : HistoryState
     {
         private readonly Dictionary<CreatureTemplate.Type, Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship>> _data;
 
@@ -506,6 +1104,11 @@ internal static class VanillaDevUIShortcutRuntime
             }
 
             return new RelationshipSnapshot(copy, RelationshipFingerprint(copy));
+        }
+
+        internal override HistoryState CaptureCurrent(global::DevInterface.DevUI ui)
+        {
+            return ui?.activePage is RelationshipPage ? Capture() : null;
         }
 
         internal override bool Restore(global::DevInterface.DevUI ui)
@@ -556,7 +1159,7 @@ internal static class VanillaDevUIShortcutRuntime
         }
     }
 
-    private sealed class MapSnapshot : DevSnapshot
+    private sealed class MapSnapshot : HistoryState
     {
         private sealed class RoomState
         {
@@ -665,6 +1268,13 @@ internal static class VanillaDevUIShortcutRuntime
 
             string fingerprint = MapFingerprint(rooms, defaultAttractions, defaultNamed, materials);
             return new MapSnapshot(page.world, rooms, defaultAttractions, defaultNamed, materials, fingerprint);
+        }
+
+        internal override HistoryState CaptureCurrent(global::DevInterface.DevUI ui)
+        {
+            return ui?.activePage is MapPage page && ReferenceEquals(page.world, _world)
+                ? Capture(page)
+                : null;
         }
 
         internal override bool Restore(global::DevInterface.DevUI ui)
@@ -851,5 +1461,10 @@ internal static class VanillaDevUIShortcutRuntime
                 .Append(value.y.ToString("R", CultureInfo.InvariantCulture))
                 .Append('|');
         }
+    }
+
+    private static string[] CloneStrings(string[] source)
+    {
+        return source == null ? null : (string[])source.Clone();
     }
 }
