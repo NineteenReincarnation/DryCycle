@@ -50,6 +50,12 @@ internal static class RopeSpearClimbController
             return false;
         }
 
+        // A fresh throw usually puts the physical RopeHandle into the thrower's
+        // newly-free hand. The first frame of a deliberate climb transfers that
+        // grip to the rope itself so the free endpoint does not follow the player
+        // and create a self-referential rope constraint.
+        ReleaseAssociatedHandleForClimb(player, spear);
+
         Player.InputPackage input = player.input[0];
         Player.InputPackage previousInput = player.input.Length > 1
             ? player.input[1]
