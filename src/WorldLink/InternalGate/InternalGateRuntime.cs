@@ -56,16 +56,22 @@ internal static class InternalGateRuntime
     /// </summary>
     private static void WorldLoader_MappingRooms(On.WorldLoader.orig_MappingRooms orig, WorldLoader self)
     {
+        // MappingRooms increments rmcntr internally, so capture the current room number and
+        // tag state before calling vanilla. Otherwise InternalGate would be registered as the
+        // next room's gateIndex.
+        bool internalGateLine = _enabled && CurrentWorldLineHasTag(self);
+        int roomCounter = self?.rmcntr ?? -1;
+
         orig(self);
 
-        if (!_enabled || self?.world == null || !CurrentWorldLineHasTag(self))
+        if (!internalGateLine || roomCounter < 0 || self?.world == null)
         {
             return;
         }
 
         try
         {
-            int roomIndex = self.rmcntr + self.world.firstRoomIndex;
+            int roomIndex = roomCounter + self.world.firstRoomIndex;
             if (!self.gatesList.Contains(roomIndex))
             {
                 self.gatesList.Add(roomIndex);
@@ -256,7 +262,7 @@ internal static class InternalGateRuntime
 
     private static bool CurrentWorldLineHasTag(WorldLoader loader)
     {
-        if (loader?.lines == null || loader.cntr < 0 || loader.cntr >= loader.lines.Length)
+        if (loader?.lines == null || loader.cntr < 0 || loader.cntr >= loader.lines.Count)
         {
             return false;
         }
