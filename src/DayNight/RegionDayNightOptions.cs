@@ -9,8 +9,9 @@ using UnityEngine;
 namespace DryCycle.DayNight;
 
 /// <summary>
-/// Remix configuration for opting individual registered regions into DryCycle's
-/// day/night world clock and the weather system built on top of it.
+/// DryCycle Remix configuration. The original region/day-night controls remain here,
+/// and RopeSpear gameplay controls share the same OptionInterface because Rain World
+/// only registers one Remix interface per mod ID.
 /// </summary>
 internal sealed class RegionDayNightOptions : OptionInterface
 {
@@ -26,17 +27,35 @@ internal sealed class RegionDayNightOptions : OptionInterface
     private Configurable<bool> _legacyIndividualPlacedObjectViewer;
     private Configurable<bool> _legacyFadePaletteCombiner;
 
+    private Configurable<bool> _ropeSpearEightWayThrow;
+    private Configurable<bool> _ropeSpearAimIndicator;
+    private Configurable<int> _ropeSpearAimHoldFrames;
+    private Configurable<bool> _ropeSpearModeSwitch;
+
     internal static bool EnableLegacyIndividualPlacedObjectViewer
         => _instance?._legacyIndividualPlacedObjectViewer?.Value ?? false;
 
     internal static bool EnableLegacyFadePaletteCombiner
         => _instance?._legacyFadePaletteCombiner?.Value ?? false;
 
+    internal static bool RopeSpearEightWayThrowEnabled
+        => _instance?._ropeSpearEightWayThrow?.Value ?? true;
+
+    internal static bool RopeSpearAimIndicatorEnabled
+        => _instance?._ropeSpearAimIndicator?.Value ?? true;
+
+    internal static int RopeSpearAimHoldFrames
+        => Mathf.Clamp(_instance?._ropeSpearAimHoldFrames?.Value ?? 8, 1, 20);
+
+    internal static bool RopeSpearModeSwitchEnabled
+        => _instance?._ropeSpearModeSwitch?.Value ?? true;
+
     internal static void Register()
     {
         _instance ??= new RegionDayNightOptions();
         _instance.BindKnownRegions();
         _instance.BindCompatibilityOptions();
+        _instance.BindRopeSpearOptions();
 
         // MachineConnector keys option interfaces by Rain World's modinfo.json ID,
         // not by the BepInEx plugin GUID. DryCycle is shipped inside Ancient Site,
@@ -45,8 +64,8 @@ internal sealed class RegionDayNightOptions : OptionInterface
         {
             Plugin.Logger?.LogWarning(
                 $"DryCycle could not register its Remix option interface for " +
-                $"Rain World mod '{Plugin.RainWorldModId}'; region day/night settings " +
-                "will use their default enabled state.");
+                $"Rain World mod '{Plugin.RainWorldModId}'; DryCycle settings will " +
+                "use their default values.");
         }
     }
 
@@ -88,14 +107,17 @@ internal sealed class RegionDayNightOptions : OptionInterface
         base.Initialize();
         BindKnownRegions();
         BindCompatibilityOptions();
+        BindRopeSpearOptions();
 
         Tabs = new[]
         {
             new OpTab(this, Translate("Regions")),
+            new OpTab(this, Translate("RopeSpear")),
             new OpTab(this, Translate("Compatibility"))
         };
 
-        BuildCompatibilityTab(Tabs[1]);
+        BuildRopeSpearTab(Tabs[1]);
+        BuildCompatibilityTab(Tabs[2]);
 
         float contentHeight = Math.Max(600f, 125f + _regionOrder.Count * RowHeight);
         OpScrollBox scroll = new(Tabs[0], contentHeight);
@@ -158,6 +180,84 @@ internal sealed class RegionDayNightOptions : OptionInterface
         }
     }
 
+    private void BuildRopeSpearTab(OpTab tab)
+    {
+        OpLabel title = new(
+            new Vector2(150f, 530f),
+            new Vector2(300f, 30f),
+            "RopeSpear Controls",
+            FLabelAlignment.Center,
+            bigText: true);
+
+        OpLabel description = new(
+            new Vector2(30f, 455f),
+            new Vector2(540f, 66f),
+            "Tap Throw for the normal horizontal cast. Hold Throw to enter eight-direction aim, press any movement direction to select N/NE/E/SE/S/SW/W/NW, then release Throw. Releasing the movement keys keeps the last selected direction. Double-tap Alt switches long/short rope mode.",
+            FLabelAlignment.Left);
+
+        OpCheckBox eightWay = new(_ropeSpearEightWayThrow, new Vector2(32f, 390f));
+        eightWay.description =
+            "Enable RopeSpear hold-to-aim eight-direction throwing. When disabled, RopeSpear uses normal Rain World horizontal throwing.";
+        OpLabel eightWayLabel = new(72f, 390f, "Eight-Direction Throwing")
+        {
+            bumpBehav = eightWay.bumpBehav,
+            description = eightWay.description
+        };
+
+        OpCheckBox indicator = new(_ropeSpearAimIndicator, new Vector2(32f, 340f));
+        indicator.description =
+            "Show the eight-direction world-space aim guide while RopeSpear aim mode is active.";
+        OpLabel indicatorLabel = new(72f, 340f, "Show Aim Guide")
+        {
+            bumpBehav = indicator.bumpBehav,
+            description = indicator.description
+        };
+
+        OpSlider holdFrames = new(
+            _ropeSpearAimHoldFrames,
+            new Vector2(32f, 275f),
+            250);
+        holdFrames.description =
+            "How many gameplay frames Throw must be held before RopeSpear enters eight-direction aim. Rain World normally updates gameplay at about 40 frames per second.";
+        OpLabel holdFramesLabel = new(312f, 278f, "Aim Hold Delay (frames)")
+        {
+            bumpBehav = holdFrames.bumpBehav,
+            description = holdFrames.description
+        };
+
+        OpCheckBox modeSwitch = new(_ropeSpearModeSwitch, new Vector2(32f, 210f));
+        modeSwitch.description =
+            "Allow double-tapping Alt while holding RopeSpear to switch between long and short rope modes. Disabling this forces held RopeSpears back to long mode.";
+        OpLabel modeSwitchLabel = new(72f, 210f, "Long / Short Rope Mode Switch")
+        {
+            bumpBehav = modeSwitch.bumpBehav,
+            description = modeSwitch.description
+        };
+
+        OpLabel safety = new(
+            new Vector2(30f, 105f),
+            new Vector2(540f, 70f),
+            "Directional throws preserve the vanilla throw force and rotate the projectile velocity rather than replacing it with a fixed speed. Any-angle RopeSpear wall sticking remains active so diagonal and vertical throws can interact with terrain.",
+            FLabelAlignment.Left);
+
+        UIfocusable.MutualVerticalFocusableBind(eightWay, indicator);
+        UIfocusable.MutualVerticalFocusableBind(indicator, holdFrames);
+        UIfocusable.MutualVerticalFocusableBind(holdFrames, modeSwitch);
+
+        tab.AddItems(
+            title,
+            description,
+            eightWay,
+            eightWayLabel,
+            indicator,
+            indicatorLabel,
+            holdFrames,
+            holdFramesLabel,
+            modeSwitch,
+            modeSwitchLabel,
+            safety);
+    }
+
     private void BuildCompatibilityTab(OpTab tab)
     {
         OpLabel title = new(
@@ -193,6 +293,45 @@ internal sealed class RegionDayNightOptions : OptionInterface
 
         UIfocusable.MutualVerticalFocusableBind(objectViewer, fadeCombiner);
         tab.AddItems(title, description, objectViewer, objectViewerLabel, fadeCombiner, fadeCombinerLabel);
+    }
+
+    private void BindRopeSpearOptions()
+    {
+        _ropeSpearEightWayThrow ??= config.Bind(
+            "RopeSpearEightWayThrow",
+            defaultValue: true,
+            new ConfigurableInfo(
+                "Enable RopeSpear hold-to-aim eight-direction throwing. Disable to keep normal horizontal throwing.",
+                null,
+                "RopeSpear",
+                "Eight-Direction Throwing"));
+
+        _ropeSpearAimIndicator ??= config.Bind(
+            "RopeSpearAimIndicator",
+            defaultValue: true,
+            new ConfigurableInfo(
+                "Show a world-space eight-direction guide while RopeSpear aim mode is active.",
+                null,
+                "RopeSpear",
+                "Show Aim Guide"));
+
+        _ropeSpearAimHoldFrames ??= config.Bind(
+            "RopeSpearAimHoldFrames",
+            defaultValue: 8,
+            new ConfigurableInfo(
+                "Gameplay frames Throw must be held before RopeSpear enters eight-direction aim.",
+                new ConfigAcceptableRange<int>(1, 20),
+                "RopeSpear",
+                "Aim Hold Delay"));
+
+        _ropeSpearModeSwitch ??= config.Bind(
+            "RopeSpearModeSwitch",
+            defaultValue: true,
+            new ConfigurableInfo(
+                "Enable the double-Alt long/short RopeSpear mode switch. Disable to force long mode.",
+                null,
+                "RopeSpear",
+                "Long / Short Rope Mode Switch"));
     }
 
     private void BindCompatibilityOptions()
