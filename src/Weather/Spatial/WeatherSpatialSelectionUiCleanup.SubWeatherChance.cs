@@ -36,7 +36,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                     ? "DryCycle_Weather_Family_Chance_Input"
                     : "DryCycle_Weather_SubWeather_Chance_Input",
                 parent,
-                new Vector2(160f, familyChance ? 470f : 492f),
+                new Vector2(160f, familyChance ? 492f : 470f),
                 44f,
                 "0%")
         {
@@ -56,7 +56,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                     ? "DryCycle_Weather_Family_Chance_Label"
                     : "DryCycle_Weather_SubWeather_Chance_Label",
                 parent,
-                new Vector2(8f, familyChance ? 470f : 492f),
+                new Vector2(8f, familyChance ? 492f : 470f),
                 148f,
                 familyChance ? "FamWeatherChance" : "SubWeather Chance");
             parent.subNodes.Add(_label);

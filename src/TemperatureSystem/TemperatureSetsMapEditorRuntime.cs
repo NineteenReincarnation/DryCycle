@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
+using DryCycle.DevUI;
 using DryCycle.DevUI.Controls;
 using DryCycle.Weather.Spatial;
 using UnityEngine;
@@ -185,7 +186,9 @@ internal static class TemperatureSetsMapEditorRuntime
         private readonly MapPage _mapPage;
         private readonly string _regionId;
         private readonly List<RoomPanel> _roomPanels = new();
-        private readonly SelectedRoomOverlay _selectionOverlay;
+        private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SelectedRoomsOverlay _selectionOverlay;
+        private readonly MapRoomMarquee _selectionMarquee;
         private readonly DryCycleNumericSlider _roomHeat;
         private readonly DryCycleNumericSlider _sunlight;
         private readonly DryCycleNumericSlider _roomShade;
@@ -205,8 +208,8 @@ internal static class TemperatureSetsMapEditorRuntime
                 owner,
                 EditorNodeId,
                 mapPage,
-                new Vector2(1035f, 370f),
-                new Vector2(310f, 350f),
+                new Vector2(1035f, 350f),
+                new Vector2(310f, 370f),
                 "DryCycle Temperature Sets")
         {
             _mapPage = mapPage;
@@ -265,10 +268,16 @@ internal static class TemperatureSetsMapEditorRuntime
             _statusLabel = AddLabel("TemperatureStatus", 8f, 82f, 294f, string.Empty);
             _pathLabel = AddLabel("TemperaturePath", 8f, 60f, 294f, string.Empty);
             _warningLabel = AddLabel("TemperatureWarnings", 8f, 38f, 294f, string.Empty);
-            AddLabel("TemperatureShortcut", 8f, 16f, 294f, "RMB Room - Select   LMB Drag - Pan   Ctrl+S - Save");
+            AddLabel("TemperatureShortcutSelect", 8f, 20f, 294f, "Shift+LMB Drag - Box Select   RMB Room - Select");
+            AddLabel("TemperatureShortcutKeys", 8f, 4f, 294f, "LMB Drag - Pan Map   Ctrl+S - Save JSON");
 
-            _selectionOverlay = new SelectedRoomOverlay(owner, this);
+            _selectionOverlay = new SelectedRoomsOverlay(owner, this);
             subNodes.Add(_selectionOverlay);
+            _selectionMarquee = new MapRoomMarquee(
+                owner,
+                "DryCycle_Temperature_Room_Marquee",
+                this);
+            subNodes.Add(_selectionMarquee);
             collapsed = false;
             SetRoomDraggingDisabled(true);
             SyncControlsFromSelection();
@@ -286,7 +295,26 @@ internal static class TemperatureSetsMapEditorRuntime
                 Save();
             }
 
-            if (!MouseOver && Input.GetMouseButtonDown(1))
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (_selectionMarquee.Active)
+            {
+                owner.draggedNode = this;
+                _selectionMarquee.MoveTo(owner.mousePos);
+                if (!Input.GetMouseButton(0))
+                {
+                    CompleteMarqueeSelection();
+                    if (ReferenceEquals(owner.draggedNode, this))
+                    {
+                        owner.draggedNode = null;
+                    }
+                }
+            }
+            else if (!MouseOver && shift && Input.GetMouseButtonDown(0))
+            {
+                _selectionMarquee.Begin(owner.mousePos);
+                owner.draggedNode = this;
+            }
+            else if (!MouseOver && Input.GetMouseButtonDown(1))
             {
                 RoomPanel hovered = HoveredRoomPanel();
                 if (hovered != null)
@@ -295,13 +323,14 @@ internal static class TemperatureSetsMapEditorRuntime
                 }
             }
 
-            _selectionOverlay.SetRoom(_selectedRoom);
+            _selectionOverlay.SetRooms(_roomPanels, _selection);
             UpdateLabels();
             BringEditorUiToFront(this);
         }
 
         public override void ClearSprites()
         {
+            _selectionMarquee.Cancel();
             SetRoomDraggingDisabled(false);
             base.ClearSprites();
         }
@@ -331,7 +360,27 @@ internal static class TemperatureSetsMapEditorRuntime
             }
 
             _selectedRoom = roomPanel;
+            _selection.Clear();
+            _selection.Add(roomPanel.roomRep.room.name);
             _status = "Editing " + roomPanel.roomRep.room.name + ".";
+            SyncControlsFromSelection();
+        }
+
+        private void CompleteMarqueeSelection()
+        {
+            int count = _selectionMarquee.Complete(_roomPanels, _selection);
+            _selectedRoom = null;
+            for (int i = 0; i < _roomPanels.Count; i++)
+            {
+                string roomName = _roomPanels[i].roomRep?.room?.name;
+                if (!string.IsNullOrEmpty(roomName) && _selection.Contains(roomName))
+                {
+                    _selectedRoom = _roomPanels[i];
+                    break;
+                }
+            }
+
+            _status = "Box selected " + count + " room(s).";
             SyncControlsFromSelection();
         }
 
@@ -340,36 +389,60 @@ internal static class TemperatureSetsMapEditorRuntime
             float value,
             float oldValue)
         {
-            if (_synchronizing || _selectedRoom?.roomRep?.room == null)
+            if (_synchronizing || _selection.Count == 0)
             {
                 return;
             }
 
-            RoomEnvironmentProfile profile = new(
-                _roomHeat.Value,
-                _sunlight.Value,
-                _roomShade.Value,
-                _humidity.Value);
-            TemperatureSetsLoader.SetProfile(_regionId, _selectedRoom.roomRep.room.name, profile);
-            _status = "Changed " + _selectedRoom.roomRep.room.name + ". Save JSON to persist.";
+            foreach (string roomName in _selection)
+            {
+                RoomEnvironmentProfile profile =
+                    TemperatureSetsLoader.GetProfileOrDefault(_regionId, roomName);
+                if (ReferenceEquals(slider, _roomHeat))
+                {
+                    profile.RoomHeat = RoomHeatFactor.ClampHeat(value);
+                }
+                else if (ReferenceEquals(slider, _sunlight))
+                {
+                    profile.SunlightIntensity = RoomEnvironmentProfile.ClampUnit(value);
+                }
+                else if (ReferenceEquals(slider, _roomShade))
+                {
+                    profile.RoomShade = RoomEnvironmentProfile.ClampUnit(value);
+                }
+                else if (ReferenceEquals(slider, _humidity))
+                {
+                    profile.Humidity = RoomEnvironmentProfile.ClampSigned(value);
+                }
+                TemperatureSetsLoader.SetProfile(_regionId, roomName, profile);
+            }
+            _status = "Changed " + _selection.Count + " room(s). Save JSON to persist.";
         }
 
         private void ResetSelectedRoom()
         {
-            if (_selectedRoom?.roomRep?.room == null)
+            if (_selection.Count == 0)
             {
-                _status = "Select a room first.";
+                _status = "Select one or more rooms first.";
                 return;
             }
 
-            string roomName = _selectedRoom.roomRep.room.name;
-            if (TemperatureSetsLoader.RemoveProfile(_regionId, roomName))
+            int resetCount = 0;
+            foreach (string roomName in _selection)
             {
-                _status = "Reset " + roomName + " to neutral defaults.";
+                if (TemperatureSetsLoader.RemoveProfile(_regionId, roomName))
+                {
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+            {
+                _status = "Reset " + resetCount + " room(s) to neutral defaults.";
             }
             else
             {
-                _status = roomName + " already uses neutral defaults.";
+                _status = "Selected rooms already use neutral defaults.";
             }
             SyncControlsFromSelection();
         }
@@ -399,12 +472,16 @@ internal static class TemperatureSetsMapEditorRuntime
         private void UpdateLabels()
         {
             string roomName = _selectedRoom?.roomRep?.room?.name;
-            bool selected = !string.IsNullOrEmpty(roomName);
-            _roomLabel.Text = "Room: " + (selected ? roomName : "<right-click one>");
-            _sourceLabel.Text = "Source: " +
-                                (selected && TemperatureSetsLoader.HasProfile(_regionId, roomName)
-                                    ? "JSON room override"
-                                    : "neutral defaults");
+            bool selected = _selection.Count > 0 && !string.IsNullOrEmpty(roomName);
+            _roomLabel.Text = _selection.Count > 1
+                ? "Rooms: " + _selection.Count + " (values shown from " + roomName + ")"
+                : "Room: " + (selected ? roomName : "<right-click or box-select>");
+            _sourceLabel.Text = _selection.Count > 1
+                ? "Batch edit: changes apply to every selected room"
+                : "Source: " +
+                  (selected && TemperatureSetsLoader.HasProfile(_regionId, roomName)
+                      ? "JSON room override"
+                      : "neutral defaults");
             _statusLabel.Text = (TemperatureSetsLoader.Dirty ? "* " : string.Empty) + _status;
             _pathLabel.Text = ShortPath(TemperatureSetsLoader.LoadedPath);
 
@@ -490,7 +567,7 @@ internal static class TemperatureSetsMapEditorRuntime
 
         private static void BringEditorUiToFront(DevUINode node)
         {
-            if (node == null || node is SelectedRoomOverlay)
+            if (node == null || node is SelectedRoomsOverlay || node is MapRoomMarquee)
             {
                 return;
             }
@@ -529,16 +606,70 @@ internal static class TemperatureSetsMapEditorRuntime
         }
     }
 
-    private sealed class SelectedRoomOverlay : DevUINode
+    private sealed class SelectedRoomsOverlay : DevUINode
     {
-        private readonly FSprite[] _border = new FSprite[4];
+        private readonly List<FSprite> _borders = new();
 
-        internal SelectedRoomOverlay(DevInterface.DevUI owner, DevUINode parent)
+        internal SelectedRoomsOverlay(DevInterface.DevUI owner, DevUINode parent)
             : base(owner, "DryCycle_Temperature_Selected_Room", parent)
         {
-            for (int i = 0; i < _border.Length; i++)
+        }
+
+        internal void SetRooms(
+            IReadOnlyList<RoomPanel> roomPanels,
+            HashSet<string> selection)
+        {
+            int used = 0;
+            if (roomPanels != null && selection != null)
             {
-                _border[i] = new FSprite("pixel")
+                for (int i = 0; i < roomPanels.Count; i++)
+                {
+                    RoomPanel panel = roomPanels[i];
+                    string roomName = panel?.roomRep?.room?.name;
+                    if (string.IsNullOrEmpty(roomName) ||
+                        !selection.Contains(roomName) ||
+                        !panel.Visible ||
+                        panel.collapsed ||
+                        panel.miniMap == null)
+                    {
+                        continue;
+                    }
+
+                    EnsureSpriteCount(used + 4);
+                    SetRoomBorder(panel, used);
+                    used += 4;
+                }
+            }
+
+            for (int i = used; i < _borders.Count; i++)
+            {
+                _borders[i].isVisible = false;
+            }
+        }
+
+        private void SetRoomBorder(RoomPanel panel, int first)
+        {
+            Vector2 pos = panel.miniMap.absPos;
+            Vector2 size = panel.miniMap.size;
+            size.x = Mathf.Max(2f, size.x);
+            size.y = Mathf.Max(2f, size.y);
+            const float thickness = 2f;
+
+            SetGeometry(_borders[first], pos.x, pos.y, size.x, thickness);
+            SetGeometry(_borders[first + 1], pos.x, pos.y + size.y - thickness, size.x, thickness);
+            SetGeometry(_borders[first + 2], pos.x, pos.y, thickness, size.y);
+            SetGeometry(_borders[first + 3], pos.x + size.x - thickness, pos.y, thickness, size.y);
+            for (int i = first; i < first + 4; i++)
+            {
+                _borders[i].isVisible = true;
+            }
+        }
+
+        private void EnsureSpriteCount(int count)
+        {
+            while (_borders.Count < count)
+            {
+                FSprite border = new("pixel")
                 {
                     anchorX = 0f,
                     anchorY = 0f,
@@ -546,37 +677,13 @@ internal static class TemperatureSetsMapEditorRuntime
                     alpha = 0.95f,
                     isVisible = false
                 };
-                fSprites.Add(_border[i]);
+                _borders.Add(border);
+                fSprites.Add(border);
                 if (owner != null)
                 {
-                    Futile.stage.AddChild(_border[i]);
+                    Futile.stage.AddChild(border);
                 }
             }
-        }
-
-        internal void SetRoom(RoomPanel panel)
-        {
-            bool visible = panel != null &&
-                           panel.Visible &&
-                           !panel.collapsed &&
-                           panel.miniMap != null;
-            if (!visible)
-            {
-                SetVisible(false);
-                return;
-            }
-
-            Vector2 pos = panel.miniMap.absPos;
-            Vector2 size = panel.miniMap.size;
-            size.x = Mathf.Max(2f, size.x);
-            size.y = Mathf.Max(2f, size.y);
-            const float thickness = 2f;
-
-            SetGeometry(_border[0], pos.x, pos.y, size.x, thickness);
-            SetGeometry(_border[1], pos.x, pos.y + size.y - thickness, size.x, thickness);
-            SetGeometry(_border[2], pos.x, pos.y, thickness, size.y);
-            SetGeometry(_border[3], pos.x + size.x - thickness, pos.y, thickness, size.y);
-            SetVisible(true);
         }
 
         private static void SetGeometry(FSprite sprite, float x, float y, float width, float height)
@@ -585,14 +692,6 @@ internal static class TemperatureSetsMapEditorRuntime
             sprite.y = y;
             sprite.scaleX = width;
             sprite.scaleY = height;
-        }
-
-        private void SetVisible(bool visible)
-        {
-            for (int i = 0; i < _border.Length; i++)
-            {
-                _border[i].isVisible = visible;
-            }
         }
     }
 }

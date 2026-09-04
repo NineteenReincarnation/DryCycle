@@ -98,8 +98,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Stretch(editor, "Preview", 8f, 140f);
         Stretch(editor, "Selection", 8f, 140f);
 
-        // Make room for the family probability row between SubWeather chance and
-        // preview. Everything below it moves down by one standard row.
+        // Make room for the family probability row above SubWeather chance.
+        // Everything below it moves down by one standard row.
         ShiftY(editor, "Preview", -22f);
         ShiftY(editor, "Selection", -22f);
         ShiftY(editor, "SelectAll", -22f);

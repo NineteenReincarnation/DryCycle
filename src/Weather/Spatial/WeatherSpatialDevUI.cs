@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
+using DryCycle.DevUI;
+using DryCycle.Weather.Scheduling;
 using UnityEngine;
 
 namespace DryCycle.Weather.Spatial;
@@ -102,6 +104,8 @@ internal static class WeatherSpatialDevUI
         private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<EditCommand> _undo = new();
         private readonly List<EditCommand> _redo = new();
+        private readonly MapRoomMarquee _selectionMarquee;
+        private readonly WeatherRoomHoverInfoPanel _hoverInfoPanel;
 
         private readonly Button _targetButton;
         private readonly Button _overviewButton;
@@ -220,6 +224,15 @@ internal static class WeatherSpatialDevUI
                 subNodes.Add(overlay);
             }
 
+            _selectionMarquee = new MapRoomMarquee(
+                owner,
+                "DryCycle_Weather_Room_Marquee",
+                this);
+            subNodes.Add(_selectionMarquee);
+
+            _hoverInfoPanel = new WeatherRoomHoverInfoPanel(owner, this);
+            subNodes.Add(_hoverInfoPanel);
+
             collapsed = true;
             _lastValidation = WeatherSpatialRegistry.Validate(_world);
             UpdateStateLabels();
@@ -234,13 +247,20 @@ internal static class WeatherSpatialDevUI
             if (!editorActive)
             {
                 EndPaintIfNeeded();
+                _selectionMarquee.Cancel();
                 UpdateOverlays(visible: false);
+                _hoverInfoPanel.UpdateInfo(visible: false, _regionId, roomName: null);
                 return;
             }
 
             HandleKeyboardShortcuts();
             UpdateStateLabels();
             UpdateOverlays(visible: true);
+            RoomPanel hoveredRoom = HoveredRoomPanel();
+            _hoverInfoPanel.UpdateInfo(
+                visible: true,
+                _regionId,
+                hoveredRoom?.roomRep?.room?.name);
             BringEditorUiToFront(this);
             HandleMapInput();
         }
@@ -248,6 +268,7 @@ internal static class WeatherSpatialDevUI
         public override void ClearSprites()
         {
             EndPaintIfNeeded();
+            _selectionMarquee.Cancel();
             SetRoomDraggingDisabled(false);
             WeatherSpatialPreview.Clear();
             base.ClearSprites();
@@ -392,6 +413,24 @@ internal static class WeatherSpatialDevUI
             if (_overview || owner == null)
             {
                 EndPaintIfNeeded();
+                _selectionMarquee.Cancel();
+                return;
+            }
+
+            if (_selectionMarquee.Active)
+            {
+                owner.draggedNode = this;
+                _selectionMarquee.MoveTo(owner.mousePos);
+                if (!Input.GetMouseButton(0))
+                {
+                    int count = _selectionMarquee.Complete(_roomPanels, _selection);
+                    _status = "Box selected " + count + " room(s).";
+                    if (ReferenceEquals(owner.draggedNode, this))
+                    {
+                        owner.draggedNode = null;
+                    }
+                }
+                EndPaintIfNeeded();
                 return;
             }
 
@@ -409,21 +448,19 @@ internal static class WeatherSpatialDevUI
 
             RoomPanel hovered = HoveredRoomPanel();
             bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-            if (shift && owner.mouseClick && hovered != null)
+            if (shift && Input.GetMouseButtonDown(0))
             {
-                string roomName = hovered.roomRep.room.name;
-                if (!_selection.Add(roomName))
-                {
-                    _selection.Remove(roomName);
-                }
+                _selectionMarquee.Begin(owner.mousePos);
                 owner.draggedNode = this;
                 EndPaintIfNeeded();
                 return;
             }
 
-            if (shift && owner.mouseDown)
+            // Shift+RMB is handled once by WeatherSpatialTogglePaintRuntime and
+            // toggles the complete marquee selection. Do not start a paint stroke.
+            if (shift)
             {
-                owner.draggedNode = this;
+                EndPaintIfNeeded();
                 return;
             }
 
@@ -981,7 +1018,7 @@ internal static class WeatherSpatialDevUI
 
         private static void BringEditorUiToFront(DevUINode node)
         {
-            if (node == null || node is WeatherRoomOverlay)
+            if (node == null || node is WeatherRoomOverlay || node is MapRoomMarquee)
             {
                 return;
             }
@@ -1044,6 +1081,233 @@ internal static class WeatherSpatialDevUI
                 return text ?? string.Empty;
             }
             return text.Substring(0, Math.Max(0, length - 3)) + "...";
+        }
+    }
+
+    private sealed class WeatherRoomHoverInfoPanel : Panel
+    {
+        private const int RowsPerColumn = 6;
+
+        private static readonly Color AllowedColor = new(0.45f, 0.95f, 0.55f);
+        private static readonly Color DeniedColor = new(1f, 0.42f, 0.35f);
+        private static readonly Color MutedColor = new(0.72f, 0.72f, 0.72f);
+
+        private readonly DevUILabel _roomLabel;
+        private readonly DevUILabel[] _familyRows = new DevUILabel[RowsPerColumn];
+        private readonly DevUILabel[] _weatherRows = new DevUILabel[RowsPerColumn];
+        private readonly DevUILabel[] _dangerRows = new DevUILabel[RowsPerColumn];
+
+        internal WeatherRoomHoverInfoPanel(
+            DevInterface.DevUI owner,
+            DevUINode parent)
+            : base(
+                owner,
+                "DryCycle_Weather_Room_Hover_Info",
+                parent,
+                new Vector2(0f, -157f),
+                new Vector2(310f, 154f),
+                "Hovered Room Weather")
+        {
+            _roomLabel = AddInfoLabel(
+                "HoverRoom",
+                8f,
+                122f,
+                294f,
+                "Room: <hover a room>",
+                0.85f,
+                Color.white);
+            AddInfoLabel(
+                "HoverLegend",
+                8f,
+                107f,
+                294f,
+                "A/D effective | R room  Z region  G global | +/- rule",
+                0.68f,
+                MutedColor);
+
+            AddInfoLabel("HoverFamilyHeader", 8f, 91f, 88f, "FamWeather", 0.75f, Color.white);
+            AddInfoLabel("HoverWeatherHeader", 101f, 91f, 99f, "SubWeather", 0.75f, Color.white);
+            AddInfoLabel("HoverDangerHeader", 205f, 91f, 97f, "DangerType", 0.75f, Color.white);
+
+            for (int i = 0; i < RowsPerColumn; i++)
+            {
+                float y = 77f - i * 13f;
+                _familyRows[i] = AddInfoLabel(
+                    "HoverFamily" + i,
+                    8f,
+                    y,
+                    88f,
+                    string.Empty,
+                    0.68f,
+                    MutedColor);
+                _weatherRows[i] = AddInfoLabel(
+                    "HoverWeather" + i,
+                    101f,
+                    y,
+                    99f,
+                    string.Empty,
+                    0.68f,
+                    MutedColor);
+                _dangerRows[i] = AddInfoLabel(
+                    "HoverDanger" + i,
+                    205f,
+                    y,
+                    97f,
+                    string.Empty,
+                    0.68f,
+                    MutedColor);
+            }
+        }
+
+        internal void UpdateInfo(bool visible, string regionId, string roomName)
+        {
+            SetPanelVisible(visible);
+            if (!visible)
+            {
+                return;
+            }
+
+            ClearRows(_familyRows);
+            ClearRows(_weatherRows);
+            ClearRows(_dangerRows);
+
+            if (string.IsNullOrWhiteSpace(roomName))
+            {
+                _roomLabel.Text = "Room: <hover a room>";
+                return;
+            }
+
+            _roomLabel.Text = "Room: " + roomName;
+            int familyIndex = 0;
+            int weatherIndex = 0;
+            int dangerIndex = 0;
+            IReadOnlyList<WeatherSpatialTarget> targets = WeatherSpatialCatalog.AllTargets;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                WeatherSpatialTarget target = targets[i];
+                if (target.IsFamily)
+                {
+                    SetRow(_familyRows, ref familyIndex, regionId, roomName, target);
+                }
+                else if (target.Kind == WeatherScheduleEventKind.DangerType)
+                {
+                    SetRow(_dangerRows, ref dangerIndex, regionId, roomName, target);
+                }
+                else
+                {
+                    SetRow(_weatherRows, ref weatherIndex, regionId, roomName, target);
+                }
+            }
+        }
+
+        private DevUILabel AddInfoLabel(
+            string id,
+            float x,
+            float y,
+            float width,
+            string text,
+            float scale,
+            Color color)
+        {
+            DevUILabel label = new(owner, id, this, new Vector2(x, y), width, text);
+            label.spriteColor = Color.black;
+            label.textColor = color;
+            for (int i = 0; i < label.fLabels.Count; i++)
+            {
+                label.fLabels[i].scale = scale;
+            }
+            subNodes.Add(label);
+            return label;
+        }
+
+        private static void ClearRows(DevUILabel[] rows)
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                rows[i].Text = string.Empty;
+                rows[i].textColor = MutedColor;
+            }
+        }
+
+        private static void SetRow(
+            DevUILabel[] rows,
+            ref int index,
+            string regionId,
+            string roomName,
+            in WeatherSpatialTarget target)
+        {
+            if (index >= rows.Length)
+            {
+                return;
+            }
+
+            bool allowed = target.IsFamily
+                ? WeatherSpatialRegistry.IsFamilyAllowed(regionId, roomName, target.FamilyId)
+                : WeatherSpatialRegistry.IsAllowed(regionId, roomName, target.Kind, target.WeatherId);
+            string rule = ResolvedRuleCode(regionId, roomName, target);
+            string chance = ChanceText(regionId, target);
+            string name = target.IsFamily ? target.FamilyId : target.WeatherId;
+
+            DevUILabel row = rows[index++];
+            row.Text = (allowed ? "A " : "D ") + rule + " " + name + " " + chance;
+            row.textColor = allowed ? AllowedColor : DeniedColor;
+        }
+
+        private static string ResolvedRuleCode(
+            string regionId,
+            string roomName,
+            in WeatherSpatialTarget target)
+        {
+            WeatherSpatialRule roomRule = WeatherSpatialRegistry.GetRoomRule(regionId, roomName, target);
+            if (roomRule != WeatherSpatialRule.Inherit)
+            {
+                return "R" + RuleSign(roomRule);
+            }
+
+            WeatherSpatialRule regionRule = WeatherSpatialRegistry.GetDefaultRule(regionId, target);
+            if (regionRule != WeatherSpatialRule.Inherit)
+            {
+                return "Z" + RuleSign(regionRule);
+            }
+
+            if (target.IsFamily)
+            {
+                return "G" + RuleSign(WeatherSpatialRegistry.GlobalDefault);
+            }
+
+            return "--";
+        }
+
+        private static string RuleSign(WeatherSpatialRule rule) =>
+            rule == WeatherSpatialRule.Allow ? "+" : "-";
+
+        private static string ChanceText(string regionId, in WeatherSpatialTarget target)
+        {
+            bool found = target.IsFamily
+                ? WeatherSpatialRegistry.TryGetFamilyWeatherChance(regionId, target, out float chance)
+                : WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out chance);
+            return found ? Mathf.RoundToInt(chance) + "%" : "--";
+        }
+
+        private void SetPanelVisible(bool visible)
+        {
+            SetNodeVisible(this, visible);
+        }
+
+        private static void SetNodeVisible(DevUINode node, bool visible)
+        {
+            for (int i = 0; i < node.fSprites.Count; i++)
+            {
+                node.fSprites[i].isVisible = visible;
+            }
+            for (int i = 0; i < node.fLabels.Count; i++)
+            {
+                node.fLabels[i].isVisible = visible;
+            }
+            for (int i = 0; i < node.subNodes.Count; i++)
+            {
+                SetNodeVisible(node.subNodes[i], visible);
+            }
         }
     }
 

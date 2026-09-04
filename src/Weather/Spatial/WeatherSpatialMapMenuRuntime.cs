@@ -18,6 +18,7 @@ internal static class WeatherSpatialMapMenuRuntime
     internal const string MenuButtonId = "DryCycle_Weather_Zones_Button";
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string TargetPopupId = "DryCycle_Weather_Target_Popup_Fixed";
+    private const string HoverInfoPanelId = "DryCycle_Weather_Room_Hover_Info";
 
     private static bool _enabled;
     private static ConstructorInfo _editorConstructor;
@@ -73,12 +74,13 @@ internal static class WeatherSpatialMapMenuRuntime
         bool realLeftClick = owner.mouseClick;
         bool rightDown = Input.GetMouseButton(1);
         bool rightClick = Input.GetMouseButtonDown(1);
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         bool overInteractiveUi = IsMouseOverInteractiveUi(self, editor);
 
         if (realLeftClick)
         {
             _leftPanPage = self;
-            _leftPanActive = !overInteractiveUi;
+            _leftPanActive = !overInteractiveUi && !shift;
         }
         if (!realLeftDown && ReferenceEquals(_leftPanPage, self))
         {
@@ -89,7 +91,7 @@ internal static class WeatherSpatialMapMenuRuntime
         bool panWithLeft = realLeftDown &&
                            _leftPanActive &&
                            ReferenceEquals(_leftPanPage, self);
-        bool authorWithRight = (rightDown || rightClick) && !overInteractiveUi;
+        bool authorWithRight = (rightDown || rightClick) && !shift && !overInteractiveUi;
 
         // The existing weather editor is written against DevUI's left-button fields.
         // While Weather Zones is open, feed it RMB instead; LMB is reserved for the
@@ -142,7 +144,8 @@ internal static class WeatherSpatialMapMenuRuntime
         // The weather picker deliberately opens to the left of the main editor panel.
         // Because that popup sits outside editorRect, include it explicitly so LMB does
         // not pan the map and RMB does not paint rooms through the popup.
-        if (IsMouseOverNode(editor, TargetPopupId))
+        if (IsMouseOverNode(editor, TargetPopupId) ||
+            IsMouseOverNode(editor, HoverInfoPanelId))
         {
             return true;
         }
@@ -545,10 +548,11 @@ internal static class WeatherSpatialMapMenuRuntime
             return;
         }
 
-        AddLegendLabel(editor, "WeatherShortcutHeader", 92f, "Shortcuts");
-        AddLegendLabel(editor, "WeatherShortcutPan", 74f, "LMB Drag  - Pan Map");
-        AddLegendLabel(editor, "WeatherShortcutPaint", 56f, "RMB Drag  - Paint Brush");
-        AddLegendLabel(editor, "WeatherShortcutSelect", 38f, "Shift + RMB  - Toggle Room Select");
+        AddLegendLabel(editor, "WeatherShortcutHeader", 110f, "Shortcuts");
+        AddLegendLabel(editor, "WeatherShortcutPan", 92f, "LMB Drag  - Pan Map");
+        AddLegendLabel(editor, "WeatherShortcutBox", 74f, "Shift + LMB Drag  - Box Select Rooms");
+        AddLegendLabel(editor, "WeatherShortcutPaint", 56f, "RMB Drag  - Toggle Weather Zone");
+        AddLegendLabel(editor, "WeatherShortcutSelect", 38f, "Shift + RMB  - Toggle Selected Rooms");
         AddLegendLabel(editor, "WeatherShortcutKeys", 20f, "Ctrl+S Save   Ctrl+Z Undo   Ctrl+Y Redo");
     }
 

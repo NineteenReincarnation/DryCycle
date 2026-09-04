@@ -9,7 +9,7 @@ namespace DryCycle.Weather.Spatial;
 
 /// <summary>
 /// Binary Weather Zones authoring: RMB toggles the effective state of every room
-/// touched by the current stroke. Shift+RMB remains room selection.
+/// touched by the current stroke. Shift+RMB toggles the complete room selection once.
 /// </summary>
 internal static class WeatherSpatialTogglePaintRuntime
 {
@@ -73,7 +73,11 @@ internal static class WeatherSpatialTogglePaintRuntime
             bool overview = _overviewField?.GetValue(editor) is bool overviewValue && overviewValue;
             bool collapsed = editor is Panel panel && panel.collapsed;
 
-            if (rightDown && !shift && !overview && !collapsed)
+            if (rightDown && shift && !_rightWasDown && !overview && !collapsed)
+            {
+                ToggleSelection(editor);
+            }
+            else if (rightDown && !shift && !overview && !collapsed)
             {
                 RoomPanel hovered = HoveredRoom(self);
                 if (hovered?.roomRep?.room != null)
@@ -306,9 +310,13 @@ internal static class WeatherSpatialTogglePaintRuntime
         {
             paint.Text = "RMB Drag  - Toggle Weather Zone";
         }
+        if (FindDirect(editor, "WeatherShortcutBox") is DevUILabel box)
+        {
+            box.Text = "Shift + LMB Drag  - Box Select Rooms";
+        }
         if (FindDirect(editor, "WeatherShortcutSelect") is DevUILabel select)
         {
-            select.Text = "Shift + RMB  - Toggle Room Select";
+            select.Text = "Shift + RMB  - Toggle Selected Rooms";
         }
     }
 
