@@ -7,7 +7,12 @@ internal sealed class AbstractRopeSpear : AbstractSpear
 {
     public const float DefaultRopeLength = 260f;
     public const float MinRopeLength = 65f;
-    public const float MaxRopeLength = 360f;
+
+    // Rope is allowed to pay out freely during a throw. Keep the authored/runtime
+    // ceiling well above any normal Rain World room span so projectile flight is
+    // never range-limited by the old 360 px cap. Reeling can still shorten it all
+    // the way back to MinRopeLength.
+    public const float MaxRopeLength = 10000f;
 
     internal const string FixedHandlePrefix = "DRYCYCLE_ROPESPEAR_FIXED_HANDLE=";
     internal const string FixedHandleAnchorPrefix = "DRYCYCLE_ROPESPEAR_FIXED_ANCHOR=";
