@@ -59,10 +59,10 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         string id = button?.IDstring ?? string.Empty;
         if (id.StartsWith(FamilyChancePrefix, StringComparison.Ordinal))
         {
-            string familyId = id.Substring(FamilyChancePrefix.Length);
+            string scheduleFamilyId = id.Substring(FamilyChancePrefix.Length);
             return !WeatherSpatialRegistry.TryGetFamilySchedule(
                        regionId,
-                       familyId,
+                       scheduleFamilyId,
                        out bool enabled,
                        out _) ||
                    !enabled;
@@ -82,8 +82,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             return true;
         }
 
-        string familyId = suffix.Substring(0, separator);
-        if (!WeatherSpatialCatalog.TryGetFamily(familyId, out WeatherSpatialFamily family) ||
+        string childFamilyId = suffix.Substring(0, separator);
+        if (!WeatherSpatialCatalog.TryGetFamily(childFamilyId, out WeatherSpatialFamily family) ||
             memberIndex < 0 ||
             memberIndex >= family.Members.Count)
         {
