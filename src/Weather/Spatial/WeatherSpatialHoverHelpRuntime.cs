@@ -92,14 +92,13 @@ internal static class WeatherSpatialHoverHelpRuntime
     {
         PanelState state = new();
 
-        // Keep the button inside the top-right corner of the existing 310x154 panel.
-        // It deliberately sits beside the panel's native title-bar controls rather than
-        // creating a second floating window.
+        // Keep the button in the existing title-bar area, immediately to the left of
+        // Panel's native top-right controls. This avoids covering the two white circles.
         state.Toggle = new Button(
             panel.owner,
             HelpToggleId,
             panel,
-            new Vector2(278f, 132f),
+            new Vector2(246f, 132f),
             24f,
             _helpMode ? "<" : "?");
         panel.subNodes.Add(state.Toggle);
