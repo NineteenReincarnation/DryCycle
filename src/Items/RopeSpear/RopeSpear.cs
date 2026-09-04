@@ -13,8 +13,6 @@ internal sealed class RopeSpear : Spear
     private const float TensionDamping = 0.06f;
     private const float MaxPlayerPullImpulse = 2.4f;
     private const float MaxAnchorPullImpulse = 1.8f;
-    private const float BreakStretch = 92f;
-    private const int BreakFramesRequired = 8;
 
     private readonly List<Vector2> _drawPath = new();
     private readonly Vector2[] _sampledRope = new Vector2[RopeMeshSegments + 1];
@@ -23,7 +21,6 @@ internal sealed class RopeSpear : Spear
     private Rope _ropeTopology;
     private Room _ropeRoom;
     private int _ropeSpriteIndex = -1;
-    private int _breakFrames;
     private float _lastRouteLength;
     private bool _ropeDeployed;
 
@@ -74,7 +71,6 @@ internal sealed class RopeSpear : Spear
         {
             _ropeOwner = player;
             _ropeDeployed = true;
-            _breakFrames = 0;
             EnsureTopology(forceReset: true);
         }
     }
@@ -88,7 +84,10 @@ internal sealed class RopeSpear : Spear
             _ropeOwner = player;
         }
 
-        RetractRope(resetLength: true);
+        // Picking the spear up is the repair/reset action. A rope that was cut by
+        // a creature entering a shortcut becomes usable again and returns to its
+        // authored default length before the next throw.
+        RetractRope(resetState: true);
     }
 
     public override void Update(bool eu)
@@ -97,6 +96,16 @@ internal sealed class RopeSpear : Spear
 
         if (!_ropeDeployed || IsBroken)
         {
+            return;
+        }
+
+        // A rope cannot follow a creature through Rain World's shortcut/pipe
+        // transport. If the spear is embedded in a creature and that creature
+        // enters a shortcut, cut the rope immediately. Ordinary tension never
+        // damages the rope.
+        if (AttachedCreatureEnteredShortcut())
+        {
+            BreakRope();
             return;
         }
 
@@ -125,21 +134,14 @@ internal sealed class RopeSpear : Spear
             ApplyRopeConstraint(stretch, routeLength);
         }
 
-        if (stretch >= BreakStretch)
-        {
-            _breakFrames++;
-            if (_breakFrames >= BreakFramesRequired)
-            {
-                BreakRope();
-                return;
-            }
-        }
-        else
-        {
-            _breakFrames = Mathf.Max(0, _breakFrames - 2);
-        }
-
         _lastRouteLength = routeLength;
+    }
+
+    private bool AttachedCreatureEnteredShortcut()
+    {
+        return mode == Mode.StuckInCreature &&
+               stuckInObject is Creature creature &&
+               creature.inShortcut;
     }
 
     private bool OwnerCanHoldRope()
@@ -159,12 +161,13 @@ internal sealed class RopeSpear : Spear
             return;
         }
 
-        Player.InputPackage input = _ropeOwner.input[0];
-        if (!input.pckp)
+        bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+        if (!altHeld)
         {
             return;
         }
 
+        Player.InputPackage input = _ropeOwner.input[0];
         if (input.y > 0)
         {
             RopeLength -= ReelSpeed;
@@ -257,7 +260,6 @@ internal sealed class RopeSpear : Spear
         }
 
         _ropeDeployed = false;
-        _breakFrames = 0;
         _ropeTopology?.Reset();
         _ropeTopology = null;
         _ropeRoom = null;
@@ -272,23 +274,22 @@ internal sealed class RopeSpear : Spear
     private void DisconnectRope()
     {
         _ropeDeployed = false;
-        _breakFrames = 0;
         _ropeTopology?.Reset();
         _ropeTopology = null;
         _ropeRoom = null;
         _ropeOwner = null;
     }
 
-    private void RetractRope(bool resetLength)
+    private void RetractRope(bool resetState)
     {
         _ropeDeployed = false;
-        _breakFrames = 0;
         _ropeTopology?.Reset();
         _ropeTopology = null;
         _ropeRoom = null;
 
-        if (resetLength && Data != null && !Data.RopeBroken)
+        if (resetState && Data != null)
         {
+            Data.RopeBroken = false;
             Data.RopeLength = AbstractRopeSpear.DefaultRopeLength;
         }
     }
