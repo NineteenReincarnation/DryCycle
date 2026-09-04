@@ -102,6 +102,27 @@ internal sealed class RopeSpearRopeSystem
         ApplyPins();
     }
 
+    internal Vector2 GetNode(int index)
+    {
+        if (!_initialized)
+        {
+            return Vector2.zero;
+        }
+
+        return _nodes[Mathf.Clamp(index, 0, NodeCount - 1)].Pos;
+    }
+
+    internal void PushNode(int index, Vector2 movement)
+    {
+        if (!_initialized || index <= 0 || index >= NodeCount - 1 || _pinned[index])
+        {
+            return;
+        }
+
+        _nodes[index].Pos += movement;
+        _nodes[index].LastPos += movement;
+    }
+
     internal Vector2 GetPoint(float normalizedPosition)
     {
         if (!_initialized)
