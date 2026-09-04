@@ -16,18 +16,11 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
-        EnsureLegacyScheduleMigration();
-        string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0 ||
-            !RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule) ||
-            !schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather entry) ||
-            !entry.IsFamily)
-        {
-            return false;
-        }
-
-        chancePercent = entry.ChancePercent;
-        return true;
+        return TryGetFamilySchedule(
+            regionId,
+            family.Id,
+            out _,
+            out chancePercent);
     }
 
     internal static bool SetFamilyWeatherChance(
@@ -40,55 +33,7 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
-        EnsureLegacyScheduleMigration();
-        string regionKey = NormalizeRegion(regionId);
-        if (regionKey.Length == 0)
-        {
-            return false;
-        }
-
-        chancePercent = WeatherSpatialScheduleWeather.ClampChance(chancePercent);
-        if (!RegionSchedules.TryGetValue(regionKey, out WeatherSpatialRegionSchedule schedule))
-        {
-            schedule = new WeatherSpatialRegionSchedule();
-            RegionSchedules[regionKey] = schedule;
-        }
-
-        if (schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather existing) &&
-            existing.IsFamily)
-        {
-            existing.ChancePercent = chancePercent;
-            Dirty = true;
-            return true;
-        }
-
-        WeatherSpatialScheduleWeather created = new(
-            family.Id,
-            chancePercent,
-            isFamily: true);
-
-        // A child can have the same ID as its family (Fog/Fog). Preserve that
-        // child's independent chance while converting the old simple entry.
-        for (int i = 0; i < family.Members.Count; i++)
-        {
-            WeatherSpatialMember member = family.Members[i];
-            if (member.Kind != WeatherScheduleEventKind.Weather)
-            {
-                continue;
-            }
-
-            string memberId = WeatherSpatialCatalog.CanonicalWeatherId(member.Kind, member.Id);
-            if (schedule.Weather.TryGetValue(memberId, out WeatherSpatialScheduleWeather simple) &&
-                !simple.IsFamily)
-            {
-                created.Variants[memberId] = simple.ChancePercent;
-                schedule.Weather.Remove(memberId);
-            }
-        }
-
-        schedule.Weather[family.Id] = created;
-        Dirty = true;
-        return true;
+        return SetFamilyScheduleChance(regionId, family.Id, chancePercent);
     }
 
     internal static bool TryGetSubWeatherChance(
@@ -163,6 +108,7 @@ internal static partial class WeatherSpatialRegistry
         {
             schedule.DangerTypes[id] = chancePercent;
             Dirty = true;
+            WeatherScheduleCacheInvalidation.InvalidateAll();
             return true;
         }
 
@@ -172,6 +118,7 @@ internal static partial class WeatherSpatialRegistry
         {
             familyEntry.Variants[id] = chancePercent;
             Dirty = true;
+            WeatherScheduleCacheInvalidation.InvalidateAll();
             return true;
         }
 
@@ -180,6 +127,7 @@ internal static partial class WeatherSpatialRegistry
         {
             exact.ChancePercent = chancePercent;
             Dirty = true;
+            WeatherScheduleCacheInvalidation.InvalidateAll();
             return true;
         }
 
@@ -203,12 +151,14 @@ internal static partial class WeatherSpatialRegistry
                 created.Variants[id] = chancePercent;
                 schedule.Weather[family.Id] = created;
                 Dirty = true;
+                WeatherScheduleCacheInvalidation.InvalidateAll();
                 return true;
             }
         }
 
         schedule.Weather[id] = new WeatherSpatialScheduleWeather(id, chancePercent);
         Dirty = true;
+        WeatherScheduleCacheInvalidation.InvalidateAll();
         return true;
     }
 

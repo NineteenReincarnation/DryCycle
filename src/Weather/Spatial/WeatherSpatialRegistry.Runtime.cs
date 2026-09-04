@@ -29,8 +29,6 @@ internal static partial class WeatherSpatialRegistry
             return _globalDefault != WeatherSpatialRule.Deny;
         }
 
-        // A Family is only the prerequisite/container for its members. It never
-        // implicitly enables every child weather in the room.
         if (!IsFamilyAllowed(regionId, roomName, family.Id))
         {
             return false;
@@ -58,8 +56,6 @@ internal static partial class WeatherSpatialRegistry
             }
         }
 
-        // No explicit child rule means the child was never placed. The parent Family
-        // only unlocks editing; it does not supply an implicit Allow.
         return false;
     }
 
@@ -104,19 +100,13 @@ internal static partial class WeatherSpatialRegistry
 
         bool removedSpatial = Regions.Remove(regionKey);
         bool removedSchedule = RegionSchedules.Remove(regionKey);
-        if (!removedSpatial && !removedSchedule)
+        bool removedFamilySchedule = ClearRegionFamilyScheduleState(regionKey);
+        if (!removedSpatial && !removedSchedule && !removedFamilySchedule)
         {
             return false;
         }
 
-        // Clear means a true region reset: room/default spatial rules and all regional
-        // schedule/chance data disappear together. BuildJsonRoot unions these two
-        // dictionaries, so a region with no remaining data vanishes from JSON on Save.
         Dirty = true;
-
-        // The current day/night phase may already have been rolled before the developer
-        // clears the region. Invalidate both the concrete schedule state and HUD timeline
-        // so stale forecast/weather cannot survive the destructive reset in this session.
         WeatherScheduleCacheInvalidation.InvalidateAll();
         return true;
     }
@@ -156,6 +146,13 @@ internal static partial class WeatherSpatialRegistry
                 File.Delete(path);
             }
             File.Move(temp, path);
+
+            if (!PersistRegionFamilyScheduleState(path))
+            {
+                Dirty = true;
+                Plugin.Logger?.LogError("DryCycle weather spatial: failed to persist regional FamWeather state.");
+                return false;
+            }
 
             LoadedPath = path;
             FatalLoadError = null;
@@ -199,6 +196,7 @@ internal static partial class WeatherSpatialRegistry
 
         Regions.Clear();
         RegionSchedules.Clear();
+        RegionFamilySchedules.Clear();
         ParseWarnings.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
         FatalLoadError = null;

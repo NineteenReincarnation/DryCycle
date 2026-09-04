@@ -43,6 +43,7 @@ internal static partial class WeatherSpatialRegistry
         ParseWarnings.Clear();
         Regions.Clear();
         RegionSchedules.Clear();
+        RegionFamilySchedules.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
 
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -54,6 +55,7 @@ internal static partial class WeatherSpatialRegistry
 
         if (TryLoadFile(path, out string primaryError))
         {
+            LoadRegionFamilyScheduleState(path);
             Dirty = false;
             RememberWriteTime(path);
             return;
@@ -63,6 +65,7 @@ internal static partial class WeatherSpatialRegistry
         string primaryWarning = $"Primary {FileName} is invalid: {primaryError}";
         if (File.Exists(backupPath) && TryLoadFile(backupPath, out string backupError))
         {
+            LoadRegionFamilyScheduleState(backupPath);
             ParseWarnings.Insert(0, primaryWarning);
             ParseWarnings.Add($"Recovered {FileName} from '{Path.GetFileName(backupPath)}'. Save from DevTools to repair the primary file.");
             Dirty = true;
@@ -73,6 +76,7 @@ internal static partial class WeatherSpatialRegistry
 
         Regions.Clear();
         RegionSchedules.Clear();
+        RegionFamilySchedules.Clear();
         _globalDefault = WeatherSpatialRule.Deny;
         Dirty = false;
         FatalLoadError = File.Exists(backupPath)
@@ -192,8 +196,6 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
-        // Family rows establish the parent scope. Inherit is always allowed so old
-        // orphaned child overrides can still be removed after this prerequisite was added.
         if (target.IsFamily || rule == WeatherSpatialRule.Inherit)
         {
             return true;

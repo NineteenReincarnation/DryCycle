@@ -102,33 +102,52 @@ internal static partial class WeatherSpatialRegistry
             return false;
         }
 
+        EnsureLegacyFamilySchedule(regionKey);
         RegionClimateProfile built = new(regionKey);
-        foreach (string weatherId in SortedKeys(schedule.Weather))
+        bool any = false;
+
+        for (int familyIndex = 0; familyIndex < WeatherSpatialCatalog.AllFamilies.Count; familyIndex++)
         {
-            WeatherSpatialScheduleWeather configured = schedule.Weather[weatherId];
-            if (configured.IsFamily && configured.Variants.Count == 0)
+            WeatherSpatialFamily family = WeatherSpatialCatalog.AllFamilies[familyIndex];
+            if (!TryGetFamilySchedule(regionKey, family.Id, out bool enabled, out float familyChance) || !enabled)
             {
                 continue;
             }
-            WeatherFamilyClimateEntry family = new(configured.Id, configured.ChancePercent);
-            foreach (string variantId in SortedKeys(configured.Variants))
-            {
-                family.AddVariant(new ClimateChanceEntry(
-                    variantId,
-                    configured.Variants[variantId]));
-            }
-            built.AddWeather(family);
-        }
 
-        foreach (string dangerId in SortedKeys(schedule.DangerTypes))
-        {
-            built.AddDanger(new ClimateChanceEntry(
-                dangerId,
-                schedule.DangerTypes[dangerId]));
+            WeatherFamilyClimateEntry weatherGroup = null;
+            for (int memberIndex = 0; memberIndex < family.Members.Count; memberIndex++)
+            {
+                WeatherSpatialMember member = family.Members[memberIndex];
+                if (!TryGetConfiguredMemberChance(schedule, family, member, out float childChance))
+                {
+                    continue;
+                }
+
+                if (member.Kind == WeatherScheduleEventKind.Weather)
+                {
+                    weatherGroup ??= new WeatherFamilyClimateEntry(family.Id, familyChance);
+                    weatherGroup.AddVariant(new ClimateChanceEntry(member.Id, childChance));
+                }
+                else
+                {
+                    // Danger entries live in a flat compatibility list. Multiplying the
+                    // two independent probabilities preserves the same effective chance.
+                    built.AddDanger(new ClimateChanceEntry(
+                        member.Id,
+                        childChance * familyChance / 100f));
+                    any = true;
+                }
+            }
+
+            if (weatherGroup != null && weatherGroup.Variants.Count > 0)
+            {
+                built.AddWeather(weatherGroup);
+                any = true;
+            }
         }
 
         profile = built;
-        return true;
+        return any;
     }
 
     internal static bool RegionScheduleContains(
@@ -138,5 +157,41 @@ internal static partial class WeatherSpatialRegistry
     {
         return TryGetScheduleRules(regionId, out WeatherSpatialRegionSchedule schedule) &&
                schedule.Contains(kind, id);
+    }
+
+    private static bool TryGetConfiguredMemberChance(
+        WeatherSpatialRegionSchedule schedule,
+        WeatherSpatialFamily family,
+        in WeatherSpatialMember member,
+        out float chancePercent)
+    {
+        chancePercent = 0f;
+        string id = WeatherSpatialCatalog.CanonicalWeatherId(member.Kind, member.Id);
+        if (member.Kind == WeatherScheduleEventKind.DangerType)
+        {
+            return schedule.DangerTypes.TryGetValue(id, out chancePercent);
+        }
+
+        if (schedule.Weather.TryGetValue(family.Id, out WeatherSpatialScheduleWeather grouped) &&
+            grouped.IsFamily &&
+            grouped.Variants.TryGetValue(id, out chancePercent))
+        {
+            return true;
+        }
+
+        if (schedule.Weather.TryGetValue(id, out WeatherSpatialScheduleWeather exact) && !exact.IsFamily)
+        {
+            chancePercent = exact.ChancePercent;
+            return true;
+        }
+
+        foreach (WeatherSpatialScheduleWeather candidate in schedule.Weather.Values)
+        {
+            if (candidate.IsFamily && candidate.Variants.TryGetValue(id, out chancePercent))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

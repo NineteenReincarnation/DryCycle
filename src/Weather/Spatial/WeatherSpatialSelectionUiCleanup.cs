@@ -16,6 +16,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string MarkerId = "DryCycle_Weather_SelectionUi_Clean";
     private const string BrokenPickerId = "DryCycle_Weather_Target_Picker_Node";
+    private const float FamilyTableExpansion = 110f;
 
     private static bool _enabled;
 
@@ -59,7 +60,8 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             return;
         }
 
-        // Retired bulk-selection controls.
+        ExpandForFamilyScheduleTable(editor);
+
         Remove(editor, "SelectConnected");
         Remove(editor, "SelectOffscreen");
         Remove(editor, "StopGate");
@@ -68,9 +70,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Remove(editor, "ForceDeny");
         Remove(editor, "ForceInherit");
 
-        // Binary authoring no longer has a persistent brush mode. RMB derives the
-        // opposite state from each room as it is touched. The old apply button is kept
-        // but becomes a compact Toggle Sel bulk action handled by the toggle runtime.
         Remove(editor, "Brush");
         Stretch(editor, "ApplySelected", 208f, 84f);
         if (Find(editor, "ApplySelected") is Button applySelected)
@@ -78,16 +77,11 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             applySelected.Text = "Toggle Sel";
         }
 
-        // Remove both the original arrow selector and the first picker implementation.
-        // The latter inherited directly from DevUINode, so its Positioned children were
-        // accidentally screen-relative instead of Weather-Zones-panel-relative.
         Remove(editor, "TargetPrev");
         Remove(editor, "Target");
         Remove(editor, "TargetNext");
         Remove(editor, BrokenPickerId);
 
-        // Preview intensity is typed directly now; +/- and the passive percentage label
-        // are no longer part of the UI.
         Remove(editor, "PreviewMinus");
         Remove(editor, "PreviewPlus");
         Remove(editor, "PreviewValue");
@@ -98,8 +92,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Stretch(editor, "Preview", 8f, 140f);
         Stretch(editor, "Selection", 8f, 140f);
 
-        // Make room for the family probability row above SubWeather chance.
-        // Everything below it moves down by one standard row.
+        // One dedicated SubWeather chance row sits between Toggle Sel and Preview.
         ShiftY(editor, "Preview", -22f);
         ShiftY(editor, "Selection", -22f);
         ShiftY(editor, "SelectAll", -22f);
@@ -109,7 +102,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         ShiftY(editor, "SelectShelters", -22f);
         ShiftY(editor, "SelectGates", -22f);
 
-        // Two deleted selection rows sat above history/validation controls.
         ShiftY(editor, "Undo", 50f);
         ShiftY(editor, "Redo", 50f);
         ShiftY(editor, "Validate", 50f);
@@ -134,24 +126,39 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             ShiftY(editor, "Issue" + i, -22f);
         }
 
-        // These are deliberately appended last so their sprites and click handling sit
-        // above the older editor controls that the popup temporarily covers.
         editor.subNodes.Add(new WeatherChanceInput(
             editor.owner,
             editor,
             editor,
             familyChance: false));
-        editor.subNodes.Add(new WeatherChanceInput(
-            editor.owner,
-            editor,
-            editor,
-            familyChance: true));
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
+        editor.subNodes.Add(new FamilyScheduleTable(editor.owner, editor, editor));
         editor.subNodes.Add(new ClearRegionZonesControl(editor.owner, editor, editor));
         editor.subNodes.Add(new CleanupMarker(editor.owner, editor));
         RefreshForbiddenTerminology(editor);
         editor.Refresh();
+    }
+
+    private static void ExpandForFamilyScheduleTable(DevUINode editor)
+    {
+        if (editor is RectangularDevUINode panel)
+        {
+            panel.pos = new Vector2(panel.pos.x, panel.pos.y - FamilyTableExpansion);
+            panel.size = new Vector2(panel.size.x, panel.size.y + FamilyTableExpansion);
+        }
+
+        // Keep Region at its original screen position; everything below it moves down
+        // with the expanded panel, leaving a clean block for the four Family rows.
+        ShiftY(editor, "Region", FamilyTableExpansion);
+
+        // The old hover panel lived directly below the main panel. The expanded panel
+        // now uses that vertical space, so park hover details immediately to the left.
+        if (Find(editor, "DryCycle_Weather_Room_Hover_Info") is PositionedDevUINode hover)
+        {
+            hover.pos = new Vector2(-320f, 0f);
+            hover.Refresh();
+        }
     }
 
     private static DevUINode FindEditor(MapPage mapPage)
@@ -248,8 +255,6 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         if (root is Button button && !string.IsNullOrEmpty(button.Text))
         {
-            // Internal enum value remains Deny for save compatibility/migration code,
-            // but developer-facing terminology is now consistently Forbidden.
             button.Text = button.Text
                 .Replace("DENY", "FORBIDDEN")
                 .Replace("Deny", "Forbidden");
