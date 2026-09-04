@@ -1114,20 +1114,18 @@ internal static class WeatherSpatialDevUI
                 122f,
                 294f,
                 "Room: <hover a room>",
-                0.85f,
                 Color.white);
             AddInfoLabel(
                 "HoverLegend",
                 8f,
                 107f,
                 294f,
-                "A/D effective | R room  Z region  G global | +/- rule",
-                0.68f,
+                "Green Allow  Red Deny | R/Z/G source, +/- rule",
                 MutedColor);
 
-            AddInfoLabel("HoverFamilyHeader", 8f, 91f, 88f, "FamWeather", 0.75f, Color.white);
-            AddInfoLabel("HoverWeatherHeader", 101f, 91f, 99f, "SubWeather", 0.75f, Color.white);
-            AddInfoLabel("HoverDangerHeader", 205f, 91f, 97f, "DangerType", 0.75f, Color.white);
+            AddInfoLabel("HoverFamilyHeader", 8f, 91f, 76f, "FamWeather", Color.white);
+            AddInfoLabel("HoverWeatherHeader", 88f, 91f, 101f, "SubWeather", Color.white);
+            AddInfoLabel("HoverDangerHeader", 193f, 91f, 109f, "DangerType", Color.white);
 
             for (int i = 0; i < RowsPerColumn; i++)
             {
@@ -1136,25 +1134,22 @@ internal static class WeatherSpatialDevUI
                     "HoverFamily" + i,
                     8f,
                     y,
-                    88f,
+                    76f,
                     string.Empty,
-                    0.68f,
                     MutedColor);
                 _weatherRows[i] = AddInfoLabel(
                     "HoverWeather" + i,
-                    101f,
+                    88f,
                     y,
-                    99f,
+                    101f,
                     string.Empty,
-                    0.68f,
                     MutedColor);
                 _dangerRows[i] = AddInfoLabel(
                     "HoverDanger" + i,
-                    205f,
+                    193f,
                     y,
-                    97f,
+                    109f,
                     string.Empty,
-                    0.68f,
                     MutedColor);
             }
         }
@@ -1206,16 +1201,11 @@ internal static class WeatherSpatialDevUI
             float y,
             float width,
             string text,
-            float scale,
             Color color)
         {
             DevUILabel label = new(owner, id, this, new Vector2(x, y), width, text);
             label.spriteColor = Color.black;
             label.textColor = color;
-            for (int i = 0; i < label.fLabels.Count; i++)
-            {
-                label.fLabels[i].scale = scale;
-            }
             subNodes.Add(label);
             return label;
         }
@@ -1246,11 +1236,20 @@ internal static class WeatherSpatialDevUI
                 : WeatherSpatialRegistry.IsAllowed(regionId, roomName, target.Kind, target.WeatherId);
             string rule = ResolvedRuleCode(regionId, roomName, target);
             string chance = ChanceText(regionId, target);
-            string name = target.IsFamily ? target.FamilyId : target.WeatherId;
+            string name = CompactName(target.IsFamily ? target.FamilyId : target.WeatherId);
 
             DevUILabel row = rows[index++];
-            row.Text = (allowed ? "A " : "D ") + rule + " " + name + " " + chance;
+            row.Text = name + " " + rule + " " + chance;
             row.textColor = allowed ? AllowedColor : DeniedColor;
+        }
+
+        private static string CompactName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name.Length <= 11)
+            {
+                return name ?? string.Empty;
+            }
+            return name.Substring(0, 10) + ".";
         }
 
         private static string ResolvedRuleCode(
