@@ -25,6 +25,7 @@ internal sealed class RopeSpearRopeSystem
     private Rope _topology;
     private Room _room;
     private bool _initialized;
+    private bool _externalPullPending;
 
     internal float RouteLength => _topology?.totalLength ?? 0f;
 
@@ -36,6 +37,7 @@ internal sealed class RopeSpearRopeSystem
         _topology = null;
         _room = null;
         _initialized = false;
+        _externalPullPending = false;
         _guide.Clear();
     }
 
@@ -59,8 +61,14 @@ internal sealed class RopeSpearRopeSystem
             _initialized = false;
         }
 
+        bool hadExternalPull = _externalPullPending;
+        _externalPullPending = false;
+
         _topology.Update(endpointA, endpointB);
         BuildGuide(endpointA, endpointB);
+
+        float guideLength = GuideLength();
+        float slack = Mathf.Max(0f, ropeLength - guideLength);
 
         if (!_initialized ||
             Vector2.Distance(_nodes[0].Pos, endpointA) > 140f ||
@@ -71,6 +79,11 @@ internal sealed class RopeSpearRopeSystem
 
         BuildPins(endpointA, endpointB);
 
+        // A rope that is nearly taut should not continue behaving like a hanging
+        // vine. Gravity fades out as available slack approaches zero; the distance
+        // constraints and guide straightening then make each free span converge to
+        // a straight tension line. Player/body pulls can still bend that line.
+        float gravityFactor = Mathf.InverseLerp(1.5f, 45f, slack);
         for (int i = 1; i < NodeCount - 1; i++)
         {
             if (_pinned[i])
@@ -82,7 +95,7 @@ internal sealed class RopeSpearRopeSystem
             Vector2 velocity = (current - _nodes[i].LastPos) * VerletDamping;
             _nodes[i].LastPos = current;
             _nodes[i].Pos += velocity;
-            _nodes[i].Pos.y -= room.gravity * NodeGravity;
+            _nodes[i].Pos.y -= room.gravity * NodeGravity * gravityFactor;
         }
 
         float segmentLength = Mathf.Max(2f, ropeLength / (NodeCount - 1f));
@@ -100,13 +113,12 @@ internal sealed class RopeSpearRopeSystem
 
         ResolveTerrain();
         ApplyPins();
+        StraightenUnderTension(slack, hadExternalPull);
+        ApplyPins();
     }
 
     internal Vector2 GetNode(int index)
     {
-        // Keep the last valid node positions available even after Reset(). Vanilla
-        // VineGrab can query a vine for one final frame while it is detaching; a
-        // zeroed path here would feed TotalLength=0 into the vanilla climb math.
         return _nodes[Mathf.Clamp(index, 0, NodeCount - 1)].Pos;
     }
 
@@ -119,6 +131,7 @@ internal sealed class RopeSpearRopeSystem
 
         _nodes[index].Pos += movement;
         _nodes[index].LastPos += movement;
+        _externalPullPending = true;
     }
 
     internal Vector2 GetPoint(float normalizedPosition)
@@ -176,6 +189,8 @@ internal sealed class RopeSpearRopeSystem
         {
             return;
         }
+
+        _externalPullPending = true;
 
         int center = Mathf.Clamp(
             Mathf.RoundToInt(Mathf.Clamp01(normalizedPosition) * (NodeCount - 1f)),
@@ -359,6 +374,31 @@ internal sealed class RopeSpearRopeSystem
                 _nodes[i].Pos = fallback;
                 _nodes[i].LastPos = fallback;
             }
+        }
+    }
+
+    private void StraightenUnderTension(float slack, bool hadExternalPull)
+    {
+        float tautness = 1f - Mathf.InverseLerp(1.5f, 34f, slack);
+        if (tautness <= 0f || _guide.Count < 2)
+        {
+            return;
+        }
+
+        // With no one hanging on the span, a taut rope should settle rapidly onto
+        // the straight/corner guide. While a player is pulling a middle section we
+        // keep only a weak straightening force so their weight can form a real V.
+        float strength = tautness * (hadExternalPull ? 0.09f : 0.46f);
+        for (int i = 1; i < NodeCount - 1; i++)
+        {
+            if (_pinned[i])
+            {
+                continue;
+            }
+
+            Vector2 target = SampleGuide(i / (NodeCount - 1f));
+            _nodes[i].Pos = Vector2.Lerp(_nodes[i].Pos, target, strength);
+            _nodes[i].LastPos = Vector2.Lerp(_nodes[i].LastPos, target, strength * 0.72f);
         }
     }
 
