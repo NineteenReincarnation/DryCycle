@@ -8,6 +8,7 @@ using DryCycle.DayNight;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
+using DryCycle.Items.RopeSpear;
 using DryCycle.Misc;
 using DryCycle.OptimizedVanilla;
 using DryCycle.PlayerAbility.SlugCatKarmicArmor;
@@ -37,7 +38,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.112";
+    public const string Version = "0.2.113";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -73,6 +74,7 @@ internal sealed class Plugin : BaseUnityPlugin
         DryCycleContent.Disable();
         MossySpiderBackPlatform.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
+        RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
 
@@ -104,6 +106,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
@@ -137,6 +140,7 @@ internal sealed class Plugin : BaseUnityPlugin
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
         CreatureDevConsoleSupport.ResetRegistration();
+        RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
@@ -159,6 +163,7 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             DryCycleContent.LoadResources(self);
             KingVultureSpearHooks.Enable();
+            RopeSpearHooks.Enable();
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
@@ -256,6 +261,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DehydrationVisualRuntime.Disable();
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
+            RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandCreatureEscape.Disable();
             QuicksandAIHazard.Disable();
@@ -292,6 +298,7 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         orig(self);
         CreatureDevConsoleSupport.TryRegisterAll();
+        RopeSpearDevConsoleSupport.TryRegister();
         SpinebackLizardDevConsoleSupport.TryRegister();
     }
 }
