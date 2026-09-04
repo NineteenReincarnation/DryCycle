@@ -98,10 +98,10 @@ internal static class DevUIShortcutInputGuard
         RainWorldGame game = self?.room?.game;
         if (HasFocusedTextField(game))
         {
-            Player.InputPackage input = self.input[0];
-            NeutralizeGameplayInput(ref input);
-            self.input[0] = input;
-            self.mapInput = input;
+            Player.InputPackage focusedInput = self.input[0];
+            NeutralizeGameplayInput(ref focusedInput);
+            self.input[0] = focusedInput;
+            self.mapInput = focusedInput;
             return;
         }
 
