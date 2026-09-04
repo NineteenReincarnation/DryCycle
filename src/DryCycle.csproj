@@ -151,13 +151,13 @@
       Condition="Exists('$(DryCycleWeatherBundleSource)') and !Exists('$(DryCycleWeatherBundleVersionSource)')"
       Text="DryCycle weather AssetBundle exists but has no Unity-version sidecar. Rebuild shader-src to restore runtime compatibility diagnostics." />
 
-    <!-- These world text files are live-authored in the actual region mod. Seed them
+    <!-- These world data files are live-authored in the actual region mod. Seed them
          only when missing; never overwrite mapper/weather/WorldLink tuning during a build. -->
     <MakeDir Directories="$(GameModRootDir)/world" />
     <Copy
-      Condition="!Exists('$(GameModRootDir)/world/TemperatureSets.txt')"
-      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.txt"
-      DestinationFiles="$(GameModRootDir)/world/TemperatureSets.txt" />
+      Condition="!Exists('$(GameModRootDir)/world/TemperatureSets.json')"
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/world/TemperatureSets.json"
+      DestinationFiles="$(GameModRootDir)/world/TemperatureSets.json" />
     <Copy
       Condition="!Exists('$(GameModRootDir)/world/GateUnlockRequirements.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/world/GateUnlockRequirements.txt"

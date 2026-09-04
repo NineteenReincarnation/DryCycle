@@ -9,7 +9,7 @@ namespace DryCycle.TemperatureSystem;
 /// Room/local humidity query plus hydration and thermal correction rules.
 ///
 /// Humidity is signed in [-1,1]: -1 = extremely dry, 0 = neutral,
-/// +1 = extremely humid. TemperatureSets supplies the authored room baseline.
+/// +1 = extremely humid. TemperatureSets.json supplies the authored room baseline.
 /// HeatWave and IntenseHeat may gradually dry the runtime room humidity without
 /// modifying that authored value. A unified Environment Zone still carries an
 /// absolute local Humidity value; when a sample is inside one or more zones, the

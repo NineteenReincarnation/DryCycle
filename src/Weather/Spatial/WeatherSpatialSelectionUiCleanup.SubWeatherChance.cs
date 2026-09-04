@@ -8,8 +8,9 @@ namespace DryCycle.Weather.Spatial;
 
 internal static partial class WeatherSpatialSelectionUiCleanup
 {
-    private sealed class SubWeatherChanceInput : Button
+    private sealed class WeatherChanceInput : Button
     {
+        private readonly bool _familyChance;
         private readonly DevUINode _editor;
         private readonly FieldInfo _regionIdField;
         private readonly FieldInfo _targetIndexField;
@@ -20,22 +21,26 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
         private bool _editing;
         private string _buffer = string.Empty;
-        private string _lastTargetKey = string.Empty;
+        private string _lastBindingKey = string.Empty;
         private int _lastPercent;
         private bool _hasConfiguredChance;
 
-        internal SubWeatherChanceInput(
+        internal WeatherChanceInput(
             DevInterface.DevUI owner,
             DevUINode parent,
-            DevUINode editor)
+            DevUINode editor,
+            bool familyChance)
             : base(
                 owner,
-                "DryCycle_Weather_SubWeather_Chance_Input",
+                familyChance
+                    ? "DryCycle_Weather_Family_Chance_Input"
+                    : "DryCycle_Weather_SubWeather_Chance_Input",
                 parent,
-                new Vector2(160f, 492f),
+                new Vector2(160f, familyChance ? 470f : 492f),
                 44f,
                 "0%")
         {
+            _familyChance = familyChance;
             _editor = editor;
             Type editorType = editor.GetType();
             BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -47,23 +52,28 @@ internal static partial class WeatherSpatialSelectionUiCleanup
 
             _label = new DevUILabel(
                 owner,
-                "DryCycle_Weather_SubWeather_Chance_Label",
+                familyChance
+                    ? "DryCycle_Weather_Family_Chance_Label"
+                    : "DryCycle_Weather_SubWeather_Chance_Label",
                 parent,
-                new Vector2(8f, 492f),
+                new Vector2(8f, familyChance ? 470f : 492f),
                 148f,
-                "SubWeather Chance");
+                familyChance ? "FamWeatherChance" : "SubWeather Chance");
             parent.subNodes.Add(_label);
             RefreshFromTarget(force: true);
         }
 
         public override void Clicked()
         {
-            if (!TryCurrentTarget(out _, out WeatherSpatialTarget target) || target.IsFamily)
+            if (!TryCurrentBinding(out _, out _, out _))
             {
-                SetStatus("Select a SubWeather before editing its chance.");
+                SetStatus(_familyChance
+                    ? "Select a weather family before editing its chance."
+                    : "Select a SubWeather before editing its chance.");
                 return;
             }
 
+            RefreshFromTarget(force: true);
             _editing = true;
             _buffer = _hasConfiguredChance
                 ? _lastPercent.ToString(CultureInfo.InvariantCulture)
@@ -79,20 +89,20 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         {
             base.Update();
 
-            if (!TryCurrentTarget(out _, out WeatherSpatialTarget target))
+            if (!TryCurrentBinding(out _, out WeatherSpatialTarget target, out string bindingKey))
             {
                 _editing = false;
                 Text = "--";
                 return;
             }
 
-            if (!string.Equals(_lastTargetKey, target.Key, StringComparison.Ordinal))
+            if (!string.Equals(_lastBindingKey, bindingKey, StringComparison.OrdinalIgnoreCase))
             {
                 _editing = false;
                 RefreshFromTarget(force: true);
             }
 
-            if (target.IsFamily)
+            if (!_familyChance && target.IsFamily)
             {
                 _editing = false;
                 Text = "--";
@@ -132,7 +142,7 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 }
                 else if (!char.IsControl(c))
                 {
-                    SetStatus("SubWeather chance accepts digits only (0-100).");
+                    SetStatus(ChanceName + " accepts digits only (0-100).");
                 }
             }
 
@@ -167,21 +177,27 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 percent < 0 ||
                 percent > 100)
             {
-                SetStatus("SubWeather chance must be between 0 and 100.");
+                SetStatus(ChanceName + " must be between 0 and 100.");
                 Text = _buffer.Length == 0 ? "_" : _buffer + "_";
                 return;
             }
 
-            if (!TryCurrentTarget(out string regionId, out WeatherSpatialTarget target) || target.IsFamily)
+            if (!TryCurrentBinding(
+                    out string regionId,
+                    out WeatherSpatialTarget target,
+                    out _))
             {
                 _editing = false;
                 Text = "--";
                 return;
             }
 
-            if (!WeatherSpatialRegistry.SetSubWeatherChance(regionId, target, percent))
+            bool updated = _familyChance
+                ? WeatherSpatialRegistry.SetFamilyWeatherChance(regionId, target, percent)
+                : WeatherSpatialRegistry.SetSubWeatherChance(regionId, target, percent);
+            if (!updated)
             {
-                SetStatus("Could not update SubWeather chance.");
+                SetStatus("Could not update " + ChanceName + ".");
                 return;
             }
 
@@ -190,21 +206,25 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             _editing = false;
             _buffer = percent.ToString(CultureInfo.InvariantCulture);
             Text = _buffer + "%";
-            SetStatus(target.DisplayName.Trim() + " chance: " + percent + "%");
+            SetStatus(BindingDisplayName(target) + " " + ChanceName + ": " + percent + "%");
             _runValidationMethod?.Invoke(_editor, null);
             _updateStateLabelsMethod?.Invoke(_editor, null);
         }
 
         private void RefreshFromTarget(bool force)
         {
-            if (!TryCurrentTarget(out string regionId, out WeatherSpatialTarget target))
+            if (!TryCurrentBinding(
+                    out string regionId,
+                    out WeatherSpatialTarget target,
+                    out string bindingKey))
             {
                 return;
             }
 
-            if (!force && string.Equals(_lastTargetKey, target.Key, StringComparison.Ordinal))
+            if (!force &&
+                string.Equals(_lastBindingKey, bindingKey, StringComparison.OrdinalIgnoreCase))
             {
-                if (WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out float liveChance))
+                if (TryReadChance(regionId, target, out float liveChance))
                 {
                     int live = Mathf.RoundToInt(liveChance);
                     if (live == _lastPercent && _hasConfiguredChance)
@@ -218,13 +238,45 @@ internal static partial class WeatherSpatialSelectionUiCleanup
                 }
             }
 
-            _lastTargetKey = target.Key;
+            _lastBindingKey = bindingKey;
             float chance = 0f;
-            _hasConfiguredChance = !target.IsFamily &&
-                WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out chance);
+            _hasConfiguredChance = TryReadChance(regionId, target, out chance);
             _lastPercent = _hasConfiguredChance ? Mathf.RoundToInt(chance) : 0;
             _buffer = _lastPercent.ToString(CultureInfo.InvariantCulture);
-            Text = target.IsFamily ? "--" : _buffer + "%";
+            Text = !_familyChance && target.IsFamily ? "--" : _buffer + "%";
+        }
+
+        private bool TryCurrentBinding(
+            out string regionId,
+            out WeatherSpatialTarget target,
+            out string bindingKey)
+        {
+            bindingKey = string.Empty;
+            if (!TryCurrentTarget(out regionId, out target))
+            {
+                return false;
+            }
+
+            string targetBinding;
+            if (_familyChance)
+            {
+                if (!TryTargetFamily(target, out WeatherSpatialFamily family))
+                {
+                    return false;
+                }
+                targetBinding = "Family/" + family.Id;
+            }
+            else
+            {
+                if (target.IsFamily)
+                {
+                    return false;
+                }
+                targetBinding = target.Key;
+            }
+
+            bindingKey = (regionId ?? string.Empty).Trim().ToUpperInvariant() + "/" + targetBinding;
+            return true;
         }
 
         private bool TryCurrentTarget(
@@ -251,5 +303,37 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             _statusField?.SetValue(_editor, text);
             _updateStateLabelsMethod?.Invoke(_editor, null);
         }
+
+        private bool TryReadChance(
+            string regionId,
+            in WeatherSpatialTarget target,
+            out float chance)
+        {
+            return _familyChance
+                ? WeatherSpatialRegistry.TryGetFamilyWeatherChance(regionId, target, out chance)
+                : WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out chance);
+        }
+
+        private string BindingDisplayName(in WeatherSpatialTarget target)
+        {
+            if (_familyChance && TryTargetFamily(target, out WeatherSpatialFamily family))
+            {
+                return family.Id;
+            }
+            return target.DisplayName.Trim();
+        }
+
+        private static bool TryTargetFamily(
+            in WeatherSpatialTarget target,
+            out WeatherSpatialFamily family)
+        {
+            return target.IsFamily
+                ? WeatherSpatialCatalog.TryGetFamily(target.FamilyId, out family)
+                : WeatherSpatialCatalog.TryGetFamily(target.Kind, target.WeatherId, out family);
+        }
+
+        private string ChanceName => _familyChance
+            ? "FamWeatherChance"
+            : "SubWeather chance";
     }
 }

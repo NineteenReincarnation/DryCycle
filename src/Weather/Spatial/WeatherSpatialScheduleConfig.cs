@@ -8,13 +8,18 @@ namespace DryCycle.Weather.Spatial;
 internal sealed class WeatherSpatialScheduleWeather
 {
     internal string Id { get; }
+    internal bool IsFamily { get; }
     internal float ChancePercent { get; set; }
     internal readonly Dictionary<string, float> Variants =
         new(StringComparer.OrdinalIgnoreCase);
 
-    internal WeatherSpatialScheduleWeather(string id, float chancePercent)
+    internal WeatherSpatialScheduleWeather(
+        string id,
+        float chancePercent,
+        bool isFamily = false)
     {
         Id = (id ?? string.Empty).Trim();
+        IsFamily = isFamily;
         ChancePercent = ClampChance(chancePercent);
     }
 
@@ -52,7 +57,7 @@ internal sealed class WeatherSpatialRegionSchedule
 
         foreach (WeatherSpatialScheduleWeather weather in Weather.Values)
         {
-            if (weather.Variants.Count == 0 &&
+            if (!weather.IsFamily &&
                 WeatherSpatialCatalog.NormalizeId(weather.Id) == normalized)
             {
                 return true;
@@ -101,6 +106,10 @@ internal static partial class WeatherSpatialRegistry
         foreach (string weatherId in SortedKeys(schedule.Weather))
         {
             WeatherSpatialScheduleWeather configured = schedule.Weather[weatherId];
+            if (configured.IsFamily && configured.Variants.Count == 0)
+            {
+                continue;
+            }
             WeatherFamilyClimateEntry family = new(configured.Id, configured.ChancePercent);
             foreach (string variantId in SortedKeys(configured.Variants))
             {

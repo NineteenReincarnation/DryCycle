@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.TemperatureSystem;
 
 /// <summary>
-/// Authored room-level environment values loaded from TemperatureSets.txt.
+/// Authored room-level environment values loaded from TemperatureSets.json.
 ///
 /// RoomHeat remains the base thermal environment. SunlightIntensity and RoomShade
 /// describe the solar-radiation branch. Humidity is a signed room baseline in

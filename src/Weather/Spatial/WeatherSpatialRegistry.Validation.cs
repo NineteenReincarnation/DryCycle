@@ -146,7 +146,7 @@ internal static partial class WeatherSpatialRegistry
     {
         foreach (WeatherSpatialScheduleWeather configured in schedule.Weather.Values)
         {
-            if (configured.Variants.Count == 0)
+            if (!configured.IsFamily)
             {
                 if (!WeatherSpatialCatalog.IsKnownWeather(
                         WeatherScheduleEventKind.Weather,

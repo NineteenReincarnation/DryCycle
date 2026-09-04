@@ -98,6 +98,17 @@ internal static partial class WeatherSpatialSelectionUiCleanup
         Stretch(editor, "Preview", 8f, 140f);
         Stretch(editor, "Selection", 8f, 140f);
 
+        // Make room for the family probability row between SubWeather chance and
+        // preview. Everything below it moves down by one standard row.
+        ShiftY(editor, "Preview", -22f);
+        ShiftY(editor, "Selection", -22f);
+        ShiftY(editor, "SelectAll", -22f);
+        ShiftY(editor, "SelectNone", -22f);
+        ShiftY(editor, "SelectInvert", -22f);
+        ShiftY(editor, "SelectSubregion", -22f);
+        ShiftY(editor, "SelectShelters", -22f);
+        ShiftY(editor, "SelectGates", -22f);
+
         // Two deleted selection rows sat above history/validation controls.
         ShiftY(editor, "Undo", 50f);
         ShiftY(editor, "Redo", 50f);
@@ -111,9 +122,30 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             ShiftY(editor, "Issue" + i, 50f);
         }
 
+        ShiftY(editor, "Undo", -22f);
+        ShiftY(editor, "Redo", -22f);
+        ShiftY(editor, "Validate", -22f);
+        ShiftY(editor, "Save", -22f);
+        ShiftY(editor, "Repair", -22f);
+        ShiftY(editor, "Status", -22f);
+        ShiftY(editor, "Path", -22f);
+        for (int i = 0; i < 7; i++)
+        {
+            ShiftY(editor, "Issue" + i, -22f);
+        }
+
         // These are deliberately appended last so their sprites and click handling sit
         // above the older editor controls that the popup temporarily covers.
-        editor.subNodes.Add(new SubWeatherChanceInput(editor.owner, editor, editor));
+        editor.subNodes.Add(new WeatherChanceInput(
+            editor.owner,
+            editor,
+            editor,
+            familyChance: false));
+        editor.subNodes.Add(new WeatherChanceInput(
+            editor.owner,
+            editor,
+            editor,
+            familyChance: true));
         editor.subNodes.Add(new PreviewPercentInput(editor.owner, editor, editor));
         editor.subNodes.Add(new FixedTargetPicker(editor.owner, editor, editor));
         editor.subNodes.Add(new ClearRegionZonesControl(editor.owner, editor, editor));

@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using DevInterface;
+using DryCycle.TemperatureSystem;
 using UnityEngine;
 
 namespace DryCycle.Weather.Spatial;
@@ -14,7 +15,7 @@ namespace DryCycle.Weather.Spatial;
 /// </summary>
 internal static class WeatherSpatialMapMenuRuntime
 {
-    private const string MenuButtonId = "DryCycle_Weather_Zones_Button";
+    internal const string MenuButtonId = "DryCycle_Weather_Zones_Button";
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string TargetPopupId = "DryCycle_Weather_Target_Popup_Fixed";
 
@@ -231,6 +232,7 @@ internal static class WeatherSpatialMapMenuRuntime
         {
             if (sender.IDstring == MenuButtonId)
             {
+                TemperatureSetsMapEditorRuntime.CloseEditor(self, refresh: false);
                 if (FindEditor(self) != null)
                 {
                     CloseEditor(self, refresh: true);

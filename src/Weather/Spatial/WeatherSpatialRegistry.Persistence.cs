@@ -274,7 +274,9 @@ internal static partial class WeatherSpatialRegistry
                 id);
         }
 
-        WeatherSpatialScheduleWeather configured = new(canonicalId, chance);
+        bool isFamily = WeatherSpatialCatalog.TryGetFamily(id, out _) &&
+            entryMap.ContainsKey("variants");
+        WeatherSpatialScheduleWeather configured = new(canonicalId, chance, isFamily);
         if (entryMap.TryGetValue("variants", out object variantsObj) && variantsObj != null)
         {
             if (variantsObj is Dictionary<string, object> variantsMap)
@@ -430,7 +432,7 @@ internal static partial class WeatherSpatialRegistry
             {
                 ["chance"] = configured.ChancePercent
             };
-            if (configured.Variants.Count > 0)
+            if (configured.IsFamily)
             {
                 Dictionary<string, object> variants = new();
                 foreach (string variantId in SortedKeys(configured.Variants))

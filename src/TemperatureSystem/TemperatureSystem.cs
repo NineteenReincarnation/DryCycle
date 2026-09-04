@@ -18,6 +18,7 @@ internal static class TemperatureSystemRuntime
 
         _enabled = true;
         TemperatureSetsLoader.Enable();
+        TemperatureSetsMapEditorRuntime.Enable();
         SolarShadeZoneHooks.Enable();
         HumidityEnvironment.Enable();
         PlayerWetnessModel.Enable();
@@ -38,6 +39,7 @@ internal static class TemperatureSystemRuntime
         PlayerWetnessModel.Disable();
         HumidityEnvironment.Disable();
         SolarShadeZoneHooks.Disable();
+        TemperatureSetsMapEditorRuntime.Disable();
         TemperatureSetsLoader.Disable();
     }
 

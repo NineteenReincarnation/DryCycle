@@ -180,7 +180,7 @@ internal static partial class WeatherSpatialRegistry
         bool changed = false;
         if (!schedule.Weather.TryGetValue(familyId, out WeatherSpatialScheduleWeather weather))
         {
-            weather = new WeatherSpatialScheduleWeather(familyId, chance);
+            weather = new WeatherSpatialScheduleWeather(familyId, chance, isFamily: true);
             schedule.Weather[familyId] = weather;
             changed = true;
         }

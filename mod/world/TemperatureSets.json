@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "regions": {
+    "B5": {
+      "rooms": {
+        "B5_POTDF01": {
+          "roomHeat": 0.3,
+          "sunlightIntensity": 0.2,
+          "roomShade": 0,
+          "humidity": 0
+        }
+      }
+    }
+  }
+}

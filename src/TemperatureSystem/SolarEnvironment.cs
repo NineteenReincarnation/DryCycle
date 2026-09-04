@@ -5,7 +5,7 @@ namespace DryCycle.TemperatureSystem;
 /// <summary>
 /// Solar-environment query layer.
 ///
-/// Room-wide sunlight and shade come from TemperatureSets.txt. Local Environment
+/// Room-wide sunlight and shade come from TemperatureSets.json. Local Environment
 /// Zones are sampled at world positions so the player's two primary body chunks can
 /// receive different sunlight when only part of the body is covered.
 /// </summary>
