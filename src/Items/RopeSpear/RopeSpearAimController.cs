@@ -1,25 +1,16 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using DryCycle.DayNight;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// RopeSpear input controller: tap/hold throw aiming plus long/short rope mode.
+/// RopeSpear input controller: eight-direction hold-to-aim throwing plus long/short
+/// rope mode. Quick taps remain ordinary horizontal throws.
 /// </summary>
 internal static class RopeSpearAimController
 {
-    // Rain World updates gameplay at roughly 40 Hz. Eight frames is long enough to
-    // distinguish an intentional hold while keeping ordinary taps responsive.
-    private const int HoldThresholdFrames = 8;
-
-    // Deliberately slow enough to let the player release on a chosen angle instead
-    // of having the spear race through the arc. At ~40 Hz this is ~50 degrees/sec:
-    // horizontal -> straight up takes about 1.8 seconds.
-    private const float SweepDegreesPerFrame = 1.25f;
-    private const float MinAimAngle = -90f;
-    private const float MaxAimAngle = 90f;
-
     // Two separate Alt presses inside this window toggle rope mode. Holding Alt is
     // counted as one press, so Alt+Up/Down reeling can never oscillate the mode.
     private const int DoubleAltWindowFrames = 12;
@@ -32,8 +23,7 @@ internal static class RopeSpearAimController
         internal int Facing = 1;
         internal int HoldFrames;
         internal bool Charging;
-        internal float AngleDegrees;
-        internal int SweepDirection = 1;
+        internal Vector2 AimDirection = Vector2.right;
         internal RopeSpearAimIndicator Indicator;
     }
 
@@ -107,13 +97,12 @@ internal static class RopeSpearAimController
 
     internal static bool TryGetAimVisualState(
         Player player,
-        out int facing,
-        out float angleDegrees)
+        out Vector2 direction)
     {
-        facing = 1;
-        angleDegrees = 0f;
+        direction = Vector2.right;
 
         if (!_enabled ||
+            !RegionDayNightOptions.RopeSpearEightWayThrowEnabled ||
             player == null ||
             !States.TryGetValue(player, out AimState state) ||
             !state.Charging ||
@@ -122,8 +111,9 @@ internal static class RopeSpearAimController
             return false;
         }
 
-        facing = state.Facing;
-        angleDegrees = state.AngleDegrees;
+        direction = state.AimDirection.sqrMagnitude > 0.0001f
+            ? state.AimDirection.normalized
+            : new Vector2(state.Facing, 0f);
         return true;
     }
 
@@ -140,12 +130,29 @@ internal static class RopeSpearAimController
         }
 
         AltTapState tap = AltTapStates.GetOrCreateValue(self);
+        bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+
+        if (!RegionDayNightOptions.RopeSpearModeSwitchEnabled)
+        {
+            tap.AltWasHeld = altHeld;
+            tap.SecondTapWindow = 0;
+
+            // The setting is live. If it is disabled while a short-mode spear is in
+            // the player's hand, immediately return that spear to the safe default.
+            if (TryFindHeldRopeSpear(self, out RopeSpear heldSpear))
+            {
+                RopeModeState heldMode = RopeModes.GetOrCreateValue(heldSpear);
+                heldMode.LongMode = true;
+                heldMode.ShortFlightActive = false;
+            }
+            return;
+        }
+
         if (tap.SecondTapWindow > 0)
         {
             tap.SecondTapWindow--;
         }
 
-        bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
         bool altPressed = altHeld && !tap.AltWasHeld;
         tap.AltWasHeld = altHeld;
 
@@ -194,7 +201,7 @@ internal static class RopeSpearAimController
             spear = candidate;
             mode = RopeModes.GetOrCreateValue(spear);
 
-            if (!mode.LongMode)
+            if (RegionDayNightOptions.RopeSpearModeSwitchEnabled && !mode.LongMode)
             {
                 mode.LockedLength = spear.abstractPhysicalObject is AbstractRopeSpear data
                     ? data.RopeLength
@@ -207,6 +214,7 @@ internal static class RopeSpearAimController
             }
             else
             {
+                mode.LongMode = true;
                 mode.ShortFlightActive = false;
             }
         }
@@ -376,6 +384,17 @@ internal static class RopeSpearAimController
         }
 
         AimState state = States.GetOrCreateValue(self);
+
+        if (!RegionDayNightOptions.RopeSpearEightWayThrowEnabled)
+        {
+            if (state.Spear != null)
+            {
+                ResetState(state);
+            }
+            orig(self, eu);
+            return;
+        }
+
         bool throwHeld = self.input[0].thrw;
         bool throwPressed = throwHeld &&
                             (self.input.Length < 2 || !self.input[1].thrw);
@@ -405,24 +424,21 @@ internal static class RopeSpearAimController
 
         // While this state exists, vanilla must never see the held throw input.
         // Vanilla converts the first rising edge directly into wantToThrow=5 and
-        // throws during the same GrabUpdate, which would make long-press aiming
-        // impossible. Keeping wantToThrow at zero also removes any buffered edge.
+        // throws during the same GrabUpdate, which would make hold-to-aim impossible.
         self.wantToThrow = 0;
 
         if (throwHeld)
         {
             state.HoldFrames++;
-            if (!state.Charging && state.HoldFrames >= HoldThresholdFrames)
+            int threshold = RegionDayNightOptions.RopeSpearAimHoldFrames;
+            if (!state.Charging && state.HoldFrames >= threshold)
             {
-                // Enter aiming at exactly horizontal. The sweep starts on the next
-                // held frame so crossing the tap/hold threshold never jumps angle.
                 state.Charging = true;
-                state.AngleDegrees = 0f;
-                state.SweepDirection = 1;
+                UpdateEightWayDirection(self, state);
             }
             else if (state.Charging)
             {
-                AdvanceSweep(state);
+                UpdateEightWayDirection(self, state);
             }
 
             if (state.Charging)
@@ -437,9 +453,8 @@ internal static class RopeSpearAimController
         }
 
         // Releasing before the threshold is a normal flat throw. Releasing after
-        // the threshold uses the angle currently shown by the spear. Both branches
-        // throw on release, which is the unavoidable small delay needed to tell a
-        // tap apart from a hold without sacrificing either input.
+        // the threshold uses the last of the eight directions selected by movement
+        // input. Direction release does not cancel the selection.
         RunGrabUpdateWithThrowMasked(orig, self, eu);
         self.wantToThrow = 0;
 
@@ -460,7 +475,7 @@ internal static class RopeSpearAimController
             // Let vanilla and every existing ThrowObject hook finish first. The
             // directional override is deliberately applied only after this entire
             // call returns, so RopeSpearHooks' horizontal direction lock cannot
-            // overwrite an angled release regardless of HookGen ordering.
+            // overwrite the selected direction regardless of HookGen ordering.
             self.ThrowObject(releaseGrasp, eu);
 
             if (releasedSpear != null &&
@@ -493,8 +508,7 @@ internal static class RopeSpearAimController
         }
 
         // Player.GraphicsModuleUpdated normally overwrites a carried weapon with
-        // GetHeldItemDirection. Reapply our angle afterwards so the visible spear
-        // tip actually follows the aiming sweep in the player's hand.
+        // GetHeldItemDirection. Reapply our selected direction afterwards.
         ApplyHeldAimPose(state);
     }
 
@@ -514,8 +528,6 @@ internal static class RopeSpearAimController
         state.GraspIndex = graspIndex;
         state.HoldFrames = 0;
         state.Charging = false;
-        state.AngleDegrees = 0f;
-        state.SweepDirection = 1;
 
         int facing = player.ThrowDirection;
         if (facing == 0)
@@ -523,10 +535,21 @@ internal static class RopeSpearAimController
             facing = player.flipDirection;
         }
         state.Facing = facing < 0 ? -1 : 1;
+        state.AimDirection = new Vector2(state.Facing, 0f);
     }
 
     private static void EnsureAimIndicator(Player player, AimState state)
     {
+        if (!RegionDayNightOptions.RopeSpearAimIndicatorEnabled)
+        {
+            if (state.Indicator != null)
+            {
+                state.Indicator.Destroy();
+                state.Indicator = null;
+            }
+            return;
+        }
+
         if (player?.room == null || !state.Charging)
         {
             return;
@@ -635,36 +658,47 @@ internal static class RopeSpearAimController
         }
     }
 
-    private static void AdvanceSweep(AimState state)
+    private static void UpdateEightWayDirection(Player player, AimState state)
     {
-        state.AngleDegrees += state.SweepDirection * SweepDegreesPerFrame;
-
-        if (state.AngleDegrees >= MaxAimAngle)
+        if (player?.input == null || player.input.Length == 0 || state == null)
         {
-            state.AngleDegrees = MaxAimAngle;
-            state.SweepDirection = -1;
+            return;
         }
-        else if (state.AngleDegrees <= MinAimAngle)
+
+        int x = player.input[0].x;
+        int y = player.input[0].y;
+        if (x == 0 && y == 0)
         {
-            state.AngleDegrees = MinAimAngle;
-            state.SweepDirection = 1;
+            // Keep the last selected direction. This lets the player choose a ray,
+            // release the D-pad/stick, then release Throw without snapping horizontal.
+            return;
+        }
+
+        x = x < 0 ? -1 : x > 0 ? 1 : 0;
+        y = y < 0 ? -1 : y > 0 ? 1 : 0;
+
+        Vector2 direction = new(x, y);
+        if (direction.sqrMagnitude < 0.0001f)
+        {
+            return;
+        }
+
+        direction.Normalize();
+        state.AimDirection = direction;
+        if (x != 0)
+        {
+            state.Facing = x;
         }
     }
 
     private static Vector2 GetAimDirection(AimState state)
     {
-        float radians = state.AngleDegrees * Mathf.Deg2Rad;
-        Vector2 direction = new(
-            Mathf.Cos(radians) * state.Facing,
-            Mathf.Sin(radians));
-
-        if (direction.sqrMagnitude < 0.0001f)
+        if (state == null || state.AimDirection.sqrMagnitude < 0.0001f)
         {
-            return new Vector2(state.Facing, 0f);
+            return new Vector2(state?.Facing < 0 ? -1f : 1f, 0f);
         }
 
-        direction.Normalize();
-        return direction;
+        return state.AimDirection.normalized;
     }
 
     private static void ApplyHeldAimPose(AimState state)
@@ -690,7 +724,9 @@ internal static class RopeSpearAimController
         Vector2 direction,
         bool eu)
     {
-        if (player == null || direction.sqrMagnitude < 0.0001f)
+        if (player == null ||
+            spear?.firstChunk == null ||
+            direction.sqrMagnitude < 0.0001f)
         {
             return;
         }
@@ -698,7 +734,7 @@ internal static class RopeSpearAimController
         direction.Normalize();
 
         // Preserve vanilla's calculated throw force, including weakness and other
-        // character modifiers, but rotate that velocity to the selected angle.
+        // character modifiers, but rotate that velocity to the selected direction.
         float throwSpeed = spear.firstChunk.vel.magnitude;
         if (throwSpeed < 1f)
         {
@@ -718,8 +754,8 @@ internal static class RopeSpearAimController
         spear.firstChunk.vel = direction * throwSpeed;
 
         // Start the projectile on the same ten-pixel release arc vanilla uses, but
-        // rotate that offset with the selected angle so a vertical shot does not
-        // visibly originate from the side of the slugcat.
+        // rotate that offset with the selected direction. If a downward/backward
+        // offset would start inside terrain, retain vanilla's already-valid position.
         Vector2 desiredPosition = player.firstChunk.pos +
                                   direction * 10f +
                                   new Vector2(0f, 4f);
@@ -736,10 +772,9 @@ internal static class RopeSpearAimController
         spear.rotationSpeed = 0f;
         spear.changeDirCounter = 0;
 
-        // Vanilla impact code expects an IntVector2 cardinal throwDir. Keep the
-        // exact velocity/visual angle, but select the dominant axis for wall vs.
-        // floor/ceiling contact so straight-up/down shots and ordinary side shots
-        // retain the original spear collision path.
+        // Vanilla impact code expects a cardinal IntVector2. The any-angle wall-stick
+        // runtime uses the real flight vector; this dominant-axis value only keeps
+        // vanilla weapon bookkeeping coherent for the rest of the engine.
         if (Mathf.Abs(direction.x) >= Mathf.Abs(direction.y))
         {
             spear.throwDir = new IntVector2(direction.x < 0f ? -1 : 1, 0);
@@ -749,14 +784,16 @@ internal static class RopeSpearAimController
             spear.throwDir = new IntVector2(0, direction.y < 0f ? -1 : 1);
         }
 
-        // Vanilla already applied horizontal recoil before our angle override.
-        // Rotate only that recoil component so an upward/downward cast feels like
-        // it was actually thrown in the selected direction.
+        // Vanilla already applied horizontal recoil. Rotate that contribution toward
+        // the requested direction, but cap the corrective delta so a 180-degree aim
+        // cannot create an accidental movement-tech-sized impulse by itself.
         Vector2 recoilCorrection = direction - vanillaDirection;
-        player.mainBodyChunk.vel += recoilCorrection * 8f;
+        Vector2 mainCorrection = Vector2.ClampMagnitude(recoilCorrection * 8f, 10f);
+        Vector2 rearCorrection = Vector2.ClampMagnitude(recoilCorrection * 4f, 5f);
+        player.mainBodyChunk.vel += mainCorrection;
         if (player.bodyChunks != null && player.bodyChunks.Length > 1)
         {
-            player.bodyChunks[1].vel -= recoilCorrection * 4f;
+            player.bodyChunks[1].vel -= rearCorrection;
         }
     }
 
@@ -788,7 +825,6 @@ internal static class RopeSpearAimController
         state.Facing = 1;
         state.HoldFrames = 0;
         state.Charging = false;
-        state.AngleDegrees = 0f;
-        state.SweepDirection = 1;
+        state.AimDirection = Vector2.right;
     }
 }
