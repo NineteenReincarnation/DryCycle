@@ -11,13 +11,24 @@ internal static class WeatherSpatialIssueWrapRuntime
 {
     private const string EditorNodeId = "DryCycle_WeatherSpatial";
     private const string PathNodeId = "Path";
+    private const string ShortcutHeaderId = "WeatherShortcutHeader";
     private const int MaxIssueSlots = 7;
-    private const int MaxCharsPerLine = 58;
+    private const int MaxCharsPerLine = 36;
+    private const float IssueWidth = 270f;
     private const float LineHeight = 16f;
-    private const float IssueGap = 2f;
-    private const float BottomMargin = 8f;
+    private const float IssueGap = 3f;
+    private const float TopGap = 18f;
+    private const float ShortcutClearance = 28f;
+
+    private sealed class WrappedIssue
+    {
+        internal string Text;
+        internal int Lines;
+        internal float Height;
+    }
 
     private static readonly DevUILabel[] Labels = new DevUILabel[MaxIssueSlots];
+    private static readonly List<WrappedIssue> VisibleIssues = new();
     private static bool _enabled;
     private static FieldInfo _lastValidationField;
     private static Type _cachedEditorType;
@@ -43,6 +54,7 @@ internal static class WeatherSpatialIssueWrapRuntime
         On.DevInterface.MapPage.Update -= MapPage_Update;
         _cachedEditorType = null;
         _lastValidationField = null;
+        VisibleIssues.Clear();
         _enabled = false;
     }
 
@@ -53,18 +65,15 @@ internal static class WeatherSpatialIssueWrapRuntime
         orig(self);
 
         DevUINode editor = FindDirect(self, EditorNodeId);
-        if (editor == null)
+        if (editor != null)
         {
-            return;
+            RefreshLayout(editor);
         }
-
-        RefreshLayout(editor);
     }
 
     private static void RefreshLayout(DevUINode editor)
     {
-        DevUINode pathNode = FindDirect(editor, PathNodeId);
-        if (pathNode is not PositionedDevUINode path)
+        if (FindDirect(editor, PathNodeId) is not PositionedDevUINode path)
         {
             return;
         }
@@ -80,41 +89,57 @@ internal static class WeatherSpatialIssueWrapRuntime
 
         WeatherSpatialValidationResult validation = GetValidation(editor);
         int issueCount = validation?.Issues?.Count ?? 0;
-        float cursorTop = path.pos.y - IssueGap;
-        int issueIndex = 0;
-        int slot = 0;
-
-        while (slot < Labels.Length)
+        if (issueCount <= 0)
         {
-            if (issueIndex >= issueCount)
-            {
-                HideFrom(slot);
-                return;
-            }
+            HideFrom(0);
+            return;
+        }
 
-            int remainingIssues = issueCount - issueIndex;
-            if (slot == Labels.Length - 1 && remainingIssues > 1)
-            {
-                ShowSummary(Labels[slot], cursorTop, remainingIssues);
-                HideFrom(slot + 1);
-                return;
-            }
+        float top = path.pos.y - TopGap;
+        float bottom = 120f;
+        if (FindDirect(editor, ShortcutHeaderId) is PositionedDevUINode shortcut)
+        {
+            bottom = shortcut.pos.y + ShortcutClearance;
+        }
 
+        float available = Mathf.Max(0f, top - bottom);
+        VisibleIssues.Clear();
+        float used = 0f;
+
+        // This is deliberately a bounded live diagnostics window. Keep newest issues
+        // and let older overflow entries disappear instead of growing into Shortcuts.
+        for (int issueIndex = issueCount - 1;
+             issueIndex >= 0 && VisibleIssues.Count < MaxIssueSlots;
+             issueIndex--)
+        {
             string wrapped = WrapIssue(validation.Issues[issueIndex].ToString(), out int lineCount);
             float height = Mathf.Max(LineHeight, lineCount * LineHeight);
-
-            if (cursorTop - height < BottomMargin)
+            float required = height + (VisibleIssues.Count > 0 ? IssueGap : 0f);
+            if (used + required > available)
             {
-                ShowSummary(Labels[slot], cursorTop, remainingIssues);
-                HideFrom(slot + 1);
-                return;
+                break;
             }
 
-            ShowLabel(Labels[slot], wrapped, lineCount, cursorTop);
-            cursorTop -= height + IssueGap;
-            issueIndex++;
-            slot++;
+            VisibleIssues.Add(new WrappedIssue
+            {
+                Text = wrapped,
+                Lines = lineCount,
+                Height = height
+            });
+            used += required;
         }
+
+        VisibleIssues.Reverse();
+        float cursorTop = top;
+        int slot = 0;
+        for (; slot < VisibleIssues.Count && slot < Labels.Length; slot++)
+        {
+            WrappedIssue issue = VisibleIssues[slot];
+            ShowLabel(Labels[slot], issue.Text, issue.Lines, cursorTop);
+            cursorTop -= issue.Height + IssueGap;
+        }
+
+        HideFrom(slot);
     }
 
     private static WeatherSpatialValidationResult GetValidation(DevUINode editor)
@@ -131,20 +156,6 @@ internal static class WeatherSpatialIssueWrapRuntime
         return _lastValidationField?.GetValue(editor) as WeatherSpatialValidationResult;
     }
 
-    private static void ShowSummary(DevUILabel label, float top, int count)
-    {
-        if (label == null || top - LineHeight < BottomMargin)
-        {
-            if (label != null)
-            {
-                Hide(label);
-            }
-            return;
-        }
-
-        ShowLabel(label, "+ " + count + " more issue(s)", 1, top);
-    }
-
     private static void ShowLabel(
         DevUILabel label,
         string text,
@@ -153,12 +164,13 @@ internal static class WeatherSpatialIssueWrapRuntime
     {
         float height = Mathf.Max(LineHeight, lineCount * LineHeight);
         label.Text = text ?? string.Empty;
-        label.pos = new Vector2(label.pos.x, top);
-        label.size = new Vector2(label.size.x, height);
+        label.pos = new Vector2(8f, top);
+        label.size = new Vector2(IssueWidth, height);
 
         if (label.fSprites.Count > 0 && label.fSprites[0] != null)
         {
             label.fSprites[0].anchorY = 1f;
+            label.fSprites[0].scaleX = IssueWidth;
             label.fSprites[0].scaleY = height;
             label.fSprites[0].isVisible = true;
         }
@@ -198,7 +210,7 @@ internal static class WeatherSpatialIssueWrapRuntime
 
     private static string WrapIssue(string text, out int lineCount)
     {
-        const string continuationIndent = "      ";
+        const string continuationIndent = "    ";
         List<string> lines = new();
         string[] words = (text ?? string.Empty).Split(
             new[] { ' ', '\t', '\r', '\n' },
