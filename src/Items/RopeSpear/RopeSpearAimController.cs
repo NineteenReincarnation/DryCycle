@@ -1,14 +1,11 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// Adds a RopeSpear-only throw input state machine.
-/// A quick tap of throw is delayed until release and remains a normal horizontal
-/// throw. Holding throw past a short threshold enters an aiming sweep from level
-/// to straight up, then down through level to straight down, bouncing continuously
-/// until the button is released.
+/// RopeSpear input controller: tap/hold throw aiming plus long/short rope mode.
 /// </summary>
 internal static class RopeSpearAimController
 {
@@ -23,6 +20,11 @@ internal static class RopeSpearAimController
     private const float MinAimAngle = -90f;
     private const float MaxAimAngle = 90f;
 
+    // Two separate Alt presses inside this window toggle rope mode. Holding Alt is
+    // counted as one press, so Alt+Up/Down reeling can never oscillate the mode.
+    private const int DoubleAltWindowFrames = 12;
+    private const float ShortModeRopeThickness = 1.15f;
+
     private sealed class AimState
     {
         internal RopeSpear Spear;
@@ -35,7 +37,42 @@ internal static class RopeSpearAimController
         internal RopeSpearAimIndicator Indicator;
     }
 
+    private sealed class AltTapState
+    {
+        internal bool AltWasHeld;
+        internal int SecondTapWindow;
+    }
+
+    private sealed class RopeModeState
+    {
+        // New RopeSpears are long mode by default.
+        internal bool LongMode = true;
+        internal bool ShortFlightActive;
+        internal float LockedLength = AbstractRopeSpear.DefaultRopeLength;
+    }
+
     private static readonly ConditionalWeakTable<Player, AimState> States = new();
+    private static readonly ConditionalWeakTable<Player, AltTapState> AltTapStates = new();
+    private static readonly ConditionalWeakTable<RopeSpear, RopeModeState> RopeModes = new();
+
+    // Short mode intentionally restores the older fixed-length projectile behaviour
+    // without changing RopeSpear's normal long-payout implementation. These cached
+    // members let the post-room pass reuse the existing rope topology and tension
+    // code, including wall bends, instead of implementing a second rope solver.
+    private static readonly FieldInfo RopeSystemField = typeof(RopeSpear).GetField(
+        "_ropeSystem",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly MethodInfo GetHandleRopePointMethod = typeof(RopeSpear).GetMethod(
+        "GetHandleRopePoint",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly MethodInfo GetSpearRopePointMethod = typeof(RopeSpear).GetMethod(
+        "GetSpearRopePoint",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly MethodInfo ApplyRopeConstraintMethod = typeof(RopeSpear).GetMethod(
+        "ApplyRopeConstraint",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+
+    private static bool _reflectionWarningIssued;
     private static bool _enabled;
 
     internal static void Enable()
@@ -46,8 +83,11 @@ internal static class RopeSpearAimController
         }
 
         _enabled = true;
+        On.Player.Update += Player_Update;
         On.Player.GrabUpdate += Player_GrabUpdate;
+        On.Player.ThrowObject += Player_ThrowObject_RopeMode;
         On.Player.GraphicsModuleUpdated += Player_GraphicsModuleUpdated;
+        On.Room.Update += Room_Update;
     }
 
     internal static void Disable()
@@ -57,8 +97,11 @@ internal static class RopeSpearAimController
             return;
         }
 
+        On.Player.Update -= Player_Update;
         On.Player.GrabUpdate -= Player_GrabUpdate;
+        On.Player.ThrowObject -= Player_ThrowObject_RopeMode;
         On.Player.GraphicsModuleUpdated -= Player_GraphicsModuleUpdated;
+        On.Room.Update -= Room_Update;
         _enabled = false;
     }
 
@@ -82,6 +125,243 @@ internal static class RopeSpearAimController
         facing = state.Facing;
         angleDegrees = state.AngleDegrees;
         return true;
+    }
+
+    private static void Player_Update(
+        On.Player.orig_Update orig,
+        Player self,
+        bool eu)
+    {
+        orig(self, eu);
+
+        if (self == null)
+        {
+            return;
+        }
+
+        AltTapState tap = AltTapStates.GetOrCreateValue(self);
+        if (tap.SecondTapWindow > 0)
+        {
+            tap.SecondTapWindow--;
+        }
+
+        bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+        bool altPressed = altHeld && !tap.AltWasHeld;
+        tap.AltWasHeld = altHeld;
+
+        if (!altPressed)
+        {
+            return;
+        }
+
+        if (!TryFindHeldRopeSpear(self, out RopeSpear spear))
+        {
+            tap.SecondTapWindow = 0;
+            return;
+        }
+
+        if (tap.SecondTapWindow <= 0)
+        {
+            tap.SecondTapWindow = DoubleAltWindowFrames;
+            return;
+        }
+
+        tap.SecondTapWindow = 0;
+        RopeModeState mode = RopeModes.GetOrCreateValue(spear);
+        mode.LongMode = !mode.LongMode;
+        mode.ShortFlightActive = false;
+
+        if (self.room != null)
+        {
+            self.room.AddObject(new RopeSpearModeFlash(self, mode.LongMode));
+        }
+    }
+
+    private static void Player_ThrowObject_RopeMode(
+        On.Player.orig_ThrowObject orig,
+        Player self,
+        int grasp,
+        bool eu)
+    {
+        RopeSpear spear = null;
+        RopeModeState mode = null;
+
+        if (self?.grasps != null &&
+            grasp >= 0 &&
+            grasp < self.grasps.Length &&
+            self.grasps[grasp]?.grabbed is RopeSpear candidate)
+        {
+            spear = candidate;
+            mode = RopeModes.GetOrCreateValue(spear);
+
+            if (!mode.LongMode)
+            {
+                mode.LockedLength = spear.abstractPhysicalObject is AbstractRopeSpear data
+                    ? data.RopeLength
+                    : AbstractRopeSpear.DefaultRopeLength;
+                mode.LockedLength = Mathf.Clamp(
+                    mode.LockedLength,
+                    AbstractRopeSpear.MinRopeLength,
+                    AbstractRopeSpear.MaxRopeLength);
+                mode.ShortFlightActive = true;
+            }
+            else
+            {
+                mode.ShortFlightActive = false;
+            }
+        }
+
+        orig(self, grasp, eu);
+
+        if (spear == null || mode == null || mode.LongMode || !mode.ShortFlightActive)
+        {
+            return;
+        }
+
+        // RopeSpear itself pays out in long mode during Thrown.Update. Restoring the
+        // authored length here establishes the cap before the first room update.
+        if (spear.abstractPhysicalObject is AbstractRopeSpear shortData)
+        {
+            shortData.RopeLength = mode.LockedLength;
+        }
+    }
+
+    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    {
+        orig(self);
+
+        if (self?.physicalObjects == null)
+        {
+            return;
+        }
+
+        for (int layer = 0; layer < self.physicalObjects.Length; layer++)
+        {
+            var objects = self.physicalObjects[layer];
+            for (int i = 0; i < objects.Count; i++)
+            {
+                if (objects[i] is not RopeSpear spear ||
+                    !RopeModes.TryGetValue(spear, out RopeModeState mode) ||
+                    mode.LongMode ||
+                    !mode.ShortFlightActive ||
+                    spear.slatedForDeletetion)
+                {
+                    continue;
+                }
+
+                if (spear.abstractPhysicalObject is AbstractRopeSpear data)
+                {
+                    // Long-mode Update may have paid out this frame. Short mode
+                    // always restores the exact length captured at release.
+                    data.RopeLength = mode.LockedLength;
+                }
+
+                ForceShortRopePhysics(self, spear, mode.LockedLength);
+
+                // The first settled frame in RopeSpear clears its internal payout
+                // latch. After that, ordinary Alt+Up/Down reeling is allowed to
+                // change the short rope normally; only the launch length is fixed.
+                if (spear.mode != Weapon.Mode.Thrown)
+                {
+                    mode.ShortFlightActive = false;
+                }
+            }
+        }
+    }
+
+    private static void ForceShortRopePhysics(
+        Room room,
+        RopeSpear spear,
+        float lockedLength)
+    {
+        if (room == null || spear == null)
+        {
+            return;
+        }
+
+        if (RopeSystemField == null ||
+            GetHandleRopePointMethod == null ||
+            GetSpearRopePointMethod == null ||
+            ApplyRopeConstraintMethod == null)
+        {
+            WarnMissingShortModeReflection();
+            return;
+        }
+
+        try
+        {
+            if (RopeSystemField.GetValue(spear) is not RopeSpearRopeSystem ropeSystem)
+            {
+                WarnMissingShortModeReflection();
+                return;
+            }
+
+            Vector2 handlePoint = (Vector2)GetHandleRopePointMethod.Invoke(
+                spear,
+                new object[] { 1f });
+            Vector2 spearPoint = (Vector2)GetSpearRopePointMethod.Invoke(
+                spear,
+                new object[] { 1f });
+
+            // Re-solve the same topology using the locked short length. This makes
+            // the visible rope taut at its cap and preserves the existing corner
+            // wrapping behaviour rather than measuring a naive straight line.
+            ropeSystem.Update(
+                room,
+                handlePoint,
+                spearPoint,
+                lockedLength,
+                ShortModeRopeThickness);
+
+            float routeLength = ropeSystem.RouteLength;
+            float stretch = routeLength - lockedLength;
+            if (stretch > 0.75f)
+            {
+                ApplyRopeConstraintMethod.Invoke(
+                    spear,
+                    new object[] { stretch, routeLength });
+            }
+        }
+        catch (System.Exception ex)
+        {
+            if (!_reflectionWarningIssued)
+            {
+                _reflectionWarningIssued = true;
+                Plugin.Logger?.LogWarning($"RopeSpear short-mode constraint failed: {ex}");
+            }
+        }
+    }
+
+    private static void WarnMissingShortModeReflection()
+    {
+        if (_reflectionWarningIssued)
+        {
+            return;
+        }
+
+        _reflectionWarningIssued = true;
+        Plugin.Logger?.LogWarning(
+            "RopeSpear short mode could not bind the existing rope solver; fixed-length launch constraint is unavailable.");
+    }
+
+    private static bool TryFindHeldRopeSpear(Player player, out RopeSpear spear)
+    {
+        spear = null;
+        if (player?.grasps == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < player.grasps.Length; i++)
+        {
+            if (player.grasps[i]?.grabbed is RopeSpear candidate)
+            {
+                spear = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void Player_GrabUpdate(
@@ -303,13 +583,13 @@ internal static class RopeSpearAimController
                 continue;
             }
 
-            if (grasp.grabbed is not RopeSpear spear)
+            if (grasp.grabbed is not RopeSpear candidate)
             {
                 return false;
             }
 
             graspIndex = i;
-            ropeSpear = spear;
+            ropeSpear = candidate;
             return true;
         }
 
