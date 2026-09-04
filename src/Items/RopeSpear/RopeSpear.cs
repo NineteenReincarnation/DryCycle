@@ -6,20 +6,20 @@ namespace DryCycle.Items.RopeSpear;
 
 internal sealed class RopeSpear : Spear
 {
-    private const int RopeMeshSegments = 28;
+    private const int RopeMeshSegments = RopeSpearRopeSystem.NodeCount - 1;
     private const float RopeThickness = 1.15f;
     private const float ReelSpeed = 2.15f;
+    private const float ClimbSpeed = 2.4f;
     private const float TensionSpring = 0.032f;
     private const float TensionDamping = 0.06f;
     private const float MaxPlayerPullImpulse = 2.4f;
     private const float MaxAnchorPullImpulse = 1.8f;
 
-    private readonly List<Vector2> _drawPath = new();
-    private readonly Vector2[] _sampledRope = new Vector2[RopeMeshSegments + 1];
+    private readonly RopeSpearRopeSystem _ropeSystem = new();
+    private readonly Vector2[] _drawNodes = new Vector2[RopeSpearRopeSystem.NodeCount];
 
-    private Player _ropeOwner;
-    private Rope _ropeTopology;
-    private Room _ropeRoom;
+    private RopeHandle _handle;
+    private Player _pendingHandleOwner;
     private int _ropeSpriteIndex = -1;
     private float _lastRouteLength;
     private bool _ropeDeployed;
@@ -34,11 +34,11 @@ internal sealed class RopeSpear : Spear
     internal bool RopeActive =>
         _ropeDeployed &&
         !IsBroken &&
-        _ropeOwner != null &&
+        _handle != null &&
+        !_handle.slatedForDeletetion &&
         room != null &&
-        _ropeOwner.room == room;
-
-    internal Player RopeOwner => _ropeOwner;
+        _handle.room == room &&
+        _ropeSystem.Ready;
 
     private bool IsBroken => Data?.RopeBroken ?? true;
 
@@ -67,67 +67,76 @@ internal sealed class RopeSpear : Spear
     {
         base.Thrown(thrownBy, thrownPos, firstFrameTraceFromPos, throwDir, frc, eu);
 
-        if (thrownBy is Player player && !IsBroken)
+        if (thrownBy is not Player player || IsBroken)
         {
-            _ropeOwner = player;
-            _ropeDeployed = true;
-            EnsureTopology(forceReset: true);
+            return;
         }
+
+        _ropeDeployed = true;
+        _pendingHandleOwner = player;
+        EnsureHandle(player);
+        _ropeSystem.Reset();
     }
 
     public override void PickedUp(Creature upPicker)
     {
         base.PickedUp(upPicker);
 
-        if (upPicker is Player player)
+        if (Data != null)
         {
-            _ropeOwner = player;
+            Data.RopeBroken = false;
+            Data.RopeLength = AbstractRopeSpear.DefaultRopeLength;
         }
 
-        // Picking the spear up is the repair/reset action. A rope that was cut by
-        // a creature entering a shortcut becomes usable again and returns to its
-        // authored default length before the next throw.
-        RetractRope(resetState: true);
+        _ropeDeployed = false;
+        _pendingHandleOwner = null;
+        _ropeSystem.Reset();
+        RemoveAssociatedHandles();
+        _handle = null;
     }
 
     public override void Update(bool eu)
     {
         base.Update(eu);
 
-        if (!_ropeDeployed || IsBroken)
+        if (!_ropeDeployed && !IsBroken && TryResolveExistingHandle())
+        {
+            _ropeDeployed = true;
+        }
+
+        if (!_ropeDeployed || IsBroken || room == null)
         {
             return;
         }
 
-        // A rope cannot follow a creature through Rain World's shortcut/pipe
-        // transport. If the spear is embedded in a creature and that creature
-        // enters a shortcut, cut the rope immediately. Ordinary tension never
-        // damages the rope.
+        if (_handle == null || _handle.slatedForDeletetion)
+        {
+            if (!TryResolveExistingHandle())
+            {
+                return;
+            }
+        }
+
+        if (_handle.room != room)
+        {
+            BreakRope();
+            return;
+        }
+
         if (AttachedCreatureEnteredShortcut())
         {
             BreakRope();
             return;
         }
 
-        if (!OwnerCanHoldRope())
-        {
-            DisconnectRope();
-            return;
-        }
-
-        EnsureTopology(forceReset: false);
-        if (_ropeTopology == null)
-        {
-            return;
-        }
-
+        TryGiveHandleToPendingOwner();
         HandleReelingInput();
 
-        Vector2 playerPoint = GetPlayerRopePoint(_ropeOwner, 1f);
+        Vector2 handlePoint = GetHandleRopePoint(1f);
         Vector2 spearPoint = GetSpearRopePoint(1f);
-        _ropeTopology.Update(playerPoint, spearPoint);
+        _ropeSystem.Update(room, handlePoint, spearPoint, RopeLength, RopeThickness);
 
-        float routeLength = _ropeTopology.totalLength;
+        float routeLength = _ropeSystem.RouteLength;
         float stretch = routeLength - RopeLength;
         if (stretch > 0f)
         {
@@ -137,26 +146,113 @@ internal sealed class RopeSpear : Spear
         _lastRouteLength = routeLength;
     }
 
+    internal bool TryFindNearestRopePoint(
+        Vector2 worldPosition,
+        float maxDistance,
+        out float normalizedPosition,
+        out float distance)
+    {
+        normalizedPosition = 0f;
+        distance = float.MaxValue;
+        return RopeActive &&
+               _ropeSystem.TryFindNearestPoint(
+                   worldPosition,
+                   maxDistance,
+                   out normalizedPosition,
+                   out distance);
+    }
+
+    internal bool UpdatePlayerRopeGrab(Player player, ref float normalizedPosition)
+    {
+        if (!RopeActive ||
+            player == null ||
+            player.room != room ||
+            player.dead ||
+            player.inShortcut ||
+            player.enteringShortCut.HasValue)
+        {
+            return false;
+        }
+
+        if (player.input != null && player.input.Length > 0)
+        {
+            int vertical = player.input[0].y;
+            if (vertical != 0)
+            {
+                normalizedPosition = AdvanceGrabPosition(normalizedPosition, vertical);
+            }
+        }
+
+        Vector2 ropePoint = _ropeSystem.GetPoint(normalizedPosition);
+        Vector2 targetBodyPosition = ropePoint + new Vector2(0f, -11f);
+        Vector2 delta = targetBodyPosition - player.mainBodyChunk.pos;
+        if (delta.magnitude > 95f)
+        {
+            return false;
+        }
+
+        Vector2 pull = Vector2.ClampMagnitude(delta * 0.13f, 3.1f);
+        player.mainBodyChunk.vel += pull;
+        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+        {
+            player.bodyChunks[1].vel += pull * 0.78f;
+        }
+
+        if (player.input != null && player.input.Length > 0 && player.input[0].x != 0)
+        {
+            float swing = player.input[0].x * 0.12f;
+            player.mainBodyChunk.vel.x += swing;
+            if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+            {
+                player.bodyChunks[1].vel.x += swing * 0.75f;
+            }
+        }
+
+        _ropeSystem.ApplyExternalPull(
+            normalizedPosition,
+            player.mainBodyChunk.pos + new Vector2(0f, 7f),
+            0.085f);
+        return true;
+    }
+
+    private float AdvanceGrabPosition(float current, int verticalInput)
+    {
+        float step = Mathf.Clamp(ClimbSpeed / Mathf.Max(80f, RopeLength), 0.004f, 0.035f);
+        float lowerT = Mathf.Clamp01(current - step);
+        float upperT = Mathf.Clamp01(current + step);
+        Vector2 lower = _ropeSystem.GetPoint(lowerT);
+        Vector2 upper = _ropeSystem.GetPoint(upperT);
+
+        bool increasingGoesUp;
+        if (Mathf.Abs(upper.y - lower.y) > 0.75f)
+        {
+            increasingGoesUp = upper.y > lower.y;
+        }
+        else
+        {
+            increasingGoesUp = GetSpearRopePoint(1f).y >= GetHandleRopePoint(1f).y;
+        }
+
+        float direction = increasingGoesUp ? 1f : -1f;
+        if (verticalInput < 0)
+        {
+            direction = -direction;
+        }
+
+        return Mathf.Clamp01(current + step * direction);
+    }
+
     private bool AttachedCreatureEnteredShortcut()
     {
         return mode == Mode.StuckInCreature &&
                stuckInObject is Creature creature &&
-               creature.inShortcut;
-    }
-
-    private bool OwnerCanHoldRope()
-    {
-        return _ropeOwner != null &&
-               !_ropeOwner.slatedForDeletetion &&
-               !_ropeOwner.dead &&
-               _ropeOwner.room == room &&
-               !_ropeOwner.inShortcut &&
-               room != null;
+               (creature.enteringShortCut.HasValue || creature.inShortcut);
     }
 
     private void HandleReelingInput()
     {
-        if (_ropeOwner?.input == null || _ropeOwner.input.Length == 0)
+        Player holder = _handle?.Holder;
+        if (holder?.input == null || holder.input.Length == 0)
         {
             return;
         }
@@ -167,12 +263,11 @@ internal sealed class RopeSpear : Spear
             return;
         }
 
-        Player.InputPackage input = _ropeOwner.input[0];
-        if (input.y > 0)
+        if (holder.input[0].y > 0)
         {
             RopeLength -= ReelSpeed;
         }
-        else if (input.y < 0)
+        else if (holder.input[0].y < 0)
         {
             RopeLength += ReelSpeed;
         }
@@ -180,37 +275,55 @@ internal sealed class RopeSpear : Spear
 
     private void ApplyRopeConstraint(float stretch, float routeLength)
     {
-        if (_ropeTopology == null || _ropeOwner == null || routeLength <= 0.001f)
+        if (!_ropeSystem.Ready || routeLength <= 0.001f)
         {
             return;
         }
 
-        BodyChunk playerChunk = _ropeOwner.mainBodyChunk;
-        BodyChunk anchorChunk = GetMovableAnchorChunk();
+        BodyChunk handleChunk = GetMovableHandleChunk(out Player handleHolder);
+        BodyChunk spearChunk = GetMovableSpearChunk();
 
-        Vector2 playerDir = Custom.DirVec(playerChunk.pos, _ropeTopology.AConnect);
-        Vector2 anchorPos = anchorChunk?.pos ?? firstChunk.pos;
-        Vector2 anchorDir = Custom.DirVec(anchorPos, _ropeTopology.BConnect);
+        Vector2 handlePoint = GetHandleRopePoint(1f);
+        Vector2 spearPoint = GetSpearRopePoint(1f);
+        Vector2 nextFromHandle = _ropeSystem.GetPoint(1f / (RopeSpearRopeSystem.NodeCount - 1f));
+        Vector2 nextFromSpear = _ropeSystem.GetPoint(1f - 1f / (RopeSpearRopeSystem.NodeCount - 1f));
 
+        Vector2 handleDirection = Custom.DirVec(handlePoint, nextFromHandle);
+        Vector2 spearDirection = Custom.DirVec(spearPoint, nextFromSpear);
         float routeSpeed = routeLength - _lastRouteLength;
         float springImpulse = stretch * TensionSpring + Mathf.Max(0f, routeSpeed) * TensionDamping;
-        float playerImpulse = Mathf.Min(MaxPlayerPullImpulse, springImpulse);
 
-        playerChunk.vel += playerDir * playerImpulse;
-        if (_ropeOwner.bodyChunks != null && _ropeOwner.bodyChunks.Length > 1)
+        if (handleChunk != null)
         {
-            _ropeOwner.bodyChunks[1].vel += playerDir * playerImpulse * 0.72f;
+            float impulse = Mathf.Min(MaxPlayerPullImpulse, springImpulse);
+            handleChunk.vel += handleDirection * impulse;
+
+            if (handleHolder?.bodyChunks != null && handleHolder.bodyChunks.Length > 1)
+            {
+                handleHolder.bodyChunks[1].vel += handleDirection * impulse * 0.72f;
+            }
         }
 
-        if (anchorChunk != null)
+        if (spearChunk != null)
         {
-            float anchorMassScale = Mathf.Clamp01(0.12f / Mathf.Max(0.05f, anchorChunk.mass));
-            float anchorImpulse = Mathf.Min(MaxAnchorPullImpulse, springImpulse * anchorMassScale);
-            anchorChunk.vel += anchorDir * anchorImpulse;
+            float massScale = Mathf.Clamp01(0.12f / Mathf.Max(0.05f, spearChunk.mass));
+            float impulse = Mathf.Min(MaxAnchorPullImpulse, springImpulse * massScale);
+            spearChunk.vel += spearDirection * impulse;
         }
     }
 
-    private BodyChunk GetMovableAnchorChunk()
+    private BodyChunk GetMovableHandleChunk(out Player holder)
+    {
+        holder = _handle?.Holder;
+        if (_handle == null || _handle.Anchored)
+        {
+            return null;
+        }
+
+        return holder?.mainBodyChunk ?? _handle.firstChunk;
+    }
+
+    private BodyChunk GetMovableSpearChunk()
     {
         if (mode == Mode.StuckInWall)
         {
@@ -219,37 +332,126 @@ internal sealed class RopeSpear : Spear
 
         if (mode == Mode.StuckInCreature && stuckInObject != null)
         {
-            try
-            {
-                return stuckInChunk;
-            }
-            catch
-            {
-                return null;
-            }
+            return stuckInChunk;
         }
 
         return firstChunk;
     }
 
-    private void EnsureTopology(bool forceReset)
+    private void EnsureHandle(Player owner)
     {
-        if (room == null || _ropeOwner == null || _ropeOwner.room != room)
+        if (_handle != null && !_handle.slatedForDeletetion)
         {
-            _ropeTopology = null;
-            _ropeRoom = null;
             return;
         }
 
-        Vector2 playerPoint = GetPlayerRopePoint(_ropeOwner, 1f);
-        Vector2 spearPoint = GetSpearRopePoint(1f);
-
-        if (forceReset || _ropeTopology == null || _ropeRoom != room)
+        if (TryResolveExistingHandle())
         {
-            _ropeTopology = new Rope(room, playerPoint, spearPoint, RopeThickness);
-            _ropeRoom = room;
-            _lastRouteLength = Vector2.Distance(playerPoint, spearPoint);
+            return;
         }
+
+        if (room?.abstractRoom == null || room.game == null)
+        {
+            return;
+        }
+
+        Vector2 position = owner?.bodyChunks != null && owner.bodyChunks.Length > 1
+            ? owner.bodyChunks[1].pos
+            : firstChunk.pos;
+
+        AbstractRopeHandle abstractHandle = new(
+            room.world,
+            room.GetWorldCoordinate(position),
+            room.game.GetNewID(),
+            abstractPhysicalObject.ID,
+            anchored: false,
+            anchorPosition: position);
+
+        room.abstractRoom.AddEntity(abstractHandle);
+        abstractHandle.RealizeInRoom();
+        _handle = abstractHandle.realizedObject as RopeHandle;
+
+        if (_handle != null)
+        {
+            _handle.firstChunk.HardSetPosition(position);
+            _handle.firstChunk.lastPos = position;
+            _handle.firstChunk.vel = owner?.mainBodyChunk?.vel ?? Vector2.zero;
+        }
+    }
+
+    private bool TryResolveExistingHandle()
+    {
+        if (room == null)
+        {
+            return false;
+        }
+
+        if (_handle != null &&
+            !_handle.slatedForDeletetion &&
+            _handle.ParentSpearID == abstractPhysicalObject.ID)
+        {
+            return true;
+        }
+
+        for (int layer = 0; layer < room.physicalObjects.Length; layer++)
+        {
+            List<PhysicalObject> objects = room.physicalObjects[layer];
+            for (int i = 0; i < objects.Count; i++)
+            {
+                if (objects[i] is RopeHandle handle &&
+                    handle.ParentSpearID == abstractPhysicalObject.ID &&
+                    !handle.slatedForDeletetion)
+                {
+                    _handle = handle;
+                    return true;
+                }
+            }
+        }
+
+        if (room.abstractRoom?.entities == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < room.abstractRoom.entities.Count; i++)
+        {
+            if (room.abstractRoom.entities[i] is not AbstractRopeHandle abstractHandle ||
+                abstractHandle.ParentSpearID != abstractPhysicalObject.ID ||
+                abstractHandle.slatedForDeletion)
+            {
+                continue;
+            }
+
+            if (abstractHandle.realizedObject == null)
+            {
+                abstractHandle.RealizeInRoom();
+            }
+
+            _handle = abstractHandle.realizedObject as RopeHandle;
+            return _handle != null;
+        }
+
+        return false;
+    }
+
+    private void TryGiveHandleToPendingOwner()
+    {
+        if (_pendingHandleOwner == null ||
+            _handle == null ||
+            _pendingHandleOwner.room != room ||
+            _handle.grabbedBy.Count > 0)
+        {
+            return;
+        }
+
+        int freeHand = _pendingHandleOwner.FreeHand();
+        if (freeHand < 0)
+        {
+            return;
+        }
+
+        _pendingHandleOwner.SlugcatGrab(_handle, freeHand);
+        _pendingHandleOwner = null;
     }
 
     private void BreakRope()
@@ -260,51 +462,54 @@ internal sealed class RopeSpear : Spear
         }
 
         _ropeDeployed = false;
-        _ropeTopology?.Reset();
-        _ropeTopology = null;
-        _ropeRoom = null;
-        _ropeOwner = null;
+        _pendingHandleOwner = null;
+        _ropeSystem.Reset();
+    }
 
-        if (room != null)
+    private void RemoveAssociatedHandles()
+    {
+        World world = abstractPhysicalObject?.world;
+        if (world?.abstractRooms == null)
         {
-            firstChunk.vel += Custom.RNV() * 1.2f;
+            return;
+        }
+
+        for (int roomIndex = 0; roomIndex < world.abstractRooms.Length; roomIndex++)
+        {
+            AbstractRoom abstractRoom = world.abstractRooms[roomIndex];
+            if (abstractRoom?.entities == null)
+            {
+                continue;
+            }
+
+            for (int i = abstractRoom.entities.Count - 1; i >= 0; i--)
+            {
+                if (abstractRoom.entities[i] is not AbstractRopeHandle handle ||
+                    handle.ParentSpearID != abstractPhysicalObject.ID)
+                {
+                    continue;
+                }
+
+                if (handle.realizedObject != null)
+                {
+                    handle.realizedObject.AllGraspsLetGoOfThisObject(evenNonExlusive: true);
+                    handle.realizedObject.Destroy();
+                }
+
+                handle.Destroy();
+                abstractRoom.RemoveEntity(handle);
+            }
         }
     }
 
-    private void DisconnectRope()
+    private Vector2 GetHandleRopePoint(float timeStacker)
     {
-        _ropeDeployed = false;
-        _ropeTopology?.Reset();
-        _ropeTopology = null;
-        _ropeRoom = null;
-        _ropeOwner = null;
-    }
-
-    private void RetractRope(bool resetState)
-    {
-        _ropeDeployed = false;
-        _ropeTopology?.Reset();
-        _ropeTopology = null;
-        _ropeRoom = null;
-
-        if (resetState && Data != null)
+        if (_handle == null)
         {
-            Data.RopeBroken = false;
-            Data.RopeLength = AbstractRopeSpear.DefaultRopeLength;
-        }
-    }
-
-    private static Vector2 GetPlayerRopePoint(Player player, float timeStacker)
-    {
-        if (player?.bodyChunks == null || player.bodyChunks.Length == 0)
-        {
-            return Vector2.zero;
+            return firstChunk.pos;
         }
 
-        BodyChunk chunk = player.bodyChunks.Length > 1
-            ? player.bodyChunks[1]
-            : player.mainBodyChunk;
-        return Vector2.Lerp(chunk.lastPos, chunk.pos, timeStacker);
+        return Vector2.Lerp(_handle.firstChunk.lastPos, _handle.firstChunk.pos, timeStacker);
     }
 
     private Vector2 GetSpearRopePoint(float timeStacker)
@@ -360,22 +565,14 @@ internal sealed class RopeSpear : Spear
             return;
         }
 
-        bool visible = RopeActive && _ropeTopology != null;
-        mesh.isVisible = visible;
-        if (!visible)
+        mesh.isVisible = RopeActive;
+        if (!mesh.isVisible)
         {
             return;
         }
 
-        BuildDrawPath(timeStacker);
-        if (_drawPath.Count < 2)
-        {
-            mesh.isVisible = false;
-            return;
-        }
-
-        SampleDrawPath(_drawPath, RopeLength, _sampledRope);
-        DrawRopeMesh(mesh, _sampledRope, camPos);
+        _ropeSystem.CopyPositions(_drawNodes);
+        DrawRopeMesh(mesh, _drawNodes, camPos);
     }
 
     public override void ApplyPalette(
@@ -402,81 +599,6 @@ internal sealed class RopeSpear : Spear
             for (int i = 0; i < mesh.verticeColors.Length; i++)
             {
                 mesh.verticeColors[i] = fiber;
-            }
-        }
-    }
-
-    private void BuildDrawPath(float timeStacker)
-    {
-        _drawPath.Clear();
-        if (_ropeOwner == null || _ropeTopology == null)
-        {
-            return;
-        }
-
-        _drawPath.Add(GetPlayerRopePoint(_ropeOwner, timeStacker));
-        for (int i = 0; i < _ropeTopology.bends.Count; i++)
-        {
-            _drawPath.Add(_ropeTopology.bends[i].pos);
-        }
-        _drawPath.Add(GetSpearRopePoint(timeStacker));
-    }
-
-    private static void SampleDrawPath(
-        List<Vector2> path,
-        float restLength,
-        Vector2[] output)
-    {
-        float tautLength = 0f;
-        for (int i = 1; i < path.Count; i++)
-        {
-            tautLength += Vector2.Distance(path[i - 1], path[i]);
-        }
-
-        if (tautLength <= 0.001f)
-        {
-            for (int i = 0; i < output.Length; i++)
-            {
-                output[i] = path[0];
-            }
-            return;
-        }
-
-        float slack = Mathf.Clamp(restLength - tautLength, 0f, 70f);
-
-        for (int sample = 0; sample < output.Length; sample++)
-        {
-            float targetDistance = tautLength * sample / (output.Length - 1f);
-            float walked = 0f;
-
-            for (int segment = 1; segment < path.Count; segment++)
-            {
-                Vector2 a = path[segment - 1];
-                Vector2 b = path[segment];
-                float length = Vector2.Distance(a, b);
-                if (segment != path.Count - 1 && walked + length < targetDistance)
-                {
-                    walked += length;
-                    continue;
-                }
-
-                float localT = length <= 0.001f
-                    ? 0f
-                    : Mathf.Clamp01((targetDistance - walked) / length);
-                Vector2 point = Vector2.Lerp(a, b, localT);
-
-                if (slack > 0f && path.Count == 2)
-                {
-                    float globalT = targetDistance / tautLength;
-                    point.y -= Mathf.Sin(globalT * Mathf.PI) * slack * 0.34f;
-                }
-                else if (slack > 0f)
-                {
-                    point.y -= Mathf.Sin(localT * Mathf.PI) * slack * 0.12f;
-                }
-
-                output[sample] = point;
-                break;
             }
         }
     }
