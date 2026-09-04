@@ -97,20 +97,21 @@ internal static class WeatherScheduleRuntime
             return 0f;
         }
 
-        float bestIntensity = 0f;
+        // Preview is an explicit developer force state. Once it matches this weather,
+        // bypass the random schedule and room spatial Allow/Forbidden rules entirely.
+        // That keeps Weather and DangerType previews consistent and lets developers
+        // inspect effects such as IntenseHeat in any room without authoring a test rule.
         if (WeatherSpatialPreview.TryGetIntensity(
                 world,
                 kind,
                 ids,
                 out float previewIntensity,
-                out string previewId))
+                out _))
         {
-            bestIntensity = WeatherSpatialRuntime.ApplyIntensity(
-                world,
-                kind,
-                previewId,
-                previewIntensity);
+            return previewIntensity;
         }
+
+        float bestIntensity = 0f;
 
         // GetIntensity is called from many owners, not only RainCycle.Update. Keep the
         // schedule synchronized here so a world/region replacement cannot leak the old
