@@ -219,8 +219,9 @@ internal static partial class WeatherSpatialSelectionUiCleanup
             }
 
             _lastTargetKey = target.Key;
+            float chance = 0f;
             _hasConfiguredChance = !target.IsFamily &&
-                WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out float chance);
+                WeatherSpatialRegistry.TryGetSubWeatherChance(regionId, target, out chance);
             _lastPercent = _hasConfiguredChance ? Mathf.RoundToInt(chance) : 0;
             _buffer = _lastPercent.ToString(CultureInfo.InvariantCulture);
             Text = target.IsFamily ? "--" : _buffer + "%";
