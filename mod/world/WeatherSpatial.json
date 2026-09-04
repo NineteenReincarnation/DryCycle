@@ -17,8 +17,7 @@
             "enabled": true,
             "chance": 100,
             "subWeather": {
-              "Weather/SandStorm": true,
-              "DangerType/SandStorm": true
+              "Weather/SandStorm": true
             }
           }
         },
@@ -31,8 +30,7 @@
           }
         },
         "dangerTypes": {
-          "IntenseHeat": 100,
-          "SandStorm": 100
+          "IntenseHeat": 100
         }
       }
     },
