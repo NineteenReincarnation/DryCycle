@@ -70,7 +70,8 @@ internal static class RopeSpearAimController
         facing = 1;
         angleDegrees = 0f;
 
-        if (player == null ||
+        if (!_enabled ||
+            player == null ||
             !States.TryGetValue(player, out AimState state) ||
             !state.Charging ||
             !AimStateStillValid(player, state))
