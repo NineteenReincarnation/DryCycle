@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
