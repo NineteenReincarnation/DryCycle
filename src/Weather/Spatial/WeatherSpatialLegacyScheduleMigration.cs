@@ -7,11 +7,22 @@ namespace DryCycle.Weather.Spatial;
 
 internal static partial class WeatherSpatialRegistry
 {
+    private const string DeprecatedVanillaSandDangerKey = "DangerType/SandStorm";
+
     private static string _legacyMigrationCheckedPath;
     private static DateTime _legacyMigrationCheckedWriteUtc;
 
     private static void EnsureLegacyScheduleMigration()
     {
+        // DangerType/SandStorm is Rain World's vanilla room danger type and is not a
+        // DryCycle Sand FamWeather member. Older WeatherSpatial builds exposed it by
+        // mistake. Strip that exact legacy entry from the in-memory model so existing
+        // authoring files migrate cleanly on their next Save.
+        if (RemoveDeprecatedVanillaSandDanger())
+        {
+            Dirty = true;
+        }
+
         string path = LoadedPath;
         if (_recoveredFromBackup && !string.IsNullOrEmpty(path) && File.Exists(path + ".bak"))
         {
@@ -44,6 +55,120 @@ internal static partial class WeatherSpatialRegistry
         {
             Dirty = true;
         }
+    }
+
+    private static bool RemoveDeprecatedVanillaSandDanger()
+    {
+        bool changed = false;
+
+        List<string> scheduleRegions = new(RegionSchedules.Keys);
+        for (int regionIndex = 0; regionIndex < scheduleRegions.Count; regionIndex++)
+        {
+            string regionId = scheduleRegions[regionIndex];
+            WeatherSpatialRegionSchedule schedule = RegionSchedules[regionId];
+            List<string> dangerIds = new(schedule.DangerTypes.Keys);
+            for (int dangerIndex = 0; dangerIndex < dangerIds.Count; dangerIndex++)
+            {
+                string dangerId = dangerIds[dangerIndex];
+                if (WeatherSpatialCatalog.NormalizeId(dangerId) == "SANDSTORM")
+                {
+                    schedule.DangerTypes.Remove(dangerId);
+                    changed = true;
+                }
+            }
+
+            if (schedule.IsEmpty)
+            {
+                RegionSchedules.Remove(regionId);
+            }
+        }
+
+        foreach (Dictionary<string, WeatherSpatialRegionFamilySchedule> families in RegionFamilySchedules.Values)
+        {
+            if (!families.TryGetValue("Sand", out WeatherSpatialRegionFamilySchedule sand))
+            {
+                continue;
+            }
+
+            List<string> subWeatherKeys = new(sand.SubWeatherEnabled.Keys);
+            for (int keyIndex = 0; keyIndex < subWeatherKeys.Count; keyIndex++)
+            {
+                string key = subWeatherKeys[keyIndex];
+                if (string.Equals(key, DeprecatedVanillaSandDangerKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    sand.SubWeatherEnabled.Remove(key);
+                    changed = true;
+                }
+            }
+        }
+
+        List<string> spatialRegions = new(Regions.Keys);
+        for (int regionIndex = 0; regionIndex < spatialRegions.Count; regionIndex++)
+        {
+            string regionId = spatialRegions[regionIndex];
+            WeatherSpatialRegionRules region = Regions[regionId];
+            changed |= RemoveDeprecatedRule(region.WeatherDefaults);
+
+            List<string> roomNames = new(region.Rooms.Keys);
+            for (int roomIndex = 0; roomIndex < roomNames.Count; roomIndex++)
+            {
+                string roomName = roomNames[roomIndex];
+                WeatherSpatialRoomRules room = region.Rooms[roomName];
+                changed |= RemoveDeprecatedRule(room.Weather);
+                if (room.IsEmpty)
+                {
+                    region.Rooms.Remove(roomName);
+                }
+            }
+
+            if (region.IsEmpty)
+            {
+                Regions.Remove(regionId);
+            }
+        }
+
+        // LoadRegionFamilyScheduleState intentionally rejects the retired key after the
+        // catalog change. Suppress that one migration-only parse warning; all unrelated
+        // malformed entries continue to be reported normally.
+        for (int warningIndex = ParseWarnings.Count - 1; warningIndex >= 0; warningIndex--)
+        {
+            if (ParseWarnings[warningIndex].IndexOf(
+                    DeprecatedVanillaSandDangerKey,
+                    StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                ParseWarnings.RemoveAt(warningIndex);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            WeatherScheduleCacheInvalidation.InvalidateAll();
+        }
+        return changed;
+    }
+
+    private static bool RemoveDeprecatedRule(Dictionary<string, WeatherSpatialRule> rules)
+    {
+        if (rules == null || rules.Count == 0)
+        {
+            return false;
+        }
+
+        List<string> keys = new(rules.Keys);
+        bool changed = false;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (string.Equals(
+                    keys[i],
+                    DeprecatedVanillaSandDangerKey,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                rules.Remove(keys[i]);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     private static bool TryApplyLegacyScheduleMigration(string path)
@@ -118,7 +243,6 @@ internal static partial class WeatherSpatialRegistry
         changed |= EnsureSimpleWeather(b5, "HeatWave", 100f);
         changed |= EnsureSimpleWeather(b5, "SandStorm", 100f);
         changed |= EnsureDanger(b5, "IntenseHeat", 100f);
-        changed |= EnsureDanger(b5, "SandStorm", 100f);
 
         return changed;
     }
