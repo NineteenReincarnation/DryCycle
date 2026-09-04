@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
@@ -13,15 +12,7 @@ internal static class RopeSpearHooks
     private const string HandleObjectTypeName = "RopeSpearHandle";
     private const string LengthPrefix = "DRYCYCLE_ROPESPEAR_LENGTH=";
     private const string BrokenPrefix = "DRYCYCLE_ROPESPEAR_BROKEN=";
-    private const float RopeGrabRange = 26f;
 
-    private sealed class PlayerRopeGrabState
-    {
-        internal RopeSpear Spear;
-        internal float NormalizedPosition;
-    }
-
-    private static readonly ConditionalWeakTable<Player, PlayerRopeGrabState> RopeGrabStates = new();
     private static bool _enabled;
 
     public static AbstractPhysicalObject.AbstractObjectType ObjectType { get; private set; }
@@ -42,7 +33,6 @@ internal static class RopeSpearHooks
         On.AbstractPhysicalObject.Realize += AbstractPhysicalObject_Realize;
         On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability += Player_Grabability;
-        On.Player.GrabUpdate += Player_GrabUpdate;
         On.Player.ThrowObject += Player_ThrowObject;
 
         RopeSpearDevConsoleSupport.TryRegister();
@@ -58,7 +48,6 @@ internal static class RopeSpearHooks
         On.AbstractPhysicalObject.Realize -= AbstractPhysicalObject_Realize;
         On.SaveState.AbstractPhysicalObjectFromString -= SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability -= Player_Grabability;
-        On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.ThrowObject -= Player_ThrowObject;
 
         RopeSpearDevConsoleSupport.ResetRegistration();
@@ -123,98 +112,6 @@ internal static class RopeSpearHooks
         }
 
         orig(self, grasp, eu);
-    }
-
-    private static void Player_GrabUpdate(
-        On.Player.orig_GrabUpdate orig,
-        Player self,
-        bool eu)
-    {
-        if (self == null)
-        {
-            orig(self, eu);
-            return;
-        }
-
-        PlayerRopeGrabState state = RopeGrabStates.GetOrCreateValue(self);
-        bool pickupPressed = self.input != null &&
-                             self.input.Length > 1 &&
-                             self.input[0].pckp &&
-                             !self.input[1].pckp;
-
-        if (state.Spear != null)
-        {
-            if (pickupPressed)
-            {
-                state.Spear = null;
-                self.wantToPickUp = 0;
-                orig(self, eu);
-                return;
-            }
-
-            self.wantToPickUp = 0;
-            orig(self, eu);
-
-            if (!state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition))
-            {
-                state.Spear = null;
-            }
-            return;
-        }
-
-        if (pickupPressed &&
-            self.FreeHand() >= 0 &&
-            TryFindNearestRope(self, out RopeSpear spear, out float normalizedPosition))
-        {
-            state.Spear = spear;
-            state.NormalizedPosition = normalizedPosition;
-            self.wantToPickUp = 0;
-            orig(self, eu);
-            state.Spear.UpdatePlayerRopeGrab(self, ref state.NormalizedPosition);
-            return;
-        }
-
-        orig(self, eu);
-    }
-
-    private static bool TryFindNearestRope(
-        Player player,
-        out RopeSpear bestSpear,
-        out float normalizedPosition)
-    {
-        bestSpear = null;
-        normalizedPosition = 0f;
-        if (player?.room?.physicalObjects == null)
-        {
-            return false;
-        }
-
-        float bestDistance = float.MaxValue;
-        Vector2 position = player.mainBodyChunk.pos;
-
-        for (int layer = 0; layer < player.room.physicalObjects.Length; layer++)
-        {
-            List<PhysicalObject> objects = player.room.physicalObjects[layer];
-            for (int i = 0; i < objects.Count; i++)
-            {
-                if (objects[i] is not RopeSpear spear ||
-                    !spear.TryFindNearestRopePoint(
-                        position,
-                        RopeGrabRange,
-                        out float candidatePosition,
-                        out float distance) ||
-                    distance >= bestDistance)
-                {
-                    continue;
-                }
-
-                bestDistance = distance;
-                bestSpear = spear;
-                normalizedPosition = candidatePosition;
-            }
-        }
-
-        return bestSpear != null;
     }
 
     private static AbstractPhysicalObject SaveState_AbstractPhysicalObjectFromString(
