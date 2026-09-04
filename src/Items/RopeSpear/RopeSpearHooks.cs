@@ -258,10 +258,14 @@ internal static class RopeSpearHooks
         On.PlayerGraphics.orig_Update orig,
         PlayerGraphics self)
     {
+        PlayerRopeGrabState state = null;
         Player player = self?.player;
-        bool active = player != null &&
-                      RopeGrabStates.TryGetValue(player, out PlayerRopeGrabState state) &&
-                      state.Spear != null;
+        if (player != null)
+        {
+            RopeGrabStates.TryGetValue(player, out state);
+        }
+
+        bool active = state?.Spear != null;
 
         // Prime the hand targets before SlugcatHand.Update so free hands actually
         // move onto the rope this frame. Reapply afterwards to keep the target
