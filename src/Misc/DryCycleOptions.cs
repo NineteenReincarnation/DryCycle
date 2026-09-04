@@ -96,7 +96,10 @@ internal sealed class DryCycleOptions : OptionInterface
             new Vector2(75f, 430f),
             new Vector2(450f, 65f),
             "When DevTools (O) and DevUI (H) are both open, Ctrl+Z / Ctrl+S / Ctrl+Y reserve their letter keys so editor shortcuts cannot move the player. Enable an unlock below to release that key back to gameplay.",
-            FLabelAlignment.Center);
+            FLabelAlignment.Center)
+        {
+            autoWrap = true
+        };
 
         AddUnlockRow(Tabs[0], UnlockCtrlZGameplayInput, 355f, "Unlock Ctrl+Z gameplay input");
         AddUnlockRow(Tabs[0], UnlockCtrlSGameplayInput, 300f, "Unlock Ctrl+S gameplay input");
