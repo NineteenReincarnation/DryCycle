@@ -72,6 +72,12 @@ internal sealed class RopeSpear : Spear
             return;
         }
 
+        if (Data != null)
+        {
+            Data.HasPersistentHandleAnchor = false;
+            Data.PersistentHandleAnchor = Vector2.zero;
+        }
+
         _ropeDeployed = true;
         _pendingHandleOwner = player;
         EnsureHandle(player);
@@ -86,6 +92,8 @@ internal sealed class RopeSpear : Spear
         {
             Data.RopeBroken = false;
             Data.RopeLength = AbstractRopeSpear.DefaultRopeLength;
+            Data.HasPersistentHandleAnchor = false;
+            Data.PersistentHandleAnchor = Vector2.zero;
         }
 
         _ropeDeployed = false;
@@ -99,9 +107,19 @@ internal sealed class RopeSpear : Spear
     {
         base.Update(eu);
 
-        if (!_ropeDeployed && !IsBroken && TryResolveExistingHandle())
+        if (!_ropeDeployed && !IsBroken)
         {
-            _ropeDeployed = true;
+            if (!TryResolveExistingHandle() &&
+                Data?.HasPersistentHandleAnchor == true &&
+                mode == Mode.StuckInWall)
+            {
+                CreateHandle(Data.PersistentHandleAnchor, anchored: true);
+            }
+
+            if (_handle != null && !_handle.slatedForDeletetion)
+            {
+                _ropeDeployed = true;
+            }
         }
 
         if (!_ropeDeployed || IsBroken || room == null)
@@ -113,7 +131,15 @@ internal sealed class RopeSpear : Spear
         {
             if (!TryResolveExistingHandle())
             {
-                return;
+                if (Data?.HasPersistentHandleAnchor == true && mode == Mode.StuckInWall)
+                {
+                    CreateHandle(Data.PersistentHandleAnchor, anchored: true);
+                }
+
+                if (_handle == null)
+                {
+                    return;
+                }
             }
         }
 
@@ -131,6 +157,7 @@ internal sealed class RopeSpear : Spear
 
         TryGiveHandleToPendingOwner();
         HandleReelingInput();
+        SynchronizePersistentAnchorState();
 
         Vector2 handlePoint = GetHandleRopePoint(1f);
         Vector2 spearPoint = GetSpearRopePoint(1f);
@@ -273,6 +300,25 @@ internal sealed class RopeSpear : Spear
         }
     }
 
+    private void SynchronizePersistentAnchorState()
+    {
+        if (Data == null || _handle == null)
+        {
+            return;
+        }
+
+        if (mode == Mode.StuckInWall && _handle.Anchored)
+        {
+            Data.HasPersistentHandleAnchor = true;
+            Data.PersistentHandleAnchor = _handle.firstChunk.pos;
+        }
+        else if (Data.HasPersistentHandleAnchor)
+        {
+            Data.HasPersistentHandleAnchor = false;
+            Data.PersistentHandleAnchor = Vector2.zero;
+        }
+    }
+
     private void ApplyRopeConstraint(float stretch, float routeLength)
     {
         if (!_ropeSystem.Ready || routeLength <= 0.001f)
@@ -350,22 +396,31 @@ internal sealed class RopeSpear : Spear
             return;
         }
 
+        Vector2 position = owner?.bodyChunks != null && owner.bodyChunks.Length > 1
+            ? owner.bodyChunks[1].pos
+            : firstChunk.pos;
+        CreateHandle(position, anchored: false);
+
+        if (_handle != null)
+        {
+            _handle.firstChunk.vel = owner?.mainBodyChunk?.vel ?? Vector2.zero;
+        }
+    }
+
+    private void CreateHandle(Vector2 position, bool anchored)
+    {
         if (room?.abstractRoom == null || room.game == null)
         {
             return;
         }
-
-        Vector2 position = owner?.bodyChunks != null && owner.bodyChunks.Length > 1
-            ? owner.bodyChunks[1].pos
-            : firstChunk.pos;
 
         AbstractRopeHandle abstractHandle = new(
             room.world,
             room.GetWorldCoordinate(position),
             room.game.GetNewID(),
             abstractPhysicalObject.ID,
-            anchored: false,
-            anchorPosition: position);
+            anchored,
+            position);
 
         room.abstractRoom.AddEntity(abstractHandle);
         abstractHandle.RealizeInRoom();
@@ -375,7 +430,7 @@ internal sealed class RopeSpear : Spear
         {
             _handle.firstChunk.HardSetPosition(position);
             _handle.firstChunk.lastPos = position;
-            _handle.firstChunk.vel = owner?.mainBodyChunk?.vel ?? Vector2.zero;
+            _handle.firstChunk.vel = Vector2.zero;
         }
     }
 
@@ -459,6 +514,8 @@ internal sealed class RopeSpear : Spear
         if (Data != null)
         {
             Data.RopeBroken = true;
+            Data.HasPersistentHandleAnchor = false;
+            Data.PersistentHandleAnchor = Vector2.zero;
         }
 
         _ropeDeployed = false;
