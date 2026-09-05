@@ -1,178 +1,231 @@
+using System;
 using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertBatflyGraphics : GraphicsModule
+// Keep the complete vanilla Batfly animation/pose pipeline. Desert Batfly only
+// changes scale, palette and adds lightweight markings/spikes on top of it.
+internal sealed class DesertBatflyGraphics : FlyGraphics
 {
-    private readonly DesertBatfly fly;
-    private readonly Vector2[] patterns;
+    private readonly struct PatternMark
+    {
+        internal readonly bool Wing;
+        internal readonly int Side;
+        internal readonly float Along;
+        internal readonly float Offset;
+        internal readonly float Scale;
+        internal readonly float Shade;
+        internal readonly int Shape;
+
+        internal PatternMark(bool wing, int side, float along, float offset, float scale, float shade, int shape)
+        {
+            Wing = wing;
+            Side = side;
+            Along = along;
+            Offset = offset;
+            Scale = scale;
+            Shade = shade;
+            Shape = shape;
+        }
+    }
+
+    private const int VanillaSpriteCount = 4;
+    private readonly DesertBatfly desert;
+    private readonly PatternMark[] patterns;
     private readonly float[] spikeLengths;
-    private Vector2 axis = Vector2.up, lastAxis = Vector2.up;
-    private float phase, lastPhase, spread = 1f, lastSpread = 1f;
-    private Color bodyColor, wingColor, markingColor;
-    private const int Body = 2, Abdomen = 3, Head = 4, PatternStart = 5;
+    private Color bodyColor, wingColor, darkMark, warmMark;
+    private int PatternStart => VanillaSpriteCount;
     private int SpikeStart => PatternStart + patterns.Length;
 
-    internal DesertBatflyGraphics(DesertBatfly owner) : base(owner, false)
+    internal DesertBatflyGraphics(DesertBatfly owner) : base(owner)
     {
-        fly = owner;
-        var random = new System.Random(fly.Personality.PatternSeed);
-        patterns = new Vector2[fly.Personality.PatternCount];
-        for (int i = 0; i < patterns.Length; i++)
-            patterns[i] = new Vector2(Mathf.Lerp(-1f, 1f, (float)random.NextDouble()), (float)random.NextDouble());
-        random = new System.Random(fly.Personality.SpikeSeed);
-        spikeLengths = new float[fly.Personality.SpikeCount];
-        for (int i = 0; i < spikeLengths.Length; i++)
-            spikeLengths[i] = Mathf.Lerp(2f, 6.5f, fly.Personality.Temperament) * Mathf.Lerp(0.8f, 1.15f, (float)random.NextDouble());
-        phase = (fly.Personality.VisualSeed & 255) / 255f * Mathf.PI * 2f;
-        cullRange = 180f;
-    }
+        desert = owner;
 
-    public override void Update()
-    {
-        base.Update();
-        lastAxis = axis;
-        lastPhase = phase;
-        lastSpread = spread;
-        bool held = fly.grabbedBy.Count > 0;
-        bool attached = fly.DesertAI.Mode == DesertBatflyAI.Activity.Attach;
-        bool dive = fly.DesertAI.Mode is DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.FakeDive;
-        Vector2 wanted = dive ? fly.mainBodyChunk.vel.normalized : new Vector2(fly.mainBodyChunk.vel.x * 0.12f, 1f).normalized;
-        if (fly.DesertAI.PullingUp) wanted = Vector2.up;
-        if (attached && fly.DesertAI.Target != null)
-            wanted = Custom.DirVec(fly.mainBodyChunk.pos, fly.DesertAI.Target.mainBodyChunk.pos);
-        if (!fly.Consious)
-        {
-            axis = Custom.RotateAroundOrigo(axis, Mathf.Clamp(fly.mainBodyChunk.vel.x * 2f, -12f, 12f));
-            spread = Mathf.Lerp(spread, 0.38f, 0.12f);
-        }
-        else
-        {
-            if (fly.Emergence.Active) wanted = fly.dir;
-            axis = Vector2.Lerp(axis, wanted, dive ? 0.22f : 0.09f).normalized;
-            phase += DesertBatflyTuning.WingRate * (held ? 1.9f : attached ? 0.35f : dive ? 0.75f : 1f);
-            spread = Mathf.Lerp(spread, fly.DesertAI.PullingUp ? 1.25f : attached ? 0.3f : dive ? 0.62f : 1f, 0.16f);
-        }
-        if (fly.DesertAI.Mode == DesertBatflyAI.Activity.Roost) spread = Mathf.Lerp(spread, 0.18f, 0.25f);
-    }
-
-    public override void Reset()
-    {
-        base.Reset();
-        lastAxis = axis;
-        lastPhase = phase;
-        lastSpread = spread;
-    }
-
-    public override void InitiateSprites(RoomCamera.SpriteLeaser leaser, RoomCamera camera)
-    {
-        leaser.sprites = new FSprite[SpikeStart + spikeLengths.Length];
-        for (int side = 0; side < 2; side++)
-            leaser.sprites[side] = new TriangleMesh("Futile_White", new[] {
-                new TriangleMesh.Triangle(0, 1, 2), new TriangleMesh.Triangle(0, 2, 3),
-                new TriangleMesh.Triangle(0, 3, 4), new TriangleMesh.Triangle(0, 4, 5),
-                new TriangleMesh.Triangle(0, 5, 6) }, true);
-        leaser.sprites[Body] = new FSprite("FlyBody");
-        leaser.sprites[Abdomen] = new FSprite("Circle20");
-        leaser.sprites[Head] = new FSprite("Circle20");
-        for (int i = 0; i < patterns.Length; i++) leaser.sprites[PatternStart + i] = new FSprite("pixel");
-        for (int i = 0; i < spikeLengths.Length; i++)
-            leaser.sprites[SpikeStart + i] = new TriangleMesh("Futile_White", new[] { new TriangleMesh.Triangle(0, 1, 2) }, false);
-        ApplyPalette(leaser, camera, camera.currentPalette);
-        AddToContainer(leaser, camera, null);
-    }
-
-    public override void AddToContainer(RoomCamera.SpriteLeaser leaser, RoomCamera camera, FContainer container)
-    {
-        container ??= camera.ReturnFContainer("Midground");
-        // Membranes behind body, markings and attached silhouette spikes in front.
-        foreach (FSprite sprite in leaser.sprites)
-        {
-            sprite.RemoveFromContainer();
-            container.AddChild(sprite);
-        }
-    }
-
-    public override void ApplyPalette(RoomCamera.SpriteLeaser leaser, RoomCamera camera, RoomPalette palette)
-    {
-        float darkness = Mathf.Clamp01(palette.darkness * 0.65f);
-        bodyColor = Color.Lerp(fly.Personality.BaseColor, palette.blackColor, darkness);
-        wingColor = Color.Lerp(fly.Personality.WingColor, palette.blackColor, darkness);
-        markingColor = Color.Lerp(fly.Personality.SecondaryColor, palette.blackColor, darkness);
-        for (int i = Body; i < leaser.sprites.Length; i++)
-            leaser.sprites[i].color = i >= PatternStart ? markingColor : bodyColor;
-        leaser.sprites[Head].color = Color.Lerp(bodyColor, markingColor, 0.45f);
-    }
-
-    public override void DrawSprites(RoomCamera.SpriteLeaser leaser, RoomCamera camera, float timeStacker, Vector2 camPos)
-    {
-        if (fly.slatedForDeletetion || fly.room != camera.room) { leaser.CleanSpritesAndRemove(); return; }
-        Vector2 pos = Vector2.Lerp(fly.mainBodyChunk.lastPos, fly.mainBodyChunk.pos, timeStacker) - camPos;
-        Vector2 forward = Vector2.Lerp(lastAxis, axis, timeStacker).normalized;
-        Vector2 right = new(forward.y, -forward.x);
-        float rotation = Custom.VecToDeg(forward);
-        float size = fly.Personality.Size;
-        float emerge = fly.Emergence.Progress;
-        float opening = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.25f, 0.9f, emerge));
-        float flap = Mathf.Sin(Mathf.Lerp(lastPhase, phase, timeStacker));
-        float width = Mathf.Lerp(lastSpread, spread, timeStacker) * opening;
-        float struggle = fly.grabbedBy.Count > 0 && !fly.dead ? Mathf.Sin(phase * 2.1f) * 1.2f : 0f;
-        pos += right * struggle;
-        foreach (FSprite sprite in leaser.sprites)
-        {
-            sprite.isVisible = emerge > 0.01f && !culled;
-            sprite.alpha = Mathf.InverseLerp(0f, 0.28f, emerge);
-        }
-        for (int side = 0; side < 2; side++)
-        {
-            float sign = side == 0 ? -1f : 1f;
-            var mesh = (TriangleMesh)leaser.sprites[side];
-            Vector2 root = pos + right * sign * 3f * size;
-            Vector2 lateral = right * sign * DesertBatflyTuning.WingLength * size * Mathf.Max(0.1f, width * (0.72f + 0.28f * flap));
-            Vector2 lift = forward * (5f + flap * 6f) * size;
-            mesh.MoveVertice(0, root);
-            mesh.MoveVertice(1, root + lateral * 0.45f + lift + forward * 5f);
-            mesh.MoveVertice(2, root + lateral + lift * 0.5f);
-            mesh.MoveVertice(3, root + lateral * 0.73f - forward * 3f);
-            mesh.MoveVertice(4, root + lateral * 0.57f - forward * 10f * size);
-            mesh.MoveVertice(5, root + lateral * 0.30f - forward * 7f * size);
-            mesh.MoveVertice(6, root - forward * 6f * size);
-            for (int v = 0; v < mesh.verticeColors.Length; v++)
-                mesh.verticeColors[v] = Color.Lerp(wingColor, markingColor, v is 2 or 4 or 6 ? 0.25f + fly.Personality.Temperament * 0.5f : 0.05f);
-        }
-        Place(leaser.sprites[Body], pos, rotation, 1.20f * size, 1.45f * size);
-        Place(leaser.sprites[Abdomen], pos - forward * 6f * size, rotation, 0.32f * size, 0.62f * size);
-        Place(leaser.sprites[Head], pos + forward * 4f * size, rotation, 0.29f * size, 0.25f * size);
+        var random = new System.Random(owner.Personality.PatternSeed);
+        patterns = new PatternMark[owner.Personality.PatternCount];
         for (int i = 0; i < patterns.Length; i++)
         {
-            Vector2 pattern = patterns[i];
+            // Roughly two thirds of the markings sit on the moving wing membranes;
+            // the rest break up the body silhouette. Everything is deterministic.
             bool wing = i % 3 != 0;
-            float sign = pattern.x < 0f ? -1f : 1f;
-            Vector2 location = wing
-                ? pos + right * sign * (7f + pattern.y * 8f) * width * (0.72f + 0.28f * flap) * size + forward * (flap * 2f - 1f)
-                : pos + right * pattern.x * 2.5f * size - forward * pattern.y * 9f * size;
-            Place(leaser.sprites[PatternStart + i], location, rotation + pattern.x * 30f,
-                (wing ? 1.3f : 1.7f) * size, (1.2f + pattern.y * 1.8f) * size);
-            if (wing) leaser.sprites[PatternStart + i].alpha *= opening;
+            int side = random.NextDouble() < 0.5 ? -1 : 1;
+            float along = Mathf.Lerp(0.18f, 0.88f, (float)random.NextDouble());
+            float offset = Mathf.Lerp(-0.75f, 0.75f, (float)random.NextDouble());
+            float scale = Mathf.Lerp(0.75f, 1.35f, (float)random.NextDouble());
+            float shade = (float)random.NextDouble();
+            patterns[i] = new PatternMark(wing, side, along, offset, scale, shade, i % 4);
         }
+
+        random = new System.Random(owner.Personality.SpikeSeed);
+        spikeLengths = new float[owner.Personality.SpikeCount];
         for (int i = 0; i < spikeLengths.Length; i++)
-        {
-            float sign = i % 2 == 0 ? -1f : 1f;
-            Vector2 root = pos + right * sign * 2.8f * size - forward * (i / 2 * 3f + 1f) * size;
-            var mesh = (TriangleMesh)leaser.sprites[SpikeStart + i];
-            mesh.MoveVertice(0, root + forward * 1.6f);
-            mesh.MoveVertice(1, root - forward * 1.6f);
-            mesh.MoveVertice(2, root + (right * sign - forward * 0.45f).normalized * spikeLengths[i] * size);
-        }
+            spikeLengths[i] = Mathf.Lerp(2.2f, 4.8f, owner.Personality.Temperament) *
+                Mathf.Lerp(0.8f, 1.15f, (float)random.NextDouble());
     }
 
-    private static void Place(FSprite sprite, Vector2 pos, float rotation, float x, float y)
+    public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        sprite.x = pos.x;
-        sprite.y = pos.y;
-        sprite.rotation = rotation;
-        sprite.scaleX = x;
-        sprite.scaleY = y;
+        // This creates the exact vanilla FlyBody / FlyWing / FlyWing / FlyEyes set
+        // and keeps all vanilla grabbed/dead/flight animation behavior intact.
+        base.InitiateSprites(sLeaser, rCam);
+
+        FSprite[] vanilla = sLeaser.sprites;
+        var expanded = new FSprite[VanillaSpriteCount + patterns.Length + spikeLengths.Length];
+        Array.Copy(vanilla, expanded, Mathf.Min(VanillaSpriteCount, vanilla.Length));
+
+        for (int i = 0; i < patterns.Length; i++)
+        {
+            // Mix dots and broken bars instead of painting the animal one flat color.
+            expanded[PatternStart + i] = patterns[i].Shape == 0
+                ? new FSprite("Circle20")
+                : new FSprite("pixel");
+        }
+
+        for (int i = 0; i < spikeLengths.Length; i++)
+            expanded[SpikeStart + i] = new TriangleMesh(
+                "Futile_White",
+                new[] { new TriangleMesh.Triangle(0, 1, 2) },
+                false);
+
+        sLeaser.sprites = expanded;
+        ApplyPalette(sLeaser, rCam, rCam.currentPalette);
+        AddToContainer(sLeaser, rCam, null);
+    }
+
+    public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
+    {
+        // Let vanilla perform its normal setup first, then replace only the colors.
+        base.ApplyPalette(sLeaser, rCam, palette);
+
+        float darkness = Mathf.Clamp01(palette.darkness * 0.72f);
+        bodyColor = Color.Lerp(desert.Personality.BaseColor, palette.blackColor, darkness);
+        wingColor = Color.Lerp(desert.Personality.WingColor, palette.blackColor, darkness * 0.88f);
+        darkMark = Color.Lerp(desert.Personality.SecondaryColor, palette.blackColor, darkness * 0.82f);
+        warmMark = Color.Lerp(
+            Color.Lerp(desert.Personality.BaseColor, new Color(0.60f, 0.30f, 0.18f), 0.42f + desert.Personality.Temperament * 0.28f),
+            palette.blackColor,
+            darkness * 0.75f);
+
+        if (sLeaser.sprites.Length < VanillaSpriteCount) return;
+        sLeaser.sprites[0].color = bodyColor;
+        sLeaser.sprites[1].color = wingColor;
+        sLeaser.sprites[2].color = wingColor;
+        sLeaser.sprites[3].color = Color.Lerp(darkMark, bodyColor, 0.18f);
+
+        for (int i = 0; i < patterns.Length; i++)
+        {
+            Color mark = Color.Lerp(darkMark, warmMark, patterns[i].Shade);
+            // A little local mixing keeps adjacent markings from becoming a single
+            // solid patch when many aggressive markings overlap.
+            sLeaser.sprites[PatternStart + i].color = Color.Lerp(
+                mark,
+                patterns[i].Wing ? wingColor : bodyColor,
+                0.10f + (i % 3) * 0.06f);
+        }
+
+        for (int i = 0; i < spikeLengths.Length; i++)
+            sLeaser.sprites[SpikeStart + i].color = Color.Lerp(darkMark, bodyColor, 0.18f);
+    }
+
+    public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
+    {
+        // Vanilla owns lowerBody, wing phases, grabbed struggle, death pose and the
+        // base four sprite positions. We deliberately do not reimplement any of it.
+        base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
+        if (culled || desert.slatedForDeletetion || desert.room != rCam.room || sLeaser.sprites.Length < VanillaSpriteCount) return;
+
+        float size = desert.Personality.Size;
+        float emerge = desert.Emergence.Progress;
+        float alpha = Mathf.SmoothStep(0f, 1f, emerge);
+
+        // Vanilla geometry, personality-controlled 1.00x-1.25x scaling.
+        sLeaser.sprites[0].scaleX = size;
+        sLeaser.sprites[0].scaleY = size;
+        sLeaser.sprites[1].scaleX *= size;
+        sLeaser.sprites[1].scaleY = size;
+        sLeaser.sprites[2].scaleX *= size;
+        sLeaser.sprites[2].scaleY = size;
+        sLeaser.sprites[3].scaleX = size;
+        sLeaser.sprites[3].scaleY = size;
+
+        Vector2 head = Vector2.Lerp(desert.mainBodyChunk.lastPos, desert.mainBodyChunk.pos, timeStacker) - camPos;
+        Vector2 tail = Vector2.Lerp(lowerBody.lastPos, lowerBody.pos, timeStacker) - camPos;
+        Vector2 forward = Custom.DirVec(tail, head);
+        if (forward.sqrMagnitude < 0.01f) forward = Vector2.up;
+        Vector2 right = Custom.PerpendicularVector(forward);
+        float bodyRotation = sLeaser.sprites[0].rotation;
+
+        for (int i = 0; i < patterns.Length; i++)
+        {
+            PatternMark mark = patterns[i];
+            FSprite sprite = sLeaser.sprites[PatternStart + i];
+            bool visible;
+
+            if (mark.Wing)
+            {
+                int wingIndex = mark.Side < 0 ? 1 : 2;
+                FSprite baseWing = sLeaser.sprites[wingIndex];
+                Vector2 wingDirection = Custom.DegToVec(baseWing.rotation);
+                float distance = Mathf.Lerp(4.2f, 11.2f, mark.Along) * size;
+                sprite.x = head.x + wingDirection.x * distance;
+                sprite.y = head.y + wingDirection.y * distance;
+                sprite.rotation = baseWing.rotation + mark.Offset * 14f;
+
+                if (mark.Shape == 0)
+                {
+                    sprite.scaleX = 0.10f * mark.Scale * size;
+                    sprite.scaleY = 0.065f * mark.Scale * size;
+                }
+                else
+                {
+                    sprite.scaleX = Mathf.Lerp(1.5f, 3.2f, mark.Along) * mark.Scale * size;
+                    sprite.scaleY = (0.75f + Mathf.Abs(mark.Offset) * 0.75f) * size;
+                }
+                visible = baseWing.isVisible;
+            }
+            else
+            {
+                Vector2 position = Vector2.Lerp(tail, head, mark.Along) + right * mark.Offset * 3f * size;
+                sprite.x = position.x;
+                sprite.y = position.y;
+                sprite.rotation = bodyRotation + mark.Offset * 28f;
+
+                if (mark.Shape == 0)
+                {
+                    sprite.scaleX = 0.09f * mark.Scale * size;
+                    sprite.scaleY = 0.055f * mark.Scale * size;
+                }
+                else
+                {
+                    sprite.scaleX = (1.4f + mark.Along * 1.6f) * mark.Scale * size;
+                    sprite.scaleY = (0.65f + Mathf.Abs(mark.Offset) * 0.8f) * size;
+                }
+                visible = sLeaser.sprites[0].isVisible;
+            }
+
+            sprite.isVisible = visible && alpha > 0.01f;
+            sprite.alpha = alpha * Mathf.Lerp(0.68f, 0.94f, desert.Personality.Contrast);
+        }
+
+        for (int i = 0; i < spikeLengths.Length; i++)
+        {
+            float t = (i + 1f) / (spikeLengths.Length + 1f);
+            float sign = i % 2 == 0 ? -1f : 1f;
+            Vector2 root = Vector2.Lerp(head, tail, Mathf.Lerp(0.28f, 0.82f, t));
+            root += right * sign * 2.3f * size;
+            Vector2 side = (right * sign - forward * 0.35f).normalized;
+            var mesh = (TriangleMesh)sLeaser.sprites[SpikeStart + i];
+            mesh.MoveVertice(0, root + forward * 1.25f * size);
+            mesh.MoveVertice(1, root - forward * 1.25f * size);
+            mesh.MoveVertice(2, root + side * spikeLengths[i] * size);
+            mesh.isVisible = sLeaser.sprites[0].isVisible && alpha > 0.01f;
+            mesh.alpha = alpha;
+        }
+
+        // Curve emergence fades the entire vanilla silhouette in while its body is
+        // physically moved through the surface. Normal hive emergence stays at 1.
+        for (int i = 0; i < VanillaSpriteCount; i++)
+            sLeaser.sprites[i].alpha = alpha;
     }
 }
