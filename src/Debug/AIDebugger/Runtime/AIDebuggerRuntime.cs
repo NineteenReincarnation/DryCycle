@@ -109,6 +109,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             if (overlayCamera != null) overlayCamera.enabled = visible;
         }
 
+        // Whole-session export is intentionally independent of the Dock layout. It can
+        // still be used after closing F7 as long as the retained trace buffers exist.
+        if (Input.GetKeyDown(KeyCode.F8) &&
+            (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
+            (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
+        {
+            TryExportSession();
+        }
+
         if (!visible) return;
         if (Input.GetKeyDown(KeyCode.F6)) window.FullMode = !window.FullMode;
         // Do not steal Tab from an active ImGui text/navigation widget.
@@ -159,13 +168,26 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             AIDebugStyleController.Reset();
             backend = new AIDebugImGuiBackend();
-            logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, whole-world pause/step enabled.");
+            logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, Ctrl+Shift+F8 session export, whole-world pause/step enabled.");
             return true;
         }
         catch (Exception error)
         {
             FailBackend("initialization", error);
             return false;
+        }
+    }
+
+    private void TryExportSession()
+    {
+        try
+        {
+            string path = AIDebugSessionExporter.Export();
+            logger?.LogInfo("DryCycle AI Observatory session exported: " + path);
+        }
+        catch (Exception error)
+        {
+            logger?.LogWarning("DryCycle AI Observatory session export failed: " + error);
         }
     }
 
