@@ -26,7 +26,7 @@ internal static class RopeSpearAimController
     // counted as one press, so Alt+Up/Down reeling can never oscillate the mode.
     private const int DoubleAltWindowFrames = 12;
     private const float ShortModeRopeThickness = 1.15f;
-    private const float UltraShortLengthMultiplier = 0.225f;
+    private const float UltraShortLengthMultiplier = 0.25f;
 
     private sealed class AimState
     {
@@ -231,9 +231,9 @@ internal static class RopeSpearAimController
 
                 if (mode.UltraShortMode)
                 {
-                    // Ultra-short is now 10% shorter than the previous quarter-length
-                    // tuning: 22.5% of the ordinary short-mode launch length.
-                    // Its floor scales by the same multiplier.
+                    // Ultra-short is defined as exactly one quarter of the length
+                    // the ordinary short mode would have captured for this throw.
+                    // Its own floor is therefore one quarter of Short's floor.
                     mode.LockedLength = Mathf.Clamp(
                         shortLength * UltraShortLengthMultiplier,
                         AbstractRopeSpear.MinRopeLength * UltraShortLengthMultiplier,
