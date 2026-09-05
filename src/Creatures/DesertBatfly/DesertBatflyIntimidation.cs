@@ -98,11 +98,12 @@ internal static class DesertBatflyIntimidation
     private const float VengeanceChargeMaxSpeed = 18f;
     private const float VengeanceHitExtraRadius = 5f;
 
-    // Extreme vengeance is dangerous on purpose. Only the highest VengeanceDrive can
-    // reach the upper Player damage range, where Creature.Violence may cross the
-    // Slugcat template's instant-death threshold. Ordinary retaliation never uses this.
+    // Extreme vengeance is dangerous on purpose. Player damage scales linearly with
+    // VengeanceDrive so the very highest rare individuals can cross a Slugcat's
+    // instant-death threshold. Peach remains on a squared, lower damage curve because
+    // it is a much larger predator. Ordinary retaliation never uses these values.
     private const float PlayerVengeanceDamageMin = 0.30f;
-    private const float PlayerVengeanceDamageMax = 1.10f;
+    private const float PlayerVengeanceDamageMax = 1.30f;
     private const float LizardVengeanceDamageMin = 0.12f;
     private const float LizardVengeanceDamageMax = 0.44f;
     private const float VengeanceStunMin = 14f;
@@ -713,11 +714,15 @@ internal static class DesertBatflyIntimidation
                     head + target.mainBodyChunk.vel * 0.95f,
                     Mathf.Lerp(VengeanceChargeMinSpeed, VengeanceChargeMaxSpeed, drive));
                 state.VengeanceTimer++;
-                if (TryVengeanceContact(bat, state, target, rescue: true) ||
-                    state.VengeanceTimer > VengeanceChargeTimeout)
+                if (TryVengeanceContact(bat, state, target, rescue: true))
                 {
                     if (state.Vengeance == VengeanceMode.RescueCharge)
                         ContinueOrWithdraw(bat, state, target);
+                }
+                else if (state.VengeanceTimer > VengeanceChargeTimeout)
+                {
+                    state.PassesRemaining = Mathf.Max(0, state.PassesRemaining - 1);
+                    ContinueOrWithdraw(bat, state, target);
                 }
                 break;
 
@@ -726,11 +731,16 @@ internal static class DesertBatflyIntimidation
                     bat,
                     head + target.mainBodyChunk.vel * 1.05f,
                     Mathf.Lerp(VengeanceChargeMinSpeed, VengeanceChargeMaxSpeed, drive));
-                if (--state.VengeanceTimer <= 0 ||
-                    TryVengeanceContact(bat, state, target, rescue: false))
+                state.VengeanceTimer--;
+                if (TryVengeanceContact(bat, state, target, rescue: false))
                 {
                     if (state.Vengeance == VengeanceMode.Charge)
                         ContinueOrWithdraw(bat, state, target);
+                }
+                else if (state.VengeanceTimer <= 0)
+                {
+                    state.PassesRemaining = Mathf.Max(0, state.PassesRemaining - 1);
+                    ContinueOrWithdraw(bat, state, target);
                 }
                 break;
 
@@ -762,7 +772,7 @@ internal static class DesertBatflyIntimidation
 
         float drive = bat.Personality.VengeanceDrive;
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, hitChunk.pos);
-        float damageDrive = drive * drive;
+        float damageDrive = target is Player ? drive : drive * drive;
         float damage = target is Player
             ? Mathf.Lerp(PlayerVengeanceDamageMin, PlayerVengeanceDamageMax, damageDrive)
             : Mathf.Lerp(LizardVengeanceDamageMin, LizardVengeanceDamageMax, damageDrive);
@@ -772,9 +782,9 @@ internal static class DesertBatflyIntimidation
             Mathf.Lerp(0.82f, 1.05f, state.Rage);
         Vector2 momentum = direction * Mathf.Lerp(VengeanceImpactMin, VengeanceImpactMax, drive);
 
-        // This is the deliberate lethal exception. A top-end extreme-vengence bat can
-        // cross Slugcat instant-death damage, while Peach receives meaningful but much
-        // smaller health damage because it is a large predator.
+        // This is the deliberate lethal exception. The highest rare personality can
+        // kill a Slugcat through vanilla Creature.Violence; Peach receives meaningful
+        // but smaller health damage because it is a large predator.
         target.Violence(
             bat.mainBodyChunk,
             momentum,
