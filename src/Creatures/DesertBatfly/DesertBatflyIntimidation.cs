@@ -31,7 +31,7 @@ internal static class DesertBatflyIntimidation
     private const int DirectShockMaxTicks = 500;
     private const int SecondaryShockMinTicks = 110;
     private const int SecondaryShockMaxTicks = 260;
-    private const int PanicRefreshTicks = 70;
+    private const int PanicRefreshTicks = 100;
     private const int AvoidRefreshTicks = 110;
 
     private const int CorpseLifetimeTicks = 600;
@@ -142,8 +142,8 @@ internal static class DesertBatflyIntimidation
         {
             // Immediate shock always wins over revenge/aggression. Threatened() already
             // owns chain release, attack cancellation and the native Escape steering.
-            // Refresh slower than the normal 90-tick retreat so a 5-12 second shock
-            // remains continuous without doing work every frame.
+            // Refresh slightly slower than the normal 90-tick retreat so the retreat
+            // is only renewed when it would otherwise be ending, rather than every frame.
             if (playerPresent && state.PanicRefresh <= 0)
             {
                 state.PanicRefresh = PanicRefreshTicks;
