@@ -19,7 +19,7 @@ namespace DryCycle.WatcherExts.PeachLizard;
 /// </summary>
 internal static class PeachLizardQuicksandSandMap
 {
-    // A Peach Lizard is not a point. Reject a tile when the quicksand boundary lies
+    // A Peach Lizard is not a point. Reject a tile when a quicksand boundary lies
     // immediately beside it, even if the tile centre itself is ordinary sand.
     private const float MaterialSafetyPadding = 8f;
     private const int MaterialSamplesPerTile = 7;
@@ -112,6 +112,13 @@ internal static class PeachLizardQuicksandSandMap
         cache.NormalizedDepth = new float[cache.Width, cache.Height];
         cache.LurkCandidates.Clear();
 
+        List<QuicksandZone> zones = new();
+        for (int i = 0; i < room.terrain.terrainList.Count; i++)
+        {
+            if (room.terrain.terrainList[i] is QuicksandZone zone && Usable(zone))
+                zones.Add(zone);
+        }
+
         float[] bestCandidateDistance = new float[cache.Width];
         int[] bestCandidateY = new int[cache.Width];
         for (int x = 0; x < cache.Width; x++)
@@ -120,11 +127,9 @@ internal static class PeachLizardQuicksandSandMap
             bestCandidateY[x] = -1;
         }
 
-        for (int terrainIndex = 0; terrainIndex < room.terrain.terrainList.Count; terrainIndex++)
+        for (int zoneIndex = 0; zoneIndex < zones.Count; zoneIndex++)
         {
-            if (room.terrain.terrainList[terrainIndex] is not QuicksandZone zone || !Usable(zone))
-                continue;
-
+            QuicksandZone zone = zones[zoneIndex];
             float authoredA = zone.PlacedObject.pos.x + zone.Data.SurfaceSpline.posA.x;
             float authoredB = zone.PlacedObject.pos.x + zone.Data.SurfaceSpline.posB.x;
             float authoredMinX = Mathf.Min(authoredA, authoredB);
@@ -158,6 +163,11 @@ internal static class PeachLizardQuicksandSandMap
                     // This guarantees the tile is actually part of this particular
                     // safe QuicksandZone section, not merely another terrain object.
                     if (!terrain.ObstructsTile(x, y)) continue;
+
+                    // Overlapping placed objects are allowed. A tile that is ordinary
+                    // sand in this zone is still unsafe if any other zone puts true
+                    // quicksand through the same physical tile volume.
+                    if (OverlapsAnyActualQuicksand(zones, x, y)) continue;
 
                     AItile aiTile = room.aimap.getAItile(x, y);
                     if (aiTile == null || aiTile.acc != AItile.Accessibility.Sand)
@@ -226,6 +236,57 @@ internal static class PeachLizardQuicksandSandMap
         }
 
         return sampled;
+    }
+
+    private static bool OverlapsAnyActualQuicksand(
+        List<QuicksandZone> zones,
+        int tileX,
+        int tileY)
+    {
+        float tileLeft = tileX * 20f - MaterialSafetyPadding;
+        float tileRight = (tileX + 1) * 20f + MaterialSafetyPadding;
+        float tileBottom = tileY * 20f - MaterialSafetyPadding;
+        float tileTop = (tileY + 1) * 20f + MaterialSafetyPadding;
+
+        for (int zoneIndex = 0; zoneIndex < zones.Count; zoneIndex++)
+        {
+            QuicksandZone zone = zones[zoneIndex];
+            float authoredA = zone.PlacedObject.pos.x + zone.Data.SurfaceSpline.posA.x;
+            float authoredB = zone.PlacedObject.pos.x + zone.Data.SurfaceSpline.posB.x;
+            float authoredMinX = Mathf.Min(authoredA, authoredB);
+            float authoredMaxX = Mathf.Max(authoredA, authoredB);
+            if (tileRight < authoredMinX || tileLeft > authoredMaxX)
+                continue;
+
+            float zoneBottom = zone.PlacedObject.pos.y - zone.Data.BottomDepth;
+            if (tileTop < zoneBottom)
+                continue;
+
+            for (int i = 0; i < MaterialSamplesPerTile; i++)
+            {
+                float t = MaterialSamplesPerTile <= 1
+                    ? 0.5f
+                    : i / (float)(MaterialSamplesPerTile - 1);
+                float worldX = Mathf.Lerp(tileLeft, tileRight, t);
+                if (worldX < authoredMinX || worldX > authoredMaxX)
+                    continue;
+
+                float u = zone.MaterialUAtWorldX(worldX);
+                if (!zone.Data.IsQuicksand(u) ||
+                    !zone.TrySampleSurfaceFrame(
+                        u,
+                        out Vector2 surface,
+                        out _,
+                        out _,
+                        out _))
+                    continue;
+
+                if (tileBottom <= surface.y && tileTop >= zoneBottom)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool Usable(QuicksandZone zone)
