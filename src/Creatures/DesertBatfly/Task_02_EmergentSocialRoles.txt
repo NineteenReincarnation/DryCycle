@@ -1,0 +1,909 @@
+Desert Batfly Task 02
+Sparse Emergent Social Roles / 稀疏涌现式社会角色
+Codex Execution Specification
+====================================================
+
+0. 任务性质
+-----------
+这是一个可以直接执行的 Codex 开发任务书。
+
+本任务实现 DiscussionStatus.txt 中已经敲定的第 2 项：Emergent Social Roles。
+
+核心不是把 Desert Batfly 做成“职业分工社会”，而是在绝大多数普通个体之间，偶尔出现少量行为特别鲜明的个体，作为生态点缀。
+
+【最重要的总体要求】
+- 大多数 Desert Batfly 必须是普通个体 / None。
+- 显性角色只是少数点缀，不得覆盖整个群体。
+- 不保证每个群落都拥有每一种角色。
+- 不按群落人数硬分配“1个哨兵、1个恶霸、1个机会主义者”。
+- 角色不是出生时的永久职业，也不是新的 Personality 轴。
+- Follower 与 Loner 不作为正式职业；它们只是 Conformity / RoostAffinity 等人格在行为上的自然表现。
+
+正式显性角色只保留：
+1) Sentinel / 哨戒者
+2) Bully / 挑衅者、骚扰发起者
+3) Opportunist / 机会主义观察者
+
+普通状态：
+4) None / Ordinary / 普通个体
+
+禁止实现：
+- 固定职业人口配额；
+- 永久 Role 存档；
+- RPG 式职业 buff；
+- 新增 AttackSlots；
+- 为每只个体强行选一个职业；
+- FollowerRole / LonerRole 这种正式角色 enum；
+- 完整 Boids flock simulation；
+- 第 3 项完整 Social Signal System；
+- 第 8 项完整 ThreatStyleMemory；
+- 第 10 项完整 Corpse Ecology。
+
+
+1. 当前项目基线
+---------------
+仓库：NineteenReincarnation/DryCycle
+主要目录：src/Creatures/DesertBatfly/
+
+执行前必须先阅读 main 当前实现，至少包括：
+- DesertBatflyState.cs
+- DesertBatfly.cs
+- DesertBatflyAI.cs
+- DesertBatflyIntimidation.cs
+- DesertBatflySocialBond.cs
+- DesertBatflyGraphics.cs
+- DesertSwarmRoom.cs
+- DiscussionStatus.txt
+- Task_05_SocialBond_Sex.txt（作为既有设计边界参考，不是让你重新实现 Task 05）
+- docs/DesertBatfly-SocialBond-Sex.md（若存在）
+- docs/DesertBatfly-Morale-Vengeance.md（若存在）
+- tests/DesertBatfly/Program.cs
+
+不要根据旧对话记忆覆盖当前源码。以 main 当前实现为准。
+
+当前已经存在的重要系统包括：
+- Personality：Temperament / Nerve / RoostAffinity / SandSpitAffinity / VengeanceAffinity / Conformity；
+- Male / Female 与轻度性二型；
+- 单槽 SocialBond；
+- Grief；
+- 普通 Harass / Observe / Approach / Circle / FakeDive / Dive / Attach / Interfere；
+- AttackSlots = 2；
+- GrabMemory；
+- Player / Peach Fear；
+- 有限链式恐惧；
+- Extreme Vengeance + Social Follower；
+- Persistent Trauma / PTSD；
+- Fly Chain / Roost；
+- Peach 捕食、救援、尸体捡食；
+- SandSpit。
+
+本任务必须扩展现有 AI，不允许建立第二套平行 Creature AI。
+
+
+2. 最终体验目标
+---------------
+正常约 11 + 3 的 Desert Batfly 群落中，玩家长期观察时应该偶尔感受到：
+- “那一只总喜欢待在外围看着外面，似乎更早发现危险。”
+- “那一只特别烦，经常主动来试探我。”
+- “那一只不怎么抢先行动，但危险一退就很快重新靠回来观察。”
+
+但是玩家绝不能产生：
+- “这群 14 只每只都有职业。”
+- “每个房间固定有哨兵、恶霸、机会主义者。”
+- “这是一个高度组织化的职业社会。”
+
+期望总体观感：
+- 普通 / None：约 70%~85%，必须是绝对多数；
+- 所有显性角色合计：通常约 15%~30%；
+- 正常 14 只群落通常只有约 2~4 只明显角色个体；
+- 个别群落可以只有 0~1 只；
+- 偶尔可以有 5 只左右，但不应成为常态；
+- 某个群落完全没有 Sentinel、完全没有 Opportunist 都是合法生态结果。
+
+这些是调参目标，不是硬编码人口百分比。
+
+
+3. 核心设计：潜在倾向 != 显性角色
+----------------------------------
+
+3.1 潜在倾向
+~~~~~~~~~~~~
+允许为每只 Desert Batfly 计算以下内部 tendency / score：
+- SentinelTendency
+- BullyTendency
+- OpportunistTendency
+
+这些值可以来自 Personality + 当前 runtime context。
+
+它们只是决策权重，不意味着个体拥有职业。
+
+不要把这些 score 写进持久存档；优先由稳定 Personality 和当前环境派生。
+
+3.2 显性角色
+~~~~~~~~~~~~
+运行时可以使用类似：
+
+internal enum ExpressedSocialRole
+{
+    None,
+    Sentinel,
+    Bully,
+    Opportunist
+}
+
+这个 enum 如果实现，只是 runtime expression，绝不是永久出生职业。
+
+默认必须是 None。
+
+只有在某个倾向足够突出时，才允许进入显性角色。
+
+推荐起始规则（可根据统计调参，但不得破坏设计目的）：
+- 最高 role score >= 约 0.76~0.82；
+- 且最高 score 比第二高 score 至少高约 0.10~0.15；
+- 且当前处于安全、可表达角色的状态；
+- 且通过群落“软角色预算”后的门槛。
+
+示例：
+Sentinel 0.82 / Bully 0.79 / Opportunist 0.40
+=> 不够鲜明，应该保持 None。
+
+Sentinel 0.88 / Bully 0.48 / Opportunist 0.35
+=> 可以表达 Sentinel。
+
+3.3 普通个体仍然复杂
+~~~~~~~~~~~~~~~~~~~~
+None 绝不等于“没有 Personality”。
+
+None 仍然完整拥有：
+- Temperament
+- Nerve
+- Conformity
+- RoostAffinity
+- SandSpitAffinity
+- VengeanceAffinity
+- Sex
+- SocialBond
+- Grief
+- Trauma
+- GrabMemory
+- Thirst
+- 现有 Harass / Roost / Fear / Vengeance 等全部逻辑。
+
+角色只是额外点缀。
+
+
+4. 稀疏化：软角色预算
+---------------------
+
+禁止硬编码：
+- MaxSentinel = 1
+- 必须有 1 Sentinel
+- 每 14 只固定 3 个 Role
+
+允许并推荐使用“软预算”控制显性角色总量。
+
+参考设计：
+- softBudget ≈ round(activeColonyCount * 0.20~0.28)
+- 正常 14 只大约 3~4 个显性角色的软预算；
+- 当当前角色数低于 softBudget：正常显性阈值；
+- 达到 softBudget 后：后续个体需要更高 score 才能进入角色；
+- 超过 softBudget 时继续提高阈值，但不要绝对禁止真正极端高分个体。
+
+这必须是“阈值压力”，不是岗位分配。
+
+不得为了填预算主动把低分个体升为角色。
+
+角色预算只控制显性表达数量，不修改 Personality。
+
+
+5. 角色生命周期
+---------------
+
+5.1 低频重评估
+~~~~~~~~~~~~~~
+禁止每帧重算所有 role score。
+
+推荐：
+- 每只个体约 80~160 tick 重评估一次；
+- 用 EntityID / seed 做 stagger，避免整个群落同一 tick 同时更新；
+- 或在 room-level social snapshot 更新后分散评估。
+
+5.2 平滑 / hysteresis
+~~~~~~~~~~~~~~~~~~~~~
+角色不能频繁：
+Sentinel -> None -> Sentinel -> None
+
+建议：
+- score 用平滑值或进入/退出双阈值；
+- 进入角色后有 400~1200 tick 左右的 RoleCommitment；
+- 正常结束后有约 240~720 tick RoleCooldown；
+- commitment/cooldown 可以有 Personality / stable jitter，但不要使用高频 UnityEngine.Random 造成抖动。
+
+5.3 角色不是不可打断状态
+~~~~~~~~~~~~~~~~~~~~~~~~
+以下状态必须立即压过显性角色行为：
+- dead
+- unconscious / stun 导致无法正常行为
+- grabbed / restrained
+- shortcut
+- emergence
+- direct predator danger
+- immediate weapon danger
+- Escape / DeathShock
+- severe PTSD / Trauma
+- Extreme Vengeance
+- Social Vengeance Follower 正在执行复仇生命周期
+- 强 Grief 响应
+- 原版 fleeFromRain / Burrow / lured / safari 等高优先状态
+- 后续第 7 项危险天气强制撤离
+
+角色可以在危险结束后重新评估，不得为了保住“职业身份”违反生存逻辑。
+
+5.4 不建议持久化 ExpressedRole
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ExpressedRole 是当前环境下的行为表达，优先保持 runtime-only。
+
+跨房间 / warp / unrealize 后：
+- 清理临时 role state；
+- 保留稳定 Personality；
+- 重新进入安全环境后再评估。
+
+不要增加不必要的 save schema 字段。
+
+
+6. FlockSnapshot / 轻量群体上下文
+--------------------------------
+
+为了避免 Sentinel/Loner-like/Follower-like 等逻辑在每只 Bat 中重复扫描整个群落，允许增加一个轻量 room-level FlockSnapshot。
+
+推荐放在 DesertSwarmRoom 或职责清晰的新 helper 中。
+
+建议字段：
+- Center：当前有效 Desert Batfly 平均位置；
+- AverageVelocity：平均速度；
+- ActiveCount；
+- PanicRatio / EscapeRatio；
+- RoostRatio / ChainRatio；
+- ExpressedRoleCount；
+- 可选：SentinelCount / BullyCount / OpportunistCount，仅用于软预算和 debug；
+- SnapshotAge / update clock。
+
+更新频率建议：
+- 每房间约 20~40 tick 一次；
+- 一次 O(n) 扫描当前 colony；
+- 过滤 dead / deleting / shortcut / 非当前 room 等无效个体。
+
+【禁止】
+- 每只 Bat 每帧重新求群体平均；
+- N×N 距离矩阵；
+- 完整 Boids cohesion/alignment/separation 接管移动。
+
+FlockSnapshot 只提供社会上下文，不替换原版 Fly locomotion。
+
+
+7. Sentinel / 哨戒者
+--------------------
+
+7.1 核心定位
+~~~~~~~~~~~~
+Sentinel 的作用不是更强攻击，而是：
+- 更容易待在群落外围；
+- 更愿意观察潜在威胁；
+- 对明显危险进行短时间确认；
+- 确认后更早触发现有局部 Alarm / Threat response；
+- 自己随后撤离或保持安全距离。
+
+7.2 倾向来源
+~~~~~~~~~~~~
+推荐高权重：
+- Nerve 高；
+- Conformity 中等到偏高；
+- Temperament 不需要极端高；中间区域可以更适合稳定观察；
+- 当前 Trauma/Fear 低；
+- 当前群落相对安全；
+- stable per-individual jitter，防止完全由三条 Personality 轴机械决定。
+
+不要让 Sex 直接决定 Sentinel。
+不要让 SocialBond 直接决定 Sentinel。
+
+7.3 空间行为
+~~~~~~~~~~~~
+安全状态下，Sentinel 可以对原版 Flight 做轻度偏置：
+- 更常位于 FlockSnapshot.Center 外围；
+- 参考距离约 120~260 px；
+- 不要飞得远离整个群落；
+- 不要为了“站岗”进入不可达位置；
+- 不覆盖 Hive / Rain / Escape / Roost 等原版强状态。
+
+允许使用轻量 Steering bias，但不要建立独立 pathfinder 或重新实现 Fly locomotion。
+
+7.4 主动确认威胁 —— 已敲定：允许
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sentinel 允许对真实可见的潜在威胁主动靠近一小段距离进行确认，但必须保持安全观察距离。
+
+目标体验：
+- 玩家在远处经过时，不是一看到就全群 Alarm；
+- Sentinel 可能先在外围看 20~60 tick；
+- 若玩家明显接近群体、进入危险距离、出现武器/暴力迹象、附近同伴已经 Panic，ThreatConfidence 上升；
+- 达阈值后才触发 Alarm；
+- 如果玩家只是路过，可能不 Alarm；
+- Sentinel 也允许误判。
+
+不得读取玩家输入、AI 目标或不可见信息。
+只能依据当前游戏世界中 Desert Batfly 实际可观察的信息，例如：
+- VisualContact；
+- 距离和距离变化；
+- 玩家/Peach 当前速度方向；
+- 已发生的 Violence / death / capture；
+- 附近 Bat 的 Escape/Panic 状态；
+- 玩家当前实际拿在手里的可见物体（若当前 API/可见性检查安全），但不要提前实现第 8 项复杂武器学习。
+
+对 Player 的确认距离应该比直接攻击距离更安全。
+对 Peach 等已知捕食者应更保守，不得为了“确认”主动送进舌头危险区。
+
+7.5 Alarm 接口
+~~~~~~~~~~~~~
+本任务不要另写完整 Social Signal System。
+
+优先复用现有：
+- Threatened
+- RaiseLocalAlarm 或等价局部报警逻辑
+- Intimidation / Fear
+
+如当前 RaiseLocalAlarm 是 private，可以按职责最小化重构为内部明确 API，但禁止复制一份新的 Alarm 系统。
+
+为第 3 项未来 Social Signal 预留只读/轻接口，例如：
+- role helper 可以暴露 IsSentinel / SentinelAlertConfidence；
+- 不要提前实现 Alarm Flutter / Rally Signal 全套。
+
+7.6 Sentinel 代价
+~~~~~~~~~~~~~~~~
+Sentinel 必须有自然代价：
+- 更常处在群落外围；
+- 更容易最早接近潜在危险；
+- 错误判断可能导致自己暴露；
+- 高 Nerve 不是免疫捕食。
+
+禁止给 Sentinel：
+- 伤害减免；
+- 更高生命；
+- 免费 AttackSlot；
+- 全知视野。
+
+
+8. Bully / 挑衅者
+-----------------
+
+8.1 核心定位
+~~~~~~~~~~~~
+Bully 是少数“更容易主动把普通骚扰事件启动起来”的个体。
+
+它不是 damage class，也不是 True Avenger。
+
+必须允许：
+- Bully 很高但 CanExtremeVengeance == false；
+- True Avenger 平时并不表现为 Bully。
+
+8.2 倾向来源
+~~~~~~~~~~~~
+推荐高权重：
+- Temperament 高；
+- Nerve 高；
+- 当前 Trauma/Fear 低；
+- 当前 Grief 对普通骚扰没有强抑制；
+- stable jitter。
+
+Conformity 可以很弱地参与，但不能让高 Conformity 自动变 Bully。
+
+8.3 行为影响
+~~~~~~~~~~~~
+Bully 只对现有普通骚扰链做加权：
+- 更容易主动选择可骚扰目标；
+- 更容易先进入 Observe；
+- Probe/Observe 时更愿意保持约 80~150 px 的试探距离；
+- 更频繁使用现有 FakeDive / Circle 作为威慑；
+- 可以略微缩短普通 Observe 迟疑；
+- 在玩家明显退开且没有伤亡/威胁反馈时，可以短时间维持更高骚扰兴趣。
+
+不要新增真实伤害能力。
+不要提高 Extreme Vengeance damage。
+不要绕过现有 AttackSlots。
+
+8.4 AttackSlots 是硬限制
+~~~~~~~~~~~~~~~~~~~~~~~~
+AttackSlots = 2 必须原样保留。
+
+即使房间里有 5 个 Bully：
+- 最多仍只有 2 个 formal attacker；
+- 其他 Bully 最多处于 Observe / 外围 Circle / FakeDive / 等待状态；
+- 不允许 role 逻辑直接 hasSlot=true；
+- 必须继续走现有 AcquireSlot / release slot。
+
+8.5 恐惧优先
+~~~~~~~~~~~~
+一旦出现：
+- 玩家杀死同伴；
+- Spear/weapon direct threat；
+- Peach 靠近；
+- Trauma 跨阈值；
+- 自己被抓；
+
+现有 Fear / PTSD / Escape 必须立即压过 Bully。
+
+“它是 Bully”绝不能成为无脑不怕死的理由。
+
+8.6 Bully 代价
+~~~~~~~~~~~~~
+自然代价就是：
+- 更频繁进入危险距离；
+- 更容易成为玩家反击目标；
+- 如果因此目击死亡或自己被抓，照常积累 Trauma/Grief。
+
+禁止提供隐藏抗性或生存 buff。
+
+
+9. Opportunist / 机会主义观察者
+------------------------------
+
+9.1 核心定位
+~~~~~~~~~~~~
+Opportunist 不是“捡尸职业”。
+
+它的核心是：
+- 不轻易第一个冲进危险；
+- 更愿意在中距离观察局势；
+- 当真实危险下降后，比普通个体更早重新进入原来的活动区域；
+- 利用低风险窗口，而不是读取隐藏信息。
+
+9.2 倾向来源
+~~~~~~~~~~~~
+建议综合：
+- 中高 Nerve；
+- Temperament 不极端；
+- Conformity 偏低到中等；
+- 当前 Trauma 低；
+- stable jitter；
+- 当前 OpportunityContext。
+
+不要让 Sex 直接决定 Opportunist。
+
+9.3 当前任务允许实现的 OpportunityContext
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+只使用已经存在、可观察的风险信号：
+- danger 刚刚离开；
+- local PanicRatio 正在下降；
+- 玩家/Peach 已经离开直接危险距离；
+- 当前没有 direct Visual threat；
+- 原有 Fear/retreat 已经接近结束；
+- 玩家正在明显远离群落（只依据位置/速度，不读取输入）。
+
+Opportunist 可以：
+- 在安全阈值满足后缩短“回到普通活动空间”的迟疑；
+- 在中距离保持 Watch/Observe；
+- 比普通个体更早回到 FlockSnapshot.Center 周边；
+- 对最近危险位置做轻微谨慎，不得直接无视现有 CorpseWarning / Fear。
+
+9.4 刚发生死亡区域 —— 已敲定：允许之后重新接近
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+如果危险已经真实离开、Fear/CorpseWarning 等现有危险提示已经降低到安全水平，Opportunist 可以比普通个体更早重新接近刚发生过事件的区域。
+
+但是：
+- 本任务不要创建新的 Corpse Ecology；
+- 不要让 Opportunist 主动寻找尸体；
+- 不要扫描尸体资源；
+- 不要读取“这里未来安全”这类全知信息；
+- 第 10 项将来实现 Corpse Ecology 后，再把 OpportunityContext 接入正式尸体 danger cue。
+
+9.5 Opportunist 代价
+~~~~~~~~~~~~~~~~~~~
+机会主义的代价是：
+- 会比其他个体更早重新靠近刚解除的危险区域；
+- 可能误判危险已经结束；
+- 不获得防御、速度或逃生 buff。
+
+
+10. Follower-like 与 Loner-like：不是职业
+----------------------------------------
+
+10.1 Follower-like
+~~~~~~~~~~~~~~~~~~
+禁止创建 FollowerRole。
+
+Follower-like 主要来自现有 Conformity。
+
+现有系统已经包括：
+- Social Vengeance Follower；
+- SocialFearScale；
+- Roost 对 Conformity 的轻影响。
+
+本任务只需要：
+- 不把 Follower-like 升格成显性职业；
+- 如 role helper 需要，可提供 FollowerLikeStrength = Conformity 派生值；
+- 为第 3 项 Signal System 预留接口；
+- 不在本任务提前实现完整 Fear/Harass/Roost/Safe 信号传播。
+
+10.2 Loner-like
+~~~~~~~~~~~~~~~
+禁止创建 LonerRole。
+
+Loner-like 主要来自：
+- 低 Conformity；
+- 低 RoostAffinity；
+- 可辅以 Nerve。
+
+允许做非常轻的普通空间/社交偏置，例如：
+- 安全 Flight 时更能接受离 FlockSnapshot.Center 稍远；
+- 更少受“附近个体正在 Roost”这种未来社会加权影响；
+- 但直接看到 Predator 时仍按自己的 Fear 正常逃；
+- 不削弱 direct threat detection。
+
+SocialBond 必须能够产生例外：
+- 一个很 Loner-like 的个体仍可以非常在乎自己的 BondTarget；
+- 不能因为低 Conformity 就拒绝一切 Bond 行为。
+
+如果当前 AI 没有合适、安全的普通 Flight spatial bias 接口，不要为了 Loner-like 强行重写 locomotion；可以只提供派生 strength 和留给第 3 项使用。
+
+
+11. SocialBond / Grief 接口
+--------------------------
+
+Task 05A 已经实现 SocialBond 与 Grief，必须以 main 当前代码为准。
+
+11.1 Bond 不等于角色
+~~~~~~~~~~~~~~~~~~~~
+SocialBondTarget 不能直接决定角色。
+
+允许：
+- Sentinel 看到 Bond partner 靠近危险时，ThreatConfidence 略提高；
+- Bully 在 Bond partner 已经正常 Harass 时，普通兴趣略提高；
+- Loner-like 个体在安全状态下允许靠近 Bond partner，部分抵消离群空间偏好；
+- Opportunist 在 Bond partner 已恢复普通活动时，可以把它作为“环境恢复正常”的弱证据。
+
+所有这些都只能是小幅加权。
+
+11.2 Grief 对角色
+~~~~~~~~~~~~~~~~~
+Grief 应压低角色表达，尤其：
+- Bully 明显降低；
+- Sentinel 视 Grief 强度降低或暂停；
+- Opportunist 在强 Grief 期间不应表现成若无其事地回去捡机会。
+
+高 Temperament 个体的 GriefAnger 仍由现有 Task 05A 逻辑处理；本任务不要重新发明 Grief。
+
+严重 PTSD 仍然高于所有角色。
+
+
+12. 与 Extreme Vengeance 的边界
+-------------------------------
+
+角色与 Vengeance 完全分离：
+- Bully != True Avenger；
+- Sentinel != leader；
+- Opportunist != coward；
+- ExpressedRole 不修改 CanExtremeVengeance；
+- 不修改约 4.94% True Avenger 标定；
+- 不改变 SocialVengeanceGroupCap；
+- Vengeance lifecycle 启动后暂停 role expression 行为；
+- Vengeance Withdraw/结束后再进入普通 role reevaluation。
+
+绝不能因为 Bully role 提高 True Avenger 出现率。
+
+
+13. 可视化行为要求
+-----------------
+
+角色必须能够通过运动习惯被玩家长期观察出来，而不是只存在 debug 数字里。
+
+不用新建大量 Sprite/动画资源；优先通过已有运动表现。
+
+Sentinel：
+- 更常在群落外围；
+- 短暂停留/转向潜在威胁；
+- 安全距离确认；
+- 确认后局部 Alarm / Escape。
+
+Bully：
+- 更常主动 Observe；
+- 中近距离 Probe；
+- FakeDive / Circle 更明显；
+- 但 formal attack cap 不变。
+
+Opportunist：
+- 危险时不第一个冲；
+- 中距离 Watch；
+- 风险下降后较早回到活动区域。
+
+None：
+- 完全正常使用现有复杂 AI；
+- 不需要视觉标签。
+
+禁止：
+- 在普通游戏 HUD 上显示职业名称；
+- 给角色永久换色；
+- 用巨大图标暴露角色。
+
+
+14. Debug / 调参支持
+--------------------
+
+建议提供开发者模式可读信息，但不要做常驻玩家 UI。
+
+至少应能从代码/debug 输出观察：
+- current ExpressedRole；
+- Sentinel/Bully/Opportunist score；
+- role commitment/cooldown；
+- FlockSnapshot activeCount / roleCount；
+- role suppression reason（danger / grief / trauma / vengeance 等）若实现方便。
+
+如果项目已有 dev label/visualizer，复用它。
+如果没有，不要为了本任务造大型 Debug UI；内部只读属性 + 日志/测试可访问即可。
+
+
+15. 性能要求
+------------
+
+正常群落约 14 只，角色系统必须保持轻量。
+
+硬要求：
+- 不逐帧 O(n^2)；
+- 不每只 Bat 每帧扫描所有 DesertBatfly；
+- room-level FlockSnapshot 最多低频 O(n)；
+- role evaluation 80~160 tick 级低频并 stagger；
+- 不创建每只 Bat 的 Dictionary/List 角色历史；
+- ExpressedRole runtime state 固定大小；
+- dead/Destroy/room reset 后不留下 active role state 泄漏；
+- 不为角色建立第二个 AI controller；
+- 不接管原版 Fly pathing/locomotion。
+
+角色系统如果没有显性角色、没有安全 role context，应尽量 fast-return。
+
+
+16. 建议代码组织
+----------------
+
+可以新建职责单一文件，例如：
+- DesertBatflySocialRoles.cs
+
+推荐职责：
+- ExpressedSocialRole enum；
+- RoleScores / role runtime state；
+- EvaluateRole；
+- Suppression 判断；
+- soft budget；
+- Sentinel/Bully/Opportunist 的小型行为加权 helper；
+- FollowerLikeStrength / LonerLikeStrength 只读派生；
+- debug summary。
+
+FlockSnapshot 建议放在：
+- DesertSwarmRoom 内部缓存；
+或
+- 单独 DesertBatflyFlockContext.cs。
+
+不要把所有角色逻辑继续塞进已经很大的 DesertBatflyAI.cs。
+DesertBatflyAI 只负责在合适的决策点调用 role helper。
+
+具体文件结构可根据当前 main 调整，但职责必须清晰。
+
+
+17. 角色 score 初始公式建议
+--------------------------
+
+以下仅作为第一版调参起点，不是不可修改常量。
+Codex 应在 10,000 seed / synthetic colony 统计后微调，使 None 保持绝对多数。
+
+17.1 Sentinel base score
+~~~~~~~~~~~~~~~~~~~~~~~~
+概念权重：
+- Nerve：高权重；
+- Conformity：中等权重；
+- Temperament 距离中间值越近可略加分；
+- RoostAffinity：小权重；
+- stable individual jitter：小权重。
+
+示例思想：
+0.35*Nerve
++0.20*Conformity
++0.15*middleTemperamentPreference
++0.10*RoostAffinity
++0.20*stableJitter
+
+17.2 Bully base score
+~~~~~~~~~~~~~~~~~~~~
+概念：
+0.45~0.55*Temperament
++0.25~0.35*Nerve
++ small lowTrauma / stableJitter modifier
+
+17.3 Opportunist base score
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+概念：
+- Nerve 中高；
+- Temperament 中低到中等；
+- Conformity 低到中等；
+- stableJitter；
+- runtime OpportunityContext。
+
+不要让 Opportunist 和 Loner 完全重合。
+
+17.4 Dominance gap
+~~~~~~~~~~~~~~~~~~
+显性化时必须检查 top score 与 second score 的差值。
+
+如果多个角色倾向都差不多，保持 None。
+这是确保角色是“鲜明点缀”而不是人人贴标签的重要机制。
+
+
+18. 测试要求
+------------
+
+更新 tests/DesertBatfly/Program.cs 或新增职责清晰的 managed tests。
+
+必须至少覆盖：
+
+18.1 Score 稳定性
+- 同一 seed、同一 synthetic context 得到相同 base role scores；
+- score 始终 finite 且 0..1；
+- 不改变 Sex 稳定分布；
+- 不改变 SandSpit trait；
+- 不改变约 4.94% True Avenger 分布。
+
+18.2 稀疏职业分布
+在安全 baseline context 下，对 10,000 seeds 或大量 synthetic 14-bat colonies 统计：
+- None 必须约 70%~85%；
+- 所有显性角色合计通常约 15%~30%；
+- 不要求三种角色各自固定比例；
+- 不能出现接近 100% 个体都有角色；
+- 不能通过硬填坑保证每群都有三种角色。
+
+允许根据实际 Personality 分布把范围调得稍宽，但最终测试必须体现“普通个体绝对多数”的设计目标。
+
+18.3 soft budget
+- 角色数量达到 softBudget 后，新个体显性门槛上升；
+- 极端高分个体仍有机会越过软预算；
+- 低分个体不会因为预算有空位被强制升级。
+
+18.4 优先级
+构造/反射检查：
+- severe Trauma -> role behavior 被压制；
+- danger/retreat -> Escape 优先；
+- Extreme Vengeance active -> role behavior 停止；
+- Grief strong -> Bully/Opportunist 普通表达被压低；
+- restrained/dead/shortcut -> role helper fast-return。
+
+18.5 AttackSlots 回归
+- Bully 不增加 AttackSlots；
+- 原有最多 2 个 formal attacker 测试继续通过；
+- Bully Observe/FakeDive 不能绕过 AcquireSlot 直接 Attach/Dive 正式攻击。
+
+18.6 FlockSnapshot
+- dead/shortcut/other-room 个体不计入；
+- Center/average velocity 不产生 NaN；
+- activeCount=0 安全处理；
+- snapshot 更新不是 per-bat per-frame O(n)。
+
+18.7 SocialBond
+- LonerLikeStrength 高仍可有 Bond；
+- Bond partner 不强制改变 ExpressedRole；
+- severe PTSD 仍压过 Bond + role。
+
+
+19. 实机验收场景
+----------------
+
+Codex 完成后必须在文档中列出以下实机验收；如果当前环境不能跑 Rain World，不要声称已实机通过。
+
+A. 普通群落
+- 观察 10+ 个正常群落；
+- 大部分 Bat 看起来只是普通个体；
+- 不应该每群都能明显找齐三种角色。
+
+B. Sentinel
+- 偶尔有个体更常待外围；
+- 玩家远处路过时先观察，不一定 Alarm；
+- 玩家明显靠近/制造危险后能较早触发局部 Alarm；
+- Peach 出现时不为了“确认”冲进舌头危险范围。
+
+C. Bully
+- 少数个体更容易主动 Observe/FakeDive；
+- 多个 Bully 同时存在时 formal attack 仍最多 2；
+- 玩家一旦反杀同伴，Bully 正常进入 Fear/PTSD，不无脑冲。
+
+D. Opportunist
+- 威胁存在时保持谨慎；
+- 威胁真实离开后，比普通个体稍早回到活动区域；
+- 不会主动扫描/捡尸，因为 Corpse Ecology 还未实现。
+
+E. None
+- 普通个体数量明显最多；
+- None 仍表现出 Temperament/Nerve/Conformity/SocialBond 等差异。
+
+F. Task 05A 交叉
+- 强 Bond 的 Loner-like 个体仍会靠近 Bond partner；
+- Grief 期间不会继续若无其事执行 Bully/Opportunist 行为；
+- partner 死亡后的 PTSD/Grief 优先级不被 role 打破。
+
+
+20. 必须进行的整体 AI 复盘
+--------------------------
+
+实现完成后，不要只检查新文件。
+必须重新走一遍至少以下链路，并直接修复能够确定的问题：
+
+1) Flight -> role evaluation -> Sentinel perimeter/watch -> Threatened/Escape -> role reset
+2) Flight -> Bully Observe -> FakeDive/Approach -> AcquireSlot -> Finish/Cooldown
+3) Bully + retaliationCharges / GrabMemory 是否会重复启动旧攻击
+4) Opportunist -> recent danger -> retreat decay -> early return -> 再次 danger
+5) role + severe PTSD
+6) role + Grief
+7) role + SocialBond
+8) role + Extreme Vengeance / Follower
+9) role + Fly Chain / Roost
+10) role + player-held / Peach-held
+11) role + dead corpse Update / Destroy
+12) role + room transition / shortcut / warp
+13) soft budget 中角色死亡/离房后计数是否恢复
+14) FlockSnapshot 是否包含 stale/dead realized refs
+15) Bully 是否泄漏 AttackSlot
+16) Sentinel Alarm 是否重复广播导致恐惧叠加爆炸
+17) Opportunist 是否把仍有 CorpseWarning/Trauma 的区域错误判断为安全
+18) RoleCommitment 是否在 suppressed 状态下被每帧重置造成永远无法结束
+19) role reevaluation 是否所有 Bat 同帧执行造成周期性尖峰
+20) ExpressedRole 是否被误写进存档或跨 unrealize 泄漏。
+
+发现确定的 bug 直接修；不能确认的风险记录到文档，不要用猜测性大改原 AI。
+
+
+21. 文档要求
+------------
+
+实现后新增或更新文档，例如：
+- docs/DesertBatfly-Emergent-Social-Roles.md
+
+文档必须记录：
+- None 为绝对多数的设计目标；
+- 三个正式角色；
+- Follower/Loner 不是职业；
+- score / expression / soft budget 的最终参数；
+- FlockSnapshot 的更新频率；
+- 角色 suppression 优先级；
+- 与 SocialBond/Grief/PTSD/Vengeance/AttackSlots 的接口；
+- 性能模型；
+- 自动测试结果；
+- 尚未实现的 Social Signal / ThreatStyle / Corpse Ecology 接口；
+- 实机验收清单。
+
+同时更新 DiscussionStatus.txt 第 2 项为“已实现/待实机验收”或对应实际状态。
+不要擅自把第 3、8、10 项标记成已完成。
+
+
+22. 完成定义 / Definition of Done
+--------------------------------
+只有同时满足以下条件，Task 02 才算完成：
+
+- [ ] 大多数个体保持 None / Ordinary；
+- [ ] 正式角色只有 Sentinel / Bully / Opportunist；
+- [ ] Follower/Loner 不作为正式职业；
+- [ ] 角色是 runtime expression，不是永久职业；
+- [ ] 角色表达需要高 score + dominance gap；
+- [ ] 使用软预算而非岗位分配；
+- [ ] Sentinel 有外围观察和安全确认行为；
+- [ ] Sentinel 可误判，但不能全知；
+- [ ] Bully 更主动骚扰但不增加 AttackSlots/伤害；
+- [ ] Opportunist 只利用真实风险下降窗口；
+- [ ] 普通 None 个体保留完整复杂 AI；
+- [ ] FlockSnapshot 是低频 O(n)，无 O(n^2) 热路径；
+- [ ] PTSD/Fear/Grief/Vengeance 高于角色；
+- [ ] SocialBond 与角色保持独立；
+- [ ] 角色不会改变 True Avenger 约 4.94% 标定；
+- [ ] 角色不会改变 Sex/SandSpit 稳定随机管线；
+- [ ] AttackSlots=2 回归通过；
+- [ ] save/load 不新增无必要 role 持久字段；
+- [ ] 自动测试覆盖稀疏分布和优先级；
+- [ ] 完成整体 AI 复盘；
+- [ ] 文档记录最终参数和未实现接口；
+- [ ] 无法实机运行时明确写“未实机验收”，禁止虚报。
+
+最终目标不是“让每只 Desert Batfly 都有一个职业”。
+最终目标是：
+
+“绝大多数仍然只是各有性格的普通沙漠蝠蝇；偶尔其中一两只、三四只因为自己特别突出的性格和当前环境，自然表现得像哨兵、恶霸或机会主义者。玩家能观察出差异，但不会感觉这是一个人为分配岗位的职业社会。”
