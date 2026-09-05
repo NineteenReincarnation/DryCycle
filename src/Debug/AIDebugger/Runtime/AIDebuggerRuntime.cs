@@ -74,7 +74,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     internal bool Visible => visible;
     internal bool WantsMouse => visible && backend?.WantsMouse == true;
     internal bool WantsKeyboard => visible && (window.InteractMode || backend?.WantsKeyboard == true);
-    internal bool BlocksPlayerInput => visible && (window.InteractMode || backend?.WantsKeyboard == true);
+    internal bool BlocksPlayerInput => visible &&
+        (window.InteractMode || backend?.WantsKeyboard == true || backend?.WantsMouse == true);
 
     internal void Bind(RainWorld rw, ManualLogSource log)
     {
@@ -110,7 +111,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
         if (!visible) return;
         if (Input.GetKeyDown(KeyCode.F6)) window.FullMode = !window.FullMode;
-        if (Input.GetKeyDown(KeyCode.Tab)) window.ToggleInteract();
+        // Do not steal Tab from an active ImGui text/navigation widget.
+        if (Input.GetKeyDown(KeyCode.Tab) && backend?.WantsKeyboard != true) window.ToggleInteract();
         if (!EnsureBackend()) return;
 
         Stopwatch watch = Stopwatch.StartNew();
