@@ -23,7 +23,13 @@ internal static class RopeSpearWallStickRuntime
         internal Vector2 Direction;
     }
 
+    private sealed class BeamThrowState
+    {
+        internal bool ThrowWasHeld;
+    }
+
     private static readonly ConditionalWeakTable<RopeSpear, FlightState> FlightStates = new();
+    private static readonly ConditionalWeakTable<Player, BeamThrowState> BeamThrowStates = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -155,6 +161,8 @@ internal static class RopeSpearWallStickRuntime
     {
         orig(self, eu);
 
+        RecoverBeamSupportedThrow(self, eu);
+
         if (self?.animation != Player.AnimationIndex.VineGrab ||
             self.vinePos?.vine is not RopeSpear ropeSpear ||
             HasFixedClimbAnchors(ropeSpear))
@@ -169,6 +177,171 @@ internal static class RopeSpearWallStickRuntime
         self.vinePos = null;
         self.vineGrabDelay = Mathf.Max(self.vineGrabDelay, 10);
         self.noGrabCounter = Mathf.Max(self.noGrabCounter, 5);
+    }
+
+    private static void RecoverBeamSupportedThrow(Player player, bool eu)
+    {
+        if (player?.input == null || player.input.Length == 0)
+        {
+            return;
+        }
+
+        BeamThrowState state = BeamThrowStates.GetOrCreateValue(player);
+        bool throwHeld = player.input[0].thrw;
+        bool throwReleased = state.ThrowWasHeld && !throwHeld;
+        state.ThrowWasHeld = throwHeld;
+
+        if (!throwReleased || !IsBeamSupportedThrowState(player))
+        {
+            return;
+        }
+
+        if (!TryFindHeldRopeSpear(player, out int graspIndex, out RopeSpear spear))
+        {
+            return;
+        }
+
+        // The custom aim controller normally releases inside GrabUpdate. On the top
+        // of a vertical beam Rain World's BeamTip transition can consume that release
+        // frame while the aim pose remains valid, leaving the RopeSpear in the hand.
+        // Retry once after Player.Update has finished. At this point all beam-state
+        // movement code has run, so the ordinary Player.ThrowObject path is safe.
+        Vector2 aimedDirection = spear.rotation;
+        if (aimedDirection.sqrMagnitude < 0.0001f)
+        {
+            int facing = player.ThrowDirection;
+            if (facing == 0)
+            {
+                facing = player.flipDirection;
+            }
+            aimedDirection = new Vector2(facing < 0 ? -1f : 1f, 0f);
+        }
+        aimedDirection.Normalize();
+
+        player.ThrowObject(graspIndex, eu);
+
+        if (spear.slatedForDeletetion ||
+            spear.mode != Weapon.Mode.Thrown ||
+            IsStillHeld(player, graspIndex, spear))
+        {
+            return;
+        }
+
+        ApplyRecoveredThrowDirection(player, spear, aimedDirection, eu);
+    }
+
+    private static bool IsBeamSupportedThrowState(Player player)
+    {
+        return player != null &&
+               player.bodyMode == Player.BodyModeIndex.ClimbingOnBeam &&
+               (player.animation == Player.AnimationIndex.BeamTip ||
+                player.animation == Player.AnimationIndex.GetUpToBeamTip ||
+                player.animation == Player.AnimationIndex.StandOnBeam);
+    }
+
+    private static bool TryFindHeldRopeSpear(
+        Player player,
+        out int graspIndex,
+        out RopeSpear spear)
+    {
+        graspIndex = -1;
+        spear = null;
+        if (player?.grasps == null)
+        {
+            return false;
+        }
+
+        // Preserve vanilla throw priority. If another throwable object is in the
+        // earlier hand, do not steal that release for RopeSpear recovery.
+        for (int i = 0; i < player.grasps.Length; i++)
+        {
+            Creature.Grasp grasp = player.grasps[i];
+            if (grasp?.grabbed == null || !player.IsObjectThrowable(grasp.grabbed))
+            {
+                continue;
+            }
+
+            if (grasp.grabbed is not RopeSpear candidate)
+            {
+                return false;
+            }
+
+            graspIndex = i;
+            spear = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsStillHeld(Player player, int graspIndex, RopeSpear spear)
+    {
+        return player?.grasps != null &&
+               graspIndex >= 0 &&
+               graspIndex < player.grasps.Length &&
+               ReferenceEquals(player.grasps[graspIndex]?.grabbed, spear);
+    }
+
+    private static void ApplyRecoveredThrowDirection(
+        Player player,
+        RopeSpear spear,
+        Vector2 direction,
+        bool eu)
+    {
+        direction.Normalize();
+
+        float throwSpeed = spear.firstChunk.vel.magnitude;
+        if (throwSpeed < 1f)
+        {
+            throwSpeed = 40f;
+        }
+
+        Vector2 vanillaDirection = spear.throwDir.ToVector2();
+        if (vanillaDirection.sqrMagnitude > 0.0001f)
+        {
+            vanillaDirection.Normalize();
+        }
+        else
+        {
+            vanillaDirection = new Vector2(player.flipDirection < 0 ? -1f : 1f, 0f);
+        }
+
+        spear.firstChunk.vel = direction * throwSpeed;
+
+        Vector2 desiredPosition = player.firstChunk.pos +
+                                  direction * 10f +
+                                  new Vector2(0f, 4f);
+        if (player.room != null && !player.room.GetTile(desiredPosition).Solid)
+        {
+            spear.firstChunk.MoveFromOutsideMyUpdate(eu, desiredPosition);
+            spear.thrownPos = desiredPosition;
+        }
+
+        spear.firstFrameTraceFromPos = player.mainBodyChunk.pos - direction * 10f;
+        spear.setRotation = direction;
+        spear.rotation = direction;
+        spear.lastRotation = direction;
+        spear.rotationSpeed = 0f;
+        spear.changeDirCounter = 0;
+
+        if (Mathf.Abs(direction.x) >= Mathf.Abs(direction.y))
+        {
+            spear.throwDir = new IntVector2(direction.x < 0f ? -1 : 1, 0);
+        }
+        else
+        {
+            spear.throwDir = new IntVector2(0, direction.y < 0f ? -1 : 1);
+        }
+
+        // Player.ThrowObject already applied horizontal vanilla recoil. Rotate only
+        // that impulse into the chosen aim direction so BeamTip throws retain the
+        // same recoil magnitude as throws from ordinary ground states.
+        Vector2 recoilCorrection = direction - vanillaDirection;
+        player.mainBodyChunk.vel += recoilCorrection * 8f;
+        if (player.bodyChunks != null && player.bodyChunks.Length > 1)
+        {
+            player.bodyChunks[1].vel -= recoilCorrection * 4f;
+        }
     }
 
     private static bool HasFixedClimbAnchors(RopeSpear spear)
