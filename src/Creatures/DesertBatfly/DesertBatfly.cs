@@ -328,12 +328,18 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         }
 
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
+        bool previousLegitimateDeathContext = resolvingNonRockViolence;
+        resolvingNonRockViolence = true;
         try
         {
+            // A Rock collision guard may still be active for a few ticks. Player eating
+            // is a separate legitimate death path and must not be mistaken for delayed
+            // Rock lethality by Die().
             base.BitByPlayer(grasp, eu);
         }
         finally
         {
+            resolvingNonRockViolence = previousLegitimateDeathContext;
             mealFood = 2;
         }
 
