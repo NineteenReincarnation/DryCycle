@@ -25,6 +25,7 @@ internal static class RopeSpearDiagonalClimbRuntime
 
         _enabled = true;
         On.Player.Update += Player_Update;
+        RopeSpearSlopePoseRuntime.Enable();
     }
 
     internal static void Disable()
@@ -34,6 +35,7 @@ internal static class RopeSpearDiagonalClimbRuntime
             return;
         }
 
+        RopeSpearSlopePoseRuntime.Disable();
         On.Player.Update -= Player_Update;
         _enabled = false;
     }
