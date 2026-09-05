@@ -21,8 +21,11 @@ internal readonly struct AIDebugTraceEvent
     internal readonly float Time;
     internal readonly AIDebugEventCategory Category;
     internal readonly string Name;
-    internal readonly string Detail;
-    internal readonly string Reason;
+    internal readonly string RawDetail;
+    internal readonly string RawReason;
+
+    internal string Detail => AIDebugExtendedLocalization.EventDetail(Name, RawDetail);
+    internal string Reason => AIDebugExtendedLocalization.EventReason(RawReason);
 
     internal AIDebugTraceEvent(int frame, float time, AIDebugEventCategory category,
         string name, string detail, string reason)
@@ -31,8 +34,8 @@ internal readonly struct AIDebugTraceEvent
         Time = time;
         Category = category;
         Name = name ?? "?";
-        Detail = detail ?? string.Empty;
-        Reason = reason ?? string.Empty;
+        RawDetail = detail ?? string.Empty;
+        RawReason = reason ?? string.Empty;
     }
 }
 
@@ -115,7 +118,7 @@ internal static class AIDebugTrace
     private const int EventCapacity = 1024;
     private const int FrameCapacity = 600;
     private const int MaxTraces = 12;
-    private const int SampleTickInterval = 4; // Rain World runs its gameplay clock at 40 Hz.
+    private const int SampleTickInterval = 4;
 
     private sealed class Trace
     {
@@ -134,8 +137,6 @@ internal static class AIDebugTrace
 
     internal static bool Visible => visible;
 
-    // Prefer Rain World's simulation clock. It does not advance during Pause World,
-    // which keeps Timeline, Trigger Capture and anomaly windows tied to actual AI time.
     internal static int SimulationTick
     {
         get
@@ -216,9 +217,6 @@ internal static class AIDebugTrace
         DebugEntityKey key = DebugEntityKey.From(creature);
         Trace trace = GetOrCreate(key);
         int tick = SimulationTick;
-
-        // No duplicate samples while the world is paused. A manual Step advances
-        // RainWorldGame.clock by one and therefore records exactly one stepped state.
         if (tick <= trace.LastSampleTick) return;
         int requiredInterval = AIDebugSimulationControl.Paused ? 1 : SampleTickInterval;
         if (trace.LastSampleTick != int.MinValue && tick - trace.LastSampleTick < requiredInterval) return;
