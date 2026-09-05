@@ -31,13 +31,14 @@ internal static class AIDebugDockingNative
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern void igDockBuilderFinish(uint node_id);
 
-    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    private static extern void igLoadIniSettingsFromDisk(string ini_filename);
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void igLoadIniSettingsFromMemory(IntPtr ini_data, uint ini_size);
 
-    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    private static extern void igSaveIniSettingsToDisk(string ini_filename);
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr igSaveIniSettingsToMemory(out uint out_ini_size);
 
-    internal static void DockSpace(uint dockspaceId, Num.Vector2 size, ImGuiDockNodeFlags flags = ImGuiDockNodeFlags.None) =>
+    internal static void DockSpace(uint dockspaceId, Num.Vector2 size,
+        ImGuiDockNodeFlags flags = ImGuiDockNodeFlags.None) =>
         igDockSpace(dockspaceId, size, flags, IntPtr.Zero);
 
     internal static void BuildDefault(uint dockspaceId, Num.Vector2 size)
@@ -53,6 +54,8 @@ internal static class AIDebugDockingNative
         uint bottom, center;
         igDockBuilderSplitNode(centerBottom, ImGuiDir.Down, 0.31f, out bottom, out center);
 
+        // The visible label can change language; the ### suffix gives every window a
+        // stable ImGui ID, so these English bootstrap names still dock localized windows.
         igDockBuilderDockWindow("Entity Browser###AIEntityBrowser", left);
         igDockBuilderDockWindow("Inspector###AIInspector", right);
         igDockBuilderDockWindow("Timeline###AITimeline", bottom);
@@ -72,7 +75,18 @@ internal static class AIDebugDockingNative
     {
         string path = AIDebugSettings.LayoutPath;
         if (!File.Exists(path)) return false;
-        igLoadIniSettingsFromDisk(path);
+        byte[] data = File.ReadAllBytes(path);
+        if (data.Length == 0) return false;
+        IntPtr memory = Marshal.AllocHGlobal(data.Length);
+        try
+        {
+            Marshal.Copy(data, 0, memory, data.Length);
+            igLoadIniSettingsFromMemory(memory, checked((uint)data.Length));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(memory);
+        }
         return true;
     }
 
@@ -80,7 +94,11 @@ internal static class AIDebugDockingNative
     {
         string directory = Path.GetDirectoryName(AIDebugSettings.LayoutPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-        igSaveIniSettingsToDisk(AIDebugSettings.LayoutPath);
+        IntPtr memory = igSaveIniSettingsToMemory(out uint size);
+        if (memory == IntPtr.Zero || size == 0) return;
+        byte[] data = new byte[checked((int)size)];
+        Marshal.Copy(memory, data, 0, data.Length);
+        File.WriteAllBytes(AIDebugSettings.LayoutPath, data);
     }
 
     internal static void DeleteLayout()
