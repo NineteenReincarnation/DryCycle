@@ -117,6 +117,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         try
         {
             backend.BeginFrame();
+            AIDebugStyleController.Apply();
             RainWorldGame game = rainWorld?.processManager?.currentMainLoop as RainWorldGame;
             window.Draw(game, overheadMs);
             backend.EndFrame();
@@ -154,6 +155,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (backendFailed) return false;
         try
         {
+            AIDebugStyleController.Reset();
             backend = new AIDebugImGuiBackend();
             logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, whole-world pause/step enabled.");
             return true;
@@ -174,6 +176,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         logger?.LogError($"DryCycle AI Observatory {phase} failed: {error}");
         backend?.Dispose();
         backend = null;
+        AIDebugStyleController.Reset();
     }
 
     private void OnDestroy()
@@ -187,5 +190,6 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         AIDebugTrace.Reset();
         backend?.Dispose();
         backend = null;
+        AIDebugStyleController.Reset();
     }
 }
