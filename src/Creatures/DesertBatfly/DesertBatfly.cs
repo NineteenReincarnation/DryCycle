@@ -16,6 +16,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private bool resolvingNonRockViolence;
     private Player playerHolder;
 
+    private float sandStruggleMeter, sandSpitThreshold;
+    private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
+
+    internal bool SandSpitWindingUp => sandSpitWindup > 0;
+    internal int SandSpitWindupRemaining => sandSpitWindup;
+
     int IPlayerEdible.FoodPoints => mealFood;
 
     internal DesertBatfly(AbstractCreature creature, World world) : base(creature, world)
@@ -29,6 +35,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (DesertState.MealConsumed) eaten = 1;
         DesertAI = new DesertBatflyAI(this);
         Emergence = new DesertBatflyEmergence(this);
+        PrepareNextSandThreshold();
     }
 
     public override void InitiateGraphicsModule()
@@ -64,11 +71,15 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         TrackPlayerRelease();
         if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
+        if (sandSpitCooldown > 0) sandSpitCooldown--;
+
         if (room == null)
         {
             base.Update(eu);
             return;
         }
+
+        UpdateHeldSandStruggle();
 
         DesertState.Thirst = Mathf.Clamp01(
             DesertState.Thirst + (dead ? 0f : DesertBatflyTuning.ThirstPerTick));
@@ -99,6 +110,96 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertAI.AfterPhysics(eu);
     }
 
+    private void UpdateHeldSandStruggle()
+    {
+        if (playerHolder == null || !Personality.CanSandSpit || dead || !Consious ||
+            inShortcut || playerHolder.room != room)
+        {
+            sandSpitWindup = 0;
+            sandStruggleMeter = Mathf.Max(0f, sandStruggleMeter - 0.02f);
+            return;
+        }
+
+        if (sandSpitWindup > 0)
+        {
+            sandSpitWindup--;
+            if (sandSpitWindup == 0)
+                EmitSandSpit();
+            return;
+        }
+
+        if (sandSpitCooldown > 0) return;
+
+        float movement = Mathf.Clamp01(playerHolder.mainBodyChunk.vel.magnitude / 8f);
+        sandStruggleMeter += Personality.SandSpitMeterRate +
+            movement * DesertBatflyTuning.SandSpitMovementBonus;
+
+        if (sandStruggleMeter < sandSpitThreshold) return;
+
+        // Short deterministic wind-up: FlyGraphics intensifies the existing grabbed
+        // wing struggle during these few ticks, making the burst readable before the
+        // screen effect appears.
+        sandStruggleMeter = 0f;
+        sandSpitWindup = DesertBatflyTuning.SandSpitWindupTicks;
+    }
+
+    private void EmitSandSpit()
+    {
+        if (room == null || playerHolder == null || dead || !Consious ||
+            !Personality.CanSandSpit) return;
+
+        int seed = unchecked(Personality.VisualSeed ^ (sandSpitCycle * 1103515245));
+        DesertBatflySandBurst.Emit(
+            room,
+            this,
+            playerHolder,
+            Personality.SandSpitIntensity,
+            seed);
+
+        float cooldownT = Stable01(0x45D9F3B + sandSpitCycle * 17);
+        sandSpitCooldown = Mathf.RoundToInt(Mathf.Lerp(
+            DesertBatflyTuning.SandSpitCooldownMaxTicks,
+            DesertBatflyTuning.SandSpitCooldownMinTicks,
+            Mathf.Clamp01(Personality.SandSpitDrive * 0.7f + cooldownT * 0.3f)));
+
+        sandSpitCycle++;
+        PrepareNextSandThreshold();
+    }
+
+    private void PrepareNextSandThreshold()
+    {
+        float t = Stable01(0x1F123BB5 + sandSpitCycle * 31);
+        sandSpitThreshold = Mathf.Lerp(
+            DesertBatflyTuning.SandSpitThresholdMin,
+            DesertBatflyTuning.SandSpitThresholdMax,
+            t);
+    }
+
+    private float Stable01(int salt)
+    {
+        unchecked
+        {
+            uint x = (uint)(Personality.VisualSeed * 1103515245 + salt * 12345);
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return (x & 0x00FFFFFFu) / 16777215f;
+        }
+    }
+
+    private void BeginPlayerHold(Player player)
+    {
+        playerHolder = player;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
+        // A new grab never produces an immediate burst. Existing post-spit cooldown
+        // is preserved so rapid grab/drop cycling cannot bypass it.
+        sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);
+        PrepareNextSandThreshold();
+    }
+
     private void TrackPlayerRelease()
     {
         if (playerHolder == null) return;
@@ -116,6 +217,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         Player releasedBy = playerHolder;
         playerHolder = null;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
         if (!dead && !slatedForDeletetion)
             DesertAI.PlayerReleased(releasedBy, mainBodyChunk.vel.magnitude);
     }
@@ -168,7 +271,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         {
             if (playerHolder != player)
             {
-                playerHolder = player;
+                BeginPlayerHold(player);
                 DesertAI.PlayerGrabbed(player);
             }
         }
@@ -221,6 +324,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
 
         playerHolder = null;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
         base.Die();
@@ -229,6 +334,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     public override void Destroy()
     {
         playerHolder = null;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
         DesertAI?.CancelAttack();
         base.Destroy();
     }
