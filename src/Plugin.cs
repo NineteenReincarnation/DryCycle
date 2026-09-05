@@ -107,6 +107,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             RopeSpearWallStickRuntime.Disable();
+            RopeSpearDiagonalClimbRuntime.Disable();
             RopeSpearAimController.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
@@ -166,6 +167,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DryCycleContent.LoadResources(self);
             KingVultureSpearHooks.Enable();
             RopeSpearHooks.Enable();
+            RopeSpearDiagonalClimbRuntime.Enable();
             RopeSpearWallStickRuntime.Enable();
             RopeSpearAimController.Enable();
             KingVultureSpearPlayerEffects.Enable();
@@ -258,6 +260,7 @@ internal sealed class Plugin : BaseUnityPlugin
             HydrationWeakness.Disable();
             KingVultureSpearCombat.Disable();
             RopeSpearWallStickRuntime.Disable();
+            RopeSpearDiagonalClimbRuntime.Disable();
             RopeSpearAimController.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
