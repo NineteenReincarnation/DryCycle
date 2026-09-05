@@ -978,7 +978,7 @@ internal sealed class DesertBatflyAI
 
     private void ScanWeapons()
     {
-        foreach (PhysicalObject[] layer in fly.room.physicalObjects)
+        foreach (var layer in fly.room.physicalObjects)
         foreach (PhysicalObject obj in layer)
         {
             if (obj is not Weapon weapon || weapon.thrownBy == fly)
