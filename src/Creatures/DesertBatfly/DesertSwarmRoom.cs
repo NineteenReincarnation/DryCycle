@@ -27,6 +27,12 @@ internal sealed class DesertSwarmRoom
 
     internal static bool IsDesertSwarmRoom(AbstractRoom room) => room?.roomTags?.Contains("DESERTSWARMROOM") == true;
     internal static DesertSwarmRoom For(Room room) => rooms.GetValue(room, value => new DesertSwarmRoom(value));
+    // Debug/read-only callers must not create a colony merely by inspecting it.
+    internal static bool TryGet(Room room, out DesertSwarmRoom colony)
+    {
+        colony = null;
+        return room != null && rooms.TryGetValue(room, out colony);
+    }
     internal static void Reset() { rooms = new(); populations = new(); }
 
     internal static void UpdateRoom(Room room, bool eu)
