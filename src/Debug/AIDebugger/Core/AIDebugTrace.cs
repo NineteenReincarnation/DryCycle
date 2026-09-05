@@ -113,7 +113,7 @@ internal readonly struct AIDebugTraceFrame
 internal static class AIDebugTrace
 {
     private const int EventCapacity = 1024;
-    private const int FrameCapacity = 600; // hard maximum: ~60s at default 10Hz sampling
+    private const int FrameCapacity = 600;
     private const int MaxTraces = 12;
     private const int SampleFrameInterval = 4;
 
@@ -212,7 +212,7 @@ internal static class AIDebugTrace
             {
                 try
                 {
-                    RainWorldGame game = creature.world?.game;
+                    RainWorldGame game = AIDebugRegistry.CurrentGame;
                     AIDebugSnapshot snapshot = AIDebugRegistry.Capture(creature, game);
                     AIDebugAdvancedCapture.CaptureUtilities(creature, UtilityScratch);
                     AIDebugAdvancedCapture.CapturePerception(creature, PerceptionScratch);
