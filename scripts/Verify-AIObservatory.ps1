@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "src/DryCycle.csproj"
+$buildProps = Join-Path $repoRoot "src/Directory.Build.props"
 
 function Require-File([string]$Path, [string]$Description) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -73,6 +74,13 @@ Require-Text $runtime "AIDebugSessionExporter.Export()" "session export wiring"
 Require-Text $trace "SimulationTick" "Rain World simulation-tick trace clock"
 Require-Text $trace "CopyKeys" "session trace enumeration"
 Require-Text $advancedCapture "tracker.smoothedUtility" "read-only cached Utility capture"
+Require-Text $advancedCapture "!elaborate.bestGhostDirty" "read-only Tracker best-ghost capture"
+Require-Text $project "BepInEx/core/MonoMod.RuntimeDetour.dll" "RuntimeDetour project reference"
+Require-Text $project "<Private>false</Private>" "non-private Rain World runtime references"
+
+if (Select-String -LiteralPath $buildProps -SimpleMatch "MonoMod.RuntimeDetour" -Quiet) {
+    throw "MonoMod.RuntimeDetour must not be referenced from Directory.Build.props; RainWorldDir can be assigned later in DryCycle.csproj."
+}
 
 if (Test-Path -LiteralPath $windowV2 -PathType Leaf) {
     throw "Deprecated AIDebuggerWindowV2.cs is still present and would participate in the SDK build: $windowV2"
@@ -84,12 +92,17 @@ if ($forbiddenUtilityCalls) {
     throw "Observatory source still calls UtilityTracker.SmoothedUtility(), which can re-run AIModule.Utility(). First hit: $($forbiddenUtilityCalls[0].Path):$($forbiddenUtilityCalls[0].LineNumber)"
 }
 
+$forbiddenBestGuessCalls = $debugCs | Select-String -Pattern '\.BestGuessForPosition\s*\(' -CaseSensitive
+if ($forbiddenBestGuessCalls) {
+    throw "Observatory source still calls CreatureRepresentation.BestGuessForPosition(), which can mutate ElaborateCreatureRepresentation ghost caches. First hit: $($forbiddenBestGuessCalls[0].Path):$($forbiddenBestGuessCalls[0].LineNumber)"
+}
+
 $hardCameraZero = $debugCs | Select-String -SimpleMatch 'cameras[0]'
 if ($hardCameraZero) {
     throw "Observatory source still hard-codes cameras[0]. First hit: $($hardCameraZero[0].Path):$($hardCameraZero[0].LineNumber)"
 }
 
-Write-Host "  SOURCE OK  V3 workspace / adapters / trace clock / session export / camera abstraction" -ForegroundColor Green
+Write-Host "  SOURCE OK  V3 workspace / adapters / trace clock / session export / camera abstraction / read-only Utility+Tracker" -ForegroundColor Green
 
 if (-not $SkipBuild) {
     Write-Host "`nBuilding Release..." -ForegroundColor Cyan
@@ -113,15 +126,12 @@ foreach ($file in $hardRequired) {
 }
 
 # RuntimeDetour is intentionally referenced from BepInEx/core and MUST NOT be copied
-# as a second private version beside DryCycle.dll. Check the source copy above instead.
+# as a second private version beside DryCycle.dll.
 $duplicateDetour = Join-Path $GameModOutputDir "MonoMod.RuntimeDetour.dll"
 if (Test-Path -LiteralPath $duplicateDetour -PathType Leaf) {
     Write-Warning "A private MonoMod.RuntimeDetour.dll exists beside DryCycle.dll. Remove it unless it is byte-for-byte the BepInEx/core version; duplicate RuntimeDetour versions can break Mono hooks."
 }
 
-# ImGui.NET support dependencies can vary by resolved target/framework. These are
-# warnings rather than hard failures because some Rain World Mono installations can
-# already provide compatible facade/support assemblies.
 $managedSupport = @(
     "System.Buffers.dll",
     "System.Numerics.Vectors.dll",
@@ -146,16 +156,17 @@ Write-Host "  4. Alt+Left Click a creature; test normal and Jolly split-screen/m
 Write-Host "  5. Test LIVE/INTERACT plus text/mouse widgets: captured ImGui input must not leak into player gameplay controls."
 Write-Host "  6. Pause World -> Step 1 Tick repeatedly; Timeline must advance by one RainWorldGame.clock tick per step and must not fill while merely paused."
 Write-Host "  7. Exercise Timeline / Freeze / Utility / Perception / Path / Compare / Candidates."
-Write-Host "  8. On vanilla UtilityComparer AI, verify missing non-retained values show dash and the creature behavior is unchanged by opening Utility."
-Write-Host "  9. Trigger a manual capture; after five simulated seconds export JSON and inspect roughly 10 s pre + 5 s post history."
-Write-Host " 10. Exercise automatic anomaly detection; debugger Pause must not create PossibleStuck."
-Write-Host " 11. Exercise a conditional breakpoint and verify it pauses the whole world rather than one AI."
-Write-Host " 12. Test DesertBatfly Sentinel/Bully/Opportunist overlays and AttackSlots labels."
-Write-Host " 13. Select MossySpider and verify the dedicated Roaming/Waiting, RoamTarget and Pather diagnostics."
-Write-Host " 14. Select SpinebackLizard and verify Green-baseline ownership plus LizardAI Utility/Tracker/Path diagnostics."
-Write-Host " 15. Enable AImap overlay and confirm creature-specific accessibility/connection rendering."
-Write-Host " 16. Verify selected/pinned identity survives shortcut, den, unrealize/realize and room transitions."
-Write-Host " 17. Press Ctrl+Shift+F8; validate BepInEx/config/DryCycle.AIObservatory.Sessions/*.json and confirm traces/history/captures exist."
-Write-Host " 18. Verify non-finite diagnostic floats export as JSON null rather than NaN/Infinity."
-Write-Host " 19. Verify a non-ASCII Windows/Rain World path can save/load DockSpace layout."
-Write-Host " 20. Verify F7-closed overhead is effectively zero and F7-open profiler values are acceptable in a populated stress room."
+Write-Host "  8. On vanilla UtilityComparer AI, verify missing non-retained values show dash and behavior is unchanged by opening Utility."
+Write-Host "  9. On an Elaborate Tracker creature, verify opening Perception does not change ghost/best-guess behavior."
+Write-Host " 10. Trigger a manual capture; after five simulated seconds export JSON and inspect roughly 10 s pre + 5 s post history."
+Write-Host " 11. Exercise automatic anomaly detection; debugger Pause must not create PossibleStuck."
+Write-Host " 12. Exercise a conditional breakpoint and verify it pauses the whole world rather than one AI."
+Write-Host " 13. Test DesertBatfly Sentinel/Bully/Opportunist overlays and AttackSlots labels."
+Write-Host " 14. Select MossySpider and verify the dedicated Roaming/Waiting, RoamTarget and Pather diagnostics."
+Write-Host " 15. Select SpinebackLizard and verify Green-baseline ownership plus LizardAI Utility/Tracker/Path diagnostics."
+Write-Host " 16. Enable AImap overlay and confirm creature-specific accessibility/connection rendering."
+Write-Host " 17. Verify selected/pinned identity survives shortcut, den, unrealize/realize and room transitions."
+Write-Host " 18. Press Ctrl+Shift+F8; validate BepInEx/config/DryCycle.AIObservatory.Sessions/*.json and confirm traces/history/captures exist."
+Write-Host " 19. Verify non-finite diagnostic floats export as JSON null rather than NaN/Infinity."
+Write-Host " 20. Verify a non-ASCII Windows/Rain World path can save/load DockSpace layout."
+Write-Host " 21. Verify F7-closed overhead is effectively zero and F7-open profiler values are acceptable in a populated stress room."
