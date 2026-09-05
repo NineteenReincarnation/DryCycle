@@ -121,10 +121,20 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         // It can cancel ordinary aggression or, for the rare extreme personality,
         // override movement with the dedicated vengeance/rescue state machine.
         DesertBatflyIntimidation.Update(this);
+        bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
+        if (extremeVengeance)
+        {
+            // Extreme vengeance owns the whole attack lane while active. Release any
+            // normal attack slot the ordinary AI may have tried to reacquire earlier
+            // in this frame and never stack drinking/non-damaging Interfere on top of
+            // the dedicated lethal vengeance collision.
+            DesertAI.CancelAttack();
+        }
 
         if (room == null) return;
         Emergence.Update(eu);
-        DesertAI.AfterPhysics(eu);
+        if (!extremeVengeance)
+            DesertAI.AfterPhysics(eu);
     }
 
     private void UpdateHeldSandStruggle()
