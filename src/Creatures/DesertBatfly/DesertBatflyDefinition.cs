@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using DryCycle.Registration;
+using Watcher;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
@@ -45,6 +46,31 @@ internal sealed class DesertBatflyDefinition : CreatureDefinition
             if (other.TopAncestor().type == CreatureTemplate.Type.Scavenger)
                 other.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Attacks, DesertBatflyTuning.ScavengerHostility);
         }
+
+        // Peach Lizard is a deliberate ecological predator of Desert Batflies. Its
+        // intensity is comparable to Watcher's own Peach->Frog relationship: enough
+        // for PreyTracker/Hunt/tongue logic to engage without making a tiny flying
+        // prey override every other useful target in the room. The reverse Afraid
+        // relationship also plugs directly into DesertBatflyAI's predator detection,
+        // so even nasty individuals flee instead of trying to harass their predator.
+        if (ModManager.Watcher &&
+            WatcherEnums.CreatureTemplateType.PeachLizard != null &&
+            WatcherEnums.CreatureTemplateType.PeachLizard.Index >= 0 &&
+            WatcherEnums.CreatureTemplateType.PeachLizard.Index < StaticWorld.creatureTemplates.Length)
+        {
+            CreatureTemplate peach = StaticWorld.GetCreatureTemplate(
+                WatcherEnums.CreatureTemplateType.PeachLizard);
+            if (peach != null)
+            {
+                peach.relationships[Type.Index] = new(
+                    CreatureTemplate.Relationship.Type.Eats,
+                    0.32f);
+                desert.relationships[peach.type.Index] = new(
+                    CreatureTemplate.Relationship.Type.Afraid,
+                    0.90f);
+            }
+        }
+
         desert.relationships[CreatureTemplate.Type.Slugcat.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
         desert.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
         desert.relationships[CreatureTemplate.Type.Fly.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
