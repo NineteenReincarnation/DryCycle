@@ -13,9 +13,13 @@ internal static class AIDebuggerRuntime
     internal static bool Visible => host?.Visible == true;
     internal static bool WantsMouse => host?.WantsMouse == true;
     internal static bool WantsKeyboard => host?.WantsKeyboard == true;
+    internal static bool BlocksPlayerInput => host?.BlocksPlayerInput == true;
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
+        AIDebugSettings.Load(logger);
+        AIDebugInputGate.Install(logger);
+        AIDebugSimulationControl.Install(logger);
         if (host != null)
         {
             host.Bind(rainWorld, logger);
@@ -30,7 +34,7 @@ internal static class AIDebuggerRuntime
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
 
         Camera camera = hostObject.AddComponent<Camera>();
-        camera.enabled = false;
+        camera.enabled = AIDebugSettings.AutoOpen;
         camera.clearFlags = CameraClearFlags.Depth;
         camera.cullingMask = 0;
         camera.depth = 10000f;
@@ -41,11 +45,15 @@ internal static class AIDebuggerRuntime
 
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
+        host.SetStartupVisible(AIDebugSettings.AutoOpen);
     }
 
     internal static void Uninstall()
     {
+        AIDebugSettings.Save();
         AIDebugTrace.Reset();
+        AIDebugSimulationControl.Uninstall();
+        AIDebugInputGate.Uninstall();
         if (hostObject != null) UnityEngine.Object.Destroy(hostObject);
         hostObject = null;
         host = null;
@@ -58,20 +66,28 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private ManualLogSource logger;
     private Camera overlayCamera;
     private AIDebugImGuiBackend backend;
-    private readonly AIDebuggerWindow window = new();
+    private readonly AIDebuggerWindowV2 window = new();
     private bool visible;
     private bool backendFailed;
     private double overheadMs;
 
     internal bool Visible => visible;
     internal bool WantsMouse => visible && backend?.WantsMouse == true;
-    internal bool WantsKeyboard => visible && backend?.WantsKeyboard == true;
+    internal bool WantsKeyboard => visible && (window.InteractMode || backend?.WantsKeyboard == true);
+    internal bool BlocksPlayerInput => visible && (window.InteractMode || backend?.WantsKeyboard == true);
 
     internal void Bind(RainWorld rw, ManualLogSource log)
     {
         rainWorld = rw;
         logger = log;
         overlayCamera = GetComponent<Camera>();
+    }
+
+    internal void SetStartupVisible(bool value)
+    {
+        visible = value;
+        AIDebugTrace.SetVisible(value);
+        if (overlayCamera != null) overlayCamera.enabled = value;
     }
 
     private void Update()
@@ -94,6 +110,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
         if (!visible) return;
         if (Input.GetKeyDown(KeyCode.F6)) window.FullMode = !window.FullMode;
+        if (Input.GetKeyDown(KeyCode.Tab)) window.ToggleInteract();
         if (!EnsureBackend()) return;
 
         Stopwatch watch = Stopwatch.StartNew();
@@ -138,7 +155,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         try
         {
             backend = new AIDebugImGuiBackend();
-            logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full, Alt+LMB world pick.");
+            logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, whole-world pause/step enabled.");
             return true;
         }
         catch (Exception error)
@@ -161,6 +178,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
     private void OnDestroy()
     {
+        try
+        {
+            if (backend != null) AIDebugDockingNative.SaveLayout();
+        }
+        catch { }
+        AIDebugSettings.Save();
         AIDebugTrace.Reset();
         backend?.Dispose();
         backend = null;
