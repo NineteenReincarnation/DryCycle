@@ -20,6 +20,7 @@ Desert Batfly 是原版 `Fly` 的沙漠生态变种：保持原版 Batfly 的飞
 - `Temperament`：温和～恶劣。
 - `Nerve`：胆量；决定对普通靠近的容忍度，不会屏蔽真实攻击、武器和抓取。
 - `RoostAffinity`：栖息/倒挂倾向。
+- `SandSpitAffinity`：被玩家抓住后是否具有挣扎喷沙能力及其强弱；先天随机占主要权重，Temperament / Nerve 只提供偏置，因此不是所有恶劣个体都会喷沙，也允许少量温和个体具备该能力。
 - `VisualSeed / PatternSeed / SpikeSeed`：稳定视觉差异。
 
 `Temperament >= 0.52` 进入恶劣侧，但攻击性不是二元开关。`AggressionDrive` 会连续控制：
@@ -152,17 +153,41 @@ Fly-on-Fly 的 `grabbedBy` 是 Chain 结构，不视为“被捕获”。只有 
 - 即使当前 Thirst 不高，强记忆也可以让它选择真正的 Attach / Drain 报复性吸水。
 - 对记忆中的玩家，仅仅靠近更不容易把它吓跑；真实 Rock/Spear/抓取等仍然立即作为威胁处理。
 
+## 被抓挣扎喷沙
+
+喷沙不是所有 Desert Batfly 的通用能力。每只个体通过稳定 Seed 得到 `SandSpitAffinity`；当前阈值为 0.58。10,000 个连续测试 Seed 下约 37% 个体具备能力，其中恶劣侧约 50%，温和侧约 25%，因此该能力与恶劣性格相关但不等同。
+
+具备喷沙能力的个体被玩家抓住时：
+
+- 继续使用原版 `FlyGraphics` 的被抓挣扎。
+- 不逐帧进行随机概率判定，而是积累轻量 `StruggleSandMeter`；玩家带着它快速移动会稍微加快积累。
+- 达到由个体 Seed 派生的变化阈值后，先进入 8 tick 短预兆；此时只强化原版翅膀/身体挣扎，不另造新的完整动画。
+- 预兆结束且仍被同一玩家抓住、仍有意识时触发喷沙。
+- 一次喷沙后进入约 90～150 tick 冷却；快速抓放不能绕过冷却。
+- 放手、进入 shortcut、昏迷或死亡会取消尚未完成的喷沙预兆。
+
+喷沙效果由单个短寿命 `DesertBatflySandBurst` 管理：
+
+- 世界空间只生成 5～8 个轻量沙粒，表示沙真正从蝠蝇身上喷出。
+- 屏幕层使用 `HUD2` 生成约 4～6 个局部沙斑/砂粒，固定在抓取玩家当时的屏幕区域附近，并在约 1.2～2 秒内缓慢下滑淡出。
+- 不全屏染黄，不修改玩家输入，不 Stun，也不叠加移动 debuff；它只负责短暂视野干扰。
+- 同房间最多同时存在 2 组屏幕沙斑；达到上限后仍显示世界沙粒，但不再新增屏幕遮挡。
+- 分屏模式只在跟随抓取玩家的 Camera 上显示 HUD2 沙斑；共享单摄像机仍正常显示。
+- 喷沙能力本身不写额外存档字段，因为 `SandSpitAffinity` 由稳定个体 Seed 重新推导；运行时 meter / cooldown 不需要跨存档保存。
+
 ## 性能约束
 
 新增行为保持轻量：
 
-- 每只蝙蝠只额外保存一个玩家编号、一个 float Strength、一个计时器。
+- 每只蝙蝠只额外保存一个玩家编号、一个 float Strength、一个记忆计时器，以及几个只在抓取期间使用的喷沙 meter/cooldown 标量。
 - 没有全局仇恨字典，没有每只蝙蝠的玩家列表。
 - 记忆目标选择复用已有每 8 tick 的 `ScanCreatures()`，没有增加逐 tick 全房间 Creature 遍历。
 - `RestrainedByNonFly()` 仅遍历本个体通常为 0～1 项的 `grabbedBy`。
 - 反击贴身阶段每 tick 只处理目标 Player 的少量 BodyChunks。
 - 局部 Alarm 只在受击/抓取等事件发生时遍历 Desert colony。
 - Attack Slot 查询只在准备正式攻击时执行。
+- 喷沙触发不逐帧使用 RNG；只有喷沙事件发生时才扫描一次当前 Room 的短 `updateList` 统计现有屏幕沙斑组数。
+- 每次喷沙只有一个 `CosmeticSprite` 更新对象，同时管理世界沙粒和 HUD2 沙斑，避免每粒沙都成为独立 Update 对象。
 
 ## 地图、Sandbox、Token、Warp
 
@@ -196,5 +221,6 @@ DC_A01 : DC_A02, DC_A03 : DESERTSWARMROOM
 8. Fly Chain：普通链保持原版挂链；抓/攻击链中一只时整链释放，但只有直接被抓个体建立强 Grab Memory。
 9. 吸水：从喝水阶段开始稳定按照 50 raw hydration points / 秒降低，HUD 连续显示。
 10. 完整食用：只在最后完成食用时扣 50 raw hydration points。
+11. 喷沙：只有部分个体会触发；长时间抓持时应先出现短促猛烈挣扎，再产生少量世界沙粒和局部 HUD2 沙斑；沙斑不能遮满屏幕，分屏时不能污染另一玩家 Camera，释放/昏迷应能取消尚未完成的喷沙。
 
 参数仍集中于 `DesertBatflyTuning`，实机若需要调整只调数值，不应重新拆散上述行为架构。
