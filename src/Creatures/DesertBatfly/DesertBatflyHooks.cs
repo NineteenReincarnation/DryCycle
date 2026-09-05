@@ -17,6 +17,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.FlyAI.FleeFromRainUpdate += Rain;
+        On.Rock.HitSomething += RockHitSomething;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
@@ -34,6 +35,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.FlyAI.FleeFromRainUpdate -= Rain;
+        On.Rock.HitSomething -= RockHitSomething;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
@@ -128,6 +130,22 @@ internal static class DesertBatflyHooks
         { orig(self); return; }
         if (self.followingDijkstraMap < 0)
             self.followingDijkstraMap = self.room.exitAndDenIndex.Length + UnityEngine.Random.Range(0, self.room.hives.Length);
+    }
+
+    private static bool RockHitSomething(
+        On.Rock.orig_HitSomething orig,
+        Rock self,
+        SharedPhysics.CollisionResult result,
+        bool eu)
+    {
+        // Start protection before vanilla Rock.HitSomething runs. That method owns
+        // the complete impact stack (weapon bookkeeping, Creature.Violence, rebound,
+        // sound and VFX), so guarding here catches any death path triggered anywhere
+        // inside the same Rock collision while preserving the original hit behavior.
+        if (result.obj is DesertBatfly desert && !desert.dead)
+            desert.BeginRockStunGuard();
+
+        return orig(self, result, eu);
     }
 
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
