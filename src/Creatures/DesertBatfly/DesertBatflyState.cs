@@ -37,6 +37,13 @@ internal static class DesertBatflyTuning
     internal const float RetaliationMinDrag = 0.025f, RetaliationMaxDrag = 0.065f;
     internal const float RetaliationMinPush = 0.03f, RetaliationMaxPush = 0.08f;
 
+    // Extreme vengeance is intentionally rare. It is a stable personality trait,
+    // separate from ordinary aggression: innate variation dominates, but only nasty,
+    // sufficiently bold animals are eligible to turn fear into lethal retaliation.
+    internal const float VengeanceTraitThreshold = 0.78f;
+    internal const float VengeanceMinTemperament = 0.70f;
+    internal const float VengeanceMinNerve = 0.58f;
+
     // Player-grab memory is stored as player number + strength + remaining ticks.
     // This keeps co-op targeting specific without allocating dictionaries per bat.
     internal const float GrabMemoryGain = 0.28f, GrabThrowBonus = 0.24f;
@@ -77,7 +84,7 @@ internal sealed class DesertBatflyPersonality
 {
     internal readonly int VisualSeed, PatternSeed, SpikeSeed;
     internal readonly float Temperament, Size, Contrast;
-    internal readonly float Nerve, RoostAffinity, SandSpitAffinity;
+    internal readonly float Nerve, RoostAffinity, SandSpitAffinity, VengeanceAffinity;
     internal readonly int PatternCount, SpikeCount;
     internal readonly Color BaseColor, WingColor, SecondaryColor;
 
@@ -108,6 +115,15 @@ internal sealed class DesertBatflyPersonality
         SandSpitAffinity = Mathf.Clamp01(
             innateSand * 0.62f + Temperament * 0.28f + Nerve * 0.10f);
 
+        // Vengeance is rarer and more selective than sand-spitting. A strong innate
+        // component prevents every nasty bat from becoming suicidal, while explicit
+        // temperament/nerve gates below ensure extreme retaliation remains a trait of
+        // unusually hostile AND unusually bold individuals.
+        var vengeanceRandom = new System.Random(seed ^ 0x2C1B3C6D);
+        float innateVengeance = (float)vengeanceRandom.NextDouble();
+        VengeanceAffinity = Mathf.Clamp01(
+            innateVengeance * 0.55f + Temperament * 0.30f + Nerve * 0.15f);
+
         // Size is a readable personality trait: calm individuals remain near vanilla
         // size, harsher individuals trend toward the 1.25x upper bound.
         Size = Mathf.Lerp(1f, 1.25f, Temperament);
@@ -128,6 +144,26 @@ internal sealed class DesertBatflyPersonality
 
     internal bool Aggressive => Temperament >= DesertBatflyTuning.AggressiveThreshold;
     internal float AggressionDrive => Mathf.InverseLerp(DesertBatflyTuning.AggressiveThreshold, 1f, Temperament);
+
+    internal bool CanExtremeVengeance =>
+        Temperament >= DesertBatflyTuning.VengeanceMinTemperament &&
+        Nerve >= DesertBatflyTuning.VengeanceMinNerve &&
+        VengeanceAffinity >= DesertBatflyTuning.VengeanceTraitThreshold;
+
+    internal float VengeanceDrive => Mathf.Clamp01(
+        Mathf.InverseLerp(
+            DesertBatflyTuning.VengeanceTraitThreshold,
+            1f,
+            VengeanceAffinity) * 0.62f +
+        Mathf.InverseLerp(
+            DesertBatflyTuning.VengeanceMinTemperament,
+            1f,
+            Temperament) * 0.23f +
+        Mathf.InverseLerp(
+            DesertBatflyTuning.VengeanceMinNerve,
+            1f,
+            Nerve) * 0.15f);
+
     internal bool CanSandSpit => SandSpitAffinity >= DesertBatflyTuning.SandSpitTraitThreshold;
     internal float SandSpitDrive => Mathf.InverseLerp(
         DesertBatflyTuning.SandSpitTraitThreshold,
