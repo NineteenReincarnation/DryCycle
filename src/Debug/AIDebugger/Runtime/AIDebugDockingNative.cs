@@ -9,6 +9,10 @@ namespace DryCycle.Debugging.AI;
 internal static class AIDebugDockingNative
 {
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
+    private static extern uint igDockSpace(uint dockspace_id, Num.Vector2 size,
+        ImGuiDockNodeFlags flags, IntPtr window_class);
+
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern uint igDockBuilderAddNode(uint node_id, ImGuiDockNodeFlags flags);
 
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
@@ -32,6 +36,9 @@ internal static class AIDebugDockingNative
 
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
     private static extern void igSaveIniSettingsToDisk(string ini_filename);
+
+    internal static void DockSpace(uint dockspaceId, Num.Vector2 size, ImGuiDockNodeFlags flags = ImGuiDockNodeFlags.None) =>
+        igDockSpace(dockspaceId, size, flags, IntPtr.Zero);
 
     internal static void BuildDefault(uint dockspaceId, Num.Vector2 size)
     {
