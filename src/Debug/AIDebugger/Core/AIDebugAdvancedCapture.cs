@@ -140,9 +140,19 @@ internal static class AIDebugAdvancedCapture
             CreatureTemplate.Relationship relationship = rep.dynamicRelationship?.currentRelationship ?? default;
             string relationshipName = rep.dynamicRelationship == null ? "—" : relationship.type.ToString();
             float intensity = rep.dynamicRelationship == null ? 0f : relationship.intensity;
-            WorldCoordinate bestGuess;
-            try { bestGuess = rep.BestGuessForPosition(); }
-            catch { bestGuess = rep.lastSeenCoord; }
+
+            // Do not call BestGuessForPosition() here. ElaborateCreatureRepresentation
+            // can run FindBestGhost() from that getter and mutate the AI's cache. Read a
+            // clean retained bestGhost only when the real tracker has already resolved it;
+            // otherwise lastSeenCoord is the safest truthful value available.
+            WorldCoordinate bestGuess = rep.lastSeenCoord;
+            if (rep is Tracker.ElaborateCreatureRepresentation elaborate &&
+                !elaborate.bestGhostDirty && elaborate.bestGhost != null)
+            {
+                WorldCoordinate cached = elaborate.bestGhost.coord;
+                bestGuess = cached.room == creature.pos.room ? cached.WashNode() : cached;
+            }
+
             output.Add(new AIDebugPerceptionRow(DebugEntityKey.From(other),
                 $"{type} #{other.ID.number}", rep.VisualContact, rep.TicksSinceSeen,
                 rep.EstimatedChanceOfFinding, rep.priority, rep.lastSeenCoord, bestGuess,
