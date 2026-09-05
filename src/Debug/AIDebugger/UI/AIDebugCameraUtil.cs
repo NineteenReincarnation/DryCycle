@@ -20,12 +20,17 @@ internal static class AIDebugCameraUtil
     internal static RoomCamera ForCreature(RainWorldGame game, AbstractCreature creature)
     {
         if (game?.cameras == null || creature == null) return Primary(game);
-        Room targetRoom = creature.realizedCreature?.room ?? creature.Room;
+        Room realizedRoom = creature.realizedCreature?.room;
+        AbstractRoom abstractRoom = creature.Room;
         RoomCamera fallback = null;
         for (int i = 0; i < game.cameras.Length; i++)
         {
             RoomCamera camera = game.cameras[i];
-            if (camera?.room == null || camera.room != targetRoom) continue;
+            if (camera?.room == null) continue;
+            bool sameRoom = realizedRoom != null
+                ? ReferenceEquals(camera.room, realizedRoom)
+                : ReferenceEquals(camera.room.abstractRoom, abstractRoom);
+            if (!sameRoom) continue;
             fallback ??= camera;
             if (ReferenceEquals(camera.followAbstractCreature, creature)) return camera;
         }
