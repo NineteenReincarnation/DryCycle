@@ -261,15 +261,14 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         if (!RippleViolenceCheck(source)) return;
         Creature attacker = source?.owner as Creature ?? (source?.owner as Weapon)?.thrownBy;
-        DesertAI.Threatened(attacker, true);
 
         if (source?.owner is Rock)
         {
+            // Rock is explicitly nonlethal but still frightening. There is no death
+            // attribution or mortality wave, only the ordinary direct-threat response.
+            DesertAI.Threatened(attacker, true);
             BeginRockStunGuard();
 
-            // Rock is a control tool for this species. Do not call Creature.Violence
-            // at all: even tiny/zero damage can enter HealthState.quickDeath when an
-            // animal was previously injured. Keep only impact impulse and stun.
             BodyChunk chunk = hitChunk ?? mainBodyChunk;
             if (momentum.HasValue)
                 chunk.vel += Vector2.ClampMagnitude(momentum.Value / chunk.mass, 10f);
@@ -277,10 +276,14 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
         }
 
-        // Attribute only genuine damaging attacks from supported mortality threats.
-        // Spears remain the clearest player demonstration; Peach-Lizard bites/tongue
-        // follow-up damage use a slightly stronger predator scale.
-        if (damage > 0f && DesertBatflyIntimidation.IsSupportedLethalThreat(attacker))
+        bool supportedLethalThreat = damage > 0f &&
+            DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
+
+        // For a supported potentially-lethal hit, preserve the intact Fly Chain until
+        // base.Violence has had its chance to call Die(). Die() can then snapshot the
+        // real pre-death FirstInChain() and mark every chain-mate as a direct witness.
+        // If the bat survives, we perform the ordinary Threatened() transition below.
+        if (supportedLethalThreat)
         {
             recentLethalDamager = attacker;
             recentLethalDamageTicks = 240;
@@ -288,9 +291,11 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                 ? (source?.owner is Spear ? 1f : 0.82f)
                 : 1.05f;
         }
+        else
+        {
+            DesertAI.Threatened(attacker, true);
+        }
 
-        // A spear, predator bite or any other genuine damage event must remain able
-        // to kill even if it happens immediately after a Rock impact.
         resolvingNonRockViolence = true;
         try
         {
@@ -300,6 +305,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         {
             resolvingNonRockViolence = false;
         }
+
+        if (supportedLethalThreat && !dead && !slatedForDeletetion)
+            DesertAI.Threatened(attacker, true);
     }
 
     public override void Grabbed(Grasp grasp)
@@ -313,6 +321,15 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                 BeginPlayerHold(player);
                 DesertAI.PlayerGrabbed(player);
             }
+        }
+        else if (grasp?.grabber is Lizard lizard &&
+                 DesertBatflyIntimidation.IsSupportedLethalThreat(lizard))
+        {
+            // A direct Peach bite/grasp may never use the tongue. Broadcast before
+            // Threatened() dismantles a hanging chain so chain-mates retain their
+            // direct-witness status. Tongue->Bite duplicates are internally debounced.
+            DesertBatflyIntimidation.BroadcastPredatorCapture(this, lizard, null);
+            DesertAI.Threatened(lizard, true);
         }
         else if (grasp?.grabber != null && grasp.grabber is not Fly)
         {
