@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using RWCustom;
 using UnityEngine;
 
@@ -5,16 +6,24 @@ namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
 /// Owns Alt+Throw while a player is holding a RopeSpear handle. Alt+Throw is an
-/// anchor command, never an ordinary throw. When an airborne player successfully
-/// fixes the handle while the spear end is already embedded in terrain, immediately
-/// transfer the player from the handle to the rope's vanilla VineGrab state so the
-/// release frame cannot make them fall before they can press Up again.
+/// anchor command, never an ordinary throw. Endpoint anchoring also arms a short
+/// post-Player.Update catch window so the hanging player is transferred to the
+/// rope only after vanilla has finished processing the release frame.
 /// </summary>
 internal static class RopeSpearHandleAnchorSafetyRuntime
 {
-    private const float AutoCatchSearchRadius = 58f;
-    private const float EndpointFallbackDistance = 62f;
+    private const float AutoCatchSearchRadius = 72f;
+    private const float EndpointFallbackDistance = 78f;
+    private const int PendingCatchFrames = 5;
 
+    private sealed class PendingCatchState
+    {
+        internal RopeSpear Spear;
+        internal RopeHandle Handle;
+        internal int FramesLeft;
+    }
+
+    private static readonly ConditionalWeakTable<Player, PendingCatchState> PendingCatches = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -26,6 +35,7 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
 
         _enabled = true;
         On.Player.ThrowObject += Player_ThrowObject;
+        On.Player.Update += Player_Update;
     }
 
     internal static void Disable()
@@ -36,7 +46,33 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
         }
 
         On.Player.ThrowObject -= Player_ThrowObject;
+        On.Player.Update -= Player_Update;
         _enabled = false;
+    }
+
+    /// <summary>
+    /// Called by RopeHandle itself when an endpoint becomes anchored. Keeping this
+    /// notification at the actual state transition makes auto-catch independent of
+    /// ThrowObject hook ordering: even the older RopeSpearHooks anchor path cannot
+    /// bypass the safety transfer.
+    /// </summary>
+    internal static void NotifyHandleAnchored(RopeHandle handle, Player holder)
+    {
+        if (!_enabled || handle == null || holder == null)
+        {
+            return;
+        }
+
+        RopeSpear parentSpear = FindParentSpear(holder, handle);
+        if (!ShouldAutoCatch(holder, parentSpear))
+        {
+            return;
+        }
+
+        PendingCatchState pending = PendingCatches.GetOrCreateValue(holder);
+        pending.Spear = parentSpear;
+        pending.Handle = handle;
+        pending.FramesLeft = PendingCatchFrames;
     }
 
     private static void Player_ThrowObject(
@@ -63,18 +99,73 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
             return;
         }
 
-        RopeSpear parentSpear = FindParentSpear(self, handle);
-        bool autoCatch = ShouldAutoCatch(self, parentSpear);
-
-        // Do not use Player.ReleaseObject here. This is not a lay-down action and the
-        // handle must stay exactly at its newly authored anchor point. Releasing the
-        // grasp directly also avoids an extra item-drop state between anchor and catch.
+        // TryAnchorToNearbyTerrain arms the pending catch while the player is still
+        // the holder. Release the hand now; the actual VineGrab transfer happens in
+        // the post-Update pass below, after vanilla can no longer overwrite it.
         self.ReleaseGrasp(grasp);
+    }
 
-        if (autoCatch)
+    private static void Player_Update(
+        On.Player.orig_Update orig,
+        Player self,
+        bool eu)
+    {
+        orig(self, eu);
+
+        if (self == null ||
+            !PendingCatches.TryGetValue(self, out PendingCatchState pending) ||
+            pending.FramesLeft <= 0)
         {
-            TryAttachPlayerToRope(self, parentSpear, handle);
+            return;
         }
+
+        if (self.dead ||
+            !self.Consious ||
+            self.inShortcut ||
+            self.enteringShortCut.HasValue ||
+            pending.Spear == null ||
+            pending.Handle == null ||
+            pending.Spear.slatedForDeletetion ||
+            pending.Handle.slatedForDeletetion ||
+            pending.Spear.room != self.room ||
+            pending.Handle.room != self.room ||
+            pending.Spear.mode != Weapon.Mode.StuckInWall ||
+            !pending.Handle.Anchored)
+        {
+            ClearPending(pending);
+            return;
+        }
+
+        if (self.animation == Player.AnimationIndex.VineGrab &&
+            self.vinePos?.vine == pending.Spear)
+        {
+            ClearPending(pending);
+            return;
+        }
+
+        if (TryAttachPlayerToRope(self, pending.Spear, pending.Handle))
+        {
+            ClearPending(pending);
+            return;
+        }
+
+        pending.FramesLeft--;
+        if (pending.FramesLeft <= 0)
+        {
+            ClearPending(pending);
+        }
+    }
+
+    private static void ClearPending(PendingCatchState pending)
+    {
+        if (pending == null)
+        {
+            return;
+        }
+
+        pending.Spear = null;
+        pending.Handle = null;
+        pending.FramesLeft = 0;
     }
 
     private static bool AltHeld()
@@ -125,35 +216,57 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
             return false;
         }
 
-        // Restrict the automatic transfer to the hanging/falling case requested by
-        // the player. Anchoring an endpoint while safely standing on terrain or a beam
-        // should simply anchor it and leave the player's movement state alone.
-        if (player.standing ||
-            player.canJump > 0 ||
-            player.bodyMode == Player.BodyModeIndex.ClimbingOnBeam ||
+        // Do not trust Player.standing/canJump here. While the player is physically
+        // suspended from a held RopeHandle those fields can remain stale for a frame,
+        // which was exactly why the vertical hanging case failed to auto-catch.
+        // Reject only states that have real, current support.
+        return !HasStableSupport(player);
+    }
+
+    private static bool HasStableSupport(Player player)
+    {
+        if (player.bodyMode == Player.BodyModeIndex.ClimbingOnBeam ||
             player.animation == Player.AnimationIndex.ClimbOnBeam ||
             player.animation == Player.AnimationIndex.HangFromBeam ||
             player.animation == Player.AnimationIndex.StandOnBeam ||
             player.animation == Player.AnimationIndex.BeamTip ||
             player.animation == Player.AnimationIndex.GetUpOnBeam ||
-            player.animation == Player.AnimationIndex.GetUpToBeamTip)
+            player.animation == Player.AnimationIndex.GetUpToBeamTip ||
+            player.animation == Player.AnimationIndex.HangUnderVerticalBeam)
+        {
+            return true;
+        }
+
+        if (player.bodyChunks == null)
         {
             return false;
         }
 
-        if (player.bodyChunks != null)
+        for (int i = 0; i < player.bodyChunks.Length; i++)
         {
-            for (int i = 0; i < player.bodyChunks.Length; i++)
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null && chunk.ContactPoint.y < 0)
             {
-                BodyChunk chunk = player.bodyChunks[i];
-                if (chunk != null && chunk.ContactPoint.y < 0)
+                return true;
+            }
+        }
+
+        // ContactPoint can lag one frame at tile boundaries. Probe directly below
+        // the lower body chunk as a second check for genuine floor support.
+        if (player.room != null && player.bodyChunks.Length > 1)
+        {
+            BodyChunk lower = player.bodyChunks[1];
+            if (lower != null)
+            {
+                Vector2 probe = lower.pos + Vector2.down * (lower.rad + 3f);
+                if (player.room.GetTile(probe).Solid)
                 {
-                    return false;
+                    return true;
                 }
             }
         }
 
-        return true;
+        return false;
     }
 
     private static bool TryAttachPlayerToRope(
@@ -173,7 +286,7 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
         ClimbableVinesSystem.VinePosition vinePosition =
             player.room.climbableVines.VineOverlap(
                 player.mainBodyChunk.pos,
-                player.mainBodyChunk.rad + 18f);
+                player.mainBodyChunk.rad + 22f);
 
         if (vinePosition?.vine != spear)
         {
@@ -193,8 +306,8 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
                          EndpointFallbackDistance))
             {
                 // RopeSpearRopeSystem is authored handle -> spear, so floatPos 0 is
-                // the endpoint the player just released. This fallback covers the
-                // same-frame case before the rope solver has refreshed its node chain.
+                // the endpoint the player just released. This fallback also covers
+                // the few frames before the rope solver has refreshed its node chain.
                 vinePosition = new ClimbableVinesSystem.VinePosition(spear, 0f);
             }
             else
@@ -211,10 +324,11 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
         player.wantToPickUp = 0;
         player.bodyMode = Player.BodyModeIndex.Default;
         player.standing = false;
+        player.ledgeGrabCounter = 0;
+        player.wallSlideCounter = 0;
 
-        // Preserve the player's existing swing/fall momentum. Vanilla VineGrab will
-        // connect the main body chunk to the rope during the normal update path; no
-        // teleport or velocity reset is needed here.
+        // Preserve swing/fall momentum. VineGrab makes the physical connection on
+        // its normal next update; there is no endpoint teleport and no velocity reset.
         return true;
     }
 }
