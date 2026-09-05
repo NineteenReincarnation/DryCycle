@@ -30,7 +30,6 @@ internal static class PeachLizardDesertBatflyPredation
         On.PreyTracker.TrackedPrey.Attractiveness += TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference += LizardAI_TravelPreference;
         On.LizardTongue.Update += LizardTongue_Update;
-        On.Lizard.Bite += Lizard_Bite;
     }
 
     internal static void Disable()
@@ -40,7 +39,6 @@ internal static class PeachLizardDesertBatflyPredation
         On.PreyTracker.TrackedPrey.Attractiveness -= TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
         On.LizardTongue.Update -= LizardTongue_Update;
-        On.Lizard.Bite -= Lizard_Bite;
     }
 
     private static float TrackedPrey_Attractiveness(
@@ -165,37 +163,12 @@ internal static class PeachLizardDesertBatflyPredation
             (previousState != LizardTongue.State.AttachedInSmallObject ||
              previousAttached?.owner != caught))
         {
-            // Threatened owns the captured bat's immediate chain release. The colony
-            // event then handles eyewitness fear, finite social propagation and the
-            // rare time-sensitive rescue response.
-            caught.DesertAI.Threatened(self.lizard, true);
+            // Broadcast BEFORE Threatened() dismantles a hanging Fly Chain. The
+            // mortality layer can therefore snapshot FirstInChain() and mark every
+            // chain-mate as a direct witness. The victim's own threat response follows.
             DesertBatflyIntimidation.BroadcastPredatorCapture(caught, self.lizard, self);
+            caught.DesertAI.Threatened(self.lizard, true);
         }
-    }
-
-    private static void Lizard_Bite(
-        On.Lizard.orig_Bite orig,
-        Lizard self,
-        BodyChunk chunk)
-    {
-        DesertBatfly candidate = IsPeach(self) && chunk?.owner is DesertBatfly bat && !bat.dead
-            ? bat
-            : null;
-        bool alreadyHeld = candidate != null &&
-            self.grasps != null && self.grasps.Length > 0 &&
-            self.grasps[0]?.grabbed == candidate;
-
-        orig(self, chunk);
-
-        if (candidate == null || alreadyHeld || candidate.dead ||
-            self.grasps == null || self.grasps.Length == 0 ||
-            self.grasps[0]?.grabbed != candidate)
-            return;
-
-        // Covers ordinary close-range bites that never used the tongue. The mortality
-        // layer internally debounces this against a recent tongue-capture event from
-        // the same Peach, so tongue -> mouth -> Bite is still a single fear event.
-        DesertBatflyIntimidation.BroadcastPredatorCapture(candidate, self, null);
     }
 
     private static void TryTransferTongueCatchToBite(LizardTongue tongue)
@@ -218,6 +191,9 @@ internal static class PeachLizardDesertBatflyPredation
         BodyChunk caughtChunk = tongue.attached;
         lizard.Bite(caughtChunk);
 
+        // If Bite actually created the vanilla grasp, DesertBatfly.Grabbed reports
+        // that Peach capture too. BroadcastPredatorCapture has a 90-tick per-victim /
+        // predator debounce, so the earlier tongue event remains the single event.
         if (lizard.grasps[0] != null && lizard.grasps[0].grabbed == bat)
             tongue.Retract();
     }
