@@ -13,7 +13,12 @@ internal static class DesertBatflyTuning
     internal const int HivePopulation = 11, CurvePopulation = 3;
     internal const float AggressiveThreshold = 0.52f, ThirstPerTick = 0.000065f;
     internal const float AttackThirst = 0.48f, DrainRelief = 0.65f;
-    internal const float MealWater = 200f, AttackWater = 30f;
+
+    // Water values are raw DryCycle hydration points, not HUD pips. Eating a
+    // Desert Batfly now costs 50 points. Once an attached bat starts drinking it
+    // removes 50 points per second for as long as the drain window remains active.
+    internal const float MealWater = 50f, AttackWaterPerSecond = 50f;
+
     internal const int AttackSlots = 2, Cooldown = 1800, FailedCooldown = 240;
     internal const int ObserveTicks = 100, AttachTicks = 180, RockStun = 110;
     internal const int DrainStartTicks = 20, DrainEndTicks = 160;
