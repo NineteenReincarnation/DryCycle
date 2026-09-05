@@ -2,47 +2,33 @@
 
 Status: **code implementation complete / pending full Rain World runtime validation**.
 
-The Observatory is a developer-only Dear ImGui runtime inspection system for Rain World creature AI. Its design rule is strict: **observe the real AI; never become a second AI system**.
+AI Observatory is a developer-only Dear ImGui inspection system for Rain World creature AI. Its core rule is strict: **observe the real AI; never become a second AI system**.
 
-It is intended to answer four questions:
+It is designed to answer four questions:
 
-1. What is this creature doing right now?
-2. Which behavior layer currently owns control, and why?
-3. What did the AI know / score / plan immediately before something went wrong?
-4. Can the exact diagnostic window be frozen, captured, compared and exported without changing the creature's decision?
+1. What is this creature doing now?
+2. Which layer owns control, and why?
+3. What did the AI know, score and plan immediately before a failure?
+4. Can that diagnostic state be frozen, compared, captured and exported without changing the creature's decision?
 
 ## Controls
 
-- `F7` — open / close the Observatory.
-- `F6` — switch Compact / Full DockSpace workspace.
-- `Tab` — switch `LIVE` / `INTERACT` when ImGui is not already consuming keyboard input.
-- `Alt + Left Mouse` — select the nearest realized creature under the cursor in the relevant RoomCamera.
+- `F7` — open / close Observatory.
+- `F6` — Compact / Full DockSpace workspace.
+- `Tab` — `LIVE` / `INTERACT` when ImGui is not already consuming keyboard input.
+- `Alt + Left Mouse` — select the nearest realized creature under the relevant RoomCamera.
 - Entity Browser click — select entity A.
 - `Shift + click` — select comparison entity B.
-- Pin — keep an entity in the watched set while selecting another entity.
-- Toolbar `Pause World` / `Resume World` — pause or resume the whole RainWorldGame simulation.
-- Toolbar `Step 1 Tick` — while debugger-paused, execute exactly one complete RainWorldGame simulation update.
-- `Ctrl + Shift + F8` — export the entire retained Observatory debug session to JSON.
+- Pin — keep an entity watched while selecting another entity.
+- Toolbar `Pause World` / `Resume World` — pause/resume the whole RainWorldGame simulation.
+- Toolbar `Step 1 Tick` — execute one complete RainWorldGame simulation tick while debugger-paused.
+- `Ctrl + Shift + F8` — export the whole retained debug session to JSON.
 
-The UI supports Chinese / English switching at runtime. Raw implementation names can be displayed when exact symbols matter.
+The UI can switch between Chinese and English at runtime. Raw implementation names remain available separately for exact symbol-level debugging.
 
-## Input isolation
+## Workspace
 
-The Observatory detours `RWInput.PlayerInputLogic(int,int)` through the RuntimeDetour version already shipped by Rain World's BepInEx environment.
-
-Gameplay input is neutralized when:
-
-- `INTERACT` mode is active;
-- ImGui requests keyboard capture;
-- ImGui requests mouse capture.
-
-Controller metadata is preserved, so leaving the UI does not require the player to reconnect or reselect the input device.
-
-The debugger does not block gameplay input merely because F7 is open in LIVE mode; it blocks only when the UI is actually consuming the relevant input.
-
-## Full DockSpace workspace
-
-Full mode uses a real Dear ImGui DockSpace with persistent layout storage. The active V3 workspace contains:
+Full mode is a real Dear ImGui DockSpace with persistent layout storage. The active V3 workspace contains:
 
 - Entity Browser
 - Decision Stack
@@ -57,221 +43,176 @@ Full mode uses a real Dear ImGui DockSpace with persistent layout storage. The a
 - Captures / Breakpoints
 - Settings
 
-The old V1/V2 workspace implementations were removed so obsolete code does not remain in the SDK build.
+The obsolete V1/V2 window implementations were removed so they cannot break the SDK build later.
 
-Layout persistence is stored through ImGui's in-memory ini API and written by managed UTF-8 file I/O. Native cimgui therefore never has to parse a potentially Chinese Windows path.
+Dock layout persistence uses ImGui's memory ini API plus managed file I/O. Native cimgui does not parse the Windows path, which avoids non-ASCII path problems.
 
-## Entity Browser and identity
+## Input isolation
 
-`DebugEntityKey` uses creature template + EntityID spawner/number rather than a realized `Creature` object reference. This lets a watched identity survive realize/unrealize and normal room transitions as long as the AbstractCreature still exists.
+Observatory detours `RWInput.PlayerInputLogic(int,int)` using the RuntimeDetour assembly already shipped with Rain World's BepInEx environment.
 
-The Browser separates creatures in currently visible RoomCamera rooms from the rest of the world. Multiple RoomCamera instances are supported.
+Gameplay commands are neutralized when:
 
-## Timeline and complete historical state
+- `INTERACT` mode is active;
+- ImGui requests keyboard capture;
+- ImGui requests mouse capture.
 
-Trace time is based on **RainWorldGame.clock (40 Hz simulation ticks)**, not Unity render frames or wall-clock time.
+Controller metadata is preserved. LIVE mode does not steal gameplay input merely because F7 is open.
 
-Consequences:
+## Entity identity and multiple cameras
 
-- normal gameplay records at one sample every 4 game ticks, approximately 10 Hz;
-- debugger Pause does not create duplicate history samples while render frames continue;
-- `Step 1 Tick` can produce a real single-tick diagnostic sample;
-- capture pre/post windows use simulation time rather than time spent reading the UI.
+`DebugEntityKey` is based on creature template + EntityID spawner/number rather than a realized Creature reference. This lets watched identity survive ordinary realize/unrealize and room transitions while the AbstractCreature still exists.
 
-Current fixed limits per retained trace:
+`AIDebugCameraUtil` centralizes RoomCamera selection:
 
-- up to 1024 transition/events;
+- selected/pinned overlays use a camera showing their room;
+- Alt+click uses the camera under the mouse;
+- split-screen world/screen conversion handles upper/lower camera placement;
+- frozen historical overlay is drawn only through a camera showing the historical room.
+
+The Entity Browser groups creatures in currently visible camera rooms separately from the rest of the world.
+
+## Timeline and complete history
+
+Trace time uses **`RainWorldGame.clock` at 40 Hz**, not Unity render frames or wall-clock time.
+
+Normal gameplay records approximately one sample every four simulation ticks (~10 Hz). Debugger Pause does not create duplicate samples, and Step 1 Tick can produce a real single-tick diagnostic sample.
+
+Per retained trace the fixed storage is bounded to:
+
+- up to 1024 events;
 - up to 600 frame samples;
 - up to 12 retained entity traces;
-- user-visible history length configurable from 5 to 60 seconds.
+- user-visible history length of 5–60 seconds.
 
-Each full-history frame can retain:
+A full-history frame can retain:
 
-- core trace state: room, position, velocity, local goal, mode/controller, target, role/suppression and diagnostic scalar values;
+- room, position, velocity and local goal;
+- mode/controller, target, role and suppression;
 - complete `AIDebugSnapshot` sections and decision nodes;
 - Utility rows;
 - Tracker / perception rows;
-- path/planner state.
+- Path state.
 
-Freeze View and the Timeline cursor therefore show the actual recorded diagnostic state for that tick instead of rebuilding old pages from the creature's current AI.
+Freeze View therefore reads the historical state captured at that simulation tick instead of rebuilding an old page from current AI state.
 
 ## Events
 
-The event log records state/decision transitions instead of per-frame spam. Categories are:
+Events record decision/state transitions instead of per-frame spam. Categories are Decision, State, Perception, Path, Combat, Social and Warning.
 
-- Decision
-- State
-- Perception
-- Path
-- Combat
-- Social
-- Warning
+Each event stores raw detail/reason text. Known names and fixed reasons are translated at presentation time, so switching language also re-renders old events. JSON exports preserve raw diagnostics.
 
-Events store `RawDetail` and `RawReason`. The UI renders known event names/reasons in the currently selected language, while JSON export always preserves raw diagnostic text.
+## Read-only Utility diagnostics
 
-DesertBatfly instrumentation includes important boundaries such as:
+Observatory **never calls `AIModule.Utility()`** to fill a debug table.
 
-- RoleEntered
-- RoleExit
-- RoleEvaluation / RoleEvaluationBlocked
-- RoleSustain
-- SentinelAlarm
-- OpportunistEarlyReturn
+It also never calls `UtilityTracker.SmoothedUtility()`, because Rain World's implementation can call `module.Utility()` when no smoother exists.
 
-## Utility: read retained state only
+For vanilla UtilityComparer AI, Observatory reads only retained state:
 
-The Observatory **never calls `AIModule.Utility()` to fill the UI**.
+- module name;
+- weight;
+- continuation-bonus configuration;
+- current highest UtilityTracker;
+- cached weighted/smoothed value only when a real smoother exists.
 
-It also does not call `UtilityTracker.SmoothedUtility()`, because Rain World's implementation may call `module.Utility()` when no smoother exists.
+Unavailable values display as `—` and export as JSON `null`.
 
-For vanilla `UtilityComparer` AI:
+DesertBatfly role scores are safe to display because they are values already calculated by its real role evaluator.
 
-- module name is read directly;
-- weight and continuation-bonus configuration are read directly;
-- current winning `UtilityTracker` is read directly;
-- weighted/smoothed values are shown only when the real AI retained them in a non-null smoother;
-- unavailable values are shown as `—` / exported as JSON `null`.
+## Read-only Perception / Tracker diagnostics
 
-For DesertBatfly, Sentinel / Bully / Opportunist scores are values already calculated by the real role evaluator and can therefore be displayed directly.
-
-## Perception / Tracker
-
-When a real AI exposes `Tracker`, the Observatory can show its retained `CreatureRepresentation` data:
+Observatory reads retained `CreatureRepresentation` fields such as:
 
 - visual contact;
 - ticks since seen;
 - estimated chance of finding;
-- tracker priority;
+- priority;
 - last-seen coordinate;
-- best-position estimate;
-- dynamic relationship type and intensity when available.
+- dynamic relationship type/intensity.
 
-Optional world overlay markers can show tracked realized creatures in the selected entity's camera/room.
+It does **not** call `BestGuessForPosition()` from the debugger. `ElaborateCreatureRepresentation.BestGuessForPosition()` may run `FindBestGhost()` and mutate the tracker's cache. Observatory instead uses an already-clean cached `bestGhost` when the real tracker has resolved one; otherwise it reports `lastSeenCoord`.
+
+This preserves the rule that opening the debugger must not change tracker state.
 
 ## Path / Control chain
 
-Locomotion is deliberately separated into three layers:
+Locomotion is separated into:
 
-- **INTENT** — AbstractCreatureAI destination / desired world coordinate;
+- **INTENT** — AbstractCreatureAI destination;
 - **PLANNER** — PathFinder, reachability, returnability and stranded state;
 - **MOTOR** — species-specific local movement command / physical execution.
 
-This makes it possible to distinguish:
+The reachability checks used here read existing pathing cells; Observatory does not call `SetDestination` or rebuild the path.
 
-- wrong destination;
-- correct destination but bad path;
-- correct path but bad movement command / physics.
+## Compare and Candidate Inspector
 
-## Compare
+Compare displays entity A/B snapshots side-by-side. Raw names can be enabled for exact implementation comparison.
 
-Entity A and B snapshots are flattened and displayed side-by-side. Raw implementation names can be enabled for exact field comparison.
+Instrumented AI can publish candidates already produced by the real decision pass. Candidate Inspector displays set/name, validity, score, winner and reason without running another candidate-selection pass.
 
-## Candidate Inspector
+## World overlays
 
-Instrumented AI may register candidates without creating another selection pass. The Candidate window shows:
+World overlays are transient Dear ImGui background drawings and do not create persistent Room objects.
 
-- candidate set;
-- candidate name;
-- valid / invalid;
-- score;
-- winner;
-- rejection/selection reason.
+Available layers include:
 
-DesertBatfly exposes role candidates and current motor goal through this path. Candidate data is read from values already calculated by its actual AI.
-
-## World overlay
-
-World overlays are drawn through Dear ImGui background draw lists; they do not create persistent Room objects.
-
-Supported layers include:
-
-- selected / pinned creature markers;
-- physics BodyChunks and radii;
-- velocity vectors;
+- selected/pinned markers;
+- BodyChunks/radii;
+- velocity;
 - grasps;
-- movement/local goal;
+- local movement goal;
 - generic path destination;
-- Tracker perception marks;
+- Tracker marks;
 - creature-specific AImap accessibility heatmap and allowed outgoing connections;
-- instrumented candidate positions;
+- candidate positions;
 - DesertBatfly social/combat diagnostics.
 
-### Multiple RoomCamera support
+## DesertBatfly adapter
 
-Camera selection is centralized in `AIDebugCameraUtil`.
+The dedicated DesertBatfly source exposes personality, thirst, custom AI mode/target, retreat/memory counters, social role scores and suppression, Sentinel/Opportunist state, flock snapshot, social bond/trauma/grief, movement state and related vanilla FlyAI state.
 
-- selected/pinned overlays use the camera showing their room;
-- Alt+click chooses the RoomCamera under the mouse;
-- split-screen world/screen conversion accounts for upper/lower camera placement;
-- frozen history is drawn only through a camera showing the historical room.
+Special overlays include:
 
-## DesertBatfly specialized diagnostics
+- Sentinel perimeter, threat, confidence and watch state;
+- Opportunist return radius, recovery/window/safe-tick state;
+- Bully/formal attack `SLOT 1`, `SLOT 2`, `WAIT` labels and AttackSlots violation warning.
 
-The dedicated DesertBatfly source and overlays expose:
+## MossySpider adapter
 
-- temperament, nerve, conformity, roost/vengeance/sand-spit affinities;
-- thirst and creature cooldown;
-- DesertAI mode / target / formal attack ownership;
-- retreat, attacker memory, interest, pursuit, unseen and attack-slot state;
-- stored role / expressed role / suppression;
-- Sentinel, Bully and Opportunist scores;
-- commitment / role cooldown / evaluation timing;
-- Sentinel confidence and watch state;
-- opportunity window, clear-sight safety ticks and Opportunist recovery;
-- flock center, average velocity, active count, expressed-role count, panic and roost ratios;
-- grab memory, grief, player/predator trauma and social bond;
-- position, velocity, escape source, FlyAI localGoal, vanilla behavior and rain/lure state.
+MossySpider has a deliberately simple non-predatory ecology. Its dedicated adapter exposes only its real systems:
 
-World overlays additionally include:
-
-- Sentinel flock perimeter and visible threat;
-- Opportunist return radius / recovery status;
-- Bully/formal-attack `SLOT 1`, `SLOT 2`, `WAIT` labels and AttackSlots violation warning.
-
-## Other DryCycle creature adapters
-
-### MossySpider
-
-MossySpider deliberately has a minimal non-predatory ecology. Its dedicated adapter therefore exposes what its real AI actually has rather than inventing threat/prey modules:
-
-- Roaming / Waiting behavior;
+- Roaming / Waiting;
 - AbstractAI roam target;
-- realized `MossySpiderPather` destination;
-- cross-room migration control;
+- realized MossySpiderPather destination;
+- migration control;
 - movement direction;
 - gait cycle;
 - ground support;
 - swim factor.
 
-### SpinebackLizard
+## SpinebackLizard adapter
 
-SpinebackLizard intentionally inherits Green Lizard behavior through DryCycle compatibility hooks. Its adapter explicitly labels that ownership while exposing live LizardAI / Utility / Tracker / Path state. This helps distinguish a DryCycle compatibility-hook problem from ordinary vanilla LizardAI behavior.
+SpinebackLizard intentionally uses Green Lizard AI as a baseline through DryCycle compatibility hooks. Its adapter makes that ownership explicit and exposes the live LizardAI plus the normal Utility / Tracker / Path diagnostics.
 
-### Generic fallback
-
-All other creatures fall back to `GenericCreatureDebugSource`, which exposes lifecycle, AbstractAI, RealAI, destination, pathfinder, modules and common realized state without claiming species-specific semantics that are not known.
+All other creatures fall back to `GenericCreatureDebugSource` rather than receiving invented species semantics.
 
 ## Pause / Step
 
-`AIDebugSimulationControl` detours `RainWorldGame.Update()` using Rain World's own `MonoMod.RuntimeDetour` assembly.
+`AIDebugSimulationControl` detours `RainWorldGame.Update()` through Rain World's own RuntimeDetour version.
 
-- Pause preserves the game's previous pause state.
-- Native pause menus keep ownership of their own paused update loop.
-- Step temporarily unpauses simulation, runs one complete original `RainWorldGame.Update()`, then restores debugger pause.
-- unloading the mod restores the previous pause state and disposes the hook.
+- debugger Pause remembers the previous game pause state;
+- native pause menus retain ownership of their paused update loop;
+- Step temporarily unpauses, runs one complete original update, then re-pauses;
+- unloading restores the previous pause state and disposes the hook.
 
-The target Rain World/BepInEx RuntimeDetour version used during implementation was also checked for the required `Hook(MethodBase, Delegate)` constructor.
+The target RuntimeDetour build used during implementation was checked for `Hook(MethodBase, Delegate)` support.
 
-## Trigger Capture and anomaly recorder
+## Trigger Capture, anomalies and breakpoints
 
-Trigger Capture creates a diagnostic black-box window containing approximately:
+Trigger Capture records roughly 10 simulated seconds before the trigger and 5 simulated seconds after it.
 
-- 10 seconds before the trigger;
-- 5 seconds after the trigger;
-
-measured in Rain World simulation time.
-
-Automatic anomaly categories currently include:
+Automatic anomaly types currently include:
 
 - InvalidNumber
 - VelocitySpike
@@ -280,137 +221,105 @@ Automatic anomaly categories currently include:
 - PossibleStuck
 - AttackSlotsViolation
 
-Debugger-induced Pause does not count as physical stuck/velocity anomaly time.
+Debugger-induced Pause is excluded from physical stuck/velocity anomaly detection.
 
-Completed captures can be exported individually to raw JSON.
+Conditional breakpoints can filter by event category, event-name substring and entity. A matching breakpoint can pause the whole world without modifying the creature AI.
 
-## Conditional Breakpoints
+## JSON export
 
-Breakpoint rules may filter by:
+Completed trigger captures can be exported individually.
 
-- event category;
-- event-name substring;
-- entity.
-
-When configured, a matching event pauses the whole simulation through the same Observatory pause controller rather than mutating the creature AI.
-
-## Whole Debug Session export
-
-`Ctrl + Shift + F8` writes a complete retained session under:
+`Ctrl + Shift + F8` exports the complete retained Observatory session under:
 
 `BepInEx/config/DryCycle.AIObservatory.Sessions/`
 
-The session file contains:
+The session contains:
 
 - format/version and simulation metadata;
-- all trace keys still retained by the fixed trace registry, including entities no longer realized/currently visible;
-- all retained trace frames;
-- complete per-frame historical Snapshot / Utility / Perception / Path data when full-history recording was enabled;
-- raw trace events;
-- completed Trigger Captures and their frames/events;
-- current diagnostic settings metadata.
+- all retained trace identities, including entities no longer realized or visible;
+- trace frames;
+- complete historical Snapshot / Utility / Perception / Path data when enabled;
+- raw events;
+- completed captures and their frames/events;
+- diagnostic settings metadata.
 
-Non-finite float values are exported as JSON `null`, never invalid `NaN`/`Infinity` tokens.
+Non-finite float values are emitted as valid JSON `null`, never `NaN`/`Infinity` tokens.
 
-## Settings
+## Settings and profiling
 
-Persistent developer settings include:
+Persistent settings include language, UI/font scale, opacity, AutoOpen, history length, raw names, data age/source, entity IDs, overlay categories, full-history recording, capture/anomaly switches and breakpoint pause behavior.
 
-- Chinese / English;
-- UI scale;
-- font scale;
-- opacity;
-- AutoOpen;
-- history length;
-- raw implementation names;
-- data age/source;
-- entity IDs;
-- master and per-category overlay toggles;
-- full-history recording;
-- trigger capture;
-- automatic anomaly detection;
-- breakpoint-pauses-world.
+The Settings window also exposes Observatory profiling categories for Capture, UI, Overlay, Timeline, Utility, Perception and AImap.
 
-The Settings page also shows per-category Observatory profiling values.
+## Performance and non-interference rules
 
-## Performance / non-interference rules
-
-The Observatory must not become a second AI system.
-
-- F7 closed disables trace watching.
-- Trace and capture storage are bounded.
+- F7 closed disables detailed trace watching.
+- Trace/capture storage is bounded.
 - Only selected/pinned entities receive detailed sampling.
-- Entity discovery is throttled.
-- Normal trace sampling is roughly 10 Hz simulation time, not every rendered frame.
-- Cached reflection metadata is used where private species diagnostics are necessary.
-- Flock inspection uses read-only accessors.
-- Utility diagnostics never rerun module Utility methods.
-- Debug code must not write AI target, role, path, relationship, utility or save-state data.
-- Allowed external effects are limited to debugger controls: input isolation, whole-world Pause/Step, UI/settings/layout files and explicit diagnostic exports.
+- World entity discovery is throttled.
+- Normal history sampling is ~10 Hz simulation time, not every render frame.
+- Reflection metadata is cached where private species state must be inspected.
+- Utility methods are never rerun by the debugger.
+- Tracker best-guess computation is never triggered by the debugger.
+- Flock access is read-only.
+- Debug code must not write AI target, role, destination, path, relationship, utility or save-state data.
+- Allowed external effects are limited to debugger controls: player-input isolation, whole-world Pause/Step, and explicit settings/layout/export files.
 
-## ImGui / build runtime
+## Build/runtime wiring
 
-`src/Directory.Build.props` references `ImGui.NET 1.91.6.1`, pins the build to x64 and references the `MonoMod.RuntimeDetour.dll` already shipped by Rain World's BepInEx installation with `Private=false`.
+`src/Directory.Build.props` contains the x64 build settings and the `ImGui.NET 1.91.6.1` package reference.
 
-The Rain World ImGui backend is self-contained and uses a dedicated overlay Camera plus Built-in Render Pipeline command-buffer / dynamic-mesh rendering. It does not require Unity Editor, SRP, OS viewports or UImGui at runtime.
+`src/DryCycle.csproj` contains the Rain World/BepInEx/Unity references, including the exact `BepInEx/core/MonoMod.RuntimeDetour.dll` with `Private=false`, and validates those paths before reference resolution.
 
-`src/DryCycle.csproj` validates the actual Rain World/BepInEx/Unity assembly locations before resolving the Release build.
+The ImGui backend is self-contained for Rain World's Built-in Render Pipeline and uses a dedicated overlay Camera with command-buffer/dynamic-mesh rendering.
 
-`scripts/Verify-AIObservatory.ps1` is the intended pre-live validation entry point.
+`scripts/Verify-AIObservatory.ps1` performs source-wiring checks, dependency/deployment checks and then prints the live acceptance checklist.
 
 ## Code completion status
 
-The planned V1/V2/V3 managed-code feature set is now implemented:
+The planned V1/V2/V3 managed-code feature set is implemented:
 
-- inspection workspace and bilingual UI;
-- DockSpace and persistent layout;
+- bilingual inspection workspace;
+- DockSpace + persistent layout;
 - input isolation;
-- complete historical snapshots and timeline replay;
+- complete timeline/history replay;
 - read-only Utility / Tracker / Path diagnostics;
 - world overlays and AImap;
-- Compare and Candidate Inspector;
+- Compare / Candidate Inspector;
 - whole-world Pause / Step;
 - Trigger Capture / anomaly detection;
-- conditional Breakpoints;
+- conditional breakpoints;
 - per-capture JSON export;
 - whole-session JSON export;
 - DesertBatfly, MossySpider, SpinebackLizard and generic adapters;
-- profiler/settings/runtime deployment validation support.
+- profiling/settings/deployment verification support.
 
-This means **the implementation task is code-complete**. It does **not** mean live acceptance has been performed.
+Therefore the **implementation task is code-complete**. This is not the same as runtime acceptance.
 
 ## Live validation still required
 
-Before changing status from `implemented / pending live validation` to `fully validated`, run a Release build against the actual Rain World install and verify at minimum:
+Before marking the system `fully validated`, run the Release build against the actual Rain World installation and verify at minimum:
 
-1. `scripts/Verify-AIObservatory.ps1` passes dependency and deployment checks.
-2. NuGet restore resolves ImGui.NET and its net48-compatible dependencies.
-3. `DryCycle.dll`, `ImGui.NET.dll`, required managed support assemblies and x64 `cimgui.dll` deploy correctly.
-4. Rain World reaches gameplay with F7 closed and no Observatory-side exception.
-5. F7 opens Compact mode; F6 enters the DockSpace workspace; F7 closes cleanly.
-6. Chinese and English text render correctly, including Chinese glyphs.
-7. Saved DockSpace layout survives restart and also works when the Windows path contains non-ASCII characters.
-8. LIVE mode does not steal gameplay input when ImGui is not interacting.
-9. INTERACT/text/mouse UI capture does not leak gameplay input into the player.
-10. Pause World freezes gameplay without corrupting Rain World's native pause menu state.
-11. Step 1 Tick advances exactly one gameplay simulation tick.
-12. Alt+click selects the correct creature in normal camera and split-screen/multiple-camera conditions.
-13. Entity identity survives realize/unrealize, shortcut, den and room transitions without stale-reference exceptions.
-14. Pin, Freeze, Timeline and Compare remain valid across ordinary transitions.
-15. Timeline stops accumulating duplicate samples while debugger-paused.
-16. Utility diagnostics on a vanilla UtilityComparer creature do not alter its behavior and show `—` when no cached smoother exists.
-17. Tracker/Perception and Path pages work on suitable vanilla creatures.
-18. AImap overlay follows the selected creature's template and does not throw on transition/unloaded coordinates.
-19. DesertBatfly shows role evaluation, suppression, Sentinel alarm, Opportunist recovery and AttackSlots overlay correctly.
-20. MossySpider uses the dedicated migration/roaming adapter.
-21. SpinebackLizard is identified as Green-baseline LizardAI and still exposes vanilla Utility/Tracker/Path data.
-22. Trigger Capture contains approximately 10 seconds pre-trigger + 5 seconds post-trigger of simulation history.
-23. Artificial debugger Pause does not trigger PossibleStuck.
-24. A conditional breakpoint pauses the whole world on the expected event and resumes safely.
-25. Individual capture JSON contains raw event detail/reason.
-26. `Ctrl+Shift+F8` creates a valid whole-session JSON containing traces, historical state and captures.
-27. F7-closed overhead is effectively zero; F7-open overhead remains acceptable in a populated stress-test room.
+1. `scripts/Verify-AIObservatory.ps1` passes source/dependency/deployment checks.
+2. Rain World reaches gameplay with F7 closed and no Observatory exception.
+3. Compact/Full DockSpace, Chinese/English, saved layout and non-ASCII paths work.
+4. LIVE/INTERACT and ImGui keyboard/mouse capture do not leak gameplay input.
+5. Pause freezes the whole simulation and Step advances exactly one simulation tick.
+6. Timeline does not grow while merely paused and historical pages match old samples.
+7. Alt+click and overlays work with normal and multiple/split RoomCamera setups.
+8. Utility on vanilla creatures shows unavailable cache values as `—` and does not change AI behavior.
+9. Tracker/Perception and Path pages operate without changing retained AI state.
+10. AImap overlay does not throw during room/shortcut transitions.
+11. DesertBatfly specialized roles, Sentinel/Opportunist state and AttackSlots overlays behave correctly.
+12. MossySpider selects its dedicated roaming/migration adapter.
+13. SpinebackLizard reports Green-baseline LizardAI ownership and exposes vanilla diagnostics.
+14. Trigger Capture produces the expected ~10 s pre / 5 s post simulation window.
+15. Artificial Pause does not trigger PossibleStuck.
+16. Conditional breakpoint pauses/resumes the whole world safely.
+17. Individual capture JSON preserves raw event detail/reason.
+18. `Ctrl+Shift+F8` produces valid whole-session JSON containing traces/history/captures.
+19. F7-closed overhead is effectively zero and F7-open overhead is acceptable in a populated stress-test room.
 
-Until these live-game checks are completed, the correct status remains:
+Until these live-game checks are performed, the correct status is:
 
 **code complete / pending live Rain World validation**.
