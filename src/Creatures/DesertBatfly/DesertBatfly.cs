@@ -16,11 +16,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private bool resolvingNonRockViolence;
     private Player playerHolder;
 
-    // Short damage attribution window used only to identify a genuine player kill.
-    // Rock never enters this path because it is stun-only for this species.
-    private Player recentPlayerDamager;
-    private int recentPlayerDamageTicks;
-    private float recentPlayerThreatScale;
+    // Short lethal-attribution window. It accepts only threats the mortality system
+    // explicitly understands (Slugcat or Peach Lizard). Rock never enters this path
+    // because the species' Rock interaction is stun-only.
+    private Creature recentLethalDamager;
+    private int recentLethalDamageTicks;
+    private float recentLethalThreatScale;
 
     private float sandStruggleMeter, sandSpitThreshold;
     private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
@@ -78,10 +79,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         TrackPlayerRelease();
         if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
         if (sandSpitCooldown > 0) sandSpitCooldown--;
-        if (recentPlayerDamageTicks > 0 && --recentPlayerDamageTicks == 0)
+        if (recentLethalDamageTicks > 0 && --recentLethalDamageTicks == 0)
         {
-            recentPlayerDamager = null;
-            recentPlayerThreatScale = 0f;
+            recentLethalDamager = null;
+            recentLethalThreatScale = 0f;
         }
 
         if (room == null)
@@ -116,10 +117,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        // Mortality awareness is enforced after the normal AI pass but before
-        // Attach/Interfere physics. If an intimidated bat tried to reacquire the
-        // demonstrated killer this tick, the intimidation layer can cancel it before
-        // any drain or movement interference is applied.
+        // Mortality awareness runs after normal AI but before Attach/Interfere physics.
+        // It can cancel ordinary aggression or, for the rare extreme personality,
+        // override movement with the dedicated vengeance/rescue state machine.
         DesertBatflyIntimidation.Update(this);
 
         if (room == null) return;
@@ -267,14 +267,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
         }
 
-        // Attribute only genuine damaging player attacks. Spears are the clearest
-        // demonstration of lethal force and receive full intimidation weight; other
-        // player-caused lethal damage still counts but is slightly weaker.
-        if (damage > 0f && attacker is Player playerAttacker)
+        // Attribute only genuine damaging attacks from supported mortality threats.
+        // Spears remain the clearest player demonstration; Peach-Lizard bites/tongue
+        // follow-up damage use a slightly stronger predator scale.
+        if (damage > 0f && DesertBatflyIntimidation.IsSupportedLethalThreat(attacker))
         {
-            recentPlayerDamager = playerAttacker;
-            recentPlayerDamageTicks = 240;
-            recentPlayerThreatScale = source?.owner is Spear ? 1f : 0.82f;
+            recentLethalDamager = attacker;
+            recentLethalDamageTicks = 240;
+            recentLethalThreatScale = attacker is Player
+                ? (source?.owner is Spear ? 1f : 0.82f)
+                : 1.05f;
         }
 
         // A spear, predator bite or any other genuine damage event must remain able
@@ -351,16 +353,17 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
 
         bool wasDead = dead;
-        Player killer = !wasDead && recentPlayerDamageTicks > 0
-            ? recentPlayerDamager
+        Creature killer = !wasDead && recentLethalDamageTicks > 0
+            ? recentLethalDamager
             : null;
-        float threatScale = recentPlayerThreatScale > 0f
-            ? recentPlayerThreatScale
+        float threatScale = recentLethalThreatScale > 0f
+            ? recentLethalThreatScale
             : 0.82f;
         Vector2 deathPosition = mainBodyChunk?.pos ?? Vector2.zero;
         Fly preDeathChainRoot = !wasDead && AI != null && AI.behavior == FlyAI.Behavior.Chain
             ? FirstInChain()
             : null;
+        bool revengeFailed = !wasDead && DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
 
         playerHolder = null;
         sandStruggleMeter = 0f;
@@ -369,30 +372,44 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         Emergence?.Cancel();
         base.Die();
 
-        // Broadcast only on the single live -> dead transition and only when a recent
-        // genuine player damage event can be identified. Predator kills, drowning and
-        // unrelated deaths therefore never manufacture player intimidation.
+        // Broadcast only once on live -> dead and only for a supported recent threat.
+        // A killed avenger is marked specially so the next fear wave is stronger and
+        // cannot immediately recruit a replacement suicide attacker.
         if (!wasDead && dead && killer != null)
         {
-            DesertBatflyIntimidation.BroadcastPlayerKill(
-                this,
-                killer,
-                deathPosition,
-                preDeathChainRoot,
-                threatScale);
+            if (killer is Player playerKiller)
+            {
+                DesertBatflyIntimidation.BroadcastPlayerKill(
+                    this,
+                    playerKiller,
+                    deathPosition,
+                    preDeathChainRoot,
+                    threatScale,
+                    revengeFailed);
+            }
+            else if (killer is Lizard lizardKiller)
+            {
+                DesertBatflyIntimidation.BroadcastPredatorKill(
+                    this,
+                    lizardKiller,
+                    deathPosition,
+                    preDeathChainRoot,
+                    threatScale,
+                    revengeFailed);
+            }
         }
 
-        recentPlayerDamager = null;
-        recentPlayerDamageTicks = 0;
-        recentPlayerThreatScale = 0f;
+        recentLethalDamager = null;
+        recentLethalDamageTicks = 0;
+        recentLethalThreatScale = 0f;
     }
 
     public override void Destroy()
     {
         playerHolder = null;
-        recentPlayerDamager = null;
-        recentPlayerDamageTicks = 0;
-        recentPlayerThreatScale = 0f;
+        recentLethalDamager = null;
+        recentLethalDamageTicks = 0;
+        recentLethalThreatScale = 0f;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
         DesertAI?.CancelAttack();
