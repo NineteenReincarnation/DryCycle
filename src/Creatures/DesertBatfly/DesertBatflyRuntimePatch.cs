@@ -61,6 +61,28 @@ internal static class DesertBatflyRuntimePatch
 
     internal static Type FindType(string fullName)
     {
+        Type found = FindLoadedType(fullName);
+        if (found != null) return found;
+
+        // Harmony is normally already loaded by BepInEx. Some chainloader builds
+        // delay-load it, so explicitly requesting 0Harmony is a harmless fallback.
+        if (fullName.StartsWith("HarmonyLib.", StringComparison.Ordinal))
+        {
+            try
+            {
+                Assembly.Load("0Harmony");
+                found = FindLoadedType(fullName);
+                if (found != null) return found;
+            }
+            catch
+            {
+            }
+        }
+        return null;
+    }
+
+    private static Type FindLoadedType(string fullName)
+    {
         foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
             try
