@@ -8,10 +8,11 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
     private const float Radius = 4.2f;
     private const float Mass = 0.055f;
 
-    // A wallbehind tile only tells gameplay that there is a background wall. The
-    // rendered room texture still contains the exact 30-step depth at that pixel.
-    // Anchored RopeHandles sample that depth per camera and use CustomDepth so the
-    // marker is occluded by anything genuinely in front of the wall it is pinned to.
+    // Rain World's LevelTexture encodes real room geometry/decorative depth in 30
+    // discrete steps. A pure-white pixel is the special "nothing rendered here"
+    // value and DepthAtCoordinate returns 1 for it; the deepest real level pixel is
+    // 29 / 30. Use that distinction for both anchoring eligibility and rendering.
+    private const float EmptyDepthThreshold = 29.5f / 30f;
     private const float BackgroundDepthFallback = 10f / 30f;
     private const float AnchorDepthFrontBias = 0.5f / 30f;
 
@@ -163,23 +164,109 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         Player holderAtAnchor = Holder;
         Vector2 position = firstChunk.pos;
 
-        // RopeHandle anchoring is a background-wall operation, not a foreground
-        // collision operation. The endpoint may be completely suspended in open
-        // foreground space; it only needs a non-empty room background at the exact
-        // point where the player is holding it. Rain World's Tile.wallbehind is the
-        // authoritative marker for that background wall.
-        if (room.GetTile(position).Solid && lastOutsideTerrainPos.HasValue)
+        // If the small handle happens to overlap foreground collision, use its last
+        // valid outside-terrain point; anchoring itself is not based on foreground
+        // Tile.Solid or Tile.wallbehind at all.
+        if (room.GetTile(position).Solid)
         {
+            if (!lastOutsideTerrainPos.HasValue)
+            {
+                return false;
+            }
+
             position = lastOutsideTerrainPos.Value;
+            if (room.GetTile(position).Solid)
+            {
+                return false;
+            }
         }
 
-        Room.Tile tile = room.GetTile(position);
-        if (tile.Solid || !tile.wallbehind)
+        // The previous implementation used Tile.wallbehind here. That flag only
+        // represents the gameplay wall-behind geometry and therefore rejects many
+        // perfectly visible deeper background layers. What the player actually sees
+        // is LevelTexture, so permit the anchor whenever the exact screen pixel has
+        // any real depth-coded level content. Pure white means genuine empty space.
+        if (!TryResolveRenderedBackgroundDepth(position, out _))
         {
             return false;
         }
 
         return CommitAnchor(position, holderAtAnchor);
+    }
+
+    private bool TryResolveRenderedBackgroundDepth(Vector2 worldPosition, out float depth)
+    {
+        depth = BackgroundDepthFallback;
+        RoomCamera[] cameras = room?.game?.cameras;
+        bool sampledVisibleCamera = false;
+
+        if (cameras != null)
+        {
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                RoomCamera camera = cameras[i];
+                if (camera?.room != room || camera.levelTexture == null)
+                {
+                    continue;
+                }
+
+                if (!TrySampleCameraDepth(camera, worldPosition, out float candidateDepth))
+                {
+                    continue;
+                }
+
+                sampledVisibleCamera = true;
+                if (candidateDepth < EmptyDepthThreshold)
+                {
+                    depth = candidateDepth;
+                    return true;
+                }
+            }
+        }
+
+        if (sampledVisibleCamera)
+        {
+            return false;
+        }
+
+        // Normally the handle is on the active camera and the LevelTexture branch
+        // above is authoritative. Keep wallbehind only as an off-screen/loading
+        // fallback so an already valid gameplay background does not become unusable
+        // for a frame before the camera texture is available.
+        Room.Tile tile = room.GetTile(worldPosition);
+        if (!tile.Solid && tile.wallbehind)
+        {
+            depth = BackgroundDepthFallback;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TrySampleCameraDepth(
+        RoomCamera camera,
+        Vector2 worldPosition,
+        out float depth)
+    {
+        depth = 1f;
+        if (camera?.levelTexture == null)
+        {
+            return false;
+        }
+
+        Vector2 local = worldPosition - camera.CamPos(camera.currentCameraPosition);
+        int pixelX = Mathf.FloorToInt(local.x);
+        int pixelY = Mathf.FloorToInt(local.y);
+        if (pixelX < 0 ||
+            pixelY < 0 ||
+            pixelX >= camera.levelTexture.width ||
+            pixelY >= camera.levelTexture.height)
+        {
+            return false;
+        }
+
+        depth = Mathf.Clamp01(camera.DepthAtCoordinate(worldPosition));
+        return true;
     }
 
     private bool CommitAnchor(Vector2 position, Player holderAtAnchor)
@@ -260,10 +347,10 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         float alpha = 1f;
         if (anchored)
         {
-            // RoomCamera.DepthAtCoordinate decodes the exact level-texture depth
-            // (0..29 / 30), not merely the gameplay wallbehind bit. Pull the marker
-            // half a depth step toward the camera so it remains visible on the wall
-            // surface while still being hidden by genuinely closer geometry.
+            // Use the same LevelTexture depth used to decide whether this pixel can
+            // be anchored. Pull the marker half a depth step toward the camera so it
+            // appears embedded on the visible background surface instead of being
+            // rejected or hidden merely because that surface is several layers back.
             float backgroundDepth = ResolveAnchorDepth(rCam, worldPosition);
             float markerDepth = Mathf.Clamp01(backgroundDepth - AnchorDepthFrontBias);
             alpha = 1f - markerDepth;
@@ -295,15 +382,13 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
             return BackgroundDepthFallback;
         }
 
-        // DepthAtCoordinate indexes the current camera's level texture directly, so
-        // only sample while this world point is inside that texture. Off-screen
-        // leasers use the ordinary wallbehind depth until the point becomes visible.
-        if (!rCam.PositionCurrentlyVisible(worldPosition, 0f, widescreen: true))
+        if (TrySampleCameraDepth(rCam, worldPosition, out float depth) &&
+            depth < EmptyDepthThreshold)
         {
-            return BackgroundDepthFallback;
+            return depth;
         }
 
-        return Mathf.Clamp01(rCam.DepthAtCoordinate(worldPosition));
+        return BackgroundDepthFallback;
     }
 
     public void ApplyPalette(
