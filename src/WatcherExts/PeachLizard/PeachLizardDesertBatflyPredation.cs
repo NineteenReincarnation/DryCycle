@@ -36,6 +36,7 @@ internal static class PeachLizardDesertBatflyPredation
         if (_enabled) return;
         _enabled = true;
         On.PreyTracker.TrackedPrey.Attractiveness += TrackedPrey_Attractiveness;
+        On.PreyTracker.Utility += PreyTracker_Utility;
         On.LizardAI.TravelPreference += LizardAI_TravelPreference;
         On.LizardTongue.Update += LizardTongue_Update;
     }
@@ -45,6 +46,7 @@ internal static class PeachLizardDesertBatflyPredation
         if (!_enabled) return;
         _enabled = false;
         On.PreyTracker.TrackedPrey.Attractiveness -= TrackedPrey_Attractiveness;
+        On.PreyTracker.Utility -= PreyTracker_Utility;
         On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
         On.LizardTongue.Update -= LizardTongue_Update;
     }
@@ -75,11 +77,7 @@ internal static class PeachLizardDesertBatflyPredation
 
         if (prey.dead)
         {
-            float remaining = Mathf.Clamp01(prey.bites / 3f);
-            float factor = Mathf.Lerp(
-                CorpseAttractivenessMin,
-                CorpseAttractivenessMax,
-                Mathf.Pow(remaining, 0.75f));
+            float factor = CorpseFoodValue(prey);
 
             // A corpse already within easy tongue reach is cheap food, but even an intact
             // carcass should normally remain below a healthy living bat at comparable range.
@@ -127,6 +125,30 @@ internal static class PeachLizardDesertBatflyPredation
             liveFactor *= 1.20f;
 
         return result * Mathf.Clamp(liveFactor, 0.48f, 1.55f);
+    }
+
+    private static float PreyTracker_Utility(
+        On.PreyTracker.orig_Utility orig,
+        PreyTracker self)
+    {
+        float result = orig(self);
+        if (self?.AI is not LizardAI ai || !IsPeach(ai.lizard) ||
+            self.MostAttractivePrey?.representedCreature?.realizedCreature is not DesertBatfly prey)
+        {
+            return result;
+        }
+
+        if (!HasEdibleRemains(prey) || IsHeldByPlayer(prey))
+            return 0f;
+
+        // TrackedPrey.Attractiveness chooses between prey entries; PreyTracker.Utility
+        // competes against Lurk/Travel/Fear/etc. Scale both for corpses so a one-bite scrap
+        // is genuinely opportunistic rather than retaining the full Eats relationship's
+        // behavioral urgency. Once grasped, vanilla LizardAI's ReturnPrey override sets
+        // utility to 1 independently, so this does not weaken carrying food home.
+        return prey.dead
+            ? result * CorpseFoodValue(prey)
+            : result;
     }
 
     private static PathCost LizardAI_TravelPreference(
@@ -279,6 +301,15 @@ internal static class PeachLizardDesertBatflyPredation
                 return true;
         }
         return false;
+    }
+
+    private static float CorpseFoodValue(DesertBatfly prey)
+    {
+        float remaining = Mathf.Clamp01(prey.bites / 3f);
+        return Mathf.Lerp(
+            CorpseAttractivenessMin,
+            CorpseAttractivenessMax,
+            Mathf.Pow(remaining, 0.75f));
     }
 
     private static bool IsPeach(Lizard lizard)
