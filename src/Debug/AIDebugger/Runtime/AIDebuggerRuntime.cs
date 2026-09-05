@@ -66,7 +66,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private ManualLogSource logger;
     private Camera overlayCamera;
     private AIDebugImGuiBackend backend;
-    private readonly AIDebuggerWindowV2 window = new();
+    private readonly AIDebuggerWindowV3 window = new();
     private bool visible;
     private bool backendFailed;
     private double overheadMs;
@@ -157,7 +157,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             AIDebugStyleController.Reset();
             backend = new AIDebugImGuiBackend();
-            logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, whole-world pause/step enabled.");
+            logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, whole-world pause/step enabled.");
             return true;
         }
         catch (Exception error)
