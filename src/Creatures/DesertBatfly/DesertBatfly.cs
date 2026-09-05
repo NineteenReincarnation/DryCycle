@@ -16,9 +16,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private bool resolvingNonRockViolence;
     private Player playerHolder;
 
-    // Short lethal-attribution window. It accepts only threats the mortality system
-    // explicitly understands (Slugcat or Peach Lizard). Rock never enters this path
-    // because the species' Rock interaction is stun-only.
     private Creature recentLethalDamager;
     private int recentLethalDamageTicks;
     private float recentLethalThreatScale;
@@ -111,11 +108,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertBatflyIntimidation.Update(this);
         bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
         if (extremeVengeance)
-        {
-            // Vengeance owns the attack lane. Followers are included here too, so
-            // ordinary Attach/Interfere can never stack with social vengeance damage.
             DesertAI.CancelAttack();
-        }
 
         if (room == null) return;
         Emergence.Update(eu);
@@ -257,9 +250,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         bool supportedLethalThreat = damage > 0f &&
             DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
 
-        // Do not dismantle an intact Fly chain before a lethal hit gets to Die(). The
-        // death path snapshots/broadcasts the full pre-death chain first. A surviving
-        // target receives the ordinary direct threat transition immediately afterwards.
+        // Preserve an intact Fly chain until Die() has captured its witnesses. A hit
+        // that does not kill receives the ordinary Threatened transition afterwards.
         if (supportedLethalThreat)
         {
             recentLethalDamager = attacker;
@@ -353,15 +345,23 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             ? recentLethalThreatScale
             : 0.82f;
         Vector2 deathPosition = mainBodyChunk?.pos ?? Vector2.zero;
-        Fly preDeathChainRoot = !wasDead && AI != null && AI.behavior == FlyAI.Behavior.Chain
-            ? FirstInChain()
-            : null;
-        bool revengeFailed = !wasDead && DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
+        DesertBatfly[] chainWitnesses = !wasDead
+            ? DesertBatflyIntimidation.SnapshotChainWitnesses(this)
+            : System.Array.Empty<DesertBatfly>();
+        bool revengeFailed = !wasDead &&
+            DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
 
-        // Creature.Die() performs grasp teardown. Broadcast while the victim and all
-        // chain mates still retain their real pre-death chain topology, otherwise a
-        // spear kill in a hanging chain can silently degrade into a weak proximity alarm.
-        if (!wasDead && killer != null)
+        playerHolder = null;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
+        DesertAI?.CancelAttack();
+        Emergence?.Cancel();
+        base.Die();
+
+        // Broadcast only after the live -> dead transition is confirmed. The chain
+        // snapshot above preserves exact eyewitnesses without creating a false death
+        // event if an external compatibility hook unexpectedly prevents death.
+        if (!wasDead && dead && killer != null)
         {
             if (killer is Player playerKiller)
             {
@@ -369,7 +369,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                     this,
                     playerKiller,
                     deathPosition,
-                    preDeathChainRoot,
+                    chainWitnesses,
                     threatScale,
                     revengeFailed);
             }
@@ -379,18 +379,14 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                     this,
                     lizardKiller,
                     deathPosition,
-                    preDeathChainRoot,
+                    chainWitnesses,
                     threatScale,
                     revengeFailed);
             }
         }
 
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        DesertAI?.CancelAttack();
-        Emergence?.Cancel();
-        base.Die();
+        if (!wasDead && dead)
+            DesertBatflyIntimidation.Forget(this);
 
         recentLethalDamager = null;
         recentLethalDamageTicks = 0;
@@ -406,6 +402,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
         DesertAI?.CancelAttack();
+        DesertBatflyIntimidation.Forget(this);
         base.Destroy();
     }
 }
