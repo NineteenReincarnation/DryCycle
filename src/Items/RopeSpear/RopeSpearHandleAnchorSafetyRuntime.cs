@@ -1,3 +1,4 @@
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
