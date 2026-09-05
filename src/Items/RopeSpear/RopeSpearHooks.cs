@@ -16,6 +16,7 @@ internal static class RopeSpearHooks
     private const string BrokenPrefix = "DRYCYCLE_ROPESPEAR_BROKEN=";
     private const float RopeGrabRange = 27f;
     private const int RopeRegrabDelay = 10;
+    private const float SpearEndExitDistance = 38f;
 
     private sealed class PlayerRopeGrabState
     {
@@ -47,9 +48,8 @@ internal static class RopeSpearHooks
         On.AbstractSpear.StuckInWallTick += AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability += Player_Grabability;
-        On.Player.GrabUpdate += Player_GrabUpdate;
         On.Player.ThrowObject += Player_ThrowObject;
-        On.PlayerGraphics.Update += PlayerGraphics_Update;
+        On.Player.Update += Player_Update;
 
         RopeSpearDevConsoleSupport.TryRegister();
     }
@@ -65,9 +65,8 @@ internal static class RopeSpearHooks
         On.AbstractSpear.StuckInWallTick -= AbstractSpear_StuckInWallTick;
         On.SaveState.AbstractPhysicalObjectFromString -= SaveState_AbstractPhysicalObjectFromString;
         On.Player.Grabability -= Player_Grabability;
-        On.Player.GrabUpdate -= Player_GrabUpdate;
         On.Player.ThrowObject -= Player_ThrowObject;
-        On.PlayerGraphics.Update -= PlayerGraphics_Update;
+        On.Player.Update -= Player_Update;
 
         RopeSpearDevConsoleSupport.ResetRegistration();
 
@@ -173,6 +172,147 @@ internal static class RopeSpearHooks
         }
     }
 
+    private static void Player_Update(
+        On.Player.orig_Update orig,
+        Player self,
+        bool eu)
+    {
+        orig(self, eu);
+
+        if (self?.animation != Player.AnimationIndex.VineGrab ||
+            self.vinePos?.vine is not RopeSpear ropeSpear)
+        {
+            return;
+        }
+
+        // This is the historical RopeSpear climbing path: the actual Rain World
+        // VineGrab state owns body placement, hands, tangent movement, swinging and
+        // jump release. If the thrower was still holding this rope's handle, drop
+        // only that handle once VineGrab has actually acquired the rope.
+        RopeSpearClimbController.ReleaseAssociatedHandleForClimb(self, ropeSpear);
+
+        TryMountSpearFromVanillaVine(self, ropeSpear);
+    }
+
+    private static void TryMountSpearFromVanillaVine(Player player, RopeSpear ropeSpear)
+    {
+        if (player?.room?.climbableVines == null ||
+            player.vinePos == null ||
+            player.input == null ||
+            player.input.Length == 0 ||
+            player.input[0].y <= 0 ||
+            ropeSpear == null ||
+            ropeSpear.mode != Weapon.Mode.StuckInWall ||
+            ropeSpear.abstractPhysicalObject is not AbstractRopeSpear data ||
+            data.stuckInWallCycles < 0)
+        {
+            return;
+        }
+
+        float totalLength = player.room.climbableVines.TotalLength(ropeSpear);
+        if (totalLength <= 0.001f)
+        {
+            return;
+        }
+
+        float remaining = Mathf.Max(0f, 1f - player.vinePos.floatPos) * totalLength;
+        if (remaining > SpearEndExitDistance)
+        {
+            return;
+        }
+
+        int last = ropeSpear.TotalPositions() - 1;
+        Vector2 spearEnd = ropeSpear.Pos(last);
+        if (!Custom.DistLess(player.mainBodyChunk.pos, spearEnd, 48f) ||
+            spearEnd.y + 5f < player.mainBodyChunk.pos.y)
+        {
+            return;
+        }
+
+        if (!TryFindHorizontalSpearBeam(
+                player.room,
+                ropeSpear.firstChunk.pos,
+                player.mainBodyChunk.pos,
+                out Vector2 beamCenter))
+        {
+            return;
+        }
+
+        Vector2 pullupTarget = new Vector2(
+            beamCenter.x,
+            player.room.MiddleOfTile(beamCenter).y + 20f);
+        if (!Custom.DistLess(player.mainBodyChunk.pos, pullupTarget, 32f))
+        {
+            return;
+        }
+
+        // Keep the later historical fix: hand control from VineGrab to vanilla
+        // GetUpOnBeam, but do not teleport either body chunk and do not clear
+        // existing velocity. Vanilla performs the pull-up over subsequent frames.
+        player.vineGrabDelay = 15;
+        player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
+        player.flipDirection = ropeSpear.rotation.x >= 0f ? -1 : 1;
+        player.pullupSoftlockSafety = 0;
+        player.straightUpOnHorizontalBeam = true;
+        player.forceFeetToHorizontalBeamTile = 20;
+        player.upOnHorizontalBeamPos = pullupTarget;
+        player.animation = Player.AnimationIndex.GetUpOnBeam;
+        player.bodyMode = Player.BodyModeIndex.ClimbingOnBeam;
+        player.standing = false;
+
+        player.room.PlaySound(
+            SoundID.Slugcat_Get_Up_On_Horizontal_Beam,
+            player.mainBodyChunk,
+            loop: false,
+            0.75f,
+            1f);
+    }
+
+    private static bool TryFindHorizontalSpearBeam(
+        Room room,
+        Vector2 spearPosition,
+        Vector2 playerPosition,
+        out Vector2 beamCenter)
+    {
+        beamCenter = Vector2.zero;
+        if (room == null)
+        {
+            return false;
+        }
+
+        IntVector2 origin = room.GetTilePosition(spearPosition);
+        float bestDistance = float.MaxValue;
+        bool found = false;
+
+        for (int x = -2; x <= 2; x++)
+        {
+            for (int y = -1; y <= 1; y++)
+            {
+                IntVector2 tilePos = origin + new IntVector2(x, y);
+                Room.Tile tile = room.GetTile(tilePos);
+                if (!tile.horizontalBeam || tile.Solid)
+                {
+                    continue;
+                }
+
+                Vector2 center = room.MiddleOfTile(tilePos);
+                float distance = Vector2.Distance(playerPosition, center);
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                beamCenter = center;
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    // Legacy custom-grab helpers are kept in the file for now but are deliberately
+    // not hooked. Vanilla VineGrab is authoritative again for RopeSpear climbing.
     private static void Player_GrabUpdate(
         On.Player.orig_GrabUpdate orig,
         Player self,
@@ -199,8 +339,6 @@ internal static class RopeSpearHooks
 
         if (state.Spear != null)
         {
-            // Pickup remains an explicit manual detach. Jump detach is handled in
-            // RopeSpearClimbController so it can preserve swing momentum.
             if (pickupPressed)
             {
                 RopeSpearClimbController.ResetVinePose(self);
@@ -226,9 +364,6 @@ internal static class RopeSpearHooks
             return;
         }
 
-        // Vanilla vines allow Up to acquire them without consuming a hand. Keep
-        // that input behaviour, but do the overlap test against our own rope chain
-        // instead of registering RopeSpear as IClimbableVine.
         bool wantsRope = state.RegrabDelay == 0 && (upHeld || pickupPressed);
         if (wantsRope &&
             CanStartRopeGrab(self) &&
@@ -267,10 +402,6 @@ internal static class RopeSpearHooks
         }
 
         bool active = state?.Spear != null;
-
-        // Prime the hand targets before SlugcatHand.Update so free hands actually
-        // move onto the rope this frame. Reapply afterwards to keep the target
-        // stable for the next graphics tick if another generic hand behaviour ran.
         if (active)
         {
             RopeSpearClimbController.PrepareHands(
