@@ -58,7 +58,7 @@ internal readonly struct AIDebugTraceFrame
         string mode, string target, string role, string suppression, string controlOwner,
         float utility0 = 0f, float utility1 = 0f, float utility2 = 0f, float panic = 0f)
     {
-        Frame = Time.frameCount;
+        Frame = UnityEngine.Time.frameCount;
         Time = UnityEngine.Time.unscaledTime;
         Room = room ?? "—";
         Position = position;
@@ -139,11 +139,11 @@ internal static class AIDebugTrace
         if (!IsWatched(key)) return;
         Trace trace = GetOrCreate(key);
         int index = trace.EventHead;
-        trace.Events[index] = new AIDebugTraceEvent(Time.frameCount, UnityEngine.Time.unscaledTime,
+        trace.Events[index] = new AIDebugTraceEvent(UnityEngine.Time.frameCount, UnityEngine.Time.unscaledTime,
             category, name, detail, reason);
         trace.EventHead = (index + 1) % EventCapacity;
         if (trace.EventCount < EventCapacity) trace.EventCount++;
-        trace.LastTouchedFrame = Time.frameCount;
+        trace.LastTouchedFrame = UnityEngine.Time.frameCount;
     }
 
     internal static void RecordChange(AbstractCreature creature, AIDebugEventCategory category,
@@ -164,7 +164,7 @@ internal static class AIDebugTrace
         if (!IsWatched(creature)) return;
         DebugEntityKey key = DebugEntityKey.From(creature);
         Trace trace = GetOrCreate(key);
-        int now = Time.frameCount;
+        int now = UnityEngine.Time.frameCount;
         if (now - trace.LastSampleFrame < SampleFrameInterval) return;
         trace.LastSampleFrame = now;
         trace.Frames[trace.FrameHead] = sample;
