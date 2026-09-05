@@ -34,6 +34,7 @@ internal static class PeachLizardDesertBatflyPredation
     {
         if (_enabled) return;
         _enabled = true;
+        On.PreyTracker.TrackedPrey.Attractiveness += TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference += LizardAI_TravelPreference;
         On.LizardTongue.Update += LizardTongue_Update;
     }
@@ -42,8 +43,60 @@ internal static class PeachLizardDesertBatflyPredation
     {
         if (!_enabled) return;
         _enabled = false;
+        On.PreyTracker.TrackedPrey.Attractiveness -= TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
         On.LizardTongue.Update -= LizardTongue_Update;
+    }
+
+    private static float TrackedPrey_Attractiveness(
+        On.PreyTracker.TrackedPrey.orig_Attractiveness orig,
+        PreyTracker.TrackedPrey self)
+    {
+        float result = orig(self);
+        if (self?.owner?.AI is not LizardAI ai ||
+            !IsPeach(ai.lizard) ||
+            self.critRep?.representedCreature?.realizedCreature is not DesertBatfly prey ||
+            prey.room == null || prey.room != ai.lizard.room || prey.inShortcut)
+        {
+            return result;
+        }
+
+        Lizard lizard = ai.lizard;
+        float distance = Vector2.Distance(lizard.mainBodyChunk.pos, prey.mainBodyChunk.pos);
+        float verticalGap = prey.mainBodyChunk.pos.y - lizard.mainBodyChunk.pos.y;
+        float speed = prey.mainBodyChunk.vel.magnitude;
+
+        // Native PreyTracker already handles relationship strength, estimated route
+        // distance, reachability and memory. This factor only teaches Peach what makes
+        // a tiny flying prey realistically catchable with its own tongue.
+        float factor = 1f;
+
+        // Hanging or nearly stationary bats are excellent tongue targets. Chain is
+        // the native Fly behavior used by Desert Batfly's real roost implementation.
+        if (!prey.dead && prey.AI?.behavior == FlyAI.Behavior.Chain)
+            factor *= 1.28f;
+
+        factor *= Mathf.Lerp(1.13f, 0.78f, Mathf.InverseLerp(2.5f, 11f, speed));
+
+        if (verticalGap > 0f)
+        {
+            // Low air targets remain attractive; very high targets become a poor use
+            // of hunting time even if their abstract tile is still remembered.
+            factor *= Mathf.Lerp(
+                1.08f,
+                0.56f,
+                Mathf.InverseLerp(90f, 340f, verticalGap));
+        }
+
+        bool directTongueOpportunity =
+            self.critRep.VisualContact &&
+            distance <= lizard.lizardParams.tongueAttackRange * 1.12f;
+        if (directTongueOpportunity)
+            factor *= 1.20f;
+
+        // Keep the modifier bounded so native prey hierarchy and persistence remain
+        // authoritative. It should bias target choice, never replace PreyTracker.
+        return result * Mathf.Clamp(factor, 0.48f, 1.55f);
     }
 
     private static PathCost LizardAI_TravelPreference(
