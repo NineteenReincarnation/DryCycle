@@ -284,6 +284,21 @@ internal static class AIDebugTrace
         return output.Count;
     }
 
+    internal static int CopyKeys(List<DebugEntityKey> output)
+    {
+        if (output == null) return 0;
+        output.Clear();
+        foreach (DebugEntityKey key in Traces.Keys) output.Add(key);
+        output.Sort((a, b) =>
+        {
+            int template = string.Compare(a.Template, b.Template, StringComparison.Ordinal);
+            if (template != 0) return template;
+            int spawner = a.Spawner.CompareTo(b.Spawner);
+            return spawner != 0 ? spawner : a.Number.CompareTo(b.Number);
+        });
+        return output.Count;
+    }
+
     internal static bool TryLatest(DebugEntityKey key, out AIDebugTraceFrame frame)
     {
         frame = default;
