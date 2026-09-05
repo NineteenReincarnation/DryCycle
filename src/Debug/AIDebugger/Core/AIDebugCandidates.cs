@@ -27,7 +27,7 @@ internal readonly struct AIDebugCandidate
         Score = float.IsNaN(score) || float.IsInfinity(score) ? 0f : score;
         Reason = reason ?? string.Empty;
         Winner = winner;
-        Frame = Time.frameCount;
+        Frame = AIDebugTrace.SimulationTick;
     }
 }
 
@@ -35,7 +35,7 @@ internal static class AIDebugCandidateRegistry
 {
     private sealed class CandidateSet
     {
-        internal int Frame;
+        internal int Frame = int.MinValue;
         internal readonly List<AIDebugCandidate> Items = new(24);
     }
 
@@ -50,8 +50,9 @@ internal static class AIDebugCandidateRegistry
             set = new CandidateSet();
             Sets[key] = set;
         }
-        if (set.Frame == Time.frameCount) return;
-        set.Frame = Time.frameCount;
+        int tick = AIDebugTrace.SimulationTick;
+        if (set.Frame == tick) return;
+        set.Frame = tick;
         set.Items.Clear();
     }
 
@@ -84,6 +85,5 @@ internal static class AIDebugCandidateRegistry
     }
 
     internal static void Clear(DebugEntityKey key) => Sets.Remove(key);
-
     internal static void Reset() => Sets.Clear();
 }
