@@ -137,6 +137,12 @@ internal static partial class Program
         var holder = Bare<Player>();
         first.grabbedBy.Add(new Creature.Grasp(holder, first, 0, 0, Creature.Grasp.Shareability.NonExclusive, 1f, false));
         Suppressed("Restrained"); first.grabbedBy.Clear();
+        var chainGrasp = new Creature.Grasp(second, first, 0, 0, Creature.Grasp.Shareability.NonExclusive, 1f, false);
+        first.grabbedBy.Add(chainGrasp);
+        first.AI.behavior = FlyAI.Behavior.Chain;
+        Check(Get(first, "Suppression").ToString() == "Roost", "Fly chain grasp is roost, not generic restraint");
+        first.grabbedBy.Clear();
+        first.AI.behavior = FlyAI.Behavior.Idle;
         first.AI.behavior = FlyAI.Behavior.Chain; Suppressed("Roost"); first.AI.behavior = FlyAI.Behavior.Idle;
         first.AI.fleeFromRain = true; Suppressed("VanillaPriority"); first.AI.fleeFromRain = false;
 
@@ -237,6 +243,33 @@ internal static partial class Program
         Check((int)rolesType.GetField("alarmCooldown", Flags).GetValue(Roles(sentinel)) == alarmCooldown &&
             (float)stateType.GetField("PlayerTraumaStrength", Flags).GetValue(loner.State) == 0f,
             "suspicion never manufactures death trauma or repeats an alarm during suppression");
+
+        var recovering = Make(28031);
+        Force(recovering, "Opportunist");
+        Set(Brain(recovering), "retreat", 20);
+        Call(recovering, "CheckSuppression");
+        Check(Get(recovering, "Role").ToString() == "None" && (int)Get(recovering, "Cooldown") >= 240 &&
+            (bool)Get(recovering, "OpportunistRecoveryActive"), "danger ends Opportunist expression but preserves bounded recovery eligibility");
+        for (int i = 0; i < 8; i++)
+        {
+            Call(recovering, "BeginVisibleScan"); Call(recovering, "EndVisibleScan", baseline);
+        }
+        Check(!(bool)Call(recovering, "SafeOpportunity", baseline), "retreat scans cannot pre-pay the post-danger safe window");
+        Set(Brain(recovering), "retreat", 0);
+        for (int i = 0; i < 4; i++)
+        {
+            Call(recovering, "BeginVisibleScan"); Call(recovering, "EndVisibleScan", baseline);
+        }
+        Check(!(bool)Call(recovering, "SafeOpportunity", baseline), "recovery still waits through 32 truly safe ticks");
+        Call(recovering, "BeginVisibleScan"); Call(recovering, "EndVisibleScan", baseline);
+        Check((bool)Call(recovering, "SafeOpportunity", baseline) && Get(recovering, "Role").ToString() == "None" &&
+            (int)Get(recovering, "Cooldown") > 0 && (bool)Get(recovering, "OpportunistRecoveryActive"),
+            "interrupted Opportunist regains early-return bias after 40 safe ticks without bypassing role cooldown");
+        Set(recovering.State, "GriefStrength", 0.8f);
+        Call(recovering, "CheckSuppression");
+        Check(!(bool)Get(recovering, "OpportunistRecoveryActive"), "unrelated high-priority suppression invalidates stale recovery bias");
+        Set(recovering.State, "GriefStrength", 0f);
+
         Set(Brain(sentinel), "retreat", 0);
         aiType.GetMethod("SetMode", Flags).Invoke(Brain(sentinel), new[] { Enum.Parse(aiType.GetNestedType("Activity", Flags), "Flight") });
         Force(sentinel, "Opportunist");
@@ -259,6 +292,6 @@ internal static partial class Program
         aiType.GetMethod("ResetRoom", Flags).Invoke(Brain(sentinel), null);
         Check(Get(sentinel, "Role").ToString() == "None" && (int)Get(sentinel, "OpportunityTicks") == 0 &&
             rolesType.GetField("visibleThreat", Flags).GetValue(Roles(sentinel)) == null, "room transition clears role and visible threat references");
-        Console.WriteLine("Roles integration: snapshot validity, stagger, interruption/cooldown, PTSD/Grief/Fear/Vengeance, Bully slots, Loner-like Bond independence.");
+        Console.WriteLine("Roles integration: snapshot validity, stagger, interruption/cooldown, PTSD/Grief/Fear/Vengeance, Bully slots, Loner-like Bond independence, Opportunist recovery.");
     }
 }
