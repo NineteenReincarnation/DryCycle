@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace DryCycle.Debugging.AI;
@@ -105,19 +106,89 @@ internal static class AIDebugExtendedLocalization
 
     internal static string EventName(string raw) => raw switch
     {
-        "RoleEntered" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "角色进入" : "Role Entered",
-        "RoleExit" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "角色退出" : "Role Exit",
-        "RoleEvaluation" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "角色评估" : "Role Evaluation",
-        "RoleEvaluationBlocked" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "角色评估被阻止" : "Role Evaluation Blocked",
-        "RoleSustain" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "角色维持" : "Role Sustain",
-        "SentinelAlarm" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "哨兵警报" : "Sentinel Alarm",
-        "OpportunistEarlyReturn" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "机会主义提前返回" : "Opportunist Early Return",
-        "StateOscillation" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "状态振荡" : "State Oscillation",
-        "TargetThrashing" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "目标抖动" : "Target Thrashing",
-        "PossibleStuck" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "可能卡住" : "Possible Stuck",
-        "VelocitySpike" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "速度异常峰值" : "Velocity Spike",
-        "InvalidNumber" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "非法数值" : "Invalid Number",
-        "AttackSlotsViolation" => AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "攻击槽超限" : "Attack Slots Violation",
+        "RoleEntered" => B("Role Entered", "角色进入"),
+        "RoleExit" => B("Role Exit", "角色退出"),
+        "RoleEvaluation" => B("Role Evaluation", "角色评估"),
+        "RoleEvaluationBlocked" => B("Role Evaluation Blocked", "角色评估被阻止"),
+        "RoleSustain" => B("Role Sustain", "角色维持"),
+        "SentinelAlarm" => B("Sentinel Alarm", "哨兵警报"),
+        "OpportunistEarlyReturn" => B("Opportunist Early Return", "机会主义提前返回"),
+        "StateOscillation" => B("State Oscillation", "状态振荡"),
+        "TargetThrashing" => B("Target Thrashing", "目标抖动"),
+        "PossibleStuck" => B("Possible Stuck", "可能卡住"),
+        "VelocitySpike" => B("Velocity Spike", "速度异常峰值"),
+        "InvalidNumber" => B("Invalid Number", "非法数值"),
+        "AttackSlotsViolation" => B("Attack Slots Violation", "攻击槽超限"),
+        "HistoryCaptureFailed" => B("History Capture Failed", "历史快照采集失败"),
+        "Selected" => B("Selected", "已选择"),
+        "ControlOwner" => B("Control Owner", "控制权"),
+        "Destination" => B("Destination", "目标坐标"),
+        "HighestUtility" => B("Highest Utility", "最高效用模块"),
+        "Mode" => B("Mode", "模式"),
+        "Suppression" => B("Suppression", "抑制状态"),
+        "StoredRole" => B("Stored Role", "内部角色"),
+        "ExpressedRole" => B("Expressed Role", "显性角色"),
+        "OpportunistRecovery" => B("Opportunist Recovery", "机会主义恢复窗口"),
+        "FormalAttack" => B("Formal Attack", "正式攻击"),
+        "Target" => B("Target", "目标"),
+        "VanillaBehavior" => B("Vanilla Behavior", "原版行为"),
+        "StaleFlockSnapshot" => B("Stale Flock Snapshot", "群体快照过旧"),
         _ => raw ?? "?"
     };
+
+    // Dynamic values remain raw/technical on purpose. Only fixed human-readable
+    // phrases are translated, so switching language never destroys diagnostic data.
+    internal static string EventDetail(string eventName, string raw) => raw ?? string.Empty;
+
+    internal static string EventReason(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return string.Empty;
+        if (AIDebugLocalization.Language != AIDebugLanguage.Chinese) return raw;
+
+        if (raw.StartsWith("suppressed by ", StringComparison.Ordinal))
+            return "被以下状态抑制：" + raw.Substring("suppressed by ".Length);
+        if (raw.StartsWith("role cooldown", StringComparison.Ordinal))
+            return "角色冷却中" + raw.Substring("role cooldown".Length);
+
+        return raw switch
+        {
+            "world/browser selection" => "通过世界点选或实体浏览器选择",
+            "ArtificialIntelligence type" => "当前 ArtificialIntelligence 控制器类型",
+            "AbstractCreatureAI.destination" => "来自 AbstractCreatureAI.destination",
+            "UtilityComparer winner" => "来自 UtilityComparer 当前胜出模块",
+            "formal attack owns behavior" => "正式攻击状态机当前拥有行为控制权",
+            "no active flock" => "当前没有有效群体成员",
+            "no score passed threshold + 0.12 dominance lead" => "没有角色同时通过进入阈值与 0.12 领先差要求",
+            "watch role blocked by existing target" => "已有目标时禁止监视型角色接管",
+            "commitment expired" => "角色承诺时间已结束",
+            "commitment/score ended expression" => "角色承诺或评分不再满足维持条件",
+            "automatic anomaly detector" => "自动异常检测器触发",
+            "recent threat window" => "存在最近威胁恢复窗口",
+            "no recovery window" => "当前没有恢复窗口",
+            "no target" => "当前没有目标",
+            "role visible" => "角色当前允许显性表达",
+            "no higher-priority blocker" => "没有更高优先级阻断项",
+            "dead / unconscious / shortcut / no room" => "死亡、失去意识、位于捷径或没有房间",
+            "non-fly grasp or cannot respond" => "被非 Fly 生物抓住或当前无法响应",
+            "emergence animation owns behavior" => "出巢动画拥有行为控制权",
+            "rain / burrow / lure / safari" => "降雨、Burrow、诱饵或 Safari 原版优先级",
+            "direct danger or retreat" => "直接危险或撤退状态",
+            "intimidation / corpse reminder / fear" => "威吓、尸体提醒或恐惧状态",
+            "trauma above aggression block" => "创伤强度超过攻击行为阻断阈值",
+            "grief >= 0.30" => "悲伤强度达到或超过 0.30",
+            "extreme vengeance owns behavior" => "极端复仇状态拥有行为控制权",
+            "roost or fly chain" => "栖息或 Fly Chain 状态",
+            "creature unavailable" => "生物当前不可用",
+            "shortcut owns movement" => "捷径系统拥有移动控制权",
+            "danger / retreat owns movement" => "危险 / 撤退拥有移动控制权",
+            "fear / intimidation priority" => "恐惧 / 威吓优先级接管",
+            "vanilla FlyAI priority" => "原版 FlyAI 优先级接管",
+            "formal attack state machine" => "正式攻击状态机接管",
+            "DesertBatflyAI state machine" => "DesertBatflyAI 状态机控制",
+            _ => raw
+        };
+    }
+
+    private static string B(string english, string chinese) =>
+        AIDebugLocalization.Language == AIDebugLanguage.Chinese ? chinese : english;
 }
