@@ -10,14 +10,15 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal DesertBatflyState DesertState => (DesertBatflyState)State;
     internal DesertBatflyPersonality Personality => DesertState.Personality;
     private int mealFood = 2;
+    private bool runningVanillaUpdate;
     int IPlayerEdible.FoodPoints => mealFood;
 
     internal DesertBatfly(AbstractCreature creature, World world) : base(creature, world)
     {
         mainBodyChunk.rad = DesertBatflyTuning.Radius * Personality.Size;
         mainBodyChunk.mass = DesertBatflyTuning.Mass * Personality.Size;
-        // Fly's grasp anchor is its main chunk; the enlarged radius is also used by
-        // player grabbing, weapons and terrain collision, not just the renderer.
+        // Fly's grasp anchor is its main chunk; the personality scale therefore
+        // affects grabbing, weapons and terrain collision as well as rendering.
         airFriction = 0.975f;
         bites = DesertState.Bites;
         if (DesertState.MealConsumed) eaten = 1;
@@ -58,8 +59,13 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         var colony = DesertSwarmRoom.For(currentRoom);
         currentRoom.fliesRoomAi = colony.Hive;
         colony.Hive.AddFly(this);
+        runningVanillaUpdate = true;
         try { base.Update(eu); }
-        finally { currentRoom.fliesRoomAi = original; }
+        finally
+        {
+            runningVanillaUpdate = false;
+            currentRoom.fliesRoomAi = original;
+        }
         if (room == null) return;
         Emergence.Update(eu);
         DesertAI.AfterPhysics(eu);
@@ -71,12 +77,14 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!RippleViolenceCheck(source)) return;
         Creature attacker = source?.owner as Creature ?? (source?.owner as Weapon)?.thrownBy;
         DesertAI.Threatened(attacker);
-        if (source?.owner?.GetType() == typeof(Rock))
+        if (source?.owner is Rock)
         {
-            // Do not call base with zero damage: HealthState's quickDeath may
-            // still kill a previously injured animal even on a zero-damage hit.
+            // Rock is a control tool for this species. Do not call Creature.Violence
+            // at all: even tiny/zero damage can enter HealthState.quickDeath when an
+            // animal was previously injured. Keep only impact impulse and stun.
+            BodyChunk chunk = hitChunk ?? mainBodyChunk;
             if (momentum.HasValue)
-                (hitChunk ?? mainBodyChunk).vel += Vector2.ClampMagnitude(momentum.Value / (hitChunk ?? mainBodyChunk).mass, 10f);
+                chunk.vel += Vector2.ClampMagnitude(momentum.Value / chunk.mass, 10f);
             Stun(Mathf.Max(DesertBatflyTuning.RockStun, Mathf.CeilToInt(stunBonus)));
             return;
         }
@@ -107,6 +115,15 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Die()
     {
+        // Vanilla Fly.Update has an intentional 1/160-per-tick chance to die while
+        // held by a non-Saint player. That behavior is wrong for Desert Batfly: a
+        // living specimen must survive being picked up and remain alive after it is
+        // released/thrown. Only suppress that incidental update-time death; bites,
+        // Spears, predators and actual drowning still call Die normally.
+        if (runningVanillaUpdate && !dead && drown < 1f &&
+            grabbedBy.Count > 0 && grabbedBy[0].grabber is Player)
+            return;
+
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
         base.Die();
