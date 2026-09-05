@@ -8,13 +8,17 @@ namespace DryCycle.Debugging.AI;
 
 internal sealed class AIDebuggerWindow
 {
+    private const float SnapshotInterval = 0.10f;
+
     private readonly List<AbstractCreature> entities = new(128);
     private readonly HashSet<DebugEntityKey> pinned = new();
     private DebugEntityKey selected;
+    private AbstractCreature selectedCreature;
     private bool hasSelection;
     private bool fullMode;
     private bool showRawNames;
     private int nextEntityRefresh;
+    private float nextSnapshotRefresh;
     private AIDebugSnapshot snapshot;
 
     internal bool FullMode
@@ -117,8 +121,13 @@ internal sealed class AIDebuggerWindow
             fullMode = !fullMode;
         ImGui.SameLine();
         if (ImGui.Button(AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "English" : "中文"))
+        {
             AIDebugLocalization.Language = AIDebugLocalization.Language == AIDebugLanguage.Chinese
                 ? AIDebugLanguage.English : AIDebugLanguage.Chinese;
+            // Some display values are localized at capture time. Rebuild immediately.
+            nextSnapshotRefresh = 0f;
+            snapshot = null;
+        }
         ImGui.SameLine();
         bool raw = showRawNames;
         if (ImGui.Checkbox(AIDebugLocalization.T("app.raw_names"), ref raw)) showRawNames = raw;
@@ -136,7 +145,7 @@ internal sealed class AIDebuggerWindow
             ImGui.TextDisabled(AIDebugLocalization.T("app.pinned"));
             foreach (DebugEntityKey key in pinned)
             {
-                AbstractCreature creature = AIDebugRegistry.Resolve(game, key);
+                AbstractCreature creature = FindEntity(key);
                 if (creature != null) DrawEntityRow(creature, true);
             }
             ImGui.Separator();
@@ -163,9 +172,7 @@ internal sealed class AIDebuggerWindow
         string label = $"{type} #{creature.ID.number}  [{state}]##{key.Spawner}:{key.Number}:{pinnedSection}";
         if (ImGui.Selectable(label, selectedNow))
         {
-            selected = key;
-            hasSelection = true;
-            snapshot = null;
+            Select(creature);
         }
         if (ImGui.IsItemHovered() && showRawNames)
             ImGui.SetTooltip(key.ToString());
@@ -290,20 +297,53 @@ internal sealed class AIDebuggerWindow
                 candidate ??= creature.realizedCreature != null ? creature : null;
             }
             candidate ??= entities[0];
-            selected = DebugEntityKey.From(candidate);
-            hasSelection = true;
+            Select(candidate);
         }
+    }
+
+    private void Select(AbstractCreature creature)
+    {
+        if (creature == null) return;
+        selected = DebugEntityKey.From(creature);
+        selectedCreature = creature;
+        hasSelection = true;
+        snapshot = null;
+        nextSnapshotRefresh = 0f;
     }
 
     private void ResolveSelection(RainWorldGame game)
     {
         if (!hasSelection)
         {
+            selectedCreature = null;
             snapshot = null;
             return;
         }
-        AbstractCreature creature = AIDebugRegistry.Resolve(game, selected);
-        snapshot = creature == null ? null : AIDebugRegistry.Capture(creature, game);
+
+        if (selectedCreature == null || selectedCreature.slatedForDeletion ||
+            DebugEntityKey.From(selectedCreature) != selected)
+        {
+            // Normally an AbstractCreature survives realize/unrealize intact, so this is
+            // only paid after a world rebuild or stale reference.
+            selectedCreature = FindEntity(selected) ?? AIDebugRegistry.Resolve(game, selected);
+        }
+
+        if (selectedCreature == null)
+        {
+            snapshot = null;
+            return;
+        }
+
+        if (snapshot != null && Time.unscaledTime < nextSnapshotRefresh) return;
+        snapshot = AIDebugRegistry.Capture(selectedCreature, game);
+        nextSnapshotRefresh = Time.unscaledTime + SnapshotInterval;
+    }
+
+    private AbstractCreature FindEntity(DebugEntityKey key)
+    {
+        for (int i = 0; i < entities.Count; i++)
+            if (DebugEntityKey.From(entities[i]) == key) return entities[i];
+        return null;
     }
 
     private static int CompareEntities(AbstractCreature a, AbstractCreature b)
