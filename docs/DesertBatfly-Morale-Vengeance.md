@@ -1,114 +1,168 @@
-# Desert Batfly：群体恐惧、捕食威慑与极端报复
+# Desert Batfly：群体恐惧、从众、PTSD 与极端报复
 
-本文描述 `main` 当前实现的 Desert Batfly 群体士气系统。实现主体：
+本文描述 `main` 当前的 Desert Batfly 社会行为实现。核心文件：
 
+- `src/Creatures/DesertBatfly/DesertBatflyState.cs`
+- `src/Creatures/DesertBatfly/DesertBatflyAI.cs`
 - `src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs`
 - `src/Creatures/DesertBatfly/DesertBatfly.cs`
-- `src/Creatures/DesertBatfly/DesertBatflyState.cs`
 - `src/WatcherExts/PeachLizard/PeachLizardDesertBatflyPredation.cs`
 
-## 设计原则
+## 总体原则
 
-死亡/捕食事件不再只是普通 `Alarm`。群体会区分：
+Desert Batfly 不是共享一个群体大脑。每只个体仍保留自己的 `Temperament / Nerve / Thirst / Cooldown / GrabMemory` 和普通攻击逻辑；社会系统只把别的蝠蝇的行为作为额外证据。
 
-1. 亲眼看到同类被杀/捕获；
-2. 距离很近但没有直接看见；
-3. 看到附近同类突然恐慌逃跑而被带动；
-4. 极少数性格极端的个体，在先逃离后反向报复。
-
-恐惧可以传播，但传播有限，不做全房间心灵感应；极端报复可以造成真实伤害，但不会替代普通 Desert Batfly 的非伤害反击，也不会让整群变成敢死队。
-
-## 支持的死亡/捕食来源
-
-### 玩家
-
-真实的玩家致死攻击会建立对**具体玩家编号**的威慑记忆。
-
-- Spear / ExplosiveSpear 等矛类真实伤害：完整威慑权重。
-- 其他真实玩家伤害：略低权重。
-- Rock：仍然严格 `stun-only`，只产生普通直接威胁反应，不进入死亡威慑。
-- 多人游戏不会把 Player 1 的杀戮错误归到 Player 2。
-
-### Peach Lizard
-
-桃子蜥蜴的捕食分两次可能触发群体事件：
-
-- **捕获**：舌头第一次黏住 Desert Batfly，或 Peach 直接 Bite/Grasp 成功；此时即使猎物还活着，附近群体已经知道捕食发生，并可能出现救援。
-- **死亡**：之后 Peach 的真实 Bite/Violence 杀死猎物，再形成一次更强的死亡确认。
-
-舌头捕获与随后嘴部 `Bite/Grasp` 有 90 tick 去重，同一次捕获不会重复广播。
-
-## Fly Chain 的直接目击
-
-玩家用致命攻击击中倒挂链成员、或 Peach 从链上用舌头/嘴部捕获成员时，会在拆链前快照 `FirstInChain()`。
-
-因此原本处于同一条真实原版 Fly Chain 的成员全部视为直接目击者，即使它们与死亡点之间的普通视线判断不理想。
-
-随后仍使用已有 Chain 解散逻辑，避免下层成员悬挂在已经离开的上层成员下面。
-
-## 有限链式恐惧
-
-一次事件先建立四个强度层级：
-
-| 层级 | 来源 | 特征 |
-| --- | --- | --- |
-| Tier 0 | 直接目击 / 同一 Fly Chain | 最强 DeathShock 与记忆 |
-| Tier 1 | 事件附近约 180px 的非直接目击者 | 较弱但明确的灾难反应 |
-| Tier 2 | 被 Tier 0/1 恐慌个体在约 150px 内带动 | 第一跳社会传播 |
-| Tier 3 | 再向外一跳，范围进一步缩小 | 最弱的第二跳传播 |
-
-只允许两次社会传播 hop。Tier 2/3 不要求直接看见尸体，因为它们响应的是邻居突然逃跑，而不是拥有死亡现场信息。
-
-传播只在死亡/捕获事件发生的那一刻遍历当前 Desert colony；不会每帧维护邻接图，也不会无限链式传播。
-
-## 两类独立恐惧记忆
-
-每只实现中的 Desert Batfly 最多维护两份固定槽位：
-
-- `PlayerFear`：当前具体杀手玩家；
-- `PredatorFear`：当前具体 Peach 捕食者。
-
-不使用 `Dictionary<Creature,...>`，所以不会随着房间内玩家/捕食者数量增加而扩展。
-
-直接目击的短期 DeathShock 当前约 200～500 tick（5～12.5 秒）；普通长期威慑约 800～2400 tick（20～60 秒）。链式传播层级会显著缩短这两个效果。
-
-`Temperament` 和 `Nerve` 会降低恐惧强度、缩短恢复时间，但不会让直接目击者完全无视刚刚发生的死亡/捕食。
-
-## 极端报复个体
-
-新增稳定个体因子：
+一次玩家击杀或 Peach 捕食会经历：
 
 ```text
-VengeanceAffinity
+死亡 / 捕获事件
+→ 直接目击者恐慌
+→ 附近个体受带动
+→ 最多再传播两跳社会恐惧
+→ 极少数 True Avenger 可能克服恐惧
+→ 最多 1～2 个高 Conformity 个体跟随
+→ 成功、失败或士气崩溃后撤退
 ```
 
-它由个体 `EntityID.RandomSeed` 稳定生成：
+普通 `RetaliationCharge / Interfere` 仍然是不造成生命伤害的移动干扰；只有 Extreme Vengeance 状态允许真实伤害。
 
-- 55% 先天随机；
-- 30% Temperament；
-- 15% Nerve。
+## Personality
 
-只有同时满足：
+### VengeanceAffinity
+
+`VengeanceAffinity` 仍由稳定 Seed 生成：
+
+```text
+55% innate random
+30% Temperament
+15% Nerve
+```
+
+True Avenger 的当前门槛：
 
 ```text
 Temperament >= 0.70
 Nerve >= 0.58
-VengeanceAffinity >= 0.78
+VengeanceAffinity >= 0.715
 ```
 
-才具备极端报复资格。
+对 Seed `0..9999` 的标定结果约为 **4.94%**。测试要求保持在约 5% 区间，防止以后调 Personality 时无意把极端复仇变成常见行为。
 
-10,000 个连续 Seed 的离线统计中约 2.9% 个体满足资格，因此普通约 11+3 的群落往往没有或只有 1 个，极少同时出现多个。
+### Conformity
 
-每次死亡/捕食事件最多挑选 **2 个**直接目击的合格个体；优先选择 `VengeanceAffinity` 更高者。
+`Conformity` 是独立的稳定人格轴，范围 `0..1`，不由 Temperament 或 Nerve 派生。
 
-即使符合资格，个体也不会立即冲上去。它首先经历事件自身的恐惧/退离，然后才可能让复仇欲压过恐惧。
+它表达的是“同伴行为对自己决策的影响有多大”，而不是状态复制。
 
-## 三种极端报复行为
+高 Conformity 会：
+
+- 放大 Tier 1～3 的社会恐惧；
+- 稍微放大直接目击后的群体性反应；
+- 更容易受正在骚扰玩家的同伴影响；
+- 更容易跟随 True Avenger；
+- 稍微提高加入/维持 roost 文化的倾向；
+- 在自己盲从后看到 Leader/Follower 被杀时受到更大的士气和 Trauma 打击。
+
+它不会绕过：
+
+- `Aggressive` 门槛；
+- Nerve；
+- Thirst；
+- Cooldown；
+- Fear / Trauma；
+- 普通 `AttackSlots = 2`；
+- 个体自己的目标可达性和状态机。
+
+## 玩家死亡威慑
+
+玩家真正杀死 Desert Batfly 时，威慑绑定到**具体 Player number**。
+
+- Spear 等真实矛伤害使用完整威慑权重；
+- 其他玩家真实致死伤害略低；
+- Rock 继续严格 `stun-only`，不会制造死亡事件；
+- 多人模式不会把 Player 1 的杀戮记到 Player 2。
+
+## Peach 捕食威慑
+
+Peach Lizard 有两种群体事件：
+
+1. `PredatorCapture`：舌头第一次黏住，或直接 Bite/Grasp 抓住活体；
+2. `PredatorKill`：随后真正杀死猎物。
+
+Tongue → Bite/Grasp 有 90 tick 捕获去重；捕获后短时间内发生死亡时，死亡事件会降低权重，避免同一次捕食被当成两次完全独立的大灾难。
+
+Peach 平地捕食、普通地形追猎和安全普通沙地下接近都仍然有效；沙地只是可选路线。
+
+## Fly Chain 直接目击
+
+死亡前会先 `SnapshotChainWitnesses()`，然后执行原版 `base.Die()`，确认真正死亡后才广播。
+
+这样同时解决两件事：
+
+- 原版 `Creature.Die()` 会拆 Grasp，但同链成员身份不会丢；
+- 如果外部兼容 Hook 意外阻止死亡，不会提前制造一次假的死亡恐慌。
+
+Peach 捕获则在 Chain 被 `Threatened()` 拆掉之前直接快照。
+
+## 有限链式恐惧
+
+| Tier | 来源 | 强度 |
+| --- | --- | --- |
+| 0 | 直接视觉 / 同一 Fly Chain | 最强 |
+| 1 | 事件附近约 180 px | 中等 |
+| 2 | 跟随附近恐慌蝠蝇的第一跳 | 较弱 |
+| 3 | 第二跳 | 最弱 |
+
+只允许两次社会 hop。Tier 2/3 表示看见同伴逃跑，不表示知道完整死亡现场。
+
+Conformity 越高，Tier 1～3 的 Fear/DeathShock 越容易被放大；但传播放大仍然有硬 hop 上限。
+
+## True Avenger 与社会跟随组
+
+一次事件最多产生：
+
+```text
+1 True Avenger
++ 0～2 Follower
+= 最多 3 个社会复仇参与者
+```
+
+True Avenger 由直接目击者中的 `CanExtremeVengeance` 个体选出，优先 `VengeanceAffinity` 较高者。
+
+Follower 自己不需要 True Avenger trait。加入评分综合：
+
+```text
+Conformity
+Temperament
+Nerve
+Leader VengeanceDrive
+- 当前 Fear
+- 当前 Trauma
+```
+
+Follower 必须是 Tier 0/1，不能从很远的链式恐惧层突然加入围攻。
+
+### Support follower
+
+承诺较低的 Follower：
+
+```text
+Wait → Observe → Circle → Feint → Withdraw
+```
+
+它只壮声势，不进行普通死亡伤害 Charge。若 Peach 仍在拖拽同伴，它仍可以用较低威力尝试 RescueCharge。
+
+### Combat follower
+
+承诺较高的 Follower 最多进行一次真实 Charge，伤害缩放约为 True Avenger 的 `35%～65%`。
+
+Follower 不会得到 True Avenger 的第二次攻击 pass。
+
+## Extreme Vengeance 三种方案
 
 ### 1. 真实伤害冲撞
 
-死亡后的主要流程：
+True Avenger 的一般流程：
 
 ```text
 DeathShock / Retreat
@@ -116,130 +170,193 @@ DeathShock / Retreat
 → Circle
 → Feint
 → Charge
-→ （高驱动力时最多再来一次）
+→ 可能第二个 pass
 → Withdraw
 ```
 
-真实 Charge 命中目标头部/主 BodyChunk 时调用原版：
+Charge 命中调用原版：
 
 ```text
 Creature.Violence(..., DamageType.Blunt, damage, stun)
 ```
 
-因此它不是视觉假动作，而是真实游戏伤害。
+对 Slugcat：True Avenger 基础约 `0.30～1.30 Blunt`，极高驱动力少数个体存在通过原版伤害机制致死的可能。
 
-普通 `RetaliationCharge -> Interfere` 仍保持原设计：**不造成生命伤害**。只有稀有极端报复状态允许真实伤害。
+对 Peach：约 `0.12～0.44 Blunt`，并附带 Stun 和冲量，定位为真正能伤害/打断大型捕食者，而不是常规一撞秒杀蜥蜴。
 
-#### 对 Slugcat
+Follower 再乘自己的 `DamageScale`。
 
-当前伤害范围约：
+### 2. Peach 舌头/嘴部救援
 
-```text
-0.30 ～ 1.30 Blunt
-```
+若同伴仍被：
 
-按 `VengeanceDrive` 线性增加，并有小幅 rage 修正。普通极端个体通常造成受伤/强 Stun；最高端极少数个体可以通过原版 `instantDeathDamageLimit` 路径造成死亡。
+- `LizardTongue.State.AttachedInSmallObject` 拖拽；或
+- Peach `grasp[0]` 咬住；
 
-#### 对 Peach Lizard
+复仇参与者可进入 `RescueCharge`。必须先真实撞到 Peach，随后才检查救援概率。
 
-当前伤害范围约：
+成功时使用原版：
 
-```text
-0.12 ～ 0.44 Blunt
-```
+- `tongue.Retract()`；或
+- `lizard.ReleaseGrasp(0)`。
 
-使用更保守的平方曲线，并附带冲量与 Stun。目标是让小型蝠蝇能够真正伤害/干扰捕食者，而不是单次撞死大型蜥蜴。
+舌头阶段基础救援率约 `18%～48%`；进入嘴部 Grasp 后再乘 `0.62`。Follower 的成功率进一步降低。
 
-### 2. 舌头 / 嘴部救援
+成功后立即 Withdraw。
 
-Peach 舌头第一次抓到 Desert Batfly 后，合格个体可以在非常短的退离后进入 `RescueCharge`。
+### 3. Circle / Feint / 有限围攻
 
-救援者必须先真实冲撞 Peach 头部；命中本身会造成上述伤害和 Stun，然后检查同伴是否仍然：
+没有可救援目标时，复仇不会直接锁头冲撞，而是先 Observe、Circle、Feint，再进入真实 Charge。
 
-- 被 `LizardTongue.State.AttachedInSmallObject` 拖拽；或
-- 被 Peach 的 grasp[0] 咬住。
+Charge 超时没有命中也会消耗 pass，避免无限追杀。
 
-舌头救援基础成功率约 18%～48%，随 `VengeanceDrive / Nerve / Rage` 增加。已经进入嘴部 Grasp 后成功率进一步乘 0.62，因此越晚越难救。
+## Leader / Follower 士气逻辑
 
-成功时：
+### Leader 被杀
 
-- 舌头调用原版 `Retract()`；或
-- Peach 调用原版 `ReleaseGrasp(0)`；
-- 被救同伴获得离开 Peach 的速度；
-- 救援者立即撤退，不继续因为成功而无限攻击。
+这是最强社会失败事件之一。
 
-### 3. 围绕、假冲、有限多次真实攻击
+跟随这个 Leader 的 Follower：
 
-如果同伴已经死亡、救援窗口关闭，或者救援失败，极端个体使用：
+- 立即退出复仇；
+- 获得额外 Trauma；
+- Conformity 越高，额外 Trauma 越大；
+- 当次死亡事件禁止再招募替补 True Avenger。
 
-```text
-Observe → Circle → Feint → Charge
-```
+### Follower 被杀
 
-表现为先远距离确认目标，再绕圈，再做一次明显的接近/拉起假冲，最后才进入真实伤害冲撞。
+同一 Leader 下的其他 Follower 获得较小额外 Trauma；因为死者本身处于 Extreme Vengeance，死亡事件同样不会再补一个新的复仇者。
 
-高 `VengeanceDrive` 个体最多拥有 2 个真实攻击 pass；其他只有 1 个。冲撞超时没有命中也会消耗 pass，避免卡成无限追击。
+### Leader 正常撤退
 
-## 复仇者被反杀
+正常 `Withdraw` **不是失败/PTSD 事件**。
 
-如果正在极端报复的 Desert Batfly 又被原杀手/Peach 杀死：
+Follower 只会同步 Withdraw。它们不会因为 Leader 正常结束行为而获得额外 Trauma，也不会因为 Leader 状态自然清理而把正常收手误判成“Leader 阵亡”。
 
-- 新死亡事件的恐惧强度提高约 28%；
-- 当次事件明确**不再招募新的极端报复者**。
+该分支在 AI 复盘中专门修复过：Follower 的 Withdraw timer 不再每帧被 Leader 重置。
 
-这样会形成：
+## Persistent Trauma / PTSD
+
+短期 Fear 和长期 Trauma 分离。
+
+CreatureState 固定保存：
 
 ```text
-同伴被杀
-→ 极少数个体尝试报复
-→ 报复者也被杀
-→ 群落士气明显崩溃
+PlayerTraumaPlayer
+PlayerTraumaStrength
+PlayerTraumaTicks
+
+PredatorTraumaId
+PredatorTraumaStrength
+PredatorTraumaTicks
 ```
 
-而不是 A 死后 B 上、B 死后 C 上的无限敢死队。
+持续时间约：
 
-当单个极端个体自身积累的相关恐惧强度达到约 0.84 时，即使它具备 `VengeanceAffinity`，也会放弃继续成为复仇者。
+```text
+2400 ～ 12000 tick
+约 1 ～ 5 分钟
+```
 
-## 与原有攻击系统隔离
+阈值：
 
-极端报复存在期间：
+```text
+Trauma >= 0.42
+→ 阻止对这个具体对象的普通骚扰/反击
 
-- 释放普通 `AttackSlot`；
-- 不执行普通 `Attach / Drain`；
-- 不执行普通 `Interfere`；
-- 不叠加玩家饮水损失；
-- 极端报复状态机独占该个体的攻击移动。
+Trauma >= 0.68
+→ 可以打崩正在进行的 Extreme Vengeance
+```
 
-状态结束后才重新交还原 DesertBatflyAI。
+所以高 Temperament / 高 Nerve 个体也可能真正被某个玩家或某只 Peach 打怕。
 
-这保证“极端报复真实可致命”不会和原来的吸水、移动干扰叠成不可读的双重攻击。
+PTSD 优先级高于：
 
-## 性能约束
+- `GrabMemory`；
+- 普通 attacker memory；
+- 未消费的 retaliation charges；
+- 普通目标扫描；
+- AttackSlot 申请；
+- Attach / Interfere；
+- Extreme Vengeance。
 
-设计没有新增逐帧全房间 Creature scan：
+`SuppressHostility()` 会清理针对该创伤对象的旧 Target、attacker memory 和未消费普通 retaliation，避免 Trauma 几分钟后过期时突然执行一笔很久以前的旧仇。
 
-- 平时每只 Desert Batfly 只有固定状态查询/标量更新；
-- PlayerFear / PredatorFear 是固定两个槽，不分配目标字典；
-- Chain fear 只在稀有死亡/捕获事件发生时遍历一次当前约十几只 Desert colony；
-- 传播最多两跳，候选数量由当前群落天然限制；
-- Peach 捕食仍复用原版 `PreyTracker / LizardAI / LizardTongue / Bite`；
-- 没有为救援新增房间扫描；
-- CorpseWarning 最长 600 tick，只每 40 tick 检查一次附近群落，且杀手离开死亡位置后立即销毁。
+### 多人/多捕食者固定槽策略
+
+为了保持固定内存，每类 Trauma 只保留一个对象。如果新的不同玩家/Peach只造成了很弱的 Trauma，而当前已有更强的有效 PTSD，新弱事件不会覆盖强记忆。
+
+这避免 co-op 中 Player 2 的一次小事件把 Player 1 已经建立的严重 PTSD 清掉。
+
+## 普通 Conformity 行为
+
+普通攻击扫描仍每 8 tick 工作。高 Conformity 的 Aggressive 个体可以观察附近正在明显 `Observe / Approach / Circle / FakeDive / Dive` 的同类，并把其 Player 目标当成一个额外候选。
+
+这只降低“我是否也过去看看”的动力门槛：
+
+- 不复制 Attach；
+- 不绕过 Cooldown；
+- 不绕过 Trauma；
+- 不绕过普通 AttackSlots；
+- 不让非 Aggressive 个体突然成为攻击者。
+
+因此表现是社会影响，不是同步编队。
+
+## AttackSlots 与 Extreme Vengeance 隔离
+
+普通正式攻击仍最多 `AttackSlots = 2`。
+
+Extreme Vengeance 使用独立社会组上限，但该状态活跃时会：
+
+- `CancelAttack()`；
+- 释放普通攻击槽；
+- 跳过普通 `AfterPhysics`；
+- 禁止同时 Attach/Drain/Interfere。
+
+因此不会出现极端伤害冲撞与吸水/普通干扰叠加。
+
+## 性能
+
+正常时间没有群体邻接图。
+
+- Death/Capture 事件发生时才遍历约 `11+3` 的 Desert colony；
+- fear propagation 最多两 hop；
+- Follower 只在该事件中筛选一次；
+- Conformity 普通骚扰复用原来的 8-tick AI scan；
+- Trauma threat 只每 20 tick 对有活跃 PTSD 的个体检查一次；
+- 无 Trauma/Fear/Vengeance 时 `Intimidation.Update()` 保留 fast return；
+- CorpseWarning 只在死亡后存在最多 600 tick，并每 40 tick 采样一次；
+- 不创建自定义寻路器，不重写 Peach tongue/pathfinder。
+
+## 当前自动测试覆盖
+
+`tests/DesertBatfly/Program.cs` 现在验证：
+
+- 10,000 Seed Personality 可重复；
+- `Conformity` 独立稳定且范围合法；
+- Extreme Vengeance 资格保持约 5%；
+- `VengeanceDrive / SocialFearScale` 有界；
+- Player Trauma 存档往返；
+- Peach/Predator Trauma 存档往返；
+- Trauma 每 realized update 只衰减一 tick；
+- 旧 V1 payload 不产生幽灵 PTSD；
+- 原有 Rock、营养、AttackSlots、Quicksand/Emergence 回归检查继续存在。
+
+这些测试仍需要完整 Rain World `PUBLIC/HOOKS` 程序集和编译后的 DryCycle.dll 才能实际执行。
 
 ## 实机验收重点
 
-1. 玩家用 Spear 杀死单只：直接目击者立刻撤退，外围个体出现有限的链式恐惧。
-2. 玩家杀死倒挂链成员：整条原 Chain 应按直接目击强度反应。
-3. Rock：只能击晕，不产生死亡威慑，也不能杀死 Desert Batfly。
-4. 连续玩家击杀：同一玩家的威慑累积，攻击位不能像敢死队一样立即补满。
-5. Peach 舌头抓到活体：捕获瞬间即出现群体恐慌，不需要等猎物死亡。
-6. Peach 直接 Bite/Grasp：没有舌头也必须触发同一捕食威慑。
-7. Peach 抓倒挂链：同一 Chain 成员按直接目击处理。
-8. 极端个体：先退离，再 Observe/Circle/Feint/Charge，不能直接无脑冲。
-9. RescueCharge：有机会撞击 Peach 并使舌头/嘴部释放同伴；成功后救援者立即撤退。
-10. 极端冲撞 Peach：应造成实际 Damage/Stun，但不能普通一击秒杀 Peach。
-11. 极端冲撞 Slugcat：普通极端个体造成伤害/重 Stun；最高端个体应存在通过原版伤害路径致死的可能。
-12. 极端个体最多 1～2 个真实 pass；未命中超时也必须消耗 pass。
-13. 复仇者被杀：后续群体更恐慌，不能立即产生下一批复仇敢死队。
-14. 普通攻击系统：极端报复时不得同时 Attach 吸水或 Interfere。
-15. 多人：玩家死亡威慑继续绑定实际杀手玩家，不污染另一位玩家。
+1. 玩家一矛杀一只：直接目击、同链、外围两 hop 的反应应明显分层。
+2. Rock 连续命中：只能 Stun，绝不制造死亡恐惧。
+3. True Avenger 出现率在大量个体中应接近 5%，单房间仍然不是必出。
+4. True Avenger 偶尔带 1～2 个高 Conformity Follower，而不是整群同步冲锋。
+5. Support follower 只绕圈/假冲；Combat follower 最多一次低伤 Charge。
+6. Leader 正常 Withdraw：Follower 正常同步退出，不额外获得 PTSD。
+7. Leader 被杀：Follower 士气明显崩溃，高 Conformity 个体最容易留下 PTSD。
+8. Follower 被杀：剩余跟随者受到次一级士气打击，不补新的敢死队。
+9. 高 Trauma 恶劣个体面对同一 Player/Peach：不能重新申请普通攻击槽或突然执行旧 retaliation。
+10. Co-op：弱的新玩家 Trauma 不应覆盖另一玩家已经建立的严重 PTSD。
+11. Peach Tongue → Bite/Grasp：捕获广播只发生一次；随后死亡权重降低但仍确认死亡。
+12. RescueCharge：成功后 Peach 原版舌头/Grasp 正确释放，救援者立即撤退。
+13. Extreme Vengeance 活跃时不得同时吸水或执行普通 Interfere。
+14. 连续杀死复仇者：群体应越来越崩，不应出现无穷替补。
