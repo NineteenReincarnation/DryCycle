@@ -3,7 +3,7 @@
 本目录负责 Watcher 桃子蜥蜴（`PeachLizard`）与 DryCycle 沙漠生态的兼容。目前包含两部分：
 
 - `QuicksandZone` 非流沙材质的原生掘沙适配。
-- 对 `DesertBatfly` 的原生捕食、舌头捕捉与可选沙下接近。
+- 对 `DesertBatfly` 的原生捕食、舌头捕捉、尸体捡食与可选沙下接近。
 
 统一生命周期入口是 `PeachLizardRuntime`。具体功能仍拆在独立文件中，避免 Quicksand 与捕食逻辑互相耦合。
 
@@ -78,7 +78,7 @@ Peach Lizard 同时满足：
 
 ---
 
-## Desert Batfly 捕食
+## Desert Batfly 捕食与捡食
 
 ### 生态关系
 
@@ -116,13 +116,127 @@ PreyTracker
 - 自定义舌头 projectile
 - 自定义咬杀
 - 自定义拖拽
+- 自定义 ReturnPrey
 - 自定义“传送到猎物”行为
+
+### 尸体与玩家吃剩残骸
+
+Peach 会把**仍有食用价值的 Desert Batfly 尸体**继续当作 `Eats` 猎物。
+
+有效条件：
+
+```text
+slatedForDeletetion == false
+MealConsumed == false
+bites > 0
+```
+
+因此以下情况都可以被 Peach 捡走：
+
+- 玩家用 Spear 杀死后留在地上的完整尸体；
+- Peach 之外的其他伤害来源留下的完整尸体；
+- 玩家已经吃过 1～2 口、但仍有 `bites > 0` 的残骸。
+
+完全吃光或 `MealConsumed == true` 的对象会直接从 Peach 的 `PreyTracker` 吸引力中失效。
+
+尸体价值低于同距离、同可达性的活体：
+
+- 完整尸体大约使用活体吸引力的较低比例；
+- 剩余 bites 越少，吸引力继续下降；
+- 已经处于容易吐舌拾取的近距离位置会获得很小的便利加成；
+- 尸体不会获得“为了捕猎而钻沙伏击”的额外路线奖励。
+
+这使 Peach 表现为“有机会就捡便宜食物”，而不是有活猎物时总优先翻尸体。
+
+### 不主动抢玩家手里的食物
+
+任何仍被 Player grasp 持有的 Desert Batfly，无论活着还是已经死亡，都会在 Peach 的专用 `TrackedPrey.Attractiveness()` 中返回不可选值。
+
+不能简单返回 `0`：原版 `PreyTracker` 在只有一个候选时仍可能把 0 分候选保留为 `currentPrey`。因此这里使用 `float.NegativeInfinity`，确保玩家手里的目标不会成为 Peach 当前 prey。
+
+如果 Peach 已经开始一次 ShootTongue，而玩家在舌头落地前捡起了目标，舌头侧还会再次检查 `IsHeldByPlayer()` 并立即 Retract，避免形成短暂的拉扯抢食。
+
+玩家把尸体丢下后，下一轮原版 PreyTracker 更新即可重新把它视为普通低价值尸体食物。
+
+### 尸体会正常带回巢穴
+
+这一点完全复用原版 Lizard 行为。
+
+原版 `ArtificialIntelligence.TrackerToDiscardDeadCreature()` 对 `Eats` 关系的死生物**不会自动丢弃**，所以尸体可以继续留在 Peach 的 PreyTracker 中。
+
+舌头或近距离 Bite 最终建立：
+
+```text
+lizard.grasps[0].grabbed == corpse
+```
+
+之后原版 `LizardAI` 会检查：
+
+```text
+grasp[0] 是 Creature
+并且 DynamicRelationship == Eats
+```
+
+满足后立即：
+
+```text
+behavior = ReturnPrey
+currentUtility = 1
+```
+
+`ReturnPrey` 再把原版 denFinder 的 Den position 设为目的地。
+
+所以尸体流程是：
+
+```text
+发现尸体 / 吃剩残骸
+-> 普通 Hunt 接近
+-> Tongue 或 Bite
+-> 原版 Grasp
+-> 原版 ReturnPrey
+-> 带回 den
+```
+
+没有自定义搬运状态，也不会因为对象已经 dead 而停在尸体旁边不走。
+
+### 尸体捡食不会伪造 Peach 捕食恐惧
+
+群体士气系统区分“Peach 捕获活体”和“Peach 捡已有尸体”。
+
+活体：
+
+```text
+Peach tongue / Bite 抓住
+-> PredatorCapture
+-> 群体恐惧 / 链式恐惧 / 极端报复候选
+```
+
+尸体：
+
+```text
+Peach 抓住现成尸体
+-> 纯 scavenging
+-> 不 BroadcastPredatorCapture
+-> 不 Threatened 全群
+```
+
+例如：
+
+```text
+Player 用 Spear 杀死 Bat A
+-> 群体已经产生 PlayerKill 威慑
+
+数秒后 Peach 来捡 Bat A
+-> 不再追加一轮 Peach 捕杀恐惧
+```
+
+`DesertBatfly.Grabbed()` 和舌头命中桥接都对 `dead` 做了这个区分。
 
 ### 舌头轻型生物桥接
 
 Watcher Peach 的 AI 使用 `lizardParams.tongueAttackRange = 160` 作为发舌判定。
 
-`LizardTongue` 自身对 `TotalMass < 0.2` 的命中目标使用 `AttachedInSmallObject` 分支。Desert Batfly 的实际质量远低于 0.2，因此原版舌头会像拉轻物件一样把它拖回嘴边；自由飞行的小型生物在这条分支结束时不一定自动转换成蜥蜴 Grasp。
+`LizardTongue` 自身对 `TotalMass < 0.2` 的命中目标使用 `AttachedInSmallObject` 分支。Desert Batfly 的实际质量远低于 0.2，因此原版舌头会像拉轻物件一样把它拖回嘴边；自由飞行的小型生物和小型尸体在这条分支结束时不一定自动转换成蜥蜴 Grasp。
 
 `PeachLizardDesertBatflyPredation` 只修这一处接口缝隙：
 
@@ -130,15 +244,15 @@ Watcher Peach 的 AI 使用 `lizardParams.tongueAttackRange = 160` 作为发舌�
 2. 飞行轨迹仍是原版 `LizardTongue`。
 3. BodyChunk 命中仍使用原版 projectile trace。
 4. 拉回过程仍是原版 `AttachedInSmallObject`。
-5. 当已经捕获的 Desert Batfly 被拉到嘴边约 18px 内时，调用原版 `Lizard.Bite(caughtChunk)`。
+5. 当已捕获的有效 Desert Batfly 被拉到嘴边约 18px 内时，调用原版 `Lizard.Bite(caughtChunk)`。
 6. 只有原版 Bite 真正建立 `grasps[0]` 后才让舌头 Retract。
-7. 后续伤害、ShakePrey、ReturnPrey 全部继续由原版 Lizard 处理。
+7. 活体继续进入伤害 / ShakePrey；尸体则直接满足 ReturnPrey 搬运条件。
 
-因此不会发生“自定义代码远距离直接把蝠蝇塞进嘴里”，也不会出现舌头已经物理抓到它、回到嘴边却无条件释放的轻型目标漏洞。
+因此不会发生“自定义代码远距离直接把蝠蝇塞进嘴里”，也不会出现尸体明明被舌头拖到嘴边却因为轻型物件分支而被无条件放掉。
 
 ### 蝠蝇链
 
-舌头第一次真正命中活体 Desert Batfly 后，会调用该生物已有的 `DesertAI.Threatened(peach, directAttack: true)`。
+舌头第一次真正命中**活体** Desert Batfly 后，会调用该生物已有的 `DesertAI.Threatened(peach, directAttack: true)`。
 
 这样直接复用现有规则：
 
@@ -147,13 +261,13 @@ Watcher Peach 的 AI 使用 `lizardParams.tongueAttackRange = 160` 作为发舌�
 - 附近 Desert Batfly 收到局部 Alarm。
 - Peach 被识别为捕食者，只触发逃生，不触发玩家式记仇反击。
 
-不会另写第二套 Fly Chain 解散逻辑。
+尸体拾取不会重复调用这条链式恐惧逻辑。
 
 ### 可选沙下接近
 
 沙地只是捕食的**可选移动优势**，绝不是前置条件。
 
-当 Peach 正在 Hunt Desert Batfly 且当前还没有清晰的舌头射击机会时：
+当 Peach 正在 Hunt **活着的** Desert Batfly 且当前还没有清晰的舌头射击机会时：
 
 - 若 PathFinder 本来就考虑经过 DryCycle 已验证的安全 Sand tile，该连接得到很小的额外 resistance 优惠。
 - 已经 buried 的 Peach 获得稍强一点的“继续走沙下”的偏好。
@@ -169,7 +283,7 @@ VisualContact == true
 
 立刻停止额外沙地偏好。
 
-所以在平地看到低飞 / 倒挂 Desert Batfly 时，Peach 会直接按原版方式接近并吐舌，不会为了“必须伏击”而先钻进附近的沙。
+尸体不会得到这层 prey-specific sand bonus，因为它不会逃；Peach 仍然可以通过自己的通用安全 Sand 路径能力抵达尸体。
 
 真正流沙仍然：
 
@@ -189,25 +303,31 @@ VisualContact == true
 - lurk 候选每个 X 列最多保存 1 个，不保存整片沙层的所有点。
 - 每 120 tick 最多测试 8 个候选，不逐帧扫描房间。
 
-### 捕食
+### 捕食 / 捡食
 
 - 不新增 Creature 扫描；猎物完全复用原版 `PreyTracker.MostAttractivePrey`。
+- 尸体有效性只检查 `slatedForDeletetion / MealConsumed / bites` 三个常数级字段。
+- 玩家持有检查只遍历该 Bat 自己极短的 `grabbedBy` 列表，不扫描房间玩家。
 - `TravelPreference` 热路径先检查是否 Peach + Hunt + 当前 prey 是否 DesertBatfly；绝大多数调用立即返回。
 - 真正需要沙判断时只做现有 O(1) SafeSand lookup。
 - `LizardTongue.Update` 每只 Peach 每 tick 只做常数级类型 / 状态 / 距离检查。
-- 不创建每只 Peach 的 Dictionary、候选表、仇恨表或额外 AI module。
+- 不创建每只 Peach 的 Dictionary、尸体表、候选表、仇恨表或额外 AI module。
 
 ---
 
 ## 期望实机行为
 
-1. **纯平地、无 QuicksandZone**：Peach 能把 Desert Batfly 作为 prey，接近后使用原版舌头捕捉。
+1. **纯平地、无 QuicksandZone**：Peach 能把活 Desert Batfly 作为 prey，接近后使用原版舌头捕捉。
 2. **低空飞行**：进入舌头机会后直接吐舌，不要求钻沙。
-3. **倒挂个体**：Peach 可在地面接近并吐舌；命中链成员时整条 Fly Chain 解散。
-4. **舌头命中**：Desert Batfly 被原版舌头拉回；到嘴边后进入原版 Bite/Grasp，而不是被轻型物件分支无故放掉。
-5. **抓住以后**：Desert Batfly 不享受 Player-held 生存保护；Peach 的正常 Bite / predator damage 可以杀死它。
-6. **安全普通沙附近**：远距离追猎时 Peach 可以选择原生 burrow 路线靠近。
-7. **已经有直接舌头机会**：不再为了沙下伏击绕路。
-8. **真实流沙**：仍不是安全 Sand tunnel；Peach 不会为了追 Desert Batfly 穿过它。
-9. **高空且长期不可达的 Bat**：沙路线奖励很弱，原版 frustration / retargeting 应能让 Peach 放弃，不长期卡死追逐。
-10. **其他猎物**：所有额外路径偏好只针对当前 `MostAttractivePrey` 是 DesertBatfly 的 Hunt，不改变 Peach 对其他生物的原版行为。
+3. **倒挂个体**：Peach 可在地面接近并吐舌；命中活链成员时整条 Fly Chain 解散。
+4. **舌头命中活体**：被原版舌头拉回；到嘴边后进入原版 Bite/Grasp，而不是被轻型物件分支无故放掉。
+5. **完整尸体**：Peach 可以重新选择、接近、吐舌/咬住，并通过原版 ReturnPrey 带回 den。
+6. **玩家吃过 1～2 口的尸体**：只要 `bites > 0 && !MealConsumed`，仍然可以被 Peach 捡走，但价值低于完整尸体。
+7. **完全吃光**：`bites <= 0` 或 `MealConsumed` 后 Peach 不再选它。
+8. **玩家正在拿着尸体**：Peach 不主动把它选为 prey；若舌头已经在路上，命中后也应 Retract 而不是与玩家拉扯。
+9. **玩家杀死后 Peach 再捡尸体**：只保留原来的 PlayerKill 威慑，不新增假的 Peach PredatorCapture。
+10. **安全普通沙附近**：远距离追猎活体时 Peach 可以选择原生 burrow 路线靠近。
+11. **尸体**：没有 prey-specific 沙下伏击奖励，但仍可使用 Peach 自己的通用安全 Sand 路径能力。
+12. **真实流沙**：仍不是安全 Sand tunnel；Peach 不会为了追 Desert Batfly 穿过它。
+13. **高空且长期不可达的活 Bat**：沙路线奖励很弱，原版 frustration / retargeting 应能让 Peach 放弃，不长期卡死追逐。
+14. **其他猎物**：所有额外路径偏好只针对当前 `MostAttractivePrey` 是 DesertBatfly 的 Hunt，不改变 Peach 对其他生物的原版行为。
