@@ -192,13 +192,18 @@ internal static class RopeSpearWallStickRuntime
 
         Vector2 anchorPosition = spear.room.MiddleOfTile(airTile) - direction * EmbedOffset;
 
-        // stuckInWallCycles is also vanilla's orientation bit for generated beam
-        // topology: positive = wall/mostly horizontal spear, negative = floor or
-        // ceiling/mostly vertical spear. Base ChangeMode can therefore keep doing
-        // all of its ordinary pole bookkeeping even though the sprite remains at
-        // the exact arbitrary angle afterwards.
+        // Vanilla stores generated traversal topology in the sign of
+        // stuckInWallCycles: positive creates horizontalBeam tiles, negative creates
+        // verticalBeam tiles. For an arbitrary-angle RopeSpear this must follow the
+        // shaft itself, not the terrain face that happened to be hit. Otherwise a
+        // shallow diagonal spear striking the underside of a ledge becomes a
+        // vertical pole and the historical VineGrab -> GetUpOnBeam handoff can never
+        // trigger. At 45 degrees we deliberately prefer horizontal so the player can
+        // finish climbing the rope and stand on the shaft; steeper spears use the
+        // vanilla vertical-beam topology instead.
         int cycles = Random.Range(3, 7);
-        spear.abstractSpear.stuckInWallCycles = surfaceDirection.x != 0
+        bool horizontalTraversal = Mathf.Abs(direction.x) >= Mathf.Abs(direction.y);
+        spear.abstractSpear.stuckInWallCycles = horizontalTraversal
             ? cycles
             : -cycles;
         spear.throwDir = surfaceDirection;
