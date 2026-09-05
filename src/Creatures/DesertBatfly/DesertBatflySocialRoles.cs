@@ -1,3 +1,4 @@
+using DryCycle.Debugging.AI;
 using RWCustom;
 using UnityEngine;
 
@@ -100,20 +101,23 @@ internal sealed class DesertBatflySocialRoles
             // Unrelated high-priority states invalidate an old threat-recovery window.
             opportunistRecovery = false;
         }
-        EndExpression();
+        EndExpression("suppressed by " + LastSuppression);
         SentinelAlertConfidence = 0f;
         watchTicks = 0;
         if (LastSuppression == SocialRoleSuppression.Unavailable)
             visibleThreat = scanThreat = null;
     }
 
-    private void EndExpression()
+    private void EndExpression(string reason = null)
     {
         if (Role == ExpressedSocialRole.None) return;
+        ExpressedSocialRole previous = Role;
         Role = ExpressedSocialRole.None;
         Commitment = 0;
         // Transition only: suppression must not refresh this timer every frame.
         Cooldown = 240 + (int)((uint)bat.Personality.VisualSeed % 121u);
+        AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Social,
+            "RoleExit", previous, reason ?? "commitment/score ended expression");
     }
 
     internal void Evaluate(DesertBatflyFlockSnapshot flock)
@@ -126,20 +130,56 @@ internal sealed class DesertBatflySocialRoles
             bat.DesertState.GriefStrength, Trauma, opportunity);
         if (Role != ExpressedSocialRole.None)
         {
-            if (Commitment <= 0 || Scores.For(Role) < 0.72f) EndExpression();
+            if (Commitment <= 0)
+                EndExpression("commitment expired");
+            else if (Scores.For(Role) < 0.72f)
+                EndExpression($"{Role} score {Scores.For(Role):0.000} < sustain 0.720");
+            else
+                AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                    "RoleSustain", Role, $"score={Scores.For(Role):0.000}, commitment={Commitment}");
             return;
         }
-        // Never acquire a new expression in the middle of an already committed attack.
-        if (Cooldown > 0 || bat.DesertAI.FormalAttack || flock.ActiveCount == 0) return;
-        ExpressedSocialRole candidate = Scores.Select(flock.ActiveCount, flock.ExpressedRoleCount);
-        // Watching must not silently take over an ordinary attack already in progress.
-        if (candidate != ExpressedSocialRole.Bully && bat.DesertAI.Target != null) return;
-        Role = candidate;
-        if (Role != ExpressedSocialRole.None)
+
+        if (Cooldown > 0)
         {
-            opportunistRecovery = false;
-            Commitment = 800 + (int)((uint)bat.Personality.VisualSeed % 301u);
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                "RoleEvaluationBlocked", Cooldown, "role cooldown");
+            return;
         }
+        if (bat.DesertAI.FormalAttack)
+        {
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                "RoleEvaluationBlocked", bat.DesertAI.Mode, "formal attack owns behavior");
+            return;
+        }
+        if (flock.ActiveCount == 0)
+        {
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                "RoleEvaluationBlocked", 0, "no active flock");
+            return;
+        }
+
+        ExpressedSocialRole candidate = Scores.Select(flock.ActiveCount, flock.ExpressedRoleCount);
+        float threshold = DesertBatflyRoleScores.EntryThreshold(flock.ActiveCount, flock.ExpressedRoleCount);
+        string scoreDetail = $"S={Scores.Sentinel:0.000} B={Scores.Bully:0.000} O={Scores.Opportunist:0.000} threshold={threshold:0.000}";
+        if (candidate == ExpressedSocialRole.None)
+        {
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                "RoleEvaluation", scoreDetail, "no score passed threshold + 0.12 dominance lead");
+            return;
+        }
+        // Watching must not silently take over an ordinary attack already in progress.
+        if (candidate != ExpressedSocialRole.Bully && bat.DesertAI.Target != null)
+        {
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Decision,
+                "RoleEvaluationBlocked", candidate, "watch role blocked by existing target");
+            return;
+        }
+        Role = candidate;
+        opportunistRecovery = false;
+        Commitment = 800 + (int)((uint)bat.Personality.VisualSeed % 301u);
+        AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Social,
+            "RoleEntered", candidate, scoreDetail + $", commitment={Commitment}");
     }
 
     internal void BeginVisibleScan() { scanThreat = null; scanDistance = float.MaxValue; scanPredator = false; }
@@ -181,6 +221,9 @@ internal sealed class DesertBatflySocialRoles
         if (watchTicks >= 24 && SentinelAlertConfidence >= 0.72f && alarmCooldown == 0)
         {
             alarmCooldown = 480;
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Perception,
+                "SentinelAlarm", AIDebugFormat.Creature(visibleThreat),
+                $"confidence={SentinelAlertConfidence:0.000}, distance={scanDistance:0.0}, predator={visiblePredator}, closing={closing:0.00}, weapon={weapon}, panic={flock.PanicRatio:0.000}");
             // A suspicion is one existing local alarm/escape, never a death/capture broadcast.
             bat.DesertAI.Threatened(visibleThreat, false);
             CheckSuppression();
@@ -236,5 +279,8 @@ internal sealed class DesertBatflySocialRoles
         bat.AI.localGoal = step;
         Vector2 desired = Vector2.ClampMagnitude(goal - pos, 3f);
         bat.mainBodyChunk.vel += Vector2.ClampMagnitude(desired - bat.mainBodyChunk.vel, 0.16f);
+        if (recoveryReturn)
+            AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+                "OpportunistEarlyReturn", true, $"safe opportunity; goal={AIDebugFormat.Value(goal)}");
     }
 }
