@@ -11,6 +11,15 @@ internal sealed class RopeSpearRopeSystem
     private const float VerletDamping = 0.985f;
     private const float NodeGravity = 0.42f;
 
+    // Rain World's Rope corner positions are offset from solid-tile corners by the
+    // Rope.thickness value. The visual rope is only ~1 px thick, but a slugcat's
+    // main body chunk has a 9 px radius while VineGrab permits about 2.1 px of
+    // separation from the vine centreline. Keeping the topology only 1.15 px from
+    // a sharp ledge therefore leaves the player's collision circle roughly 8 px
+    // away from the visible rope. A 6.9 px corner clearance matches the vanilla
+    // VineGrab body envelope (9 - 2.1) without changing the rendered rope width.
+    private const float ClimbCornerClearance = 6.9f;
+
     private struct Node
     {
         internal Vector2 Pos;
@@ -56,7 +65,12 @@ internal sealed class RopeSpearRopeSystem
 
         if (_topology == null || _room != room)
         {
-            _topology = new Rope(room, endpointA, endpointB, thickness);
+            // Keep the visible mesh thin, but route the climbable centreline far
+            // enough around sharp terrain corners that vanilla VineGrab can place
+            // the player's main body chunk on the rope without terrain collision
+            // pushing the cat several pixels away from it.
+            float topologyClearance = Mathf.Max(thickness, ClimbCornerClearance);
+            _topology = new Rope(room, endpointA, endpointB, topologyClearance);
             _room = room;
             _initialized = false;
         }
