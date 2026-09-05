@@ -64,6 +64,25 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
                 Mathf.Lerp(0.8f, 1.15f, (float)random.NextDouble());
     }
 
+    public override void Update()
+    {
+        // Preserve the original grabbed struggle first. During the short sand-spit
+        // wind-up we only exaggerate its existing wing/body motion so the player gets
+        // a readable warning without replacing FlyGraphics with a custom animation.
+        base.Update();
+        if (!desert.SandSpitWindingUp || desert.dead || desert.grabbedBy.Count == 0) return;
+
+        int phase = desert.SandSpitWindupRemaining;
+        for (int i = 0; i < 2; i++)
+        {
+            wings[i, 1] = wings[i, 0];
+            wings[i, 0] = ((phase + i) & 1) == 0 ? 0f : 1f;
+        }
+
+        float side = (phase & 1) == 0 ? 1f : -1f;
+        lowerBody.vel += new Vector2(side * 0.34f, 0.10f);
+    }
+
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         // This creates the exact vanilla FlyBody / FlyWing / FlyWing / FlyEyes set
@@ -214,11 +233,11 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
             float sign = i % 2 == 0 ? -1f : 1f;
             Vector2 root = Vector2.Lerp(head, tail, Mathf.Lerp(0.28f, 0.82f, t));
             root += right * sign * 2.3f * size;
-            Vector2 side = (right * sign - forward * 0.35f).normalized;
+            Vector2 spikeSide = (right * sign - forward * 0.35f).normalized;
             var mesh = (TriangleMesh)sLeaser.sprites[SpikeStart + i];
             mesh.MoveVertice(0, root + forward * 1.25f * size);
             mesh.MoveVertice(1, root - forward * 1.25f * size);
-            mesh.MoveVertice(2, root + side * spikeLengths[i] * size);
+            mesh.MoveVertice(2, root + spikeSide * spikeLengths[i] * size);
             mesh.isVisible = sLeaser.sprites[0].isVisible && alpha > 0.01f;
             mesh.alpha = alpha;
         }
