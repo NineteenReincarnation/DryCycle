@@ -42,6 +42,7 @@ internal static class DesertBatflyIntimidation
 
     private sealed class State
     {
+        internal bool Active;
         internal Player Player;
         internal int PlayerNumber = -1;
         internal float Strength;
@@ -105,10 +106,12 @@ internal static class DesertBatflyIntimidation
     }
 
     private static ConditionalWeakTable<DesertBatfly, State> states = new();
+    private static int activeMemories;
 
     internal static void Reset()
     {
         states = new ConditionalWeakTable<DesertBatfly, State>();
+        activeMemories = 0;
     }
 
     /// <summary>
@@ -119,7 +122,11 @@ internal static class DesertBatflyIntimidation
     /// </summary>
     internal static void Update(DesertBatfly bat)
     {
-        if (bat == null || !states.TryGetValue(bat, out State state))
+        // In ordinary play, before the first witnessed player kill, this is the entire
+        // cost of the system: one integer check. Avoid even a weak-table lookup until
+        // at least one live intimidation memory exists.
+        if (bat == null || activeMemories <= 0 ||
+            !states.TryGetValue(bat, out State state) || !state.Active)
             return;
 
         if (state.MemoryTicks > 0) state.MemoryTicks--;
@@ -295,11 +302,17 @@ internal static class DesertBatflyIntimidation
     {
         State state = states.GetValue(bat, _ => new State());
         int playerNumber = player?.playerState?.playerNumber ?? 0;
-        if (state.PlayerNumber != playerNumber)
-        {
+
+        if (state.Active && state.PlayerNumber != playerNumber)
             Clear(state);
-            state.PlayerNumber = playerNumber;
+
+        if (!state.Active)
+        {
+            state.Active = true;
+            activeMemories++;
         }
+
+        state.PlayerNumber = playerNumber;
         state.Player = player;
         return state;
     }
@@ -324,6 +337,12 @@ internal static class DesertBatflyIntimidation
 
     private static void Clear(State state)
     {
+        if (state.Active)
+        {
+            state.Active = false;
+            activeMemories = Mathf.Max(0, activeMemories - 1);
+        }
+
         state.Player = null;
         state.PlayerNumber = -1;
         state.Strength = 0f;
