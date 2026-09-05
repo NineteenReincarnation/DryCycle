@@ -255,23 +255,23 @@ internal sealed class DesertBatflyAI
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        // Stay attached for several seconds. Fluid transfer is spread across the
-        // middle of that window rather than being a single hidden -30 event.
+        // Once drinking starts, drain at a real time-based rate instead of a fixed
+        // total. Rain World updates at 40 simulation ticks per second, so 50 raw
+        // hydration points/second is 1.25 points per active drain tick.
         if (ticks >= DesertBatflyTuning.DrainStartTicks &&
-            ticks <= DesertBatflyTuning.DrainEndTicks &&
-            drainedWater < DesertBatflyTuning.AttackWater)
+            ticks <= DesertBatflyTuning.DrainEndTicks)
         {
-            float drainTicks = DesertBatflyTuning.DrainEndTicks - DesertBatflyTuning.DrainStartTicks + 1f;
-            float amount = Mathf.Min(
-                DesertBatflyTuning.AttackWater - drainedWater,
-                DesertBatflyTuning.AttackWater / drainTicks);
+            float amount = DesertBatflyTuning.AttackWaterPerSecond /
+                ThirstConstants.SimulationTicksPerSecond;
             bool transferred = true;
 
             if (Target is Player player)
             {
-                transferred = ThirstStore.RemoveRuntime(player, amount / ThirstConstants.WaterValuePerPip);
-                // The existing thirst HUD already follows the true runtime value
-                // continuously. Keeping it open here makes the slow loss visible.
+                transferred = ThirstStore.RemoveRuntime(
+                    player,
+                    amount / ThirstConstants.WaterValuePerPip);
+                // Keep the existing thirst HUD visible while the bat is actively
+                // drinking so the player can watch the water level fall in real time.
                 player.showKarmaFoodRainTime = Mathf.Max(
                     player.showKarmaFoodRainTime,
                     ThirstConstants.HydrationLossHudHoldFrames);
@@ -280,10 +280,16 @@ internal sealed class DesertBatflyAI
             if (transferred)
             {
                 drainedWater += amount;
+
+                // Preserve roughly the old total thirst relief across one complete
+                // drain window even though player water loss is now time-based.
+                float fullWindowWater = DesertBatflyTuning.AttackWaterPerSecond *
+                    (DesertBatflyTuning.DrainEndTicks - DesertBatflyTuning.DrainStartTicks + 1f) /
+                    ThirstConstants.SimulationTicksPerSecond;
                 fly.DesertState.Thirst = Mathf.Max(
                     0f,
                     fly.DesertState.Thirst - DesertBatflyTuning.DrainRelief *
-                    (amount / DesertBatflyTuning.AttackWater));
+                    (amount / Mathf.Max(0.001f, fullWindowWater)));
                 fly.DesertState.Cooldown = DesertBatflyTuning.Cooldown;
             }
         }
@@ -437,7 +443,6 @@ internal sealed class DesertBatflyAI
                 StopRoost(true);
                 return;
             }
-
             // Use the actual vanilla hanging state so FlyGraphics gets the original
             // upside-down body/wing pose instead of a custom imitation.
             if (fly.AI.behavior != FlyAI.Behavior.Chain)
