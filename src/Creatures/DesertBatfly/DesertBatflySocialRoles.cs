@@ -18,7 +18,7 @@ internal sealed class DesertBatflySocialRoles
     internal int OpportunityTicks { get; private set; }
     internal SocialRoleSuppression LastSuppression { get; private set; }
     private Creature visibleThreat, scanThreat;
-    private bool visiblePredator, scanPredator;
+    private bool visiblePredator, scanPredator, opportunistRecovery;
     private float scanDistance;
     private int watchTicks, clearSightTicks, alarmCooldown;
 
@@ -26,6 +26,7 @@ internal sealed class DesertBatflySocialRoles
     internal ExpressedSocialRole Expressed => Suppression == SocialRoleSuppression.None ? Role : ExpressedSocialRole.None;
     internal bool IsBully => Expressed == ExpressedSocialRole.Bully;
     internal bool WatchesInsteadOfInitiating => Expressed is ExpressedSocialRole.Sentinel or ExpressedSocialRole.Opportunist;
+    internal bool OpportunistRecoveryActive => opportunistRecovery && OpportunityTicks > 0;
     internal float HarassThresholdScale => IsBully ? 0.82f : 1f;
     internal float ObserveDurationScale => IsBully ? 0.82f : 1f;
     internal float ObserveRadius => IsBully ? 115f : 150f;
@@ -37,7 +38,9 @@ internal sealed class DesertBatflySocialRoles
         {
             if (bat == null || bat.dead || bat.slatedForDeletetion || bat.room == null || bat.inShortcut || !bat.Consious)
                 return SocialRoleSuppression.Unavailable;
-            if (bat.grabbedBy.Count > 0 || !DesertBatflySocialBond.CanRespond(bat)) return SocialRoleSuppression.Restrained;
+            // Fly-on-Fly grabbedBy entries are the vanilla hanging chain. Only a real
+            // non-Fly restraint belongs here; chain/roost is classified below.
+            if (!DesertBatflySocialBond.CanRespond(bat)) return SocialRoleSuppression.Restrained;
             if (bat.Emergence?.Active == true) return SocialRoleSuppression.Emergence;
             if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
                 bat.AI.luredCounter > 0 || bat.safariControlled) return SocialRoleSuppression.VanillaPriority;
@@ -61,6 +64,7 @@ internal sealed class DesertBatflySocialRoles
         Commitment = Cooldown = OpportunityTicks = watchTicks = clearSightTicks = alarmCooldown = 0;
         EvaluationTicks = 1 + (int)((uint)bat.Personality.VisualSeed % 120u);
         visibleThreat = scanThreat = null;
+        opportunistRecovery = false;
         SentinelAlertConfidence = 0f;
         LastSuppression = SocialRoleSuppression.None;
     }
@@ -71,7 +75,7 @@ internal sealed class DesertBatflySocialRoles
         if (EvaluationTicks > 0) EvaluationTicks--;
         if (Commitment > 0) Commitment--;
         if (Cooldown > 0) Cooldown--;
-        if (OpportunityTicks > 0) OpportunityTicks--;
+        if (OpportunityTicks > 0 && --OpportunityTicks == 0) opportunistRecovery = false;
         if (alarmCooldown > 0) alarmCooldown--;
         CheckSuppression();
         if (EvaluationTicks == 0 && LastSuppression != SocialRoleSuppression.None)
@@ -83,7 +87,19 @@ internal sealed class DesertBatflySocialRoles
         LastSuppression = Suppression;
         if (LastSuppression == SocialRoleSuppression.None) return;
         if (LastSuppression is SocialRoleSuppression.Danger or SocialRoleSuppression.Fear)
-            OpportunityTicks = 600; // Only evidence of a past threat; never authority to cancel fear.
+        {
+            // A currently expressed Opportunist may remember that it was interrupted by
+            // this threat. The role itself still ends and receives normal cooldown; only
+            // a bounded, safety-gated return bias survives so cooldown cannot erase the
+            // defining "comes back early" behavior.
+            if (Role == ExpressedSocialRole.Opportunist) opportunistRecovery = true;
+            OpportunityTicks = 600; // Evidence of a past threat; never authority to cancel fear.
+        }
+        else
+        {
+            // Unrelated high-priority states invalidate an old threat-recovery window.
+            opportunistRecovery = false;
+        }
         EndExpression();
         SentinelAlertConfidence = 0f;
         watchTicks = 0;
@@ -120,7 +136,10 @@ internal sealed class DesertBatflySocialRoles
         if (candidate != ExpressedSocialRole.Bully && bat.DesertAI.Target != null) return;
         Role = candidate;
         if (Role != ExpressedSocialRole.None)
+        {
+            opportunistRecovery = false;
             Commitment = 800 + (int)((uint)bat.Personality.VisualSeed % 301u);
+        }
     }
 
     internal void BeginVisibleScan() { scanThreat = null; scanDistance = float.MaxValue; scanPredator = false; }
@@ -142,7 +161,12 @@ internal sealed class DesertBatflySocialRoles
         }
         visibleThreat = scanThreat;
         visiblePredator = scanPredator;
-        clearSightTicks = visibleThreat == null ? Mathf.Min(600, clearSightTicks + 8) : 0;
+        // Clear-sight time only counts after all role suppression has actually ended.
+        // Scans performed while retreating or under Fear must not pre-pay the 40-tick
+        // safety confirmation and cause an instant return on the first safe frame.
+        clearSightTicks = visibleThreat == null && Suppression == SocialRoleSuppression.None
+            ? Mathf.Min(600, clearSightTicks + 8)
+            : 0;
         if (Expressed != ExpressedSocialRole.Sentinel || visibleThreat == null) return;
         watchTicks += 8;
         Vector2 towardFlock = Custom.DirVec(visibleThreat.mainBodyChunk.pos, flock.Center);
@@ -182,7 +206,9 @@ internal sealed class DesertBatflySocialRoles
     internal void BiasOrdinaryFlight(DesertBatflyFlockSnapshot flock)
     {
         ExpressedSocialRole role = Expressed;
-        if (role is not (ExpressedSocialRole.Sentinel or ExpressedSocialRole.Opportunist) ||
+        bool safeOpportunity = (role == ExpressedSocialRole.Opportunist || OpportunistRecoveryActive) && SafeOpportunity(flock);
+        bool recoveryReturn = role == ExpressedSocialRole.None && OpportunistRecoveryActive && safeOpportunity;
+        if ((role is not (ExpressedSocialRole.Sentinel or ExpressedSocialRole.Opportunist) && !recoveryReturn) ||
             flock.ActiveCount < 2 || bat.DesertAI.Target != null ||
             bat.DesertAI.Mode is not (DesertBatflyAI.Activity.Flight or DesertBatflyAI.Activity.Cooldown) ||
             (bat.AI.behavior != FlyAI.Behavior.Idle && bat.AI.behavior != FlyAI.Behavior.Swarm)) return;
@@ -199,7 +225,7 @@ internal sealed class DesertBatflySocialRoles
         }
         else if (role == ExpressedSocialRole.Sentinel)
             goal = flock.Center + outward.normalized * 190f;
-        else if (SafeOpportunity(flock))
+        else if (safeOpportunity)
             goal = flock.Center + outward.normalized * 95f;
         else return;
         // Small reachable correction only. Vanilla still owns locomotion and pathing.
