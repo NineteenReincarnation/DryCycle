@@ -8,47 +8,20 @@ using Watcher;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Mortality awareness, finite chain fear and rare extreme vengeance for Desert Batflies.
-///
-/// Player kills and Peach-Lizard predation share the same event-time fear propagation:
-/// direct witnesses react strongly, nearby non-witnesses react more weakly, and panic can
-/// travel through at most two additional neighbours. This creates visible flock morale
-/// without a global per-frame observer graph or unlimited room-wide telepathy.
-///
-/// Most bats only flee. A small, stable personality subset can overcome the initial shock
-/// and perform extreme vengeance against the actual killer/predator. That special mode is
-/// intentionally separate from the ordinary non-damaging retaliation system and is the
-/// only Desert-Batfly behavior allowed to deal meaningful blunt damage to a Slugcat or
-/// Peach Lizard. It also owns the rare tongue/grasp rescue attempt.
+/// Mortality awareness, finite social fear, persistent trauma and rare vengeance mobs.
+/// All expensive colony work is event-driven; ordinary per-bat updates are constant-time.
 /// </summary>
 internal static class DesertBatflyIntimidation
 {
-    private enum EventKind
-    {
-        PlayerKill,
-        PredatorCapture,
-        PredatorKill
-    }
+    private enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
+    private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
+    private enum SocialRole { None, TrueAvenger, Follower }
 
-    private enum VengeanceMode
-    {
-        None,
-        Waiting,
-        Observe,
-        Circle,
-        Feint,
-        RescueCharge,
-        Charge,
-        Withdraw
-    }
-
-    // Direct perception and finite social propagation.
     private const float DirectWitnessRadius = 340f;
     private const float SecondaryAlarmRadius = 180f;
     private const float ChainFearRadius = 150f;
     private const int ChainFearHops = 2;
 
-    // A short-lived corpse remains evidence only while the killer is still nearby.
     private const float CorpseReminderRadius = 190f;
     private const float CorpseKillerProximity = 230f;
     private const int CorpseLifetimeTicks = 600;
@@ -57,7 +30,6 @@ internal static class DesertBatflyIntimidation
     private const int CorpseReminderShockTicks = 60;
     private const int CorpseReminderCooldownTicks = 180;
 
-    // Fear gains. Chain tiers are deliberately much weaker than eyewitness memory.
     private const float DirectGain = 0.50f;
     private const float SecondaryGain = 0.22f;
     private const float ChainGain1 = 0.13f;
@@ -78,9 +50,7 @@ internal static class DesertBatflyIntimidation
     private const int PanicRefreshTicks = 100;
     private const int AvoidRefreshTicks = 110;
 
-    // Only a couple of exceptional individuals may counter-attack one mortality event.
-    // This is the hard safety cap that keeps vengeance from becoming another attack swarm.
-    private const int MaxVengeanceResponders = 2;
+    private const int MaxTrueAvengers = 2;
     private const float VengeanceCollapseStrength = 0.84f;
     private const int VengeanceCaptureDelayMin = 12;
     private const int VengeanceCaptureDelayMax = 30;
@@ -98,10 +68,6 @@ internal static class DesertBatflyIntimidation
     private const float VengeanceChargeMaxSpeed = 18f;
     private const float VengeanceHitExtraRadius = 5f;
 
-    // Extreme vengeance is dangerous on purpose. Player damage scales linearly with
-    // VengeanceDrive so the very highest rare individuals can cross a Slugcat's
-    // instant-death threshold. Peach remains on a squared, lower damage curve because
-    // it is a much larger predator. Ordinary retaliation never uses these values.
     private const float PlayerVengeanceDamageMin = 0.30f;
     private const float PlayerVengeanceDamageMax = 1.30f;
     private const float LizardVengeanceDamageMin = 0.12f;
@@ -111,11 +77,12 @@ internal static class DesertBatflyIntimidation
     private const float VengeanceImpactMin = 0.75f;
     private const float VengeanceImpactMax = 2.8f;
 
-    // Rescue is never guaranteed; a successful head/face charge can make Peach lose
-    // the tongue catch, and a later grasp rescue is possible at a lower probability.
     private const float TongueRescueChanceMin = 0.18f;
     private const float TongueRescueChanceMax = 0.48f;
     private const float GraspRescueChanceScale = 0.62f;
+
+    private const int TraumaThreatScanTicks = 20;
+    private const int TraumaRetreatRefreshTicks = 120;
 
     private struct FearMemory
     {
@@ -128,7 +95,6 @@ internal static class DesertBatflyIntimidation
         internal int AvoidRefresh;
         internal int CorpseReminderCooldown;
         internal Vector2 LastLethalPosition;
-
         internal bool Active => MemoryTicks > 0 && Strength > 0f;
     }
 
@@ -139,20 +105,41 @@ internal static class DesertBatflyIntimidation
         internal FearMemory PredatorFear;
 
         internal VengeanceMode Vengeance;
+        internal SocialRole Role;
         internal Creature VengeanceTarget;
+        internal DesertBatfly Leader;
         internal DesertBatfly RescueVictim;
         internal LizardTongue RescueTongue;
         internal float Rage;
+        internal float Commitment;
+        internal float DamageScale = 1f;
         internal int VengeanceTimer;
         internal int PassesRemaining;
         internal bool RescueAttempted;
         internal bool WasRescuePlan;
+        internal bool SupportOnly;
+
+        internal int TraumaThreatScan;
+        internal int TraumaRetreatRefresh;
     }
 
     private sealed class CaptureStamp
     {
         internal int PredatorIdentity = int.MinValue;
         internal int Clock = int.MinValue;
+    }
+
+    private readonly struct FollowerCandidate
+    {
+        internal readonly DesertBatfly Bat;
+        internal readonly DesertBatfly Leader;
+        internal readonly float Score;
+        internal FollowerCandidate(DesertBatfly bat, DesertBatfly leader, float score)
+        {
+            Bat = bat;
+            Leader = leader;
+            Score = score;
+        }
     }
 
     private sealed class CorpseWarning : UpdatableAndDeletable
@@ -163,12 +150,7 @@ internal static class DesertBatflyIntimidation
         private readonly float threatScale;
         private int age;
 
-        internal CorpseWarning(
-            Room room,
-            DesertBatfly victim,
-            Creature killer,
-            Vector2 deathPosition,
-            float threatScale)
+        internal CorpseWarning(Room room, DesertBatfly victim, Creature killer, Vector2 deathPosition, float threatScale)
         {
             this.room = room;
             this.victim = victim;
@@ -181,16 +163,13 @@ internal static class DesertBatflyIntimidation
         {
             base.Update(eu);
             age++;
-
             if (age > CorpseLifetimeTicks || room == null || !ValidThreat(killer, room) ||
                 !Custom.DistLess(killer.mainBodyChunk.pos, deathPosition, CorpseKillerProximity))
             {
                 Destroy();
                 return;
             }
-
-            if (age % CorpseSampleTicks != 0)
-                return;
+            if (age % CorpseSampleTicks != 0) return;
 
             foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
             {
@@ -199,7 +178,6 @@ internal static class DesertBatflyIntimidation
                     !Custom.DistLess(bat.mainBodyChunk.pos, deathPosition, CorpseReminderRadius) ||
                     !room.VisualContact(bat.mainBodyChunk.pos, deathPosition))
                     continue;
-
                 ReceiveCorpseReminder(bat, killer, deathPosition, threatScale);
             }
         }
@@ -216,10 +194,7 @@ internal static class DesertBatflyIntimidation
         activeStates = 0;
     }
 
-    internal static bool IsSupportedLethalThreat(Creature creature)
-    {
-        return creature is Player || IsPeach(creature);
-    }
+    internal static bool IsSupportedLethalThreat(Creature creature) => creature is Player || IsPeach(creature);
 
     internal static bool IsExtremeVengeanceActive(DesertBatfly bat)
     {
@@ -227,167 +202,162 @@ internal static class DesertBatflyIntimidation
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
-    /// <summary>
-    /// Called after DesertBatflyAI.Update but before its Attach/Interfere physics.
-    /// Normal time is extremely cheap: until a mortality event creates state, the
-    /// method exits after one integer comparison and performs no weak-table lookup.
-    /// </summary>
     internal static void Update(DesertBatfly bat)
     {
-        if (bat == null || activeStates <= 0 ||
-            !states.TryGetValue(bat, out State state) || !state.Active)
+        if (bat == null) return;
+
+        DesertBatflyState persistent = bat.DesertState;
+        State state;
+        if (persistent.HasTrauma)
+        {
+            state = StateFor(bat);
+        }
+        else if (activeStates <= 0 || !states.TryGetValue(bat, out state) || !state.Active)
+        {
             return;
+        }
 
         TickMemory(ref state.PlayerFear);
         TickMemory(ref state.PredatorFear);
 
-        if (bat.dead || !bat.Consious || bat.room == null || bat.inShortcut ||
-            RestrainedByNonFly(bat))
+        if (bat.dead || !bat.Consious || bat.room == null || bat.inShortcut || RestrainedByNonFly(bat))
         {
             ClearVengeance(state);
-            TryDeactivate(state);
+            TryDeactivate(bat, state);
             return;
         }
 
-        // Extreme vengeance is allowed to override the ordinary fear steering only
-        // after its explicit waiting phase. Until then, both memories still enforce
-        // the visible panic/withdrawal response requested for even the boldest bats.
+        EnforcePersistentTrauma(bat, state);
+
         bool vengeanceControlsMovement = state.Vengeance is
             VengeanceMode.Observe or VengeanceMode.Circle or VengeanceMode.Feint or
             VengeanceMode.RescueCharge or VengeanceMode.Charge or VengeanceMode.Withdraw;
 
         if (!vengeanceControlsMovement)
         {
-            EnforceFear(bat, state, ref state.PlayerFear, isPlayer: true);
-            EnforceFear(bat, state, ref state.PredatorFear, isPlayer: false);
+            EnforceFear(bat, ref state.PlayerFear, true);
+            EnforceFear(bat, ref state.PredatorFear, false);
         }
 
         UpdateVengeance(bat, state);
-        TryDeactivate(state);
+        TryDeactivate(bat, state);
     }
 
     internal static void BroadcastPlayerKill(
-        DesertBatfly victim,
-        Player killer,
-        Vector2 deathPosition,
-        Fly preDeathChainRoot,
-        float threatScale,
-        bool revengeFailed = false)
+        DesertBatfly victim, Player killer, Vector2 deathPosition, Fly preDeathChainRoot,
+        float threatScale, bool revengeFailed = false)
     {
         BroadcastThreatEvent(
-            victim,
-            killer,
-            deathPosition,
-            preDeathChainRoot,
-            Mathf.Clamp(threatScale, 0.5f, 1.25f),
-            EventKind.PlayerKill,
-            null,
-            revengeFailed);
+            victim, killer, deathPosition, preDeathChainRoot,
+            Mathf.Clamp(threatScale, 0.5f, 1.25f), EventKind.PlayerKill, null, revengeFailed);
     }
 
-    internal static void BroadcastPredatorCapture(
-        DesertBatfly victim,
-        Lizard predator,
-        LizardTongue tongue)
+    internal static void BroadcastPredatorCapture(DesertBatfly victim, Lizard predator, LizardTongue tongue)
     {
-        if (victim?.room == null || !IsPeach(predator) || predator.room != victim.room)
-            return;
+        if (victim?.room == null || !IsPeach(predator) || predator.room != victim.room) return;
 
-        // Tongue-hit and subsequent Bite/Grasp hooks can observe the same capture.
-        // Collapse those into one event so fear and rescue are never double-armed.
         CaptureStamp stamp = captureStamps.GetOrCreateValue(victim);
         int clock = victim.room.game?.clock ?? 0;
         int identity = ThreatIdentity(predator);
-        if (stamp.PredatorIdentity == identity && clock - stamp.Clock >= 0 &&
-            clock - stamp.Clock < 90)
+        if (stamp.PredatorIdentity == identity && clock - stamp.Clock >= 0 && clock - stamp.Clock < 90)
             return;
-
         stamp.PredatorIdentity = identity;
         stamp.Clock = clock;
 
         Fly chainRoot = victim.AI != null && victim.AI.behavior == FlyAI.Behavior.Chain
-            ? victim.FirstInChain()
-            : null;
-
+            ? victim.FirstInChain() : null;
         BroadcastThreatEvent(
-            victim,
-            predator,
-            victim.mainBodyChunk.pos,
-            chainRoot,
-            0.92f,
-            EventKind.PredatorCapture,
-            tongue,
-            revengeFailed: false);
+            victim, predator, victim.mainBodyChunk.pos, chainRoot,
+            0.92f, EventKind.PredatorCapture, tongue, false);
     }
 
     internal static void BroadcastPredatorKill(
-        DesertBatfly victim,
-        Lizard predator,
-        Vector2 deathPosition,
-        Fly preDeathChainRoot,
-        float threatScale,
-        bool revengeFailed = false)
+        DesertBatfly victim, Lizard predator, Vector2 deathPosition, Fly preDeathChainRoot,
+        float threatScale, bool revengeFailed = false)
     {
-        if (!IsPeach(predator))
-            return;
+        if (!IsPeach(predator)) return;
+
+        if (victim?.room != null && captureStamps.TryGetValue(victim, out CaptureStamp stamp))
+        {
+            int clock = victim.room.game?.clock ?? 0;
+            if (stamp.PredatorIdentity == ThreatIdentity(predator) &&
+                clock - stamp.Clock >= 0 && clock - stamp.Clock < 120)
+                threatScale *= 0.78f;
+        }
 
         BroadcastThreatEvent(
-            victim,
-            predator,
-            deathPosition,
-            preDeathChainRoot,
-            Mathf.Clamp(threatScale, 0.6f, 1.35f),
-            EventKind.PredatorKill,
-            null,
-            revengeFailed);
+            victim, predator, deathPosition, preDeathChainRoot,
+            Mathf.Clamp(threatScale, 0.6f, 1.35f), EventKind.PredatorKill, null, revengeFailed);
     }
 
     private static void BroadcastThreatEvent(
-        DesertBatfly victim,
-        Creature threat,
-        Vector2 eventPosition,
-        Fly preEventChainRoot,
-        float threatScale,
-        EventKind kind,
-        LizardTongue rescueTongue,
-        bool revengeFailed)
+        DesertBatfly victim, Creature threat, Vector2 eventPosition, Fly preEventChainRoot,
+        float threatScale, EventKind kind, LizardTongue rescueTongue, bool revengeFailed)
     {
         Room room = victim?.room;
-        if (room == null || !ValidThreat(threat, room))
-            return;
+        if (room == null || !ValidThreat(threat, room)) return;
 
-        // A failed vengeance attempt being killed is especially demoralizing. It
-        // strengthens the fear wave and deliberately suppresses replacement avengers
-        // for this event, preventing an endless queue of heroic suicides.
-        if (revengeFailed)
-            threatScale = Mathf.Min(1.35f, threatScale * 1.28f);
+        bool victimWasLeader = TryGetVengeanceState(victim, out State victimState) &&
+                               victimState.Role == SocialRole.TrueAvenger &&
+                               victimState.Vengeance != VengeanceMode.None;
+        bool victimWasFollower = victimState != null &&
+                                 victimState.Role == SocialRole.Follower &&
+                                 victimState.Vengeance != VengeanceMode.None;
+
+        if (revengeFailed) threatScale = Mathf.Min(1.35f, threatScale * 1.28f);
 
         List<DesertBatfly> bats = new(DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation);
         foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
         {
-            if (other is DesertBatfly bat && bat != victim && !bat.dead &&
-                bat.room == room && bat.Consious)
+            if (other is DesertBatfly bat && bat != victim && !bat.dead && bat.room == room && bat.Consious)
                 bats.Add(bat);
         }
+        if (bats.Count == 0) return;
 
-        if (bats.Count == 0)
-            return;
+        if (victimWasLeader)
+        {
+            for (int i = 0; i < bats.Count; i++)
+            {
+                DesertBatfly bat = bats[i];
+                if (!TryGetVengeanceState(bat, out State follower) ||
+                    follower.Role != SocialRole.Follower || follower.Leader != victim ||
+                    follower.VengeanceTarget != threat)
+                    continue;
 
-        // tier: 0 = direct/same-chain, 1 = nearby secondary, 2/3 = social chain hops.
+                AddTrauma(
+                    bat, threat,
+                    Mathf.Lerp(0.30f, 0.55f, bat.Personality.Conformity) * threatScale);
+                ClearVengeance(follower);
+                bat.DesertAI.Threatened(threat, false);
+            }
+            revengeFailed = true;
+        }
+        else if (victimWasFollower)
+        {
+            for (int i = 0; i < bats.Count; i++)
+            {
+                DesertBatfly bat = bats[i];
+                if (!TryGetVengeanceState(bat, out State social) ||
+                    social.Role != SocialRole.Follower || social.VengeanceTarget != threat)
+                    continue;
+                AddTrauma(
+                    bat, threat,
+                    Mathf.Lerp(0.08f, 0.20f, bat.Personality.Conformity) * threatScale);
+            }
+        }
+
         int[] tier = new int[bats.Count];
         for (int i = 0; i < tier.Length; i++) tier[i] = -1;
-
         List<int> frontier = new(bats.Count);
         List<int> next = new(bats.Count);
-        List<DesertBatfly> vengeanceCandidates = new(4);
+        List<DesertBatfly> trueCandidates = new(4);
 
         for (int i = 0; i < bats.Count; i++)
         {
             DesertBatfly bat = bats[i];
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, eventPosition);
-            bool sameChain = preEventChainRoot != null &&
-                bat.AI != null && bat.AI.behavior == FlyAI.Behavior.Chain &&
-                bat.FirstInChain() == preEventChainRoot;
+            bool sameChain = preEventChainRoot != null && bat.AI != null &&
+                bat.AI.behavior == FlyAI.Behavior.Chain && bat.FirstInChain() == preEventChainRoot;
             bool directVisual = distance <= DirectWitnessRadius &&
                 (room.VisualContact(bat.mainBodyChunk.pos, eventPosition) ||
                  room.VisualContact(bat.mainBodyChunk.pos, threat.mainBodyChunk.pos));
@@ -397,7 +367,7 @@ internal static class DesertBatflyIntimidation
                 tier[i] = 0;
                 frontier.Add(i);
                 if (!revengeFailed && bat.Personality.CanExtremeVengeance)
-                    vengeanceCandidates.Add(bat);
+                    trueCandidates.Add(bat);
             }
             else if (distance <= SecondaryAlarmRadius)
             {
@@ -406,30 +376,21 @@ internal static class DesertBatflyIntimidation
             }
         }
 
-        // Panic may travel through two more nearby bats. We intentionally do not
-        // require line-of-sight for these social hops: the signal is another bat's
-        // sudden escape, not direct knowledge of the corpse. Range shrinks per hop.
         for (int hop = 0; hop < ChainFearHops && frontier.Count > 0; hop++)
         {
             next.Clear();
             float radius = ChainFearRadius * (hop == 0 ? 1f : 0.82f);
-
             for (int f = 0; f < frontier.Count; f++)
             {
                 DesertBatfly source = bats[frontier[f]];
                 for (int i = 0; i < bats.Count; i++)
                 {
-                    if (tier[i] >= 0 || bats[i] == source)
-                        continue;
-
-                    if (!Custom.DistLess(source.mainBodyChunk.pos, bats[i].mainBodyChunk.pos, radius))
-                        continue;
-
+                    if (tier[i] >= 0 || bats[i] == source) continue;
+                    if (!Custom.DistLess(source.mainBodyChunk.pos, bats[i].mainBodyChunk.pos, radius)) continue;
                     tier[i] = 2 + hop;
                     next.Add(i);
                 }
             }
-
             List<int> swap = frontier;
             frontier = next;
             next = swap;
@@ -437,42 +398,24 @@ internal static class DesertBatflyIntimidation
 
         for (int i = 0; i < bats.Count; i++)
         {
-            if (tier[i] < 0)
-                continue;
-            ReceiveFear(bats[i], threat, eventPosition, tier[i], threatScale);
+            if (tier[i] < 0) continue;
+            ReceiveFear(bats[i], threat, eventPosition, tier[i], threatScale, kind);
         }
 
-        ArmVengeanceResponders(
-            vengeanceCandidates,
-            victim,
-            threat,
-            kind,
-            rescueTongue,
-            threatScale,
-            revengeFailed);
+        ArmVengeanceGroup(
+            trueCandidates, bats, tier, victim, threat, kind, rescueTongue, threatScale, revengeFailed);
 
         if (kind != EventKind.PredatorCapture)
-        {
-            room.AddObject(new CorpseWarning(
-                room,
-                victim,
-                threat,
-                eventPosition,
-                threatScale));
-        }
+            room.AddObject(new CorpseWarning(room, victim, threat, eventPosition, threatScale));
     }
 
     private static void ReceiveFear(
-        DesertBatfly bat,
-        Creature threat,
-        Vector2 eventPosition,
-        int tier,
-        float threatScale)
+        DesertBatfly bat, Creature threat, Vector2 eventPosition, int tier,
+        float threatScale, EventKind kind)
     {
         State state = StateFor(bat);
         FearMemory memory = threat is Player ? state.PlayerFear : state.PredatorFear;
         int identity = ThreatIdentity(threat);
-
         if (!memory.Active || memory.Identity != identity)
         {
             memory = default;
@@ -482,7 +425,6 @@ internal static class DesertBatflyIntimidation
         memory.Threat = threat;
         memory.LastLethalPosition = eventPosition;
 
-        float caution = CautionFactor(bat);
         float baseGain = tier switch
         {
             0 => DirectGain,
@@ -490,20 +432,19 @@ internal static class DesertBatflyIntimidation
             2 => ChainGain1,
             _ => ChainGain2
         };
-        float minimum = tier == 0
-            ? MinimumDirectGain
-            : tier == 1
-                ? MinimumSecondaryGain
-                : 0.025f;
+        float minimum = tier == 0 ? MinimumDirectGain : tier == 1 ? MinimumSecondaryGain : 0.025f;
+        float socialScale = tier == 0
+            ? Mathf.Lerp(0.92f, 1.10f, bat.Personality.Conformity)
+            : bat.Personality.SocialFearScale;
+
+        bool followingThisThreat = state.Role == SocialRole.Follower && state.VengeanceTarget == threat;
+        if (followingThisThreat)
+            socialScale *= Mathf.Lerp(1.22f, 1.90f, bat.Personality.Conformity);
 
         memory.Strength = Mathf.Clamp01(
-            memory.Strength + Mathf.Max(minimum, baseGain * caution * threatScale));
-        int duration = Mathf.RoundToInt(Mathf.Lerp(
-            MemoryMinTicks,
-            MemoryMaxTicks,
-            memory.Strength));
-        if (tier >= 2)
-            duration = Mathf.RoundToInt(duration * (tier == 2 ? 0.70f : 0.48f));
+            memory.Strength + Mathf.Max(minimum, baseGain * CautionFactor(bat) * socialScale * threatScale));
+        int duration = Mathf.RoundToInt(Mathf.Lerp(MemoryMinTicks, MemoryMaxTicks, memory.Strength));
+        if (tier >= 2) duration = Mathf.RoundToInt(duration * (tier == 2 ? 0.70f : 0.48f));
         memory.MemoryTicks = Mathf.Max(memory.MemoryTicks, duration);
 
         float courage = Mathf.Clamp01((bat.Personality.Temperament + bat.Personality.Nerve) * 0.5f);
@@ -514,31 +455,41 @@ internal static class DesertBatflyIntimidation
             2 => Mathf.RoundToInt(Mathf.Lerp(ChainShock1MaxTicks, ChainShock1MinTicks, courage)),
             _ => Mathf.RoundToInt(Mathf.Lerp(ChainShock2MaxTicks, ChainShock2MinTicks, courage))
         };
-        shock = Mathf.RoundToInt(shock * Mathf.Lerp(0.88f, 1.08f, threatScale));
+        shock = Mathf.RoundToInt(shock * Mathf.Lerp(0.88f, 1.08f, threatScale) *
+                                 Mathf.Lerp(0.88f, 1.18f, bat.Personality.Conformity));
         memory.ShockTicks = Mathf.Max(memory.ShockTicks, shock);
         memory.PanicRefresh = 0;
         memory.AvoidRefresh = 0;
 
-        if (threat is Player)
-            state.PlayerFear = memory;
-        else
-            state.PredatorFear = memory;
+        if (threat is Player) state.PlayerFear = memory;
+        else state.PredatorFear = memory;
 
-        // Every reached tier visibly reacts now. Threatened() reuses the already-tested
-        // chain release, attack cancellation, local alarm and Escape transition.
+        float traumaBase = kind switch
+        {
+            EventKind.PredatorCapture => 0.035f,
+            EventKind.PlayerKill => 0.085f,
+            _ => 0.095f
+        };
+        float tierScale = tier switch { 0 => 1f, 1 => 0.62f, 2 => 0.34f, _ => 0.18f };
+        float traumaGain = traumaBase * tierScale *
+                           Mathf.Lerp(0.72f, 1.55f, bat.Personality.Conformity) * threatScale;
+        if (followingThisThreat)
+            traumaGain *= Mathf.Lerp(1.45f, 2.25f, bat.Personality.Conformity);
+        AddTrauma(bat, threat, traumaGain);
+
+        if (PersistentTraumaStrength(bat, threat) >= DesertBatflyTuning.TraumaSevere &&
+            state.VengeanceTarget == threat)
+            ClearVengeance(state);
+
         bat.DesertAI.Threatened(threat, false);
     }
 
     private static void ReceiveCorpseReminder(
-        DesertBatfly bat,
-        Creature threat,
-        Vector2 deathPosition,
-        float threatScale)
+        DesertBatfly bat, Creature threat, Vector2 deathPosition, float threatScale)
     {
         State state = StateFor(bat);
         FearMemory memory = threat is Player ? state.PlayerFear : state.PredatorFear;
         int identity = ThreatIdentity(threat);
-
         if (!memory.Active || memory.Identity != identity)
         {
             memory = default;
@@ -548,7 +499,7 @@ internal static class DesertBatflyIntimidation
         memory.Threat = threat;
         memory.Strength = Mathf.Max(
             memory.Strength,
-            Mathf.Max(0.06f, 0.10f * CautionFactor(bat) * threatScale));
+            Mathf.Max(0.06f, 0.10f * CautionFactor(bat) * bat.Personality.SocialFearScale * threatScale));
         memory.MemoryTicks = Mathf.Max(memory.MemoryTicks, CorpseReminderTicks);
         memory.LastLethalPosition = deathPosition;
 
@@ -560,80 +511,149 @@ internal static class DesertBatflyIntimidation
             bat.DesertAI.Threatened(threat, false);
         }
 
-        if (threat is Player)
-            state.PlayerFear = memory;
-        else
-            state.PredatorFear = memory;
+        if (threat is Player) state.PlayerFear = memory;
+        else state.PredatorFear = memory;
     }
 
-    private static void ArmVengeanceResponders(
-        List<DesertBatfly> candidates,
-        DesertBatfly victim,
-        Creature threat,
-        EventKind kind,
-        LizardTongue rescueTongue,
-        float threatScale,
-        bool revengeFailed)
+    private static void ArmVengeanceGroup(
+        List<DesertBatfly> trueCandidates, List<DesertBatfly> bats, int[] tier,
+        DesertBatfly victim, Creature threat, EventKind kind, LizardTongue rescueTongue,
+        float threatScale, bool revengeFailed)
     {
-        if (revengeFailed || candidates == null || candidates.Count == 0 ||
+        if (revengeFailed || trueCandidates == null || trueCandidates.Count == 0 ||
             !ValidThreat(threat, victim?.room))
             return;
 
-        candidates.Sort((a, b) => b.Personality.VengeanceAffinity.CompareTo(a.Personality.VengeanceAffinity));
-        int armed = 0;
+        trueCandidates.Sort((a, b) => b.Personality.VengeanceAffinity.CompareTo(a.Personality.VengeanceAffinity));
+        List<DesertBatfly> leaders = new(2);
+        int participants = 0;
 
-        for (int i = 0; i < candidates.Count && armed < MaxVengeanceResponders; i++)
+        for (int i = 0; i < trueCandidates.Count && leaders.Count < MaxTrueAvengers &&
+             participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
         {
-            DesertBatfly bat = candidates[i];
+            DesertBatfly bat = trueCandidates[i];
             State state = StateFor(bat);
             FearMemory memory = threat is Player ? state.PlayerFear : state.PredatorFear;
-
-            // Once repeated mortality has already pushed an exceptional bat into
-            // overwhelming trauma, even it stops trying to be a hero.
-            if (memory.Strength >= VengeanceCollapseStrength)
+            float trauma = PersistentTraumaStrength(bat, threat);
+            if (memory.Strength >= VengeanceCollapseStrength ||
+                trauma >= DesertBatflyTuning.TraumaAggressionBlock)
                 continue;
 
-            float drive = bat.Personality.VengeanceDrive;
-            float rage = Mathf.Clamp01(
-                Mathf.Lerp(0.58f, 1f, drive) * Mathf.Lerp(0.88f, 1.08f, threatScale));
-
-            // If this bat is already avenging the same threat, a later kill/capture
-            // reinforces rage but does not rewind it back to the waiting phase.
-            if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
-            {
-                state.Rage = Mathf.Max(state.Rage, rage);
-                state.PassesRemaining = Mathf.Max(state.PassesRemaining, drive > 0.70f ? 2 : 1);
-                armed++;
-                continue;
-            }
-
-            state.VengeanceTarget = threat;
-            state.RescueVictim = kind == EventKind.PredatorCapture ? victim : null;
-            state.RescueTongue = kind == EventKind.PredatorCapture ? rescueTongue : null;
-            state.RescueAttempted = false;
-            state.WasRescuePlan = kind == EventKind.PredatorCapture;
-            state.Rage = rage;
-            state.PassesRemaining = drive > 0.70f ? 2 : 1;
-            state.Vengeance = VengeanceMode.Waiting;
-
-            // A time-sensitive tongue rescue overcomes the first panic much faster,
-            // but still produces a visible retreat before the bat turns back around.
-            int minDelay = kind == EventKind.PredatorCapture
-                ? VengeanceCaptureDelayMin
-                : VengeanceKillDelayMin;
-            int maxDelay = kind == EventKind.PredatorCapture
-                ? VengeanceCaptureDelayMax
-                : VengeanceKillDelayMax;
-            state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(maxDelay, minDelay, drive));
-            armed++;
+            ArmVengeance(
+                bat, state, threat, kind, victim, rescueTongue,
+                bat.Personality.VengeanceDrive, 1f, false, null);
+            leaders.Add(bat);
+            participants++;
         }
+
+        if (leaders.Count == 0 || participants >= DesertBatflyTuning.SocialVengeanceGroupCap) return;
+
+        List<FollowerCandidate> followers = new(bats.Count);
+        for (int i = 0; i < bats.Count; i++)
+        {
+            DesertBatfly bat = bats[i];
+            if (tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
+                bat.Personality.Conformity < DesertBatflyTuning.SocialFollowerMinConformity ||
+                IsExtremeVengeanceActive(bat))
+                continue;
+
+            float trauma = PersistentTraumaStrength(bat, threat);
+            if (trauma >= DesertBatflyTuning.TraumaAggressionBlock) continue;
+
+            DesertBatfly bestLeader = null;
+            float bestLeaderDrive = 0f;
+            for (int l = 0; l < leaders.Count; l++)
+            {
+                DesertBatfly leader = leaders[l];
+                bool sociallyVisible = Custom.DistLess(
+                    bat.mainBodyChunk.pos, leader.mainBodyChunk.pos,
+                    DesertBatflyTuning.SocialFollowerRange) ||
+                    bat.room.VisualContact(bat.mainBodyChunk.pos, leader.mainBodyChunk.pos);
+                if (!sociallyVisible) continue;
+                if (leader.Personality.VengeanceDrive > bestLeaderDrive)
+                {
+                    bestLeader = leader;
+                    bestLeaderDrive = leader.Personality.VengeanceDrive;
+                }
+            }
+            if (bestLeader == null) continue;
+
+            State batState = StateFor(bat);
+            FearMemory fear = threat is Player ? batState.PlayerFear : batState.PredatorFear;
+            float score =
+                bat.Personality.Conformity * 0.50f +
+                bat.Personality.Temperament * 0.20f +
+                bat.Personality.Nerve * 0.15f +
+                bestLeaderDrive * 0.15f -
+                fear.Strength * 0.28f -
+                trauma * 0.65f;
+
+            if (score < 0.44f) continue;
+            float probability = Mathf.InverseLerp(0.44f, 0.84f, score) *
+                                Mathf.Lerp(0.55f, 1f, bat.Personality.Conformity);
+            if (StableEvent01(bat, victim, threat, kind) > probability) continue;
+            followers.Add(new FollowerCandidate(bat, bestLeader, score));
+        }
+
+        followers.Sort((a, b) => b.Score.CompareTo(a.Score));
+        for (int i = 0; i < followers.Count &&
+             participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
+        {
+            FollowerCandidate follower = followers[i];
+            State state = StateFor(follower.Bat);
+            float commitment = Mathf.Clamp01(Mathf.InverseLerp(0.44f, 0.90f, follower.Score));
+            bool supportOnly = follower.Score < 0.66f || follower.Bat.Personality.Temperament < 0.50f;
+            float damageScale = supportOnly
+                ? Mathf.Lerp(0.20f, 0.34f, commitment)
+                : Mathf.Lerp(0.35f, 0.65f, commitment);
+
+            ArmVengeance(
+                follower.Bat, state, threat, kind, victim, rescueTongue,
+                Mathf.Lerp(0.38f, 0.72f, commitment), damageScale,
+                supportOnly, follower.Leader);
+            state.Commitment = commitment;
+            state.Role = SocialRole.Follower;
+            participants++;
+        }
+    }
+
+    private static void ArmVengeance(
+        DesertBatfly bat, State state, Creature threat, EventKind kind,
+        DesertBatfly victim, LizardTongue rescueTongue, float drive,
+        float damageScale, bool supportOnly, DesertBatfly leader)
+    {
+        float rage = Mathf.Clamp01(Mathf.Lerp(0.58f, 1f, drive));
+        if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
+        {
+            state.Rage = Mathf.Max(state.Rage, rage);
+            if (state.Role == SocialRole.TrueAvenger)
+                state.PassesRemaining = Mathf.Max(state.PassesRemaining, drive > 0.70f ? 2 : 1);
+            return;
+        }
+
+        state.VengeanceTarget = threat;
+        state.Leader = leader;
+        state.RescueVictim = kind == EventKind.PredatorCapture ? victim : null;
+        state.RescueTongue = kind == EventKind.PredatorCapture ? rescueTongue : null;
+        state.RescueAttempted = false;
+        state.WasRescuePlan = kind == EventKind.PredatorCapture;
+        state.Rage = rage;
+        state.DamageScale = damageScale;
+        state.SupportOnly = supportOnly;
+        state.PassesRemaining = supportOnly ? 0 :
+            (leader == null && drive > 0.70f ? 2 : 1);
+        state.Role = leader == null ? SocialRole.TrueAvenger : SocialRole.Follower;
+        state.Vengeance = VengeanceMode.Waiting;
+
+        int minDelay = kind == EventKind.PredatorCapture ? VengeanceCaptureDelayMin : VengeanceKillDelayMin;
+        int maxDelay = kind == EventKind.PredatorCapture ? VengeanceCaptureDelayMax : VengeanceKillDelayMax;
+        int socialDelay = leader == null ? 0 : Mathf.RoundToInt(Mathf.Lerp(26f, 8f, bat.Personality.Conformity));
+        state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(maxDelay, minDelay, drive)) + socialDelay;
     }
 
     private static void UpdateVengeance(DesertBatfly bat, State state)
     {
-        if (state.Vengeance == VengeanceMode.None)
-            return;
-
+        if (state.Vengeance == VengeanceMode.None) return;
         Creature target = state.VengeanceTarget;
         if (!ValidThreat(target, bat.room))
         {
@@ -641,15 +661,33 @@ internal static class DesertBatflyIntimidation
             return;
         }
 
-        float drive = bat.Personality.VengeanceDrive;
+        if (state.Role == SocialRole.Follower)
+        {
+            if (state.Leader == null || state.Leader.dead || state.Leader.room != bat.room ||
+                !TryGetVengeanceState(state.Leader, out State leaderState) ||
+                leaderState.Role != SocialRole.TrueAvenger || leaderState.VengeanceTarget != target)
+            {
+                AddTrauma(bat, target, Mathf.Lerp(0.05f, 0.14f, bat.Personality.Conformity));
+                ClearVengeance(state);
+                bat.DesertAI.Threatened(target, false);
+                return;
+            }
+        }
+
+        if (PersistentTraumaStrength(bat, target) >= DesertBatflyTuning.TraumaSevere)
+        {
+            ClearVengeance(state);
+            bat.DesertAI.Threatened(target, false);
+            return;
+        }
+
+        float drive = CombatDrive(bat, state);
         Vector2 head = target.mainBodyChunk.pos;
 
         switch (state.Vengeance)
         {
             case VengeanceMode.Waiting:
-                if (--state.VengeanceTimer > 0)
-                    return;
-
+                if (--state.VengeanceTimer > 0) return;
                 if (state.WasRescuePlan && RescueStillPossible(state, target))
                 {
                     state.Vengeance = VengeanceMode.RescueCharge;
@@ -659,32 +697,22 @@ internal static class DesertBatflyIntimidation
                 {
                     state.Vengeance = VengeanceMode.Observe;
                     state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
-                        VengeanceObserveMaxTicks,
-                        VengeanceObserveMinTicks,
-                        drive));
+                        VengeanceObserveMaxTicks, VengeanceObserveMinTicks, drive));
                 }
                 break;
 
             case VengeanceMode.Observe:
-                ForceFlight(
-                    bat,
-                    head + OrbitOffset(bat, 150f, 80f),
-                    Mathf.Lerp(6.5f, 8.5f, drive));
+                ForceFlight(bat, head + OrbitOffset(bat, 150f, 80f), Mathf.Lerp(6.5f, 8.5f, drive));
                 if (--state.VengeanceTimer <= 0)
                 {
                     state.Vengeance = VengeanceMode.Circle;
                     state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
-                        VengeanceCircleMaxTicks,
-                        VengeanceCircleMinTicks,
-                        drive));
+                        VengeanceCircleMaxTicks, VengeanceCircleMinTicks, drive));
                 }
                 break;
 
             case VengeanceMode.Circle:
-                ForceFlight(
-                    bat,
-                    head + OrbitOffset(bat, 105f, 60f),
-                    Mathf.Lerp(7.5f, 10f, drive));
+                ForceFlight(bat, head + OrbitOffset(bat, 105f, 60f), Mathf.Lerp(7.5f, 10f, drive));
                 if (--state.VengeanceTimer <= 0)
                 {
                     state.Vengeance = VengeanceMode.Feint;
@@ -699,154 +727,124 @@ internal static class DesertBatflyIntimidation
                     ? head + Vector2.up * 155f + Custom.DirVec(head, bat.mainBodyChunk.pos) * 70f
                     : head + target.mainBodyChunk.vel * 0.75f;
                 ForceFlight(bat, goal, distance < 58f ? 11f : 13f);
-
                 if (--state.VengeanceTimer <= 0)
                 {
-                    state.Vengeance = VengeanceMode.Charge;
-                    state.VengeanceTimer = VengeanceChargeTimeout;
+                    if (state.SupportOnly)
+                    {
+                        StartWithdraw(state, drive);
+                    }
+                    else
+                    {
+                        state.Vengeance = VengeanceMode.Charge;
+                        state.VengeanceTimer = VengeanceChargeTimeout;
+                    }
                 }
                 break;
             }
 
             case VengeanceMode.RescueCharge:
                 ForceFlight(
-                    bat,
-                    head + target.mainBodyChunk.vel * 0.95f,
+                    bat, head + target.mainBodyChunk.vel * 0.95f,
                     Mathf.Lerp(VengeanceChargeMinSpeed, VengeanceChargeMaxSpeed, drive));
                 state.VengeanceTimer++;
-                if (TryVengeanceContact(bat, state, target, rescue: true))
+                if (TryVengeanceContact(bat, state, target, true))
                 {
                     if (state.Vengeance == VengeanceMode.RescueCharge)
-                        ContinueOrWithdraw(bat, state, target);
+                        ContinueOrWithdraw(state, target, drive);
                 }
                 else if (state.VengeanceTimer > VengeanceChargeTimeout)
                 {
                     state.PassesRemaining = Mathf.Max(0, state.PassesRemaining - 1);
-                    ContinueOrWithdraw(bat, state, target);
+                    ContinueOrWithdraw(state, target, drive);
                 }
                 break;
 
             case VengeanceMode.Charge:
                 ForceFlight(
-                    bat,
-                    head + target.mainBodyChunk.vel * 1.05f,
+                    bat, head + target.mainBodyChunk.vel * 1.05f,
                     Mathf.Lerp(VengeanceChargeMinSpeed, VengeanceChargeMaxSpeed, drive));
                 state.VengeanceTimer--;
-                if (TryVengeanceContact(bat, state, target, rescue: false))
+                if (TryVengeanceContact(bat, state, target, false))
                 {
                     if (state.Vengeance == VengeanceMode.Charge)
-                        ContinueOrWithdraw(bat, state, target);
+                        ContinueOrWithdraw(state, target, drive);
                 }
                 else if (state.VengeanceTimer <= 0)
                 {
                     state.PassesRemaining = Mathf.Max(0, state.PassesRemaining - 1);
-                    ContinueOrWithdraw(bat, state, target);
+                    ContinueOrWithdraw(state, target, drive);
                 }
                 break;
 
             case VengeanceMode.Withdraw:
                 ForceFlight(
                     bat,
-                    bat.mainBodyChunk.pos +
-                        Custom.DirVec(head, bat.mainBodyChunk.pos) * 190f + Vector2.up * 65f,
+                    bat.mainBodyChunk.pos + Custom.DirVec(head, bat.mainBodyChunk.pos) * 190f + Vector2.up * 65f,
                     Mathf.Lerp(8f, 10.5f, drive));
-                if (--state.VengeanceTimer <= 0)
-                    ClearVengeance(state);
+                if (--state.VengeanceTimer <= 0) ClearVengeance(state);
                 break;
         }
     }
 
-    private static bool TryVengeanceContact(
-        DesertBatfly bat,
-        State state,
-        Creature target,
-        bool rescue)
+    private static bool TryVengeanceContact(DesertBatfly bat, State state, Creature target, bool rescue)
     {
         BodyChunk hitChunk = target.mainBodyChunk;
-        if (hitChunk == null ||
-            !Custom.DistLess(
-                bat.mainBodyChunk.pos,
-                hitChunk.pos,
+        if (hitChunk == null || !Custom.DistLess(
+                bat.mainBodyChunk.pos, hitChunk.pos,
                 bat.mainBodyChunk.rad + hitChunk.rad + VengeanceHitExtraRadius))
             return false;
 
-        float drive = bat.Personality.VengeanceDrive;
+        float drive = CombatDrive(bat, state);
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, hitChunk.pos);
         float damageDrive = target is Player ? drive : drive * drive;
         float damage = target is Player
             ? Mathf.Lerp(PlayerVengeanceDamageMin, PlayerVengeanceDamageMax, damageDrive)
             : Mathf.Lerp(LizardVengeanceDamageMin, LizardVengeanceDamageMax, damageDrive);
-        damage *= Mathf.Lerp(0.86f, 1.08f, state.Rage);
+        damage *= Mathf.Lerp(0.86f, 1.08f, state.Rage) * state.DamageScale;
 
         float stun = Mathf.Lerp(VengeanceStunMin, VengeanceStunMax, drive) *
-            Mathf.Lerp(0.82f, 1.05f, state.Rage);
-        Vector2 momentum = direction * Mathf.Lerp(VengeanceImpactMin, VengeanceImpactMax, drive);
+                     Mathf.Lerp(0.82f, 1.05f, state.Rage) *
+                     Mathf.Lerp(0.72f, 1f, state.DamageScale);
+        Vector2 momentum = direction * Mathf.Lerp(VengeanceImpactMin, VengeanceImpactMax, drive) *
+                           Mathf.Lerp(0.65f, 1f, state.DamageScale);
 
-        // This is the deliberate lethal exception. The highest rare personality can
-        // kill a Slugcat through vanilla Creature.Violence; Peach receives meaningful
-        // but smaller health damage because it is a large predator.
         target.Violence(
-            bat.mainBodyChunk,
-            momentum,
-            hitChunk,
-            null,
-            Creature.DamageType.Blunt,
-            damage,
-            stun);
+            bat.mainBodyChunk, momentum, hitChunk, null,
+            Creature.DamageType.Blunt, damage, stun);
 
         bat.mainBodyChunk.vel += -direction * Mathf.Lerp(4.5f, 7.5f, drive) + Vector2.up * 2f;
 
         bool rescued = rescue && TryRescueVictim(bat, state, target);
         state.PassesRemaining = Mathf.Max(0, state.PassesRemaining - 1);
-
-        if (rescued)
-        {
-            state.Vengeance = VengeanceMode.Withdraw;
-            state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
-                VengeanceWithdrawMaxTicks,
-                VengeanceWithdrawMinTicks,
-                drive));
-        }
-
+        if (rescued) StartWithdraw(state, drive);
         return true;
     }
 
-    private static bool TryRescueVictim(
-        DesertBatfly bat,
-        State state,
-        Creature target)
+    private static bool TryRescueVictim(DesertBatfly bat, State state, Creature target)
     {
         if (state.RescueAttempted || target is not Lizard lizard || !IsPeach(lizard) ||
-            state.RescueVictim == null || state.RescueVictim.dead ||
-            state.RescueVictim.room != lizard.room)
+            state.RescueVictim == null || state.RescueVictim.dead || state.RescueVictim.room != lizard.room)
             return false;
 
         state.RescueAttempted = true;
-        float drive = bat.Personality.VengeanceDrive;
+        float drive = CombatDrive(bat, state);
         float chance = Mathf.Lerp(TongueRescueChanceMin, TongueRescueChanceMax, drive) *
-            Mathf.Lerp(0.92f, 1.10f, bat.Personality.Nerve) *
-            Mathf.Lerp(0.90f, 1.08f, state.Rage);
+                       Mathf.Lerp(0.92f, 1.10f, bat.Personality.Nerve) *
+                       Mathf.Lerp(0.90f, 1.08f, state.Rage);
+        if (state.Role == SocialRole.Follower)
+            chance *= Mathf.Lerp(0.72f, 0.96f, state.Commitment);
 
         DesertBatfly victim = state.RescueVictim;
-        bool tongueCatch = state.RescueTongue != null &&
-            lizard.tongue == state.RescueTongue &&
+        bool tongueCatch = state.RescueTongue != null && lizard.tongue == state.RescueTongue &&
             state.RescueTongue.attached?.owner == victim &&
             state.RescueTongue.state == LizardTongue.State.AttachedInSmallObject;
-
         bool graspCatch = lizard.grasps != null && lizard.grasps.Length > 0 &&
             lizard.grasps[0] != null && lizard.grasps[0].grabbed == victim;
+        if (!tongueCatch && !graspCatch) return false;
+        if (graspCatch) chance *= GraspRescueChanceScale;
+        if (UnityEngine.Random.value >= Mathf.Clamp01(chance)) return false;
 
-        if (!tongueCatch && !graspCatch)
-            return false;
-
-        if (graspCatch)
-            chance *= GraspRescueChanceScale;
-
-        if (UnityEngine.Random.value >= Mathf.Clamp01(chance))
-            return false;
-
-        if (tongueCatch)
-            state.RescueTongue.Retract();
+        if (tongueCatch) state.RescueTongue.Retract();
         if (graspCatch && lizard.grasps[0] != null && lizard.grasps[0].grabbed == victim)
             lizard.ReleaseGrasp(0);
 
@@ -859,12 +857,9 @@ internal static class DesertBatflyIntimidation
     private static bool RescueStillPossible(State state, Creature target)
     {
         if (target is not Lizard lizard || !IsPeach(lizard) ||
-            state.RescueVictim == null || state.RescueVictim.dead ||
-            state.RescueVictim.room != lizard.room)
+            state.RescueVictim == null || state.RescueVictim.dead || state.RescueVictim.room != lizard.room)
             return false;
-
-        bool tongueCatch = state.RescueTongue != null &&
-            lizard.tongue == state.RescueTongue &&
+        bool tongueCatch = state.RescueTongue != null && lizard.tongue == state.RescueTongue &&
             state.RescueTongue.attached?.owner == state.RescueVictim &&
             state.RescueTongue.state == LizardTongue.State.AttachedInSmallObject;
         bool graspCatch = lizard.grasps != null && lizard.grasps.Length > 0 &&
@@ -872,39 +867,32 @@ internal static class DesertBatflyIntimidation
         return tongueCatch || graspCatch;
     }
 
-    private static void ContinueOrWithdraw(DesertBatfly bat, State state, Creature target)
+    private static void ContinueOrWithdraw(State state, Creature target, float drive)
     {
-        float drive = bat.Personality.VengeanceDrive;
         state.RescueVictim = null;
         state.RescueTongue = null;
         state.WasRescuePlan = false;
 
-        if (state.PassesRemaining > 0 && ValidThreat(target, bat.room))
+        if (state.Role == SocialRole.TrueAvenger && state.PassesRemaining > 0 && target != null && !target.dead)
         {
             state.Vengeance = VengeanceMode.Circle;
             state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
-                VengeanceCircleMaxTicks,
-                VengeanceCircleMinTicks,
-                drive));
+                VengeanceCircleMaxTicks, VengeanceCircleMinTicks, drive));
             return;
         }
-
-        state.Vengeance = VengeanceMode.Withdraw;
-        state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
-            VengeanceWithdrawMaxTicks,
-            VengeanceWithdrawMinTicks,
-            drive));
+        StartWithdraw(state, drive);
     }
 
-    private static void EnforceFear(
-        DesertBatfly bat,
-        State state,
-        ref FearMemory memory,
-        bool isPlayer)
+    private static void StartWithdraw(State state, float drive)
     {
-        if (!memory.Active)
-            return;
+        state.Vengeance = VengeanceMode.Withdraw;
+        state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
+            VengeanceWithdrawMaxTicks, VengeanceWithdrawMinTicks, drive));
+    }
 
+    private static void EnforceFear(DesertBatfly bat, ref FearMemory memory, bool isPlayer)
+    {
+        if (!memory.Active) return;
         Creature threat = memory.Threat;
         bool present = ValidThreat(threat, bat.room);
 
@@ -915,54 +903,154 @@ internal static class DesertBatflyIntimidation
                 memory.PanicRefresh = PanicRefreshTicks;
                 bat.DesertAI.Threatened(threat, false);
             }
-
-            if (threat != null && bat.DesertAI.Target == threat)
-                bat.DesertAI.CancelAttack();
+            if (threat != null && bat.DesertAI.Target == threat) bat.DesertAI.CancelAttack();
             return;
         }
 
         bool blocks = isPlayer
-            ? PlayerFearBlocksAttack(bat, memory.Strength)
+            ? memory.Strength >= Mathf.Lerp(0.22f, 0.52f, bat.Personality.AggressionDrive)
             : memory.Strength >= 0.10f;
-        if (!blocks)
-            return;
+        if (!blocks) return;
 
-        if (threat != null && bat.DesertAI.Target == threat)
-            bat.DesertAI.CancelAttack();
-
-        if (!present || memory.AvoidRefresh > 0)
-            return;
+        if (threat != null && bat.DesertAI.Target == threat) bat.DesertAI.CancelAttack();
+        if (!present || memory.AvoidRefresh > 0) return;
 
         float fearDistance = Mathf.Lerp(150f, 300f, memory.Strength) *
-            Mathf.Lerp(1.12f, 0.72f, bat.Personality.Nerve);
-        if (!Custom.DistLess(bat.mainBodyChunk.pos, threat.mainBodyChunk.pos, fearDistance))
-            return;
-
+                             Mathf.Lerp(1.12f, 0.72f, bat.Personality.Nerve) *
+                             Mathf.Lerp(0.92f, 1.18f, bat.Personality.Conformity);
+        if (!Custom.DistLess(bat.mainBodyChunk.pos, threat.mainBodyChunk.pos, fearDistance)) return;
         memory.AvoidRefresh = AvoidRefreshTicks;
         bat.DesertAI.Threatened(threat, false);
     }
 
-    private static bool PlayerFearBlocksAttack(DesertBatfly bat, float strength)
+    private static void EnforcePersistentTrauma(DesertBatfly bat, State state)
     {
-        // Nasty individuals require a stronger accumulated lesson. Chain fear can
-        // therefore make them hesitate without automatically pacifying them forever.
-        float threshold = Mathf.Lerp(0.22f, 0.52f, bat.Personality.AggressionDrive);
-        return strength >= threshold;
+        DesertBatflyState persistent = bat.DesertState;
+        if (!persistent.HasTrauma) return;
+
+        Creature currentTarget = bat.DesertAI.Target;
+        if (currentTarget != null && PersistentTraumaStrength(bat, currentTarget) >=
+            DesertBatflyTuning.TraumaAggressionBlock)
+        {
+            bat.DesertAI.CancelAttack();
+        }
+
+        if (state.TraumaThreatScan > 0) state.TraumaThreatScan--;
+        if (state.TraumaRetreatRefresh > 0) state.TraumaRetreatRefresh--;
+        if (state.TraumaThreatScan > 0) return;
+        state.TraumaThreatScan = TraumaThreatScanTicks;
+
+        Creature threat = ResolveStrongestTraumaThreat(bat);
+        if (!ValidThreat(threat, bat.room)) return;
+        float strength = PersistentTraumaStrength(bat, threat);
+        if (strength < DesertBatflyTuning.TraumaAggressionBlock) return;
+
+        if (state.VengeanceTarget == threat) ClearVengeance(state);
+        float fearDistance = Mathf.Lerp(
+            DesertBatflyTuning.TraumaFearMinDistance,
+            DesertBatflyTuning.TraumaFearMaxDistance,
+            strength);
+        fearDistance *= Mathf.Lerp(0.95f, 1.18f, bat.Personality.Conformity);
+        if (!Custom.DistLess(bat.mainBodyChunk.pos, threat.mainBodyChunk.pos, fearDistance)) return;
+        if (state.TraumaRetreatRefresh > 0) return;
+
+        state.TraumaRetreatRefresh = TraumaRetreatRefreshTicks;
+        bat.DesertAI.Threatened(threat, false);
+    }
+
+    private static Creature ResolveStrongestTraumaThreat(DesertBatfly bat)
+    {
+        Creature best = null;
+        float bestStrength = 0f;
+        foreach (AbstractCreature abs in bat.room.abstractRoom.creatures)
+        {
+            Creature creature = abs.realizedCreature;
+            if (!ValidThreat(creature, bat.room)) continue;
+            float strength = PersistentTraumaStrength(bat, creature);
+            if (strength <= bestStrength) continue;
+            bestStrength = strength;
+            best = creature;
+        }
+        return best;
+    }
+
+    private static void AddTrauma(DesertBatfly bat, Creature threat, float gain)
+    {
+        if (bat == null || threat == null || gain <= 0f) return;
+        DesertBatflyState state = bat.DesertState;
+        gain = Mathf.Clamp(gain, 0f, 0.65f);
+
+        if (threat is Player player)
+        {
+            int id = player.playerState?.playerNumber ?? 0;
+            if (state.PlayerTraumaPlayer != id)
+            {
+                state.PlayerTraumaPlayer = id;
+                state.PlayerTraumaStrength = 0f;
+                state.PlayerTraumaTicks = 0;
+            }
+            state.PlayerTraumaStrength = Mathf.Clamp01(state.PlayerTraumaStrength + gain);
+            state.PlayerTraumaTicks = Mathf.Max(
+                state.PlayerTraumaTicks,
+                Mathf.RoundToInt(Mathf.Lerp(
+                    DesertBatflyTuning.TraumaMinTicks,
+                    DesertBatflyTuning.TraumaMaxTicks,
+                    state.PlayerTraumaStrength)));
+        }
+        else if (IsPeach(threat))
+        {
+            int id = ThreatIdentity(threat);
+            if (state.PredatorTraumaId != id)
+            {
+                state.PredatorTraumaId = id;
+                state.PredatorTraumaStrength = 0f;
+                state.PredatorTraumaTicks = 0;
+            }
+            state.PredatorTraumaStrength = Mathf.Clamp01(state.PredatorTraumaStrength + gain);
+            state.PredatorTraumaTicks = Mathf.Max(
+                state.PredatorTraumaTicks,
+                Mathf.RoundToInt(Mathf.Lerp(
+                    DesertBatflyTuning.TraumaMinTicks,
+                    DesertBatflyTuning.TraumaMaxTicks,
+                    state.PredatorTraumaStrength)));
+        }
+    }
+
+    private static float PersistentTraumaStrength(DesertBatfly bat, Creature threat)
+    {
+        if (bat == null || threat == null) return 0f;
+        DesertBatflyState state = bat.DesertState;
+        if (threat is Player player)
+        {
+            int id = player.playerState?.playerNumber ?? 0;
+            return state.PlayerTraumaTicks > 0 && state.PlayerTraumaPlayer == id
+                ? state.PlayerTraumaStrength : 0f;
+        }
+        if (IsPeach(threat))
+        {
+            int id = ThreatIdentity(threat);
+            return state.PredatorTraumaTicks > 0 && state.PredatorTraumaId == id
+                ? state.PredatorTraumaStrength : 0f;
+        }
+        return 0f;
+    }
+
+    private static float CombatDrive(DesertBatfly bat, State state)
+    {
+        return state.Role == SocialRole.Follower
+            ? Mathf.Lerp(0.38f, 0.72f, state.Commitment)
+            : bat.Personality.VengeanceDrive;
     }
 
     private static void TickMemory(ref FearMemory memory)
     {
-        if (!memory.Active)
-            return;
-
+        if (!memory.Active) return;
         if (memory.MemoryTicks > 0) memory.MemoryTicks--;
         if (memory.ShockTicks > 0) memory.ShockTicks--;
         if (memory.PanicRefresh > 0) memory.PanicRefresh--;
         if (memory.AvoidRefresh > 0) memory.AvoidRefresh--;
         if (memory.CorpseReminderCooldown > 0) memory.CorpseReminderCooldown--;
-
-        if (memory.MemoryTicks <= 0 || memory.Strength <= 0f)
-            memory = default;
+        if (memory.MemoryTicks <= 0 || memory.Strength <= 0f) memory = default;
     }
 
     private static State StateFor(DesertBatfly bat)
@@ -976,27 +1064,38 @@ internal static class DesertBatflyIntimidation
         return state;
     }
 
-    private static void TryDeactivate(State state)
+    private static bool TryGetVengeanceState(DesertBatfly bat, out State state)
     {
-        if (state == null || !state.Active || state.PlayerFear.Active ||
-            state.PredatorFear.Active || state.Vengeance != VengeanceMode.None)
-            return;
+        state = null;
+        return bat != null && states.TryGetValue(bat, out state) && state.Active;
+    }
 
+    private static void TryDeactivate(DesertBatfly bat, State state)
+    {
+        if (state == null || !state.Active || state.PlayerFear.Active || state.PredatorFear.Active ||
+            state.Vengeance != VengeanceMode.None || bat.DesertState.HasTrauma)
+            return;
         state.Active = false;
         activeStates = Mathf.Max(0, activeStates - 1);
     }
 
     private static void ClearVengeance(State state)
     {
+        if (state == null) return;
         state.Vengeance = VengeanceMode.None;
+        state.Role = SocialRole.None;
         state.VengeanceTarget = null;
+        state.Leader = null;
         state.RescueVictim = null;
         state.RescueTongue = null;
         state.Rage = 0f;
+        state.Commitment = 0f;
+        state.DamageScale = 1f;
         state.VengeanceTimer = 0;
         state.PassesRemaining = 0;
         state.RescueAttempted = false;
         state.WasRescuePlan = false;
+        state.SupportOnly = false;
     }
 
     private static float CautionFactor(DesertBatfly bat)
@@ -1007,9 +1106,25 @@ internal static class DesertBatflyIntimidation
 
     private static int ThreatIdentity(Creature threat)
     {
-        if (threat is Player player)
-            return player.playerState?.playerNumber ?? 0;
+        if (threat is Player player) return player.playerState?.playerNumber ?? 0;
         return threat?.abstractCreature?.ID.number ?? int.MinValue;
+    }
+
+    private static float StableEvent01(DesertBatfly bat, DesertBatfly victim, Creature threat, EventKind kind)
+    {
+        unchecked
+        {
+            uint x = (uint)bat.Personality.VisualSeed;
+            x ^= (uint)(victim?.Personality.VisualSeed ?? 0) * 0x9E3779B9u;
+            x ^= (uint)ThreatIdentity(threat) * 0x85EBCA6Bu;
+            x ^= (uint)((int)kind + 1) * 0xC2B2AE35u;
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return (x & 0x00FFFFFFu) / 16777215f;
+        }
     }
 
     private static bool ValidThreat(Creature threat, Room room)
@@ -1027,13 +1142,11 @@ internal static class DesertBatflyIntimidation
 
     private static bool RestrainedByNonFly(DesertBatfly bat)
     {
-        if (bat?.grabbedBy == null)
-            return false;
+        if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
         {
             Creature.Grasp grasp = bat.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly)
-                return true;
+            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
         }
         return false;
     }
@@ -1048,15 +1161,11 @@ internal static class DesertBatflyIntimidation
 
     private static void ForceFlight(DesertBatfly bat, Vector2 goal, float speed)
     {
-        if (bat?.room == null)
-            return;
-
+        if (bat?.room == null) return;
         bat.LoseAllGrasps();
         bat.burrowOrHangSpot = null;
-        if (bat.AI.behavior == FlyAI.Behavior.Chain)
-            bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
-        else
-            bat.AI.behavior = FlyAI.Behavior.Idle;
+        if (bat.AI.behavior == FlyAI.Behavior.Chain) bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+        else bat.AI.behavior = FlyAI.Behavior.Idle;
         bat.AI.followingDijkstraMap = -1;
         bat.movMode = Fly.MovementMode.BatFlight;
 
