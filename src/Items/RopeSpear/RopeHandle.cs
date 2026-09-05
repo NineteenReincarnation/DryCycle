@@ -73,6 +73,28 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
 
             firstChunk.collideWithTerrain = true;
 
+            // While this endpoint is in the player's hand, Alt reserves directional
+            // input for RopeSpear reeling. In particular Alt+Up must remain a
+            // shorten-rope command instead of being consumed by VineGrab climbing.
+            // Do not alter holder.input here: RopeSpear.HandleReelingInput still
+            // needs to read the original Up/Down direction later in the frame.
+            bool altHeld = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+            if (altHeld)
+            {
+                holder.vineGrabDelay = Mathf.Max(holder.vineGrabDelay, 2);
+
+                if (holder.animation == Player.AnimationIndex.VineGrab &&
+                    holder.vinePos?.vine is RopeSpear ropeSpear &&
+                    ropeSpear.abstractPhysicalObject != null &&
+                    ropeSpear.abstractPhysicalObject.ID == ParentSpearID)
+                {
+                    holder.animation = Player.AnimationIndex.None;
+                    holder.vinePos = null;
+                    holder.vineGrabDelay = Mathf.Max(holder.vineGrabDelay, 10);
+                    holder.noGrabCounter = Mathf.Max(holder.noGrabCounter, 5);
+                }
+            }
+
             if (holder.enteringShortCut.HasValue || holder.inShortcut)
             {
                 for (int i = grabbedBy.Count - 1; i >= 0; i--)
