@@ -1,28 +1,26 @@
-using DryCycle.DayNight;
 using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// World-space eight-direction guide shown while RopeSpear hold-to-aim is active.
-/// Eight short radial marks show the legal directions and one longer ray shows the
-/// exact direction that will be used when Throw is released.
+/// World-space aiming guide shown only while a RopeSpear is in long-press aim mode.
+/// The guide is centered on the slugcat, draws the facing-side 180 degree arc, and
+/// extends a ray along the exact direction that will be used on release.
 /// </summary>
 internal sealed class RopeSpearAimIndicator : CosmeticSprite
 {
-    private const int DirectionCount = 8;
-    private const int SelectedLineSprite = DirectionCount;
-    private const int SpriteCount = DirectionCount + 1;
+    private const int ArcSegments = 32;
+    private const int DirectionLineSprite = ArcSegments;
+    private const int SpriteCount = ArcSegments + 1;
 
-    private const float TickStartRadius = 35f;
-    private const float TickEndRadius = 44f;
-    private const float TickThickness = 1.55f;
-    private const float DirectionThickness = 1.45f;
+    private const float ArcRadius = 42f;
+    private const float ArcThickness = 1.6f;
+    private const float DirectionThickness = 1.35f;
     private const float DirectionStartRadius = 7f;
     private const float DirectionEndRadius = 68f;
 
-    private static readonly Color TickColor = new(1f, 0.16f, 0.13f);
+    private static readonly Color ArcColor = new(1f, 0.16f, 0.13f);
     private static readonly Color DirectionColor = new(1f, 0.72f, 0.56f);
 
     private readonly Player player;
@@ -38,11 +36,11 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
         base.Update(eu);
         age++;
 
-        if (!RegionDayNightOptions.RopeSpearAimIndicatorEnabled ||
-            player == null ||
+        if (player == null ||
             player.room != room ||
             !RopeSpearAimController.TryGetAimVisualState(
                 player,
+                out _,
                 out _))
         {
             Destroy();
@@ -55,17 +53,17 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
     {
         sLeaser.sprites = new FSprite[SpriteCount];
 
-        for (int i = 0; i < DirectionCount; i++)
+        for (int i = 0; i < ArcSegments; i++)
         {
             sLeaser.sprites[i] = new FSprite("pixel")
             {
                 anchorY = 0f,
-                scaleX = TickThickness,
-                color = TickColor
+                scaleX = ArcThickness,
+                color = ArcColor
             };
         }
 
-        sLeaser.sprites[SelectedLineSprite] = new FSprite("pixel")
+        sLeaser.sprites[DirectionLineSprite] = new FSprite("pixel")
         {
             anchorY = 0f,
             scaleX = DirectionThickness,
@@ -91,12 +89,12 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
         RoomCamera rCam,
         RoomPalette palette)
     {
-        for (int i = 0; i < DirectionCount; i++)
+        for (int i = 0; i < ArcSegments; i++)
         {
-            sLeaser.sprites[i].color = TickColor;
+            sLeaser.sprites[i].color = ArcColor;
         }
 
-        sLeaser.sprites[SelectedLineSprite].color = DirectionColor;
+        sLeaser.sprites[DirectionLineSprite].color = DirectionColor;
     }
 
     public override void DrawSprites(
@@ -112,7 +110,8 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
             player == null ||
             !RopeSpearAimController.TryGetAimVisualState(
                 player,
-                out Vector2 aimDirection))
+                out int facing,
+                out float aimAngle))
         {
             return;
         }
@@ -120,36 +119,28 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
         Vector2 center = InterpolatedPlayerCenter(timeStacker);
         float fade = Mathf.Clamp01(age / 5f);
 
-        for (int i = 0; i < DirectionCount; i++)
+        for (int i = 0; i < ArcSegments; i++)
         {
-            float angle = i * 45f * Mathf.Deg2Rad;
-            Vector2 direction = new(Mathf.Cos(angle), Mathf.Sin(angle));
-            Vector2 a = center + direction * TickStartRadius;
-            Vector2 b = center + direction * TickEndRadius;
+            float t0 = i / (float)ArcSegments;
+            float t1 = (i + 1) / (float)ArcSegments;
+            float angle0 = Mathf.Lerp(-90f, 90f, t0);
+            float angle1 = Mathf.Lerp(-90f, 90f, t1);
+
+            Vector2 a = center + ArcDirection(facing, angle0) * ArcRadius;
+            Vector2 b = center + ArcDirection(facing, angle1) * ArcRadius;
             SetLine(sLeaser.sprites[i], a, b, camPos);
-
-            float selected = Vector2.Dot(direction, aimDirection.normalized);
-            sLeaser.sprites[i].alpha =
-                (selected > 0.995f ? 0.95f : 0.45f) * fade;
+            sLeaser.sprites[i].alpha = 0.68f * fade;
         }
 
-        if (aimDirection.sqrMagnitude < 0.0001f)
-        {
-            aimDirection = Vector2.right;
-        }
-        else
-        {
-            aimDirection.Normalize();
-        }
-
+        Vector2 aimDirection = ArcDirection(facing, aimAngle);
         Vector2 lineStart = center + aimDirection * DirectionStartRadius;
         Vector2 lineEnd = center + aimDirection * DirectionEndRadius;
         SetLine(
-            sLeaser.sprites[SelectedLineSprite],
+            sLeaser.sprites[DirectionLineSprite],
             lineStart,
             lineEnd,
             camPos);
-        sLeaser.sprites[SelectedLineSprite].alpha = 0.96f * fade;
+        sLeaser.sprites[DirectionLineSprite].alpha = 0.96f * fade;
     }
 
     private Vector2 InterpolatedPlayerCenter(float timeStacker)
@@ -177,6 +168,15 @@ internal sealed class RopeSpearAimIndicator : CosmeticSprite
             timeStacker);
 
         return (frontPos + rearPos) * 0.5f;
+    }
+
+    private static Vector2 ArcDirection(int facing, float angleDegrees)
+    {
+        float radians = angleDegrees * Mathf.Deg2Rad;
+        Vector2 direction = new(
+            Mathf.Cos(radians) * (facing < 0 ? -1f : 1f),
+            Mathf.Sin(radians));
+        return direction.normalized;
     }
 
     private static void SetLine(

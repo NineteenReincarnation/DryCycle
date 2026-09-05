@@ -4,9 +4,7 @@ using UnityEngine;
 namespace DryCycle.Misc;
 
 /// <summary>
-/// Small Remix page for editor-input behavior. By default Ctrl+Z/S/Y are reserved
-/// while O (DevTools) + H (DevUI) mode is open; each checkbox below explicitly
-/// releases one shortcut key back to the player's gameplay bindings.
+/// Remix options for DryCycle gameplay/editor behavior.
 /// </summary>
 internal sealed class DryCycleOptions : OptionInterface
 {
@@ -15,10 +13,18 @@ internal sealed class DryCycleOptions : OptionInterface
     internal readonly Configurable<bool> UnlockCtrlZGameplayInput;
     internal readonly Configurable<bool> UnlockCtrlSGameplayInput;
     internal readonly Configurable<bool> UnlockCtrlYGameplayInput;
+    internal readonly Configurable<bool> RopeSpearEightDirectionThrow;
 
     internal static bool CtrlZGameplayUnlocked => _instance?.UnlockCtrlZGameplayInput?.Value ?? false;
     internal static bool CtrlSGameplayUnlocked => _instance?.UnlockCtrlSGameplayInput?.Value ?? false;
     internal static bool CtrlYGameplayUnlocked => _instance?.UnlockCtrlYGameplayInput?.Value ?? false;
+
+    /// <summary>
+    /// False is the authored default: hold X to sweep continuously through the arc.
+    /// True switches RopeSpear aiming to the eight digital movement directions.
+    /// </summary>
+    internal static bool RopeSpearEightDirectionThrowEnabled
+        => _instance?.RopeSpearEightDirectionThrow?.Value ?? false;
 
     internal DryCycleOptions()
     {
@@ -39,6 +45,12 @@ internal sealed class DryCycleOptions : OptionInterface
             false,
             new ConfigurableInfo(
                 "Allow the key bound to Y to keep controlling the player while Ctrl+Y is used in O+H DevUI mode."));
+
+        RopeSpearEightDirectionThrow = config.Bind(
+            "RopeSpearEightDirectionThrow",
+            false,
+            new ConfigurableInfo(
+                "Switch RopeSpear aiming from the default continuous hold-X sweep to eight-direction aiming. In eight-direction mode, hold X and use the movement directions; for example Up+Right throws diagonally up-right."));
     }
 
     internal static void Register()
@@ -59,7 +71,7 @@ internal sealed class DryCycleOptions : OptionInterface
         DryCycleOptions options = new();
         if (!MachineConnector.SetRegisteredOI(Plugin.RainWorldModId, options))
         {
-            Plugin.Logger?.LogWarning("DryCycle could not register its Remix options page; Ctrl+Z/S/Y gameplay input remains locked by default in O+H mode.");
+            Plugin.Logger?.LogWarning("DryCycle could not register its Remix options page; gameplay options will use their defaults.");
             return;
         }
 
@@ -82,9 +94,16 @@ internal sealed class DryCycleOptions : OptionInterface
 
         Tabs = new[]
         {
-            new OpTab(this, "DevUI Input")
+            new OpTab(this, "DevUI Input"),
+            new OpTab(this, "Rope Spear")
         };
 
+        BuildDevUiInputTab(Tabs[0]);
+        BuildRopeSpearTab(Tabs[1]);
+    }
+
+    private void BuildDevUiInputTab(OpTab tab)
+    {
         OpLabel title = new(
             new Vector2(100f, 515f),
             new Vector2(400f, 35f),
@@ -101,14 +120,60 @@ internal sealed class DryCycleOptions : OptionInterface
             autoWrap = true
         };
 
-        AddUnlockRow(Tabs[0], UnlockCtrlZGameplayInput, 355f, "Unlock Ctrl+Z gameplay input");
-        AddUnlockRow(Tabs[0], UnlockCtrlSGameplayInput, 300f, "Unlock Ctrl+S gameplay input");
-        AddUnlockRow(Tabs[0], UnlockCtrlYGameplayInput, 245f, "Unlock Ctrl+Y gameplay input");
+        AddCheckBoxRow(tab, UnlockCtrlZGameplayInput, 355f, "Unlock Ctrl+Z gameplay input");
+        AddCheckBoxRow(tab, UnlockCtrlSGameplayInput, 300f, "Unlock Ctrl+S gameplay input");
+        AddCheckBoxRow(tab, UnlockCtrlYGameplayInput, 245f, "Unlock Ctrl+Y gameplay input");
 
-        Tabs[0].AddItems(title, explanation);
+        tab.AddItems(title, explanation);
     }
 
-    private static void AddUnlockRow(OpTab tab, Configurable<bool> configurable, float y, string label)
+    private void BuildRopeSpearTab(OpTab tab)
+    {
+        OpLabel title = new(
+            new Vector2(100f, 515f),
+            new Vector2(400f, 35f),
+            "Rope Spear Throwing",
+            FLabelAlignment.Center,
+            bigText: true);
+
+        OpLabel explanation = new(
+            new Vector2(70f, 430f),
+            new Vector2(460f, 70f),
+            "Default: hold Throw (X) to use the current continuous sweeping aim. Enable eight-direction throwing to aim directly with movement input while holding Throw.",
+            FLabelAlignment.Center)
+        {
+            autoWrap = true
+        };
+
+        OpCheckBox eightDirection = new(
+            RopeSpearEightDirectionThrow,
+            new Vector2(135f, 345f));
+        eightDirection.description =
+            "Use eight-direction RopeSpear aiming. Up+Right = 45 degree up-right, Down+Left = 45 degree down-left, and so on. No direction input uses the slugcat's facing direction.";
+
+        OpLabel label = new(
+            new Vector2(175f, 342f),
+            new Vector2(320f, 30f),
+            "Eight-direction throwing",
+            FLabelAlignment.Left)
+        {
+            bumpBehav = eightDirection.bumpBehav,
+            description = eightDirection.description
+        };
+
+        OpLabel mapping = new(
+            new Vector2(95f, 230f),
+            new Vector2(410f, 85f),
+            "Directions:  ↑  ↓  ←  →\nDiagonals:  ↑+←  ↑+→  ↓+←  ↓+→",
+            FLabelAlignment.Center)
+        {
+            autoWrap = true
+        };
+
+        tab.AddItems(title, explanation, eightDirection, label, mapping);
+    }
+
+    private static void AddCheckBoxRow(OpTab tab, Configurable<bool> configurable, float y, string label)
     {
         OpCheckBox checkBox = new(configurable, new Vector2(135f, y));
         OpLabel text = new(new Vector2(175f, y - 3f), new Vector2(300f, 30f), label, FLabelAlignment.Left);
