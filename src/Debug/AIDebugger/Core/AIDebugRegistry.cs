@@ -8,6 +8,8 @@ internal static class AIDebugRegistry
     private static readonly List<IAIDebugSource> Sources = new(4);
     private static bool initialized;
 
+    internal static RainWorldGame CurrentGame { get; private set; }
+
     internal static void Initialize()
     {
         if (initialized) return;
@@ -15,6 +17,8 @@ internal static class AIDebugRegistry
         Register(new DesertBatflyDebugSource());
         Register(new GenericCreatureDebugSource());
     }
+
+    internal static void BindGame(RainWorldGame game) => CurrentGame = game;
 
     internal static void Register(IAIDebugSource source)
     {
@@ -33,14 +37,16 @@ internal static class AIDebugRegistry
 
     internal static AIDebugSnapshot Capture(AbstractCreature creature, RainWorldGame game)
     {
+        if (game != null) CurrentGame = game;
         IAIDebugSource source = SourceFor(creature);
-        return source?.Capture(creature, game);
+        return source?.Capture(creature, game ?? CurrentGame);
     }
 
     // Called only while the Observatory is visible. The list is refreshed at a low rate,
     // not once per simulation tick.
     internal static void CollectWorld(RainWorldGame game, List<AbstractCreature> output)
     {
+        if (game != null) CurrentGame = game;
         output.Clear();
         if (game?.world?.abstractRooms == null) return;
 
@@ -59,6 +65,8 @@ internal static class AIDebugRegistry
 
     internal static AbstractCreature Resolve(RainWorldGame game, DebugEntityKey key)
     {
+        if (game != null) CurrentGame = game;
+        game ??= CurrentGame;
         if (game?.world?.abstractRooms == null) return null;
         for (int r = 0; r < game.world.abstractRooms.Length; r++)
         {
