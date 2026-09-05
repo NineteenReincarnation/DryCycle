@@ -154,81 +154,25 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         // runtime uses the actual anchor transition rather than depending on which
         // Player.ThrowObject hook happened to run first.
         Player holderAtAnchor = Holder;
-
         Vector2 position = firstChunk.pos;
-        IntVector2 tile = room.GetTilePosition(position);
-        bool found = false;
 
-        for (int x = -1; x <= 1 && !found; x++)
-        {
-            for (int y = -1; y <= 1; y++)
-            {
-                if (x == 0 && y == 0)
-                {
-                    continue;
-                }
-
-                if (room.GetTile(tile + new IntVector2(x, y)).Solid)
-                {
-                    found = true;
-                    break;
-                }
-            }
-        }
-
-        if (!found)
-        {
-            return false;
-        }
-
+        // RopeHandle anchoring is a background-wall operation, not a foreground
+        // collision operation. The endpoint may be completely suspended in open
+        // foreground space; it only needs a non-empty room background at the exact
+        // point where the player is holding it. Rain World's Tile.wallbehind is the
+        // authoritative marker for that background wall.
         if (room.GetTile(position).Solid && lastOutsideTerrainPos.HasValue)
         {
             position = lastOutsideTerrainPos.Value;
         }
 
-        if (room.GetTile(position).Solid)
+        Room.Tile tile = room.GetTile(position);
+        if (tile.Solid || !tile.wallbehind)
         {
             return false;
         }
 
         return CommitAnchor(position, holderAtAnchor);
-    }
-
-    /// <summary>
-    /// Suspended-handle fallback used only by the Alt+Throw safety command. When the
-    /// spear is already embedded and the player is genuinely hanging in open air,
-    /// the free endpoint can be fixed at the exact point currently held by the hand.
-    /// This is intentionally not a general-purpose terrain anchor: the caller owns
-    /// the airborne-state gate so ordinary grounded use still requires nearby solid
-    /// terrain.
-    /// </summary>
-    internal bool TryAnchorAtCurrentPosition(Player expectedHolder)
-    {
-        if (room == null ||
-            Data == null ||
-            expectedHolder == null ||
-            expectedHolder.room != room ||
-            Holder != expectedHolder)
-        {
-            return false;
-        }
-
-        Vector2 position = firstChunk.pos;
-        if (room.GetTile(position).Solid)
-        {
-            if (!lastOutsideTerrainPos.HasValue)
-            {
-                return false;
-            }
-
-            position = lastOutsideTerrainPos.Value;
-            if (room.GetTile(position).Solid)
-            {
-                return false;
-            }
-        }
-
-        return CommitAnchor(position, expectedHolder);
     }
 
     private bool CommitAnchor(Vector2 position, Player holderAtAnchor)
