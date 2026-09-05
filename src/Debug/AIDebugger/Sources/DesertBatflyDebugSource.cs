@@ -78,13 +78,15 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.target", "DesertBatflyAI.danger", AIDebugFormat.Creature(danger))
             .Add("field.memory", "DesertBatflyAI.attacker", AIDebugFormat.Creature(attacker)));
 
+        // EvaluationTicks is time until the next role evaluation, not the age of Scores.
+        // Do not present it as data age; the separate field below reports that timer honestly.
         snapshot.Sections.Add(new AIDebugSection("section.social_role")
             .Add("field.role", "DesertBatflySocialRoles.Role", roles.Role)
             .Add("field.expressed_role", "DesertBatflySocialRoles.Expressed", roles.Expressed)
             .Add("field.suppression", "DesertBatflySocialRoles.Suppression", suppression)
-            .Add("field.sentinel_score", "DesertBatflyRoleScores.Sentinel", roles.Scores.Sentinel, roles.EvaluationTicks, "RoleEvaluation")
-            .Add("field.bully_score", "DesertBatflyRoleScores.Bully", roles.Scores.Bully, roles.EvaluationTicks, "RoleEvaluation")
-            .Add("field.opportunist_score", "DesertBatflyRoleScores.Opportunist", roles.Scores.Opportunist, roles.EvaluationTicks, "RoleEvaluation")
+            .Add("field.sentinel_score", "DesertBatflyRoleScores.Sentinel", roles.Scores.Sentinel, 0, "RoleEvaluation")
+            .Add("field.bully_score", "DesertBatflyRoleScores.Bully", roles.Scores.Bully, 0, "RoleEvaluation")
+            .Add("field.opportunist_score", "DesertBatflyRoleScores.Opportunist", roles.Scores.Opportunist, 0, "RoleEvaluation")
             .Add("field.commitment", "DesertBatflySocialRoles.Commitment", roles.Commitment)
             .Add("field.role_cooldown", "DesertBatflySocialRoles.Cooldown", roles.Cooldown)
             .Add("field.role_evaluation", "DesertBatflySocialRoles.EvaluationTicks", roles.EvaluationTicks)
@@ -92,9 +94,10 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.opportunity_ticks", "DesertBatflySocialRoles.OpportunityTicks", roles.OpportunityTicks)
             .Add("field.opportunist_recovery", "DesertBatflySocialRoles.OpportunistRecoveryActive", roles.OpportunistRecoveryActive));
 
-        if (bat.room != null)
+        // A debugger must not create gameplay state just by looking at it. Read an existing
+        // swarm snapshot only; DesertSwarmRoom.For(...) is reserved for gameplay code.
+        if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
         {
-            DesertSwarmRoom colony = DesertSwarmRoom.For(bat.room);
             DesertBatflyFlockSnapshot flock = colony.Flock;
             int age = colony.SnapshotAge;
             snapshot.Sections.Add(new AIDebugSection("section.flock")
@@ -176,12 +179,12 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
     private static void AddRole(AIDebugSnapshot snapshot, string key, ExpressedSocialRole value,
         DesertBatflySocialRoles roles, int depth)
     {
-        AIDebugDecisionState state = roles.Expressed == value
+        AIDebugDecisionState roleState = roles.Expressed == value
             ? AIDebugDecisionState.Active
             : roles.Role == value && roles.Expressed == ExpressedSocialRole.None
                 ? AIDebugDecisionState.Blocked
                 : AIDebugDecisionState.Inactive;
-        snapshot.Decisions.Add(new AIDebugDecisionNode(key, state, null, value.ToString(), depth));
+        snapshot.Decisions.Add(new AIDebugDecisionNode(key, roleState, null, value.ToString(), depth));
     }
 
     private static string ControlOwner(DesertBatfly bat, SocialRoleSuppression suppression)
