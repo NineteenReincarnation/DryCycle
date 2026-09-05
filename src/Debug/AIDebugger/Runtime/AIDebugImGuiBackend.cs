@@ -31,6 +31,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     private IntPtr context;
     private bool frameReady;
     private bool disposed;
+    private int previousSubMeshCount = -1;
 
     private readonly struct DrawCommand
     {
@@ -52,11 +53,14 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
         ImGuiIOPtr io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+        io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         io.DisplayFramebufferScale = Num.Vector2.One;
         BuildFontAtlas(io);
         ConfigureStyle();
 
-        Shader shader = Shader.Find("UI/Default") ?? Shader.Find("Sprites/Default");
+        // Futile/Basic is loaded by Rain World itself and therefore cannot be stripped
+        // from this player build. Unity built-in shaders remain fallbacks.
+        Shader shader = Shader.Find("Futile/Basic") ?? Shader.Find("Sprites/Default") ?? Shader.Find("UI/Default");
         if (shader == null) throw new InvalidOperationException("DryCycle AI Observatory: no compatible UI shader found.");
         material = new Material(shader)
         {
@@ -69,7 +73,8 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         mesh = new Mesh
         {
             name = "DryCycle AI Observatory Mesh",
-            hideFlags = HideFlags.HideAndDontSave
+            hideFlags = HideFlags.HideAndDontSave,
+            indexFormat = IndexFormat.UInt32
         };
         mesh.MarkDynamic();
     }
@@ -273,8 +278,16 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             vertexBase += list.VtxBuffer.Size;
         }
 
-        mesh.Clear(false);
-        if (vertices.Count == 0 || drawCommands.Count == 0) return;
+        if (vertices.Count == 0 || drawCommands.Count == 0)
+        {
+            mesh.Clear(false);
+            previousSubMeshCount = 0;
+            return;
+        }
+
+        bool layoutChanged = previousSubMeshCount != drawCommands.Count;
+        mesh.Clear(layoutChanged);
+        previousSubMeshCount = drawCommands.Count;
         mesh.SetVertices(vertices);
         mesh.SetUVs(0, uvs);
         mesh.SetColors(colors);
@@ -292,7 +305,9 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         float height = Mathf.Max(1f, data.DisplaySize.Y * data.FramebufferScale.Y);
         commands.Clear();
         commands.SetViewport(new Rect(0f, 0f, width, height));
-        commands.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.Ortho(0f, width, height, 0f, -1f, 1f));
+        commands.SetViewProjectionMatrices(
+            Matrix4x4.Translate(new Vector3(0.5f / width, 0.5f / height, 0f)),
+            Matrix4x4.Ortho(0f, width, height, 0f, 0f, 1f));
         properties.SetTexture("_MainTex", fontTexture);
 
         for (int i = 0; i < drawCommands.Count; i++)
