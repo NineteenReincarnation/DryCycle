@@ -80,6 +80,7 @@ VengeanceAffinity >= 0.715
 - Spear 等真实矛伤害使用完整威慑权重；
 - 其他玩家真实致死伤害略低；
 - Rock 继续严格 `stun-only`，不会制造死亡事件；
+- 玩家直接吃掉仍活着的 Desert Batfly 也会被归因为该玩家的真实死亡事件；原版 `Fly.BitByPlayer()` 会在第一口令 Fly 死亡，因此归因必须在进入原版 Bite 前写入；
 - 多人模式不会把 Player 1 的杀戮记到 Player 2。
 
 ## Peach 捕食威慑
@@ -315,7 +316,7 @@ Extreme Vengeance 使用独立社会组上限，但该状态活跃时会：
 
 因此不会出现极端伤害冲撞与吸水/普通干扰叠加。
 
-## 性能
+## Runtime 生命周期与性能
 
 正常时间没有群体邻接图。
 
@@ -323,8 +324,9 @@ Extreme Vengeance 使用独立社会组上限，但该状态活跃时会：
 - fear propagation 最多两 hop；
 - Follower 只在该事件中筛选一次；
 - Conformity 普通骚扰复用原来的 8-tick AI scan；
-- Trauma threat 只每 20 tick 对有活跃 PTSD 的个体检查一次；
+- Trauma threat 只每 20 tick 对有活跃 PTSD 的活体检查一次；
 - 无 Trauma/Fear/Vengeance 时 `Intimidation.Update()` 保留 fast return；
+- 死亡后 `Die()` 负责一次性广播并 `Forget()` runtime morale state；尸体即使 CreatureState 里仍保留 Trauma，也不会再次进入 `Intimidation.Update()`、重新占用 `activeStates`；
 - CorpseWarning 只在死亡后存在最多 600 tick，并每 40 tick 采样一次；
 - 不创建自定义寻路器，不重写 Peach tongue/pathfinder。
 
@@ -348,15 +350,17 @@ Extreme Vengeance 使用独立社会组上限，但该状态活跃时会：
 
 1. 玩家一矛杀一只：直接目击、同链、外围两 hop 的反应应明显分层。
 2. Rock 连续命中：只能 Stun，绝不制造死亡恐惧。
-3. True Avenger 出现率在大量个体中应接近 5%，单房间仍然不是必出。
-4. True Avenger 偶尔带 1～2 个高 Conformity Follower，而不是整群同步冲锋。
-5. Support follower 只绕圈/假冲；Combat follower 最多一次低伤 Charge。
-6. Leader 正常 Withdraw：Follower 正常同步退出，不额外获得 PTSD。
-7. Leader 被杀：Follower 士气明显崩溃，高 Conformity 个体最容易留下 PTSD。
-8. Follower 被杀：剩余跟随者受到次一级士气打击，不补新的敢死队。
-9. 高 Trauma 恶劣个体面对同一 Player/Peach：不能重新申请普通攻击槽或突然执行旧 retaliation。
-10. Co-op：弱的新玩家 Trauma 不应覆盖另一玩家已经建立的严重 PTSD。
-11. Peach Tongue → Bite/Grasp：捕获广播只发生一次；随后死亡权重降低但仍确认死亡。
-12. RescueCharge：成功后 Peach 原版舌头/Grasp 正确释放，救援者立即撤退。
-13. Extreme Vengeance 活跃时不得同时吸水或执行普通 Interfere。
-14. 连续杀死复仇者：群体应越来越崩，不应出现无穷替补。
+3. 玩家直接抓住并吃掉活体：第一次原版 Bite 导致死亡时应正确建立 PlayerKill 威慑。
+4. True Avenger 出现率在大量个体中应接近 5%，单房间仍然不是必出。
+5. True Avenger 偶尔带 1～2 个高 Conformity Follower，而不是整群同步冲锋。
+6. Support follower 只绕圈/假冲；Combat follower 最多一次低伤 Charge。
+7. Leader 正常 Withdraw：Follower 正常同步退出，不额外获得 PTSD。
+8. Leader 被杀：Follower 士气明显崩溃，高 Conformity 个体最容易留下 PTSD。
+9. Follower 被杀：剩余跟随者受到次一级士气打击，不补新的敢死队。
+10. 高 Trauma 恶劣个体面对同一 Player/Peach：不能重新申请普通攻击槽或突然执行旧 retaliation。
+11. Co-op：弱的新玩家 Trauma 不应覆盖另一玩家已经建立的严重 PTSD。
+12. Peach Tongue → Bite/Grasp：捕获广播只发生一次；随后死亡权重降低但仍确认死亡。
+13. RescueCharge：成功后 Peach 原版舌头/Grasp 正确释放，救援者立即撤退。
+14. Extreme Vengeance 活跃时不得同时吸水或执行普通 Interfere。
+15. 连续杀死复仇者：群体应越来越崩，不应出现无穷替补。
+16. 已死亡尸体长时间留在房间：不得重新激活 runtime morale state，也不能破坏无事件时的 `activeStates` fast-return。
