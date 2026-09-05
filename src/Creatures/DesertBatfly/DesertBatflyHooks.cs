@@ -5,6 +5,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static class DesertBatflyHooks
 {
     private static bool enabled;
+
     internal static void Enable()
     {
         if (enabled) return;
@@ -67,7 +68,12 @@ internal static class DesertBatflyHooks
 
     private static void Emerge(On.FliesRoomAI.orig_FlyEmergeFromHive orig, FliesRoomAI self, Fly fly)
     {
-        if (fly is not DesertBatfly desert) { orig(self, fly); return; }
+        if (fly is not DesertBatfly desert)
+        {
+            orig(self, fly);
+            return;
+        }
+
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
@@ -75,13 +81,28 @@ internal static class DesertBatflyHooks
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
     {
-        if (self.fly is DesertBatfly suspended && (suspended.Emergence.Active || suspended.grabbedBy.Count > 0))
+        if (self.fly is DesertBatfly suspended &&
+            (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
         {
             suspended.DesertAI.Update();
             return;
         }
+
+        // Fly-on-Fly grabbedBy entries are the vanilla hanging-chain structure and
+        // must keep running the normal FlyAI chain update. Treat only non-Fly grabs
+        // (player/predator/etc.) as an AI suspension.
         orig(self);
         if (self.fly is DesertBatfly desert) desert.DesertAI.Update();
+    }
+
+    private static bool RestrainedByNonFly(DesertBatfly fly)
+    {
+        for (int i = 0; i < fly.grabbedBy.Count; i++)
+        {
+            Creature.Grasp grasp = fly.grabbedBy[i];
+            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
+        }
+        return false;
     }
 
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
@@ -99,14 +120,18 @@ internal static class DesertBatflyHooks
             if (self.behavior == FlyAI.Behavior.Swarm) self.ChangeBehavior(FlyAI.Behavior.Idle);
             return;
         }
-        if (
-            self.behavior == FlyAI.Behavior.Idle && !self.fleeFromRain && self.ValidSwarmPosition(self.localGoal))
+        if (self.behavior == FlyAI.Behavior.Idle && !self.fleeFromRain && self.ValidSwarmPosition(self.localGoal))
             self.ChangeBehavior(FlyAI.Behavior.Swarm);
     }
 
     private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly || self.room.hives.Length > 0) { orig(self); return; }
+        if (self.fly is not DesertBatfly || self.room.hives.Length > 0)
+        {
+            orig(self);
+            return;
+        }
+
         // Never ask the ordinary world swarm manager to route a desert colony.
         // Prefer a connected desert room; otherwise use a real mapped exit.
         self.afraid = 2f;
@@ -126,8 +151,13 @@ internal static class DesertBatflyHooks
 
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly || !DesertSwarmRoom.IsDesertSwarmRoom(self.room.abstractRoom) || self.room.hives.Length == 0)
-        { orig(self); return; }
+        if (self.fly is not DesertBatfly ||
+            !DesertSwarmRoom.IsDesertSwarmRoom(self.room.abstractRoom) ||
+            self.room.hives.Length == 0)
+        {
+            orig(self);
+            return;
+        }
         if (self.followingDijkstraMap < 0)
             self.followingDijkstraMap = self.room.exitAndDenIndex.Length + UnityEngine.Random.Range(0, self.room.hives.Length);
     }
@@ -154,7 +184,10 @@ internal static class DesertBatflyHooks
         DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
     }
 
-    private static int Nourishment(On.SlugcatStats.orig_NourishmentOfObjectEaten orig, SlugcatStats.Name name, IPlayerEdible edible)
+    private static int Nourishment(
+        On.SlugcatStats.orig_NourishmentOfObjectEaten orig,
+        SlugcatStats.Name name,
+        IPlayerEdible edible)
     {
         int value = orig(name, edible);
         if (edible is not DesertBatfly || value <= 0) return value;
