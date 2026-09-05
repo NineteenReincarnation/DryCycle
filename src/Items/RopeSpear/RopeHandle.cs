@@ -150,6 +150,11 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
             return false;
         }
 
+        // Capture this before the throwing hook releases the grasp. The safety
+        // runtime uses the actual anchor transition rather than depending on which
+        // Player.ThrowObject hook happened to run first.
+        Player holderAtAnchor = Holder;
+
         Vector2 position = firstChunk.pos;
         IntVector2 tile = room.GetTilePosition(position);
         bool found = false;
@@ -188,6 +193,9 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
         firstChunk.vel = Vector2.zero;
         firstChunk.collideWithTerrain = false;
         GoThroughFloors = false;
+
+        RopeSpearHandleAnchorSafetyRuntime.NotifyHandleAnchored(this, holderAtAnchor);
+
         room.PlaySound(SoundID.Spear_Stick_In_Wall, firstChunk, loop: false, 0.45f, 1.25f);
         return true;
     }
