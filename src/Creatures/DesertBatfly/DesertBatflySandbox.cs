@@ -14,11 +14,14 @@ internal static class DesertBatflySandbox
 
     internal static void Enable()
     {
+        // RainWorld.OnModsInit reinitializes ExtEnum registries. Recreate the ID if
+        // a mod refresh invalidated its previous index, even when our hooks remain.
+        if (UnlockID == null || UnlockID.Index < 0)
+            UnlockID = new MultiplayerUnlocks.SandboxUnlockID(UnlockValue, true);
+        EnsureCreatureUnlockList();
+
         if (enabled) return;
         enabled = true;
-
-        UnlockID = new MultiplayerUnlocks.SandboxUnlockID(UnlockValue, true);
-        EnsureCreatureUnlockList();
 
         harmony = DesertBatflyRuntimePatch.Create("Anno.DesertBatfly.Sandbox");
         MethodInfo sprite = typeof(CreatureSymbol).GetMethod(
@@ -38,7 +41,7 @@ internal static class DesertBatflySandbox
 
     internal static void Disable()
     {
-        if (!enabled) return;
+        if (!enabled && UnlockID == null) return;
         enabled = false;
 
         DesertBatflyRuntimePatch.UnpatchSelf(harmony);
@@ -54,8 +57,13 @@ internal static class DesertBatflySandbox
     private static void EnsureCreatureUnlockList()
     {
         if (MultiplayerUnlocks.CreatureUnlockList == null || UnlockID == null) return;
+
+        // Remove stale objects with the same value left behind by an ExtEnum reset,
+        // then insert the currently registered object immediately after vanilla Fly.
+        MultiplayerUnlocks.CreatureUnlockList.RemoveAll(id =>
+            id != null && id.value == UnlockValue && !ReferenceEquals(id, UnlockID));
         foreach (MultiplayerUnlocks.SandboxUnlockID id in MultiplayerUnlocks.CreatureUnlockList)
-            if (id != null && id.value == UnlockValue) return;
+            if (ReferenceEquals(id, UnlockID) || (id != null && id.value == UnlockValue)) return;
 
         int flyIndex = MultiplayerUnlocks.CreatureUnlockList.FindIndex(id => id == MultiplayerUnlocks.SandboxUnlockID.Fly);
         if (flyIndex < 0) MultiplayerUnlocks.CreatureUnlockList.Add(UnlockID);
