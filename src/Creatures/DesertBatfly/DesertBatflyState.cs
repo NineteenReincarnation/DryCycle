@@ -44,6 +44,21 @@ internal static class DesertBatflyTuning
     internal const int GrabMemoryMinTicks = 1200, GrabMemoryMaxTicks = 3600;
     internal const float GrabFearMinDistance = 145f, GrabFearMaxDistance = 270f;
 
+    // Sand-spitting is a stable individual trait, not a species-wide ability. The
+    // affinity is seed-derived and mildly biased by temperament/nerve; roughly a
+    // minority of the population qualifies. Eligible bats build struggle pressure
+    // while held instead of rolling a random chance every frame.
+    internal const float SandSpitTraitThreshold = 0.58f;
+    internal const float SandSpitMeterMinRate = 0.0032f, SandSpitMeterMaxRate = 0.0064f;
+    internal const float SandSpitMovementBonus = 0.0015f;
+    internal const float SandSpitThresholdMin = 0.82f, SandSpitThresholdMax = 1.16f;
+    internal const int SandSpitWindupTicks = 8;
+    internal const int SandSpitCooldownMinTicks = 90, SandSpitCooldownMaxTicks = 150;
+    internal const int SandWorldParticleMin = 5, SandWorldParticleMax = 8;
+    internal const int SandScreenMarkMin = 4, SandScreenMarkMax = 6;
+    internal const int SandScreenLifeMin = 48, SandScreenLifeMax = 78;
+    internal const int SandScreenMaxConcurrentBursts = 2;
+
     // Desert Batflies spend a little more of their idle time hanging than vanilla.
     // Personality then spreads individuals across this range instead of using one
     // species-wide timer/chance.
@@ -62,7 +77,7 @@ internal sealed class DesertBatflyPersonality
 {
     internal readonly int VisualSeed, PatternSeed, SpikeSeed;
     internal readonly float Temperament, Size, Contrast;
-    internal readonly float Nerve, RoostAffinity;
+    internal readonly float Nerve, RoostAffinity, SandSpitAffinity;
     internal readonly int PatternCount, SpikeCount;
     internal readonly Color BaseColor, WingColor, SecondaryColor;
 
@@ -84,6 +99,15 @@ internal sealed class DesertBatflyPersonality
         var roostRandom = new System.Random(seed ^ 0x3C6EF372);
         RoostAffinity = (float)roostRandom.NextDouble();
 
+        // SandSpitAffinity follows the same stable personality-factor model. Innate
+        // variation dominates, while nasty/bold animals are somewhat more likely to
+        // qualify. This intentionally permits occasional calm spitters and prevents
+        // the behavior from becoming synonymous with the Aggressive flag.
+        var sandRandom = new System.Random(seed ^ 0x6D2B79F5);
+        float innateSand = (float)sandRandom.NextDouble();
+        SandSpitAffinity = Mathf.Clamp01(
+            innateSand * 0.62f + Temperament * 0.28f + Nerve * 0.10f);
+
         // Size is a readable personality trait: calm individuals remain near vanilla
         // size, harsher individuals trend toward the 1.25x upper bound.
         Size = Mathf.Lerp(1f, 1.25f, Temperament);
@@ -104,6 +128,17 @@ internal sealed class DesertBatflyPersonality
 
     internal bool Aggressive => Temperament >= DesertBatflyTuning.AggressiveThreshold;
     internal float AggressionDrive => Mathf.InverseLerp(DesertBatflyTuning.AggressiveThreshold, 1f, Temperament);
+    internal bool CanSandSpit => SandSpitAffinity >= DesertBatflyTuning.SandSpitTraitThreshold;
+    internal float SandSpitDrive => Mathf.InverseLerp(
+        DesertBatflyTuning.SandSpitTraitThreshold,
+        1f,
+        SandSpitAffinity);
+    internal float SandSpitMeterRate => Mathf.Lerp(
+        DesertBatflyTuning.SandSpitMeterMinRate,
+        DesertBatflyTuning.SandSpitMeterMaxRate,
+        SandSpitDrive) * Mathf.Lerp(0.92f, 1.12f, Nerve);
+    internal float SandSpitIntensity => Mathf.Clamp01(
+        Mathf.Lerp(0.35f, 1f, SandSpitDrive) * Mathf.Lerp(0.9f, 1.08f, Temperament));
 
     // Harsher individuals convert observations into real attacks more readily.
     internal float FakeDiveChance => Mathf.Lerp(0.68f, 0.26f, AggressionDrive);
