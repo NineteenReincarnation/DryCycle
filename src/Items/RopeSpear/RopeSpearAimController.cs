@@ -6,7 +6,7 @@ using UnityEngine;
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// RopeSpear input controller: configurable sweep/eight-direction aiming plus long/short rope mode.
+/// RopeSpear input controller: configurable sweep/eight-direction aiming plus long/short/ultra-short rope modes.
 /// </summary>
 internal static class RopeSpearAimController
 {
@@ -22,10 +22,11 @@ internal static class RopeSpearAimController
     private const float MinAimAngle = -90f;
     private const float MaxAimAngle = 90f;
 
-    // Two separate Alt presses inside this window toggle rope mode. Holding Alt is
+    // Two separate Alt presses inside this window advance rope mode. Holding Alt is
     // counted as one press, so Alt+Up/Down reeling can never oscillate the mode.
     private const int DoubleAltWindowFrames = 12;
     private const float ShortModeRopeThickness = 1.15f;
+    private const float UltraShortLengthMultiplier = 0.25f;
 
     private sealed class AimState
     {
@@ -48,8 +49,10 @@ internal static class RopeSpearAimController
 
     private sealed class RopeModeState
     {
-        // New RopeSpears are long mode by default.
+        // New RopeSpears are long mode by default. Double-Alt cycles:
+        // Long -> Short -> UltraShort -> Long.
         internal bool LongMode = true;
+        internal bool UltraShortMode;
         internal bool ShortFlightActive;
         internal float LockedLength = AbstractRopeSpear.DefaultRopeLength;
     }
@@ -58,7 +61,7 @@ internal static class RopeSpearAimController
     private static readonly ConditionalWeakTable<Player, AltTapState> AltTapStates = new();
     private static readonly ConditionalWeakTable<RopeSpear, RopeModeState> RopeModes = new();
 
-    // Short mode intentionally restores the older fixed-length projectile behaviour
+    // Short modes intentionally restore the older fixed-length projectile behaviour
     // without changing RopeSpear's normal long-payout implementation. These cached
     // members let the post-room pass reuse the existing rope topology and tension
     // code, including wall bends, instead of implementing a second rope solver.
@@ -171,12 +174,30 @@ internal static class RopeSpearAimController
 
         tap.SecondTapWindow = 0;
         RopeModeState mode = RopeModes.GetOrCreateValue(spear);
-        mode.LongMode = !mode.LongMode;
+
+        if (mode.LongMode)
+        {
+            mode.LongMode = false;
+            mode.UltraShortMode = false;
+        }
+        else if (!mode.UltraShortMode)
+        {
+            mode.UltraShortMode = true;
+        }
+        else
+        {
+            mode.LongMode = true;
+            mode.UltraShortMode = false;
+        }
+
         mode.ShortFlightActive = false;
 
         if (self.room != null)
         {
-            self.room.AddObject(new RopeSpearModeFlash(self, mode.LongMode));
+            self.room.AddObject(new RopeSpearModeFlash(
+                self,
+                mode.LongMode,
+                mode.UltraShortMode));
         }
     }
 
@@ -199,13 +220,30 @@ internal static class RopeSpearAimController
 
             if (!mode.LongMode)
             {
-                mode.LockedLength = spear.abstractPhysicalObject is AbstractRopeSpear data
+                float shortLength = spear.abstractPhysicalObject is AbstractRopeSpear data
                     ? data.RopeLength
                     : AbstractRopeSpear.DefaultRopeLength;
-                mode.LockedLength = Mathf.Clamp(
-                    mode.LockedLength,
+
+                shortLength = Mathf.Clamp(
+                    shortLength,
                     AbstractRopeSpear.MinRopeLength,
                     AbstractRopeSpear.MaxRopeLength);
+
+                if (mode.UltraShortMode)
+                {
+                    // Ultra-short is defined as exactly one quarter of the length
+                    // the ordinary short mode would have captured for this throw.
+                    // Its own floor is therefore one quarter of Short's floor.
+                    mode.LockedLength = Mathf.Clamp(
+                        shortLength * UltraShortLengthMultiplier,
+                        AbstractRopeSpear.MinRopeLength * UltraShortLengthMultiplier,
+                        AbstractRopeSpear.MaxRopeLength);
+                }
+                else
+                {
+                    mode.LockedLength = shortLength;
+                }
+
                 mode.ShortFlightActive = true;
             }
             else
@@ -222,7 +260,7 @@ internal static class RopeSpearAimController
         }
 
         // RopeSpear itself pays out in long mode during Thrown.Update. Restoring the
-        // authored length here establishes the cap before the first room update.
+        // fixed-mode length here establishes the cap before the first room update.
         if (spear.abstractPhysicalObject is AbstractRopeSpear shortData)
         {
             shortData.RopeLength = mode.LockedLength;
@@ -254,8 +292,8 @@ internal static class RopeSpearAimController
 
                 if (spear.abstractPhysicalObject is AbstractRopeSpear data)
                 {
-                    // Long-mode Update may have paid out this frame. Short mode
-                    // always restores the exact length captured at release.
+                    // Long-mode Update may have paid out this frame. Fixed modes
+                    // always restore the exact length captured at release.
                     data.RopeLength = mode.LockedLength;
                 }
 
@@ -263,7 +301,7 @@ internal static class RopeSpearAimController
 
                 // The first settled frame in RopeSpear clears its internal payout
                 // latch. After that, ordinary Alt+Up/Down reeling is allowed to
-                // change the short rope normally; only the launch length is fixed.
+                // change the rope normally; only the launch length is fixed.
                 if (spear.mode != Weapon.Mode.Thrown)
                 {
                     mode.ShortFlightActive = false;
