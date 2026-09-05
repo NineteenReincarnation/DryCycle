@@ -15,8 +15,8 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// native Scanning -> Seeking -> Supporting sequence instead of losing support first.
 ///
 /// This class is also the existing Watcher-terrain compatibility entry point used by
-/// Plugin.cs, so the sibling Peach Lizard adapter is enabled/disabled here as well.
-/// Its implementation remains isolated under WatcherExts/PeachLizard.
+/// Plugin.cs, so the Peach Lizard extension entry point is enabled/disabled here too.
+/// Its implementations remain isolated under WatcherExts/PeachLizard.
 /// </summary>
 internal static class QuicksandDrillCrabCompatibility
 {
@@ -39,8 +39,8 @@ internal static class QuicksandDrillCrabCompatibility
     internal static void EnsureEnabled()
     {
         // Keep Peach compatibility independent from DrillCrab's enabled guard so a
-        // future partial reload can safely re-establish both Watcher adapters.
-        PeachLizardQuicksandRuntime.Enable();
+        // future partial reload can safely re-establish every Peach extension.
+        PeachLizardRuntime.Enable();
 
         if (_enabled)
         {
@@ -54,7 +54,7 @@ internal static class QuicksandDrillCrabCompatibility
 
     internal static void Disable()
     {
-        PeachLizardQuicksandRuntime.Disable();
+        PeachLizardRuntime.Disable();
 
         if (!_enabled)
         {
