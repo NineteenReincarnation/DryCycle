@@ -35,7 +35,7 @@ internal static class DesertBatflyTuning
     internal const float RetaliationMinSpeed = 11.5f, RetaliationMaxSpeed = 15.5f;
     internal const float RetaliationMinImpact = 1.4f, RetaliationMaxImpact = 2.8f;
     internal const float RetaliationMinDrag = 0.025f, RetaliationMaxDrag = 0.065f;
-    internal const float RetaliationMinPush = 0.055f, RetaliationMaxPush = 0.16f;
+    internal const float RetaliationMinPush = 0.03f, RetaliationMaxPush = 0.08f;
 
     // Player-grab memory is stored as player number + strength + remaining ticks.
     // This keeps co-op targeting specific without allocating dictionaries per bat.
@@ -207,6 +207,12 @@ internal sealed class DesertBatflyState : HealthState
         if (int.TryParse(values[3], out int bites)) Bites = Mathf.Clamp(bites, 0, 3);
         MealConsumed = values[4] == "1";
         InHive = values.Length > 5 && values[5] == "1";
+
+        // Always clear optional fields first so loading a legacy V1 payload into a
+        // reused state object cannot retain a grudge/fear memory from prior data.
+        GrabMemoryPlayer = -1;
+        GrabMemoryStrength = 0f;
+        GrabMemoryTicks = 0;
 
         if (values.Length > 6 && int.TryParse(values[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out int player))
             GrabMemoryPlayer = Mathf.Max(-1, player);
