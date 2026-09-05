@@ -5,7 +5,7 @@ namespace DryCycle.Debugging.AI;
 
 internal static class AIDebugRegistry
 {
-    private static readonly List<IAIDebugSource> Sources = new(4);
+    private static readonly List<IAIDebugSource> Sources = new(6);
     private static bool initialized;
 
     internal static RainWorldGame CurrentGame { get; private set; }
@@ -15,6 +15,8 @@ internal static class AIDebugRegistry
         if (initialized) return;
         initialized = true;
         Register(new DesertBatflyDebugSource());
+        Register(new MossySpiderDebugSource());
+        Register(new SpinebackLizardDebugSource());
         Register(new GenericCreatureDebugSource());
     }
 
