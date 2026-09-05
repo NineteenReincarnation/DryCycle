@@ -8,9 +8,8 @@ namespace DryCycle.Debugging.AI;
 internal readonly struct AIDebugUtilityRow
 {
     internal readonly string Name;
-    // Raw is NaN when the AI does not retain the raw module value. The Observatory
-    // must never call AIModule.Utility() merely to populate a debug column because
-    // some modules can mutate counters/caches as part of their normal evaluation.
+    // NaN means the original AI did not retain this value. The Observatory must never
+    // call AIModule.Utility() merely to populate a diagnostic table.
     internal readonly float Raw;
     internal readonly float Smoothed;
     internal readonly float Weight;
@@ -30,7 +29,11 @@ internal readonly struct AIDebugUtilityRow
         Winner = winner;
     }
 
-    internal bool HasRaw => !float.IsNaN(Raw) && !float.IsInfinity(Raw);
+    internal bool HasRaw => Finite(Raw);
+    internal bool HasSmoothed => Finite(Smoothed);
+    internal bool HasWeighted => Finite(Weighted);
+
+    private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 }
 
 internal readonly struct AIDebugPerceptionRow
@@ -91,8 +94,6 @@ internal static class AIDebugAdvancedCapture
         output.Clear();
         if (creature?.realizedCreature is DesertBatfly bat)
         {
-            // DesertBatfly role scores are already calculated by the real role evaluator;
-            // reading them here does not re-run a decision.
             DesertBatflyRoleScores scores = bat.DesertAI.Roles.Scores;
             ExpressedSocialRole role = bat.DesertAI.Roles.Expressed;
             output.Add(new AIDebugUtilityRow("Sentinel", scores.Sentinel, scores.Sentinel, 1f,
@@ -112,14 +113,15 @@ internal static class AIDebugAdvancedCapture
             if (tracker == null) continue;
             string name = tracker.module?.GetType().Name ?? "<null>";
 
-            // SmoothedUtility() reads the UtilityTracker's retained state and applies
-            // the configured weight/continuation logic. It does not call module.Utility().
-            float weightedSmoothed = tracker.SmoothedUtility();
-            float nonWeightedSmoothed = Mathf.Abs(tracker.weight) > 0.000001f
-                ? weightedSmoothed / tracker.weight
-                : 0f;
-            output.Add(new AIDebugUtilityRow(name, float.NaN, nonWeightedSmoothed,
-                tracker.weight, weightedSmoothed, tracker.continuationBonus,
+            // Rain World's UtilityTracker.SmoothedUtility() calls module.Utility() when
+            // smoother == null. Never call it from the Observatory. Only a non-null
+            // smoother means the AI retained a weighted utility in smoothedUtility.
+            float weighted = tracker.smoother != null ? tracker.smoothedUtility : float.NaN;
+            float nonWeighted = tracker.smoother != null && Mathf.Abs(tracker.weight) > 0.000001f
+                ? tracker.smoothedUtility / tracker.weight
+                : float.NaN;
+            output.Add(new AIDebugUtilityRow(name, float.NaN, nonWeighted,
+                tracker.weight, weighted, tracker.continuationBonus,
                 ReferenceEquals(tracker, comparer.highestUtilityTracker)));
         }
     }
