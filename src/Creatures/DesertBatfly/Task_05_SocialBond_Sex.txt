@@ -1,0 +1,818 @@
+Desert Batfly Task 05A
+Sex + Lightweight SocialBond + Grief
+Codex Execution Specification
+=====================================
+
+0. 任务性质
+-----------
+这是一个可以直接执行的 Codex 开发任务书。
+
+本任务只实现 DiscussionStatus.txt 中第 5A 项已经敲定的内容：
+- 稳定 Male / Female 性别；
+- 轻度性二型；
+- 每只最多一个、可非对称的 SocialBond；
+- Bond 的形成、增强、失效；
+- Bond 对 Roost / Rescue / Vengeance / Trauma 的有限影响；
+- Bond partner 死亡后的 Grief；
+- 持久化、性能、回归测试。
+
+【严格禁止】实现第 5B 繁殖子系统。以下内容当前只允许预留接口，不允许完成：
+- Courtship；
+- MateBond；
+- mating；
+- Gravid / 怀孕 / 携卵；
+- 产卵；
+- 幼体；
+- Parenting；
+- Kinship；
+- reproductive credit；
+- 人口增长；
+- 与 Colony Migration 的繁殖人口联动。
+
+如果当前代码中没有对应接口，不要为了未来系统提前堆大量空类。只要求本次实现不要把未来扩展堵死。
+
+
+1. 当前项目基线
+---------------
+仓库：NineteenReincarnation/DryCycle
+主要目录：src/Creatures/DesertBatfly/
+
+执行前必须先阅读并理解当前 main 上至少以下文件：
+- DesertBatflyState.cs
+- DesertBatfly.cs
+- DesertBatflyAI.cs
+- DesertBatflyIntimidation.cs
+- DesertBatflyGraphics.cs
+- DesertSwarmRoom.cs
+- DiscussionStatus.txt
+- docs/DesertBatfly-Morale-Vengeance.md（若存在）
+- src/WatcherExts/PeachLizard/PeachLizardDesertBatflyPredation.cs
+- tests/DesertBatfly/Program.cs
+
+不要基于旧对话记忆覆盖当前源码。以 main 当前实现为准。
+
+当前已有重要系统：
+- Personality：Temperament / Nerve / RoostAffinity / SandSpitAffinity / VengeanceAffinity / Conformity；
+- 约 4.94% True Avenger；
+- 普通 Harass / FakeDive / AttackSlots；
+- GrabMemory；
+- Player / Peach Fear；
+- 有限链式恐惧；
+- Extreme Vengeance；
+- Social Follower；
+- Persistent Trauma / PTSD；
+- Peach 捕食、舌头救援和尸体捡食；
+- Fly Chain / Roost；
+- SandSpit。
+
+本任务必须在这些系统上扩展，不能复制出第二套互相竞争的 AI。
+
+
+2. 总体目标
+-----------
+让 Desert Batfly 在保持小型群居生物性能预算的前提下，拥有可长期识别的性别和一条重要的个体社会关系。
+
+目标行为：
+1) 同一只 Batfly 的 Male/Female 永远稳定；
+2) 性别能在外观上产生轻微、可学习的区别，但不决定性格；
+3) 某只 Batfly 可以逐渐特别信任另一只 Batfly；
+4) 这种关系不是群体 Conformity，而是“一对一重要同伴”；
+5) 两边关系可以不对称；
+6) 救过自己的同伴、长期共同 Roost/Chain 的同伴更容易形成强 Bond；
+7) Bond partner 被 Peach 抓走时，个体更容易参与现有救援/复仇，但不能无视严重 PTSD；
+8) Bond partner 死亡时产生更强 Trauma 和中期 Grief；
+9) Grief 会根据 Personality 表现为更偏愤怒或更偏退避，但不生成新的全知/无脑攻击；
+10) 整套关系系统必须保持固定内存、低扫描频率和 save-safe。
+
+
+3. 硬设计原则
+-------------
+
+3.1 Sex 不等于 Personality
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+绝对禁止：
+- Male 自动增加 Temperament；
+- Female 自动降低 Nerve；
+- Male 自动提高 Vengeance；
+- Female 自动提高 Roost；
+- 任何“雄性一定凶 / 雌性一定胆小”的硬映射。
+
+允许：
+- Sex 只对外观和极小的物理视觉参数做 bias；
+- 未来繁殖系统读取 Sex，但本任务不实现繁殖。
+
+3.2 SocialBond 不等于 Conformity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Conformity = 对群体行为的敏感度。
+SocialBond = 对一个具体个体的特殊重视。
+
+必须允许：
+- Conformity 很低、Bond 很高；
+- Conformity 很高、Bond 很低。
+
+3.3 SocialBond 不得变成全关系图
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+每只 Batfly 最多：
+- 1 个 SocialBondTarget；
+- 1 个 SocialBondStrength。
+
+禁止：
+- Dictionary<EntityID,float>；
+- List 全历史朋友；
+- N×N 群落关系矩阵。
+
+3.4 Fear / PTSD 优先级高于 Bond
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Bond 可以提高“想救 / 想靠近 / 想响应”的动机，不能取消：
+- severe Trauma；
+- dead / unconscious；
+- 被抓；
+- shortcut；
+- 明显不可达；
+- Peach 当前对自己的致命捕食压力。
+
+严重 PTSD 必须能够产生：
+“我很在乎它，但我还是不敢冲上去”的结果。
+
+3.5 不新增 Grief Avenger trait
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+本阶段禁止因为 BondStrength 很高，就让一个原本不满足 CanExtremeVengeance 的个体强制获得 True Avenger。
+
+可以：
+- 对已经有资格的 True Avenger 提高事件动机；
+- 对普通个体提高 Rescue/Fear/Grief 强度；
+- 让高 Temperament 个体在 Grief 中更“愤怒”，但仍受原有资格和 PTSD 规则约束。
+
+
+4. Sex 实现规格
+--------------
+
+4.1 稳定分配
+~~~~~~~~~~~~
+目标比例：
+- Male：约 48%
+- Female：约 52%
+
+必须使用 EntityID.RandomSeed 可重复派生。
+不要使用 UnityEngine.Random。
+不要在 realization 时重新随机。
+不要把 Sex 单独作为需要存档的随机值，除非当前 save schema 设计更适合显式持久化；优先视为 Personality 的稳定派生属性。
+
+建议：
+- 在 DesertBatflyPersonality 中加入 Sex enum 或 bool；
+- 用单独 salt 的稳定随机，避免改变现有 System.Random 消费顺序导致原 Personality 全部重排。
+
+非常重要：
+不要往当前 DesertBatflyPersonality 主 random 流中直接插一个 NextDouble，导致 PatternSeed / SpikeSeed / Temperament / 外观全部变化。
+应使用单独 seed xor salt，例如独立 System.Random(seed ^ CONST)。
+
+4.2 性别类型
+~~~~~~~~~~~~
+推荐：
+internal enum DesertBatflySex { Male, Female }
+
+命名可以按现有风格调整，但必须可读，不要用 0/1 魔法数字散落各处。
+
+4.3 轻度性二型
+~~~~~~~~~~~~~~
+目标不是两个不同 creature variant，而是现有随机外观上的轻微 bias。
+
+Male 倾向：
+- body visual scale：约 -0% ~ -3%；
+- wing visual length：约 +3% ~ +8%；
+- spike/pattern prominence：约 +5% ~ +15%；
+- 可以稍微提高视觉 Contrast 的表现，但不能修改 Personality.Contrast 本身到改变行为/存档语义。
+
+Female 倾向：
+- body visual scale：约 0% ~ +5%；
+- body mass 若要调整，只允许极小范围（建议 <= +6%）；
+- wing width / visual fullness 略高；
+- 不降低攻击、不降低速度作为性别固定规则。
+
+实现方式：
+- 优先在 Graphics / derived display scale 层做；
+- 若实际 mainBodyChunk.mass/rad 需要做 sex modifier，必须保证不破坏 <0.2 小物件舌头捕获阈值；
+- Desert Batfly 仍必须稳定处于 Peach LizardTongue 的 lightweight small-object 范围。
+
+4.4 外观稳定性测试
+~~~~~~~~~~~~~~~~~~
+10,000 seeds 检查：
+- Sex 可重复；
+- Male 比例约 46%~50%；
+- Female 约 50%~54%；
+- 同一 seed 原有 Personality 因子的确定性不丢失；
+- Sex 不能改变 CanExtremeVengeance 约 5% 的既有标定；
+- SandSpit trait 分布不能因为 random pipeline 被重排。
+
+
+5. SocialBond 持久状态
+---------------------
+
+5.1 State 字段
+~~~~~~~~~~~~~~
+在 DesertBatflyState 增加固定槽。
+
+逻辑字段至少需要：
+- SocialBondTarget identity；
+- SocialBondStrength 0..1；
+
+身份必须足够稳定。
+优先保存完整 EntityID 所需字段（例如 spawner + number），不要只保存 realized Creature 引用。
+
+如果 Rain World 当前 EntityID 提供稳定 ToString/FromString API，可优先复用；如果没有，显式保存组成字段。
+
+不要仅存 room index。
+不要存 runtime GetHashCode。
+不要把 EntityID.number 视作绝对全局唯一，除非检查源码确认本项目上下文中安全。
+
+5.2 非对称关系
+~~~~~~~~~~~~~~
+A 对 B 的 BondStrength 与 B 对 A 的 BondStrength完全独立。
+
+任何 helper 都不能自动镜像相同值。
+某些事件可以同时增益双方，但值可以不同。
+
+示例：
+B 成功救 A：
+- A->B 增益更大；
+- B->A 也可获得较小增益；
+但禁止直接把两边强制设为相等。
+
+5.3 保存兼容
+~~~~~~~~~~~~
+当前 DesertBatflyState 使用 DCDesertBatflyV1 payload。
+实现时：
+- 保持旧存档可读；
+- 新字段缺失时默认无 Bond；
+- malformed 值必须 clamp / clear；
+- foreign unrecognizedSaveStrings 必须继续保留；
+- 不允许旧存档加载后生成随机 ghost bond。
+
+如果扩展 V1 payload 可安全向后兼容，可以继续追加字段；如果代码可读性更适合 V2，请确保 V1 明确迁移。
+不要破坏现有 Trauma / GrabMemory 保存。
+
+
+6. SocialBond Runtime 解析
+-------------------------
+
+建议新建一个职责单一的 helper，例如：
+DesertBatflySocialBond.cs
+
+但是否新建文件由 Codex根据当前代码组织判断。
+
+应该提供类似能力：
+- AddBond(source, target, amount, reason)
+- GetBondStrength(source, target)
+- TryResolveBondPartner(realized source, out DesertBatfly partner)
+- OnSuccessfulRescue(rescuer, victim)
+- OnSharedFearEvent(...)
+- OnBondPartnerDeath(...)
+
+不要把所有逻辑塞进 DesertBatflyAI.cs。
+
+6.1 partner 解析
+~~~~~~~~~~~~~~~~
+只有当前房间 realized colony 中存在匹配 EntityID 的个体，才返回 realized partner。
+
+partner 在其他房间：
+- Bond 仍保留；
+- 不追踪其实时坐标；
+- 不导航过去；
+- 不产生跨房间心灵感应。
+
+partner 消失：
+- 不抛异常；
+- 暂时解析失败即可；
+- 如果能确认 permanent deletion / consumed / invalid，可以清理；
+- 不要因为“当前不 realized”直接删 Bond。
+
+
+7. Bond 形成与增长
+-----------------
+
+7.1 Peach 成功救援：主要来源
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+当前已有 Extreme Vengeance RescueCharge，成功时会：
+- tongue.Retract 或 ReleaseGrasp；
+- victim 获得逃离速度；
+- rescuer Withdraw。
+
+在“真正成功释放 victim”的那个事件点挂 SocialBond：
+
+建议初始增益：
+- rescued victim -> rescuer：+0.22 ~ +0.35；
+- rescuer -> rescued victim：+0.08 ~ +0.18。
+
+具体值应受：
+- 当前已有 BondStrength；
+- Personality.Conformity 可做很轻的 modifier；
+- 不要用 Temperament 直接决定“会不会感谢”。
+
+若两者原本无 BondTarget：
+- 可以建立。
+
+若已有另一个 BondTarget：
+不要简单覆盖。
+建议 challenger 只有在事件后的候选强度明显高于当前 BondStrength（例如 +0.12 margin）时才替换。
+这样避免每次偶然救援把长期关系洗掉。
+
+7.2 长期 Chain / Roost：慢速来源
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+必须避免每 tick O(n^2)。
+
+推荐：
+- 每 120~240 tick 才采样一次；
+- 只检查真实 Fly Chain 中直接相邻或同链近邻；
+- 或复用现有 Chain 状态的 First/Next 链结构；
+- 每次只对 1 个最相关候选做极小增益。
+
+建议量级：
+- 每次采样 +0.002 ~ +0.006；
+- 需要长期、多次共同 Roost 才形成明显关系。
+
+不能站一起 5 秒就 1.0。
+
+7.3 共同逃生：低频事件来源
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+复用 DesertBatflyIntimidation 的 Death/Capture event pass。
+
+当两只 Batfly：
+- 同时处于 Tier 0/1；
+- 距离合理；
+- 同时因同一个 threat 进入 escape；
+可产生很小的 Bond 增益。
+
+建议：
+- +0.005 ~ +0.02 / 事件；
+- 不要对 Tier 2/3 全链传播大规模互相加关系；
+- 每只每个 threat event 最多选择一个 nearby companion 候选，避免 O(n^2) 关系成长。
+
+7.4 Bond 衰减
+~~~~~~~~~~~~
+本任务不要求快速自然衰减。
+建议：
+- 强 Bond 具有长期稳定性；
+- 可以极慢衰减，或者本阶段不做时间衰减；
+- 若实现衰减，不允许每 tick 写 save state；
+- 优先低频、极小值。
+
+不要做“离开同一房间 30 秒朋友关系就没了”。
+
+
+8. Bond 对 Roost / Chain 的影响
+------------------------------
+目标：能看到熟悉的两只更常待在一起，但不会编队锁死。
+
+当：
+- partner 当前 realized；
+- partner 处于 Roost / Chain；
+- 当前个体没有 severe Fear / Trauma；
+- 当前不在 Attack / Escape / Extreme Vengeance；
+- 两者距离和挂点合理；
+
+则提高 partner 附近 roost candidate 的 score / willingness。
+
+建议 multiplier：
+- BondStrength 0.3：几乎无感；
+- 0.6：约 +10%~20%；
+- 1.0：约 +25%~40%；
+
+不要：
+- 强制 ChangeBehavior(Chain)；
+- 直接 teleport；
+- 直接设置 BodyChunk；
+- 为跟 partner 跑跨房间 path。
+
+继续使用原 Fly Chain / Roost 机制。
+
+
+9. Bond 对 Peach Rescue / Vengeance 的影响
+-----------------------------------------
+
+9.1 Rescue
+~~~~~~~~~~
+如果 PredatorCapture 的 victim 是自己的 SocialBondTarget：
+- 提高参与 rescue 的动机；
+- 提高 Follower candidate score 或 True Avenger rescue priority；
+- 可略缩短 Waiting delay；
+- 可轻微提高 rescue chance。
+
+建议上限：
+- candidate motivation +0.10~0.20；
+- rescue probability multiplicative +10%~25%；
+- delay 减少不超过约 20%。
+
+必须保证：
+- SocialVengeanceGroupCap 仍然是同一 target runtime 总上限 3；
+- Bond 不能额外生成第 4/5 个参与者；
+- severe Trauma >= TraumaSevere 时仍然放弃；
+- TraumaAggressionBlock 仍然对普通攻击有效。
+
+9.2 Vengeance
+~~~~~~~~~~~~~
+Bond partner 死亡：
+- 增加现有 Vengeance motivation；
+- 对 True Avenger candidate 排序可加 Bond bonus；
+- 对高 Temperament 个体可以让 Rage 更高；
+
+但：
+- 不得绕过 CanExtremeVengeance 创建新的 True Avenger trait；
+- 不得突破 1 True Avenger + 最多 2 Follower；
+- 不得取消 revengeFailed 后禁止补敢死队的规则。
+
+
+10. Bond partner 死亡与 Grief
+-----------------------------
+
+10.1 触发条件
+~~~~~~~~~~~~~
+只在真正 live -> dead 成立后触发。
+
+要求：
+- death victim 的 EntityID == observer.SocialBondTarget；
+- BondStrength 至少达到一个有效阈值（建议 0.30 左右）；
+- observer 必须处于合理社会感知范围：
+  - 同 Chain；或
+  - Tier 0/1 death event；或
+  - 直接 VisualContact / 近距离事件。
+
+禁止：
+partner 在另一个房间死亡，observer 凭空获得即时 Grief。
+
+10.2 Persistent Trauma 增幅
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+如果 killer 是已有支持对象：
+- Player；
+- Peach；
+
+则在现有 AddTrauma 之上加入 Bond death bonus。
+
+建议额外 gain：
+- 0.08 ~ 0.30，随 BondStrength；
+- MateBond 专属更高倍率不属于本任务。
+
+不要重复调用完整死亡恐惧广播；只给 observer 自己额外权重，避免双重链式恐惧。
+
+10.3 Grief runtime state
+~~~~~~~~~~~~~~~~~~~~~~~
+需要固定字段，不要新建每个 dead partner 的历史字典。
+
+建议：
+- GriefTicks；
+- GriefStrength；
+- GriefThreatIdentity（若有 killer）；
+
+Grief 持续：
+- 1200 ~ 4000 tick；
+- 按 BondStrength 提升；
+- 可由 Personality 轻微修正。
+
+GriefStrength：0..1。
+
+10.4 Grief 行为影响
+~~~~~~~~~~~~~~~~~~~
+总体效果：
+- 普通 Harass 意愿下降；
+- Attach/Drain 主动性下降；
+- Roost willingness 提高；
+- idle/retreat/独处倾向提高；
+- 不影响基础生存移动；
+- 不把蝠蝇冻结。
+
+Personality 分化：
+A. 高 Temperament + 高 Nerve：
+- Harass penalty 较小；
+- Vengeance rage/motivation bonus 较高；
+- 仍不能绕过 True Avenger / PTSD。
+
+B. 低 Temperament 或低 Nerve：
+- Harass penalty 更大；
+- Roost / avoidance bonus 更大。
+
+C. 高 Conformity：
+- 不能当作 BondStrength；
+- 只允许轻微影响 Grief 的社会表现，不是核心乘数。
+
+建议：
+Grief 对普通攻击意愿最大抑制约 25%~55%，不要永久关闭攻击。
+
+10.5 Grief 与 PTSD 优先级
+~~~~~~~~~~~~~~~~~~~~~~~~~
+严格顺序：
+severe PTSD / immediate survival > Grief > normal harassment。
+
+如果 killer 已经有 Trauma >= TraumaAggressionBlock：
+- 不得因为 Grief 重新 ArmRetaliation；
+- 不得因为 Bond death 再申请普通 AttackSlot；
+- Extreme Vengeance 已被 TraumaSevere 打崩时不能恢复。
+
+
+11. SocialBond 替换规则
+----------------------
+由于每只只有一个槽，需要明确候选替换。
+
+建议 helper：
+TryStrengthenOrReplaceBond(source, candidate, gain)
+
+规则建议：
+1) candidate == current target：直接 clamp 增益；
+2) 当前没有 target：建立；
+3) 当前 target 不可确认永久死亡/删除：先保留；
+4) 新 candidate 的 projected strength 必须明显高于当前，例如：
+   projected >= current + 0.12
+   才替换；
+5) 成功 Rescue 可以给予额外 replacement priority，但仍不要无条件覆盖 0.9 的长期关系；
+6) 所有数值 clamp 0..1。
+
+目的：
+避免 BondTarget 在一群 14 只 Batfly 中因为零碎事件频繁抖动。
+
+
+12. 与现有 AI 的接入点
+----------------------
+Codex 必须优先复用现有事件，而不是创建新扫描。
+
+推荐接入：
+
+A. DesertBatflyIntimidation
+- Death / Capture event：共同逃生 Bond、Bond victim 特殊 Trauma、Vengeance score bonus；
+- TryRescueVictim 成功点：建立/强化 rescue bond；
+- 不复制第二套 fear propagation。
+
+B. DesertBatflyAI
+- Roost candidate / Roost start decision：bond partner nearby bonus；
+- CanHarass / target acquisition：Grief penalty；
+- 不改变 AttackSlots=2；
+- 不让 SocialBond 直接写 Target。
+
+C. DesertBatflyState
+- Sex 稳定 Personality；
+- Bond save；
+- Grief 若要跨房间持续，可存 persistent fields；
+- 旧存档兼容。
+
+D. DesertBatflyGraphics
+- sex dimorphism；
+- 不创建第二套 atlas；
+- 优先使用现有 sprite scale / vertex / wing transform。
+
+E. PeachLizardDesertBatflyPredation
+- 不需要为 SocialBond 改 Peach AI；
+- rescue 仍由 Batfly morale system 处理。
+
+
+13. Grief 是否持久化
+--------------------
+建议：Grief 作为中期经历应跨房间保留，因此放入 DesertBatflyState，而不是只放 ConditionalWeakTable runtime。
+
+至少保存：
+- GriefStrength；
+- GriefTicks；
+- killer identity（若支持）；
+
+但不要保存 dead partner realized ref。
+
+Grief tick 只对活着的 realized bat 每 update 衰减一次，遵循现有 Trauma tick 风格。
+
+死亡尸体不能因为残留 Grief 重新激活 runtime AI state。
+
+
+14. 性能要求
+-----------
+硬要求：
+- 无 N×N relationship graph；
+- 无每帧 colony 全对全 scan；
+- 无每帧跨房间查找 partner；
+- 无 Dictionary per bat；
+- 无 LINQ 热路径分配；
+- 无 UnityEngine.Random 每帧社会行为滚动；
+- event-driven + low-frequency sampling。
+
+允许：
+- Death/Capture 时遍历现有约 11+3 colony；
+- 每 120~240 tick 对当前 Chain 的一个候选做检查；
+- realized partner resolution 在低频或已有 scan 中完成。
+
+如果增加 ConditionalWeakTable runtime helper，必须有 Reset/Forget 生命周期，不能让 dead corpse 保持 active fast-path count。
+
+
+15. 安全/逻辑边界
+----------------
+必须检查以下场景：
+
+1) partner 在另一个房间：
+- 不导航；
+- 不实时感知；
+- Bond 保留。
+
+2) partner 死亡但 observer 没看到：
+- 不即时 Grief；
+- 以后是否通过未来群体声誉得知不属于本任务。
+
+3) partner 被 Player 抓但没受伤：
+- 可以略提高注意，但不触发 death grief。
+
+4) partner 被 Peach 舌头抓：
+- rescue motive bonus；
+- 不绕过 Vengeance group cap。
+
+5) partner 被救成功：
+- 双方非对称 Bond 增益；
+- rescued 对 rescuer 增益应更大。
+
+6) severe PTSD + partner 被抓：
+- 允许出现不敢救；
+- 禁止 PTSD 被 Bond 清除。
+
+7) partner 死亡：
+- observer Grief/Trauma；
+- 如果 observer 本身是 Follower，现有 LeaderCollapse/Follower death 逻辑不能重复叠成无限 Trauma。
+
+8) observer dead：
+- 不更新 Bond；
+- 不 Grief；
+- 不创建 runtime social state。
+
+9) save/load：
+- target absent 不 crash；
+- malformed bond identity 清空；
+- strength clamp。
+
+10) co-op：
+- SocialBond 与 Player identity 无关；
+- 现有 PlayerTrauma 必须继续绑定具体玩家。
+
+
+16. 测试要求
+-----------
+更新 tests/DesertBatfly/Program.cs。
+
+至少新增：
+
+A. Sex
+- 10,000 seed deterministic；
+- 48/52 附近分布；
+- 不改变现有 True Avenger 约 5%；
+- 不破坏 SandSpit deterministic。
+
+B. State save/load
+- SocialBond target identity round trip；
+- SocialBondStrength round trip；
+- Grief round trip；
+- legacy V1 payload 默认无 Bond/Grief；
+- malformed identity / NaN strength 清理；
+- foreign fields 保留。
+
+C. Bond helper
+- empty -> candidate 建立；
+- same target 增强；
+- weak challenger 不替换强 bond；
+- strong projected challenger 按规则替换；
+- strength clamp 0..1；
+- 非对称性测试：A->B 变化不自动等于 B->A。
+
+D. Rescue integration
+如果测试环境允许通过 helper 直接调用事件：
+- successful rescue 增强双方；
+- rescued -> rescuer > rescuer -> rescued。
+
+E. Grief
+- bond victim death bonus 只对正确 observer；
+- unrelated bat 不获得专属 Grief；
+- Grief ticks 每 realized update 只衰减一次；
+- severe Trauma 不被 Grief 覆盖。
+
+F. 性能结构静态约束
+不需要 benchmark，但代码 review 中确认：
+- 没有 per-bat Dictionary；
+- 没有每 tick colony pair scan。
+
+
+17. 文档要求
+-----------
+完成后更新：
+- src/Creatures/DesertBatfly/README 或相关 DesertBatfly docs；
+- DiscussionStatus.txt 中第 5A 状态可标记为“已实现”，但【不要】把 5B 改成已实现；
+- 单独说明 5B reproduction remains deferred。
+
+文档必须解释：
+- Sex 不决定 Personality；
+- SocialBond 与 Conformity 的区别；
+- Bond 是单槽、非对称；
+- Rescue/Grief/PTSD 的优先关系；
+- 暂不实现 MateBond / reproduction。
+
+
+18. 建议文件组织
+----------------
+允许按实际代码调整，推荐：
+
+现有修改：
+- DesertBatflyState.cs
+- DesertBatflyAI.cs
+- DesertBatflyIntimidation.cs
+- DesertBatflyGraphics.cs
+- tests/DesertBatfly/Program.cs
+
+可新增：
+- DesertBatflySocialBond.cs
+
+不要因为任务书建议就机械拆类；如果 helper 更适合现有文件，可保持简洁。
+
+
+19. 验收行为场景
+----------------
+必须能解释并尽量在实机验证：
+
+场景 1：稳定性别
+同一个 AbstractCreature 多次 realization，Sex 不改变，外观二型稳定。
+
+场景 2：性格独立
+找到 Female 高 Temperament / Male 低 Temperament 个体，确认性别没有覆盖 Personality。
+
+场景 3：长期同链
+两只长期 Chain/Roost 后逐渐形成弱到中等 Bond，不是几秒拉满。
+
+场景 4：Peach 救援
+A 被 Peach 舌头抓，B 成功 Rescue；A->B Bond 显著提高，B->A 较小提高。
+
+场景 5：再次捕获
+以后 A 再被 Peach 抓，B 若当前安全且无 severe PTSD，更容易参与救援；但 SocialVengeanceGroupCap 仍 <=3。
+
+场景 6：PTSD 冲突
+B 已被 Peach 打出 severe PredatorTrauma，即使 A 是强 Bond partner 被抓，也可能选择逃而不是送死。
+
+场景 7：Bond partner 死亡
+玩家杀死 A，强 Bond 的 B 进入更明显 Grief/Trauma；无关系的 C 只接受普通死亡恐惧。
+
+场景 8：人格化 Grief
+高 Temperament/Nerve 的 B 表现得更愤怒；低 Nerve 的个体更退避，但都受现有 PTSD/TrueAvenger 资格限制。
+
+场景 9：非对称
+A 很依赖 B，B 对 A 普通；行为权重按各自 state，不自动同步。
+
+场景 10：跨房间
+B 离开房间，A 保留 Bond 但不会知道 B 在哪里、不会跨房间追踪。
+
+
+20. 完成前必须做的整体代码复盘
+------------------------------
+Codex 完成实现后，不要立即结束。必须重新检查以下潜在隐藏 Bug：
+
+- 新 Sex stable random 是否改变旧 Personality random pipeline；
+- 体型/质量二型是否让 Female 超过 LizardTongue small-object 质量阈值；
+- Bond partner identity 是否可能碰撞；
+- save schema 是否兼容旧存档；
+- dead Batfly 是否还在采样 Chain bond；
+- partner 消失后是否 NullReference；
+- Rescue 成功事件是否重复加 Bond（Tongue + Grasp debounce）；
+- Death event 是否重复触发 Grief 与普通 Trauma 两次过强叠加；
+- Leader/Follower death collapse 是否和 Bond grief 无限叠加；
+- Grief 是否让 CanHarass 在外层取消、内层又重复选 Target 造成抖动；
+- Grief 是否会留下旧 AttackSlot / retaliation memory；
+- PTSD 是否仍然拥有最高敌意抑制优先级；
+- SocialBond 是否突破 SocialVengeanceGroupCap；
+- Roost partner bonus 是否造成两个 Bat 永远锁死互相追逐挂点；
+- Chain bond sampling 是否 O(n^2)；
+- dead corpse 是否重新创建 runtime social state；
+- Warp / room transition 后 partner resolution 是否安全；
+- sandbox / save / legacy state 是否正常。
+
+发现确定的 Bug 直接修，不要只在总结里列出来。
+
+
+21. 明确不在本任务范围
+----------------------
+以下内容本次不要做：
+- MateBond；
+- Courtship；
+- mating；
+- egg；
+- larva / juvenile；
+- Gravid；
+- parenting；
+- reproduction season；
+- population growth；
+- kinship tree；
+- Colony Social Reputation；
+- Threat Style Memory；
+- Corpse Ecology 扩展；
+- ResourcePressure。
+
+只允许为未来系统留干净接口，不允许自行补设计。
+
+
+22. 最终交付要求
+----------------
+Codex 最终必须给出：
+1) 修改/新增文件列表；
+2) 每个系统的实际实现说明；
+3) save schema 变化；
+4) 10,000 seed Sex 分布与 True Avenger 回归结果；
+5) 新增测试与执行结果（若环境可执行）；
+6) 无法编译/运行时必须明确说明缺失程序集或环境原因，禁止声称通过；
+7) 整体 AI 复盘中发现并修复的隐藏 Bug 列表；
+8) 明确说明第 5B reproduction 仍未实现。
+
+本任务的成功标准不是“加了一个 Sex 字段和朋友 ID”，而是：
+Desert Batfly 的性别稳定可辨、重要同伴关系能够通过真实共同经历缓慢形成，并能自然影响 Roost、Peach Rescue、死亡 Trauma 和 Grief，同时不破坏现有 Fear / PTSD / Vengeance / AttackSlots / Chain / 性能体系。
