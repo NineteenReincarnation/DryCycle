@@ -27,8 +27,6 @@ internal static class AIDebuggerRuntime
 
         Camera camera = hostObject.AddComponent<Camera>();
         camera.enabled = false;
-        // Preserve all RoomCamera colour, but clear its depth before drawing the
-        // screen-space Observatory so world geometry can never occlude the panel.
         camera.clearFlags = CameraClearFlags.Depth;
         camera.cullingMask = 0;
         camera.depth = 10000f;
@@ -43,6 +41,7 @@ internal static class AIDebuggerRuntime
 
     internal static void Uninstall()
     {
+        AIDebugTrace.Reset();
         if (hostObject != null) UnityEngine.Object.Destroy(hostObject);
         hostObject = null;
         host = null;
@@ -72,6 +71,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.F7))
         {
             visible = !visible;
+            AIDebugTrace.SetVisible(visible);
             if (overlayCamera != null) overlayCamera.enabled = visible;
         }
 
@@ -97,7 +97,6 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             watch.Stop();
         }
 
-        // Smoothed value is easier to read than a frame-by-frame flicker.
         overheadMs = overheadMs <= 0.0 ? watch.Elapsed.TotalMilliseconds
             : overheadMs * 0.88 + watch.Elapsed.TotalMilliseconds * 0.12;
     }
@@ -122,7 +121,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         try
         {
             backend = new AIDebugImGuiBackend();
-            logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full.");
+            logger?.LogInfo("DryCycle AI Observatory initialized. F7 toggle, F6 compact/full, Alt+LMB world pick.");
             return true;
         }
         catch (Exception error)
@@ -136,6 +135,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         backendFailed = true;
         visible = false;
+        AIDebugTrace.SetVisible(false);
         if (overlayCamera != null) overlayCamera.enabled = false;
         logger?.LogError($"DryCycle AI Observatory {phase} failed: {error}");
         backend?.Dispose();
@@ -144,6 +144,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
     private void OnDestroy()
     {
+        AIDebugTrace.Reset();
         backend?.Dispose();
         backend = null;
     }
