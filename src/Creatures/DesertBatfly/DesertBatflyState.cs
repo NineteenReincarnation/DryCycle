@@ -20,9 +20,14 @@ internal static class DesertBatflyTuning
     internal const int ApproachTicks = 45, CircleTicks = 55, DiveTicks = 36;
     internal const int FakeDivePullUpTicks = 14, FakeDiveTicks = 38, InterestTicks = 1000;
     internal const float ObserveThirst = 0.3f, CounterThirst = 0.2f;
-    internal const int DocileRoostTicks = 380, AggressiveRoostTicks = 110;
-    internal const float DocileRoostChance = 0.03f, AggressiveRoostChance = 0.008f;
-    internal const int AttackerMemory = 640, RetreatTicks = 90;
+
+    // Desert Batflies spend a little more of their idle time hanging than vanilla.
+    // Personality then spreads individuals across this range instead of using one
+    // species-wide timer/chance.
+    internal const int RoostMinTicks = 160, RoostMaxTicks = 520;
+    internal const float RoostMinChance = 0.012f, RoostMaxChance = 0.045f;
+
+    internal const int AttackerMemory = 640, RetreatTicks = 90, ApproachRetreatTicks = 55;
     internal const float LightTargetMass = 0.55f, SightRange = 340f;
     internal const float FakeDiveChance = 0.55f, AlarmRadius = 110f;
     internal const int MaxSpikes = 4, MaxPatterns = 14;
@@ -34,6 +39,7 @@ internal sealed class DesertBatflyPersonality
 {
     internal readonly int VisualSeed, PatternSeed, SpikeSeed;
     internal readonly float Temperament, Size, Contrast;
+    internal readonly float Nerve, RoostAffinity;
     internal readonly int PatternCount, SpikeCount;
     internal readonly Color BaseColor, WingColor, SecondaryColor;
 
@@ -44,6 +50,19 @@ internal sealed class DesertBatflyPersonality
         PatternSeed = random.Next();
         SpikeSeed = random.Next();
         Temperament = (float)random.NextDouble();
+
+        // Nerve is a separate stable personality factor. High-Nerve animals are
+        // less disturbed by mere proximity/approach, while actual attacks, weapons
+        // and grabs still bypass this tolerance. A small temperament bias makes
+        // harsher animals somewhat more likely to be bold without making it binary.
+        var nerveRandom = new System.Random(seed ^ 0x5A17B1D3);
+        Nerve = Mathf.Clamp01(Mathf.Lerp((float)nerveRandom.NextDouble(), Temperament, 0.25f));
+
+        // RoostAffinity is intentionally independent from aggression. Two equally
+        // calm/aggressive individuals can still differ in how often and how long
+        // they prefer to hang.
+        var roostRandom = new System.Random(seed ^ 0x3C6EF372);
+        RoostAffinity = (float)roostRandom.NextDouble();
 
         // Size is now a readable personality trait rather than unrelated random
         // scaling: calm individuals stay near vanilla size, harsher individuals
@@ -66,6 +85,34 @@ internal sealed class DesertBatflyPersonality
     }
 
     internal bool Aggressive => Temperament >= DesertBatflyTuning.AggressiveThreshold;
+
+    // Calm animals trend toward the high end, but RoostAffinity keeps the result
+    // individual rather than turning it into another docile/aggressive switch.
+    internal float RoostChance
+    {
+        get
+        {
+            float calmness = 1f - Temperament;
+            float baseChance = Mathf.Lerp(
+                DesertBatflyTuning.RoostMinChance,
+                DesertBatflyTuning.RoostMaxChance,
+                calmness);
+            return baseChance * Mathf.Lerp(0.85f, 1.25f, RoostAffinity);
+        }
+    }
+
+    internal int RoostDuration
+    {
+        get
+        {
+            float calmness = 1f - Temperament;
+            float baseTicks = Mathf.Lerp(
+                DesertBatflyTuning.RoostMinTicks,
+                DesertBatflyTuning.RoostMaxTicks,
+                calmness);
+            return Mathf.RoundToInt(baseTicks * Mathf.Lerp(0.90f, 1.25f, RoostAffinity));
+        }
+    }
 }
 
 internal sealed class DesertBatflyState : HealthState
