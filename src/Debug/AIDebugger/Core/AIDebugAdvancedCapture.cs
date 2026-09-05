@@ -104,9 +104,12 @@ internal static class AIDebugAdvancedCapture
             if (tracker == null) continue;
             string name = tracker.module?.GetType().Name ?? "<null>";
             float raw = tracker.module?.Utility() ?? 0f;
-            float smoothed = tracker.SmoothedUtility();
-            output.Add(new AIDebugUtilityRow(name, raw, smoothed,
-                tracker.weight, smoothed, tracker.continuationBonus,
+            float weightedSmoothed = tracker.SmoothedUtility();
+            float nonWeightedSmoothed = Mathf.Abs(tracker.weight) > 0.000001f
+                ? weightedSmoothed / tracker.weight
+                : 0f;
+            output.Add(new AIDebugUtilityRow(name, raw, nonWeightedSmoothed,
+                tracker.weight, weightedSmoothed, tracker.continuationBonus,
                 ReferenceEquals(tracker, comparer.highestUtilityTracker)));
         }
     }
