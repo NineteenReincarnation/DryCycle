@@ -10,6 +10,7 @@ internal static class DesertBatflyHooks
     {
         if (enabled) return;
         enabled = true;
+        DesertBatflyIntimidation.Reset();
         On.Fly.ReportToFliesRoomAI += Report;
         On.Fly.Burrowed += Burrow;
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
@@ -40,6 +41,7 @@ internal static class DesertBatflyHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
         DesertSwarmRoom.Reset();
