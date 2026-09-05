@@ -8,6 +8,8 @@ Desert Batfly 复杂机制讨论状态
 状态定义：
 - 【采纳】= 用户已经同意该方向，可以进入后续设计与任务书。
 - 【采纳·待深入讨论】= 方向已经同意，但具体规则、参数、边界和实现方式还没有敲定，禁止直接按当前草案写最终实现。
+- 【采纳·部分已敲定】= 该大方向中已有一部分可以进入任务书，但仍有明确子项尚未进行额外深入讨论；Codex 只能实现已敲定部分。
+- 【尚未进行额外深入讨论】= 已经列入正式讨论清单，但当前没有足够细节可直接实现，禁止 Codex 自行补完设计。
 - 【暂时否决】= 当前阶段暂不加入，不代表永久删除。后续讨论可以重新启用。
 
 当前基线说明：
@@ -77,41 +79,97 @@ Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 Att
 
 
 5. Lightweight Social Bond + Sex / 轻量社会纽带 + 雄性/雌性
-状态：【采纳·待深入讨论】
+状态：【采纳·部分已敲定】
 
-已经采纳的 SocialBond 方向：
-- 每只蝠蝇只维护极少量重要社会关系，优先考虑最多 1 个 FavoredCompanion，避免完整关系图带来复杂度与性能成本。
-- SocialBond 可以来源于：
-  - 成功救援；
-  - 长时间稳定同一 Chain / Roost；
-  - 多次一起逃生；
-  - 未来可能加入的性别 / 配偶 / 繁殖相关关系。
-- SocialBond 可能影响：
-  - 更偏向一起 Roost；
-  - 同伴遇险时更容易响应；
-  - 同伴死亡造成更强 Trauma；
-  - 更容易跟随该个体的社会动作或复仇；
-  - 但仍不能强制覆盖自身 Fear / PTSD / Nerve。
+5A. 已敲定、可以进入 Codex 任务书的部分
+---------------------------------------
 
-用户新增并已采纳的方向：
-- Desert Batfly 加入“雄性 / 雌性”的个体设定。
+A. Sex / 性别
+- Desert Batfly 加入稳定的 Male / Female 个体性别。
+- 性别由 EntityID.RandomSeed 稳定决定，同一只个体重新 realization、跨房间、读档后都不能变化。
+- 当前目标比例：Male 约 48%，Female 约 52%。
+- 性别不能决定 Temperament、Nerve、Conformity、VengeanceAffinity、SandSpitAffinity 等人格轴。
+- 允许存在非常凶的 Female、非常胆小的 Male；禁止把“雄性=凶、雌性=胆小”写入 AI。
+- 性别只允许形成轻度性二型：
+  - Male 倾向身体略瘦、视觉翅长略长、spike/pattern 稍突出；
+  - Female 倾向身体略大/略厚、翅面略宽；
+  - 二型必须是现有随机外观上的小幅 bias，不能覆盖 Temperament 产生的 Size / Contrast / Pattern 差异。
+- 玩家熟悉物种后可以大致辨认，但不要求远距离一眼绝对辨认。
 
-仍需深入讨论并敲定：
-- 性别比例；
-- 性别是否影响外观；
-- 性别是否影响体型、行为、声音、攻击性或 Roost；
-- 是否加入求偶；
-- 是否加入配偶关系；
-- 是否存在长期配对 / 临时配对；
-- 是否真正进入繁殖、产卵、幼体或只做社会行为层；
-- SocialBond 与配偶 / 亲属关系的优先级；
-- 一方死亡后是否产生特殊 Trauma / 行为变化；
-- 是否允许同性强 SocialBond；
-- 性别设定应避免把 Temperament、Nerve 等人格轴简单绑定成性别刻板行为。
+B. SocialBond / 重要同伴纽带
+- 每只 Desert Batfly 最多保留 1 个 SocialBondTarget 和 1 个 SocialBondStrength。
+- SocialBond 是“我特别在乎某一个具体同类”，与 Conformity 的“我容易受群体影响”完全不同。
+- SocialBond 必须是单向记录，可以非对称：A->B 很强，而 B->A 较弱是合法状态。
+- 同性、异性都可以形成强 SocialBond；SocialBond 本身不是配偶关系。
+- 不建立完整 N×N 关系图，不为每只蝠蝇建立 Dictionary<Creature, Bond>。
+- 关系来源包括：
+  1) 成功从 Peach 舌头/嘴部救援对方：高强度增益，是最重要来源之一；
+  2) 长时间稳定处于同一真实 Fly Chain / 邻近 Roost：非常缓慢积累；
+  3) 多次在同一威胁事件中近距离共同逃生：小到中等积累；
+  4) 后续其他社会系统可以通过明确 API 增加 Bond，但禁止每帧全房间社交扫描。
+- BondStrength 范围固定 0..1，并需要持久化。
+
+C. SocialBond 对现有 AI 的影响
+- Bond partner 在附近 Roost/Chain 时，提高自己选择其附近 Roost 的倾向，但不能强制进入 Chain。
+- Bond partner 遇险时，提高自己对其事件的注意/响应权重。
+- Bond partner 被 Peach 捕获时，可以提高现有 Rescue/Extreme Vengeance 的动机，但严重 Fear/PTSD 仍然拥有更高优先级。
+- Bond partner 死亡时，产生比普通同类死亡更强的 Shock / Trauma / Grief。
+- Bond 不得绕过：dead / unconscious / held / shortcut / severe Trauma / predator danger / normal physical reachability。
+- Bond 不得让普通个体无条件成为 True Avenger。
+- 当前不启用“只因为 Bond 很高就绕过 5% True Avenger trait”的特殊 Grief Avenger；如未来要做，必须另行讨论。
+
+D. Grief / 丧失重要同伴
+- SocialBondTarget 在自己可感知的死亡/捕食链中真正死亡时，可以进入 Grief。
+- Grief 是运行时/中期状态，不等于永久人格变化。
+- 目标持续时间约 1200~4000 tick，最终值可由 BondStrength 与 Personality 共同调节。
+- Grief 的表现应受 Personality 影响：
+  - 高 Temperament / 高 Nerve：更可能表现为愤怒、提高已有复仇动机，但仍受 True Avenger/PTSD 规则约束；
+  - 低 Temperament 或低 Nerve：更偏向回避、Roost、减少骚扰；
+  - 高 Conformity 不等于高 Bond，不能直接代替关系强度。
+- Grief 期间总体降低普通 Harass / Attach 意愿，提高 Roost/独处/恢复倾向。
+- 如果杀死 Bond partner 的对象已经让该个体形成严重 PTSD，则 PTSD 必须压过 Grief 复仇冲动。
+
+E. Relationship identity / 持久化
+- SocialBondTarget 必须使用稳定的 AbstractCreature / EntityID 身份，禁止存 realized Creature 引用到存档。
+- 实现时优先保存完整 EntityID 所需字段，而不是只保存容易冲突的临时对象引用。
+- partner 不在当前 realized room 时，Bond 仍然存在，但不应产生任何实时导航/全知定位。
+- partner 死亡、被永久销毁或存档中已不存在时，应有安全失效/清理策略，不能造成 NullReference 或永久 runtime state 泄漏。
+
+F. 性能
+- SocialBond 只能是固定槽，禁止 N×N 关系图。
+- Chain/Roost 关系积累应低频采样或复用已有 Chain/Roost 事件，禁止每 tick 对 11+3 群落做全对全距离检查。
+- 共同逃生 Bond 增益可以复用现有 Death/Capture 事件遍历，因为这是低频事件。
+- Rescue Bond 增益必须挂在成功救援事件上，不新增扫描。
+
+5B. 已纳入正式讨论，但【尚未进行额外深入讨论】的繁殖相关内容
+------------------------------------------------------------------
+
+以下方向已经被明确记录，但当前禁止 Codex 擅自实现：
+- Courtship / 求偶展示；
+- Accept / Neutral / Reject 求偶响应；
+- MateBond / 配偶关系及其形成规则；
+- 长期配对还是临时配对；
+- SocialBond 是否以及如何升级为 MateBond；
+- Mate 死亡是否有比普通 SocialBond 更强的专属 Grief / Trauma；
+- Gravid / 怀孕或携卵状态；
+- 性别差异在繁殖期是否改变体型、质量、风险评估、回巢倾向；
+- 交配、产卵、幼体；
+- Parenting / 亲代行为；
+- Kinship / 亲属关系；
+- Hive reproductive credit / 群落繁殖额度；
+- 与第 9 项 Colony Migration / Abstract population 的人口增长接口；
+- 是否跨周期/跨存档真正增加 Desert Batfly 数量。
+
+对上述 5B 内容的硬约束：
+- 目前只能在代码结构上避免堵死未来扩展；
+- 不要创建假装完整的繁殖系统；
+- 不要现场生成幼体；
+- 不要自行决定怀孕时长、产卵数量、配偶选择、繁殖季节等参数；
+- 等后续专门深入讨论后，再另写 Codex 任务书。
 
 当前结论：
-- 方向已经采纳。
-- 在完成深入讨论前，禁止直接写最终任务书实现细节。
+- 第 5A 已经可以整理成独立 Codex 执行任务书。
+- 第 5B 繁殖子系统只做设计记录，状态为【尚未进行额外深入讨论】。
 
 
 6. Resource Pressure / 资源竞争与群落内部冲突
@@ -224,9 +282,10 @@ Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 Att
 后续深入讨论顺序
 ----------------
 优先按照用户当前要求逐项敲定：
-1. 第 5 项：SocialBond + 雄性/雌性（下一轮优先深聊）
-2. 第 8 项：Threat Style Memory（深度讨论）
-3. 第 10 项：Corpse Ecology（深度讨论）
-4. 再回看第 2 / 3 / 4 / 7 / 9 项之间的接口和任务书拆分
+1. 第 5A 项已经整理为可执行任务书；第 5B 繁殖相关内容保留为【尚未进行额外深入讨论】。
+2. 第 8 项：Threat Style Memory（深度讨论）。
+3. 第 10 项：Corpse Ecology（深度讨论）。
+4. 再回看第 2 / 3 / 4 / 7 / 9 项之间的接口和任务书拆分。
+5. 后续单独回到第 5B：Courtship / MateBond / Gravid / Reproduction / Population integration。
 
 暂时否决的第 1、6 项保留在本文件中，不从设计历史中删除。
