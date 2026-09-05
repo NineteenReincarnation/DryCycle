@@ -1,4 +1,5 @@
 using System;
+using DryCycle.WatcherExts.PeachLizard;
 using UnityEngine;
 using Watcher;
 
@@ -12,6 +13,10 @@ namespace DryCycle.TerrainExt.QuicksandZone;
 /// terrain, and SharedPhysics.ExactTerrainRayTracePos is augmented with the same
 /// TerrainManager surface. DrillCrab.Leg can therefore discover the curve during its
 /// native Scanning -> Seeking -> Supporting sequence instead of losing support first.
+///
+/// This class is also the existing Watcher-terrain compatibility entry point used by
+/// Plugin.cs, so the sibling Peach Lizard adapter is enabled/disabled here as well.
+/// Its implementation remains isolated under WatcherExts/PeachLizard.
 /// </summary>
 internal static class QuicksandDrillCrabCompatibility
 {
@@ -33,6 +38,10 @@ internal static class QuicksandDrillCrabCompatibility
 
     internal static void EnsureEnabled()
     {
+        // Keep Peach compatibility independent from DrillCrab's enabled guard so a
+        // future partial reload can safely re-establish both Watcher adapters.
+        PeachLizardQuicksandRuntime.Enable();
+
         if (_enabled)
         {
             return;
@@ -45,6 +54,8 @@ internal static class QuicksandDrillCrabCompatibility
 
     internal static void Disable()
     {
+        PeachLizardQuicksandRuntime.Disable();
+
         if (!_enabled)
         {
             return;
