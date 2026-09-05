@@ -36,6 +36,8 @@ internal static class RopeSpearWallStickRuntime
         _enabled = true;
         On.Spear.Update += Spear_Update;
         On.Weapon.HitWall += Weapon_HitWall;
+        On.ClimbableVinesSystem.VineOverlap += ClimbableVinesSystem_VineOverlap;
+        On.Player.Update += Player_UpdateClimbGate;
     }
 
     internal static void Disable()
@@ -47,6 +49,8 @@ internal static class RopeSpearWallStickRuntime
 
         On.Spear.Update -= Spear_Update;
         On.Weapon.HitWall -= Weapon_HitWall;
+        On.ClimbableVinesSystem.VineOverlap -= ClimbableVinesSystem_VineOverlap;
+        On.Player.Update -= Player_UpdateClimbGate;
         _enabled = false;
     }
 
@@ -123,6 +127,77 @@ internal static class RopeSpearWallStickRuntime
         }
 
         orig(self);
+    }
+
+    private static ClimbableVinesSystem.VinePosition ClimbableVinesSystem_VineOverlap(
+        On.ClimbableVinesSystem.orig_VineOverlap orig,
+        ClimbableVinesSystem self,
+        Vector2 pos,
+        float rad)
+    {
+        ClimbableVinesSystem.VinePosition result = orig(self, pos, rad);
+        if (result?.vine is not RopeSpear ropeSpear)
+        {
+            return result;
+        }
+
+        // A RopeSpear is a climbable line only after it has become a true bridge:
+        // the spear end is embedded in terrain and the RopeHandle end has also been
+        // explicitly anchored to terrain. A loose/held handle therefore never lets
+        // vanilla VineGrab acquire the rope.
+        return HasFixedClimbAnchors(ropeSpear) ? result : null;
+    }
+
+    private static void Player_UpdateClimbGate(
+        On.Player.orig_Update orig,
+        Player self,
+        bool eu)
+    {
+        orig(self, eu);
+
+        if (self?.animation != Player.AnimationIndex.VineGrab ||
+            self.vinePos?.vine is not RopeSpear ropeSpear ||
+            HasFixedClimbAnchors(ropeSpear))
+        {
+            return;
+        }
+
+        // If either endpoint stops being fixed while a player is already on the
+        // rope, release VineGrab without erasing momentum. This keeps the same rule
+        // true dynamically instead of only checking it on initial acquisition.
+        self.animation = Player.AnimationIndex.None;
+        self.vinePos = null;
+        self.vineGrabDelay = Mathf.Max(self.vineGrabDelay, 10);
+        self.noGrabCounter = Mathf.Max(self.noGrabCounter, 5);
+    }
+
+    private static bool HasFixedClimbAnchors(RopeSpear spear)
+    {
+        if (spear == null ||
+            spear.mode != Weapon.Mode.StuckInWall ||
+            spear.room?.physicalObjects == null ||
+            spear.abstractPhysicalObject == null)
+        {
+            return false;
+        }
+
+        EntityID spearId = spear.abstractPhysicalObject.ID;
+        for (int layer = 0; layer < spear.room.physicalObjects.Length; layer++)
+        {
+            var objects = spear.room.physicalObjects[layer];
+            for (int i = 0; i < objects.Count; i++)
+            {
+                if (objects[i] is RopeHandle handle &&
+                    !handle.slatedForDeletetion &&
+                    handle.ParentSpearID == spearId &&
+                    handle.Anchored)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static Vector2 ResolveFlightDirection(RopeSpear spear, Vector2 velocity)
