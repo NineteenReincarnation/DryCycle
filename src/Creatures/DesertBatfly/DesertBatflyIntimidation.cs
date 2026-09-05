@@ -57,8 +57,9 @@ internal static class DesertBatflyIntimidation
     private const int CorpseReminderShockTicks = 60;
     private const int CorpseReminderCooldownTicks = 180;
 
-    // One event has one actual leader. The group cap of three therefore means the normal
-    // social form is one true avenger plus zero, one or two followers.
+    // One event has one actual leader. The runtime group cap of three means the normal
+    // social form remains one true avenger plus zero, one or two followers even if
+    // additional deaths/captures occur before the first group has finished withdrawing.
     private const int MaxTrueAvengersPerEvent = 1;
     private const float VengeanceCollapseStrength = 0.84f;
     private const int VengeanceCaptureDelayMin = 12;
@@ -658,43 +659,87 @@ internal static class DesertBatflyIntimidation
         LizardTongue rescueTongue,
         bool suppressNewVengeance)
     {
-        if (suppressNewVengeance || trueCandidates == null || trueCandidates.Count == 0 ||
-            !ValidThreat(threat, victim?.room))
+        if (suppressNewVengeance || !ValidThreat(threat, victim?.room))
             return;
 
-        trueCandidates.Sort(
-            (a, b) => b.Personality.VengeanceAffinity.CompareTo(a.Personality.VengeanceAffinity));
-
+        // Count the whole currently active social group for this target, not merely
+        // the participants created by this event. Without this cross-event count, a
+        // leader surviving multiple nearby deaths could accumulate two new followers
+        // per event and silently grow beyond the intended 1+2 group size.
         List<DesertBatfly> leaders = new(MaxTrueAvengersPerEvent);
         int participants = 0;
-        for (int i = 0; i < trueCandidates.Count &&
-             leaders.Count < MaxTrueAvengersPerEvent &&
-             participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
+        DesertBatfly existingLeader = null;
+        State existingLeaderState = null;
+
+        for (int i = 0; i < bats.Count; i++)
         {
-            DesertBatfly bat = trueCandidates[i];
-            State state = StateFor(bat);
-            FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
-            float trauma = PersistentTraumaStrength(bat, threat);
-            if (fear.Strength >= VengeanceCollapseStrength ||
-                trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+            DesertBatfly bat = bats[i];
+            if (!TryGetVengeanceState(bat, out State social) ||
+                social.Vengeance == VengeanceMode.None ||
+                social.VengeanceTarget != threat ||
+                social.Role == SocialRole.None)
                 continue;
 
-            ArmVengeance(
-                bat,
-                state,
-                threat,
-                kind,
-                victim,
-                rescueTongue,
-                bat.Personality.VengeanceDrive,
-                1f,
-                false,
-                null);
-            leaders.Add(bat);
             participants++;
+            if (existingLeader == null && social.Role == SocialRole.TrueAvenger)
+            {
+                existingLeader = bat;
+                existingLeaderState = social;
+            }
         }
 
-        if (leaders.Count == 0 || participants >= DesertBatflyTuning.SocialVengeanceGroupCap)
+        if (existingLeader != null)
+        {
+            leaders.Add(existingLeader);
+
+            // A leader already disengaging cannot recruit fresh followers from a later
+            // event. Let the existing group finish cleanly instead of turning Withdraw
+            // into an accidental recruitment window.
+            if (existingLeaderState.Vengeance == VengeanceMode.Withdraw)
+                return;
+        }
+
+        if (participants >= DesertBatflyTuning.SocialVengeanceGroupCap)
+            return;
+
+        if (leaders.Count == 0)
+        {
+            if (trueCandidates == null || trueCandidates.Count == 0)
+                return;
+
+            trueCandidates.Sort(
+                (a, b) => b.Personality.VengeanceAffinity.CompareTo(a.Personality.VengeanceAffinity));
+
+            for (int i = 0; i < trueCandidates.Count &&
+                 leaders.Count < MaxTrueAvengersPerEvent &&
+                 participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
+            {
+                DesertBatfly bat = trueCandidates[i];
+                State state = StateFor(bat);
+                FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
+                float trauma = PersistentTraumaStrength(bat, threat);
+                if (fear.Strength >= VengeanceCollapseStrength ||
+                    trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+                    continue;
+
+                ArmVengeance(
+                    bat,
+                    state,
+                    threat,
+                    kind,
+                    victim,
+                    rescueTongue,
+                    bat.Personality.VengeanceDrive,
+                    1f,
+                    false,
+                    null);
+                leaders.Add(bat);
+                participants++;
+            }
+        }
+
+        if (leaders.Count == 0 ||
+            participants >= DesertBatflyTuning.SocialVengeanceGroupCap)
             return;
 
         List<FollowerCandidate> followers = new(bats.Count);
