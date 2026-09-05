@@ -83,23 +83,31 @@ internal static class RopeSpearClimbController
             return false;
         }
 
-        if (input.y != 0)
+        // Movement on a flexible rope must follow the rope's local tangent rather
+        // than only looking at world-space Up/Down. On a diagonal taut rope this
+        // means either Up or Right can advance the player when both point along the
+        // visible rope, and Up+Right combines naturally instead of getting stuck.
+        Vector2 climbInput = new Vector2(input.x, input.y);
+        float climbAmount = GetClimbAmount(rope, normalizedPosition, climbInput);
+        if (Mathf.Abs(climbAmount) > 0.05f)
         {
             normalizedPosition = AdvanceGrabPosition(
                 rope,
                 normalizedPosition,
-                input.y);
-            poseCycle += 0.22f * Mathf.Abs(input.y);
+                climbAmount);
+            poseCycle += 0.22f * Mathf.Abs(climbAmount);
         }
         else
         {
             poseCycle += 0.035f * Mathf.Abs(input.x);
         }
 
+        bool movingTowardSpear = climbAmount > 0.05f;
+
         // Diagonal spears cannot use Rain World's horizontal/vertical beam tiles.
         // When the player finishes climbing to the spear end, transfer directly to
         // the real angled shaft before trying the vanilla horizontal-beam handoff.
-        if (input.y > 0 &&
+        if (movingTowardSpear &&
             normalizedPosition >= SpearMountStart &&
             RopeSpearShaftTraversalRuntime.TryMountFromRopeEndpoint(player, spear))
         {
@@ -107,8 +115,10 @@ internal static class RopeSpearClimbController
             return false;
         }
 
-        // Cardinal horizontal spears still use vanilla beam traversal.
-        if (input.y > 0 && TryMountSpearFromRope(player, spear, rope, normalizedPosition))
+        // Cardinal horizontal spears still use vanilla beam traversal. Reaching the
+        // spear end by following a diagonal rope horizontally is valid too, so this
+        // handoff is driven by rope progress rather than requiring world-space Up.
+        if (movingTowardSpear && TryMountSpearFromRope(player, spear, rope, normalizedPosition))
         {
             player.vineClimbCursor *= 0.2f;
             return false;
@@ -157,9 +167,10 @@ internal static class RopeSpearClimbController
             player.bodyChunks[1].vel -= player.vineClimbCursor / 190f;
         }
 
-        // Preserve useful horizontal swing authority, but keep it weaker than the
-        // rope constraint so it cannot pull the body away from the centreline.
-        if (input.x != 0)
+        // Horizontal input is swing authority only when it is mostly perpendicular
+        // to the rope. On a diagonal rope, horizontal input is already meaningful
+        // climbing input and must not simultaneously pull the body away from it.
+        if (input.x != 0 && Mathf.Abs(climbAmount) < 0.35f)
         {
             float swing = input.x * 0.085f;
             player.mainBodyChunk.vel.x += swing;
@@ -298,38 +309,34 @@ internal static class RopeSpearClimbController
             RopeReaction);
     }
 
+    private static float GetClimbAmount(
+        RopeSpearRopeSystem rope,
+        float current,
+        Vector2 input)
+    {
+        if (rope == null || input.sqrMagnitude < 0.01f)
+        {
+            return 0f;
+        }
+
+        if (input.sqrMagnitude > 1f)
+        {
+            input.Normalize();
+        }
+
+        GetRopePose(rope, current, out _, out Vector2 tangent);
+        return Mathf.Clamp(Vector2.Dot(input, tangent), -1f, 1f);
+    }
+
     private static float AdvanceGrabPosition(
         RopeSpearRopeSystem rope,
         float current,
-        int verticalInput)
+        float climbAmount)
     {
         float referenceLength = Mathf.Max(80f, rope.RouteLength);
         float step = Mathf.Clamp(ClimbSpeed / referenceLength, 0.004f, 0.035f);
-        float lowerT = Mathf.Clamp01(current - step);
-        float upperT = Mathf.Clamp01(current + step);
-        Vector2 lower = rope.GetPoint(lowerT);
-        Vector2 upper = rope.GetPoint(upperT);
-
-        float direction;
-        if (Mathf.Abs(upper.y - lower.y) > 0.45f)
-        {
-            direction = upper.y > lower.y ? 1f : -1f;
-        }
-        else
-        {
-            // On a nearly horizontal section, define Up as motion toward whichever
-            // endpoint is physically higher. This stays deterministic around bends.
-            Vector2 handleEnd = rope.GetPoint(0f);
-            Vector2 spearEnd = rope.GetPoint(1f);
-            direction = spearEnd.y >= handleEnd.y ? 1f : -1f;
-        }
-
-        if (verticalInput < 0)
-        {
-            direction = -direction;
-        }
-
-        return Mathf.Clamp01(current + step * direction);
+        return Mathf.Clamp01(
+            current + step * Mathf.Clamp(climbAmount, -1f, 1f));
     }
 
     private static void GetRopePose(
