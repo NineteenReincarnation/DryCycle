@@ -143,6 +143,23 @@ internal static class Program
         bat.bodyChunks = new[] { new BodyChunk(bat, 0, new Vector2(40f, 40f), 8.5f, 0.095f) };
         bat.grabbedBy = new List<Creature.Grasp>();
         Set(bat, "DesertAI", Activator.CreateInstance(aiType, Flags, null, new object[] { bat }, null));
+
+        Type peachPredation = mod.GetType("DryCycle.WatcherExts.PeachLizard.PeachLizardDesertBatflyPredation", true);
+        MethodInfo hasEdibleRemains = peachPredation.GetMethod("HasEdibleRemains", Flags);
+        bat.bites = 3;
+        stateType.GetField("MealConsumed", Flags).SetValue(creature.state, false);
+        Check((bool)hasEdibleRemains.Invoke(null, new object[] { bat }), "Peach scavenging accepts intact Desert Batfly remains");
+        bat.bites = 1;
+        Check((bool)hasEdibleRemains.Invoke(null, new object[] { bat }), "Peach scavenging accepts partially eaten remains while a bite remains");
+        bat.bites = 0;
+        Check(!(bool)hasEdibleRemains.Invoke(null, new object[] { bat }), "Peach scavenging rejects exhausted zero-bite remains");
+        bat.bites = 1;
+        stateType.GetField("MealConsumed", Flags).SetValue(creature.state, true);
+        Check(!(bool)hasEdibleRemains.Invoke(null, new object[] { bat }), "Peach scavenging rejects MealConsumed remains even if runtime bites are inconsistent");
+        bat.bites = 3;
+        stateType.GetField("MealConsumed", Flags).SetValue(creature.state, false);
+        Console.WriteLine("Peach scavenging: intact and partial corpses remain food; exhausted/consumed remains are rejected.");
+
         var rock = Bare<Rock>();
         rock.abstractPhysicalObject = Bare<AbstractPhysicalObject>();
         var rockChunk = new BodyChunk(rock, 0, Vector2.zero, 3f, 0.1f);
