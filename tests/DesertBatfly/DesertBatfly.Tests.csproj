@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>13</LangVersion>
+    <RainWorldDir Condition="'$(RainWorldDir)' == ''">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Creatures/DesertBatfly/DesertBatflyState.cs" Link="DesertBatflyState.cs" />
+    <Reference Include="PUBLIC-Assembly-CSharp"><HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="HOOKS-Assembly-CSharp"><HintPath>$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

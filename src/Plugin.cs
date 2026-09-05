@@ -4,6 +4,7 @@ using BepInEx;
 using BepInEx.Logging;
 using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
+using DryCycle.Creatures.DesertBatfly;
 using DryCycle.DayNight;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
@@ -52,6 +53,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (!_contentRegistered)
         {
             DryCycleContent.Register(new MossySpiderDefinition());
+            DryCycleContent.Register(new DesertBatflyDefinition());
             _contentRegistered = true;
         }
 
@@ -59,6 +61,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         DryCycleContent.Enable();
         MossySpiderBackPlatform.Enable();
+        DesertBatflyHooks.Enable();
         SpinebackLizardHooks.Enable();
         DewPodAudioHooks.InitializeSoundIds();
 
@@ -74,6 +77,7 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         DryCycleContent.Disable();
         MossySpiderBackPlatform.Disable();
+        DesertBatflyHooks.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
