@@ -91,9 +91,6 @@ internal static class RopeSpearWallStickRuntime
         tail = center - direction * ShaftTailReach;
         wallEnd = center + direction * ShaftWallReach;
 
-        // Never expose a traversal endpoint inside solid terrain. Back the wall-side
-        // endpoint out along the shaft while keeping the tail at the rope attachment
-        // side. This is important for acute diagonal hits near tile corners.
         for (int i = 0; i < 7 && spear.room.GetTile(wallEnd).Solid; i++)
         {
             wallEnd -= direction * 2f;
@@ -147,9 +144,6 @@ internal static class RopeSpearWallStickRuntime
             if (TryResolveStoredStuckDirection(ropeSpear, out Vector2 storedDirection) &&
                 IsNonCardinal(storedDirection))
             {
-                // Vanilla pole tiles are axis-aligned. A diagonal RopeSpear uses the
-                // custom shaft traversal instead, so never create a fake horizontal
-                // or vertical beam that disagrees with the visible spear.
                 ropeSpear.addPoles = false;
             }
 
@@ -168,13 +162,7 @@ internal static class RopeSpearWallStickRuntime
             return;
         }
 
-        // RopeSpear is a traversal anchor, so a legal terrain hit is deterministic.
-        // No vanilla random wall-stick roll is allowed for this weapon.
         ropeSpear.alwaysStickInWalls = true;
-
-        // Keep genuine projectile motion through an upward/diagonal apex. A short
-        // near-zero timeout below still releases an actually stalled spear so a miss
-        // cannot stay in Thrown forever.
         ropeSpear.doNotTumbleAtLowSpeed = true;
 
         FlightState state = FlightStates.GetOrCreateValue(ropeSpear);
@@ -241,13 +229,14 @@ internal static class RopeSpearWallStickRuntime
         bool wasStuckInWall = self is RopeSpear && self.mode == Weapon.Mode.StuckInWall;
 
         Vector2 liveDirection = Vector2.zero;
+        FlightState liveState = null;
         bool haveLiveDirection = self is RopeSpear liveSpear &&
-                                 FlightStates.TryGetValue(liveSpear, out FlightState state) &&
-                                 state.InSpearUpdate &&
-                                 state.Direction.sqrMagnitude > 0.25f;
+                                 FlightStates.TryGetValue(liveSpear, out liveState) &&
+                                 liveState.InSpearUpdate &&
+                                 liveState.Direction.sqrMagnitude > 0.25f;
         if (haveLiveDirection)
         {
-            liveDirection = state.Direction.normalized;
+            liveDirection = liveState.Direction.normalized;
         }
 
         orig(self, newMode);
@@ -418,9 +407,6 @@ internal static class RopeSpearWallStickRuntime
         RememberStuckDirection(spear, direction);
         spear.ChangeMode(Weapon.Mode.StuckInWall);
 
-        // ChangeMode does the normal stuck-state bookkeeping. Reassert only the
-        // exact anchor and continuous angle afterwards; diagonal fake pole creation
-        // has already been suppressed by the ChangeMode hook.
         spear.stuckInWall = anchorPosition;
         spear.setRotation = direction;
         spear.rotation = direction;
@@ -456,9 +442,6 @@ internal static class RopeSpearWallStickRuntime
             return false;
         }
 
-        // Use the actual post-physics center when possible. The velocity projection
-        // remains as a fallback for frames where collision handling kept the center
-        // almost unchanged. The tip reach then extends the sweep to the spear point.
         Vector2 currentCenter = spear.firstChunk.pos;
         Vector2 centerEnd = Vector2.Distance(startPosition, currentCenter) > 0.5f
             ? currentCenter
@@ -640,8 +623,6 @@ internal static class RopeSpearWallStickRuntime
             return false;
         }
 
-        // "100%" means every legal terrain impact, not bypassing explicit authoring
-        // and room-safety exclusions.
         if (airTile.x <= 0 ||
             airTile.y <= 0 ||
             airTile.x >= room.abstractRoom.size.x - 1 ||
