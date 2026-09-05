@@ -105,10 +105,17 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        DesertBatflyIntimidation.Update(this);
-        bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
-        if (extremeVengeance)
-            DesertAI.CancelAttack();
+        // Die() owns the one-shot mortality broadcast and Forget(). Corpses must not
+        // recreate a runtime morale state merely because persistent Trauma remains in
+        // CreatureState; doing so would keep activeStates non-zero until corpse cleanup.
+        bool extremeVengeance = false;
+        if (!dead)
+        {
+            DesertBatflyIntimidation.Update(this);
+            extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
+            if (extremeVengeance)
+                DesertAI.CancelAttack();
+        }
 
         if (room == null) return;
         Emergence.Update(eu);
@@ -309,6 +316,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         if (DesertState.MealConsumed || bites <= 0 || grasp?.grabber is not Player player) return;
         if (SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) < 0) return;
+
+        // Vanilla Fly.BitByPlayer calls Die() on the first bite. Attribute that live
+        // consumption before entering vanilla so nearby bats treat visibly eating a
+        // flockmate as a genuine player kill rather than an unexplained death.
+        if (!dead)
+        {
+            recentLethalDamager = player;
+            recentLethalDamageTicks = 2;
+            recentLethalThreatScale = 0.90f;
+        }
 
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
         try
