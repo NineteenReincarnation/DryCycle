@@ -35,8 +35,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         mainBodyChunk.rad = DesertBatflyTuning.Radius * Personality.Size;
         mainBodyChunk.mass = DesertBatflyTuning.Mass * Personality.Size;
-        // Fly's grasp anchor is its main chunk; the personality scale therefore
-        // affects grabbing, weapons and terrain collision as well as rendering.
         airFriction = 0.975f;
         bites = DesertState.Bites;
         if (DesertState.MealConsumed) eaten = 1;
@@ -52,8 +50,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void NewRoom(Room newRoom)
     {
-        // Keep playerHolder across a carried room transition. Release tracking then
-        // still fires correctly if the player drops/throws the bat in the new room.
         DesertAI?.ResetRoom();
         base.NewRoom(newRoom);
     }
@@ -68,9 +64,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     internal void BeginRockStunGuard()
     {
-        // Rock.HitSomething can pass through several pieces of vanilla weapon and
-        // creature code in one collision. A normal Rock may stun, but that collision
-        // itself must never transition this creature into the dead state.
         rockDeathGuardTicks = Mathf.Max(rockDeathGuardTicks, 8);
     }
 
@@ -84,6 +77,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             recentLethalDamager = null;
             recentLethalThreatScale = 0f;
         }
+        if (!dead) DesertState.TickTrauma();
 
         if (room == null)
         {
@@ -99,9 +93,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertAI.TickMemory();
 
         Room currentRoom = room;
-        // Vanilla Fly hardcodes room.fliesRoomAi for flocking and burrowing. Only
-        // this synchronous call sees the private species pool; never alter vanilla
-        // SWARMROOM registration or population state globally.
         FliesRoomAI original = currentRoom.fliesRoomAi;
         var colony = DesertSwarmRoom.For(currentRoom);
         currentRoom.fliesRoomAi = colony.Hive;
@@ -117,17 +108,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        // Mortality awareness runs after normal AI but before Attach/Interfere physics.
-        // It can cancel ordinary aggression or, for the rare extreme personality,
-        // override movement with the dedicated vengeance/rescue state machine.
         DesertBatflyIntimidation.Update(this);
         bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
         if (extremeVengeance)
         {
-            // Extreme vengeance owns the whole attack lane while active. Release any
-            // normal attack slot the ordinary AI may have tried to reacquire earlier
-            // in this frame and never stack drinking/non-damaging Interfere on top of
-            // the dedicated lethal vengeance collision.
+            // Vengeance owns the attack lane. Followers are included here too, so
+            // ordinary Attach/Interfere can never stack with social vengeance damage.
             DesertAI.CancelAttack();
         }
 
@@ -162,10 +148,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             movement * DesertBatflyTuning.SandSpitMovementBonus;
 
         if (sandStruggleMeter < sandSpitThreshold) return;
-
-        // Short deterministic wind-up: FlyGraphics intensifies the existing grabbed
-        // wing struggle during these few ticks, making the burst readable before the
-        // screen effect appears.
         sandStruggleMeter = 0f;
         sandSpitWindup = DesertBatflyTuning.SandSpitWindupTicks;
     }
@@ -221,8 +203,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         playerHolder = player;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
-        // A new grab never produces an immediate burst. Existing post-spit cooldown
-        // is preserved so rapid grab/drop cycling cannot bypass it.
         sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);
         PrepareNextSandThreshold();
     }
@@ -264,8 +244,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         if (source?.owner is Rock)
         {
-            // Rock is explicitly nonlethal but still frightening. There is no death
-            // attribution or mortality wave, only the ordinary direct-threat response.
             DesertAI.Threatened(attacker, true);
             BeginRockStunGuard();
 
@@ -279,10 +257,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         bool supportedLethalThreat = damage > 0f &&
             DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
 
-        // For a supported potentially-lethal hit, preserve the intact Fly Chain until
-        // base.Violence has had its chance to call Die(). Die() can then snapshot the
-        // real pre-death FirstInChain() and mark every chain-mate as a direct witness.
-        // If the bat survives, we perform the ordinary Threatened() transition below.
+        // Do not dismantle an intact Fly chain before a lethal hit gets to Die(). The
+        // death path snapshots/broadcasts the full pre-death chain first. A surviving
+        // target receives the ordinary direct threat transition immediately afterwards.
         if (supportedLethalThreat)
         {
             recentLethalDamager = attacker;
@@ -312,8 +289,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Grabbed(Grasp grasp)
     {
-        // Fly-on-Fly grasps are the vanilla hanging-chain mechanism, not an attack.
-        // Treating them as danger would instantly dismantle every chain we create.
         if (grasp?.grabber is Player player)
         {
             if (playerHolder != player)
@@ -325,9 +300,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         else if (grasp?.grabber is Lizard lizard &&
                  DesertBatflyIntimidation.IsSupportedLethalThreat(lizard))
         {
-            // A direct Peach bite/grasp may never use the tongue. Broadcast before
-            // Threatened() dismantles a hanging chain so chain-mates retain their
-            // direct-witness status. Tongue->Bite duplicates are internally debounced.
             DesertBatflyIntimidation.BroadcastPredatorCapture(this, lizard, null);
             DesertAI.Threatened(lizard, true);
         }
@@ -346,7 +318,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (DesertState.MealConsumed || bites <= 0 || grasp?.grabber is not Player player) return;
         if (SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) < 0) return;
 
-        // Arena ObjectEaten reads FoodPoints directly instead of nourishment.
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
         try
         {
@@ -367,14 +338,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Die()
     {
-        // A normal Rock is defined as stun-only for this species. Guard the whole
-        // Rock collision stack rather than relying solely on Violence damage values;
-        // non-Rock Violence explicitly bypasses this protection above.
         if (!dead && rockDeathGuardTicks > 0 && !resolvingNonRockViolence && drown < 1f)
             return;
 
-        // Vanilla Fly.Update has an intentional chance to die while held by a player.
-        // Desert Batflies must survive being picked up and remain alive after release.
         if (runningVanillaUpdate && !dead && drown < 1f &&
             grabbedBy.Count > 0 && grabbedBy[0].grabber is Player)
             return;
@@ -392,17 +358,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             : null;
         bool revengeFailed = !wasDead && DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
 
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        DesertAI?.CancelAttack();
-        Emergence?.Cancel();
-        base.Die();
-
-        // Broadcast only once on live -> dead and only for a supported recent threat.
-        // A killed avenger is marked specially so the next fear wave is stronger and
-        // cannot immediately recruit a replacement suicide attacker.
-        if (!wasDead && dead && killer != null)
+        // Creature.Die() performs grasp teardown. Broadcast while the victim and all
+        // chain mates still retain their real pre-death chain topology, otherwise a
+        // spear kill in a hanging chain can silently degrade into a weak proximity alarm.
+        if (!wasDead && killer != null)
         {
             if (killer is Player playerKiller)
             {
@@ -425,6 +384,13 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                     revengeFailed);
             }
         }
+
+        playerHolder = null;
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
+        DesertAI?.CancelAttack();
+        Emergence?.Cancel();
+        base.Die();
 
         recentLethalDamager = null;
         recentLethalDamageTicks = 0;
