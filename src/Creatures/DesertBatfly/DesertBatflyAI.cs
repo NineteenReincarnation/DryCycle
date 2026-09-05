@@ -13,7 +13,7 @@ internal sealed class DesertBatflyAI
     private Creature attacker;
     private Creature danger;
     private int memory, retreat, ticks, scan, pursuit, unseen, interest;
-    private bool hasSlot;
+    private bool hasSlot, hasRoost;
     private float drainedWater;
     private Vector2 escapeFrom, attachOffset, roost;
     private BodyChunk attachedChunk;
@@ -27,6 +27,8 @@ internal sealed class DesertBatflyAI
         if (memory > 0 && --memory == 0) attacker = null;
         if (!fly.Consious || fly.grabbedBy.Count > 0 || fly.inShortcut)
         {
+            if (IsInFlyChain(fly)) BreakHangChain(null, DesertBatflyTuning.RetreatTicks);
+            else if (Mode == Activity.Roost) StopRoost(false);
             CancelAttack();
             return;
         }
@@ -35,9 +37,11 @@ internal sealed class DesertBatflyAI
 
     internal void ResetRoom()
     {
+        if (Mode == Activity.Roost) StopRoost(false);
         CancelAttack();
         attacker = danger = null;
         memory = retreat = pursuit = unseen = 0;
+        hasRoost = false;
     }
 
     internal void Threatened(Creature source)
@@ -49,18 +53,45 @@ internal sealed class DesertBatflyAI
             escapeFrom = source.mainBodyChunk.pos;
         }
         else escapeFrom = fly.mainBodyChunk.pos - Vector2.up * 20f;
-        retreat = DesertBatflyTuning.RetreatTicks;
-        CancelAttack();
-        SetMode(Activity.Escape);
+
+        if (IsInFlyChain(fly))
+        {
+            BreakHangChain(source, DesertBatflyTuning.RetreatTicks);
+        }
+        else
+        {
+            retreat = DesertBatflyTuning.RetreatTicks;
+            CancelAttack();
+            SetMode(Activity.Escape);
+        }
+
         if (fly.room == null) return;
         foreach (var other in DesertSwarmRoom.For(fly.room).Hive.flies)
         {
             if (other is not DesertBatfly bat || bat == fly ||
                 !Custom.DistLess(fly.mainBodyChunk.pos, bat.mainBodyChunk.pos, DesertBatflyTuning.AlarmRadius)) continue;
-            // Local, non-recursive alert; neighbours do not acquire a revenge target.
+            // Direct attacks/weapons still create a local alarm. Casual approach
+            // does not use this path, so high-Nerve neighbours can remain calm.
             bat.DesertAI.escapeFrom = escapeFrom;
             bat.DesertAI.retreat = Mathf.Max(bat.DesertAI.retreat, 25);
         }
+    }
+
+    private void DisturbedByApproach(Creature source)
+    {
+        escapeFrom = source?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up * 20f;
+
+        // A hanging chain is structurally coupled: once one member decides the
+        // approaching creature is worth fleeing from, the whole chain releases.
+        if (IsInFlyChain(fly))
+        {
+            BreakHangChain(source, DesertBatflyTuning.ApproachRetreatTicks);
+            return;
+        }
+
+        retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
+        CancelAttack();
+        SetMode(Activity.Escape);
     }
 
     internal void CancelAttack()
@@ -88,6 +119,7 @@ internal sealed class DesertBatflyAI
         ticks++;
         if (fly.Emergence.Active || fly.grabbedBy.Count > 0 || !fly.Consious || fly.inShortcut)
         {
+            if (Mode == Activity.Roost) StopRoost(true);
             CancelAttack();
             fly.movMode = Fly.MovementMode.Passive;
             return;
@@ -100,9 +132,14 @@ internal sealed class DesertBatflyAI
         }
         if (fly.AI.fleeFromRain || fly.AI.behavior == FlyAI.Behavior.Burrow || fly.AI.luredCounter > 0 || fly.safariControlled)
         {
+            if (Mode == Activity.Roost) StopRoost(true);
             CancelAttack();
             return;
         }
+
+        if (danger != null && retreat <= 0)
+            DisturbedByApproach(danger);
+
         if (danger != null || retreat > 0)
         {
             hasSlot = false;
@@ -141,7 +178,11 @@ internal sealed class DesertBatflyAI
         }
         Vector2 center = Target.mainBodyChunk.pos;
         float distance = Vector2.Distance(fly.mainBodyChunk.pos, center);
-        if (Mode is Activity.Flight or Activity.Cooldown or Activity.Roost) SetMode(Activity.Observe);
+        if (Mode is Activity.Flight or Activity.Cooldown or Activity.Roost)
+        {
+            if (Mode == Activity.Roost) StopRoost(true);
+            SetMode(Activity.Observe);
+        }
         switch (Mode)
         {
             case Activity.Observe:
@@ -299,14 +340,36 @@ internal sealed class DesertBatflyAI
             var reverse = creature.Template.CreatureRelationship(fly.Template);
             bool predator = creature is not Player && (relation.type == CreatureTemplate.Relationship.Type.Afraid ||
                 reverse.type == CreatureTemplate.Relationship.Type.Eats || reverse.type == CreatureTemplate.Relationship.Type.Attacks);
-            if (predator && distance < Mathf.Lerp(90f, 260f, Mathf.Clamp01(creature.TotalMass))) danger = creature;
-            if (creature is Player && distance < 110f)
+
+            if (predator)
             {
-                float closing = Vector2.Dot(creature.mainBodyChunk.vel, Custom.DirVec(creature.mainBodyChunk.pos, fly.mainBodyChunk.pos));
-                if (closing > 2.8f) pursuit += 8;
-                else pursuit = Mathf.Max(0, pursuit - 4);
-                if (pursuit >= 24) { Threatened(creature); pursuit = 0; }
+                float ordinaryThreatDistance = Mathf.Lerp(90f, 260f, Mathf.Clamp01(creature.TotalMass));
+                float nerveScale = Mathf.Lerp(1.15f, 0.58f, fly.Personality.Nerve);
+                float threatDistance = Mathf.Max(55f, ordinaryThreatDistance * nerveScale);
+                if (distance < threatDistance) danger = creature;
             }
+
+            if (creature is Player)
+            {
+                float reactionDistance = Mathf.Lerp(125f, 78f, fly.Personality.Nerve);
+                if (distance < reactionDistance)
+                {
+                    float closing = Vector2.Dot(creature.mainBodyChunk.vel, Custom.DirVec(creature.mainBodyChunk.pos, fly.mainBodyChunk.pos));
+                    float closingThreshold = Mathf.Lerp(2.1f, 4.4f, fly.Personality.Nerve);
+                    int pursuitThreshold = Mathf.RoundToInt(Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
+
+                    if (closing > closingThreshold) pursuit += 8;
+                    else pursuit = Mathf.Max(0, pursuit - 4);
+
+                    if (pursuit >= pursuitThreshold)
+                    {
+                        DisturbedByApproach(creature);
+                        pursuit = 0;
+                    }
+                }
+                else pursuit = Mathf.Max(0, pursuit - 2);
+            }
+
             if (distance < closest && CanHarass(creature)) { closest = distance; candidate = creature; }
         }
         if (Target == null && fly.Personality.Aggressive && fly.DesertState.Cooldown == 0 && retreat == 0 &&
@@ -349,9 +412,11 @@ internal sealed class DesertBatflyAI
     {
         fly.LoseAllGrasps();
         fly.burrowOrHangSpot = null;
-        fly.AI.behavior = FlyAI.Behavior.Idle;
+        if (fly.AI.behavior == FlyAI.Behavior.Chain) fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+        else fly.AI.behavior = FlyAI.Behavior.Idle;
         fly.AI.followingDijkstraMap = -1;
         fly.movMode = Fly.MovementMode.BatFlight;
+        hasRoost = false;
         Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, goal);
         if (fly.room.GetTile(fly.mainBodyChunk.pos + direction * 25f).Solid ||
             (fly.room.terrain != null && fly.room.terrain.Contains(fly.mainBodyChunk.pos + direction * 25f)))
@@ -367,17 +432,121 @@ internal sealed class DesertBatflyAI
     {
         if (Mode == Activity.Roost)
         {
-            if (ticks > (fly.Personality.Aggressive ? DesertBatflyTuning.AggressiveRoostTicks : DesertBatflyTuning.DocileRoostTicks)) { SetMode(Activity.Flight); return; }
+            if (!hasRoost || ticks > fly.Personality.RoostDuration || fly.AI.fleeFromRain)
+            {
+                StopRoost(true);
+                return;
+            }
+
+            // Use the actual vanilla hanging state so FlyGraphics gets the original
+            // upside-down body/wing pose instead of a custom imitation.
+            if (fly.AI.behavior != FlyAI.Behavior.Chain)
+                fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
             fly.burrowOrHangSpot = roost;
             fly.movMode = Fly.MovementMode.Hang;
             fly.mainBodyChunk.vel *= 0.5f;
             return;
         }
-        if (scan != 0 || Random.value > (fly.Personality.Aggressive ? DesertBatflyTuning.AggressiveRoostChance : DesertBatflyTuning.DocileRoostChance)) return;
-        if (fly.room.GetTile(fly.mainBodyChunk.pos + Vector2.up * 20f).Solid)
+
+        // Vanilla Chain remains valid and may accumulate additional Fly members.
+        // The custom roost chance is an extra desert-species inclination, not a
+        // replacement for the base game chain system.
+        if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
+        if (scan != 0 || Random.value > fly.Personality.RoostChance) return;
+        if (!TryFindRoost(out Vector2 spot)) return;
+
+        roost = spot;
+        hasRoost = true;
+        fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
+        fly.burrowOrHangSpot = roost;
+        fly.movMode = Fly.MovementMode.Hang;
+        SetMode(Activity.Roost);
+    }
+
+    private bool TryFindRoost(out Vector2 spot)
+    {
+        spot = default;
+        IntVector2 tile = fly.room.GetTilePosition(fly.mainBodyChunk.pos);
+        if (!fly.AI.ChainTile(tile)) return false;
+
+        Room.Tile current = fly.room.GetTile(tile);
+        Room.Tile above = fly.room.GetTile(tile.x, tile.y + 1);
+        Vector2 middle = fly.room.MiddleOfTile(tile);
+
+        if (current.horizontalBeam)
+            spot = new Vector2(fly.mainBodyChunk.pos.x, middle.y - 4f);
+        else if (above.verticalBeam && !current.verticalBeam)
+            spot = middle + Vector2.up * 10f;
+        else
+            spot = new Vector2(fly.mainBodyChunk.pos.x, middle.y + 10f);
+
+        return true;
+    }
+
+    private void StopRoost(bool releaseWholeChain)
+    {
+        if (releaseWholeChain && IsInFlyChain(fly))
         {
-            roost = fly.mainBodyChunk.pos;
-            SetMode(Activity.Roost);
+            ReleaseHangChain(false, null, 0);
+            return;
+        }
+
+        fly.LoseAllGrasps();
+        fly.burrowOrHangSpot = null;
+        hasRoost = false;
+        if (fly.AI.behavior == FlyAI.Behavior.Chain)
+            fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+        fly.movMode = Fly.MovementMode.BatFlight;
+        SetMode(Activity.Flight);
+    }
+
+    private static bool IsInFlyChain(Fly member)
+    {
+        return member?.AI != null && member.AI.behavior == FlyAI.Behavior.Chain;
+    }
+
+    private void BreakHangChain(Creature source, int retreatTicks)
+    {
+        ReleaseHangChain(true, source, retreatTicks);
+    }
+
+    private void ReleaseHangChain(bool frightened, Creature source, int retreatTicks)
+    {
+        if (fly == null) return;
+
+        Fly member = fly.FirstInChain();
+        int guard = 0;
+        Vector2 sourcePos = source?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up * 20f;
+
+        while (member != null && guard++ < 32)
+        {
+            Fly next = member.NextInChain();
+            member.LoseAllGrasps();
+            member.burrowOrHangSpot = null;
+            if (member.AI != null && member.AI.behavior == FlyAI.Behavior.Chain)
+                member.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+            member.movMode = Fly.MovementMode.BatFlight;
+
+            if (member is DesertBatfly desert)
+            {
+                DesertBatflyAI brain = desert.DesertAI;
+                brain.hasRoost = false;
+                brain.hasSlot = false;
+                brain.attachedChunk = null;
+                brain.Target = null;
+                brain.drainedWater = 0f;
+                brain.interest = 0;
+
+                if (frightened)
+                {
+                    brain.escapeFrom = sourcePos;
+                    brain.retreat = Mathf.Max(brain.retreat, retreatTicks);
+                    brain.SetMode(Activity.Escape);
+                }
+                else brain.SetMode(Activity.Flight);
+            }
+
+            member = next;
         }
     }
 }
