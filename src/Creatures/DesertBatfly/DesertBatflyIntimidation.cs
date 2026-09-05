@@ -232,11 +232,6 @@ internal static class DesertBatflyIntimidation
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
-    /// <summary>
-    /// Capture a hanging chain before Creature.Die()/Threatened can tear down its grasps.
-    /// This lets death be broadcast only after death is confirmed while still preserving
-    /// exact same-chain eyewitnesses.
-    /// </summary>
     internal static DesertBatfly[] SnapshotChainWitnesses(DesertBatfly victim)
     {
         if (victim?.AI == null || victim.AI.behavior != FlyAI.Behavior.Chain)
@@ -361,8 +356,6 @@ internal static class DesertBatflyIntimidation
             stamp.PredatorIdentity == ThreatIdentity(predator) &&
             clock - stamp.Clock >= 0 && clock - stamp.Clock < 120)
         {
-            // A tongue catch followed immediately by the inevitable bite/death is one
-            // predation episode, not two independent full-strength catastrophes.
             threatScale *= 0.78f;
         }
 
@@ -413,8 +406,6 @@ internal static class DesertBatflyIntimidation
 
         if (victimWasLeader)
         {
-            // Followers copied the leader's decision, so watching that leader fail is
-            // especially damaging. High-Conformity followers take the largest PTSD hit.
             for (int i = 0; i < bats.Count; i++)
             {
                 DesertBatfly bat = bats[i];
@@ -477,8 +468,6 @@ internal static class DesertBatflyIntimidation
             }
         }
 
-        // Only two social hops are allowed. A hop means seeing another bat panic, not
-        // magically knowing who died, so line of sight to the original event is not used.
         for (int hop = 0; hop < ChainFearHops && frontier.Count > 0; hop++)
         {
             next.Clear();
@@ -854,10 +843,7 @@ internal static class DesertBatflyIntimidation
 
         if (state.Role == SocialRole.Follower)
         {
-            if (state.Leader == null || state.Leader.dead || state.Leader.room != bat.room ||
-                !TryGetVengeanceState(state.Leader, out State leaderState) ||
-                leaderState.Role != SocialRole.TrueAvenger ||
-                leaderState.VengeanceTarget != target)
+            if (state.Leader == null || state.Leader.dead || state.Leader.room != bat.room)
             {
                 AddTrauma(
                     bat,
@@ -868,9 +854,17 @@ internal static class DesertBatflyIntimidation
                 return;
             }
 
-            // A follower does not keep attacking after the individual it copied has
-            // already decided to withdraw.
-            if (leaderState.Vengeance == VengeanceMode.Withdraw)
+            if (!TryGetVengeanceState(state.Leader, out State leaderState) ||
+                leaderState.Role != SocialRole.TrueAvenger ||
+                leaderState.VengeanceTarget != target)
+            {
+                // The living leader simply finished or changed its mind. Followers copy
+                // that disengagement without treating a normal end as a traumatic defeat.
+                if (state.Vengeance != VengeanceMode.Withdraw)
+                    StartWithdraw(state, CombatDrive(bat, state));
+            }
+            else if (leaderState.Vengeance == VengeanceMode.Withdraw &&
+                     state.Vengeance != VengeanceMode.Withdraw)
             {
                 StartWithdraw(state, CombatDrive(bat, state));
             }
@@ -1227,8 +1221,6 @@ internal static class DesertBatflyIntimidation
 
         state.TraumaRetreatRefresh = TraumaRetreatRefreshTicks;
         bat.DesertAI.Threatened(threat, false);
-        // Threatened records an attacker for ordinary short fear. PTSD should retain
-        // Escape steering but not re-arm that old hostile memory.
         bat.DesertAI.SuppressHostility(threat);
     }
 
@@ -1262,6 +1254,10 @@ internal static class DesertBatflyIntimidation
             int id = player.playerState?.playerNumber ?? 0;
             if (state.PlayerTraumaPlayer != id)
             {
+                // Fixed-size co-op memory retains the stronger currently active PTSD
+                // instead of letting one weak event from another player erase it.
+                if (state.PlayerTraumaTicks > 0 && state.PlayerTraumaStrength > gain)
+                    return;
                 state.PlayerTraumaPlayer = id;
                 state.PlayerTraumaStrength = 0f;
                 state.PlayerTraumaTicks = 0;
@@ -1280,6 +1276,8 @@ internal static class DesertBatflyIntimidation
             int id = ThreatIdentity(threat);
             if (state.PredatorTraumaId != id)
             {
+                if (state.PredatorTraumaTicks > 0 && state.PredatorTraumaStrength > gain)
+                    return;
                 state.PredatorTraumaId = id;
                 state.PredatorTraumaStrength = 0f;
                 state.PredatorTraumaTicks = 0;
