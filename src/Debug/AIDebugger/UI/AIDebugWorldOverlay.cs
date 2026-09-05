@@ -14,7 +14,7 @@ internal static class AIDebugWorldOverlay
     {
         picked = null;
         if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return false;
-        if (mouseCaptured || !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt)) return false;
+        if (mouseCaptured || (!Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt))) return false;
         if (!Input.GetMouseButtonDown(0)) return false;
 
         RoomCamera camera = game.cameras[0];
@@ -158,7 +158,7 @@ internal static class AIDebugWorldOverlay
     {
         draw.AddLine(from, to, color, thickness);
         Num.Vector2 delta = to - from;
-        float length = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
+        float length = Mathf.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
         if (length < 2f) return;
         Num.Vector2 dir = delta / length;
         Num.Vector2 side = new(-dir.Y, dir.X);
