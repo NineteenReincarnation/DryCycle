@@ -46,20 +46,40 @@ internal static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Run()
     {
+        Check(DesertBatflyTuning.MealWater == 50f, "meal water cost is 50 raw points");
+        Check(DesertBatflyTuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
+
         for (int seed = 0; seed < 10000; seed++)
         {
             var a = new DesertBatflyPersonality(seed);
             var b = new DesertBatflyPersonality(seed);
             Check(a.PatternSeed == b.PatternSeed && a.SpikeSeed == b.SpikeSeed && a.BaseColor == b.BaseColor, "stable appearance");
-            Check(a.SpikeCount >= 1 && a.SpikeCount <= DesertBatflyTuning.MaxSpikes, "spike bound");
-            Check(a.PatternCount >= 2 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
+            Check(a.SpikeCount >= 0 && a.SpikeCount <= DesertBatflyTuning.MaxSpikes, "spike bound");
+            Check(a.PatternCount >= 5 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
+            Check(a.Nerve >= 0f && a.Nerve <= 1f && a.RoostAffinity >= 0f && a.RoostAffinity <= 1f, "stable personality factors bounded");
+            if (a.Aggressive)
+            {
+                Check(a.FakeDiveChance >= 0.26f && a.FakeDiveChance <= 0.68f, "aggression fake-dive chance bounded");
+                Check(a.RetaliationChance >= 0.38f && a.RetaliationChance <= 0.92f, "retaliation chance bounded");
+            }
         }
-        Console.WriteLine("Personality: 10,000 repeatable seeds, bounded patterns/spikes.");
+        Console.WriteLine("Personality: 10,000 repeatable seeds, bounded visuals/nerve/roost/aggression.");
 
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
         creature.ID = new EntityID(-1, 973);
-        var state = new DesertBatflyState(creature) { Thirst = 0.74321f, Cooldown = 1133, Bites = 1, MealConsumed = true, InHive = true, health = 0.35f };
+        var state = new DesertBatflyState(creature)
+        {
+            Thirst = 0.74321f,
+            Cooldown = 1133,
+            Bites = 1,
+            MealConsumed = true,
+            InHive = true,
+            health = 0.35f,
+            GrabMemoryPlayer = 1,
+            GrabMemoryStrength = 0.72f,
+            GrabMemoryTicks = 2200
+        };
         state.unrecognizedSaveStrings["ForeignMod"] = "preserve";
         var culture = CultureInfo.CurrentCulture;
         try
@@ -70,12 +90,14 @@ internal static class Program
             restored.LoadFromString(Regex.Split(save, "<cB>"));
             Check(restored.Thirst == state.Thirst && restored.Cooldown == 1133 && restored.Bites == 1, "state round trip");
             Check(restored.InHive && restored.MealConsumed && Math.Abs(restored.health - 0.35f) < 0.001f, "hive/meal/health round trip");
+            Check(restored.GrabMemoryPlayer == 1 && Math.Abs(restored.GrabMemoryStrength - 0.72f) < 0.001f && restored.GrabMemoryTicks == 2200, "grab memory round trip");
             Check(restored.unrecognizedSaveStrings["ForeignMod"] == "preserve", "foreign save data preserved");
             restored.LoadFromString(new[] { "DCDesertBatflyV1<cC>973;NaN;-42;99;0" });
             Check(!float.IsNaN(restored.Thirst) && restored.Cooldown == 0 && restored.Bites == 3, "malformed save bounded");
+            Check(restored.GrabMemoryPlayer == -1 && restored.GrabMemoryStrength == 0f && restored.GrabMemoryTicks == 0, "legacy payload clears optional grab memory");
         }
         finally { CultureInfo.CurrentCulture = culture; }
-        Console.WriteLine("State: locale-independent round trip, legacy schema, malformed data, foreign fields.");
+        Console.WriteLine("State: locale-independent round trip, grab memory, legacy schema, malformed data, foreign fields.");
 
         Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
@@ -148,10 +170,10 @@ internal static class Program
         var third = MakeBat(103);
         foreach (var instance in new[] { first, second, third }) Set(Brain(instance), "<Target>k__BackingField", target);
         Check((bool)Invoke(Brain(first), "AcquireSlot"), "first attack slot");
-        Mode(Brain(first), "Approach");
+        Mode(Brain(first), "RetaliationCharge");
         Check((bool)Invoke(Brain(second), "AcquireSlot"), "second attack slot");
-        Mode(Brain(second), "Circle");
-        Check(!(bool)Invoke(Brain(third), "AcquireSlot"), "third attacker blocked before dive");
+        Mode(Brain(second), "Interfere");
+        Check(!(bool)Invoke(Brain(third), "AcquireSlot"), "third attacker blocked while retaliation uses slots");
         first.stun = 10;
         Invoke(Brain(first), "TickMemory");
         Check((bool)Invoke(Brain(third), "AcquireSlot"), "stun releases slot");
@@ -161,7 +183,7 @@ internal static class Program
         Check(aiType.GetProperty("Mode", Flags).GetValue(Brain(third)).ToString() != "Attach", "held attacker detaches before drain");
         Check((float)stateType.GetField("Thirst", Flags).GetValue(third.State) > 0f, "grab cannot satisfy thirst");
         Check(!(bool)aiType.GetProperty("FormalAttack", Flags).GetValue(Brain(third)), "grab releases formal attack slot");
-        Console.WriteLine("Attack slots: actual compiled controller, cap at two, stun release, held-attach cancellation.");
+        Console.WriteLine("Attack slots: retaliation shares cap at two, stun release, held-attach cancellation.");
 
         room.Width = room.Height = 30;
         room.Tiles = new Room.Tile[30, 30];
