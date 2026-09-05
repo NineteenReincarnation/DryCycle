@@ -27,7 +27,9 @@ internal static class AIDebuggerRuntime
 
         Camera camera = hostObject.AddComponent<Camera>();
         camera.enabled = false;
-        camera.clearFlags = CameraClearFlags.Nothing;
+        // Preserve all RoomCamera colour, but clear its depth before drawing the
+        // screen-space Observatory so world geometry can never occlude the panel.
+        camera.clearFlags = CameraClearFlags.Depth;
         camera.cullingMask = 0;
         camera.depth = 10000f;
         camera.orthographic = true;
