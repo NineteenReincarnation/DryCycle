@@ -15,7 +15,9 @@ internal sealed class DesertSwarmRoom
     private static ConditionalWeakTable<AbstractRoom, Population> populations = new();
     internal readonly FliesRoomAI Hive;
     private readonly Room room;
-    private int curveTimer = 100;
+    private int curveTimer = 100, flockRefresh;
+    internal DesertBatflyFlockSnapshot Flock { get; private set; }
+    internal int SnapshotAge => 30 - flockRefresh;
 
     private DesertSwarmRoom(Room room)
     {
@@ -72,6 +74,11 @@ internal sealed class DesertSwarmRoom
         // Clean up consumed/dead entries rather than resurrecting them on exit.
         Hive.inHive.RemoveAll(fly => fly.slatedForDeletetion || fly.dead);
         Hive.Update(eu);
+        if (--flockRefresh <= 0)
+        {
+            Flock = DesertBatflyFlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
+            flockRefresh = 30;
+        }
     }
 
     internal bool SafeWeather() => FlyAI.RoomNotACycleHazard(room) ||
@@ -83,5 +90,40 @@ internal sealed class DesertSwarmRoom
             StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType), null, coordinate, room.game.GetNewID());
         room.abstractRoom.AddEntity(creature);
         return creature;
+    }
+}
+
+// Value-only snapshot: does not retain dead, absent, or unrealized creature references.
+internal readonly struct DesertBatflyFlockSnapshot
+{
+    internal readonly Vector2 Center, AverageVelocity;
+    internal readonly int ActiveCount, ExpressedRoleCount;
+    internal readonly float PanicRatio, PreviousPanicRatio, RoostRatio;
+    internal DesertBatflyFlockSnapshot(Vector2 center, Vector2 velocity, int active, int roles,
+        float panic, float previousPanic, float roost)
+    {
+        Center = center; AverageVelocity = velocity; ActiveCount = active; ExpressedRoleCount = roles;
+        PanicRatio = panic; PreviousPanicRatio = previousPanic; RoostRatio = roost;
+    }
+    private static bool Finite(Vector2 v) => !float.IsNaN(v.x) && !float.IsNaN(v.y) &&
+        !float.IsInfinity(v.x) && !float.IsInfinity(v.y);
+    internal static DesertBatflyFlockSnapshot Capture(Room room, System.Collections.Generic.IEnumerable<Fly> flies, float previousPanic)
+    {
+        Vector2 center = Vector2.zero, velocity = Vector2.zero;
+        int count = 0, roles = 0, panic = 0, roost = 0;
+        foreach (Fly fly in flies)
+        {
+            if (fly is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion || bat.room != room ||
+                bat.inShortcut || bat.DesertState.InHive || bat.mainBodyChunk == null ||
+                !Finite(bat.mainBodyChunk.pos) || !Finite(bat.mainBodyChunk.vel)) continue;
+            count++;
+            center += (bat.mainBodyChunk.pos - center) / count;
+            velocity += (bat.mainBodyChunk.vel - velocity) / count;
+            if (bat.DesertAI.Roles.Expressed != ExpressedSocialRole.None) roles++;
+            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.BlocksSocialRoles(bat)) panic++;
+            if (bat.AI?.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost) roost++;
+        }
+        return new DesertBatflyFlockSnapshot(center, velocity, count, roles,
+            count == 0 ? 0f : (float)panic / count, previousPanic, count == 0 ? 0f : (float)roost / count);
     }
 }

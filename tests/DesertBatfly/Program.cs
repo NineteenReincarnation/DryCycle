@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 using DryCycle.Creatures.DesertBatfly;
 using UnityEngine;
 
-internal static class Program
+internal static partial class Program
 {
     private static string game;
     private static Assembly mod;
@@ -96,6 +96,8 @@ internal static class Program
         Check(sandSpitters > 500 && sandSpitters < 9500, "sand spit is an individual minority trait, not none/all");
         Check(trueAvengers >= 450 && trueAvengers <= 550, "true-avenger rate remains approximately five percent");
         Console.WriteLine($"Personality: 10,000 repeatable seeds, {sandSpitters} sand spitters, {trueAvengers} true avengers; Conformity stable and bounded.");
+
+        RunRoleDistribution();
 
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
@@ -354,6 +356,7 @@ internal static class Program
         room.Tiles[15, 7].Terrain = Room.Tile.TerrainType.Solid;
         Check(!Path(300f, Vector2.up), "blocked exit corridor rejected");
         Console.WriteLine("Emergence: actual TerrainManager/TerrainCurve collision, full path, outward normal, obstruction and sand margin.");
+        RunRoleIntegration();
     }
 
     private static T Bare<T>() => (T)FormatterServices.GetUninitializedObject(typeof(T));

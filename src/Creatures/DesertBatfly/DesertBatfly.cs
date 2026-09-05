@@ -67,6 +67,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Update(bool eu)
     {
+        DesertAI.Roles.Tick();
         TrackPlayerRelease();
         if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
         if (sandSpitCooldown > 0) sandSpitCooldown--;
@@ -122,6 +123,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!dead)
         {
             DesertBatflyIntimidation.Update(this);
+            DesertAI.Roles.CheckSuppression();
             extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
             if (extremeVengeance)
                 DesertAI.CancelAttack();
@@ -426,6 +428,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         if (!wasDead && dead)
         {
+            DesertAI?.Roles.Reset();
             if (!DesertBatflyIntimidation.IsSupportedLethalThreat(killer) && room != null)
                 foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
                     if (member is DesertBatfly observer && observer != this &&
@@ -443,6 +446,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Destroy()
     {
+        DesertAI?.Roles.Reset();
         playerHolder = null;
         recentLethalDamager = null;
         recentLethalDamageTicks = 0;
