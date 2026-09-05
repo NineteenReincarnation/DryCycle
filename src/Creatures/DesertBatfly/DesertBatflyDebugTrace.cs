@@ -43,10 +43,25 @@ internal static class DesertBatflyDebugTrace
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
+        DesertBatflyRoleScores scores = roles.Scores;
+        float threshold = DesertBatflyRoleScores.EntryThreshold(flock.ActiveCount, flock.ExpressedRoleCount);
+        AIDebugCandidateRegistry.Begin(bat.abstractCreature);
+        AIDebugCandidateRegistry.Record(bat.abstractCreature, "SocialRole", "Sentinel",
+            scores.Sentinel >= threshold, scores.Sentinel,
+            $"entry threshold={threshold:0.000}", roles.Expressed == ExpressedSocialRole.Sentinel);
+        AIDebugCandidateRegistry.Record(bat.abstractCreature, "SocialRole", "Bully",
+            scores.Bully >= threshold, scores.Bully,
+            $"entry threshold={threshold:0.000}", roles.Expressed == ExpressedSocialRole.Bully);
+        AIDebugCandidateRegistry.Record(bat.abstractCreature, "SocialRole", "Opportunist",
+            scores.Opportunist >= threshold, scores.Opportunist,
+            $"entry threshold={threshold:0.000}", roles.Expressed == ExpressedSocialRole.Opportunist);
+        if (bat.AI != null)
+            AIDebugCandidateRegistry.Record(bat.abstractCreature, "Motor", "localGoal",
+                bat.AI.localGoal, true, 1f, bat.AI.behavior.ToString(), true);
+
         Vector2 position = bat.mainBodyChunk?.pos ?? Vector2.zero;
         Vector2 velocity = bat.mainBodyChunk?.vel ?? Vector2.zero;
         Vector2 localGoal = bat.AI?.localGoal ?? position;
-        DesertBatflyRoleScores scores = roles.Scores;
         AIDebugTrace.Sample(bat.abstractCreature, new AIDebugTraceFrame(
             bat.room?.abstractRoom?.name,
             position,
