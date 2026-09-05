@@ -127,8 +127,6 @@ internal sealed class DesertBatflyAI
         memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
         escapeFrom = player.mainBodyChunk.pos;
 
-        // A real player grab always overrides Nerve. Only this bat receives the
-        // strong player-specific memory; chain neighbours merely flee.
         if (IsInFlyChain(fly)) BreakHangChain(player, DesertBatflyTuning.RetreatTicks);
         else
         {
@@ -153,14 +151,11 @@ internal sealed class DesertBatflyAI
 
         if (fly.Personality.Aggressive)
         {
-            // A nasty individual withdraws briefly, then can turn back to ram or
-            // perform a normal fluid-draining attack against the remembered player.
             ArmRetaliation(player, fly.DesertState.GrabMemoryStrength + (thrown ? 0.25f : 0f));
             retreat = Mathf.Clamp(retreat, 35, 60);
         }
         else
         {
-            // A calm individual interprets exactly the same event as fear.
             float fear = fly.DesertState.GrabMemoryStrength *
                 Mathf.Lerp(1.15f, 0.8f, fly.Personality.Nerve);
             retreat = Mathf.Max(retreat, Mathf.RoundToInt(Mathf.Lerp(90f, 180f, fear)));
@@ -215,7 +210,6 @@ internal sealed class DesertBatflyAI
             if (other is not DesertBatfly bat || bat == fly ||
                 !Custom.DistLess(fly.mainBodyChunk.pos, bat.mainBodyChunk.pos, DesertBatflyTuning.AlarmRadius)) continue;
 
-            // Neighbours do not inherit this bat's grudge/fear memory.
             bat.DesertAI.escapeFrom = escapeFrom;
             bat.DesertAI.retreat = Mathf.Max(bat.DesertAI.retreat, 25);
         }
@@ -225,8 +219,6 @@ internal sealed class DesertBatflyAI
     {
         escapeFrom = source?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up * 20f;
 
-        // A chain is structurally coupled. If one member decides to flee, every
-        // member is released so no lower bat remains hanging in empty space.
         if (IsInFlyChain(fly))
         {
             BreakHangChain(source, DesertBatflyTuning.ApproachRetreatTicks);
@@ -246,6 +238,24 @@ internal sealed class DesertBatflyAI
         drainedWater = 0f;
         interest = 0;
         SetMode(Activity.Flight);
+    }
+
+    // Persistent trauma is stronger than ordinary grudge/retaliation memory. Clear the
+    // hostile bookkeeping for this exact threat so an old unspent retaliation charge
+    // cannot survive PTSD and fire minutes later when the trauma finally expires.
+    internal void SuppressHostility(Creature source)
+    {
+        if (source == null) return;
+        if (Target == source) CancelAttack();
+        if (attacker == source)
+        {
+            attacker = null;
+            memory = 0;
+            retaliationCharges = 0;
+            retaliationRecovery = 0;
+        }
+        pursuit = 0;
+        unseen = 0;
     }
 
     private void SetMode(Activity next)
@@ -519,7 +529,6 @@ internal sealed class DesertBatflyAI
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        // 50 raw hydration points/second = 1.25 raw points per 40 Hz tick.
         if (ticks >= DesertBatflyTuning.DrainStartTicks &&
             ticks <= DesertBatflyTuning.DrainEndTicks)
         {
@@ -580,8 +589,6 @@ internal sealed class DesertBatflyAI
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        // No stun, input lock or forced grasp release: just short physical drag and
-        // directional pressure, so movement is obstructed without becoming a hard lock.
         float drag = fly.Personality.RetaliationDrag;
         Vector2 push = retaliationDirection * fly.Personality.RetaliationPush;
         foreach (BodyChunk chunk in player.bodyChunks)
@@ -710,8 +717,6 @@ internal sealed class DesertBatflyAI
                 int pursuitThreshold = Mathf.RoundToInt(
                     Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
 
-                // A grudge-bearing nasty individual is harder to scare away merely
-                // by the remembered player approaching. Real attacks still override it.
                 if (remembered && fly.Personality.Aggressive)
                 {
                     reactionDistance *= 0.72f;
@@ -859,8 +864,6 @@ internal sealed class DesertBatflyAI
             return;
         }
 
-        // Existing vanilla chains are left to vanilla FlyAI. This custom chance is
-        // only an extra desert-species tendency to start a chain/roost.
         if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
         if (scan != 0 || Random.value > fly.Personality.RoostChance) return;
         if (!TryFindRoost(out Vector2 spot)) return;
