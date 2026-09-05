@@ -13,7 +13,8 @@ internal sealed class DesertBatflyAI
     private Creature attacker;
     private Creature danger;
     private int memory, retreat, ticks, scan, pursuit, unseen, interest;
-    private bool hasSlot, drained;
+    private bool hasSlot;
+    private float drainedWater;
     private Vector2 escapeFrom, attachOffset, roost;
     private BodyChunk attachedChunk;
     internal bool PullingUp => Mode == Activity.FakeDive && ticks > DesertBatflyTuning.FakeDivePullUpTicks;
@@ -67,7 +68,7 @@ internal sealed class DesertBatflyAI
         hasSlot = false;
         attachedChunk = null;
         Target = null;
-        drained = false;
+        drainedWater = 0f;
         interest = 0;
         SetMode(Activity.Flight);
     }
@@ -175,13 +176,14 @@ internal sealed class DesertBatflyAI
                 {
                     attachedChunk = contact;
                     attachOffset = Custom.DirVec(contact.pos, fly.mainBodyChunk.pos) * (contact.rad + fly.mainBodyChunk.rad * 0.5f);
+                    drainedWater = 0f;
                     SetMode(Activity.Attach);
                 }
                 else if (ticks > DesertBatflyTuning.DiveTicks) Finish(false);
                 break;
             case Activity.Attach:
                 fly.movMode = Fly.MovementMode.Passive;
-                if (ticks >= DesertBatflyTuning.AttachTicks) Finish(drained);
+                if (ticks >= DesertBatflyTuning.AttachTicks) Finish(drainedWater > 0.001f);
                 break;
         }
     }
@@ -200,24 +202,49 @@ internal sealed class DesertBatflyAI
             fly.inShortcut || Target.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
         {
-            Finish(false);
+            Finish(drainedWater > 0.001f);
             return;
         }
         Vector2 position = attachedChunk.pos + attachOffset;
         if (fly.room.GetTile(position).Solid || !fly.room.VisualContact(fly.mainBodyChunk.pos, position))
         {
-            Finish(false);
+            Finish(drainedWater > 0.001f);
             return;
         }
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
-        if (!drained && ticks >= 8)
+
+        // Stay attached for several seconds. Fluid transfer is spread across the
+        // middle of that window rather than being a single hidden -30 event.
+        if (ticks >= DesertBatflyTuning.DrainStartTicks &&
+            ticks <= DesertBatflyTuning.DrainEndTicks &&
+            drainedWater < DesertBatflyTuning.AttackWater)
         {
-            drained = true;
+            float drainTicks = DesertBatflyTuning.DrainEndTicks - DesertBatflyTuning.DrainStartTicks + 1f;
+            float amount = Mathf.Min(
+                DesertBatflyTuning.AttackWater - drainedWater,
+                DesertBatflyTuning.AttackWater / drainTicks);
+            bool transferred = true;
+
             if (Target is Player player)
-                ThirstStore.RemoveRuntime(player, DesertBatflyTuning.AttackWater / ThirstConstants.WaterValuePerPip);
-            fly.DesertState.Thirst = Mathf.Max(0f, fly.DesertState.Thirst - DesertBatflyTuning.DrainRelief);
-            fly.DesertState.Cooldown = DesertBatflyTuning.Cooldown;
+            {
+                transferred = ThirstStore.RemoveRuntime(player, amount / ThirstConstants.WaterValuePerPip);
+                // The existing thirst HUD already follows the true runtime value
+                // continuously. Keeping it open here makes the slow loss visible.
+                player.showKarmaFoodRainTime = Mathf.Max(
+                    player.showKarmaFoodRainTime,
+                    ThirstConstants.HydrationLossHudHoldFrames);
+            }
+
+            if (transferred)
+            {
+                drainedWater += amount;
+                fly.DesertState.Thirst = Mathf.Max(
+                    0f,
+                    fly.DesertState.Thirst - DesertBatflyTuning.DrainRelief *
+                    (amount / DesertBatflyTuning.AttackWater));
+                fly.DesertState.Cooldown = DesertBatflyTuning.Cooldown;
+            }
         }
     }
 
