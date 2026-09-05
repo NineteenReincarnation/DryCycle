@@ -21,7 +21,7 @@ internal sealed class AIDebugCapture
     {
         Key = key;
         Reason = reason ?? "manual";
-        TriggerTime = Time.unscaledTime;
+        TriggerTime = AIDebugTrace.SimulationTime;
         EndTime = TriggerTime + 5f;
     }
 }
@@ -34,6 +34,7 @@ internal static class AIDebugCaptureManager
     private static readonly List<AIDebugTraceEvent> EventScratch = new(512);
 
     internal static IReadOnlyList<AIDebugCapture> Captures => Completed;
+    internal static int PendingCount => Pending.Count;
 
     internal static void Trigger(DebugEntityKey key, string reason)
     {
@@ -41,7 +42,7 @@ internal static class AIDebugCaptureManager
         var capture = new AIDebugCapture(key, reason);
         AIDebugTrace.CopyFrames(key, FrameScratch);
         AIDebugTrace.CopyEvents(key, EventScratch);
-        float cutoff = Time.unscaledTime - 10f;
+        float cutoff = capture.TriggerTime - 10f;
         for (int i = 0; i < FrameScratch.Count; i++)
             if (FrameScratch[i].Time >= cutoff) capture.Frames.Add(FrameScratch[i]);
         for (int i = 0; i < EventScratch.Count; i++)
@@ -54,12 +55,14 @@ internal static class AIDebugCaptureManager
         if (!Pending.TryGetValue(key, out AIDebugCapture capture)) return;
         if (capture.Frames.Count == 0 || capture.Frames[capture.Frames.Count - 1].Frame != frame.Frame)
             capture.Frames.Add(frame);
-        if (Time.unscaledTime < capture.EndTime) return;
+        if (frame.Time < capture.EndTime) return;
+
         AIDebugTrace.CopyEvents(key, EventScratch);
         float start = capture.TriggerTime - 10f;
+        float end = capture.EndTime;
         capture.Events.Clear();
         for (int i = 0; i < EventScratch.Count; i++)
-            if (EventScratch[i].Time >= start) capture.Events.Add(EventScratch[i]);
+            if (EventScratch[i].Time >= start && EventScratch[i].Time <= end) capture.Events.Add(EventScratch[i]);
         capture.Complete = true;
         Pending.Remove(key);
         Completed.Add(capture);
@@ -120,17 +123,20 @@ internal static class AIDebugCaptureManager
     }
 
     private static string F(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
     private static string Sanitize(string value)
     {
         if (string.IsNullOrEmpty(value)) return "Creature";
         foreach (char c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '_');
         return value;
     }
+
     private static void Json(StringBuilder b, string key, string value, bool comma, int indent)
     {
         b.Append(' ', indent * 2).Append('"').Append(Escape(key)).Append("\": \"")
             .Append(Escape(value)).Append('"').AppendLine(comma ? "," : string.Empty);
     }
+
     private static string Escape(string value) => (value ?? string.Empty)
         .Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
 }
@@ -143,13 +149,15 @@ internal static class AIDebugAnomalyDetector
     {
         if (!AIDebugSettings.DetectAnomalies || creature == null || frames == null || frames.Count < 2) return null;
         DebugEntityKey key = DebugEntityKey.From(creature);
-        if (LastTrigger.TryGetValue(key, out float last) && Time.unscaledTime - last < 5f) return null;
+        float now = AIDebugTrace.SimulationTime;
+        if (LastTrigger.TryGetValue(key, out float last) && now - last < 5f) return null;
         AIDebugTraceFrame current = frames[frames.Count - 1];
+        bool paused = AIDebugSimulationControl.Paused;
 
         string reason = null;
         if (!Finite(current.Position) || !Finite(current.Velocity) || !Finite(current.LocalGoal))
             reason = "InvalidNumber";
-        else if (current.Velocity.magnitude > 55f && creature.realizedCreature?.inShortcut != true)
+        else if (!paused && current.Velocity.magnitude > 55f && creature.realizedCreature?.inShortcut != true)
             reason = "VelocitySpike";
         else
         {
@@ -162,7 +170,7 @@ internal static class AIDebugAnomalyDetector
             }
             if (modeChanges >= 7) reason = "StateOscillation";
             else if (targetChanges >= 6) reason = "TargetThrashing";
-            else if (frames.Count >= 20)
+            else if (!paused && frames.Count >= 20)
             {
                 AIDebugTraceFrame old = frames[frames.Count - 20];
                 float moved = Vector2.Distance(old.Position, current.Position);
@@ -185,7 +193,7 @@ internal static class AIDebugAnomalyDetector
         }
 
         if (reason == null) return null;
-        LastTrigger[key] = Time.unscaledTime;
+        LastTrigger[key] = now;
         AIDebugTrace.Record(key, AIDebugEventCategory.Warning, reason, current.Mode, "automatic anomaly detector");
         AIDebugCaptureManager.Trigger(key, reason);
         return reason;
