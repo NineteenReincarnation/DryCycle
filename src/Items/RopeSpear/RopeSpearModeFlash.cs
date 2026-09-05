@@ -5,7 +5,7 @@ namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
 /// Brief world-space mode indicator shown above the slugcat when RopeSpear
-/// switches between long-payout and fixed-short modes.
+/// switches between long-payout, fixed-short, and fixed-ultra-short modes.
 /// </summary>
 internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
 {
@@ -17,14 +17,21 @@ internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
 
     private readonly Player _player;
     private readonly bool _longMode;
+    private readonly bool _ultraShortMode;
     private int _age;
     private float _alpha;
     private float _lastAlpha;
 
     internal RopeSpearModeFlash(Player player, bool longMode)
+        : this(player, longMode, ultraShortMode: false)
+    {
+    }
+
+    internal RopeSpearModeFlash(Player player, bool longMode, bool ultraShortMode)
     {
         _player = player;
         _longMode = longMode;
+        _ultraShortMode = !longMode && ultraShortMode;
     }
 
     public override void Update(bool eu)
@@ -62,7 +69,7 @@ internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        // 0: rope line, 1/2: rope end caps, 3..7: compact L/S mode glyph.
+        // 0: rope line, 1/2: rope end caps, 3..7: compact L/S/U mode glyph.
         sLeaser.sprites = new FSprite[8];
         for (int i = 0; i < sLeaser.sprites.Length; i++)
         {
@@ -102,9 +109,11 @@ internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
 
         Color color = _longMode
             ? new Color(0.62f, 0.91f, 1f)
-            : new Color(1f, 0.78f, 0.34f);
+            : _ultraShortMode
+                ? new Color(1f, 0.48f, 0.34f)
+                : new Color(1f, 0.78f, 0.34f);
 
-        float ropeWidth = _longMode ? 28f : 13f;
+        float ropeWidth = _longMode ? 28f : _ultraShortMode ? 7f : 13f;
         FSprite rope = sLeaser.sprites[0];
         rope.SetPosition(center + new Vector2(0f, -7.5f));
         rope.scaleX = ropeWidth;
@@ -162,21 +171,32 @@ internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
             sLeaser.sprites[3].scaleY = 8f;
             sLeaser.sprites[4].scaleX = 6f;
             sLeaser.sprites[4].scaleY = 1.7f;
+            return;
         }
-        else
+
+        if (_ultraShortMode)
         {
-            // S: top, upper-left, middle, lower-right, bottom.
-            sLeaser.sprites[3].scaleX = 6f;
-            sLeaser.sprites[3].scaleY = 1.7f;
+            // U: two verticals and one bottom segment.
+            sLeaser.sprites[3].scaleX = 1.7f;
+            sLeaser.sprites[3].scaleY = 8f;
             sLeaser.sprites[4].scaleX = 1.7f;
-            sLeaser.sprites[4].scaleY = 4f;
+            sLeaser.sprites[4].scaleY = 8f;
             sLeaser.sprites[5].scaleX = 6f;
             sLeaser.sprites[5].scaleY = 1.7f;
-            sLeaser.sprites[6].scaleX = 1.7f;
-            sLeaser.sprites[6].scaleY = 4f;
-            sLeaser.sprites[7].scaleX = 6f;
-            sLeaser.sprites[7].scaleY = 1.7f;
+            return;
         }
+
+        // S: top, upper-left, middle, lower-right, bottom.
+        sLeaser.sprites[3].scaleX = 6f;
+        sLeaser.sprites[3].scaleY = 1.7f;
+        sLeaser.sprites[4].scaleX = 1.7f;
+        sLeaser.sprites[4].scaleY = 4f;
+        sLeaser.sprites[5].scaleX = 6f;
+        sLeaser.sprites[5].scaleY = 1.7f;
+        sLeaser.sprites[6].scaleX = 1.7f;
+        sLeaser.sprites[6].scaleY = 4f;
+        sLeaser.sprites[7].scaleX = 6f;
+        sLeaser.sprites[7].scaleY = 1.7f;
     }
 
     private void DrawGlyph(RoomCamera.SpriteLeaser sLeaser, Vector2 center)
@@ -185,6 +205,14 @@ internal sealed class RopeSpearModeFlash : UpdatableAndDeletable, IDrawable
         {
             sLeaser.sprites[3].SetPosition(center + new Vector2(-2.2f, 1.5f));
             sLeaser.sprites[4].SetPosition(center + new Vector2(0.1f, -2.1f));
+            return;
+        }
+
+        if (_ultraShortMode)
+        {
+            sLeaser.sprites[3].SetPosition(center + new Vector2(-2.3f, 1.5f));
+            sLeaser.sprites[4].SetPosition(center + new Vector2(2.3f, 1.5f));
+            sLeaser.sprites[5].SetPosition(center + new Vector2(0f, -2.2f));
             return;
         }
 
