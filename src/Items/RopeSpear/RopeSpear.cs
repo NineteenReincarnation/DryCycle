@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
-internal sealed class RopeSpear : Spear
+internal sealed class RopeSpear : Spear, IClimbableVine
 {
     private const int RopeMeshSegments = RopeSpearRopeSystem.NodeCount - 1;
     private const float RopeThickness = 1.15f;
@@ -23,6 +23,7 @@ internal sealed class RopeSpear : Spear
 
     private RopeHandle _handle;
     private Player _pendingHandleOwner;
+    private Room _vineRoom;
     private int _ropeSpriteIndex = -1;
     private float _lastRouteLength;
     private float _preThrowRopeLength;
@@ -65,18 +66,19 @@ internal sealed class RopeSpear : Spear
     public override void PlaceInRoom(Room placeRoom)
     {
         base.PlaceInRoom(placeRoom);
-        RemoveLegacyVineRegistration(placeRoom);
+        EnsureVineRegistration(placeRoom);
     }
 
     public override void NewRoom(Room newRoom)
     {
+        RemoveVineRegistration();
         base.NewRoom(newRoom);
-        RemoveLegacyVineRegistration(newRoom);
+        EnsureVineRegistration(newRoom);
     }
 
     public override void Destroy()
     {
-        RemoveLegacyVineRegistration(room);
+        RemoveVineRegistration();
         _ropeSystem.Reset();
         base.Destroy();
     }
@@ -134,7 +136,7 @@ internal sealed class RopeSpear : Spear
     public override void Update(bool eu)
     {
         base.Update(eu);
-        RemoveLegacyVineRegistration(room);
+        EnsureVineRegistration(room);
 
         if (!_ropeDeployed && !IsBroken)
         {
@@ -779,20 +781,78 @@ internal sealed class RopeSpear : Spear
         return center - direction * 17f;
     }
 
-    private void RemoveLegacyVineRegistration(Room targetRoom)
+    private void EnsureVineRegistration(Room targetRoom)
     {
-        if (targetRoom?.climbableVines?.vines == null)
+        if (targetRoom == null)
         {
             return;
         }
 
-        for (int i = targetRoom.climbableVines.vines.Count - 1; i >= 0; i--)
+        if (_vineRoom == targetRoom &&
+            targetRoom.climbableVines != null &&
+            targetRoom.climbableVines.vines.Contains(this))
         {
-            if (ReferenceEquals(targetRoom.climbableVines.vines[i], this))
-            {
-                targetRoom.climbableVines.vines.RemoveAt(i);
-            }
+            return;
         }
+
+        RemoveVineRegistration();
+
+        if (targetRoom.climbableVines == null)
+        {
+            targetRoom.climbableVines = new ClimbableVinesSystem();
+            targetRoom.AddObject(targetRoom.climbableVines);
+        }
+
+        if (!targetRoom.climbableVines.vines.Contains(this))
+        {
+            targetRoom.climbableVines.vines.Add(this);
+        }
+
+        _vineRoom = targetRoom;
+    }
+
+    private void RemoveVineRegistration()
+    {
+        if (_vineRoom?.climbableVines != null)
+        {
+            _vineRoom.climbableVines.vines.Remove(this);
+        }
+
+        _vineRoom = null;
+    }
+
+    public int TotalPositions()
+    {
+        return RopeSpearRopeSystem.NodeCount;
+    }
+
+    public Vector2 Pos(int index)
+    {
+        return _ropeSystem.GetNode(index);
+    }
+
+    public float Rad(int index)
+    {
+        return 2.1f;
+    }
+
+    public float Mass(int index)
+    {
+        return 0.18f;
+    }
+
+    public void Push(int index, Vector2 movement)
+    {
+        _ropeSystem.PushNode(index, movement);
+    }
+
+    public void BeingClimbedOn(Creature crit)
+    {
+    }
+
+    public bool CurrentlyClimbable()
+    {
+        return RopeActive && mode != Mode.Thrown && !slatedForDeletetion;
     }
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
