@@ -76,7 +76,7 @@ internal readonly struct AIDebugTraceFrame
         string mode, string target, string role, string suppression, string controlOwner,
         float utility0 = 0f, float utility1 = 0f, float utility2 = 0f, float panic = 0f,
         AIDebugHistoricalState history = null)
-        : this(UnityEngine.Time.frameCount, UnityEngine.Time.unscaledTime, room, position, velocity,
+        : this(AIDebugTrace.SimulationTick, AIDebugTrace.SimulationTime, room, position, velocity,
             localGoal, mode, target, role, suppression, controlOwner,
             utility0, utility1, utility2, panic, history)
     {
@@ -115,15 +115,15 @@ internal static class AIDebugTrace
     private const int EventCapacity = 1024;
     private const int FrameCapacity = 600;
     private const int MaxTraces = 12;
-    private const int SampleFrameInterval = 4;
+    private const int SampleTickInterval = 4; // Rain World runs its gameplay clock at 40 Hz.
 
     private sealed class Trace
     {
         internal readonly AIDebugTraceEvent[] Events = new AIDebugTraceEvent[EventCapacity];
         internal readonly AIDebugTraceFrame[] Frames = new AIDebugTraceFrame[FrameCapacity];
         internal readonly Dictionary<string, string> LastValues = new(16, StringComparer.Ordinal);
-        internal int EventHead, EventCount, FrameHead, FrameCount, LastSampleFrame = int.MinValue;
-        internal int LastTouchedFrame;
+        internal int EventHead, EventCount, FrameHead, FrameCount, LastSampleTick = int.MinValue;
+        internal int LastTouchedTick;
     }
 
     private static readonly Dictionary<DebugEntityKey, Trace> Traces = new();
@@ -133,6 +133,19 @@ internal static class AIDebugTrace
     private static bool visible;
 
     internal static bool Visible => visible;
+
+    // Prefer Rain World's simulation clock. It does not advance during Pause World,
+    // which keeps Timeline, Trigger Capture and anomaly windows tied to actual AI time.
+    internal static int SimulationTick
+    {
+        get
+        {
+            RainWorldGame game = AIDebugRegistry.CurrentGame;
+            return game != null ? game.clock : UnityEngine.Time.frameCount;
+        }
+    }
+
+    internal static float SimulationTime => SimulationTick / 40f;
 
     internal static void SetVisible(bool value)
     {
@@ -175,12 +188,12 @@ internal static class AIDebugTrace
         if (!IsWatched(key)) return;
         Trace trace = GetOrCreate(key);
         int index = trace.EventHead;
-        var item = new AIDebugTraceEvent(UnityEngine.Time.frameCount,
-            UnityEngine.Time.unscaledTime, category, name, detail, reason);
+        int tick = SimulationTick;
+        var item = new AIDebugTraceEvent(tick, tick / 40f, category, name, detail, reason);
         trace.Events[index] = item;
         trace.EventHead = (index + 1) % EventCapacity;
         if (trace.EventCount < EventCapacity) trace.EventCount++;
-        trace.LastTouchedFrame = UnityEngine.Time.frameCount;
+        trace.LastTouchedTick = tick;
         AIDebugBreakpointManager.OnEvent(key, item);
     }
 
@@ -202,9 +215,14 @@ internal static class AIDebugTrace
         if (!IsWatched(creature)) return;
         DebugEntityKey key = DebugEntityKey.From(creature);
         Trace trace = GetOrCreate(key);
-        int now = UnityEngine.Time.frameCount;
-        if (now - trace.LastSampleFrame < SampleFrameInterval) return;
-        trace.LastSampleFrame = now;
+        int tick = SimulationTick;
+
+        // No duplicate samples while the world is paused. A manual Step advances
+        // RainWorldGame.clock by one and therefore records exactly one stepped state.
+        if (tick <= trace.LastSampleTick) return;
+        int requiredInterval = AIDebugSimulationControl.Paused ? 1 : SampleTickInterval;
+        if (trace.LastSampleTick != int.MinValue && tick - trace.LastSampleTick < requiredInterval) return;
+        trace.LastSampleTick = tick;
 
         if (AIDebugSettings.RecordFullHistory)
         {
@@ -232,7 +250,7 @@ internal static class AIDebugTrace
         trace.Frames[trace.FrameHead] = sample;
         trace.FrameHead = (trace.FrameHead + 1) % FrameCapacity;
         if (trace.FrameCount < FrameCapacity) trace.FrameCount++;
-        trace.LastTouchedFrame = now;
+        trace.LastTouchedTick = tick;
         AIDebugCaptureManager.OnSample(key, sample);
     }
 
@@ -307,13 +325,13 @@ internal static class AIDebugTrace
     private static void EvictOldest()
     {
         DebugEntityKey oldestKey = default;
-        int oldestFrame = int.MaxValue;
+        int oldestTick = int.MaxValue;
         bool found = false;
         foreach (KeyValuePair<DebugEntityKey, Trace> pair in Traces)
         {
             if (Watched.Contains(pair.Key)) continue;
-            if (pair.Value.LastTouchedFrame >= oldestFrame) continue;
-            oldestFrame = pair.Value.LastTouchedFrame;
+            if (pair.Value.LastTouchedTick >= oldestTick) continue;
+            oldestTick = pair.Value.LastTouchedTick;
             oldestKey = pair.Key;
             found = true;
         }
@@ -321,8 +339,8 @@ internal static class AIDebugTrace
         {
             foreach (KeyValuePair<DebugEntityKey, Trace> pair in Traces)
             {
-                if (pair.Value.LastTouchedFrame >= oldestFrame) continue;
-                oldestFrame = pair.Value.LastTouchedFrame;
+                if (pair.Value.LastTouchedTick >= oldestTick) continue;
+                oldestTick = pair.Value.LastTouchedTick;
                 oldestKey = pair.Key;
                 found = true;
             }
