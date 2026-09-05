@@ -5,22 +5,15 @@ using UnityEngine;
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// Gives RopeSpear deterministic terrain sticking at the real projectile angle.
-/// Vanilla Spear wall logic is cardinal and probabilistic; this runtime uses the
-/// continuous flight vector, preserves that angle through save/load, and delegates
-/// non-cardinal traversal to RopeSpearShaftTraversalRuntime.
+/// Makes RopeSpear wall sticking use the real flight vector instead of vanilla's
+/// cardinal throwDir test. Vanilla Spear only sticks when ContactPoint == throwDir,
+/// which breaks for diagonal throws because throwDir can only represent four axes.
 /// </summary>
 internal static class RopeSpearWallStickRuntime
 {
     private const float SpearTipReach = 22f;
     private const float TraceStep = 2f;
     private const float EmbedOffset = 5f;
-    private const float NonCardinalComponentThreshold = 0.015f;
-    private const float ShaftTailReach = 27f;
-    private const float ShaftWallReach = 6f;
-    private const float StandableSlopeLimit = 0.80f;
-    private const float LowSpeedThreshold = 1.5f;
-    private const int LowSpeedReleaseFrames = 18;
 
     private sealed class FlightState
     {
@@ -28,7 +21,6 @@ internal static class RopeSpearWallStickRuntime
         internal Vector2 StartPosition;
         internal Vector2 Velocity;
         internal Vector2 Direction;
-        internal int LowSpeedFrames;
     }
 
     private static readonly ConditionalWeakTable<RopeSpear, FlightState> FlightStates = new();
@@ -43,9 +35,7 @@ internal static class RopeSpearWallStickRuntime
 
         _enabled = true;
         On.Spear.Update += Spear_Update;
-        On.Spear.ChangeMode += Spear_ChangeMode;
         On.Weapon.HitWall += Weapon_HitWall;
-        RopeSpearShaftTraversalRuntime.Enable();
     }
 
     internal static void Disable()
@@ -55,77 +45,9 @@ internal static class RopeSpearWallStickRuntime
             return;
         }
 
-        RopeSpearShaftTraversalRuntime.Disable();
-        On.Weapon.HitWall -= Weapon_HitWall;
-        On.Spear.ChangeMode -= Spear_ChangeMode;
         On.Spear.Update -= Spear_Update;
+        On.Weapon.HitWall -= Weapon_HitWall;
         _enabled = false;
-    }
-
-    internal static bool TryGetTraversalSegment(
-        RopeSpear spear,
-        out Vector2 tail,
-        out Vector2 wallEnd,
-        out Vector2 direction,
-        out Vector2 supportNormal,
-        out bool canStand)
-    {
-        tail = Vector2.zero;
-        wallEnd = Vector2.zero;
-        direction = Vector2.right;
-        supportNormal = Vector2.up;
-        canStand = false;
-
-        if (spear == null ||
-            spear.room == null ||
-            spear.mode != Weapon.Mode.StuckInWall ||
-            spear.slatedForDeletetion ||
-            !TryResolveStoredStuckDirection(spear, out direction) ||
-            !IsNonCardinal(direction))
-        {
-            return false;
-        }
-
-        direction.Normalize();
-        Vector2 center = spear.firstChunk.pos;
-        tail = center - direction * ShaftTailReach;
-        wallEnd = center + direction * ShaftWallReach;
-
-        for (int i = 0; i < 7 && spear.room.GetTile(wallEnd).Solid; i++)
-        {
-            wallEnd -= direction * 2f;
-        }
-
-        if (spear.room.GetTile(tail).Solid)
-        {
-            for (int i = 0; i < 7 && spear.room.GetTile(tail).Solid; i++)
-            {
-                tail += direction * 2f;
-            }
-        }
-
-        if (Vector2.Distance(tail, wallEnd) < 12f)
-        {
-            return false;
-        }
-
-        supportNormal = new Vector2(-direction.y, direction.x);
-        if (supportNormal.y < 0f)
-        {
-            supportNormal = -supportNormal;
-        }
-        supportNormal.Normalize();
-
-        canStand = Mathf.Abs(direction.y) <= StandableSlopeLimit;
-        return true;
-    }
-
-    internal static bool IsNonCardinalStuckSpear(RopeSpear spear)
-    {
-        return spear != null &&
-               spear.mode == Weapon.Mode.StuckInWall &&
-               TryResolveStoredStuckDirection(spear, out Vector2 direction) &&
-               IsNonCardinal(direction);
     }
 
     private static void Spear_Update(
@@ -133,36 +55,24 @@ internal static class RopeSpearWallStickRuntime
         Spear self,
         bool eu)
     {
-        if (self is not RopeSpear ropeSpear || ropeSpear.room == null)
+        if (self is not RopeSpear ropeSpear ||
+            ropeSpear.mode != Weapon.Mode.Thrown ||
+            ropeSpear.room == null)
         {
             orig(self, eu);
             return;
         }
 
-        if (ropeSpear.mode == Weapon.Mode.StuckInWall)
-        {
-            if (TryResolveStoredStuckDirection(ropeSpear, out Vector2 storedDirection) &&
-                IsNonCardinal(storedDirection))
-            {
-                ropeSpear.addPoles = false;
-            }
-
-            orig(self, eu);
-
-            if (TryResolveStoredStuckDirection(ropeSpear, out storedDirection))
-            {
-                RestoreExactStuckPose(ropeSpear, storedDirection);
-            }
-            return;
-        }
-
-        if (ropeSpear.mode != Weapon.Mode.Thrown)
-        {
-            orig(self, eu);
-            return;
-        }
-
+        // RopeSpear is a traversal anchor, so terrain hits must not use vanilla's
+        // probabilistic wall-stick roll. This is scoped strictly to RopeSpear and
+        // still leaves NoSpearStickZone/border/shelter restrictions intact.
         ropeSpear.alwaysStickInWalls = true;
+
+        // Vanilla Weapon.Update normally tumbles a thrown weapon into Mode.Free as
+        // soon as its speed drops below exitThrownModeSpeed (~30). That is fine for
+        // ordinary spears, but it prematurely ends RopeSpear's projectile state on
+        // upward/diagonal casts near the top of the arc. Keep RopeSpear in genuine
+        // projectile mode until an actual collision/stick transition ends the throw.
         ropeSpear.doNotTumbleAtLowSpeed = true;
 
         FlightState state = FlightStates.GetOrCreateValue(ropeSpear);
@@ -182,94 +92,21 @@ internal static class RopeSpearWallStickRuntime
 
         if (ropeSpear.mode == Weapon.Mode.StuckInCreature)
         {
-            state.LowSpeedFrames = 0;
             return;
         }
 
+        // Vanilla may have succeeded on a cardinal-compatible face. Preserve its
+        // wall/beam bookkeeping but restore the exact diagonal visual orientation.
         if (ropeSpear.mode == Weapon.Mode.StuckInWall)
         {
-            RememberStuckDirection(ropeSpear, state.Direction);
             RestoreExactStuckPose(ropeSpear, state.Direction);
-            state.LowSpeedFrames = 0;
             return;
         }
 
-        if (TryStickFromFlight(ropeSpear, state))
-        {
-            state.LowSpeedFrames = 0;
-            return;
-        }
-
-        if (ropeSpear.mode != Weapon.Mode.Thrown)
-        {
-            state.LowSpeedFrames = 0;
-            return;
-        }
-
-        if (ropeSpear.firstChunk.vel.magnitude < LowSpeedThreshold)
-        {
-            state.LowSpeedFrames++;
-            if (state.LowSpeedFrames >= LowSpeedReleaseFrames)
-            {
-                ropeSpear.ChangeMode(Weapon.Mode.Free);
-                state.LowSpeedFrames = 0;
-            }
-        }
-        else
-        {
-            state.LowSpeedFrames = 0;
-        }
-    }
-
-    private static void Spear_ChangeMode(
-        On.Spear.orig_ChangeMode orig,
-        Spear self,
-        Weapon.Mode newMode)
-    {
-        bool wasStuckInWall = self is RopeSpear && self.mode == Weapon.Mode.StuckInWall;
-
-        Vector2 liveDirection = Vector2.zero;
-        FlightState liveState = null;
-        bool haveLiveDirection = self is RopeSpear liveSpear &&
-                                 FlightStates.TryGetValue(liveSpear, out liveState) &&
-                                 liveState.InSpearUpdate &&
-                                 liveState.Direction.sqrMagnitude > 0.25f;
-        if (haveLiveDirection)
-        {
-            liveDirection = liveState.Direction.normalized;
-        }
-
-        orig(self, newMode);
-
-        if (self is not RopeSpear ropeSpear)
-        {
-            return;
-        }
-
-        if (newMode == Weapon.Mode.StuckInWall)
-        {
-            Vector2 direction;
-            if (haveLiveDirection)
-            {
-                direction = liveDirection;
-            }
-            else if (!TryResolveStoredStuckDirection(ropeSpear, out direction))
-            {
-                direction = ResolveFlightDirection(ropeSpear, ropeSpear.firstChunk.vel);
-            }
-
-            RememberStuckDirection(ropeSpear, direction);
-            if (IsNonCardinal(direction))
-            {
-                ropeSpear.addPoles = false;
-            }
-            RestoreExactStuckPose(ropeSpear, direction);
-        }
-        else if (wasStuckInWall &&
-                 ropeSpear.abstractPhysicalObject is AbstractRopeSpear data)
-        {
-            data.SetPersistentStuckDirection(Vector2.zero);
-        }
+        // For a diagonal contact vanilla often leaves the spear Thrown because
+        // BodyChunk.ContactPoint and cardinal throwDir differ. Sweep the real flight
+        // path and perform the same wall-stick transition ourselves.
+        TryStickFromFlight(ropeSpear, state);
     }
 
     private static void Weapon_HitWall(
@@ -320,49 +157,6 @@ internal static class RopeSpearWallStickRuntime
         return direction;
     }
 
-    private static bool TryResolveStoredStuckDirection(
-        RopeSpear spear,
-        out Vector2 direction)
-    {
-        direction = Vector2.zero;
-        if (spear?.abstractPhysicalObject is AbstractRopeSpear data &&
-            data.TryGetPersistentStuckDirection(out direction))
-        {
-            return true;
-        }
-
-        if (spear == null || spear.rotation.sqrMagnitude <= 0.25f)
-        {
-            return false;
-        }
-
-        direction = spear.rotation.normalized;
-        return true;
-    }
-
-    private static void RememberStuckDirection(RopeSpear spear, Vector2 direction)
-    {
-        if (spear?.abstractPhysicalObject is not AbstractRopeSpear data ||
-            direction.sqrMagnitude <= 0.25f)
-        {
-            return;
-        }
-
-        data.SetPersistentStuckDirection(direction.normalized);
-    }
-
-    private static bool IsNonCardinal(Vector2 direction)
-    {
-        if (direction.sqrMagnitude <= 0.25f)
-        {
-            return false;
-        }
-
-        direction.Normalize();
-        return Mathf.Abs(direction.x) > NonCardinalComponentThreshold &&
-               Mathf.Abs(direction.y) > NonCardinalComponentThreshold;
-    }
-
     private static bool TryStickFromFlight(RopeSpear spear, FlightState state)
     {
         if (spear == null ||
@@ -397,6 +191,12 @@ internal static class RopeSpearWallStickRuntime
         }
 
         Vector2 anchorPosition = spear.room.MiddleOfTile(airTile) - direction * EmbedOffset;
+
+        // stuckInWallCycles is also vanilla's orientation bit for generated beam
+        // topology: positive = wall/mostly horizontal spear, negative = floor or
+        // ceiling/mostly vertical spear. Base ChangeMode can therefore keep doing
+        // all of its ordinary pole bookkeeping even though the sprite remains at
+        // the exact arbitrary angle afterwards.
         int cycles = Random.Range(3, 7);
         spear.abstractSpear.stuckInWallCycles = surfaceDirection.x != 0
             ? cycles
@@ -404,9 +204,10 @@ internal static class RopeSpearWallStickRuntime
         spear.throwDir = surfaceDirection;
         spear.stuckInWall = anchorPosition;
         spear.vibrate = 10;
-        RememberStuckDirection(spear, direction);
         spear.ChangeMode(Weapon.Mode.StuckInWall);
 
+        // Spear.ChangeMode intentionally snaps ordinary spears to a cardinal axis.
+        // Reapply the real throw vector only after its wall/beam bookkeeping ran.
         spear.stuckInWall = anchorPosition;
         spear.setRotation = direction;
         spear.rotation = direction;
@@ -442,13 +243,12 @@ internal static class RopeSpearWallStickRuntime
             return false;
         }
 
-        Vector2 currentCenter = spear.firstChunk.pos;
-        Vector2 centerEnd = Vector2.Distance(startPosition, currentCenter) > 0.5f
-            ? currentCenter
-            : startPosition + velocity;
-        Vector2 endPosition = centerEnd + direction * SpearTipReach;
+        // Trace the actual swept center path plus the physical spear-tip reach.
+        // This works for every continuous angle and also catches fast casts before
+        // the single BodyChunk has enough time to settle onto a cardinal contact.
+        Vector2 endPosition = startPosition + velocity + direction * SpearTipReach;
         float distance = Vector2.Distance(startPosition, endPosition);
-        int samples = Mathf.Clamp(Mathf.CeilToInt(distance / TraceStep), 1, 64);
+        int samples = Mathf.Clamp(Mathf.CeilToInt(distance / TraceStep), 1, 48);
 
         bool haveAir = false;
         IntVector2 previousAirTile = default;
@@ -478,6 +278,8 @@ internal static class RopeSpearWallStickRuntime
 
         if (!hitSolid)
         {
+            // Physical terrain collision is still useful as a fallback when another
+            // mod has already modified velocity/position during the same update.
             IntVector2 contact = spear.firstChunk.ContactPoint;
             if (contact.x == 0 && contact.y == 0)
             {
@@ -551,6 +353,7 @@ internal static class RopeSpearWallStickRuntime
     {
         surfaceDirection = default;
 
+        // ContactPoint is authoritative when it names a solid neighbor.
         if (contactPoint.x != 0)
         {
             IntVector2 candidate = new(contactPoint.x < 0 ? -1 : 1, 0);
@@ -583,6 +386,8 @@ internal static class RopeSpearWallStickRuntime
             return true;
         }
 
+        // Corner crossing: choose the solid cardinal neighbor that the real flight
+        // vector points into most strongly. This keeps 45-degree casts deterministic.
         IntVector2[] candidates =
         {
             new IntVector2(1, 0),
@@ -623,6 +428,9 @@ internal static class RopeSpearWallStickRuntime
             return false;
         }
 
+        // Preserve vanilla's map-authoring restrictions. "Any angle" should not
+        // bypass NoSpearStickZone, room borders, shelter-door safety, or allow two
+        // wall spears to occupy the same anchor tile.
         if (airTile.x <= 0 ||
             airTile.y <= 0 ||
             airTile.x >= room.abstractRoom.size.x - 1 ||
@@ -699,11 +507,6 @@ internal static class RopeSpearWallStickRuntime
                 spear.firstChunk.HardSetPosition(anchor);
                 spear.firstChunk.lastPos = anchor;
             }
-        }
-
-        if (IsNonCardinal(direction))
-        {
-            spear.addPoles = false;
         }
 
         spear.setRotation = direction;
