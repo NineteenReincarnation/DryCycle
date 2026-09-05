@@ -299,8 +299,14 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         else if (grasp?.grabber is Lizard lizard &&
                  DesertBatflyIntimidation.IsSupportedLethalThreat(lizard))
         {
-            DesertBatflyIntimidation.BroadcastPredatorCapture(this, lizard, null);
-            DesertAI.Threatened(lizard, true);
+            if (!dead)
+            {
+                // A living Peach capture is a real predator event. Picking up an already
+                // dead Desert Batfly is scavenging: it should enter the lizard's ordinary
+                // ReturnPrey pipeline without manufacturing a second predator fear event.
+                DesertBatflyIntimidation.BroadcastPredatorCapture(this, lizard, null);
+                DesertAI.Threatened(lizard, true);
+            }
         }
         else if (grasp?.grabber != null && grasp.grabber is not Fly)
         {
