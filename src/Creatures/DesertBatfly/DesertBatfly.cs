@@ -38,7 +38,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void NewRoom(Room newRoom)
     {
-        playerHolder = null;
+        // Keep playerHolder across a carried room transition. Release tracking then
+        // still fires correctly if the player drops/throws the bat in the new room.
         DesertAI?.ResetRoom();
         base.NewRoom(newRoom);
     }
@@ -171,9 +172,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                 DesertAI.PlayerGrabbed(player);
             }
         }
-        else if (grasp?.grabber is not Fly)
+        else if (grasp?.grabber != null && grasp.grabber is not Fly)
         {
-            DesertAI.Threatened(grasp?.grabber, true);
+            DesertAI.Threatened(grasp.grabber, true);
         }
 
         DesertAI.CancelAttack();
