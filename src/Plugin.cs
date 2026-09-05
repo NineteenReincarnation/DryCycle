@@ -18,6 +18,7 @@ using DryCycle.ShelterExts;
 using DryCycle.TemperatureSystem;
 using DryCycle.TerrainExt.QuicksandZone;
 using DryCycle.Thirst;
+using DryCycle.Token;
 using DryCycle.Weather;
 using DryCycle.Weather.Climate;
 using DryCycle.Weather.HeatWave;
@@ -110,6 +111,8 @@ internal sealed class Plugin : BaseUnityPlugin
             RopeSpearMountVinePoseRuntime.Disable();
             RopeSpearDiagonalClimbRuntime.Disable();
             RopeSpearAimController.Disable();
+            RopeSpearSandboxRuntime.Disable();
+            DryCycleTokenRuntime.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandCreatureEscape.Disable();
@@ -168,6 +171,8 @@ internal sealed class Plugin : BaseUnityPlugin
             DryCycleContent.LoadResources(self);
             KingVultureSpearHooks.Enable();
             RopeSpearHooks.Enable();
+            DryCycleTokenRuntime.Enable();
+            RopeSpearSandboxRuntime.Enable();
             RopeSpearDiagonalClimbRuntime.Enable();
             RopeSpearMountVinePoseRuntime.Enable();
             RopeSpearWallStickRuntime.Enable();
@@ -265,6 +270,8 @@ internal sealed class Plugin : BaseUnityPlugin
             RopeSpearMountVinePoseRuntime.Disable();
             RopeSpearDiagonalClimbRuntime.Disable();
             RopeSpearAimController.Disable();
+            RopeSpearSandboxRuntime.Disable();
+            DryCycleTokenRuntime.Disable();
             RopeSpearHooks.Disable();
             QuicksandSubmersionCleanup.Disable();
             QuicksandCreatureEscape.Disable();
