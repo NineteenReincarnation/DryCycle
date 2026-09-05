@@ -15,19 +15,18 @@ namespace DryCycle.Debugging.AI;
 // does not depend on Unity Editor, UImGui, SRP or OS multi-viewports.
 internal sealed class AIDebugImGuiBackend : IDisposable
 {
-    private const long FontTextureIdValue = 1;
-    private static readonly IntPtr FontTextureId = new(FontTextureIdValue);
+    private static readonly IntPtr FontTextureId = new(1);
 
     private readonly Mesh mesh;
     private readonly Material material;
     private readonly MaterialPropertyBlock properties = new();
     private readonly CommandBuffer commands = new() { name = "DryCycle AI Observatory" };
     private readonly List<DrawCommand> drawCommands = new(64);
-    private readonly List<int[]> subMeshIndices = new(64);
+    private readonly List<Vector3> vertices = new(4096);
+    private readonly List<Vector2> uvs = new(4096);
+    private readonly List<Color32> colors = new(4096);
+    private readonly List<List<int>> indexBuffers = new(64);
 
-    private Vector3[] vertices = Array.Empty<Vector3>();
-    private Vector2[] uvs = Array.Empty<Vector2>();
-    private Color32[] colors = Array.Empty<Color32>();
     private Texture2D fontTexture;
     private IntPtr context;
     private bool frameReady;
@@ -36,13 +35,11 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     private readonly struct DrawCommand
     {
         internal readonly Rect Clip;
-        internal readonly IntPtr TextureId;
         internal readonly int SubMesh;
 
-        internal DrawCommand(Rect clip, IntPtr textureId, int subMesh)
+        internal DrawCommand(Rect clip, int subMesh)
         {
             Clip = clip;
-            TextureId = textureId;
             SubMesh = subMesh;
         }
     }
@@ -55,8 +52,6 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
         ImGuiIOPtr io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
-        io.IniFilename = null;
-        io.LogFilename = null;
         io.DisplayFramebufferScale = Num.Vector2.One;
         BuildFontAtlas(io);
         ConfigureStyle();
@@ -105,7 +100,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         if (disposed || !frameReady || context == IntPtr.Zero) return;
         ImGui.SetCurrentContext(context);
         ImDrawDataPtr data = ImGui.GetDrawData();
-        if (data.NativePtr == null || data.TotalVtxCount <= 0) return;
+        if (data.TotalVtxCount <= 0 || data.CmdListsCount <= 0) return;
         BuildMesh(data);
         ExecuteDrawCommands(data);
     }
@@ -126,12 +121,12 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
     private static void FeedKeyboard(ImGuiIOPtr io)
     {
-        for (KeyCode key = KeyCode.A; key <= KeyCode.Z; key++)
-            io.AddKeyEvent(ImGuiKey.A + ((int)key - (int)KeyCode.A), Input.GetKey(key));
-        for (KeyCode key = KeyCode.Alpha0; key <= KeyCode.Alpha9; key++)
-            io.AddKeyEvent(ImGuiKey._0 + ((int)key - (int)KeyCode.Alpha0), Input.GetKey(key));
-        for (KeyCode key = KeyCode.F1; key <= KeyCode.F12; key++)
-            io.AddKeyEvent(ImGuiKey.F1 + ((int)key - (int)KeyCode.F1), Input.GetKey(key));
+        for (int i = (int)KeyCode.A; i <= (int)KeyCode.Z; i++)
+            io.AddKeyEvent((ImGuiKey)((int)ImGuiKey.A + i - (int)KeyCode.A), Input.GetKey((KeyCode)i));
+        for (int i = (int)KeyCode.Alpha0; i <= (int)KeyCode.Alpha9; i++)
+            io.AddKeyEvent((ImGuiKey)((int)ImGuiKey._0 + i - (int)KeyCode.Alpha0), Input.GetKey((KeyCode)i));
+        for (int i = (int)KeyCode.F1; i <= (int)KeyCode.F12; i++)
+            io.AddKeyEvent((ImGuiKey)((int)ImGuiKey.F1 + i - (int)KeyCode.F1), Input.GetKey((KeyCode)i));
 
         AddKey(io, ImGuiKey.Tab, KeyCode.Tab);
         AddKey(io, ImGuiKey.LeftArrow, KeyCode.LeftArrow);
@@ -173,9 +168,12 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     {
         string font = FindCjkFont();
         if (font != null)
-            io.Fonts.AddFontFromFileTTF(font, 17f, default, io.Fonts.GetGlyphRangesChineseFull());
+            io.Fonts.AddFontFromFileTTF(font, 17f, default(ImFontConfigPtr), io.Fonts.GetGlyphRangesChineseFull());
         else
+        {
+            AIDebugLocalization.Language = AIDebugLanguage.English;
             io.Fonts.AddFontDefault();
+        }
 
         io.Fonts.GetTexDataAsRGBA32(out IntPtr pixels, out int width, out int height, out int bytesPerPixel);
         int byteCount = checked(width * height * bytesPerPixel);
@@ -196,13 +194,13 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
     private static string FindCjkFont()
     {
-        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+        string systemFonts = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         string[] candidates =
         {
-            Path.Combine(windows, "msyh.ttc"),
-            Path.Combine(windows, "msyhbd.ttc"),
-            Path.Combine(windows, "simhei.ttf"),
-            Path.Combine(windows, "simsun.ttc"),
+            Path.Combine(systemFonts ?? string.Empty, "msyh.ttc"),
+            Path.Combine(systemFonts ?? string.Empty, "msyhbd.ttc"),
+            Path.Combine(systemFonts ?? string.Empty, "simhei.ttf"),
+            Path.Combine(systemFonts ?? string.Empty, "simsun.ttc"),
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
         };
@@ -225,21 +223,22 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         style.ItemSpacing = new Num.Vector2(7f, 5f);
     }
 
-    private void EnsureBuffers(int count)
+    private List<int> IndexBuffer(int index)
     {
-        if (vertices.Length >= count) return;
-        int capacity = Mathf.NextPowerOfTwo(Mathf.Max(256, count));
-        vertices = new Vector3[capacity];
-        uvs = new Vector2[capacity];
-        colors = new Color32[capacity];
+        while (indexBuffers.Count <= index) indexBuffers.Add(new List<int>(256));
+        List<int> buffer = indexBuffers[index];
+        buffer.Clear();
+        return buffer;
     }
 
     private void BuildMesh(ImDrawDataPtr data)
     {
-        EnsureBuffers(data.TotalVtxCount);
+        vertices.Clear();
+        uvs.Clear();
+        colors.Clear();
         drawCommands.Clear();
-        subMeshIndices.Clear();
         int vertexBase = 0;
+        int subMesh = 0;
 
         for (int listIndex = 0; listIndex < data.CmdListsCount; listIndex++)
         {
@@ -250,47 +249,40 @@ internal sealed class AIDebugImGuiBackend : IDisposable
                 Num.Vector2 p = vertex.pos;
                 Num.Vector2 uv = vertex.uv;
                 uint packed = vertex.col;
-                int dst = vertexBase + i;
-                vertices[dst] = new Vector3(p.X, p.Y, 0f);
-                uvs[dst] = new Vector2(uv.X, uv.Y);
-                colors[dst] = new Color32((byte)(packed & 0xff), (byte)((packed >> 8) & 0xff),
-                    (byte)((packed >> 16) & 0xff), (byte)((packed >> 24) & 0xff));
+                vertices.Add(new Vector3(p.X, p.Y, 0f));
+                uvs.Add(new Vector2(uv.X, uv.Y));
+                colors.Add(new Color32((byte)(packed & 0xff), (byte)((packed >> 8) & 0xff),
+                    (byte)((packed >> 16) & 0xff), (byte)((packed >> 24) & 0xff)));
             }
 
             for (int cmdIndex = 0; cmdIndex < list.CmdBuffer.Size; cmdIndex++)
             {
                 ImDrawCmdPtr cmd = list.CmdBuffer[cmdIndex];
                 if (cmd.UserCallback != IntPtr.Zero || cmd.ElemCount == 0) continue;
-                int elemCount = checked((int)cmd.ElemCount);
-                int[] indices = new int[elemCount];
+                List<int> indices = IndexBuffer(subMesh);
                 int firstIndex = checked((int)cmd.IdxOffset);
                 int vtxOffset = checked((int)cmd.VtxOffset);
+                int elemCount = checked((int)cmd.ElemCount);
                 for (int i = 0; i < elemCount; i++)
-                    indices[i] = vertexBase + vtxOffset + list.IdxBuffer[firstIndex + i];
+                    indices.Add(vertexBase + vtxOffset + list.IdxBuffer[firstIndex + i]);
 
                 Num.Vector4 clip = cmd.ClipRect;
-                Rect rect = Rect.MinMaxRect(clip.X, clip.Y, clip.Z, clip.W);
-                int subMesh = subMeshIndices.Count;
-                subMeshIndices.Add(indices);
-                drawCommands.Add(new DrawCommand(rect, cmd.TextureId, subMesh));
+                drawCommands.Add(new DrawCommand(Rect.MinMaxRect(clip.X, clip.Y, clip.Z, clip.W), subMesh));
+                subMesh++;
             }
             vertexBase += list.VtxBuffer.Size;
         }
 
         mesh.Clear(false);
-        if (data.TotalVtxCount == 0 || subMeshIndices.Count == 0) return;
-        var usedVertices = new Vector3[data.TotalVtxCount];
-        var usedUvs = new Vector2[data.TotalVtxCount];
-        var usedColors = new Color32[data.TotalVtxCount];
-        Array.Copy(vertices, usedVertices, data.TotalVtxCount);
-        Array.Copy(uvs, usedUvs, data.TotalVtxCount);
-        Array.Copy(colors, usedColors, data.TotalVtxCount);
-        mesh.vertices = usedVertices;
-        mesh.uv = usedUvs;
-        mesh.colors32 = usedColors;
-        mesh.subMeshCount = subMeshIndices.Count;
-        for (int i = 0; i < subMeshIndices.Count; i++) mesh.SetTriangles(subMeshIndices[i], i, false);
-        mesh.RecalculateBounds();
+        if (vertices.Count == 0 || drawCommands.Count == 0) return;
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.SetColors(colors);
+        mesh.subMeshCount = drawCommands.Count;
+        for (int i = 0; i < drawCommands.Count; i++) mesh.SetTriangles(indexBuffers[i], i, false);
+        float width = Mathf.Max(1f, data.DisplaySize.X * data.FramebufferScale.X);
+        float height = Mathf.Max(1f, data.DisplaySize.Y * data.FramebufferScale.Y);
+        mesh.bounds = new Bounds(new Vector3(width * 0.5f, height * 0.5f, 0f), new Vector3(width, height, 1f));
     }
 
     private void ExecuteDrawCommands(ImDrawDataPtr data)
@@ -337,20 +329,18 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
 internal static class AIDebugNativeBootstrap
 {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
     [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr LoadLibrary(string lpFileName);
-#endif
+
     private static bool attempted;
 
     internal static void Preload()
     {
         if (attempted) return;
         attempted = true;
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        if (Environment.OSVersion.Platform != PlatformID.Win32NT) return;
         string folder = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string path = Path.Combine(folder ?? string.Empty, "cimgui.dll");
         if (File.Exists(path)) LoadLibrary(path);
-#endif
     }
 }
