@@ -60,13 +60,24 @@ internal static class RopeSpearDiagonalClimbRuntime
         Player self,
         bool eu)
     {
+        // IMPORTANT: attempt the rope -> shaft handoff before vanilla VineGrab runs.
+        // Vanilla disconnects a vine grab when the main body is farther than
+        // 40 + VineRad from the current vine point. At the RopeSpear tail the hands
+        // can reach the endpoint while the torso still hangs below that threshold,
+        // so waiting until after orig() means animation has already become None and
+        // there is nothing left to hand off. This pre-pass catches that exact frame.
+        if (TryAssistMountOntoShaft(self))
+        {
+            orig(self, eu);
+            return;
+        }
+
         BiasVineCursorAlongRope(self);
         orig(self, eu);
 
-        // RopeSpearHooks owns the normal historical handoff. Run this only as a
-        // post-pass: if that handoff already succeeded the animation is no longer
-        // VineGrab and this immediately does nothing. Otherwise it covers the
-        // endpoint dead zone without replacing ordinary beam behaviour.
+        // Keep the post-pass as well. It covers cases where vanilla movement during
+        // this frame moved the player into the mount envelope without first crossing
+        // the disconnect threshold.
         TryAssistMountOntoShaft(self);
     }
 
@@ -126,7 +137,7 @@ internal static class RopeSpearDiagonalClimbRuntime
             MaxCursor);
     }
 
-    private static void TryAssistMountOntoShaft(Player player)
+    private static bool TryAssistMountOntoShaft(Player player)
     {
         if (player?.animation != Player.AnimationIndex.VineGrab ||
             player.vinePos?.vine is not RopeSpear spear ||
@@ -138,25 +149,25 @@ internal static class RopeSpearDiagonalClimbRuntime
             spear.abstractPhysicalObject is not AbstractRopeSpear data ||
             data.stuckInWallCycles < 0)
         {
-            return;
+            return false;
         }
 
         float totalLength = player.room.climbableVines.TotalLength(spear);
         if (totalLength <= 0.001f)
         {
-            return;
+            return false;
         }
 
         float remaining = Mathf.Max(0f, 1f - player.vinePos.floatPos) * totalLength;
         if (remaining > MountRemainingRopeDistance)
         {
-            return;
+            return false;
         }
 
         int last = spear.TotalPositions() - 1;
         if (last < 0)
         {
-            return;
+            return false;
         }
 
         Vector2 spearTail = spear.Pos(last);
@@ -165,7 +176,7 @@ internal static class RopeSpearDiagonalClimbRuntime
                 spearTail,
                 MountBodyToTailDistance))
         {
-            return;
+            return false;
         }
 
         if (!TryFindMountBeam(
@@ -175,7 +186,7 @@ internal static class RopeSpearDiagonalClimbRuntime
                 player.mainBodyChunk.pos,
                 out Vector2 beamCenter))
         {
-            return;
+            return false;
         }
 
         Vector2 pullupTarget = new(
@@ -187,7 +198,7 @@ internal static class RopeSpearDiagonalClimbRuntime
                 pullupTarget,
                 MountBodyToBeamTargetDistance))
         {
-            return;
+            return false;
         }
 
         // Relinquish the rope explicitly before starting the beam pull-up. Keeping
@@ -211,6 +222,7 @@ internal static class RopeSpearDiagonalClimbRuntime
             loop: false,
             0.75f,
             1f);
+        return true;
     }
 
     private static bool TryFindMountBeam(
