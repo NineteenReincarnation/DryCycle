@@ -23,7 +23,11 @@ internal static class DesertBatflyWarpCompatibility
 
     internal static void Enable()
     {
-        if (enabled) return;
+        if (enabled)
+        {
+            EnsureWarpTypeColors();
+            return;
+        }
 
         Type roomFinderType = DesertBatflyRuntimePatch.FindType("RoomFinder");
         roomInfoType = DesertBatflyRuntimePatch.FindType("RoomInfo");
@@ -42,6 +46,7 @@ internal static class DesertBatflyWarpCompatibility
             nameof(EnumGetNamesPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         if (!DesertBatflyRuntimePatch.Patch(harmony, enumGetNames, enumPrefix))
         {
+            ShrinkWarpTypeColors();
             DesertBatflyRuntimePatch.UnpatchSelf(harmony);
             harmony = null;
             return;
@@ -51,18 +56,28 @@ internal static class DesertBatflyWarpCompatibility
             "ParseWorldFile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         MethodInfo parsePostfix = typeof(DesertBatflyWarpCompatibility).GetMethod(
             nameof(ParseWorldFilePostfix), BindingFlags.NonPublic | BindingFlags.Static);
+        if (!DesertBatflyRuntimePatch.Patch(harmony, parse, null, parsePostfix))
+        {
+            ShrinkWarpTypeColors();
+            DesertBatflyRuntimePatch.UnpatchSelf(harmony);
+            harmony = null;
+            return;
+        }
+
         MethodInfo colorLoad = colorInfoType.GetMethod(
             "Load", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
         MethodInfo colorPrefix = typeof(DesertBatflyWarpCompatibility).GetMethod(
             nameof(ColorLoadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
-        Type warpContainer = warpMenuType.GetNestedType("WarpContainer", BindingFlags.Public | BindingFlags.NonPublic);
-        MethodInfo generate = warpContainer?.GetMethod(
+        // WarpContainer is a top-level class in Warp 1.9.x, not a nested type of
+        // WarpModMenu. This prefix is only a safety net; colors are already expanded
+        // during Enable and before ColorInfo.Load.
+        Type warpContainerType = DesertBatflyRuntimePatch.FindType("WarpContainer");
+        MethodInfo generate = warpContainerType?.GetMethod(
             "GenerateRoomButtons", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         MethodInfo generatePrefix = typeof(DesertBatflyWarpCompatibility).GetMethod(
             nameof(GenerateRoomButtonsPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
-        DesertBatflyRuntimePatch.Patch(harmony, parse, null, parsePostfix);
         DesertBatflyRuntimePatch.Patch(harmony, colorLoad, colorPrefix);
         DesertBatflyRuntimePatch.Patch(harmony, generate, generatePrefix);
         enabled = true;
@@ -101,8 +116,8 @@ internal static class DesertBatflyWarpCompatibility
 
         var names = values.Select(entry => entry.name).ToList();
         while (names.Count < DesertRoomTypeValue) names.Add("Room" + names.Count);
-        if (names.Count == DesertRoomTypeValue) names.Add("DesertSwarmRoom");
-        else names[DesertRoomTypeValue] = "DesertSwarmRoom";
+        if (names.Count == DesertRoomTypeValue) names.Add("Desert Swarmroom");
+        else names[DesertRoomTypeValue] = "Desert Swarmroom";
         __result = names.ToArray();
         return false;
     }
