@@ -63,6 +63,18 @@ internal static class RopeSpearWallStickRuntime
             return;
         }
 
+        // RopeSpear is a traversal anchor, so terrain hits must not use vanilla's
+        // probabilistic wall-stick roll. This is scoped strictly to RopeSpear and
+        // still leaves NoSpearStickZone/border/shelter restrictions intact.
+        ropeSpear.alwaysStickInWalls = true;
+
+        // Vanilla Weapon.Update normally tumbles a thrown weapon into Mode.Free as
+        // soon as its speed drops below exitThrownModeSpeed (~30). That is fine for
+        // ordinary spears, but it prematurely ends RopeSpear's projectile state on
+        // upward/diagonal casts near the top of the arc. Keep RopeSpear in genuine
+        // projectile mode until an actual collision/stick transition ends the throw.
+        ropeSpear.doNotTumbleAtLowSpeed = true;
+
         FlightState state = FlightStates.GetOrCreateValue(ropeSpear);
         state.StartPosition = ropeSpear.firstChunk.pos;
         state.Velocity = ropeSpear.firstChunk.vel;
