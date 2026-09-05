@@ -120,6 +120,34 @@ internal static class AIDebugWorldOverlay
         }
     }
 
+    internal static bool DrawFrozenTrace(RainWorldGame game, AIDebugTraceFrame frame, bool drawLabels)
+    {
+        if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return false;
+        RoomCamera camera = game.cameras[0];
+        if (!string.Equals(frame.Room, camera.room.abstractRoom.name, StringComparison.Ordinal)) return false;
+
+        ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
+        uint ghost = Color(0.35f, 0.82f, 1f, 0.88f);
+        uint goal = Color(0.96f, 0.73f, 0.30f, 0.90f);
+        Num.Vector2 position = WorldToImGui(camera, frame.Position);
+        Num.Vector2 localGoal = WorldToImGui(camera, frame.LocalGoal);
+
+        draw.AddCircle(position, 13f, ghost, 24, 2.2f);
+        draw.AddCircle(position, 7f, ghost, 18, 1.3f);
+        draw.AddLine(position + new Num.Vector2(-15f, 0f), position + new Num.Vector2(15f, 0f), ghost, 1f);
+        draw.AddLine(position + new Num.Vector2(0f, -15f), position + new Num.Vector2(0f, 15f), ghost, 1f);
+        DrawArrow(draw, position, localGoal, goal, 2f);
+        draw.AddCircleFilled(localGoal, 4f, goal, 12);
+
+        if (drawLabels)
+        {
+            draw.AddText(position + new Num.Vector2(16f, -20f), ghost,
+                $"FROZEN [{frame.Frame}] {frame.Mode}");
+            draw.AddText(localGoal + new Num.Vector2(7f, -8f), goal, "localGoal@frame");
+        }
+        return true;
+    }
+
     private static void DrawCreatureMarker(ImDrawListPtr draw, RoomCamera camera,
         AbstractCreature creature, bool selected, bool label)
     {
