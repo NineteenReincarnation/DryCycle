@@ -10,6 +10,10 @@ internal static class AIDebuggerRuntime
     private static GameObject hostObject;
     private static AIDebuggerHost host;
 
+    internal static bool Visible => host?.Visible == true;
+    internal static bool WantsMouse => host?.WantsMouse == true;
+    internal static bool WantsKeyboard => host?.WantsKeyboard == true;
+
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
         if (host != null)
@@ -59,6 +63,10 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private bool backendFailed;
     private double overheadMs;
 
+    internal bool Visible => visible;
+    internal bool WantsMouse => visible && backend?.WantsMouse == true;
+    internal bool WantsKeyboard => visible && backend?.WantsKeyboard == true;
+
     internal void Bind(RainWorld rw, ManualLogSource log)
     {
         rainWorld = rw;
@@ -70,6 +78,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.F7))
         {
+            if (backendFailed)
+            {
+                logger?.LogWarning("DryCycle AI Observatory is disabled for this session because its ImGui backend previously failed. Check the earlier error and restart Rain World after fixing the runtime files.");
+                visible = false;
+                AIDebugTrace.SetVisible(false);
+                if (overlayCamera != null) overlayCamera.enabled = false;
+                return;
+            }
+
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
             if (overlayCamera != null) overlayCamera.enabled = visible;
