@@ -91,17 +91,32 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
             return;
         }
 
-        // Alt reserves Throw for endpoint anchoring. Even when there is no nearby
-        // terrain, consume the input rather than falling through to vanilla ThrowObject;
-        // otherwise a failed anchor attempt launches the handle away from the player.
-        if (!handle.TryAnchorToNearbyTerrain())
+        RopeSpear parentSpear = FindParentSpear(self, handle);
+        bool suspended = ShouldAutoCatch(self, parentSpear);
+
+        // Normal use still prefers a real terrain anchor. The special case requested
+        // for traversal is different: when the spear is already embedded and the
+        // player is hanging from the free handle in open air, Alt+Throw fixes that
+        // endpoint exactly where the hand currently is. This turns the loose end into
+        // a stable second anchor before the player lets go, so there is no impossible
+        // requirement for nearby solid terrain while suspended.
+        bool anchored = handle.TryAnchorToNearbyTerrain();
+        if (!anchored && suspended)
+        {
+            anchored = handle.TryAnchorAtCurrentPosition(self);
+        }
+
+        // Alt reserves Throw for endpoint anchoring. Even if neither terrain nor the
+        // suspended fallback is valid, consume the input rather than throwing the
+        // handle away.
+        if (!anchored)
         {
             return;
         }
 
-        // TryAnchorToNearbyTerrain arms the pending catch while the player is still
-        // the holder. Release the hand now; the actual VineGrab transfer happens in
-        // the post-Update pass below, after vanilla can no longer overwrite it.
+        // The anchor transition itself arms the pending catch while the player is
+        // still the holder. Release the hand now; VineGrab is applied after the
+        // current Player.Update finishes so vanilla cannot overwrite it this frame.
         self.ReleaseGrasp(grasp);
     }
 
@@ -217,8 +232,7 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
         }
 
         // Do not trust Player.standing/canJump here. While the player is physically
-        // suspended from a held RopeHandle those fields can remain stale for a frame,
-        // which was exactly why the vertical hanging case failed to auto-catch.
+        // suspended from a held RopeHandle those fields can remain stale for a frame.
         // Reject only states that have real, current support.
         return !HasStableSupport(player);
     }
