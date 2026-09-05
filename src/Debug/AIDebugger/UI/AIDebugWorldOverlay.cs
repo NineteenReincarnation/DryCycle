@@ -13,12 +13,13 @@ internal static class AIDebugWorldOverlay
         bool mouseCaptured, out AbstractCreature picked)
     {
         picked = null;
-        if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return false;
+        if (game?.cameras == null || game.cameras.Length == 0) return false;
         if (mouseCaptured || (!Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt))) return false;
         if (!Input.GetMouseButtonDown(0)) return false;
 
-        RoomCamera camera = game.cameras[0];
-        Vector2 mouseWorld = (Vector2)Futile.mousePosition + camera.pos;
+        RoomCamera camera = AIDebugCameraUtil.ForMouse(game);
+        if (camera?.room == null) return false;
+        Vector2 mouseWorld = AIDebugCameraUtil.MouseWorld(camera);
         float best = 34f;
         for (int i = 0; i < entities.Count; i++)
         {
@@ -37,26 +38,29 @@ internal static class AIDebugWorldOverlay
         IEnumerable<DebugEntityKey> pinned, Func<DebugEntityKey, AbstractCreature> resolver,
         bool drawPath, bool drawPerception, bool drawLabels)
     {
-        if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return;
-        RoomCamera camera = game.cameras[0];
+        if (game?.cameras == null || game.cameras.Length == 0) return;
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
 
+        // Pinned entities can belong to different RoomCameras in split-screen/Jolly.
         if (pinned != null)
         {
             foreach (DebugEntityKey key in pinned)
             {
                 AbstractCreature creature = resolver?.Invoke(key);
                 if (creature == null || ReferenceEquals(creature, selected)) continue;
-                DrawCreatureMarker(draw, camera, creature, false, drawLabels);
+                RoomCamera pinCamera = AIDebugCameraUtil.ForCreature(game, creature);
+                if (pinCamera?.room != null) DrawCreatureMarker(draw, pinCamera, creature, false, drawLabels);
             }
         }
 
         if (selected == null) return;
+        RoomCamera camera = AIDebugCameraUtil.ForCreature(game, selected);
+        if (camera?.room == null) return;
         DrawCreatureMarker(draw, camera, selected, true, drawLabels);
         Creature realized = selected.realizedCreature;
-        if (realized?.room != camera.room) return;
+        if (realized?.room != camera.room || realized.mainBodyChunk == null) return;
 
-        Num.Vector2 origin = WorldToImGui(camera, realized.mainBodyChunk.pos);
+        Num.Vector2 origin = AIDebugCameraUtil.WorldToImGui(camera, realized.mainBodyChunk.pos);
         uint cyan = Color(0.25f, 0.82f, 0.96f, 0.92f);
         uint yellow = Color(0.96f, 0.76f, 0.26f, 0.90f);
         uint red = Color(0.96f, 0.33f, 0.30f, 0.90f);
@@ -64,9 +68,9 @@ internal static class AIDebugWorldOverlay
 
         if (realized is DesertBatfly bat)
         {
-            if (bat.DesertAI.Target?.room == camera.room)
+            if (bat.DesertAI.Target?.room == camera.room && bat.DesertAI.Target.mainBodyChunk != null)
             {
-                Num.Vector2 target = WorldToImGui(camera, bat.DesertAI.Target.mainBodyChunk.pos);
+                Num.Vector2 target = AIDebugCameraUtil.WorldToImGui(camera, bat.DesertAI.Target.mainBodyChunk.pos);
                 DrawArrow(draw, origin, target, red, 2.0f);
                 draw.AddCircle(target, 9f, red, 20, 2f);
                 if (drawLabels) draw.AddText(target + new Num.Vector2(10f, -8f), red, "TARGET");
@@ -74,7 +78,7 @@ internal static class AIDebugWorldOverlay
 
             if (drawPath && bat.AI != null)
             {
-                Num.Vector2 localGoal = WorldToImGui(camera, bat.AI.localGoal);
+                Num.Vector2 localGoal = AIDebugCameraUtil.WorldToImGui(camera, bat.AI.localGoal);
                 DrawArrow(draw, origin, localGoal, cyan, 1.7f);
                 draw.AddCircleFilled(localGoal, 4f, cyan, 12);
                 if (drawLabels) draw.AddText(localGoal + new Num.Vector2(6f, -7f), cyan, "localGoal");
@@ -82,7 +86,7 @@ internal static class AIDebugWorldOverlay
 
             if (DesertSwarmRoom.TryGet(camera.room, out DesertSwarmRoom colony))
             {
-                Num.Vector2 center = WorldToImGui(camera, colony.Flock.Center);
+                Num.Vector2 center = AIDebugCameraUtil.WorldToImGui(camera, colony.Flock.Center);
                 draw.AddCircle(center, 13f, green, 24, 1.5f);
                 if (drawLabels) draw.AddText(center + new Num.Vector2(14f, -8f), green, "FLOCK");
             }
@@ -93,7 +97,7 @@ internal static class AIDebugWorldOverlay
             if (path.HasPathfinder && path.Destination.room == camera.room.abstractRoom.index && path.Destination.TileDefined)
             {
                 Vector2 destinationWorld = camera.room.MiddleOfTile(path.Destination.Tile);
-                Num.Vector2 destination = WorldToImGui(camera, destinationWorld);
+                Num.Vector2 destination = AIDebugCameraUtil.WorldToImGui(camera, destinationWorld);
                 DrawArrow(draw, origin, destination, cyan, 1.7f);
                 draw.AddCircle(destination, 7f, cyan, 16, 1.5f);
             }
@@ -110,8 +114,8 @@ internal static class AIDebugWorldOverlay
                 {
                     Tracker.CreatureRepresentation rep = tracker.creatures[i];
                     Creature other = rep?.representedCreature?.realizedCreature;
-                    if (other?.room != camera.room) continue;
-                    Num.Vector2 point = WorldToImGui(camera, other.mainBodyChunk.pos);
+                    if (other?.room != camera.room || other.mainBodyChunk == null) continue;
+                    Num.Vector2 point = AIDebugCameraUtil.WorldToImGui(camera, other.mainBodyChunk.pos);
                     uint color = rep.VisualContact ? green : yellow;
                     draw.AddCircle(point, rep.VisualContact ? 8f : 6f, color, 16, 1.4f);
                     if (rep.VisualContact) draw.AddLine(origin, point, color, 1f);
@@ -122,15 +126,14 @@ internal static class AIDebugWorldOverlay
 
     internal static bool DrawFrozenTrace(RainWorldGame game, AIDebugTraceFrame frame, bool drawLabels)
     {
-        if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return false;
-        RoomCamera camera = game.cameras[0];
-        if (!string.Equals(frame.Room, camera.room.abstractRoom.name, StringComparison.Ordinal)) return false;
+        RoomCamera camera = AIDebugCameraUtil.ForRoomName(game, frame.Room);
+        if (camera?.room == null) return false;
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
         uint ghost = Color(0.35f, 0.82f, 1f, 0.88f);
         uint goal = Color(0.96f, 0.73f, 0.30f, 0.90f);
-        Num.Vector2 position = WorldToImGui(camera, frame.Position);
-        Num.Vector2 localGoal = WorldToImGui(camera, frame.LocalGoal);
+        Num.Vector2 position = AIDebugCameraUtil.WorldToImGui(camera, frame.Position);
+        Num.Vector2 localGoal = AIDebugCameraUtil.WorldToImGui(camera, frame.LocalGoal);
 
         draw.AddCircle(position, 13f, ghost, 24, 2.2f);
         draw.AddCircle(position, 7f, ghost, 18, 1.3f);
@@ -153,7 +156,7 @@ internal static class AIDebugWorldOverlay
     {
         Creature realized = creature?.realizedCreature;
         if (realized?.room != camera.room || realized.mainBodyChunk == null) return;
-        Num.Vector2 point = WorldToImGui(camera, realized.mainBodyChunk.pos);
+        Num.Vector2 point = AIDebugCameraUtil.WorldToImGui(camera, realized.mainBodyChunk.pos);
         uint color = selected ? Color(0.28f, 0.86f, 1f, 0.98f) : Color(0.72f, 0.72f, 0.76f, 0.78f);
         float radius = selected ? 12f : 7f;
         draw.AddCircle(point, radius, color, selected ? 24 : 16, selected ? 2.3f : 1.3f);
@@ -166,20 +169,12 @@ internal static class AIDebugWorldOverlay
 
     private static float DistanceToCreature(Vector2 point, Creature creature)
     {
+        if (creature?.mainBodyChunk == null) return float.MaxValue;
         float best = Vector2.Distance(point, creature.mainBodyChunk.pos);
         if (creature.bodyChunks == null) return best;
         for (int i = 0; i < creature.bodyChunks.Length; i++)
             if (creature.bodyChunks[i] != null) best = Mathf.Min(best, Vector2.Distance(point, creature.bodyChunks[i].pos));
         return best;
-    }
-
-    private static Num.Vector2 WorldToImGui(RoomCamera camera, Vector2 world)
-    {
-        Vector2 local = world - camera.pos;
-        Vector2 virtualSize = camera.sSize;
-        float sx = Screen.width / Mathf.Max(1f, virtualSize.x);
-        float sy = Screen.height / Mathf.Max(1f, virtualSize.y);
-        return new Num.Vector2(local.x * sx, Screen.height - local.y * sy);
     }
 
     private static void DrawArrow(ImDrawListPtr draw, Num.Vector2 from, Num.Vector2 to, uint color, float thickness)
