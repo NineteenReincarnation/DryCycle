@@ -52,6 +52,21 @@ internal sealed class RegionDayNightOptions : OptionInterface
 
     internal static void Register()
     {
+        // ModsInit can run again after a mod reload. Reuse the already-registered
+        // interface instead of trying to replace it; MachineConnector rejects a
+        // duplicate registration and the old code then misleadingly fell back to
+        // defaults even though a valid settings page already existed.
+        OptionInterface registered = MachineConnector.GetRegisteredOI(Plugin.RainWorldModId);
+        if (registered is RegionDayNightOptions existing)
+        {
+            _instance = existing;
+            _instance.BindKnownRegions();
+            _instance.BindCompatibilityOptions();
+            _instance.BindRopeSpearOptions();
+            ReloadConfigSafely();
+            return;
+        }
+
         _instance ??= new RegionDayNightOptions();
         _instance.BindKnownRegions();
         _instance.BindCompatibilityOptions();
@@ -66,6 +81,30 @@ internal sealed class RegionDayNightOptions : OptionInterface
                 $"DryCycle could not register its Remix option interface for " +
                 $"Rain World mod '{Plugin.RainWorldModId}'; DryCycle settings will " +
                 "use their default values.");
+            return;
+        }
+
+        // Explicitly reload after registration. This makes RopeSpear's eight-way,
+        // guide, hold-delay and mode-switch options available immediately even when
+        // this interface was registered after Remix had already loaded configs.
+        ReloadConfigSafely();
+    }
+
+    private static void ReloadConfigSafely()
+    {
+        if (_instance == null)
+        {
+            return;
+        }
+
+        try
+        {
+            _instance.config.Reload();
+        }
+        catch (Exception ex)
+        {
+            Plugin.Logger?.LogWarning(
+                $"DryCycle Remix config reload failed: {ex.Message}");
         }
     }
 
