@@ -91,25 +91,11 @@ internal static class RopeSpearHandleAnchorSafetyRuntime
             return;
         }
 
-        RopeSpear parentSpear = FindParentSpear(self, handle);
-        bool suspended = ShouldAutoCatch(self, parentSpear);
-
-        // Normal use still prefers a real terrain anchor. The special case requested
-        // for traversal is different: when the spear is already embedded and the
-        // player is hanging from the free handle in open air, Alt+Throw fixes that
-        // endpoint exactly where the hand currently is. This turns the loose end into
-        // a stable second anchor before the player lets go, so there is no impossible
-        // requirement for nearby solid terrain while suspended.
-        bool anchored = handle.TryAnchorToNearbyTerrain();
-        if (!anchored && suspended)
-        {
-            anchored = handle.TryAnchorAtCurrentPosition(self);
-        }
-
-        // Alt reserves Throw for endpoint anchoring. Even if neither terrain nor the
-        // suspended fallback is valid, consume the input rather than throwing the
-        // handle away.
-        if (!anchored)
+        // RopeHandle decides anchoring solely from the background at its current
+        // position. A foreground wall is not required, but a truly empty background
+        // cannot be used as an anchor. Alt still consumes Throw on failure so the
+        // endpoint is never accidentally launched away.
+        if (!handle.TryAnchorToNearbyTerrain())
         {
             return;
         }
