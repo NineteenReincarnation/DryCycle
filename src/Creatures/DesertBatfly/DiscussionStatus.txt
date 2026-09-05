@@ -81,7 +81,7 @@ Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 Att
 5. Lightweight Social Bond + Sex / 轻量社会纽带 + 雄性/雌性
 状态：【采纳·部分已敲定】
 
-5A. 已敲定、可以进入 Codex 任务书的部分
+5A. 已实现（自动回归通过，实机行为待验收）
 ---------------------------------------
 
 A. Sex / 性别
@@ -168,7 +168,7 @@ F. 性能
 - 等后续专门深入讨论后，再另写 Codex 任务书。
 
 当前结论：
-- 第 5A 已经可以整理成独立 Codex 执行任务书。
+- 第 5A 已实现 Sex / 单槽 SocialBond / Grief，详见 docs/DesertBatfly-SocialBond-Sex.md；实机行为仍需验收。
 - 第 5B 繁殖子系统只做设计记录，状态为【尚未进行额外深入讨论】。
 
 

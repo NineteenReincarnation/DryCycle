@@ -11,6 +11,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal DesertBatflyPersonality Personality => DesertState.Personality;
 
     private int mealFood = 2;
+    private int socialSampleTicks;
     private bool runningVanillaUpdate;
     private int rockDeathGuardTicks;
     private bool resolvingNonRockViolence;
@@ -74,7 +75,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             recentLethalDamager = null;
             recentLethalThreatScale = 0f;
         }
-        if (!dead) DesertState.TickTrauma();
+        if (!dead)
+        {
+            DesertState.TickTrauma();
+            DesertState.TickGrief();
+            if (++socialSampleTicks >= 180)
+            {
+                socialSampleTicks = 0;
+                DesertBatflySocialBond.SampleChain(this);
+            }
+        }
 
         if (room == null)
         {
@@ -415,7 +425,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         }
 
         if (!wasDead && dead)
+        {
+            if (!DesertBatflyIntimidation.IsSupportedLethalThreat(killer) && room != null)
+                foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
+                    if (member is DesertBatfly observer && observer != this &&
+                        (System.Array.IndexOf(chainWitnesses, observer) >= 0 ||
+                         (Vector2.Distance(observer.mainBodyChunk.pos, deathPosition) <= 180f &&
+                          room.VisualContact(observer.mainBodyChunk.pos, deathPosition))))
+                        DesertBatflySocialBond.OnBondPartnerDeath(observer, this, killer);
             DesertBatflyIntimidation.Forget(this);
+        }
 
         recentLethalDamager = null;
         recentLethalDamageTicks = 0;

@@ -76,8 +76,15 @@ internal static class DesertBatflyTuning
     internal const float SandMargin = 22f, ScavengerHostility = 0.65f;
 }
 
+internal enum DesertBatflySex { Male, Female }
+
 internal sealed class DesertBatflyPersonality
 {
+    internal readonly DesertBatflySex Sex;
+    internal float BodyVisualScale => Sex == DesertBatflySex.Male ? 0.98f : 1.035f;
+    internal float WingLengthScale => Sex == DesertBatflySex.Male ? 1.055f : 1f;
+    internal float WingWidthScale => Sex == DesertBatflySex.Female ? 1.04f : 1f;
+    internal float MarkProminence => Sex == DesertBatflySex.Male ? 1.10f : 1f;
     internal readonly int VisualSeed, PatternSeed, SpikeSeed;
     internal readonly float Temperament, Size, Contrast;
     internal readonly float Nerve, RoostAffinity, SandSpitAffinity, VengeanceAffinity, Conformity;
@@ -86,6 +93,8 @@ internal sealed class DesertBatflyPersonality
 
     internal DesertBatflyPersonality(int seed)
     {
+        Sex = new System.Random(seed ^ 0x147AD639).NextDouble() < 0.48
+            ? DesertBatflySex.Male : DesertBatflySex.Female;
         VisualSeed = seed;
         var random = new System.Random(seed);
         PatternSeed = random.Next();
@@ -242,6 +251,69 @@ internal sealed class DesertBatflyState : HealthState
         Thirst = Mathf.Lerp(0.2f, 0.65f, Personality.Temperament);
     }
 
+    internal EntityID? SocialBondTarget, GriefThreatIdentity;
+    internal float SocialBondStrength, GriefStrength;
+    internal int GriefTicks;
+
+    internal float GriefAnger => Personality.Temperament * Personality.Nerve;
+    internal float GriefAttackScale => 1f - GriefStrength * Mathf.Lerp(0.55f, 0.25f, GriefAnger);
+    internal float GriefRoostScale => 1f + GriefStrength * Mathf.Lerp(0.40f, 0.15f, GriefAnger);
+
+    internal float BondStrength(EntityID target) => SocialBondTarget.HasValue &&
+        SocialBondTarget.Value.spawner == target.spawner && SocialBondTarget.Value.number == target.number
+            ? SocialBondStrength : 0f;
+
+    internal bool StrengthenBond(EntityID candidate, float gain)
+    {
+        if (float.IsNaN(gain) || float.IsInfinity(gain) || gain <= 0f) return false;
+        gain = Mathf.Clamp01(gain);
+        if (BondStrength(candidate) > 0f) SocialBondStrength = Mathf.Clamp01(SocialBondStrength + gain);
+        else
+        {
+            if (SocialBondTarget.HasValue && gain < SocialBondStrength + 0.12f) return false;
+            SocialBondTarget = candidate;
+            SocialBondStrength = gain;
+        }
+        return true;
+    }
+
+    // Clearing the observed dead target also makes repeated delivery idempotent.
+    internal float BeginGrief(EntityID victim, EntityID? killer)
+    {
+        float strength = BondStrength(victim);
+        if (strength <= 0f) return 0f;
+        SocialBondTarget = null;
+        SocialBondStrength = 0f;
+        if (strength < 0.30f) return 0f;
+        GriefStrength = Mathf.Max(GriefStrength, strength);
+        GriefTicks = Mathf.Max(GriefTicks, Mathf.Clamp(Mathf.RoundToInt(
+            Mathf.Lerp(1200f, 4000f, strength) * Mathf.Lerp(0.96f, 1.04f, Personality.RoostAffinity)), 1200, 4000));
+        GriefThreatIdentity = killer;
+        return Mathf.Lerp(0.08f, 0.30f, strength);
+    }
+
+    internal void TickGrief()
+    {
+        if (GriefTicks <= 0) return;
+        GriefStrength *= (GriefTicks - 1f) / GriefTicks;
+        if (--GriefTicks == 0) { GriefStrength = 0f; GriefThreatIdentity = null; }
+    }
+
+    private static string SaveIdentity(EntityID? id) => id.HasValue
+        ? id.Value.spawner.ToString(CultureInfo.InvariantCulture) + "," + id.Value.number.ToString(CultureInfo.InvariantCulture) : "";
+
+    private static EntityID? LoadIdentity(string text)
+    {
+        string[] parts = text.Split(',');
+        return parts.Length == 2 && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int spawner) &&
+            int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int number)
+            ? new EntityID(spawner, number) : (EntityID?)null;
+    }
+
+    private static float LoadStrength(string text) => float.TryParse(text, NumberStyles.Float,
+        CultureInfo.InvariantCulture, out float value) && !float.IsNaN(value) && !float.IsInfinity(value)
+            ? Mathf.Clamp01(value) : 0f;
+
     internal bool HasTrauma =>
         (PlayerTraumaTicks > 0 && PlayerTraumaStrength > 0f) ||
         (PredatorTraumaTicks > 0 && PredatorTraumaStrength > 0f);
@@ -280,12 +352,18 @@ internal sealed class DesertBatflyState : HealthState
             PlayerTraumaTicks.ToString(CultureInfo.InvariantCulture),
             PredatorTraumaId.ToString(CultureInfo.InvariantCulture),
             PredatorTraumaStrength.ToString("R", CultureInfo.InvariantCulture),
-            PredatorTraumaTicks.ToString(CultureInfo.InvariantCulture) });
+            PredatorTraumaTicks.ToString(CultureInfo.InvariantCulture),
+            SaveIdentity(SocialBondTarget), SocialBondStrength.ToString("R", CultureInfo.InvariantCulture),
+            GriefStrength.ToString("R", CultureInfo.InvariantCulture), GriefTicks.ToString(CultureInfo.InvariantCulture),
+            SaveIdentity(GriefThreatIdentity) });
         return base.ToString();
     }
 
     public override void LoadFromString(string[] data)
     {
+        SocialBondTarget = GriefThreatIdentity = null;
+        SocialBondStrength = GriefStrength = 0f;
+        GriefTicks = 0;
         base.LoadFromString(data);
         if (!unrecognizedSaveStrings.TryGetValue(SaveKey, out string saved)) return;
         string[] values = saved.Split(';');
@@ -332,6 +410,22 @@ internal sealed class DesertBatflyState : HealthState
             PredatorTraumaStrength = Mathf.Clamp01(predatorTrauma);
         if (values.Length > 14 && int.TryParse(values[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out int predatorTraumaTicks))
             PredatorTraumaTicks = Mathf.Clamp(predatorTraumaTicks, 0, DesertBatflyTuning.TraumaMaxTicks);
+
+        if (values.Length > 16)
+        {
+            SocialBondTarget = LoadIdentity(values[15]);
+            SocialBondStrength = LoadStrength(values[16]);
+            if (!SocialBondTarget.HasValue || SocialBondStrength <= 0f)
+            { SocialBondTarget = null; SocialBondStrength = 0f; }
+        }
+        if (values.Length > 18)
+        {
+            GriefStrength = LoadStrength(values[17]);
+            if (int.TryParse(values[18], out int griefTicks)) GriefTicks = Mathf.Clamp(griefTicks, 0, 4000);
+            if (values.Length > 19) GriefThreatIdentity = LoadIdentity(values[19]);
+            if (GriefTicks <= 0 || GriefStrength <= 0f)
+            { GriefStrength = 0f; GriefTicks = 0; GriefThreatIdentity = null; }
+        }
 
         if (GrabMemoryTicks <= 0 || GrabMemoryStrength <= 0f)
         {

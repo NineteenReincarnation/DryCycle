@@ -155,18 +155,19 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         if (culled || desert.slatedForDeletetion || desert.room != rCam.room || sLeaser.sprites.Length < VanillaSpriteCount) return;
 
         float size = desert.Personality.Size;
+        float bodySize = size * desert.Personality.BodyVisualScale;
         float emerge = desert.Emergence.Progress;
         float alpha = Mathf.SmoothStep(0f, 1f, emerge);
 
         // Vanilla geometry, personality-controlled 1.00x-1.25x scaling.
-        sLeaser.sprites[0].scaleX = size;
-        sLeaser.sprites[0].scaleY = size;
-        sLeaser.sprites[1].scaleX *= size;
-        sLeaser.sprites[1].scaleY = size;
-        sLeaser.sprites[2].scaleX *= size;
-        sLeaser.sprites[2].scaleY = size;
-        sLeaser.sprites[3].scaleX = size;
-        sLeaser.sprites[3].scaleY = size;
+        sLeaser.sprites[0].scaleX = bodySize;
+        sLeaser.sprites[0].scaleY = bodySize;
+        sLeaser.sprites[1].scaleX *= size * desert.Personality.WingWidthScale;
+        sLeaser.sprites[1].scaleY = size * desert.Personality.WingLengthScale;
+        sLeaser.sprites[2].scaleX *= size * desert.Personality.WingWidthScale;
+        sLeaser.sprites[2].scaleY = size * desert.Personality.WingLengthScale;
+        sLeaser.sprites[3].scaleX = bodySize;
+        sLeaser.sprites[3].scaleY = bodySize;
 
         Vector2 head = Vector2.Lerp(desert.mainBodyChunk.lastPos, desert.mainBodyChunk.pos, timeStacker) - camPos;
         Vector2 tail = Vector2.Lerp(lowerBody.lastPos, lowerBody.pos, timeStacker) - camPos;
@@ -186,7 +187,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
                 int wingIndex = mark.Side < 0 ? 1 : 2;
                 FSprite baseWing = sLeaser.sprites[wingIndex];
                 Vector2 wingDirection = Custom.DegToVec(baseWing.rotation);
-                float distance = Mathf.Lerp(4.2f, 11.2f, mark.Along) * size;
+                float distance = Mathf.Lerp(4.2f, 11.2f, mark.Along) * size * desert.Personality.WingLengthScale;
                 sprite.x = head.x + wingDirection.x * distance;
                 sprite.y = head.y + wingDirection.y * distance;
                 sprite.rotation = baseWing.rotation + mark.Offset * 14f;
@@ -224,7 +225,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
             }
 
             sprite.isVisible = visible && alpha > 0.01f;
-            sprite.alpha = alpha * Mathf.Lerp(0.68f, 0.94f, desert.Personality.Contrast);
+            sprite.alpha = alpha * Mathf.Clamp01(Mathf.Lerp(0.68f, 0.94f, desert.Personality.Contrast) * desert.Personality.MarkProminence);
         }
 
         for (int i = 0; i < spikeLengths.Length; i++)
@@ -237,7 +238,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
             var mesh = (TriangleMesh)sLeaser.sprites[SpikeStart + i];
             mesh.MoveVertice(0, root + forward * 1.25f * size);
             mesh.MoveVertice(1, root - forward * 1.25f * size);
-            mesh.MoveVertice(2, root + spikeSide * spikeLengths[i] * size);
+            mesh.MoveVertice(2, root + spikeSide * spikeLengths[i] * size * desert.Personality.MarkProminence);
             mesh.isVisible = sLeaser.sprites[0].isVisible && alpha > 0.01f;
             mesh.alpha = alpha;
         }

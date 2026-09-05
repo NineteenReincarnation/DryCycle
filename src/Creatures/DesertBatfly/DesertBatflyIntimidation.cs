@@ -493,8 +493,11 @@ internal static class DesertBatflyIntimidation
 
         for (int i = 0; i < bats.Count; i++)
         {
-            if (tier[i] >= 0)
-                ReceiveFear(bats[i], threat, eventPosition, tier[i], threatScale, kind);
+            if (tier[i] < 0) continue;
+            // Apply the bonus before ReceiveFear so its existing PTSD collapse checks see it.
+            if (tier[i] <= 1 && kind != EventKind.PredatorCapture)
+                DesertBatflySocialBond.OnBondPartnerDeath(bats[i], victim, threat);
+            ReceiveFear(bats[i], threat, eventPosition, tier[i], threatScale, kind);
         }
 
         ArmVengeanceGroup(
@@ -506,6 +509,19 @@ internal static class DesertBatflyIntimidation
             kind,
             rescueTongue,
             suppressNewVengeance);
+
+        DesertBatfly previousEscape = null;
+        for (int i = 0; i < bats.Count; i++)
+        {
+            if (tier[i] < 0 || !DesertBatflySocialBond.CanRespond(bats[i])) continue;
+            if (tier[i] <= 1 && !IsExtremeVengeanceActive(bats[i]))
+            {
+                if (previousEscape != null && Vector2.Distance(previousEscape.mainBodyChunk.pos,
+                    bats[i].mainBodyChunk.pos) <= 120f)
+                    DesertBatflySocialBond.AddBond(bats[i], previousEscape, 0.01f);
+                previousEscape = bats[i];
+            }
+        }
 
         if (kind != EventKind.PredatorCapture)
             room.AddObject(new CorpseWarning(room, victim, threat, eventPosition, threatScale));
@@ -708,13 +724,15 @@ internal static class DesertBatflyIntimidation
                 return;
 
             trueCandidates.Sort(
-                (a, b) => b.Personality.VengeanceAffinity.CompareTo(a.Personality.VengeanceAffinity));
+                (a, b) => (b.Personality.VengeanceAffinity + DesertBatflySocialBond.Motivation(b, victim, threat))
+                    .CompareTo(a.Personality.VengeanceAffinity + DesertBatflySocialBond.Motivation(a, victim, threat)));
 
             for (int i = 0; i < trueCandidates.Count &&
                  leaders.Count < MaxTrueAvengersPerEvent &&
                  participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
             {
                 DesertBatfly bat = trueCandidates[i];
+                if (!DesertBatflySocialBond.CanRespond(bat)) continue;
                 State state = StateFor(bat);
                 FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
                 float trauma = PersistentTraumaStrength(bat, threat);
@@ -746,7 +764,7 @@ internal static class DesertBatflyIntimidation
         for (int i = 0; i < bats.Count; i++)
         {
             DesertBatfly bat = bats[i];
-            if (tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
+            if (!DesertBatflySocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
                 bat.Personality.Conformity < DesertBatflyTuning.SocialFollowerMinConformity ||
                 IsExtremeVengeanceActive(bat))
                 continue;
@@ -784,7 +802,7 @@ internal static class DesertBatflyIntimidation
                 bat.Personality.Nerve * 0.15f +
                 bestLeaderDrive * 0.15f -
                 fear.Strength * 0.28f -
-                trauma * 0.65f;
+                trauma * 0.65f + DesertBatflySocialBond.Motivation(bat, victim, threat);
 
             if (score < 0.44f) continue;
             float probability = Mathf.InverseLerp(0.44f, 0.84f, score) *
@@ -836,7 +854,7 @@ internal static class DesertBatflyIntimidation
         bool supportOnly,
         DesertBatfly leader)
     {
-        float rage = Mathf.Clamp01(Mathf.Lerp(0.58f, 1f, drive));
+        float rage = Mathf.Clamp01(Mathf.Lerp(0.58f, 1f, drive) + DesertBatflySocialBond.Motivation(bat, victim, threat));
         if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
         {
             state.Rage = Mathf.Max(state.Rage, rage);
@@ -1124,6 +1142,8 @@ internal static class DesertBatflyIntimidation
         if (graspCatch && lizard.grasps[0] != null && lizard.grasps[0].grabbed == victim)
             lizard.ReleaseGrasp(0);
 
+        if (victim.dead || RescueStillPossible(state, target)) return false;
+        DesertBatflySocialBond.OnSuccessfulRescue(bat, victim);
         Vector2 away = Custom.DirVec(
             lizard.mainBodyChunk.pos,
             victim.mainBodyChunk.pos);
@@ -1285,7 +1305,7 @@ internal static class DesertBatflyIntimidation
         return best;
     }
 
-    private static void AddTrauma(
+    internal static void AddTrauma(
         DesertBatfly bat,
         Creature threat,
         float gain)

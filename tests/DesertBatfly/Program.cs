@@ -49,12 +49,22 @@ internal static class Program
         Check(DesertBatflyTuning.MealWater == 50f, "meal water cost is 50 raw points");
         Check(DesertBatflyTuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
 
+        int males = 0;
         int sandSpitters = 0;
         int trueAvengers = 0;
         for (int seed = 0; seed < 10000; seed++)
         {
             var a = new DesertBatflyPersonality(seed);
             var b = new DesertBatflyPersonality(seed);
+            Check(a.Sex == b.Sex, "stable sex");
+            if (a.Sex == DesertBatflySex.Male) males++;
+            var originalPersonality = new System.Random(seed);
+            Check(a.PatternSeed == originalPersonality.Next() && a.SpikeSeed == originalPersonality.Next() &&
+                a.Temperament == (float)originalPersonality.NextDouble(), "original personality stream preserved");
+            float oldNerve = Mathf.Clamp01(Mathf.Lerp((float)new System.Random(seed ^ 0x5A17B1D3).NextDouble(), a.Temperament, 0.25f));
+            float oldSand = Mathf.Clamp01((float)new System.Random(seed ^ 0x6D2B79F5).NextDouble() * 0.62f + a.Temperament * 0.28f + oldNerve * 0.10f);
+            Check(a.Nerve == oldNerve && a.SandSpitAffinity == oldSand, "original nerve and sand-spit distribution unchanged");
+            Check(DesertBatflyTuning.Mass * a.Size < 0.2f, "both sexes stay lightweight");
             Check(a.PatternSeed == b.PatternSeed && a.SpikeSeed == b.SpikeSeed && a.BaseColor == b.BaseColor, "stable appearance");
             Check(a.SpikeCount >= 0 && a.SpikeCount <= DesertBatflyTuning.MaxSpikes, "spike bound");
             Check(a.PatternCount >= 5 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
@@ -80,6 +90,9 @@ internal static class Program
                 Check(a.RetaliationChance >= 0.38f && a.RetaliationChance <= 0.92f, "retaliation chance bounded");
             }
         }
+        Check(males >= 4600 && males <= 5000, "48/52 sex distribution");
+        Check(trueAvengers == 494, "exact original true avenger calibration");
+        Console.WriteLine($"Sex: {males} male / {10000 - males} female; 494 true avengers expected.");
         Check(sandSpitters > 500 && sandSpitters < 9500, "sand spit is an individual minority trait, not none/all");
         Check(trueAvengers >= 450 && trueAvengers <= 550, "true-avenger rate remains approximately five percent");
         Console.WriteLine($"Personality: 10,000 repeatable seeds, {sandSpitters} sand spitters, {trueAvengers} true avengers; Conformity stable and bounded.");
@@ -103,7 +116,9 @@ internal static class Program
             PlayerTraumaTicks = 6400,
             PredatorTraumaId = 177,
             PredatorTraumaStrength = 0.64f,
-            PredatorTraumaTicks = 5300
+            PredatorTraumaTicks = 5300,
+            SocialBondTarget = new EntityID(42, 177), SocialBondStrength = 0.83f,
+            GriefStrength = 0.67f, GriefTicks = 2300, GriefThreatIdentity = new EntityID(-1, 333)
         };
         state.unrecognizedSaveStrings["ForeignMod"] = "preserve";
         var culture = CultureInfo.CurrentCulture;
@@ -118,6 +133,10 @@ internal static class Program
             Check(restored.GrabMemoryPlayer == 1 && Math.Abs(restored.GrabMemoryStrength - 0.72f) < 0.001f && restored.GrabMemoryTicks == 2200, "grab memory round trip");
             Check(restored.PlayerTraumaPlayer == 2 && Math.Abs(restored.PlayerTraumaStrength - 0.83f) < 0.001f && restored.PlayerTraumaTicks == 6400, "player trauma round trip");
             Check(restored.PredatorTraumaId == 177 && Math.Abs(restored.PredatorTraumaStrength - 0.64f) < 0.001f && restored.PredatorTraumaTicks == 5300, "predator trauma round trip");
+            Check(restored.BondStrength(new EntityID(42, 177)) == 0.83f && restored.BondStrength(new EntityID(43, 177)) == 0f, "full bond identity round trip and no number-only collision");
+            Check(restored.GriefTicks == 2300 && restored.GriefStrength == 0.67f && restored.GriefThreatIdentity.Value.number == 333, "grief round trip");
+            restored.TickGrief();
+            Check(restored.GriefTicks == 2299 && restored.GriefStrength < 0.67f && restored.PlayerTraumaStrength == 0.83f, "grief decay leaves severe PTSD intact");
             Check(restored.HasTrauma, "restored trauma remains active");
             restored.TickTrauma();
             Check(restored.PlayerTraumaTicks == 6399 && restored.PredatorTraumaTicks == 5299, "trauma ticks decay exactly once per realized update");
@@ -127,10 +146,30 @@ internal static class Program
             Check(restored.GrabMemoryPlayer == -1 && restored.GrabMemoryStrength == 0f && restored.GrabMemoryTicks == 0, "legacy payload clears optional grab memory");
             Check(restored.PlayerTraumaPlayer == -1 && restored.PlayerTraumaStrength == 0f && restored.PlayerTraumaTicks == 0, "legacy payload clears player trauma");
             Check(restored.PredatorTraumaId == int.MinValue && restored.PredatorTraumaStrength == 0f && restored.PredatorTraumaTicks == 0, "legacy payload clears predator trauma");
+            Check(!restored.SocialBondTarget.HasValue && restored.GriefTicks == 0 && restored.GriefStrength == 0f, "legacy clears bond and grief");
+            restored.LoadFromString(new[] { "DCDesertBatflyV1<cC>973;0.5;0;3;0;0;-1;0;0;-1;0;0;0;0;0;bad;NaN;NaN;9999;bad" });
+            Check(!restored.SocialBondTarget.HasValue && restored.SocialBondStrength == 0f && restored.GriefTicks == 0 && !restored.GriefThreatIdentity.HasValue, "malformed identities and NaN sanitized");
             Check(!restored.HasTrauma, "legacy payload has no phantom PTSD");
         }
         finally { CultureInfo.CurrentCulture = culture; }
         Console.WriteLine("State: locale-independent round trip, grab memory, persistent player/predator trauma, legacy schema, malformed data, foreign fields.");
+
+        var bonds = new DesertBatflyState(creature);
+        var friend = new EntityID(3, 20);
+        var challenger = new EntityID(4, 20);
+        Check(bonds.StrengthenBond(friend, 0.05f), "empty slot establishes bond");
+        Check(bonds.StrengthenBond(friend, 0.05f) && bonds.SocialBondStrength == 0.10f, "same partner strengthens");
+        Check(!bonds.StrengthenBond(challenger, 0.20f), "replacement margin protects bond");
+        Check(bonds.StrengthenBond(challenger, 0.30f), "strong challenger replaces weak bond");
+        bonds.StrengthenBond(challenger, 2f);
+        Check(bonds.SocialBondStrength == 1f && !bonds.StrengthenBond(friend, 0.3f), "strong bond survives rescue challenger and clamps");
+        Check(!bonds.StrengthenBond(friend, float.NaN), "invalid gain rejected");
+        Check(bonds.BeginGrief(friend, null) == 0f && bonds.GriefTicks == 0, "unrelated death has no grief");
+        Check(bonds.BeginGrief(challenger, friend) > 0f && bonds.GriefTicks >= 1200 && bonds.GriefTicks <= 4000, "bond death starts grief");
+        int griefTicks = bonds.GriefTicks;
+        Check(bonds.BeginGrief(challenger, friend) == 0f && bonds.GriefTicks == griefTicks, "duplicate death idempotent");
+        for (int i = 0; i < griefTicks; i++) bonds.TickGrief();
+        Check(bonds.GriefTicks == 0 && bonds.GriefStrength == 0f && !bonds.GriefThreatIdentity.HasValue, "grief expires cleanly");
 
         Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
@@ -218,6 +257,61 @@ internal static class Program
         var first = MakeBat(101);
         var second = MakeBat(102);
         var third = MakeBat(103);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
+        object Social(string name, params object[] arguments) => social.GetMethod(name, Flags).Invoke(null, arguments);
+        first.AI = Bare<FlyAI>();
+        second.AI = Bare<FlyAI>();
+        first.AI.behavior = second.AI.behavior = FlyAI.Behavior.Chain;
+        first.grasps = new Creature.Grasp[1];
+        second.grasps = new Creature.Grasp[1];
+        var chainGrasp = new Creature.Grasp(second, first, 0, 0, Creature.Grasp.Shareability.NonExclusive, 1f, false);
+        second.grasps[0] = chainGrasp;
+        first.grabbedBy.Add(chainGrasp);
+        Social("SampleChain", first);
+        Social("SampleChain", second);
+        Check(Math.Abs((float)Social("GetBondStrength", first, second) - 0.004f) < 0.00001f &&
+              Math.Abs((float)Social("GetBondStrength", second, first) - 0.004f) < 0.00001f, "real direct chain neighbours gain slowly in both directions");
+        first.grabbedBy.Clear();
+        second.grasps[0] = null;
+        first.AI.behavior = second.AI.behavior = FlyAI.Behavior.Idle;
+        Social("OnSuccessfulRescue", first, second);
+        float rescuedBond = (float)Social("GetBondStrength", second, first);
+        float rescuerBond = (float)Social("GetBondStrength", first, second);
+        Check(rescuedBond > rescuerBond && rescuerBond > 0f, "real rescue helper creates asymmetric bonds");
+        Social("AddBond", first, second, 0.1f);
+        Check((float)Social("GetBondStrength", second, first) == rescuedBond, "one direction never mirrors");
+        second.room = Bare<Room>();
+        Social("AddBond", first, second, 0.5f);
+        Check(Math.Abs((float)Social("GetBondStrength", first, second) - rescuerBond - 0.1f) < 0.00001f, "cross-room event cannot grow bond");
+        second.room = room;
+        second.dead = true;
+        Social("AddBond", second, first, 0.5f);
+        Check((float)Social("GetBondStrength", second, first) == rescuedBond, "dead observer cannot grow bond");
+        Social("AddBond", first, second, 0.5f);
+        Set(first.State, "SocialBondStrength", 0.9f);
+        Set(first.State, "PlayerTraumaStrength", 0.9f);
+        Set(first.State, "PlayerTraumaTicks", 5000);
+        second.room = Bare<Room>();
+        Social("OnBondPartnerDeath", first, second, null);
+        Check((int)stateType.GetField("GriefTicks", Flags).GetValue(first.State) == 0, "cross-room death is not perceived");
+        second.room = room;
+        Set(Brain(first), "hasSlot", true);
+        Set(Brain(first), "retaliationCharges", 2);
+        Set(Brain(first), "memory", 100);
+        Social("OnBondPartnerDeath", first, second, null);
+        Check(!(bool)aiType.GetField("hasSlot", Flags).GetValue(Brain(first)) &&
+            (int)aiType.GetField("retaliationCharges", Flags).GetValue(Brain(first)) == 0 &&
+            (int)aiType.GetField("memory", Flags).GetValue(Brain(first)) == 0, "grief clears old attack slot and retaliation");
+        int observedGrief = (int)stateType.GetField("GriefTicks", Flags).GetValue(first.State);
+        Check(observedGrief >= 1200 && (float)stateType.GetField("PlayerTraumaStrength", Flags).GetValue(first.State) == 0.9f, "observed death creates grief without clearing severe PTSD");
+        Social("OnBondPartnerDeath", first, second, null);
+        Check((int)stateType.GetField("GriefTicks", Flags).GetValue(first.State) == observedGrief, "repeated death helper has no second grief");
+        Social("OnBondPartnerDeath", third, second, null);
+        Check((int)stateType.GetField("GriefTicks", Flags).GetValue(third.State) == 0, "unrelated observer receives no grief");
+        second.dead = false;
+        Set(first.State, "GriefStrength", 0f);
+        Set(first.State, "GriefTicks", 0);
+        Console.WriteLine("Social: full identity, single-slot replacement, asymmetric rescue, death idempotence, grief expiry, cross-room/dead guards.");
         foreach (var instance in new[] { first, second, third }) Set(Brain(instance), "<Target>k__BackingField", target);
         Check((bool)Invoke(Brain(first), "AcquireSlot"), "first attack slot");
         Mode(Brain(first), "RetaliationCharge");

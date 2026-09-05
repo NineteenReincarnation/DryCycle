@@ -275,6 +275,14 @@ internal sealed class DesertBatflyAI
         SetMode(Activity.Flight);
     }
 
+    internal void BeginGriefResponse()
+    {
+        CancelAttack();
+        attacker = null;
+        memory = 0;
+        retaliationCharges = retaliationRecovery = 0;
+    }
+
     internal void SuppressHostility(Creature source)
     {
         if (source == null) return;
@@ -356,8 +364,9 @@ internal sealed class DesertBatflyAI
 
         if (Mode == Activity.Escape) SetMode(Activity.Flight);
 
-        if (!fly.Personality.Aggressive)
+        if (!fly.Personality.Aggressive || !GriefAllowsHarass())
         {
+            if (Mode != Activity.Roost) CancelAttack();
             UpdateRoost();
             return;
         }
@@ -436,7 +445,7 @@ internal sealed class DesertBatflyAI
                         DesertBatflyTuning.AttackThirst,
                         DesertBatflyTuning.ObserveThirst,
                         fly.Personality.AggressionDrive * 0.35f);
-                    bool thirsty = fly.DesertState.Thirst > effectiveAttackThirst;
+                    bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale > effectiveAttackThirst;
                     bool revengeDrink = grudge &&
                                         fly.DesertState.GrabMemoryStrength > 0.12f;
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
@@ -749,10 +758,14 @@ internal sealed class DesertBatflyAI
                 fly.abstractCreature.rippleBothSides);
     }
 
+    private bool GriefAllowsHarass() => fly.DesertState.GriefStrength <= 0f ||
+        fly.DesertState.Thirst * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst;
+
     private bool CanHarass(Creature creature)
     {
         if (creature == fly || creature is DesertBatfly || !Valid(creature))
             return false;
+        if (!GriefAllowsHarass()) return false;
         if (creature is Player player)
             return !IsTraumatizedPlayer(player);
 
@@ -899,6 +912,7 @@ internal sealed class DesertBatflyAI
         if (fly.DesertState.Cooldown > 0 && !retaliationPending)
             return;
 
+        if (!GriefAllowsHarass()) return;
         Player socialCandidate = FindSocialHarassTarget();
         float observeThreshold = Mathf.Lerp(
             DesertBatflyTuning.ObserveThirst,
@@ -1101,7 +1115,7 @@ internal sealed class DesertBatflyAI
         }
 
         if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
-        if (scan != 0 || Random.value > fly.Personality.RoostChance) return;
+        if (scan != 0 || Random.value > fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly)) return;
         if (!TryFindRoost(out Vector2 spot)) return;
 
         roost = spot;
