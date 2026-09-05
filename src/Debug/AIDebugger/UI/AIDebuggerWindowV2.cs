@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using DryCycle.Creatures.DesertBatfly;
 using ImGuiNET;
 using UnityEngine;
@@ -61,6 +60,9 @@ internal sealed class AIDebuggerWindowV2
 
         AIDebugSimulationControl.Bind(game);
         RefreshEntities(game);
+        if (AIDebugWorldOverlay.TryPick(game, entities, ImGui.GetIO().WantCaptureMouse,
+                out AbstractCreature picked))
+            Select(picked);
         ResolveSelection(game);
         ResolveCompare(game);
         AIDebugTrace.ReplaceWatches(selectedKey, hasSelection, pinned);
@@ -76,10 +78,7 @@ internal sealed class AIDebuggerWindowV2
         }
     }
 
-    internal void ToggleInteract()
-    {
-        interactMode = !interactMode;
-    }
+    internal void ToggleInteract() => interactMode = !interactMode;
 
     private void DrawNoGame()
     {
@@ -99,7 +98,6 @@ internal sealed class AIDebuggerWindowV2
         ImGui.SetNextWindowBgAlpha(AIDebugSettings.Opacity);
         ImGui.SetNextWindowPos(new Num.Vector2(Mathf.Max(8f, Screen.width - width - 16f), 16f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, 320f * scale), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowFontScale(AIDebugSettings.FontScale);
         if (!ImGui.Begin(AIDebugLocalization.T("app.title") + "###AICompact", ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
@@ -171,18 +169,12 @@ internal sealed class AIDebuggerWindowV2
         ImGui.Separator();
         Num.Vector2 dockSize = ImGui.GetContentRegionAvail();
         uint dockId = ImGui.GetID("DryCycleAIDockSpace");
-        ImGui.DockSpace(dockId, dockSize, ImGuiDockNodeFlags.None);
+        AIDebugDockingNative.DockSpace(dockId, dockSize);
         if (rebuildLayout)
         {
-            try
-            {
-                AIDebugDockingNative.BuildDefault(dockId, dockSize);
-                rebuildLayout = false;
-            }
-            catch
-            {
-                rebuildLayout = false;
-            }
+            try { AIDebugDockingNative.BuildDefault(dockId, dockSize); }
+            catch { }
+            rebuildLayout = false;
         }
         ImGui.End();
 
@@ -234,8 +226,7 @@ internal sealed class AIDebuggerWindowV2
         if (!compact)
         {
             ImGui.SameLine();
-            if (ImGui.Button(AIDebugExtendedLocalization.T("toolbar.save_layout")))
-                TrySaveLayout();
+            if (ImGui.Button(AIDebugExtendedLocalization.T("toolbar.save_layout"))) TrySaveLayout();
             ImGui.SameLine();
             if (ImGui.Button(AIDebugExtendedLocalization.T("toolbar.reset_layout")))
             {
@@ -462,7 +453,7 @@ internal sealed class AIDebuggerWindowV2
             {
                 AIDebugUtilityRow u = source[i];
                 ImGui.TableNextRow();
-                Cell(0, u.Name); Cell(1, u.Raw.ToString("0.000")); Cell(2, u.Smoothed.ToString("0.000"));
+                Cell(0, u.Name); Cell(1, u.HasRaw ? u.Raw.ToString("0.000") : "—"); Cell(2, u.Smoothed.ToString("0.000"));
                 Cell(3, u.Weight.ToString("0.000")); Cell(4, u.Weighted.ToString("0.000"));
                 Cell(5, u.ContinuationBonus.ToString("0.000")); Cell(6, u.Winner ? "YES" : "—");
             }
@@ -513,8 +504,9 @@ internal sealed class AIDebuggerWindowV2
     private void DrawPathWindow()
     {
         BeginDockWindow("window.path", "AIPath");
-        AIDebugPathState path = freezeView && ActiveHistory() != null
-            ? ActiveHistory().Path : AIDebugAdvancedCapture.CapturePath(selected);
+        AIDebugHistoricalState history = ActiveHistory();
+        AIDebugPathState path = freezeView && history != null
+            ? history.Path : AIDebugAdvancedCapture.CapturePath(selected);
         if (ImGui.BeginTable("##PathTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Layer"); ImGui.TableSetupColumn("Value"); ImGui.TableSetupColumn("Meaning"); ImGui.TableHeadersRow();
@@ -573,8 +565,9 @@ internal sealed class AIDebuggerWindowV2
         }
         if (ImGui.BeginTable("##CandidatesTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
         {
-            string[] h = { "Set", "Candidate", "Valid", "Score", "Winner", "Reason" };
-            for (int i = 0; i < h.Length; i++) ImGui.TableSetupColumn(h[i]); ImGui.TableHeadersRow();
+            string[] headers = { "Set", "Candidate", "Valid", "Score", "Winner", "Reason" };
+            for (int i = 0; i < headers.Length; i++) ImGui.TableSetupColumn(headers[i]);
+            ImGui.TableHeadersRow();
             for (int i = 0; i < candidates.Count; i++)
             {
                 AIDebugCandidate c = candidates[i];
@@ -600,13 +593,13 @@ internal sealed class AIDebuggerWindowV2
         IReadOnlyList<AIDebugCapture> captures = AIDebugCaptureManager.Captures;
         for (int i = captures.Count - 1; i >= 0; i--)
         {
-            AIDebugCapture c = captures[i];
+            AIDebugCapture capture = captures[i];
             ImGui.PushID(i);
-            ImGui.Text($"{c.Key} · {c.Reason} · {c.Frames.Count} frames");
+            ImGui.Text($"{capture.Key} · {capture.Reason} · {capture.Frames.Count} frames");
             ImGui.SameLine();
             if (ImGui.SmallButton(AIDebugExtendedLocalization.T("common.export")))
             {
-                try { lastExport = AIDebugCaptureManager.Export(c) ?? string.Empty; }
+                try { lastExport = AIDebugCaptureManager.Export(capture) ?? string.Empty; }
                 catch (Exception error) { lastExport = error.Message; }
             }
             ImGui.PopID();
@@ -634,7 +627,13 @@ internal sealed class AIDebuggerWindowV2
             bool enabled = rule.Enabled;
             if (ImGui.Checkbox("##Enabled", ref enabled)) rule.Enabled = enabled;
             ImGui.SameLine(); ImGui.Text($"{rule.Category?.ToString() ?? "Any"} · {rule.NameContains} · {(rule.Entity.HasValue ? rule.Entity.Value.ToString() : "Any entity")}");
-            ImGui.SameLine(); if (ImGui.SmallButton("×")) { AIDebugBreakpointManager.RemoveAt(i); ImGui.PopID(); break; }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("×"))
+            {
+                AIDebugBreakpointManager.RemoveAt(i);
+                ImGui.PopID();
+                break;
+            }
             ImGui.PopID();
         }
         if (!string.IsNullOrEmpty(AIDebugBreakpointManager.LastHit))
@@ -845,17 +844,17 @@ internal sealed class AIDebuggerWindowV2
 
     private AIDebugSnapshot ActiveSnapshot()
     {
-        if (freezeView && TryActiveFrame(out AIDebugTraceFrame f) && f.History?.Snapshot != null)
-            return f.History.Snapshot;
+        if (freezeView && TryActiveFrame(out AIDebugTraceFrame frame) && frame.History?.Snapshot != null)
+            return frame.History.Snapshot;
         return liveSnapshot;
     }
 
     private AIDebugHistoricalState ActiveHistory() =>
-        freezeView && TryActiveFrame(out AIDebugTraceFrame f) ? f.History : null;
+        freezeView && TryActiveFrame(out AIDebugTraceFrame frame) ? frame.History : null;
 
     private AIDebugTraceFrame ActiveFrameOrDefault()
     {
-        if (TryActiveFrame(out AIDebugTraceFrame f)) return f;
+        if (TryActiveFrame(out AIDebugTraceFrame frame)) return frame;
         return default;
     }
 
@@ -922,12 +921,12 @@ internal sealed class AIDebuggerWindowV2
         if (title != "section.social_role" && title != "section.flock" && title != "section.movement") return;
         if (title == "section.social_role")
         {
-            MiniGraph("Sentinel", f => f.Utility0);
-            MiniGraph("Bully", f => f.Utility1);
-            MiniGraph("Opportunist", f => f.Utility2);
+            MiniGraph("Sentinel", frame => frame.Utility0);
+            MiniGraph("Bully", frame => frame.Utility1);
+            MiniGraph("Opportunist", frame => frame.Utility2);
         }
-        else if (title == "section.flock") MiniGraph("Panic", f => f.Panic);
-        else MiniGraph("Speed", f => f.Velocity.magnitude);
+        else if (title == "section.flock") MiniGraph("Panic", frame => frame.Panic);
+        else MiniGraph("Speed", frame => frame.Velocity.magnitude);
     }
 
     private void MiniGraph(string label, Func<AIDebugTraceFrame, float> value)
@@ -937,7 +936,7 @@ internal sealed class AIDebuggerWindowV2
         float min = float.MaxValue, max = float.MinValue;
         for (int i = startIndex; i < frames.Count; i++)
         {
-            float v = value(frames[i]); min = Mathf.Min(min, v); max = Mathf.Max(max, v);
+            float current = value(frames[i]); min = Mathf.Min(min, current); max = Mathf.Max(max, current);
         }
         if (max - min < 0.001f) max = min + 1f;
         Num.Vector2 start = ImGui.GetCursorScreenPos();
@@ -949,26 +948,24 @@ internal sealed class AIDebuggerWindowV2
         Num.Vector2 previous = default;
         for (int i = 0; i < count; i++)
         {
-            float v = value(frames[startIndex + i]);
+            float current = value(frames[startIndex + i]);
             float x = start.X + (count <= 1 ? 0f : i * (width - 4f) / (count - 1));
-            float y = start.Y + height - 4f - Mathf.InverseLerp(min, max, v) * (height - 16f);
-            Num.Vector2 p = new(x, y);
-            if (i > 0) draw.AddLine(previous, p, 0xffd8c76a, 1.3f);
-            previous = p;
+            float y = start.Y + height - 4f - Mathf.InverseLerp(min, max, current) * (height - 16f);
+            Num.Vector2 point = new(x, y);
+            if (i > 0) draw.AddLine(previous, point, 0xffd8c76a, 1.3f);
+            previous = point;
         }
     }
 
     private void BeginDockWindow(string titleKey, string stableId)
     {
         ImGui.SetNextWindowBgAlpha(AIDebugSettings.Opacity);
-        ImGui.SetNextWindowFontScale(AIDebugSettings.FontScale);
         ImGui.Begin(AIDebugExtendedLocalization.T(titleKey) + "###" + stableId);
     }
 
     private void TrySaveLayout()
     {
-        try { AIDebugDockingNative.SaveLayout(); }
-        catch { }
+        try { AIDebugDockingNative.SaveLayout(); } catch { }
     }
 
     private bool MatchesEntityFilter(AbstractCreature creature)
@@ -979,11 +976,11 @@ internal sealed class AIDebuggerWindowV2
         return text.IndexOf(entityFilter, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private bool EventMatches(AIDebugTraceEvent e)
+    private bool EventMatches(AIDebugTraceEvent item)
     {
         if (string.IsNullOrWhiteSpace(eventFilter)) return true;
-        return Contains(e.Category.ToString(), eventFilter) || Contains(e.Name, eventFilter) ||
-               Contains(e.Detail, eventFilter) || Contains(e.Reason, eventFilter);
+        return Contains(item.Category.ToString(), eventFilter) || Contains(item.Name, eventFilter) ||
+               Contains(item.Detail, eventFilter) || Contains(item.Reason, eventFilter);
     }
 
     private AbstractCreature FindEntity(DebugEntityKey key)
