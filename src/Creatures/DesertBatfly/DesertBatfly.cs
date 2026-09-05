@@ -11,6 +11,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal DesertBatflyPersonality Personality => DesertState.Personality;
     private int mealFood = 2;
     private bool runningVanillaUpdate;
+    private int rockDeathGuardTicks;
+    private bool resolvingNonRockViolence;
     int IPlayerEdible.FoodPoints => mealFood;
 
     internal DesertBatfly(AbstractCreature creature, World world) : base(creature, world)
@@ -45,8 +47,20 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!hive.inHive.Contains(this)) hive.MoveFlyToHive(this);
     }
 
+    internal void BeginRockStunGuard()
+    {
+        // Rock.HitSomething can pass through several pieces of vanilla weapon and
+        // creature code in one collision. The species rule is stricter than merely
+        // setting damage to zero: a normal Rock may stun, but that collision itself
+        // must never be allowed to transition this creature into the dead state.
+        // Keep the window deliberately short so later unrelated lethal events are
+        // not protected.
+        rockDeathGuardTicks = Mathf.Max(rockDeathGuardTicks, 8);
+    }
+
     public override void Update(bool eu)
     {
+        if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
         if (room == null) { base.Update(eu); return; }
         DesertState.Thirst = Mathf.Clamp01(DesertState.Thirst + (dead ? 0f : DesertBatflyTuning.ThirstPerTick));
         if (DesertState.Cooldown > 0) DesertState.Cooldown--;
@@ -79,6 +93,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertAI.Threatened(attacker);
         if (source?.owner is Rock)
         {
+            BeginRockStunGuard();
+
             // Rock is a control tool for this species. Do not call Creature.Violence
             // at all: even tiny/zero damage can enter HealthState.quickDeath when an
             // animal was previously injured. Keep only impact impulse and stun.
@@ -88,7 +104,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             Stun(Mathf.Max(DesertBatflyTuning.RockStun, Mathf.CeilToInt(stunBonus)));
             return;
         }
-        base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
+
+        // A spear, predator bite or any other genuine damage event must remain able
+        // to kill even if it happens immediately after a Rock impact.
+        resolvingNonRockViolence = true;
+        try { base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus); }
+        finally { resolvingNonRockViolence = false; }
     }
 
     public override void Grabbed(Grasp grasp)
@@ -115,6 +136,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Die()
     {
+        // A normal Rock is defined as stun-only for this species. Guard the whole
+        // Rock collision stack rather than relying solely on Violence damage values;
+        // non-Rock Violence explicitly bypasses this protection above.
+        if (!dead && rockDeathGuardTicks > 0 && !resolvingNonRockViolence && drown < 1f)
+            return;
+
         // Vanilla Fly.Update has an intentional 1/160-per-tick chance to die while
         // held by a non-Saint player. That behavior is wrong for Desert Batfly: a
         // living specimen must survive being picked up and remain alive after it is
