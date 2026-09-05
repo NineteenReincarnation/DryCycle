@@ -1,0 +1,13 @@
+<Project>
+  <!-- Rain World on Windows is a 64-bit Unity player. Pinning x64 also lets
+       ImGui.NET's net40 build target select and copy the matching cimgui.dll
+       beside DryCycle.dll in the configured plugin output directory. -->
+  <PropertyGroup>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
+  </ItemGroup>
+</Project>
