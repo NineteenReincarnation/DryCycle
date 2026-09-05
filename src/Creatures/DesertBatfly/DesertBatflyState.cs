@@ -7,16 +7,11 @@ namespace DryCycle.Creatures.DesertBatfly;
 // All OPEN values live here. Times are simulation ticks (40 ticks/second).
 internal static class DesertBatflyTuning
 {
-    // Vanilla Fly uses radius 6 and mass 0.05. Personality.Size is deliberately
-    // constrained to 1.00x-1.25x so both physics and graphics stay Batfly-like.
     internal const float Radius = 6f, Mass = 0.05f;
     internal const int HivePopulation = 11, CurvePopulation = 3;
     internal const float AggressiveThreshold = 0.52f, ThirstPerTick = 0.000065f;
     internal const float AttackThirst = 0.48f, DrainRelief = 0.65f;
 
-    // Water values are raw DryCycle hydration points, not HUD pips. Eating a
-    // Desert Batfly costs 50 points. Once an attached bat starts drinking it
-    // removes 50 points per second for as long as the drain window remains active.
     internal const float MealWater = 50f, AttackWaterPerSecond = 50f;
 
     internal const int AttackSlots = 2, Cooldown = 1800, FailedCooldown = 240;
@@ -26,9 +21,6 @@ internal static class DesertBatflyTuning
     internal const int FakeDivePullUpTicks = 14, FakeDiveTicks = 38, InterestTicks = 1000;
     internal const float ObserveThirst = 0.3f, CounterThirst = 0.2f;
 
-    // Retaliation is deliberately movement interference rather than damage. The
-    // strongest individuals can make a second pass, but it still shares the normal
-    // attack-slot cap so a swarm cannot stunlock the player.
     internal const int RetaliationChargeTicks = 42;
     internal const int RetaliationContactMinTicks = 16, RetaliationContactMaxTicks = 36;
     internal const int RetaliationCooldown = 300;
@@ -37,24 +29,31 @@ internal static class DesertBatflyTuning
     internal const float RetaliationMinDrag = 0.025f, RetaliationMaxDrag = 0.065f;
     internal const float RetaliationMinPush = 0.03f, RetaliationMaxPush = 0.08f;
 
-    // Extreme vengeance is intentionally rare. It is a stable personality trait,
-    // separate from ordinary aggression: innate variation dominates, but only nasty,
-    // sufficiently bold animals are eligible to turn fear into lethal retaliation.
-    internal const float VengeanceTraitThreshold = 0.78f;
+    // The threshold is calibrated against the exact System.Random personality pipeline:
+    // seeds 0..9999 yield 494 true avengers (4.94%). Temperament/Nerve remain hard
+    // eligibility gates, so the population rate cannot turn every nasty bat into one.
+    internal const float VengeanceTraitThreshold = 0.715f;
     internal const float VengeanceMinTemperament = 0.70f;
     internal const float VengeanceMinNerve = 0.58f;
 
-    // Player-grab memory is stored as player number + strength + remaining ticks.
-    // This keeps co-op targeting specific without allocating dictionaries per bat.
+    // Conformity is an independent social personality axis. It never replaces the bat's
+    // own decision logic; it only changes how strongly observed flock behavior weighs in.
+    internal const float SocialFollowerMinConformity = 0.48f;
+    internal const float SocialFollowerRange = 235f;
+    internal const int SocialVengeanceGroupCap = 3;
+
+    // PTSD is intentionally much longer lived than immediate fear. These values are
+    // persisted in CreatureState so a surviving bat can remain afraid after room changes.
+    internal const int TraumaMinTicks = 2400, TraumaMaxTicks = 12000;
+    internal const float TraumaAggressionBlock = 0.42f;
+    internal const float TraumaSevere = 0.68f;
+    internal const float TraumaFearMinDistance = 210f, TraumaFearMaxDistance = 410f;
+
     internal const float GrabMemoryGain = 0.28f, GrabThrowBonus = 0.24f;
     internal const float GrabThrowSpeed = 6f;
     internal const int GrabMemoryMinTicks = 1200, GrabMemoryMaxTicks = 3600;
     internal const float GrabFearMinDistance = 145f, GrabFearMaxDistance = 270f;
 
-    // Sand-spitting is a stable individual trait, not a species-wide ability. The
-    // affinity is seed-derived and mildly biased by temperament/nerve; roughly a
-    // minority of the population qualifies. Eligible bats build struggle pressure
-    // while held instead of rolling a random chance every frame.
     internal const float SandSpitTraitThreshold = 0.58f;
     internal const float SandSpitMeterMinRate = 0.0032f, SandSpitMeterMaxRate = 0.0064f;
     internal const float SandSpitMovementBonus = 0.0015f;
@@ -66,9 +65,6 @@ internal static class DesertBatflyTuning
     internal const int SandScreenLifeMin = 48, SandScreenLifeMax = 78;
     internal const int SandScreenMaxConcurrentBursts = 2;
 
-    // Desert Batflies spend a little more of their idle time hanging than vanilla.
-    // Personality then spreads individuals across this range instead of using one
-    // species-wide timer/chance.
     internal const int RoostMinTicks = 160, RoostMaxTicks = 520;
     internal const float RoostMinChance = 0.012f, RoostMaxChance = 0.045f;
 
@@ -84,7 +80,7 @@ internal sealed class DesertBatflyPersonality
 {
     internal readonly int VisualSeed, PatternSeed, SpikeSeed;
     internal readonly float Temperament, Size, Contrast;
-    internal readonly float Nerve, RoostAffinity, SandSpitAffinity, VengeanceAffinity;
+    internal readonly float Nerve, RoostAffinity, SandSpitAffinity, VengeanceAffinity, Conformity;
     internal readonly int PatternCount, SpikeCount;
     internal readonly Color BaseColor, WingColor, SecondaryColor;
 
@@ -96,36 +92,27 @@ internal sealed class DesertBatflyPersonality
         SpikeSeed = random.Next();
         Temperament = (float)random.NextDouble();
 
-        // Nerve is separate from aggression. High-Nerve animals are less disturbed
-        // by mere proximity, while actual attacks, weapons and grabs bypass it.
         var nerveRandom = new System.Random(seed ^ 0x5A17B1D3);
         Nerve = Mathf.Clamp01(Mathf.Lerp((float)nerveRandom.NextDouble(), Temperament, 0.25f));
 
-        // RoostAffinity is intentionally independent from aggression. Two equally
-        // calm/aggressive individuals can still differ in how often they hang.
         var roostRandom = new System.Random(seed ^ 0x3C6EF372);
         RoostAffinity = (float)roostRandom.NextDouble();
 
-        // SandSpitAffinity follows the same stable personality-factor model. Innate
-        // variation dominates, while nasty/bold animals are somewhat more likely to
-        // qualify. This intentionally permits occasional calm spitters and prevents
-        // the behavior from becoming synonymous with the Aggressive flag.
         var sandRandom = new System.Random(seed ^ 0x6D2B79F5);
         float innateSand = (float)sandRandom.NextDouble();
         SandSpitAffinity = Mathf.Clamp01(
             innateSand * 0.62f + Temperament * 0.28f + Nerve * 0.10f);
 
-        // Vengeance is rarer and more selective than sand-spitting. A strong innate
-        // component prevents every nasty bat from becoming suicidal, while explicit
-        // temperament/nerve gates below ensure extreme retaliation remains a trait of
-        // unusually hostile AND unusually bold individuals.
         var vengeanceRandom = new System.Random(seed ^ 0x2C1B3C6D);
         float innateVengeance = (float)vengeanceRandom.NextDouble();
         VengeanceAffinity = Mathf.Clamp01(
             innateVengeance * 0.55f + Temperament * 0.30f + Nerve * 0.15f);
 
-        // Size is a readable personality trait: calm individuals remain near vanilla
-        // size, harsher individuals trend toward the 1.25x upper bound.
+        // Deliberately independent from aggression and courage. A vicious individual can
+        // be highly individualistic, while a calm one can be strongly social.
+        var conformityRandom = new System.Random(seed ^ 0x7F4A7C15);
+        Conformity = (float)conformityRandom.NextDouble();
+
         Size = Mathf.Lerp(1f, 1.25f, Temperament);
         Contrast = Mathf.Lerp(0.24f, 0.88f, Temperament);
         PatternCount = 5 + Mathf.FloorToInt(Temperament * (DesertBatflyTuning.MaxPatterns - 5));
@@ -134,8 +121,6 @@ internal sealed class DesertBatflyPersonality
             0,
             DesertBatflyTuning.MaxSpikes);
 
-        // Keep a sandy common ancestry while letting aggressive individuals drift
-        // into ochre/red-brown. Stable grey variation avoids clone-like swarms.
         BaseColor = Color.Lerp(new Color(0.73f, 0.66f, 0.47f), new Color(0.45f, 0.23f, 0.15f), Temperament);
         BaseColor = Color.Lerp(BaseColor, new Color(0.50f, 0.47f, 0.39f), (float)random.NextDouble() * 0.18f);
         WingColor = Color.Lerp(new Color(0.67f, 0.60f, 0.43f), new Color(0.52f, 0.30f, 0.20f), Temperament);
@@ -164,6 +149,8 @@ internal sealed class DesertBatflyPersonality
             1f,
             Nerve) * 0.15f);
 
+    internal float SocialFearScale => Mathf.Lerp(0.72f, 1.48f, Conformity);
+
     internal bool CanSandSpit => SandSpitAffinity >= DesertBatflyTuning.SandSpitTraitThreshold;
     internal float SandSpitDrive => Mathf.InverseLerp(
         DesertBatflyTuning.SandSpitTraitThreshold,
@@ -176,7 +163,6 @@ internal sealed class DesertBatflyPersonality
     internal float SandSpitIntensity => Mathf.Clamp01(
         Mathf.Lerp(0.35f, 1f, SandSpitDrive) * Mathf.Lerp(0.9f, 1.08f, Temperament));
 
-    // Harsher individuals convert observations into real attacks more readily.
     internal float FakeDiveChance => Mathf.Lerp(0.68f, 0.26f, AggressionDrive);
     internal float RetaliationChance => Mathf.Lerp(0.38f, 0.92f, AggressionDrive);
     internal int ObserveDuration => Mathf.RoundToInt(Mathf.Lerp(120f, 72f, AggressionDrive));
@@ -201,8 +187,6 @@ internal sealed class DesertBatflyPersonality
         DesertBatflyTuning.RetaliationMaxPush,
         AggressionDrive);
 
-    // Calm animals trend toward the high end, but RoostAffinity keeps the result
-    // individual rather than turning it into another docile/aggressive switch.
     internal float RoostChance
     {
         get
@@ -212,7 +196,10 @@ internal sealed class DesertBatflyPersonality
                 DesertBatflyTuning.RoostMinChance,
                 DesertBatflyTuning.RoostMaxChance,
                 calmness);
-            return baseChance * Mathf.Lerp(0.85f, 1.25f, RoostAffinity);
+            // Social animals are slightly more willing to join a roosting culture, but
+            // this is intentionally weak: RoostAffinity and the bat's own AI still lead.
+            float social = Mathf.Lerp(0.94f, 1.10f, Conformity);
+            return baseChance * Mathf.Lerp(0.85f, 1.25f, RoostAffinity) * social;
         }
     }
 
@@ -238,15 +225,42 @@ internal sealed class DesertBatflyState : HealthState
     internal int Cooldown, Bites = 3;
     internal bool MealConsumed, InHive;
 
-    // Grab memory is intentionally tiny and save-safe. Player number keeps co-op
-    // grudges/fear specific; -1 means no remembered player.
     internal int GrabMemoryPlayer = -1, GrabMemoryTicks;
     internal float GrabMemoryStrength;
+
+    // Persistent PTSD-like memories. Player identity uses co-op player number; Peach
+    // identity uses its AbstractCreature EntityID.number. Only one of each is retained,
+    // keeping state fixed-size and save-safe.
+    internal int PlayerTraumaPlayer = -1, PlayerTraumaTicks;
+    internal float PlayerTraumaStrength;
+    internal int PredatorTraumaId = int.MinValue, PredatorTraumaTicks;
+    internal float PredatorTraumaStrength;
 
     internal DesertBatflyState(AbstractCreature creature) : base(creature)
     {
         Personality = new DesertBatflyPersonality(creature.ID.RandomSeed);
         Thirst = Mathf.Lerp(0.2f, 0.65f, Personality.Temperament);
+    }
+
+    internal bool HasTrauma =>
+        (PlayerTraumaTicks > 0 && PlayerTraumaStrength > 0f) ||
+        (PredatorTraumaTicks > 0 && PredatorTraumaStrength > 0f);
+
+    internal void TickTrauma()
+    {
+        if (PlayerTraumaTicks > 0 && --PlayerTraumaTicks <= 0)
+        {
+            PlayerTraumaPlayer = -1;
+            PlayerTraumaStrength = 0f;
+            PlayerTraumaTicks = 0;
+        }
+
+        if (PredatorTraumaTicks > 0 && --PredatorTraumaTicks <= 0)
+        {
+            PredatorTraumaId = int.MinValue;
+            PredatorTraumaStrength = 0f;
+            PredatorTraumaTicks = 0;
+        }
     }
 
     public override string ToString()
@@ -260,7 +274,13 @@ internal sealed class DesertBatflyState : HealthState
             InHive ? "1" : "0",
             GrabMemoryPlayer.ToString(CultureInfo.InvariantCulture),
             GrabMemoryStrength.ToString("R", CultureInfo.InvariantCulture),
-            GrabMemoryTicks.ToString(CultureInfo.InvariantCulture) });
+            GrabMemoryTicks.ToString(CultureInfo.InvariantCulture),
+            PlayerTraumaPlayer.ToString(CultureInfo.InvariantCulture),
+            PlayerTraumaStrength.ToString("R", CultureInfo.InvariantCulture),
+            PlayerTraumaTicks.ToString(CultureInfo.InvariantCulture),
+            PredatorTraumaId.ToString(CultureInfo.InvariantCulture),
+            PredatorTraumaStrength.ToString("R", CultureInfo.InvariantCulture),
+            PredatorTraumaTicks.ToString(CultureInfo.InvariantCulture) });
         return base.ToString();
     }
 
@@ -279,11 +299,15 @@ internal sealed class DesertBatflyState : HealthState
         MealConsumed = values[4] == "1";
         InHive = values.Length > 5 && values[5] == "1";
 
-        // Always clear optional fields first so loading a legacy V1 payload into a
-        // reused state object cannot retain a grudge/fear memory from prior data.
         GrabMemoryPlayer = -1;
         GrabMemoryStrength = 0f;
         GrabMemoryTicks = 0;
+        PlayerTraumaPlayer = -1;
+        PlayerTraumaStrength = 0f;
+        PlayerTraumaTicks = 0;
+        PredatorTraumaId = int.MinValue;
+        PredatorTraumaStrength = 0f;
+        PredatorTraumaTicks = 0;
 
         if (values.Length > 6 && int.TryParse(values[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out int player))
             GrabMemoryPlayer = Mathf.Max(-1, player);
@@ -293,11 +317,39 @@ internal sealed class DesertBatflyState : HealthState
         if (values.Length > 8 && int.TryParse(values[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out int memoryTicks))
             GrabMemoryTicks = Mathf.Clamp(memoryTicks, 0, DesertBatflyTuning.GrabMemoryMaxTicks);
 
+        if (values.Length > 9 && int.TryParse(values[9], NumberStyles.Integer, CultureInfo.InvariantCulture, out int traumaPlayer))
+            PlayerTraumaPlayer = Mathf.Max(-1, traumaPlayer);
+        if (values.Length > 10 && float.TryParse(values[10], NumberStyles.Float, CultureInfo.InvariantCulture, out float playerTrauma) &&
+            !float.IsNaN(playerTrauma) && !float.IsInfinity(playerTrauma))
+            PlayerTraumaStrength = Mathf.Clamp01(playerTrauma);
+        if (values.Length > 11 && int.TryParse(values[11], NumberStyles.Integer, CultureInfo.InvariantCulture, out int playerTraumaTicks))
+            PlayerTraumaTicks = Mathf.Clamp(playerTraumaTicks, 0, DesertBatflyTuning.TraumaMaxTicks);
+
+        if (values.Length > 12 && int.TryParse(values[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out int predatorTraumaId))
+            PredatorTraumaId = predatorTraumaId;
+        if (values.Length > 13 && float.TryParse(values[13], NumberStyles.Float, CultureInfo.InvariantCulture, out float predatorTrauma) &&
+            !float.IsNaN(predatorTrauma) && !float.IsInfinity(predatorTrauma))
+            PredatorTraumaStrength = Mathf.Clamp01(predatorTrauma);
+        if (values.Length > 14 && int.TryParse(values[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out int predatorTraumaTicks))
+            PredatorTraumaTicks = Mathf.Clamp(predatorTraumaTicks, 0, DesertBatflyTuning.TraumaMaxTicks);
+
         if (GrabMemoryTicks <= 0 || GrabMemoryStrength <= 0f)
         {
             GrabMemoryPlayer = -1;
             GrabMemoryStrength = 0f;
             GrabMemoryTicks = 0;
+        }
+        if (PlayerTraumaTicks <= 0 || PlayerTraumaStrength <= 0f)
+        {
+            PlayerTraumaPlayer = -1;
+            PlayerTraumaStrength = 0f;
+            PlayerTraumaTicks = 0;
+        }
+        if (PredatorTraumaTicks <= 0 || PredatorTraumaStrength <= 0f)
+        {
+            PredatorTraumaId = int.MinValue;
+            PredatorTraumaStrength = 0f;
+            PredatorTraumaTicks = 0;
         }
     }
 }
