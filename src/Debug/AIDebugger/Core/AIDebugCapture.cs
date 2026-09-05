@@ -106,8 +106,8 @@ internal static class AIDebugCaptureManager
                 .Append(",\"time\":").Append(e.Time.ToString("0.000", CultureInfo.InvariantCulture))
                 .Append(",\"category\":\"").Append(Escape(e.Category.ToString())).Append("\"")
                 .Append(",\"name\":\"").Append(Escape(e.Name)).Append("\"")
-                .Append(",\"detail\":\"").Append(Escape(e.Detail)).Append("\"")
-                .Append(",\"reason\":\"").Append(Escape(e.Reason)).Append("\"}");
+                .Append(",\"detail\":\"").Append(Escape(e.RawDetail)).Append("\"")
+                .Append(",\"reason\":\"").Append(Escape(e.RawReason)).Append("\"}");
             text.AppendLine(i + 1 < capture.Events.Count ? "," : string.Empty);
         }
         text.AppendLine("  ]");
