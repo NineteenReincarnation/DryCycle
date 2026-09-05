@@ -96,10 +96,18 @@ internal static class RopeSpearClimbController
             poseCycle += 0.035f * Mathf.Abs(input.x);
         }
 
-        // Do not snap the player onto the spear. Climb all the way to the rope
-        // endpoint first; only when the main body is physically inside the
-        // horizontal-beam tile created by the stuck spear do we hand control to
-        // vanilla GetUpOnBeam. Vanilla then performs the pull-up using velocity.
+        // Diagonal spears cannot use Rain World's horizontal/vertical beam tiles.
+        // When the player finishes climbing to the spear end, transfer directly to
+        // the real angled shaft before trying the vanilla horizontal-beam handoff.
+        if (input.y > 0 &&
+            normalizedPosition >= SpearMountStart &&
+            RopeSpearShaftTraversalRuntime.TryMountFromRopeEndpoint(player, spear))
+        {
+            player.vineClimbCursor *= 0.2f;
+            return false;
+        }
+
+        // Cardinal horizontal spears still use vanilla beam traversal.
         if (input.y > 0 && TryMountSpearFromRope(player, spear, rope, normalizedPosition))
         {
             player.vineClimbCursor *= 0.2f;
