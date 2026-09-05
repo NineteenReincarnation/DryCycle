@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -26,6 +27,12 @@ internal static class AIDebugDockingNative
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern void igDockBuilderFinish(uint node_id);
 
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern void igLoadIniSettingsFromDisk(string ini_filename);
+
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern void igSaveIniSettingsToDisk(string ini_filename);
+
     internal static void BuildDefault(uint dockspaceId, Num.Vector2 size)
     {
         igDockBuilderRemoveNode(dockspaceId);
@@ -52,5 +59,26 @@ internal static class AIDebugDockingNative
         igDockBuilderDockWindow("Captures / Breakpoints###AICaptures", right);
         igDockBuilderDockWindow("Settings###AISettings", right);
         igDockBuilderFinish(dockspaceId);
+    }
+
+    internal static bool LoadLayout()
+    {
+        string path = AIDebugSettings.LayoutPath;
+        if (!File.Exists(path)) return false;
+        igLoadIniSettingsFromDisk(path);
+        return true;
+    }
+
+    internal static void SaveLayout()
+    {
+        string directory = Path.GetDirectoryName(AIDebugSettings.LayoutPath);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        igSaveIniSettingsToDisk(AIDebugSettings.LayoutPath);
+    }
+
+    internal static void DeleteLayout()
+    {
+        string path = AIDebugSettings.LayoutPath;
+        if (File.Exists(path)) File.Delete(path);
     }
 }
