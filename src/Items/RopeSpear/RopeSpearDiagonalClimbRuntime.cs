@@ -1,12 +1,15 @@
+using System.Runtime.CompilerServices;
 using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.RopeSpear;
 
 /// <summary>
-/// Restores RopeSpear's historical diagonal climbing input while keeping the
-/// vanilla VineGrab state responsible for body placement, hand posing, swinging,
-/// jump release, and vine attachment.
+/// Keeps vanilla VineGrab responsible for ordinary RopeSpear climbing, but owns the
+/// endpoint handoff onto the spear shaft. The handoff is deliberately conservative:
+/// it only enters a vanilla beam animation when that animation's own tile/distance
+/// requirements are already true, and it restores VineGrab if another hook starts an
+/// invalid beam transition that vanilla would immediately cancel.
 /// </summary>
 internal static class RopeSpearDiagonalClimbRuntime
 {
@@ -15,18 +18,23 @@ internal static class RopeSpearDiagonalClimbRuntime
     private const float MaxCursor = 30f;
     private const float PreservedSwingFactor = 0.35f;
 
-    // Rope -> shallow shaft handoff. The old handoff required the slugcat to already
-    // be very close to the hidden horizontal-beam target even though VineGrab keeps
-    // the torso hanging below the rope endpoint. That creates a dead zone exactly at
-    // the pose seen when the hands have reached the spear tail but the body cannot
-    // move any farther upward. These values only widen the transition envelope; the
-    // actual pull-up is still vanilla GetUpOnBeam and never teleports body chunks.
-    private const float MountRemainingRopeDistance = 52f;
-    private const float MountBodyToTailDistance = 62f;
-    private const float MountBodyToBeamTargetDistance = 60f;
+    private const float MountRemainingRopeDistance = 58f;
+    private const float MountBodyToTailDistance = 72f;
+    private const float HorizontalVanillaTargetDistance = 24f;
     private const int MountBeamSearchX = 4;
     private const int MountBeamSearchY = 2;
+    private const int EndpointRecoveryFrames = 12;
+    private const float EndpointRecoveryRopeDistance = 72f;
+    private const float EndpointRecoveryBodyDistance = 84f;
 
+    private sealed class EndpointRecoveryState
+    {
+        internal RopeSpear Spear;
+        internal float FloatPos;
+        internal int FramesLeft;
+    }
+
+    private static readonly ConditionalWeakTable<Player, EndpointRecoveryState> EndpointRecovery = new();
     private static bool _enabled;
 
     internal static void Enable()
@@ -60,25 +68,50 @@ internal static class RopeSpearDiagonalClimbRuntime
         Player self,
         bool eu)
     {
-        // IMPORTANT: attempt the rope -> shaft handoff before vanilla VineGrab runs.
-        // Vanilla disconnects a vine grab when the main body is farther than
-        // 40 + VineRad from the current vine point. At the RopeSpear tail the hands
-        // can reach the endpoint while the torso still hangs below that threshold,
-        // so waiting until after orig() means animation has already become None and
-        // there is nothing left to hand off. This pre-pass catches that exact frame.
-        if (TryAssistMountOntoShaft(self))
+        EndpointRecoveryState recovery = self == null
+            ? null
+            : EndpointRecovery.GetOrCreateValue(self);
+
+        // RopeSpearHooks still contains an older horizontal-only post-update mount
+        // path. Depending on HookGen ordering that path can run after this hook and
+        // leave the player in GetUpOnBeam even though vanilla's own 25 px / beam-tile
+        // requirements are false. Repair that state before the next vanilla update.
+        TryRecoverInvalidEndpointState(self, recovery);
+
+        bool intentionalRelease = IsIntentionalVineJump(self);
+        CaptureEndpointRecovery(self, recovery);
+
+        bool mountedBeforeVanilla = TryAssistMountOntoShaft(self);
+        if (!mountedBeforeVanilla)
         {
-            orig(self, eu);
+            BiasVineCursorAlongRope(self);
+        }
+
+        orig(self, eu);
+
+        // If vanilla or another hook discarded VineGrab while the player was merely
+        // holding Up at the spear endpoint, restore the same rope position instead of
+        // allowing an unexplained fall. Jump remains an intentional release and is
+        // never recovered.
+        if (!intentionalRelease)
+        {
+            TryRecoverInvalidEndpointState(self, recovery);
+        }
+        else
+        {
+            ClearRecovery(recovery);
             return;
         }
 
-        BiasVineCursorAlongRope(self);
-        orig(self, eu);
-
-        // Keep the post-pass as well. It covers cases where vanilla movement during
-        // this frame moved the player into the mount envelope without first crossing
-        // the disconnect threshold.
-        TryAssistMountOntoShaft(self);
+        // Vanilla movement during this frame may have brought the body into a safe
+        // beam tile. Hand off now if possible; otherwise remain on VineGrab and try
+        // again next frame.
+        if (self?.animation == Player.AnimationIndex.VineGrab &&
+            self.vinePos?.vine is RopeSpear)
+        {
+            CaptureEndpointRecovery(self, recovery);
+            TryAssistMountOntoShaft(self);
+        }
     }
 
     private static void BiasVineCursorAlongRope(Player player)
@@ -110,11 +143,6 @@ internal static class RopeSpearDiagonalClimbRuntime
         }
         tangent.Normalize();
 
-        // This is the important part of the pre-VineGrab implementation: project
-        // world-space input directly onto the visible rope tangent. Up, Right, or a
-        // diagonal combination can therefore advance on a sloped rope according to
-        // the direction actually pressed instead of depending on vanilla's
-        // goal-position angle heuristic.
         float alongInput = Vector2.Dot(input, tangent);
         float alongMagnitude = Mathf.Abs(alongInput);
         if (alongMagnitude <= InputDeadZone)
@@ -126,9 +154,6 @@ internal static class RopeSpearDiagonalClimbRuntime
         float preservedSwing =
             Vector2.Dot(player.vineClimbCursor, normal) * PreservedSwingFactor;
 
-        // Keep enough tangent authority to make ClimbOnVineSpeed unambiguous even
-        // when the body is hanging slightly off the rope. Vanilla Player.Update will
-        // still add the ordinary SwimDir contribution and perform the actual climb.
         float tangentCursor = Mathf.Sign(alongInput) *
                               Mathf.Max(MinAlongCursor, MaxCursor * alongMagnitude);
 
@@ -147,7 +172,8 @@ internal static class RopeSpearDiagonalClimbRuntime
             player.input[0].y <= 0 ||
             spear.mode != Weapon.Mode.StuckInWall ||
             spear.abstractPhysicalObject is not AbstractRopeSpear data ||
-            data.stuckInWallCycles < 0)
+            data.stuckInWallCycles == 0 ||
+            !HasFixedClimbAnchors(spear))
         {
             return false;
         }
@@ -179,7 +205,25 @@ internal static class RopeSpearDiagonalClimbRuntime
             return false;
         }
 
-        if (!TryFindMountBeam(
+        // Spear.ChangeMode encodes its generated traversal topology in the sign of
+        // stuckInWallCycles: positive = horizontalBeam, negative = verticalBeam.
+        // The previous implementation returned immediately for negative values and
+        // then searched only horizontalBeam tiles, so steep/vertical RopeSpears could
+        // never hand off at all and VineGrab eventually dropped the player.
+        if (data.stuckInWallCycles > 0)
+        {
+            return TryEnterHorizontalShaft(player, spear, spearTail);
+        }
+
+        return TryEnterVerticalShaft(player, spear);
+    }
+
+    private static bool TryEnterHorizontalShaft(
+        Player player,
+        RopeSpear spear,
+        Vector2 spearTail)
+    {
+        if (!TryFindHorizontalMountBeam(
                 player.room,
                 spear.firstChunk.pos,
                 spearTail,
@@ -193,17 +237,18 @@ internal static class RopeSpearDiagonalClimbRuntime
             beamCenter.x,
             player.room.MiddleOfTile(beamCenter).y + 20f);
 
-        if (!Custom.DistLess(
+        // Vanilla GetUpOnBeam immediately cancels itself when neither body chunk is
+        // on a horizontal beam OR when the main body is >=25 px from this target.
+        // Do not enter the animation earlier than vanilla can actually sustain it.
+        if (!BodyTouchesHorizontalBeam(player) ||
+            !Custom.DistLess(
                 player.mainBodyChunk.pos,
                 pullupTarget,
-                MountBodyToBeamTargetDistance))
+                HorizontalVanillaTargetDistance))
         {
             return false;
         }
 
-        // Relinquish the rope explicitly before starting the beam pull-up. Keeping
-        // vinePos alive after changing animation can let later vine code reclaim the
-        // same endpoint on the next frame and causes the familiar up/down loop.
         player.vinePos = null;
         player.vineGrabDelay = Mathf.Max(player.vineGrabDelay, 15);
         player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
@@ -225,7 +270,321 @@ internal static class RopeSpearDiagonalClimbRuntime
         return true;
     }
 
-    private static bool TryFindMountBeam(
+    private static bool TryEnterVerticalShaft(Player player, RopeSpear spear)
+    {
+        Room room = player.room;
+        if (room == null)
+        {
+            return false;
+        }
+
+        IntVector2 bodyTile = room.GetTilePosition(player.mainBodyChunk.pos);
+        Vector2 beamCenter;
+        Player.AnimationIndex nextAnimation;
+        bool standing;
+
+        if (room.GetTile(bodyTile).verticalBeam)
+        {
+            beamCenter = room.MiddleOfTile(bodyTile);
+            nextAnimation = Player.AnimationIndex.ClimbOnBeam;
+            standing = true;
+        }
+        else
+        {
+            IntVector2 tileAbove = bodyTile + new IntVector2(0, 1);
+            if (!room.GetTile(tileAbove).verticalBeam)
+            {
+                return false;
+            }
+
+            // This is exactly the condition vanilla HangUnderVerticalBeam checks on
+            // every frame: the tile one cell above the main body must be a vertical
+            // beam. It gives the rope endpoint a natural, non-teleport transition
+            // into a steep spear from below.
+            beamCenter = room.MiddleOfTile(tileAbove);
+            nextAnimation = Player.AnimationIndex.HangUnderVerticalBeam;
+            standing = false;
+        }
+
+        player.vinePos = null;
+        player.vineGrabDelay = Mathf.Max(player.vineGrabDelay, 15);
+        player.noGrabCounter = Mathf.Max(player.noGrabCounter, 15);
+        player.flipDirection = player.mainBodyChunk.pos.x < beamCenter.x ? -1 : 1;
+        player.animationFrame = 0;
+        player.animation = nextAnimation;
+        player.bodyMode = Player.BodyModeIndex.ClimbingOnBeam;
+        player.standing = standing;
+
+        if (nextAnimation == Player.AnimationIndex.ClimbOnBeam)
+        {
+            player.room.PlaySound(
+                SoundID.Slugcat_Climb_Up_Vertical_Beam,
+                player.mainBodyChunk,
+                loop: false,
+                0.65f,
+                1f);
+        }
+
+        return true;
+    }
+
+    private static void CaptureEndpointRecovery(
+        Player player,
+        EndpointRecoveryState recovery)
+    {
+        if (recovery == null)
+        {
+            return;
+        }
+
+        if (player?.animation != Player.AnimationIndex.VineGrab ||
+            player.vinePos?.vine is not RopeSpear spear ||
+            player.room?.climbableVines == null ||
+            !HasFixedClimbAnchors(spear))
+        {
+            if (recovery.FramesLeft > 0)
+            {
+                recovery.FramesLeft--;
+            }
+            return;
+        }
+
+        float totalLength = player.room.climbableVines.TotalLength(spear);
+        if (totalLength <= 0.001f)
+        {
+            return;
+        }
+
+        float remaining = Mathf.Max(0f, 1f - player.vinePos.floatPos) * totalLength;
+        Vector2 spearTail = spear.Pos(spear.TotalPositions() - 1);
+        if (remaining > EndpointRecoveryRopeDistance ||
+            !Custom.DistLess(
+                player.mainBodyChunk.pos,
+                spearTail,
+                EndpointRecoveryBodyDistance))
+        {
+            if (recovery.Spear == spear)
+            {
+                ClearRecovery(recovery);
+            }
+            return;
+        }
+
+        recovery.Spear = spear;
+        recovery.FloatPos = player.vinePos.floatPos;
+        recovery.FramesLeft = EndpointRecoveryFrames;
+    }
+
+    private static void TryRecoverInvalidEndpointState(
+        Player player,
+        EndpointRecoveryState recovery)
+    {
+        if (player == null ||
+            recovery == null ||
+            recovery.FramesLeft <= 0 ||
+            recovery.Spear == null)
+        {
+            return;
+        }
+
+        RopeSpear spear = recovery.Spear;
+        if (player.dead ||
+            !player.Consious ||
+            player.room == null ||
+            spear.room != player.room ||
+            !HasFixedClimbAnchors(spear))
+        {
+            ClearRecovery(recovery);
+            return;
+        }
+
+        if (player.animation == Player.AnimationIndex.VineGrab)
+        {
+            if (player.vinePos?.vine == spear)
+            {
+                recovery.FloatPos = player.vinePos.floatPos;
+                recovery.FramesLeft = EndpointRecoveryFrames;
+            }
+            else
+            {
+                ClearRecovery(recovery);
+            }
+            return;
+        }
+
+        if (player.animation == Player.AnimationIndex.GetUpOnBeam)
+        {
+            if (HorizontalMountStateIsValid(player))
+            {
+                ClearRecovery(recovery);
+                return;
+            }
+
+            RestoreEndpointVineGrab(player, recovery);
+            return;
+        }
+
+        if (player.animation == Player.AnimationIndex.ClimbOnBeam ||
+            player.animation == Player.AnimationIndex.HangUnderVerticalBeam)
+        {
+            if (VerticalMountStateIsValid(player))
+            {
+                ClearRecovery(recovery);
+                return;
+            }
+
+            RestoreEndpointVineGrab(player, recovery);
+            return;
+        }
+
+        // None is the failure state produced by both vanilla VineGrab's distance
+        // cutoff and an invalid GetUpOnBeam/ClimbOnBeam transition. While the player
+        // is in the endpoint grace window, convert that unexplained drop back into
+        // the previous rope grab. Other named animations are treated as intentional
+        // state changes and are left alone.
+        if (player.animation == Player.AnimationIndex.None)
+        {
+            RestoreEndpointVineGrab(player, recovery);
+            return;
+        }
+
+        ClearRecovery(recovery);
+    }
+
+    private static void RestoreEndpointVineGrab(
+        Player player,
+        EndpointRecoveryState recovery)
+    {
+        RopeSpear spear = recovery?.Spear;
+        if (player?.room?.climbableVines == null ||
+            spear == null ||
+            !HasFixedClimbAnchors(spear))
+        {
+            ClearRecovery(recovery);
+            return;
+        }
+
+        float totalLength = player.room.climbableVines.TotalLength(spear);
+        float safeFloat = Mathf.Clamp01(recovery.FloatPos);
+        if (totalLength > 0.001f)
+        {
+            // Never restore to exactly 1.0. ClimbOnVineSpeed has a special endpoint
+            // branch that returns -1 at floatPos==1 regardless of input direction.
+            safeFloat = Mathf.Min(safeFloat, 1f - 0.75f / totalLength);
+        }
+
+        player.animation = Player.AnimationIndex.VineGrab;
+        player.vinePos = new ClimbableVinesSystem.VinePosition(spear, safeFloat);
+        player.vineGrabDelay = 0;
+        player.bodyMode = Player.BodyModeIndex.Default;
+        player.standing = false;
+        player.wantToGrab = 0;
+
+        recovery.FloatPos = safeFloat;
+        recovery.FramesLeft = EndpointRecoveryFrames;
+    }
+
+    private static bool HorizontalMountStateIsValid(Player player)
+    {
+        return player?.room != null &&
+               BodyTouchesHorizontalBeam(player) &&
+               Custom.DistLess(
+                   player.mainBodyChunk.pos,
+                   player.upOnHorizontalBeamPos,
+                   25f);
+    }
+
+    private static bool VerticalMountStateIsValid(Player player)
+    {
+        if (player?.room == null)
+        {
+            return false;
+        }
+
+        if (player.animation == Player.AnimationIndex.ClimbOnBeam)
+        {
+            return player.room.GetTile(player.mainBodyChunk.pos).verticalBeam;
+        }
+
+        if (player.animation == Player.AnimationIndex.HangUnderVerticalBeam)
+        {
+            return player.room.GetTile(
+                player.mainBodyChunk.pos + new Vector2(0f, 20f)).verticalBeam;
+        }
+
+        return false;
+    }
+
+    private static bool BodyTouchesHorizontalBeam(Player player)
+    {
+        if (player?.room == null || player.bodyChunks == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk != null && player.room.GetTile(chunk.pos).horizontalBeam)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsIntentionalVineJump(Player player)
+    {
+        return player?.animation == Player.AnimationIndex.VineGrab &&
+               player.input != null &&
+               player.input.Length > 1 &&
+               player.input[0].jmp &&
+               !player.input[1].jmp;
+    }
+
+    private static bool HasFixedClimbAnchors(RopeSpear spear)
+    {
+        if (spear == null ||
+            spear.mode != Weapon.Mode.StuckInWall ||
+            spear.room?.physicalObjects == null ||
+            spear.abstractPhysicalObject == null)
+        {
+            return false;
+        }
+
+        EntityID spearId = spear.abstractPhysicalObject.ID;
+        for (int layer = 0; layer < spear.room.physicalObjects.Length; layer++)
+        {
+            var objects = spear.room.physicalObjects[layer];
+            for (int i = 0; i < objects.Count; i++)
+            {
+                if (objects[i] is RopeHandle handle &&
+                    !handle.slatedForDeletetion &&
+                    handle.ParentSpearID == spearId &&
+                    handle.Anchored)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void ClearRecovery(EndpointRecoveryState recovery)
+    {
+        if (recovery == null)
+        {
+            return;
+        }
+
+        recovery.Spear = null;
+        recovery.FloatPos = 0f;
+        recovery.FramesLeft = 0;
+    }
+
+    private static bool TryFindHorizontalMountBeam(
         Room room,
         Vector2 spearCenter,
         Vector2 spearTail,
@@ -241,7 +600,7 @@ internal static class RopeSpearDiagonalClimbRuntime
         float bestScore = float.MaxValue;
         bool found = false;
 
-        SearchBeamNeighborhood(
+        SearchHorizontalBeamNeighborhood(
             room,
             room.GetTilePosition(spearCenter),
             spearTail,
@@ -250,10 +609,7 @@ internal static class RopeSpearDiagonalClimbRuntime
             ref beamCenter,
             ref found);
 
-        // Diagonal spears can leave their exposed tail one tile away from the
-        // cardinal beam topology generated by Spear.ChangeMode. Searching around
-        // the tail as well as the embedded center makes that layout mountable.
-        SearchBeamNeighborhood(
+        SearchHorizontalBeamNeighborhood(
             room,
             room.GetTilePosition(spearTail),
             spearTail,
@@ -265,7 +621,7 @@ internal static class RopeSpearDiagonalClimbRuntime
         return found;
     }
 
-    private static void SearchBeamNeighborhood(
+    private static void SearchHorizontalBeamNeighborhood(
         Room room,
         IntVector2 origin,
         Vector2 spearTail,
