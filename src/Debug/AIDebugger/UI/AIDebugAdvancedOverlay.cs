@@ -11,6 +11,9 @@ namespace DryCycle.Debugging.AI;
 internal static class AIDebugAdvancedOverlay
 {
     private static readonly List<AIDebugCandidate> CandidateScratch = new(64);
+    private static readonly List<DesertBatfly> AttackersScratch = new(4);
+    private static readonly List<DesertBatfly> WaitingScratch = new(8);
+
     private static readonly FieldInfo VisibleThreatField = typeof(DesertBatflySocialRoles)
         .GetField("visibleThreat", BindingFlags.Instance | BindingFlags.NonPublic);
     private static readonly FieldInfo ClearSightField = typeof(DesertBatflySocialRoles)
@@ -21,8 +24,12 @@ internal static class AIDebugAdvancedOverlay
     internal static void Draw(RainWorldGame game, AbstractCreature selected, bool frozen,
         AIDebugTraceFrame frozenFrame)
     {
-        if (game?.cameras == null || game.cameras.Length == 0 || game.cameras[0]?.room == null) return;
-        RoomCamera camera = game.cameras[0];
+        if (game?.cameras == null || game.cameras.Length == 0) return;
+        RoomCamera camera = frozen
+            ? AIDebugCameraUtil.ForRoomName(game, frozenFrame.Room)
+            : AIDebugCameraUtil.ForCreature(game, selected);
+        if (camera?.room == null) return;
+
         Creature realized = selected?.realizedCreature;
         if (!frozen && realized?.room != camera.room) return;
 
@@ -71,12 +78,12 @@ internal static class AIDebugAdvancedOverlay
         if (creature?.bodyChunks == null) return;
         uint chunkColor = Col(0.90f, 0.90f, 0.94f, 0.72f);
         uint velocityColor = Col(0.30f, 0.78f, 0.98f, 0.80f);
+        float scale = AIDebugCameraUtil.ScreenScale(camera);
         for (int i = 0; i < creature.bodyChunks.Length; i++)
         {
             BodyChunk chunk = creature.bodyChunks[i];
             if (chunk == null) continue;
             Num.Vector2 p = World(camera, chunk.pos);
-            float scale = ScreenScale(camera);
             draw.AddCircle(p, Mathf.Max(2f, chunk.rad * scale), chunkColor, 20, 1.4f);
             Arrow(draw, p, World(camera, chunk.pos + chunk.vel * 8f), velocityColor, 1.2f);
         }
@@ -115,10 +122,17 @@ internal static class AIDebugAdvancedOverlay
         if (room?.aimap == null || selected?.creatureTemplate == null) return;
         using (AIDebugProfiler.Begin(AIDebugProfileCategory.AImap))
         {
+            float visibleBottom = camera.pos.y;
+            float visibleTop = camera.pos.y + camera.sSize.y;
+            if (camera.splitScreenMode)
+            {
+                visibleBottom += camera.sSize.y * 0.25f;
+                visibleTop -= camera.sSize.y * 0.25f;
+            }
             int x0 = Mathf.Clamp(Mathf.FloorToInt(camera.pos.x / 20f) - 1, 0, room.TileWidth - 1);
-            int y0 = Mathf.Clamp(Mathf.FloorToInt(camera.pos.y / 20f) - 1, 0, room.TileHeight - 1);
+            int y0 = Mathf.Clamp(Mathf.FloorToInt(visibleBottom / 20f) - 1, 0, room.TileHeight - 1);
             int x1 = Mathf.Clamp(Mathf.CeilToInt((camera.pos.x + camera.sSize.x) / 20f) + 1, 0, room.TileWidth - 1);
-            int y1 = Mathf.Clamp(Mathf.CeilToInt((camera.pos.y + camera.sSize.y) / 20f) + 1, 0, room.TileHeight - 1);
+            int y1 = Mathf.Clamp(Mathf.CeilToInt(visibleTop / 20f) + 1, 0, room.TileHeight - 1);
             uint allowed = Col(0.22f, 0.78f, 0.40f, 0.11f);
             uint blocked = Col(0.92f, 0.28f, 0.26f, 0.08f);
             for (int x = x0; x <= x1; x++)
@@ -162,7 +176,7 @@ internal static class AIDebugAdvancedOverlay
         if (bat.room == null || !DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony)) return;
         DesertBatflySocialRoles roles = bat.DesertAI.Roles;
         Num.Vector2 center = World(camera, colony.Flock.Center);
-        float scale = ScreenScale(camera);
+        float scale = AIDebugCameraUtil.ScreenScale(camera);
         uint social = Col(0.46f, 0.88f, 0.62f, 0.88f);
         uint watch = Col(0.72f, 0.56f, 0.96f, 0.92f);
         draw.AddCircle(center, 11f, social, 24, 1.6f);
@@ -200,32 +214,36 @@ internal static class AIDebugAdvancedOverlay
     private static void DrawDesertCombat(ImDrawListPtr draw, RoomCamera camera, DesertBatfly selected)
     {
         Creature target = selected.DesertAI.Target;
-        if (target?.room != selected.room || selected.room?.abstractRoom?.creatures == null) return;
-        var attackers = new List<DesertBatfly>(4);
-        var waiting = new List<DesertBatfly>(8);
+        if (target?.room != selected.room || target.mainBodyChunk == null ||
+            selected.room?.abstractRoom?.creatures == null) return;
+
+        AttackersScratch.Clear();
+        WaitingScratch.Clear();
         foreach (AbstractCreature abs in selected.room.abstractRoom.creatures)
         {
-            if (abs?.realizedCreature is not DesertBatfly bat || bat.DesertAI.Target != target) continue;
-            if (bat.DesertAI.FormalAttack) attackers.Add(bat);
-            else waiting.Add(bat);
+            if (abs?.realizedCreature is not DesertBatfly bat || bat.DesertAI.Target != target ||
+                bat.mainBodyChunk == null) continue;
+            if (bat.DesertAI.FormalAttack) AttackersScratch.Add(bat);
+            else WaitingScratch.Add(bat);
         }
+
         uint attack = Col(0.96f, 0.38f, 0.28f, 0.95f);
         uint wait = Col(0.96f, 0.72f, 0.24f, 0.82f);
-        for (int i = 0; i < attackers.Count; i++)
+        for (int i = 0; i < AttackersScratch.Count; i++)
         {
-            Num.Vector2 p = World(camera, attackers[i].mainBodyChunk.pos);
+            Num.Vector2 p = World(camera, AttackersScratch[i].mainBodyChunk.pos);
             if (AIDebugSettings.OverlayLabels) draw.AddText(p + new Num.Vector2(10f, 6f), attack, $"SLOT {i + 1}");
         }
-        for (int i = 0; i < waiting.Count; i++)
+        for (int i = 0; i < WaitingScratch.Count; i++)
         {
-            Num.Vector2 p = World(camera, waiting[i].mainBodyChunk.pos);
+            Num.Vector2 p = World(camera, WaitingScratch[i].mainBodyChunk.pos);
             if (AIDebugSettings.OverlayLabels) draw.AddText(p + new Num.Vector2(10f, 6f), wait, "WAIT");
         }
         Num.Vector2 t = World(camera, target.mainBodyChunk.pos);
         draw.AddCircle(t, 11f, attack, 24, 2f);
-        if (attackers.Count > DesertBatflyTuning.AttackSlots && AIDebugSettings.OverlayLabels)
+        if (AttackersScratch.Count > DesertBatflyTuning.AttackSlots && AIDebugSettings.OverlayLabels)
             draw.AddText(t + new Num.Vector2(14f, -16f), attack,
-                $"ATTACK SLOT VIOLATION {attackers.Count}/{DesertBatflyTuning.AttackSlots}");
+                $"ATTACK SLOT VIOLATION {AttackersScratch.Count}/{DesertBatflyTuning.AttackSlots}");
     }
 
     private static void DrawCandidates(ImDrawListPtr draw, RoomCamera camera, AbstractCreature owner)
@@ -247,16 +265,8 @@ internal static class AIDebugAdvancedOverlay
         }
     }
 
-    private static Num.Vector2 World(RoomCamera camera, Vector2 world)
-    {
-        Vector2 local = world - camera.pos;
-        float sx = Screen.width / Mathf.Max(1f, camera.sSize.x);
-        float sy = Screen.height / Mathf.Max(1f, camera.sSize.y);
-        return new Num.Vector2(local.x * sx, Screen.height - local.y * sy);
-    }
-
-    private static float ScreenScale(RoomCamera camera) =>
-        0.5f * (Screen.width / Mathf.Max(1f, camera.sSize.x) + Screen.height / Mathf.Max(1f, camera.sSize.y));
+    private static Num.Vector2 World(RoomCamera camera, Vector2 world) =>
+        AIDebugCameraUtil.WorldToImGui(camera, world);
 
     private static void Arrow(ImDrawListPtr draw, Num.Vector2 from, Num.Vector2 to, uint color, float thickness)
     {
