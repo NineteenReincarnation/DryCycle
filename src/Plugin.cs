@@ -6,6 +6,7 @@ using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
 using DryCycle.Creatures.DesertBatfly;
 using DryCycle.DayNight;
+using DryCycle.Debugging.AI;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
@@ -72,6 +73,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     public void OnDisable()
     {
+        AIDebuggerRuntime.Uninstall();
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
@@ -167,6 +169,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (_initialized)
         {
+            AIDebuggerRuntime.Install(self, Logger);
             return;
         }
 
@@ -240,10 +243,12 @@ internal sealed class Plugin : BaseUnityPlugin
             VanillaDevUIShortcutRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
+            AIDebuggerRuntime.Install(self, Logger);
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
         }
         catch (Exception ex)
         {
+            AIDebuggerRuntime.Uninstall();
             InternalGateRuntime.Disable();
             VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
