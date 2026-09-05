@@ -19,6 +19,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.FleeFromRainUpdate += Rain;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
+        On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
     internal static void Disable()
@@ -35,7 +36,19 @@ internal static class DesertBatflyHooks
         On.FlyAI.FleeFromRainUpdate -= Rain;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
+        On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyWarpCompatibility.Disable();
+        DesertBatflySandbox.Disable();
         DesertSwarmRoom.Reset();
+    }
+
+    private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
+    {
+        orig(self);
+        // RainWorld.Awake has built CreatureUnlockList by this point, and optional
+        // Warp assemblies are already loaded. Keep both integrations soft.
+        DesertBatflySandbox.Enable();
+        DesertBatflyWarpCompatibility.Enable();
     }
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)
