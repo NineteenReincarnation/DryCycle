@@ -186,6 +186,58 @@ internal sealed class RopeHandle : PlayerCarryableItem, IDrawable
             position = lastOutsideTerrainPos.Value;
         }
 
+        if (room.GetTile(position).Solid)
+        {
+            return false;
+        }
+
+        return CommitAnchor(position, holderAtAnchor);
+    }
+
+    /// <summary>
+    /// Suspended-handle fallback used only by the Alt+Throw safety command. When the
+    /// spear is already embedded and the player is genuinely hanging in open air,
+    /// the free endpoint can be fixed at the exact point currently held by the hand.
+    /// This is intentionally not a general-purpose terrain anchor: the caller owns
+    /// the airborne-state gate so ordinary grounded use still requires nearby solid
+    /// terrain.
+    /// </summary>
+    internal bool TryAnchorAtCurrentPosition(Player expectedHolder)
+    {
+        if (room == null ||
+            Data == null ||
+            expectedHolder == null ||
+            expectedHolder.room != room ||
+            Holder != expectedHolder)
+        {
+            return false;
+        }
+
+        Vector2 position = firstChunk.pos;
+        if (room.GetTile(position).Solid)
+        {
+            if (!lastOutsideTerrainPos.HasValue)
+            {
+                return false;
+            }
+
+            position = lastOutsideTerrainPos.Value;
+            if (room.GetTile(position).Solid)
+            {
+                return false;
+            }
+        }
+
+        return CommitAnchor(position, expectedHolder);
+    }
+
+    private bool CommitAnchor(Vector2 position, Player holderAtAnchor)
+    {
+        if (room == null || Data == null)
+        {
+            return false;
+        }
+
         Data.Anchored = true;
         Data.AnchorPosition = position;
         firstChunk.HardSetPosition(position);
