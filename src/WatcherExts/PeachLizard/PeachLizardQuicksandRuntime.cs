@@ -156,8 +156,9 @@ internal static class PeachLizardQuicksandRuntime
                     representation.BestGuessForPosition().room != testLurkPos.room ||
                     representation.representedCreature?.creatureTemplate == null ||
                     representation.representedCreature.creatureTemplate.smallCreature ||
-                    representation.dynamicRelationship.currentRelationship.type ==
-                        CreatureTemplate.Relationship.Type.Eats)
+                    (representation.dynamicRelationship != null &&
+                     representation.dynamicRelationship.currentRelationship.type ==
+                         CreatureTemplate.Relationship.Type.Eats))
                     continue;
 
                 float distance = representation.BestGuessForPosition().Tile.FloatDist(testLurkPos.Tile);
