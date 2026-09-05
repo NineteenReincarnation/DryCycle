@@ -50,6 +50,7 @@ internal static class Program
         Check(DesertBatflyTuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
 
         int sandSpitters = 0;
+        int trueAvengers = 0;
         for (int seed = 0; seed < 10000; seed++)
         {
             var a = new DesertBatflyPersonality(seed);
@@ -59,6 +60,14 @@ internal static class Program
             Check(a.PatternCount >= 5 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
             Check(a.Nerve >= 0f && a.Nerve <= 1f && a.RoostAffinity >= 0f && a.RoostAffinity <= 1f, "stable personality factors bounded");
             Check(a.SandSpitAffinity == b.SandSpitAffinity && a.SandSpitAffinity >= 0f && a.SandSpitAffinity <= 1f, "stable sand-spit personality factor");
+            Check(a.VengeanceAffinity == b.VengeanceAffinity && a.VengeanceAffinity >= 0f && a.VengeanceAffinity <= 1f, "stable vengeance personality factor");
+            Check(a.Conformity == b.Conformity && a.Conformity >= 0f && a.Conformity <= 1f, "stable independent conformity factor");
+            Check(a.SocialFearScale >= 0.72f && a.SocialFearScale <= 1.48f, "social fear scale bounded");
+            if (a.CanExtremeVengeance)
+            {
+                trueAvengers++;
+                Check(a.VengeanceDrive >= 0f && a.VengeanceDrive <= 1f, "vengeance drive bounded");
+            }
             if (a.CanSandSpit)
             {
                 sandSpitters++;
@@ -72,7 +81,8 @@ internal static class Program
             }
         }
         Check(sandSpitters > 500 && sandSpitters < 9500, "sand spit is an individual minority trait, not none/all");
-        Console.WriteLine($"Personality: 10,000 repeatable seeds, including {sandSpitters} sand-spit-capable individuals.");
+        Check(trueAvengers >= 450 && trueAvengers <= 550, "true-avenger rate remains approximately five percent");
+        Console.WriteLine($"Personality: 10,000 repeatable seeds, {sandSpitters} sand spitters, {trueAvengers} true avengers; Conformity stable and bounded.");
 
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
@@ -87,7 +97,13 @@ internal static class Program
             health = 0.35f,
             GrabMemoryPlayer = 1,
             GrabMemoryStrength = 0.72f,
-            GrabMemoryTicks = 2200
+            GrabMemoryTicks = 2200,
+            PlayerTraumaPlayer = 2,
+            PlayerTraumaStrength = 0.83f,
+            PlayerTraumaTicks = 6400,
+            PredatorTraumaId = 177,
+            PredatorTraumaStrength = 0.64f,
+            PredatorTraumaTicks = 5300
         };
         state.unrecognizedSaveStrings["ForeignMod"] = "preserve";
         var culture = CultureInfo.CurrentCulture;
@@ -100,13 +116,21 @@ internal static class Program
             Check(restored.Thirst == state.Thirst && restored.Cooldown == 1133 && restored.Bites == 1, "state round trip");
             Check(restored.InHive && restored.MealConsumed && Math.Abs(restored.health - 0.35f) < 0.001f, "hive/meal/health round trip");
             Check(restored.GrabMemoryPlayer == 1 && Math.Abs(restored.GrabMemoryStrength - 0.72f) < 0.001f && restored.GrabMemoryTicks == 2200, "grab memory round trip");
+            Check(restored.PlayerTraumaPlayer == 2 && Math.Abs(restored.PlayerTraumaStrength - 0.83f) < 0.001f && restored.PlayerTraumaTicks == 6400, "player trauma round trip");
+            Check(restored.PredatorTraumaId == 177 && Math.Abs(restored.PredatorTraumaStrength - 0.64f) < 0.001f && restored.PredatorTraumaTicks == 5300, "predator trauma round trip");
+            Check(restored.HasTrauma, "restored trauma remains active");
+            restored.TickTrauma();
+            Check(restored.PlayerTraumaTicks == 6399 && restored.PredatorTraumaTicks == 5299, "trauma ticks decay exactly once per realized update");
             Check(restored.unrecognizedSaveStrings["ForeignMod"] == "preserve", "foreign save data preserved");
             restored.LoadFromString(new[] { "DCDesertBatflyV1<cC>973;NaN;-42;99;0" });
             Check(!float.IsNaN(restored.Thirst) && restored.Cooldown == 0 && restored.Bites == 3, "malformed save bounded");
             Check(restored.GrabMemoryPlayer == -1 && restored.GrabMemoryStrength == 0f && restored.GrabMemoryTicks == 0, "legacy payload clears optional grab memory");
+            Check(restored.PlayerTraumaPlayer == -1 && restored.PlayerTraumaStrength == 0f && restored.PlayerTraumaTicks == 0, "legacy payload clears player trauma");
+            Check(restored.PredatorTraumaId == int.MinValue && restored.PredatorTraumaStrength == 0f && restored.PredatorTraumaTicks == 0, "legacy payload clears predator trauma");
+            Check(!restored.HasTrauma, "legacy payload has no phantom PTSD");
         }
         finally { CultureInfo.CurrentCulture = culture; }
-        Console.WriteLine("State: locale-independent round trip, grab memory, legacy schema, malformed data, foreign fields.");
+        Console.WriteLine("State: locale-independent round trip, grab memory, persistent player/predator trauma, legacy schema, malformed data, foreign fields.");
 
         Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
