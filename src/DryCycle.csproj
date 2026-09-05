@@ -41,6 +41,12 @@
       <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Use the exact RuntimeDetour assembly already loaded by Rain World's BepInEx.
+         Shipping another NuGet copy could create a version conflict in Mono. -->
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="PUBLIC-Assembly-CSharp">
       <HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
@@ -89,6 +95,7 @@
   <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
     <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Application/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll')" Text="MonoMod.RuntimeDetour.dll not found under $(RainWorldDir)/BepInEx/core. AI Observatory Pause/Step and input isolation require the RuntimeDetour version shipped with Rain World/BepInEx." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll')" Text="PUBLIC-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/utils." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll')" Text="HOOKS-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/plugins." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
@@ -103,7 +110,7 @@
 
   <!-- Optional one-command shader build. Keep it opt-in because the Unity Editor is
        not required for ordinary C# iteration. Example:
-       dotnet build -c Release -p:BuildDryCycleAssets=true -p:DryCycleUnityEditor="C:/.../Unity.exe" -->
+       dotnet build -c Release -p:BuildDryCycleAssets=true -p:DryCycleUnityEditor=&quot;C:/.../Unity.exe&quot; -->
   <Target Name="BuildDryCycleWeatherAssets"
           BeforeTargets="BeforeBuild"
           Condition="'$(BuildDryCycleAssets)' == 'true'">
