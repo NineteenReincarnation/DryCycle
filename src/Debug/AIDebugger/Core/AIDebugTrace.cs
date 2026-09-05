@@ -76,9 +76,19 @@ internal readonly struct AIDebugTraceFrame
         string mode, string target, string role, string suppression, string controlOwner,
         float utility0 = 0f, float utility1 = 0f, float utility2 = 0f, float panic = 0f,
         AIDebugHistoricalState history = null)
+        : this(UnityEngine.Time.frameCount, UnityEngine.Time.unscaledTime, room, position, velocity,
+            localGoal, mode, target, role, suppression, controlOwner,
+            utility0, utility1, utility2, panic, history)
     {
-        Frame = UnityEngine.Time.frameCount;
-        Time = UnityEngine.Time.unscaledTime;
+    }
+
+    private AIDebugTraceFrame(int frame, float time, string room, Vector2 position,
+        Vector2 velocity, Vector2 localGoal, string mode, string target, string role,
+        string suppression, string controlOwner, float utility0, float utility1,
+        float utility2, float panic, AIDebugHistoricalState history)
+    {
+        Frame = frame;
+        Time = time;
         Room = room ?? "—";
         Position = position;
         Velocity = velocity;
@@ -94,12 +104,16 @@ internal readonly struct AIDebugTraceFrame
         Panic = panic;
         History = history;
     }
+
+    internal AIDebugTraceFrame WithHistory(AIDebugHistoricalState history) =>
+        new(Frame, Time, Room, Position, Velocity, LocalGoal, Mode, Target, Role,
+            Suppression, ControlOwner, Utility0, Utility1, Utility2, Panic, history);
 }
 
 internal static class AIDebugTrace
 {
     private const int EventCapacity = 1024;
-    private const int FrameCapacity = 600; // hard maximum: ~60s at the default 10Hz sample rate
+    private const int FrameCapacity = 600; // hard maximum: ~60s at default 10Hz sampling
     private const int MaxTraces = 12;
     private const int SampleFrameInterval = 4;
 
@@ -161,13 +175,13 @@ internal static class AIDebugTrace
         if (!IsWatched(key)) return;
         Trace trace = GetOrCreate(key);
         int index = trace.EventHead;
-        var e = new AIDebugTraceEvent(UnityEngine.Time.frameCount, UnityEngine.Time.unscaledTime,
-            category, name, detail, reason);
-        trace.Events[index] = e;
+        var item = new AIDebugTraceEvent(UnityEngine.Time.frameCount,
+            UnityEngine.Time.unscaledTime, category, name, detail, reason);
+        trace.Events[index] = item;
         trace.EventHead = (index + 1) % EventCapacity;
         if (trace.EventCount < EventCapacity) trace.EventCount++;
         trace.LastTouchedFrame = UnityEngine.Time.frameCount;
-        AIDebugBreakpointManager.OnEvent(key, e);
+        AIDebugBreakpointManager.OnEvent(key, item);
     }
 
     internal static void RecordChange(AbstractCreature creature, AIDebugEventCategory category,
@@ -205,10 +219,7 @@ internal static class AIDebugTrace
                     AIDebugPathState path = AIDebugAdvancedCapture.CapturePath(creature);
                     var history = new AIDebugHistoricalState(snapshot,
                         UtilityScratch.ToArray(), PerceptionScratch.ToArray(), path);
-                    sample = new AIDebugTraceFrame(sample.Room, sample.Position, sample.Velocity,
-                        sample.LocalGoal, sample.Mode, sample.Target, sample.Role, sample.Suppression,
-                        sample.ControlOwner, sample.Utility0, sample.Utility1, sample.Utility2,
-                        sample.Panic, history);
+                    sample = sample.WithHistory(history);
                 }
                 catch (Exception error)
                 {
@@ -229,12 +240,14 @@ internal static class AIDebugTrace
     {
         output.Clear();
         if (!Traces.TryGetValue(key, out Trace trace) || trace.EventCount == 0) return 0;
-        float cutoff = UnityEngine.Time.unscaledTime - Mathf.Max(10f, AIDebugSettings.HistorySeconds + 10f);
+        int newestIndex = (trace.EventHead - 1 + EventCapacity) % EventCapacity;
+        float newestTime = trace.Events[newestIndex].Time;
+        float cutoff = newestTime - Mathf.Max(10f, AIDebugSettings.HistorySeconds + 10f);
         int first = (trace.EventHead - trace.EventCount + EventCapacity) % EventCapacity;
         for (int i = 0; i < trace.EventCount; i++)
         {
-            AIDebugTraceEvent e = trace.Events[(first + i) % EventCapacity];
-            if (e.Time >= cutoff) output.Add(e);
+            AIDebugTraceEvent item = trace.Events[(first + i) % EventCapacity];
+            if (item.Time >= cutoff) output.Add(item);
         }
         return output.Count;
     }
@@ -243,12 +256,14 @@ internal static class AIDebugTrace
     {
         output.Clear();
         if (!Traces.TryGetValue(key, out Trace trace) || trace.FrameCount == 0) return 0;
-        float cutoff = UnityEngine.Time.unscaledTime - Mathf.Clamp(AIDebugSettings.HistorySeconds, 5, 60);
+        int newestIndex = (trace.FrameHead - 1 + FrameCapacity) % FrameCapacity;
+        float newestTime = trace.Frames[newestIndex].Time;
+        float cutoff = newestTime - Mathf.Clamp(AIDebugSettings.HistorySeconds, 5, 60);
         int first = (trace.FrameHead - trace.FrameCount + FrameCapacity) % FrameCapacity;
         for (int i = 0; i < trace.FrameCount; i++)
         {
-            AIDebugTraceFrame frame = trace.Frames[(first + i) % FrameCapacity];
-            if (frame.Time >= cutoff) output.Add(frame);
+            AIDebugTraceFrame item = trace.Frames[(first + i) % FrameCapacity];
+            if (item.Time >= cutoff) output.Add(item);
         }
         return output.Count;
     }
