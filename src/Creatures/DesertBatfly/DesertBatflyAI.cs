@@ -50,7 +50,7 @@ internal sealed class DesertBatflyAI
         if (memory > 0 && --memory == 0) attacker = null;
         if (retaliationRecovery > 0) retaliationRecovery--;
 
-        if (!fly.Consious || fly.grabbedBy.Count > 0 || fly.inShortcut)
+        if (!fly.Consious || RestrainedByNonFly() || fly.inShortcut)
         {
             if (IsInFlyChain(fly)) BreakHangChain(null, DesertBatflyTuning.RetreatTicks);
             else if (Mode == Activity.Roost) StopRoost(false);
@@ -62,13 +62,22 @@ internal sealed class DesertBatflyAI
         if (retreat > 0) retreat--;
     }
 
+    private bool RestrainedByNonFly()
+    {
+        for (int i = 0; i < fly.grabbedBy.Count; i++)
+        {
+            Creature.Grasp grasp = fly.grabbedBy[i];
+            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
+        }
+        return false;
+    }
+
     private void TickGrabMemory()
     {
         DesertBatflyState state = fly.DesertState;
         if (state.GrabMemoryTicks <= 0) return;
         state.GrabMemoryTicks--;
         if (state.GrabMemoryTicks > 0) return;
-
         state.GrabMemoryPlayer = -1;
         state.GrabMemoryStrength = 0f;
     }
@@ -90,7 +99,6 @@ internal sealed class DesertBatflyAI
             attacker = source;
             memory = DesertBatflyTuning.AttackerMemory;
             escapeFrom = source.mainBodyChunk.pos;
-
             if (directAttack && source is Player player && fly.Personality.Aggressive)
                 ArmRetaliation(player, 1f);
         }
@@ -99,10 +107,7 @@ internal sealed class DesertBatflyAI
             escapeFrom = fly.mainBodyChunk.pos - Vector2.up * 20f;
         }
 
-        if (IsInFlyChain(fly))
-        {
-            BreakHangChain(source, DesertBatflyTuning.RetreatTicks);
-        }
+        if (IsInFlyChain(fly)) BreakHangChain(source, DesertBatflyTuning.RetreatTicks);
         else
         {
             retreat = DesertBatflyTuning.RetreatTicks;
@@ -122,8 +127,8 @@ internal sealed class DesertBatflyAI
         memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
         escapeFrom = player.mainBodyChunk.pos;
 
-        // Being physically grabbed always overrides Nerve. Only this individual
-        // receives the strong player-specific memory; chain neighbours merely flee.
+        // A real player grab always overrides Nerve. Only this bat receives the
+        // strong player-specific memory; chain neighbours merely flee.
         if (IsInFlyChain(fly)) BreakHangChain(player, DesertBatflyTuning.RetreatTicks);
         else
         {
@@ -148,16 +153,16 @@ internal sealed class DesertBatflyAI
 
         if (fly.Personality.Aggressive)
         {
-            // Harsher individuals interpret the same grab as a grudge. Give them a
-            // short withdrawal before they turn around to observe/charge/drink.
+            // A nasty individual withdraws briefly, then can turn back to ram or
+            // perform a normal fluid-draining attack against the remembered player.
             ArmRetaliation(player, fly.DesertState.GrabMemoryStrength + (thrown ? 0.25f : 0f));
             retreat = Mathf.Clamp(retreat, 35, 60);
         }
         else
         {
-            // Calm animals interpret the memory as fear. Stronger memory and lower
-            // Nerve make the avoidance period longer rather than making them attack.
-            float fear = fly.DesertState.GrabMemoryStrength * Mathf.Lerp(1.15f, 0.8f, fly.Personality.Nerve);
+            // A calm individual interprets exactly the same event as fear.
+            float fear = fly.DesertState.GrabMemoryStrength *
+                Mathf.Lerp(1.15f, 0.8f, fly.Personality.Nerve);
             retreat = Mathf.Max(retreat, Mathf.RoundToInt(Mathf.Lerp(90f, 180f, fear)));
             retaliationCharges = 0;
         }
@@ -210,8 +215,7 @@ internal sealed class DesertBatflyAI
             if (other is not DesertBatfly bat || bat == fly ||
                 !Custom.DistLess(fly.mainBodyChunk.pos, bat.mainBodyChunk.pos, DesertBatflyTuning.AlarmRadius)) continue;
 
-            // Neighbours only receive a brief local alarm. They do not inherit this
-            // bat's player-specific grab memory or retaliation target.
+            // Neighbours do not inherit this bat's grudge/fear memory.
             bat.DesertAI.escapeFrom = escapeFrom;
             bat.DesertAI.retreat = Mathf.Max(bat.DesertAI.retreat, 25);
         }
@@ -221,8 +225,8 @@ internal sealed class DesertBatflyAI
     {
         escapeFrom = source?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up * 20f;
 
-        // A hanging chain is structurally coupled: once one member decides the
-        // approaching creature is worth fleeing from, the whole chain releases.
+        // A chain is structurally coupled. If one member decides to flee, every
+        // member is released so no lower bat remains hanging in empty space.
         if (IsInFlyChain(fly))
         {
             BreakHangChain(source, DesertBatflyTuning.ApproachRetreatTicks);
@@ -256,7 +260,7 @@ internal sealed class DesertBatflyAI
         if (fly.room == null) return;
         ticks++;
 
-        if (fly.Emergence.Active || fly.grabbedBy.Count > 0 || !fly.Consious || fly.inShortcut)
+        if (fly.Emergence.Active || RestrainedByNonFly() || !fly.Consious || fly.inShortcut)
         {
             if (Mode == Activity.Roost) StopRoost(true);
             CancelAttack();
@@ -271,7 +275,8 @@ internal sealed class DesertBatflyAI
             ScanWeapons();
         }
 
-        if (fly.AI.fleeFromRain || fly.AI.behavior == FlyAI.Behavior.Burrow || fly.AI.luredCounter > 0 || fly.safariControlled)
+        if (fly.AI.fleeFromRain || fly.AI.behavior == FlyAI.Behavior.Burrow ||
+            fly.AI.luredCounter > 0 || fly.safariControlled)
         {
             if (Mode == Activity.Roost) StopRoost(true);
             CancelAttack();
@@ -288,12 +293,15 @@ internal sealed class DesertBatflyAI
             Target = null;
             SetMode(Activity.Escape);
             if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
-            Steer(fly.mainBodyChunk.pos + Custom.DirVec(escapeFrom, fly.mainBodyChunk.pos) * 160f + Vector2.up * 50f, 8f);
+            Steer(fly.mainBodyChunk.pos +
+                Custom.DirVec(escapeFrom, fly.mainBodyChunk.pos) * 160f + Vector2.up * 50f, 8f);
             return;
         }
 
-        bool retaliationReady = fly.Personality.Aggressive && retaliationCharges > 0 && retaliationRecovery <= 0;
-        if (fly.DesertState.Cooldown > 0 && Mode != Activity.Attach && Mode != Activity.Interfere && !retaliationReady)
+        bool retaliationReady = fly.Personality.Aggressive &&
+            retaliationCharges > 0 && retaliationRecovery <= 0;
+        if (fly.DesertState.Cooldown > 0 && Mode != Activity.Attach &&
+            Mode != Activity.Interfere && !retaliationReady)
         {
             CancelAttack();
             SetMode(Activity.Cooldown);
@@ -352,15 +360,15 @@ internal sealed class DesertBatflyAI
                         retaliationCharges > 0 && retaliationRecovery <= 0)
                     {
                         float memoryBoost = grudge ? fly.DesertState.GrabMemoryStrength * 0.18f : 0f;
-                        if (Random.value < Mathf.Clamp01(fly.Personality.RetaliationChance + memoryBoost))
+                        if (Random.value < Mathf.Clamp01(fly.Personality.RetaliationChance + memoryBoost) &&
+                            AcquireSlot())
                         {
-                            if (AcquireSlot())
-                            {
-                                retaliationCharges--;
-                                retaliationDirection = Custom.DirVec(fly.mainBodyChunk.pos, retaliationTarget.mainBodyChunk.pos);
-                                SetMode(Activity.RetaliationCharge);
-                                break;
-                            }
+                            retaliationCharges--;
+                            retaliationDirection = Custom.DirVec(
+                                fly.mainBodyChunk.pos,
+                                retaliationTarget.mainBodyChunk.pos);
+                            SetMode(Activity.RetaliationCharge);
+                            break;
                         }
                     }
 
@@ -373,27 +381,23 @@ internal sealed class DesertBatflyAI
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
 
                     float fakeChance = fly.Personality.FakeDiveChance;
-                    if (grudge) fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
+                    if (grudge)
+                        fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
                     if (counter) fakeChance *= 0.82f;
 
                     if (!wantsRealAttack || Random.value < fakeChance)
-                    {
                         SetMode(Activity.FakeDive);
-                    }
                     else if (AcquireSlot())
-                    {
                         SetMode(Activity.Approach);
-                    }
                     else
-                    {
                         ticks = fly.Personality.ObserveDuration / 2;
-                    }
                 }
                 break;
 
             case Activity.Approach:
                 Steer(center + Vector2.up * 100f, 6f + fly.Personality.AggressionDrive * 1.2f);
-                if (ticks > DesertBatflyTuning.ApproachTicks || distance < 110f) SetMode(Activity.Circle);
+                if (ticks > DesertBatflyTuning.ApproachTicks || distance < 110f)
+                    SetMode(Activity.Circle);
                 break;
 
             case Activity.Circle:
@@ -413,7 +417,9 @@ internal sealed class DesertBatflyAI
                 break;
 
             case Activity.Dive:
-                Steer(center + Target.mainBodyChunk.vel * 1.5f, 12f + fly.Personality.AggressionDrive * 1.5f);
+                Steer(
+                    center + Target.mainBodyChunk.vel * 1.5f,
+                    12f + fly.Personality.AggressionDrive * 1.5f);
                 BodyChunk contact = FindContact();
                 if (contact != null && unseen == 0)
                 {
@@ -423,12 +429,16 @@ internal sealed class DesertBatflyAI
                     drainedWater = 0f;
                     SetMode(Activity.Attach);
                 }
-                else if (ticks > DesertBatflyTuning.DiveTicks) Finish(false);
+                else if (ticks > DesertBatflyTuning.DiveTicks)
+                {
+                    Finish(false);
+                }
                 break;
 
             case Activity.Attach:
                 fly.movMode = Fly.MovementMode.Passive;
-                if (ticks >= DesertBatflyTuning.AttachTicks) Finish(drainedWater > 0.001f);
+                if (ticks >= DesertBatflyTuning.AttachTicks)
+                    Finish(drainedWater > 0.001f);
                 break;
 
             case Activity.RetaliationCharge:
@@ -438,7 +448,8 @@ internal sealed class DesertBatflyAI
                     break;
                 }
 
-                Vector2 predicted = chargeTarget.mainBodyChunk.pos + chargeTarget.mainBodyChunk.vel * 1.15f;
+                Vector2 predicted = chargeTarget.mainBodyChunk.pos +
+                    chargeTarget.mainBodyChunk.vel * 1.15f;
                 Steer(predicted, fly.Personality.RetaliationSpeed);
                 BodyChunk retaliationContact = FindContact();
                 if (retaliationContact != null && unseen == 0)
@@ -489,8 +500,8 @@ internal sealed class DesertBatflyAI
         }
 
         if (Mode != Activity.Attach) return;
-        if (!Valid(Target) || attachedChunk == null || !fly.Consious || fly.grabbedBy.Count > 0 ||
-            fly.inShortcut || Target.inShortcut || !hasSlot ||
+        if (!Valid(Target) || attachedChunk == null || !fly.Consious ||
+            RestrainedByNonFly() || fly.inShortcut || Target.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
         {
             Finish(drainedWater > 0.001f);
@@ -498,7 +509,8 @@ internal sealed class DesertBatflyAI
         }
 
         Vector2 position = attachedChunk.pos + attachOffset;
-        if (fly.room.GetTile(position).Solid || !fly.room.VisualContact(fly.mainBodyChunk.pos, position))
+        if (fly.room.GetTile(position).Solid ||
+            !fly.room.VisualContact(fly.mainBodyChunk.pos, position))
         {
             Finish(drainedWater > 0.001f);
             return;
@@ -507,8 +519,7 @@ internal sealed class DesertBatflyAI
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        // Once drinking starts, drain 50 raw hydration points/second. Rain World
-        // updates at 40 simulation ticks/second, so this is 1.25 points per tick.
+        // 50 raw hydration points/second = 1.25 raw points per 40 Hz tick.
         if (ticks >= DesertBatflyTuning.DrainStartTicks &&
             ticks <= DesertBatflyTuning.DrainEndTicks)
         {
@@ -552,8 +563,8 @@ internal sealed class DesertBatflyAI
     private void UpdateInterference(bool eu)
     {
         if (Target is not Player player || !Valid(player) || attachedChunk == null ||
-            !fly.Consious || fly.grabbedBy.Count > 0 || fly.inShortcut || player.inShortcut || !hasSlot ||
-            !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 75f))
+            !fly.Consious || RestrainedByNonFly() || fly.inShortcut || player.inShortcut ||
+            !hasSlot || !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 75f))
         {
             FinishRetaliation(false);
             return;
@@ -569,9 +580,8 @@ internal sealed class DesertBatflyAI
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        // Do not stun, disable input or break grasps. A short body-chunk drag plus a
-        // small directional push makes running/jumping/climbing feel obstructed while
-        // preserving player control and preventing unfair pole-drop kills.
+        // No stun, input lock or forced grasp release: just short physical drag and
+        // directional pressure, so movement is obstructed without becoming a hard lock.
         float drag = fly.Personality.RetaliationDrag;
         Vector2 push = retaliationDirection * fly.Personality.RetaliationPush;
         foreach (BodyChunk chunk in player.bodyChunks)
@@ -592,7 +602,8 @@ internal sealed class DesertBatflyAI
         retaliationRecovery = success ? 120 : 75;
         escapeFrom = from;
         retreat = success ? 55 : 40;
-        fly.mainBodyChunk.vel += Custom.DirVec(from, fly.mainBodyChunk.pos) * 5.5f + Vector2.up * 2.5f;
+        fly.mainBodyChunk.vel +=
+            Custom.DirVec(from, fly.mainBodyChunk.pos) * 5.5f + Vector2.up * 2.5f;
         SetMode(Activity.Escape);
     }
 
@@ -605,7 +616,8 @@ internal sealed class DesertBatflyAI
             success ? DesertBatflyTuning.Cooldown : DesertBatflyTuning.FailedCooldown);
         escapeFrom = from;
         retreat = 75;
-        fly.mainBodyChunk.vel += Custom.DirVec(from, fly.mainBodyChunk.pos) * 5f + Vector2.up * 3f;
+        fly.mainBodyChunk.vel +=
+            Custom.DirVec(from, fly.mainBodyChunk.pos) * 5f + Vector2.up * 3f;
         SetMode(Activity.Escape);
     }
 
@@ -695,10 +707,11 @@ internal sealed class DesertBatflyAI
 
                 float reactionDistance = Mathf.Lerp(125f, 78f, fly.Personality.Nerve);
                 float closingThreshold = Mathf.Lerp(2.1f, 4.4f, fly.Personality.Nerve);
-                int pursuitThreshold = Mathf.RoundToInt(Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
+                int pursuitThreshold = Mathf.RoundToInt(
+                    Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
 
-                // A grudge-bearing aggressive individual is harder to scare away by
-                // the remembered player simply approaching; attacks still bypass this.
+                // A grudge-bearing nasty individual is harder to scare away merely
+                // by the remembered player approaching. Real attacks still override it.
                 if (remembered && fly.Personality.Aggressive)
                 {
                     reactionDistance *= 0.72f;
@@ -720,10 +733,7 @@ internal sealed class DesertBatflyAI
                         pursuit = 0;
                     }
                 }
-                else
-                {
-                    pursuit = Mathf.Max(0, pursuit - 2);
-                }
+                else pursuit = Mathf.Max(0, pursuit - 2);
             }
 
             if (distance < closest && CanHarass(creature))
@@ -742,7 +752,8 @@ internal sealed class DesertBatflyAI
             DesertBatflyTuning.ObserveThirst,
             0.18f,
             fly.Personality.AggressionDrive * 0.45f);
-        bool motivated = fly.DesertState.Thirst > observeThreshold || memory > 0 || rememberedCandidate != null;
+        bool motivated = fly.DesertState.Thirst > observeThreshold ||
+            memory > 0 || rememberedCandidate != null;
         if (!motivated) return;
 
         if (Valid(attacker) && CanHarass(attacker)) Target = attacker;
@@ -771,9 +782,7 @@ internal sealed class DesertBatflyAI
             Vector2 delta = fly.mainBodyChunk.pos - weapon.firstChunk.pos;
             Vector2 velocity = weapon.firstChunk.vel;
             float time = Mathf.Clamp(
-                Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude),
-                0f,
-                5f);
+                Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude), 0f, 5f);
             if ((delta - velocity * time).sqrMagnitude < 32f * 32f &&
                 delta.sqrMagnitude < 170f * 170f)
             {
@@ -787,7 +796,8 @@ internal sealed class DesertBatflyAI
     {
         DesertBatflyState state = fly.DesertState;
         return player != null && state.GrabMemoryTicks > 0 &&
-            state.GrabMemoryStrength > 0f && state.GrabMemoryPlayer == PlayerNumber(player);
+            state.GrabMemoryStrength > 0f &&
+            state.GrabMemoryPlayer == PlayerNumber(player);
     }
 
     private static int PlayerNumber(Player player)
@@ -798,22 +808,27 @@ internal sealed class DesertBatflyAI
     private Vector2 Orbit(float width, float height)
     {
         float angle = (fly.room.game.clock + (fly.Personality.VisualSeed & 1023)) * 0.025f;
-        return new Vector2(Mathf.Cos(angle) * width, 55f + Mathf.Sin(angle) * height * 0.45f);
+        return new Vector2(
+            Mathf.Cos(angle) * width,
+            55f + Mathf.Sin(angle) * height * 0.45f);
     }
 
     private void Steer(Vector2 goal, float speed)
     {
         fly.LoseAllGrasps();
         fly.burrowOrHangSpot = null;
-        if (fly.AI.behavior == FlyAI.Behavior.Chain) fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
-        else fly.AI.behavior = FlyAI.Behavior.Idle;
+        if (fly.AI.behavior == FlyAI.Behavior.Chain)
+            fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+        else
+            fly.AI.behavior = FlyAI.Behavior.Idle;
         fly.AI.followingDijkstraMap = -1;
         fly.movMode = Fly.MovementMode.BatFlight;
         hasRoost = false;
 
         Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, goal);
         if (fly.room.GetTile(fly.mainBodyChunk.pos + direction * 25f).Solid ||
-            (fly.room.terrain != null && fly.room.terrain.Contains(fly.mainBodyChunk.pos + direction * 25f)))
+            (fly.room.terrain != null &&
+             fly.room.terrain.Contains(fly.mainBodyChunk.pos + direction * 25f)))
         {
             goal = fly.mainBodyChunk.pos + Vector2.up * 70f;
             speed = 4f;
@@ -844,6 +859,8 @@ internal sealed class DesertBatflyAI
             return;
         }
 
+        // Existing vanilla chains are left to vanilla FlyAI. This custom chance is
+        // only an extra desert-species tendency to start a chain/roost.
         if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
         if (scan != 0 || Random.value > fly.Personality.RoostChance) return;
         if (!TryFindRoost(out Vector2 spot)) return;
@@ -909,7 +926,8 @@ internal sealed class DesertBatflyAI
 
         Fly member = fly.FirstInChain();
         int guard = 0;
-        Vector2 sourcePos = source?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up * 20f;
+        Vector2 sourcePos = source?.mainBodyChunk.pos ??
+            fly.mainBodyChunk.pos - Vector2.up * 20f;
 
         while (member != null && guard++ < 32)
         {
