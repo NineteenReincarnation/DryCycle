@@ -49,6 +49,7 @@ internal static class Program
         Check(DesertBatflyTuning.MealWater == 50f, "meal water cost is 50 raw points");
         Check(DesertBatflyTuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
 
+        int sandSpitters = 0;
         for (int seed = 0; seed < 10000; seed++)
         {
             var a = new DesertBatflyPersonality(seed);
@@ -57,13 +58,21 @@ internal static class Program
             Check(a.SpikeCount >= 0 && a.SpikeCount <= DesertBatflyTuning.MaxSpikes, "spike bound");
             Check(a.PatternCount >= 5 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
             Check(a.Nerve >= 0f && a.Nerve <= 1f && a.RoostAffinity >= 0f && a.RoostAffinity <= 1f, "stable personality factors bounded");
+            Check(a.SandSpitAffinity == b.SandSpitAffinity && a.SandSpitAffinity >= 0f && a.SandSpitAffinity <= 1f, "stable sand-spit personality factor");
+            if (a.CanSandSpit)
+            {
+                sandSpitters++;
+                Check(a.SandSpitDrive >= 0f && a.SandSpitDrive <= 1f, "sand-spit drive bounded");
+                Check(a.SandSpitMeterRate > 0f && a.SandSpitIntensity > 0f, "sand-spit runtime parameters positive");
+            }
             if (a.Aggressive)
             {
                 Check(a.FakeDiveChance >= 0.26f && a.FakeDiveChance <= 0.68f, "aggression fake-dive chance bounded");
                 Check(a.RetaliationChance >= 0.38f && a.RetaliationChance <= 0.92f, "retaliation chance bounded");
             }
         }
-        Console.WriteLine("Personality: 10,000 repeatable seeds, bounded visuals/nerve/roost/aggression.");
+        Check(sandSpitters > 500 && sandSpitters < 9500, "sand spit is an individual minority trait, not none/all");
+        Console.WriteLine($"Personality: 10,000 repeatable seeds, including {sandSpitters} sand-spit-capable individuals.");
 
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
