@@ -16,6 +16,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private bool resolvingNonRockViolence;
     private Player playerHolder;
 
+    // Short damage attribution window used only to identify a genuine player kill.
+    // Rock never enters this path because it is stun-only for this species.
+    private Player recentPlayerDamager;
+    private int recentPlayerDamageTicks;
+    private float recentPlayerThreatScale;
+
     private float sandStruggleMeter, sandSpitThreshold;
     private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
 
@@ -72,6 +78,11 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         TrackPlayerRelease();
         if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
         if (sandSpitCooldown > 0) sandSpitCooldown--;
+        if (recentPlayerDamageTicks > 0 && --recentPlayerDamageTicks == 0)
+        {
+            recentPlayerDamager = null;
+            recentPlayerThreatScale = 0f;
+        }
 
         if (room == null)
         {
@@ -104,6 +115,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             runningVanillaUpdate = false;
             currentRoom.fliesRoomAi = original;
         }
+
+        // Mortality awareness is enforced after the normal AI pass but before
+        // Attach/Interfere physics. If an intimidated bat tried to reacquire the
+        // demonstrated killer this tick, the intimidation layer can cancel it before
+        // any drain or movement interference is applied.
+        DesertBatflyIntimidation.Update(this);
 
         if (room == null) return;
         Emergence.Update(eu);
@@ -250,6 +267,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
         }
 
+        // Attribute only genuine damaging player attacks. Spears are the clearest
+        // demonstration of lethal force and receive full intimidation weight; other
+        // player-caused lethal damage still counts but is slightly weaker.
+        if (damage > 0f && attacker is Player playerAttacker)
+        {
+            recentPlayerDamager = playerAttacker;
+            recentPlayerDamageTicks = 240;
+            recentPlayerThreatScale = source?.owner is Spear ? 1f : 0.82f;
+        }
+
         // A spear, predator bite or any other genuine damage event must remain able
         // to kill even if it happens immediately after a Rock impact.
         resolvingNonRockViolence = true;
@@ -323,17 +350,49 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             grabbedBy.Count > 0 && grabbedBy[0].grabber is Player)
             return;
 
+        bool wasDead = dead;
+        Player killer = !wasDead && recentPlayerDamageTicks > 0
+            ? recentPlayerDamager
+            : null;
+        float threatScale = recentPlayerThreatScale > 0f
+            ? recentPlayerThreatScale
+            : 0.82f;
+        Vector2 deathPosition = mainBodyChunk?.pos ?? Vector2.zero;
+        Fly preDeathChainRoot = !wasDead && AI != null && AI.behavior == FlyAI.Behavior.Chain
+            ? FirstInChain()
+            : null;
+
         playerHolder = null;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
         base.Die();
+
+        // Broadcast only on the single live -> dead transition and only when a recent
+        // genuine player damage event can be identified. Predator kills, drowning and
+        // unrelated deaths therefore never manufacture player intimidation.
+        if (!wasDead && dead && killer != null)
+        {
+            DesertBatflyIntimidation.BroadcastPlayerKill(
+                this,
+                killer,
+                deathPosition,
+                preDeathChainRoot,
+                threatScale);
+        }
+
+        recentPlayerDamager = null;
+        recentPlayerDamageTicks = 0;
+        recentPlayerThreatScale = 0f;
     }
 
     public override void Destroy()
     {
         playerHolder = null;
+        recentPlayerDamager = null;
+        recentPlayerDamageTicks = 0;
+        recentPlayerThreatScale = 0f;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
         DesertAI?.CancelAttack();
