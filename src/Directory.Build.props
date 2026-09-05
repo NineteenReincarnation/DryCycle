@@ -14,5 +14,11 @@
 
   <ItemGroup>
     <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
+    <!-- BepInEx/Rain World already ships this assembly. Observatory uses it only for
+         two narrowly scoped runtime hooks: RWInput isolation and whole-world single-step. -->
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
