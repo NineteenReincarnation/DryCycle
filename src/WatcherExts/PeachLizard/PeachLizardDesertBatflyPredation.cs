@@ -9,17 +9,10 @@ namespace DryCycle.WatcherExts.PeachLizard;
 /// Makes Desert Batfly a native Peach Lizard prey target while preserving Watcher's
 /// own hunting, tongue, bite and return-prey pipeline.
 ///
-/// This deliberately does not create a custom hunt state. Flat-ground hunting works
-/// through the ordinary PreyTracker -> Hunt -> AggressiveBehavior -> ShootTongue path.
-/// Safe DryCycle sand is only a mild optional route preference while the prey is still
-/// outside a clean tongue opportunity.
-///
-/// One narrow compatibility fix is required for the tongue itself: LizardTongue treats
-/// objects below 0.2 total mass as AttachedInSmallObject. Desert Batfly falls into that
-/// branch, which can retract a free lightweight creature to the mouth without converting
-/// it into the lizard's grasp. We therefore call the *vanilla Lizard.Bite* only once the
-/// already-caught bat has physically reached the mouth. Collision, tongue flight,
-/// attachment, retraction, grasp, damage, ShakePrey and ReturnPrey remain vanilla.
+/// Flat-ground hunting remains PreyTracker -> Hunt -> AggressiveBehavior -> ShootTongue.
+/// Safe DryCycle sand is only an optional approach preference. Capture hooks also feed
+/// Desert Batfly's mortality/morale layer so nearby colony members can panic, propagate
+/// chain fear, or in very rare personalities attempt rescue/extreme vengeance.
 /// </summary>
 internal static class PeachLizardDesertBatflyPredation
 {
@@ -37,6 +30,7 @@ internal static class PeachLizardDesertBatflyPredation
         On.PreyTracker.TrackedPrey.Attractiveness += TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference += LizardAI_TravelPreference;
         On.LizardTongue.Update += LizardTongue_Update;
+        On.Lizard.Bite += Lizard_Bite;
     }
 
     internal static void Disable()
@@ -46,6 +40,7 @@ internal static class PeachLizardDesertBatflyPredation
         On.PreyTracker.TrackedPrey.Attractiveness -= TrackedPrey_Attractiveness;
         On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
         On.LizardTongue.Update -= LizardTongue_Update;
+        On.Lizard.Bite -= Lizard_Bite;
     }
 
     private static float TrackedPrey_Attractiveness(
@@ -66,13 +61,11 @@ internal static class PeachLizardDesertBatflyPredation
         float verticalGap = prey.mainBodyChunk.pos.y - lizard.mainBodyChunk.pos.y;
         float speed = prey.mainBodyChunk.vel.magnitude;
 
-        // Native PreyTracker already handles relationship strength, estimated route
-        // distance, reachability and memory. This factor only teaches Peach what makes
-        // a tiny flying prey realistically catchable with its own tongue.
+        // Native PreyTracker already handles relationship strength, route distance,
+        // reachability and memory. This factor only describes how catchable this small
+        // flying prey is with Peach's own tongue.
         float factor = 1f;
 
-        // Hanging or nearly stationary bats are excellent tongue targets. Chain is
-        // the native Fly behavior used by Desert Batfly's real roost implementation.
         if (!prey.dead && prey.AI?.behavior == FlyAI.Behavior.Chain)
             factor *= 1.28f;
 
@@ -80,8 +73,6 @@ internal static class PeachLizardDesertBatflyPredation
 
         if (verticalGap > 0f)
         {
-            // Low air targets remain attractive; very high targets become a poor use
-            // of hunting time even if their abstract tile is still remembered.
             factor *= Mathf.Lerp(
                 1.08f,
                 0.56f,
@@ -94,8 +85,6 @@ internal static class PeachLizardDesertBatflyPredation
         if (directTongueOpportunity)
             factor *= 1.20f;
 
-        // Keep the modifier bounded so native prey hierarchy and persistence remain
-        // authoritative. It should bias target choice, never replace PreyTracker.
         return result * Mathf.Clamp(factor, 0.48f, 1.55f);
     }
 
@@ -108,8 +97,6 @@ internal static class PeachLizardDesertBatflyPredation
         PathCost result = orig(self, connection, cost);
         Lizard lizard = self?.lizard;
 
-        // Hot path: leave every non-Peach connection after two cheap checks. There is
-        // no creature list scan and no target search here; PreyTracker already owns it.
         if (!IsPeach(lizard) || self.behavior != LizardAI.Behavior.Hunt ||
             self.preyTracker?.MostAttractivePrey?.representedCreature?.realizedCreature
                 is not DesertBatfly prey ||
@@ -127,8 +114,8 @@ internal static class PeachLizardDesertBatflyPredation
             self.preyTracker.MostAttractivePrey.VisualContact &&
             preyDistance <= lizard.lizardParams.tongueAttackRange * 1.05f;
 
-        // Once a normal tongue shot is available, do not bias the route back into
-        // sand. This is what keeps ordinary flat-ground predation fully native.
+        // A direct flat-ground/tongue opportunity always wins. Sand never becomes a
+        // mandatory prerequisite for this prey relationship.
         if (cleanTongueOpportunity ||
             !PeachLizardQuicksandSandMap.TryGetSafeSand(
                 lizard.room,
@@ -138,11 +125,6 @@ internal static class PeachLizardDesertBatflyPredation
             return result;
         }
 
-        // Sand is an optional approach tool, never a requirement. The existing
-        // Quicksand adapter has already removed Peach's accidental swimmer surcharge
-        // on these verified safe cells; this small extra preference only matters while
-        // actively hunting this species. A Peach already underground is more willing
-        // to stay underground than one standing on an equally good flat route.
         float bonus = lizard.firstChunk.buried
             ? BuriedHuntSandBonus
             : SurfaceHuntSandBonus;
@@ -150,13 +132,9 @@ internal static class PeachLizardDesertBatflyPredation
         float comfortableDepth = 1f - Mathf.Clamp01(Mathf.Abs(depth - 0.42f) / 0.58f);
         bonus *= Mathf.Lerp(0.72f, 1f, comfortableDepth);
 
-        // Burrowing cannot solve a prey that is far above tongue reach. Keep only a
-        // weak preference in that case so vanilla frustration/retargeting can win.
         float verticalGap = prey.mainBodyChunk.pos.y - lizard.mainBodyChunk.pos.y;
         if (verticalGap > HighPreyPenaltyHeight)
-        {
             bonus *= 0.30f;
-        }
 
         result.resistance = Mathf.Max(0f, result.resistance - bonus);
         return result;
@@ -173,26 +151,51 @@ internal static class PeachLizardDesertBatflyPredation
         }
 
         // Transfer an already-caught lightweight Desert Batfly into the ordinary
-        // lizard bite/grasp pipeline shortly before vanilla would finish retracting.
-        // This runs before orig so the AttachedInSmallObject branch cannot clear the
-        // reference at the 10px mouth threshold first.
+        // lizard bite/grasp pipeline shortly before vanilla clears the small-object
+        // reference at the mouth threshold.
         TryTransferTongueCatchToBite(self);
 
         LizardTongue.State previousState = self.state;
         BodyChunk previousAttached = self.attached;
         orig(self);
 
-        // A fresh tongue hit on a hanging bat must immediately break the Fly chain.
-        // Threatened() owns that existing behavior and raises the same local alarm as
-        // every other real predator attack; no duplicate chain implementation here.
         if (self.state == LizardTongue.State.AttachedInSmallObject &&
             self.attached?.owner is DesertBatfly caught &&
             !caught.dead &&
             (previousState != LizardTongue.State.AttachedInSmallObject ||
              previousAttached?.owner != caught))
         {
+            // Threatened owns the captured bat's immediate chain release. The colony
+            // event then handles eyewitness fear, finite social propagation and the
+            // rare time-sensitive rescue response.
             caught.DesertAI.Threatened(self.lizard, true);
+            DesertBatflyIntimidation.BroadcastPredatorCapture(caught, self.lizard, self);
         }
+    }
+
+    private static void Lizard_Bite(
+        On.Lizard.orig_Bite orig,
+        Lizard self,
+        BodyChunk chunk)
+    {
+        DesertBatfly candidate = IsPeach(self) && chunk?.owner is DesertBatfly bat && !bat.dead
+            ? bat
+            : null;
+        bool alreadyHeld = candidate != null &&
+            self.grasps != null && self.grasps.Length > 0 &&
+            self.grasps[0]?.grabbed == candidate;
+
+        orig(self, chunk);
+
+        if (candidate == null || alreadyHeld || candidate.dead ||
+            self.grasps == null || self.grasps.Length == 0 ||
+            self.grasps[0]?.grabbed != candidate)
+            return;
+
+        // Covers ordinary close-range bites that never used the tongue. The mortality
+        // layer internally debounces this against a recent tongue-capture event from
+        // the same Peach, so tongue -> mouth -> Bite is still a single fear event.
+        DesertBatflyIntimidation.BroadcastPredatorCapture(candidate, self, null);
     }
 
     private static void TryTransferTongueCatchToBite(LizardTongue tongue)
@@ -215,13 +218,8 @@ internal static class PeachLizardDesertBatflyPredation
         BodyChunk caughtChunk = tongue.attached;
         lizard.Bite(caughtChunk);
 
-        // Eats guarantees that vanilla Bite attempts a normal lizard grasp. Only
-        // detach the tongue if that grasp really succeeded; otherwise let vanilla
-        // tongue behavior continue without manufacturing ownership.
         if (lizard.grasps[0] != null && lizard.grasps[0].grabbed == bat)
-        {
             tongue.Retract();
-        }
     }
 
     private static bool IsPeach(Lizard lizard)
