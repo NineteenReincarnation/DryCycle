@@ -6,8 +6,7 @@ using Num = System.Numerics;
 namespace DryCycle.AIObservatory.RWImGui;
 
 // RWImGUI-only presentation. This code never dereferences RainWorld, RainWorldGame,
-// Creature, Room, UnityEngine.Input or UnityEngine.Time. It consumes the immutable copy
-// published by AIDebuggerHost and emits commands for the next Unity main-thread Update.
+// Creature, Room, UnityEngine.Input or UnityEngine.Time. It consumes detached data only.
 internal static class ObservatoryView
 {
     private static string entityFilter = string.Empty;
@@ -60,14 +59,24 @@ internal static class ObservatoryView
             return;
         }
 
+        Num.Vector2 available = ImGui.GetContentRegionAvail();
+        float timelineHeight = Math.Min(ObservatoryTimeline.PreferredHeight, Math.Max(118f, available.Y * 0.30f));
+        float upperHeight = Math.Max(150f, available.Y - timelineHeight - 6f);
+        if (upperHeight + timelineHeight + 6f > available.Y)
+            timelineHeight = Math.Max(90f, available.Y - upperHeight - 6f);
+
         float browserWidth = fullMode ? 310f : 270f;
-        ImGui.BeginChild("##AIEntityBrowser", new Num.Vector2(browserWidth, 0f), ImGuiChildFlags.Borders);
+        ImGui.BeginChild("##AIEntityBrowser", new Num.Vector2(browserWidth, upperHeight), ImGuiChildFlags.Borders);
         DrawEntityBrowser(snapshot);
         ImGui.EndChild();
 
         ImGui.SameLine();
-        ImGui.BeginChild("##AIInspector", new Num.Vector2(0f, 0f), ImGuiChildFlags.Borders);
+        ImGui.BeginChild("##AIInspector", new Num.Vector2(0f, upperHeight), ImGuiChildFlags.Borders);
         DrawInspector(snapshot);
+        ImGui.EndChild();
+
+        ImGui.BeginChild("##AIPersistentTimeline", new Num.Vector2(0f, timelineHeight), ImGuiChildFlags.Borders);
+        ObservatoryTimeline.Draw(snapshot);
         ImGui.EndChild();
 
         ImGui.End();
@@ -283,9 +292,7 @@ internal static class ObservatoryView
     private static void DrawRecorderCursor(AIDebugPresentationSnapshot snapshot)
     {
         if (!snapshot.CursorMotion.HasValue && !snapshot.CursorFastState.HasValue) return;
-
-        if (!ImGui.CollapsingHeader(L(snapshot, "Recorder Cursor", "记录游标"), ImGuiTreeNodeFlags.DefaultOpen))
-            return;
+        if (!ImGui.CollapsingHeader(L(snapshot, "Recorder Cursor", "记录游标"), ImGuiTreeNodeFlags.DefaultOpen)) return;
 
         ImGui.TextDisabled($"tick {snapshot.CursorTick}");
         if (snapshot.CursorMotion.HasValue)

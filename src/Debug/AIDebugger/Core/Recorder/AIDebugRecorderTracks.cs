@@ -2,17 +2,11 @@ using System;
 
 namespace DryCycle.Debugging.AI;
 
-// Recorder records expose their simulation tick through a constrained interface. Calling
-// this from AIDebugBlockRing<T> does not box the struct and lets the generic ring perform
-// historical lookup without delegates, LINQ, temporary arrays, or per-query allocation.
 internal interface IAIDebugTicked
 {
     int Tick { get; }
 }
 
-// Hot-path records are deliberately value-only. Do not add strings, UnityEngine.Object
-// references, collections, or formatted presentation data here. The recorder writes these
-// structs on Rain World's simulation thread and Presentation/Export formats them later.
 internal readonly struct AIDebugMotionSample : IAIDebugTicked
 {
     internal int Tick { get; }
@@ -45,8 +39,6 @@ internal enum AIDebugFastFlags
     HasImmediateDanger = 1 << 5
 }
 
-// A compact 40 Hz state fingerprint. It is not a complete inspector snapshot. Its job is
-// to detect short-lived state transitions without allocating or formatting strings.
 internal readonly struct AIDebugFastState : IEquatable<AIDebugFastState>
 {
     internal const int UnknownToken = int.MinValue;
@@ -159,10 +151,8 @@ internal readonly struct AIDebugFastStateSample : IAIDebugTicked
     }
 }
 
-// Fixed block ring used by the high-frequency recorder. Blocks and their arrays are
-// allocated once when an entity first becomes tracked; Append performs no allocation.
-// PinCount is reserved for zero-copy trigger-capture windows. A pinned next block causes
-// an explicit dropped-record counter rather than blocking Rain World's simulation thread.
+// Fixed block ring used by the high-frequency recorder. Blocks and arrays are allocated
+// once when an entity becomes tracked. Append and range/history queries allocate nothing.
 internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
 {
     private sealed class Block
@@ -242,9 +232,6 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
         return true;
     }
 
-    // Finds the newest retained real sample whose simulation tick is <= cursorTick.
-    // Blocks are searched newest-to-oldest and samples within a crossing block are scanned
-    // backwards. This is the historical resolver primitive; it allocates nothing.
     internal bool TryGetLatestAtOrBefore(int cursorTick, out T value)
     {
         if (retainedCount <= 0)
@@ -299,6 +286,60 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
 
         value = default;
         return false;
+    }
+
+    // Copies a bounded visible timeline range in chronological order into caller-owned
+    // storage. No delegate/LINQ/temp array is used. If the destination fills, newer data
+    // outside the destination is intentionally omitted and the returned count exposes it.
+    internal int CopyRange(int startTick, int endTick, T[] destination, int destinationOffset = 0)
+    {
+        if (destination == null) throw new ArgumentNullException(nameof(destination));
+        if (destinationOffset < 0 || destinationOffset > destination.Length)
+            throw new ArgumentOutOfRangeException(nameof(destinationOffset));
+        if (retainedCount <= 0 || endTick < startTick || destinationOffset == destination.Length)
+            return 0;
+
+        int written = 0;
+        int capacity = destination.Length - destinationOffset;
+
+        // Once the ring has wrapped, the block after writeBlock is the oldest. Before the
+        // first wrap some blocks are empty; starting there and skipping empties still gives
+        // chronological block order, ending with the active write block.
+        int first = (writeBlock + 1) % blocks.Length;
+        for (int blockOffset = 0; blockOffset < blocks.Length && written < capacity; blockOffset++)
+        {
+            int blockIndex = first + blockOffset;
+            if (blockIndex >= blocks.Length) blockIndex -= blocks.Length;
+            Block block = blocks[blockIndex];
+            if (block.Count <= 0 || block.EndTick < startTick || block.StartTick > endTick) continue;
+
+            for (int i = 0; i < block.Count && written < capacity; i++)
+            {
+                T candidate = block.Items[i];
+                if (candidate.Tick < startTick) continue;
+                if (candidate.Tick > endTick) break;
+                destination[destinationOffset + written++] = candidate;
+            }
+        }
+
+        return written;
+    }
+
+    internal bool TryGetRetainedTickRange(out int oldestTick, out int newestTick)
+    {
+        oldestTick = int.MaxValue;
+        newestTick = int.MinValue;
+        if (retainedCount <= 0) return false;
+
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            Block block = blocks[i];
+            if (block.Count <= 0) continue;
+            if (block.StartTick < oldestTick) oldestTick = block.StartTick;
+            if (block.EndTick > newestTick) newestTick = block.EndTick;
+        }
+
+        return oldestTick != int.MaxValue;
     }
 
     internal void Clear()
