@@ -4,6 +4,38 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
+internal readonly struct DesertBatflyTravelDebugState
+{
+    internal readonly DesertBatflyTravelPurpose Purpose;
+    internal readonly string HomeColony;
+    internal readonly string DestinationRoom;
+    internal readonly int RouteIndex;
+    internal readonly int[] RouteRooms;
+    internal readonly int NextRoom;
+    internal readonly int DepartureDelay;
+    internal readonly bool WaitingAtRefuge;
+
+    internal DesertBatflyTravelDebugState(
+        DesertBatflyTravelPurpose purpose,
+        string homeColony,
+        string destinationRoom,
+        int routeIndex,
+        int[] routeRooms,
+        int nextRoom,
+        int departureDelay,
+        bool waitingAtRefuge)
+    {
+        Purpose = purpose;
+        HomeColony = homeColony ?? string.Empty;
+        DestinationRoom = destinationRoom ?? string.Empty;
+        RouteIndex = routeIndex;
+        RouteRooms = routeRooms ?? Array.Empty<int>();
+        NextRoom = nextRoom;
+        DepartureDelay = Mathf.Max(0, departureDelay);
+        WaitingAtRefuge = waitingAtRefuge;
+    }
+}
+
 /// <summary>
 /// High-level cross-room travel state for Task 09. This never replaces FlyAI's
 /// room-local locomotion: realized bats are pointed at the next room via LeaveRoom,
@@ -68,6 +100,34 @@ internal static class DesertBatflyTravelNavigation
         activeWorld = new WeakReference(world);
         intents.Clear();
         activeEvacuations.Clear();
+        RestorePendingMigrations(world);
+    }
+
+    internal static bool HasIntent(AbstractCreature creature) =>
+        creature != null && intents.ContainsKey(Key(creature.ID));
+
+    internal static bool TryGetDebugState(AbstractCreature creature, out DesertBatflyTravelDebugState state)
+    {
+        state = default;
+        if (creature == null || !intents.TryGetValue(Key(creature.ID), out TravelIntent intent))
+            return false;
+
+        int[] routeRooms = intent.Route.Valid ? new int[intent.Route.Rooms.Length] : Array.Empty<int>();
+        if (routeRooms.Length > 0) Array.Copy(intent.Route.Rooms, routeRooms, routeRooms.Length);
+        int next = -1;
+        if (intent.Route.Valid && intent.RouteIndex + 1 < intent.Route.Rooms.Length)
+            next = intent.Route.Rooms[intent.RouteIndex + 1];
+
+        state = new DesertBatflyTravelDebugState(
+            intent.Purpose,
+            intent.HomeColony,
+            intent.DestinationRoom,
+            intent.RouteIndex,
+            routeRooms,
+            next,
+            intent.DepartureDelay,
+            intent.WaitingAtRefuge);
+        return true;
     }
 
     internal static void RequestPermanentMigration(
@@ -117,6 +177,9 @@ internal static class DesertBatflyTravelNavigation
             if (creature.realizedCreature != null || creature.InDen)
                 continue;
 
+            if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
+                continue;
+
             int currentRoom = creature.pos.room;
             if (ReachedDestination(intent, currentRoom))
             {
@@ -164,6 +227,9 @@ internal static class DesertBatflyTravelNavigation
             return false;
 
         if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out TravelIntent intent))
+            return false;
+
+        if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
             return false;
 
         if (intent.DepartureDelay > 0)
@@ -280,11 +346,28 @@ internal static class DesertBatflyTravelNavigation
                             colony.RoomName,
                             StringComparison.OrdinalIgnoreCase))
                         continue;
+                    if (!string.IsNullOrEmpty(record.PendingMigrationColony))
+                        continue;
                     if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
                         existing.Purpose == DesertBatflyTravelPurpose.ColonyMigration)
                         continue;
+                    if (creature.state is not DesertBatflyState state)
+                        continue;
 
-                    int stagger = 20 + StableInt(creature.ID.RandomSeed ^ refuge.RoomIndex, 0, 220);
+                    float capability = PhysicalCapability(state);
+                    bool severe = state.WingMean >= 0.60f ||
+                                  Mathf.Max(state.LeftWingInjury, state.RightWingInjury) >= 0.82f ||
+                                  capability < 0.48f;
+                    if (severe)
+                        continue;
+
+                    int personalTravelTicks = DesertBatflyRefuge.EstimateTravelTicks(
+                        refuge.Route, capability);
+                    if (!DesertBatflyRefuge.CanLeaveBeforeDanger(hazard, personalTravelTicks))
+                        continue;
+
+                    int staggerSeed = BondDepartureSeed(creature.ID, state);
+                    int stagger = 20 + StableInt(staggerSeed ^ refuge.RoomIndex, 0, 220);
                     intents[Key(creature.ID)] = new TravelIntent(
                         creature,
                         DesertBatflyTravelPurpose.EmergencyRefuge,
@@ -312,6 +395,10 @@ internal static class DesertBatflyTravelNavigation
         string homeColony,
         CreatureTemplate template)
     {
+        AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, homeColony);
+        if (home == null) return;
+
+        // First convert live emergency intents into ordinary ReturnHome travel.
         List<string> keys = new(intents.Keys);
         for (int i = 0; i < keys.Count; i++)
         {
@@ -327,28 +414,13 @@ internal static class DesertBatflyTravelNavigation
                 continue;
             }
 
-            AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, homeColony);
-            if (home == null)
-            {
-                intents.Remove(keys[i]);
-                continue;
-            }
-
             if (creature.pos.room == home.index)
             {
                 intents.Remove(keys[i]);
                 continue;
             }
 
-            if (!DesertBatflyWorldRoutePlanner.TryPlan(
-                    world,
-                    creature.pos.room,
-                    home.index,
-                    template,
-                    DesertBatflyTravelPurpose.ReturnHome,
-                    room => CurrentRouteRisk(world, room),
-                    DesertBatflyWorldRoutePlanner.MigrationMaxHops,
-                    out DesertBatflyWorldRoute route))
+            if (!TryBuildReturnRoute(world, creature, home, template, out DesertBatflyWorldRoute route))
                 continue;
 
             intent.Purpose = DesertBatflyTravelPurpose.ReturnHome;
@@ -357,6 +429,119 @@ internal static class DesertBatflyTravelNavigation
             intent.RouteIndex = 0;
             intent.DepartureDelay = 20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180);
             intent.WaitingAtRefuge = false;
+        }
+
+        // A save/reload intentionally does not serialize temporary refuge intents. If an
+        // owned bat is physically outside its Home Colony after the hazard has ended,
+        // reconstruct ReturnHome from the actual current room rather than teleporting it.
+        for (int r = 0; r < world.abstractRooms.Length; r++)
+        {
+            AbstractRoom room = world.abstractRooms[r];
+            if (room?.creatures == null) continue;
+            for (int i = 0; i < room.creatures.Count; i++)
+            {
+                AbstractCreature creature = room.creatures[i];
+                if (!ValidCreature(creature) || creature.pos.room == home.index) continue;
+                DesertBatflyColonyRuntime.IndividualRecord record =
+                    DesertBatflyColonyRuntime.RecordFor(creature, false);
+                if (record == null ||
+                    !string.Equals(record.CurrentColony, homeColony, StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrEmpty(record.PendingMigrationColony))
+                    continue;
+
+                if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing))
+                {
+                    if (existing.Purpose is DesertBatflyTravelPurpose.ColonyMigration or
+                        DesertBatflyTravelPurpose.ReturnHome)
+                        continue;
+                }
+
+                if (!TryBuildReturnRoute(world, creature, home, template, out DesertBatflyWorldRoute route))
+                    continue;
+
+                intents[Key(creature.ID)] = new TravelIntent(
+                    creature,
+                    DesertBatflyTravelPurpose.ReturnHome,
+                    homeColony,
+                    home.name,
+                    route,
+                    20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180));
+            }
+        }
+    }
+
+    private static bool TryBuildReturnRoute(
+        World world,
+        AbstractCreature creature,
+        AbstractRoom home,
+        CreatureTemplate template,
+        out DesertBatflyWorldRoute route)
+    {
+        route = default;
+        return creature != null && home != null &&
+               DesertBatflyWorldRoutePlanner.TryPlan(
+                   world,
+                   creature.pos.room,
+                   home.index,
+                   template,
+                   DesertBatflyTravelPurpose.ReturnHome,
+                   room => CurrentRouteRisk(world, room),
+                   DesertBatflyWorldRoutePlanner.MigrationMaxHops,
+                   out route);
+    }
+
+    private static void RestorePendingMigrations(World world)
+    {
+        if (world?.abstractRooms == null) return;
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        if (template == null) return;
+
+        for (int r = 0; r < world.abstractRooms.Length; r++)
+        {
+            AbstractRoom room = world.abstractRooms[r];
+            if (room?.creatures == null) continue;
+            for (int i = 0; i < room.creatures.Count; i++)
+            {
+                AbstractCreature creature = room.creatures[i];
+                if (!ValidCreature(creature)) continue;
+                DesertBatflyColonyRuntime.IndividualRecord record =
+                    DesertBatflyColonyRuntime.RecordFor(creature, false);
+                if (record == null || string.IsNullOrWhiteSpace(record.PendingMigrationColony))
+                    continue;
+
+                AbstractRoom destination = DesertBatflyColonyRuntime.FindRoom(
+                    world, record.PendingMigrationColony);
+                if (destination == null || !DesertSwarmRoom.IsDesertSwarmRoom(destination))
+                    continue;
+
+                if (creature.pos.room == destination.index)
+                {
+                    DesertBatflyColonyRuntime.CompletePermanentMigration(
+                        creature,
+                        destination.name,
+                        DesertBatflyColonyRuntime.CurrentCycle(world));
+                    continue;
+                }
+
+                if (!DesertBatflyWorldRoutePlanner.TryPlan(
+                        world,
+                        creature.pos.room,
+                        destination.index,
+                        template,
+                        DesertBatflyTravelPurpose.ColonyMigration,
+                        roomRisk: roomCandidate => CurrentRouteRisk(world, roomCandidate),
+                        maxHops: DesertBatflyWorldRoutePlanner.MigrationMaxHops,
+                        out DesertBatflyWorldRoute route))
+                    continue;
+
+                intents[Key(creature.ID)] = new TravelIntent(
+                    creature,
+                    DesertBatflyTravelPurpose.ColonyMigration,
+                    record.CurrentColony,
+                    destination.name,
+                    route,
+                    StableInt(creature.ID.RandomSeed ^ 0x6A09E667, 0, 180));
+            }
         }
     }
 
@@ -427,7 +612,7 @@ internal static class DesertBatflyTravelNavigation
 
     private static bool TrySynchronizeRouteIndex(TravelIntent intent, int currentRoom)
     {
-        if (intent?.Route.Rooms == null) return false;
+        if (intent?.Route.Rooms == null || intent.Route.Rooms.Length == 0) return false;
         int start = Mathf.Clamp(intent.RouteIndex, 0, intent.Route.Rooms.Length - 1);
         if (intent.Route.Rooms[start] == currentRoom)
         {
@@ -467,6 +652,32 @@ internal static class DesertBatflyTravelNavigation
         if (string.IsNullOrWhiteSpace(homeColony) || activeEvacuations.Count == 0) return;
         string prefix = Normalize(homeColony) + "|";
         activeEvacuations.RemoveWhere(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static float PhysicalCapability(DesertBatflyState state)
+    {
+        if (state == null) return 0f;
+        float wingSeverity = Mathf.SmoothStep(0f, 1f, state.WingMean);
+        return Mathf.Clamp01(
+            1f -
+            0.18f * (1f - Mathf.Clamp01(state.health)) -
+            0.46f * wingSeverity -
+            0.15f * state.WingAsymmetry);
+    }
+
+    private static int BondDepartureSeed(EntityID id, DesertBatflyState state)
+    {
+        if (state?.SocialBondTarget is not EntityID partner || state.SocialBondStrength < 0.50f)
+            return id.RandomSeed;
+
+        unchecked
+        {
+            int a = id.number ^ (id.spawner * 397);
+            int b = partner.number ^ (partner.spawner * 397);
+            int lo = Mathf.Min(a, b);
+            int hi = Mathf.Max(a, b);
+            return lo * 486187739 ^ hi * 16777619;
+        }
     }
 
     private static bool ValidCreature(AbstractCreature creature) =>
