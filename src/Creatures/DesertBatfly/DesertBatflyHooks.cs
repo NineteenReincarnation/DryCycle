@@ -204,7 +204,17 @@ internal static class DesertBatflyHooks
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)
     {
         orig(self);
-        if (self.fly is not DesertBatfly) return;
+        if (self.fly is not DesertBatfly desert) return;
+
+        // Task 10 may put an active neutral interaction into Idle while still using
+        // vanilla BatFlight. Do not immediately force it back to Swarm on the next
+        // FlyAI tick; the reservation ends with the interaction and normal fallback
+        // resumes automatically afterwards.
+        DesertBatflySocialRoomRuntime.RoomState socialRoom =
+            DesertBatflySocialRoomRuntime.For(self.room);
+        if (socialRoom?.IsReserved(desert) == true)
+            return;
+
         if (!DesertSwarmRoom.IsDesertSwarmRoom(self.room.abstractRoom))
         {
             if (self.behavior == FlyAI.Behavior.Swarm) self.ChangeBehavior(FlyAI.Behavior.Idle);
