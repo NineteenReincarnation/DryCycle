@@ -153,8 +153,16 @@ internal static class AIDebugSimulationControl
         // Presentation never owns capture timing and Pause does not fabricate samples.
         if (self.clock != beforeClock)
         {
-            AIDebugRecorder.OnSimulationTick(self);
-            AIDebugRichRecorder.OnSimulationTick(self);
+            long profile = AIDebugDeepProfiler.BeginTick();
+            try
+            {
+                AIDebugRecorder.OnSimulationTick(self);
+                AIDebugRichRecorder.OnSimulationTick(self);
+            }
+            finally
+            {
+                AIDebugDeepProfiler.EndTick(profile);
+            }
         }
     }
 }
