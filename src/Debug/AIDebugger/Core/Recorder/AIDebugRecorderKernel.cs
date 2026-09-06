@@ -101,6 +101,7 @@ internal static class AIDebugRecorder
         else
         {
             Slots[existing].RefreshHandle(game);
+            if (!Slots[existing].HasHandle) return false;
         }
 
         if (selectedSlot >= 0 && selectedSlot != existing && Slots[selectedSlot] != null)
@@ -249,10 +250,13 @@ internal static class AIDebugRecorder
 
     private sealed class AIDebugTrackedEntitySlot
     {
+        private const int ResolveRetryTicks = 40;
+
         private AbstractCreature handle;
         private IAIDebugRecorderFastProvider provider;
         private bool hasFastState;
         private AIDebugFastState lastFastState;
+        private int nextResolveTick;
 
         internal DebugEntityKey Key { get; private set; }
         internal AIDebugTrackedRole Role;
@@ -261,6 +265,7 @@ internal static class AIDebugRecorder
         internal readonly AIDebugBlockRing<AIDebugFastStateSample> States;
 
         internal bool IsCapturing => Role == AIDebugTrackedRole.Selected || Role == AIDebugTrackedRole.Pinned;
+        internal bool HasHandle => handle != null && !handle.slatedForDeletion;
 
         internal AIDebugTrackedEntitySlot(
             int motionBlockCount,
@@ -280,23 +285,27 @@ internal static class AIDebugRecorder
             provider = AIDebugRecorderProviderRegistry.Resolve(creature);
             Role = AIDebugTrackedRole.Retained;
             LastTouchedTick = tick;
+            nextResolveTick = tick;
         }
 
         internal void RefreshHandle(RainWorldGame game)
         {
-            if (handle != null && !handle.slatedForDeletion && DebugEntityKey.From(handle) == Key) return;
+            if (HasHandle && DebugEntityKey.From(handle) == Key) return;
             handle = AIDebugRegistry.Resolve(game, Key);
             provider = AIDebugRecorderProviderRegistry.Resolve(handle);
+            nextResolveTick = (game?.clock ?? 0) + ResolveRetryTicks;
         }
 
         // Returns false only when this tracked entity has been explicitly deleted and the
-        // active role should be retired. Temporary inability to resolve an AbstractCreature
-        // leaves the slot active so a normal realize/unrealize transition can recover.
+        // active role should be retired. A temporarily unavailable handle is resolved at a
+        // throttled cadence so an edge case cannot turn into a 40 Hz whole-world scan.
         internal bool CaptureTick(RainWorldGame game, int tick)
         {
             AbstractCreature creature = handle;
             if (creature == null)
             {
+                if (tick < nextResolveTick) return true;
+                nextResolveTick = tick + ResolveRetryTicks;
                 creature = AIDebugRegistry.Resolve(game, Key);
                 handle = creature;
                 provider = AIDebugRecorderProviderRegistry.Resolve(creature);
@@ -341,6 +350,7 @@ internal static class AIDebugRecorder
             provider = null;
             hasFastState = false;
             lastFastState = default;
+            nextResolveTick = 0;
             Key = default;
             Role = AIDebugTrackedRole.None;
             LastTouchedTick = 0;
