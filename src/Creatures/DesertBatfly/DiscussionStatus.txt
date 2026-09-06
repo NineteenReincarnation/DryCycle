@@ -91,14 +91,16 @@ Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 Att
 - 社会系统不得成为第二套 locomotion controller。
 
 代码迁移状态：
-- 角色运行时行为已经失效化：所有 role score 为 0，选择结果永久为 None，所有角色行为修正为中性值。
-- Sentinel/Opportunist 的 visible scan 与普通飞行 bias 已改为无操作，不再写 localGoal 或速度。
-- 旧的类型/方法名称目前只允许作为迁移兼容层存在，用于逐步拆除 AI Observatory、Injury、FlockSnapshot 等旧调用点；兼容层不得拥有游戏行为权。
-- 回归测试已改成“否决保护”：验证 10,000 个 Personality 均产生 0 个显性角色，并验证旧构造器/阈值不能重新激活角色。
+- Task 02 的运行时类型与兼容层已经完成结构性删除；不再保留 DesertBatflySocialRoles、DesertBatflyRoleScores 或 ExpressedSocialRole。
+- DesertBatflyAI 不再持有 Roles 对象，也不再执行 role tick / scan / suppression / evaluation / movement bias。
+- Injury 与 FlockSnapshot 已解除 Task 02 类型依赖；普通观察、FakeDive、骚扰阈值直接使用正常 Personality / tuning 逻辑。
+- DesertBatflyIntimidation 原名 BlocksSocialRoles 的通用恐惧门已改为 HasActiveFearSuppression，明确表示它属于 Fear / Intimidation，而不是 Task 02 职业系统。
+- AI Observatory 已移除 Task 02 的字段、决策节点、事件翻译和“社交 / 角色”设置文案，不再把被否决机制显示成当前 AI 状态。
+- 回归测试改为“结构删除保护”：直接验证被否决的三个运行时类型不存在，避免为了测试而继续保留兼容类型。
 - Task_02_EmergentSocialRoles.txt 与 docs/DesertBatfly-Emergent-Social-Roles.md 只保留为否决记录，不再是可执行功能规范。
 
 当前结论：
-- 第 2 项正式否决并从当前设计中移除。
+- 第 2 项正式否决并完成运行时结构删除。
 - 旧实现不得作为未来 Codex 的实现依据。
 - 若未来重新讨论类似个体行为差异，应建立新的、无 Role、无专属移动控制器的任务，而不是恢复 Task 02。
 
@@ -306,7 +308,9 @@ F. 性能
 - 应存在迁移门槛、冷却和容量限制，避免人口在相邻房间之间来回抖动。
 
 当前结论：
-- 方向采纳，可以进入后续任务书设计。
+- 正式任务书已建立：Task_09_ColonyMigration_WeatherRefugeNavigation.txt。
+- 已敲定内容包括群落压力、最低恢复、天气 Refuge、HiveShelterQuality、跨房间寻路、回迁、冷却、防抖与个体连续性。
+- 后续实现必须以该任务书与 main 当前架构为共同依据。
 
 
 10. Corpse Ecology / 尸体生态
@@ -340,11 +344,11 @@ F. 性能
 
 后续深入讨论顺序
 ----------------
-1. 第 2 项已正式否决并移除；Task_02 仅保留为否决记录，不再执行。
+1. 第 2 项已正式否决并完成运行时结构删除；Task_02 仅保留为否决记录，不再执行。
 2. 第 5A 已实现；第 5B 繁殖相关内容保留为【尚未进行额外深入讨论】。
 3. 第 8 项：Threat Style Memory（需要深度讨论）。
 4. 第 10 项：Corpse Ecology（需要深度讨论）。
-5. 再回看第 3 / 4 / 7 / 9 项之间的接口和任务书拆分。
+5. 第 9 项已有正式任务书；后续实现时再与第 3 / 7 项对接。
 6. 后续单独回到第 5B：Courtship / MateBond / Gravid / Reproduction / Population integration。
 
 暂时否决的第 1、6 项继续保留在本文件中；第 2 项作为【否决·已移除】的设计历史保留，不得从旧任务书恢复实现。
