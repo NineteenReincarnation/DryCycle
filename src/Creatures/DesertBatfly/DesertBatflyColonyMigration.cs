@@ -1,0 +1,134 @@
+using UnityEngine;
+
+namespace DryCycle.Creatures.DesertBatfly;
+
+/// <summary>
+/// Pure decision math for Task 09. Selection is continuous and personality-driven;
+/// there is intentionally no Migrator/Scout/Leader role or runtime job state.
+/// </summary>
+internal static class DesertBatflyColonyMigration
+{
+    internal const int IndividualCooldownCycles = 3;
+    internal const int ColonyCooldownCycles = 2;
+    internal const float DestinationSwitchMargin = 0.14f;
+
+    internal static bool CanScheduleBatch(DesertBatflyColonyState colony)
+    {
+        if (colony == null || colony.ColonyMigrationCooldown > 0 ||
+            colony.CurrentPopulation <= colony.HardMinimumPersistence)
+            return false;
+        if (!colony.MigrationActive)
+            return colony.MigrationPressure >= DesertBatflyColonyState.BeginMigrationThreshold;
+        return colony.MigrationPressure >= DesertBatflyColonyState.ContinueMigrationThreshold;
+    }
+
+    internal static float IndividualPropensity(
+        DesertBatflyPersonality personality,
+        float physicalCapability,
+        bool severeInjury,
+        bool injuryRecovery,
+        float activeTrauma,
+        float bondStrength,
+        float shelterFailure,
+        int currentCycle,
+        int lastMigrationCycle)
+    {
+        if (personality == null || severeInjury || injuryRecovery) return 0f;
+        if (lastMigrationCycle != int.MinValue &&
+            currentCycle - lastMigrationCycle >= 0 &&
+            currentCycle - lastMigrationCycle < IndividualCooldownCycles)
+            return 0f;
+
+        physicalCapability = DesertBatflyColonyState.ClampFinite01(physicalCapability);
+        activeTrauma = DesertBatflyColonyState.ClampFinite01(activeTrauma);
+        bondStrength = DesertBatflyColonyState.ClampFinite01(bondStrength);
+        shelterFailure = DesertBatflyColonyState.ClampFinite01(shelterFailure);
+
+        float individualism = 1f - personality.Conformity;
+        float lowRoost = 1f - personality.RoostAffinity;
+        float score =
+            0.16f +
+            lowRoost * 0.24f +
+            individualism * 0.15f +
+            activeTrauma * 0.13f +
+            shelterFailure * 0.16f +
+            physicalCapability * 0.22f -
+            bondStrength * 0.15f;
+
+        // Nerve has only a modest effect: timid bats may want to leave but are less able
+        // to commit to a long route, while very bold bats are more willing to travel.
+        score += Mathf.Lerp(-0.05f, 0.06f, personality.Nerve);
+        return Mathf.Clamp01(score);
+    }
+
+    internal static float DestinationSuitability(
+        DesertBatflyColonyState destination,
+        float habitatSuitability,
+        float travelCost01,
+        float formerColonyFamiliarity,
+        float bondPartnerPresence)
+    {
+        if (destination == null) return float.NegativeInfinity;
+        habitatSuitability = DesertBatflyColonyState.ClampFinite01(habitatSuitability);
+        travelCost01 = DesertBatflyColonyState.ClampFinite01(travelCost01);
+        formerColonyFamiliarity = DesertBatflyColonyState.ClampFinite01(formerColonyFamiliarity);
+        bondPartnerPresence = DesertBatflyColonyState.ClampFinite01(bondPartnerPresence);
+
+        float freeCapacity = destination.SoftCapacity <= 0
+            ? 0f
+            : Mathf.Clamp(
+                (destination.SoftCapacity - destination.CurrentPopulation) /
+                (float)Mathf.Max(1, destination.SoftCapacity),
+                -1f,
+                1f);
+        float overcrowding = destination.CurrentPopulation <= destination.SoftCapacity
+            ? 0f
+            : Mathf.Clamp01(
+                (destination.CurrentPopulation - destination.SoftCapacity) /
+                (float)Mathf.Max(1, destination.SoftCapacity));
+
+        return
+            habitatSuitability * 0.28f +
+            freeCapacity * 0.17f +
+            formerColonyFamiliarity * 0.05f +
+            bondPartnerPresence * 0.05f -
+            destination.PredatorPressure * 0.13f -
+            destination.MortalityPressure * 0.10f -
+            destination.EnvironmentalPressure * 0.11f -
+            destination.ShelterFailureMemory * 0.08f -
+            travelCost01 * 0.16f -
+            overcrowding * 0.18f;
+    }
+
+    internal static bool ShouldSwitchDestination(float currentScore, float candidateScore,
+        float margin = DestinationSwitchMargin)
+    {
+        if (float.IsNaN(candidateScore) || float.IsNegativeInfinity(candidateScore)) return false;
+        if (float.IsNaN(currentScore) || float.IsNegativeInfinity(currentScore)) return true;
+        margin = Mathf.Clamp(margin, 0.05f, 0.30f);
+        return candidateScore >= currentScore + margin;
+    }
+
+    internal static float RegionalEnvironmentalAverage(
+        System.Collections.Generic.IEnumerable<DesertBatflyColonyState> colonies)
+    {
+        if (colonies == null) return 0f;
+        float sum = 0f;
+        int count = 0;
+        foreach (DesertBatflyColonyState colony in colonies)
+        {
+            if (colony == null) continue;
+            sum += DesertBatflyColonyState.ClampFinite01(colony.EnvironmentalPressure);
+            count++;
+        }
+        return count == 0 ? 0f : Mathf.Clamp01(sum / count);
+    }
+
+    internal static float ActiveTrauma(DesertBatflyState state)
+    {
+        if (state == null) return 0f;
+        return Mathf.Max(
+            state.PlayerTraumaTicks > 0 ? state.PlayerTraumaStrength : 0f,
+            state.PredatorTraumaTicks > 0 ? state.PredatorTraumaStrength : 0f);
+    }
+}
