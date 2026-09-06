@@ -16,11 +16,12 @@ internal static class DesertBatflyHooks
         enabled = true;
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
+        DesertBatflySocialLife.Reset();
         DesertBatflyColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
-            AIDebugRegistry.Register(new DesertBatflyTask09DebugSource());
+            AIDebugRegistry.Register(new DesertBatflyTask10DebugSource());
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
@@ -55,6 +56,7 @@ internal static class DesertBatflyHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
         DesertBatflyColonyRuntime.Disable();
         DesertBatflyRefuge.Reset();
@@ -90,7 +92,11 @@ internal static class DesertBatflyHooks
 
     private static void Burrow(On.Fly.orig_Burrowed orig, Fly self)
     {
-        if (self is DesertBatfly desert) desert.DesertState.InHive = true;
+        if (self is DesertBatfly desert)
+        {
+            DesertBatflySocialLife.CancelForPriority(desert, "burrow priority");
+            desert.DesertState.InHive = true;
+        }
         orig(self);
     }
 
@@ -102,6 +108,7 @@ internal static class DesertBatflyHooks
             return;
         }
 
+        DesertBatflySocialLife.CancelForPriority(desert, "emergence priority");
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
@@ -123,6 +130,7 @@ internal static class DesertBatflyHooks
         if (previousState == LizardTongue.State.AttachedInSmallObject && previousOwner == desert)
             return;
 
+        DesertBatflySocialLife.CancelForPriority(desert, "Peach tongue capture");
         DesertBatflyIntimidation.BroadcastPredatorCapture(desert, self.lizard, self);
         desert.DesertAI.Threatened(self.lizard, true);
     }
@@ -132,7 +140,9 @@ internal static class DesertBatflyHooks
         if (self.fly is DesertBatfly suspended &&
             (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
         {
+            DesertBatflySocialLife.CancelForPriority(suspended, "unavailable / restraint / emergence");
             suspended.DesertAI.Update();
+            DesertBatflySocialLife.SampleTrace(suspended);
             DesertBatflyDebugTrace.Sample(suspended);
             return;
         }
@@ -142,12 +152,19 @@ internal static class DesertBatflyHooks
 
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
+            DesertBatflySocialLife.CancelForPriority(desert, "Task09 travel priority");
             desert.DesertAI.CancelAttack();
+            DesertBatflySocialLife.SampleTrace(desert);
             DesertBatflyDebugTrace.Sample(desert);
             return;
         }
 
+        // Existing DesertBatflyAI gets first refusal for danger, combat, injury and
+        // committed roost behavior. Task 10 runs afterwards and can only shape the
+        // remaining neutral frame.
         desert.DesertAI.Update();
+        DesertBatflySocialLife.Update(desert);
+        DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
     }
 
@@ -188,8 +205,12 @@ internal static class DesertBatflyHooks
         }
 
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+        {
+            DesertBatflySocialLife.CancelForPriority(desert, "Task09 weather travel priority");
             return;
+        }
 
+        DesertBatflySocialLife.CancelForPriority(desert, "rain priority");
         if (self.room.hives.Length > 0)
         {
             orig(self);
@@ -232,7 +253,10 @@ internal static class DesertBatflyHooks
         orig(self);
 
         if (!wasDead && self is DesertBatfly bat && bat.dead)
+        {
+            DesertBatflySocialLife.CancelForPriority(bat, "death");
             DesertBatflyColonyRuntime.ReportDeath(bat, likelyPredator);
+        }
     }
 
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
