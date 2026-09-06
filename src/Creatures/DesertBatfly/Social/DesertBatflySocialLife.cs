@@ -73,10 +73,10 @@ internal readonly struct DesertBatflySocialDebugState
 }
 
 /// <summary>
-/// Task 10 neutral social-life layer. This state is deliberately realized-only and
-/// non-persistent. Existing DesertBatflyAI remains authoritative for survival, combat,
-/// injury and roost commitment; Task 10 only shapes neutral local goals after those
-/// systems have had a chance to claim the frame.
+/// Task 10 neutral social-life layer. All state is realized-only and non-persistent.
+/// Survival, Task 09 travel, injury, combat and committed roost behavior remain owned by
+/// their existing systems. Task 10 only chooses temporary neutral local goals; vanilla
+/// Fly.BatFlight remains the locomotion implementation.
 /// </summary>
 internal static class DesertBatflySocialLife
 {
@@ -174,7 +174,12 @@ internal static class DesertBatflySocialLife
             return;
         }
 
-        state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality));
+        float traumaScale = Mathf.Lerp(
+            1f,
+            0.58f,
+            Mathf.InverseLerp(0.18f, DesertBatflyTuning.TraumaSevere, ActiveTrauma(bat)));
+        state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality) * traumaScale);
+
         DesertBatflySocialRoomRuntime.RoomState roomState = DesertBatflySocialRoomRuntime.For(bat.room);
         if (roomState == null) return;
         IReadOnlyList<DesertBatfly> candidates = roomState.Candidates;
@@ -182,7 +187,8 @@ internal static class DesertBatflySocialLife
 
         int clock = bat.room?.game?.clock ?? 0;
         if (state.NextScanTick == 0)
-            state.NextScanTick = clock + StableInt(bat.Personality.VisualSeed, 0x19D3, ScanIntervalMin, ScanIntervalMax + 1);
+            state.NextScanTick = clock + StableInt(
+                bat.Personality.VisualSeed, 0x19D3, ScanIntervalMin, ScanIntervalMax + 1);
         if (clock < state.NextScanTick) return;
         state.NextScanTick = clock + StableInt(
             bat.Personality.VisualSeed,
@@ -445,7 +451,8 @@ internal static class DesertBatflySocialLife
                 state.GroupScratch.Add(other);
         }
 
-        DesertBatfly roostSource = FindRoostSource(bat, candidates, out int chainSize, out float roostBond);
+        IReadOnlyList<DesertBatfly> roosting = roomState.Roosting;
+        DesertBatfly roostSource = FindRoostSource(bat, roosting, out int chainSize, out float roostBond);
         if (roostSource != null)
         {
             DesertBatflySocialMode mode = chainSize >= 2
@@ -644,6 +651,7 @@ internal static class DesertBatflySocialLife
                 null,
                 null,
                 StablePairSide(member.abstractCreature.ID, initiator.abstractCreature.ID));
+            TraceGroupEvent(member, "MicroFlockJoined", token, "microflock reservation joined");
         }
         TraceStart(initiator, DesertBatflySocialMode.GroupDrift, null,
             $"microflock created; size={token.Members.Count}, id={token.Id}");
@@ -656,12 +664,18 @@ internal static class DesertBatflySocialLife
         State state,
         DesertBatflySocialRoomRuntime.RoomState roomState)
     {
-        if (!TryFindSocialRoost(target, source, out Vector2 spot))
+        Vector2 spot;
+        bool hasTarget = mode == DesertBatflySocialMode.ChainSocialization &&
+            TryGetChainApproachTarget(target, source, out spot);
+        if (!hasTarget)
+            hasTarget = TryFindSocialRoost(target, source, roomState, out spot);
+        if (!hasTarget)
         {
-            state.DecisionReason = "roost invitation rejected: no legal ChainTile/chain target";
+            state.DecisionReason = "roost invitation rejected: no legal chain/tile target";
             TraceDecision(target, "RoostInvitationRejected", state.DecisionReason);
             return;
         }
+
         int cap = StableInt(source.Personality.VisualSeed, 0x5411, 2, 5);
         if (!roomState.TryReserveInvitation(target, source, mode, cap, out var token))
         {
@@ -730,7 +744,7 @@ internal static class DesertBatflySocialLife
     {
         if (state.Token == null || !state.Token.Active)
         {
-            EndStateOnly(state, "reservation released");
+            CancelState(bat, state, "reservation invalidated", false);
             return;
         }
         string block = PriorityBlockReason(bat);
@@ -798,7 +812,7 @@ internal static class DesertBatflySocialLife
         Vector2 velocity = anchor.mainBodyChunk.vel;
         Vector2 backward = velocity.sqrMagnitude > 1f ? -velocity.normalized * 22f : Vector2.zero;
         Vector2 goal = anchor.mainBodyChunk.pos + backward + CompanionOffset(state.Side, bond);
-        if (!SocialSteer(bat, goal, Mathf.Lerp(4.2f, 5.1f, bat.Personality.Nerve)))
+        if (!SocialSteer(bat, goal, Mathf.Lerp(4.2f, 5.1f, bat.Personality.Nerve), state.Side))
             CancelState(bat, state, "companion path locally blocked", true);
         else
             state.DecisionReason = "companion side/back offset from temporary anchor";
@@ -825,7 +839,7 @@ internal static class DesertBatflySocialLife
             ownForward * (negotiation ? 42f : 55f) +
             Vector2.right * state.Side * (negotiation ? 72f : 58f) +
             Vector2.up * (negotiation ? 2f : 5f);
-        if (!SocialSteer(bat, goal, negotiation ? 5.2f : 5.6f))
+        if (!SocialSteer(bat, goal, negotiation ? 5.2f : 5.6f, state.Side))
             CancelState(bat, state, "lateral side blocked; vanilla avoidance resumes", true);
         else
             state.DecisionReason = negotiation
@@ -852,7 +866,7 @@ internal static class DesertBatflySocialLife
         {
             Vector2 predicted = partner.mainBodyChunk.pos + partner.mainBodyChunk.vel * 1.15f +
                 Vector2.right * state.Side * 22f;
-            if (!SocialSteer(bat, predicted, Mathf.Lerp(6.2f, 8.0f, bat.Personality.Nerve)))
+            if (!SocialSteer(bat, predicted, Mathf.Lerp(6.2f, 8.0f, bat.Personality.Nerve), state.Side))
                 CancelState(bat, state, "chase local path blocked", true);
             else
                 state.DecisionReason = "non-contact social chase / predicted offset";
@@ -866,7 +880,7 @@ internal static class DesertBatflySocialLife
             forward * 58f +
             Vector2.right * state.Side * 74f +
             Vector2.up * Mathf.Clamp(partner.mainBodyChunk.pos.y - bat.mainBodyChunk.pos.y, -8f, 8f);
-        if (!SocialSteer(bat, goal, Mathf.Lerp(5.5f, 7.0f, bat.Personality.Nerve)))
+        if (!SocialSteer(bat, goal, Mathf.Lerp(5.5f, 7.0f, bat.Personality.Nerve), state.Side))
             CancelState(bat, state, "chased local path blocked", true);
         else
             state.DecisionReason = "play chase sidestep; no fear/attack state";
@@ -877,7 +891,7 @@ internal static class DesertBatflySocialLife
         DesertBatflySocialRoomRuntime.Reservation token = state.Token;
         if (token == null || !token.Active || token.Members.Count < GroupMin)
         {
-            CancelState(bat, state, "microflock dissolved below three members", true);
+            CancelState(bat, state, "microflock dissolved below three members", token?.Active == true);
             return;
         }
 
@@ -894,8 +908,7 @@ internal static class DesertBatflySocialLife
         }
         if (count < GroupMin)
         {
-            token.Owner.Release(token);
-            EndStateOnly(state, "microflock dissolved below three valid members");
+            CancelState(bat, state, "microflock dissolved below three valid members", true);
             return;
         }
         center /= count;
@@ -928,10 +941,17 @@ internal static class DesertBatflySocialLife
                 Mathf.Clamp(separation.x * 58f, -70f, 70f),
                 Mathf.Clamp(separation.y * 24f, -10f, 10f));
         social.x += state.Side * StableRange(bat.Personality.VisualSeed, token.Id + 0x833, 5f, 15f);
-        if (!SocialSteer(bat, bat.mainBodyChunk.pos + social, Mathf.Lerp(4.3f, 5.6f, bat.Personality.Nerve)))
+        if (!SocialSteer(
+                bat,
+                bat.mainBodyChunk.pos + social,
+                Mathf.Lerp(4.3f, 5.6f, bat.Personality.Nerve),
+                state.Side))
         {
-            token.Owner.RemoveGroupMember(token, bat);
-            EndStateOnly(state, "member left microflock: local path blocked");
+            bool remainsActive = token.Owner.RemoveGroupMember(token, bat);
+            FinalizeParticipant(bat, state, "member left microflock: local path blocked", false);
+            TraceGroupEvent(bat, "MicroFlockLeft", token, "local path blocked");
+            if (!remainsActive)
+                FinalizeReleasedGroup(token, "microflock dissolved below three members");
             return;
         }
         state.DecisionReason = $"microflock {token.Id}; alignment + weak cohesion + horizontal separation";
@@ -952,48 +972,64 @@ internal static class DesertBatflySocialLife
             return;
         }
 
-        if (!state.RoostTarget.HasValue || !RoostSpotStillLegal(bat, state.RoostTarget.Value))
+        DesertBatflySocialRoomRuntime.RoomState roomState = state.Token?.Owner;
+        Vector2 target;
+        bool approachingChain = state.Mode == DesertBatflySocialMode.ChainSocialization &&
+            TryGetChainApproachTarget(bat, source, out target);
+        if (!approachingChain)
         {
-            if (!TryFindSocialRoost(bat, source, out Vector2 replacement))
+            if (!state.RoostTarget.HasValue || !RoostSpotStillLegal(bat, state.RoostTarget.Value))
             {
-                CancelState(bat, state, "roost target invalid / no replacement", true);
-                return;
+                if (roomState == null || !TryFindSocialRoost(bat, source, roomState, out Vector2 replacement))
+                {
+                    CancelState(bat, state, "roost target invalid / no replacement", true);
+                    return;
+                }
+                state.RoostTarget = replacement;
             }
-            state.RoostTarget = replacement;
+            target = state.RoostTarget.Value;
+        }
+        else
+        {
+            state.RoostTarget = target;
         }
 
-        Vector2 target = state.RoostTarget.Value;
-        if (Custom.DistLess(bat.mainBodyChunk.pos, target, 18f))
+        if (!approachingChain && Custom.DistLess(bat.mainBodyChunk.pos, target, 18f))
         {
             CommitTileRoost(bat, target);
             FinishToken(bat, state, "committed to invited legal roost", true);
             return;
         }
-        if (!SocialSteer(bat, target, 4.4f))
+        if (!SocialSteer(bat, target, 4.4f, state.Side))
             CancelState(bat, state, "invited roost locally blocked", true);
         else
-            state.DecisionReason = state.Mode == DesertBatflySocialMode.ChainSocialization
-                ? "approaching legal roost near existing chain"
-                : "responding to nearby roost invitation";
+            state.DecisionReason = approachingChain
+                ? "approaching existing legal Fly chain tail"
+                : "responding to nearby legal tile roost invitation";
     }
 
-    private static bool SocialSteer(DesertBatfly bat, Vector2 goal, float speed)
+    /// <summary>
+    /// Task 10 deliberately owns only the neutral goal, not flight physics. No velocity is
+    /// written here: Fly.Act calls vanilla BatFlight after FlyAI.Update and follows localGoal.
+    /// </summary>
+    private static bool SocialSteer(DesertBatfly bat, Vector2 goal, float speed, int preferredSide)
     {
         if (bat?.room == null || bat.AI == null || bat.mainBodyChunk == null) return false;
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
         if (direction == Vector2.zero) return true;
+
         Vector2 probe = bat.mainBodyChunk.pos + direction * 25f;
-        if (bat.room.GetTile(probe).Solid ||
-            (bat.room.terrain != null && bat.room.terrain.Contains(probe)))
+        if (Obstructed(bat.room, probe))
         {
             Vector2 leftProbe = bat.mainBodyChunk.pos + Vector2.left * 28f;
             Vector2 rightProbe = bat.mainBodyChunk.pos + Vector2.right * 28f;
-            bool leftBlocked = bat.room.GetTile(leftProbe).Solid ||
-                (bat.room.terrain != null && bat.room.terrain.Contains(leftProbe));
-            bool rightBlocked = bat.room.GetTile(rightProbe).Solid ||
-                (bat.room.terrain != null && bat.room.terrain.Contains(rightProbe));
+            bool leftBlocked = Obstructed(bat.room, leftProbe);
+            bool rightBlocked = Obstructed(bat.room, rightProbe);
             if (leftBlocked && rightBlocked) return false;
-            float desiredSide = Mathf.Sign(direction.x == 0f ? 1f : direction.x);
+
+            float desiredSide = preferredSide == 0
+                ? Mathf.Sign(direction.x == 0f ? 1f : direction.x)
+                : Mathf.Sign(preferredSide);
             if (desiredSide < 0f && leftBlocked) desiredSide = 1f;
             if (desiredSide > 0f && rightBlocked) desiredSide = -1f;
             goal = bat.mainBodyChunk.pos + Vector2.right * desiredSide * 58f + Vector2.up * 6f;
@@ -1001,26 +1037,32 @@ internal static class DesertBatflySocialLife
         }
 
         bat.Injury.NominalFlightSpeed = speed;
-        bat.LoseAllGrasps();
         bat.burrowOrHangSpot = null;
-        if (bat.AI.behavior == FlyAI.Behavior.Chain)
+        if (bat.AI.behavior != FlyAI.Behavior.Idle)
             bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
-        else
-            bat.AI.behavior = FlyAI.Behavior.Idle;
         bat.AI.followingDijkstraMap = -1;
         bat.movMode = Fly.MovementMode.BatFlight;
         bat.AI.localGoal = goal;
-        bat.mainBodyChunk.vel = Vector2.Lerp(
-            bat.mainBodyChunk.vel,
-            Custom.DirVec(bat.mainBodyChunk.pos, goal) * speed,
-            0.18f);
         return true;
     }
 
-    private static bool TryFindSocialRoost(DesertBatfly bat, DesertBatfly source, out Vector2 spot)
+    private static bool Obstructed(Room room, Vector2 point)
+    {
+        if (room == null) return true;
+        IntVector2 tile = room.GetTilePosition(point);
+        if (room.GetTile(tile).Solid) return true;
+        return room.terrain != null && room.terrain.ObstructsTile(tile);
+    }
+
+    private static bool TryFindSocialRoost(
+        DesertBatfly bat,
+        DesertBatfly source,
+        DesertBatflySocialRoomRuntime.RoomState roomState,
+        out Vector2 spot)
     {
         spot = default;
-        if (bat?.room == null || bat.AI == null || source?.room != bat.room) return false;
+        if (bat?.room == null || bat.AI == null || source?.room != bat.room || roomState == null)
+            return false;
         IntVector2 origin = bat.room.GetTilePosition(source.mainBodyChunk.pos);
         float best = float.MaxValue;
         bool found = false;
@@ -1042,13 +1084,29 @@ internal static class DesertBatflySocialLife
             float score =
                 Vector2.Distance(bat.mainBodyChunk.pos, candidate) +
                 Vector2.Distance(source.mainBodyChunk.pos, candidate) * 0.35f -
-                Mathf.Min(3, CountRoostingNear(bat.room, candidate, 75f)) * 11f;
+                Mathf.Min(3, roomState.CountRoostingNear(candidate, 75f)) * 11f;
             if (score >= best) continue;
             best = score;
             spot = candidate;
             found = true;
         }
         return found;
+    }
+
+    private static bool TryGetChainApproachTarget(
+        DesertBatfly bat,
+        DesertBatfly source,
+        out Vector2 target)
+    {
+        target = default;
+        if (!ValidRoostSource(source, bat) || bat?.AI == null) return false;
+        Fly tail = source.LastInChain();
+        if (tail == null || tail == bat || ChainLength(source) >= 6 || !bat.AI.CanIHangFromThisFly(tail))
+            return false;
+        target = tail.mainBodyChunk.pos + Vector2.down * 14f;
+        if (!Custom.DistLess(bat.mainBodyChunk.pos, target, 230f)) return false;
+        return Custom.DistLess(bat.mainBodyChunk.pos, target, 75f) ||
+            bat.room.VisualContact(bat.mainBodyChunk.pos, target);
     }
 
     private static bool RoostSpotStillLegal(DesertBatfly bat, Vector2 spot)
@@ -1064,9 +1122,12 @@ internal static class DesertBatflySocialLife
     {
         Room.Tile current = room.GetTile(tile);
         Vector2 middle = room.MiddleOfTile(tile);
-        return current.horizontalBeam
-            ? new Vector2(middle.x, middle.y - 4f)
-            : middle + Vector2.up * 10f;
+        if (current.horizontalBeam)
+            return new Vector2(middle.x, middle.y - 4f);
+        Room.Tile above = room.GetTile(tile + new IntVector2(0, 1));
+        if (current.Terrain == Room.Tile.TerrainType.Air && above.Terrain == Room.Tile.TerrainType.Floor)
+            return middle + Vector2.up * 8f;
+        return middle + Vector2.up * 10f;
     }
 
     private static void CommitTileRoost(DesertBatfly bat, Vector2 spot)
@@ -1117,7 +1178,7 @@ internal static class DesertBatflySocialLife
 
     private static DesertBatfly FindRoostSource(
         DesertBatfly bat,
-        IReadOnlyList<DesertBatfly> candidates,
+        IReadOnlyList<DesertBatfly> roosting,
         out int chainSize,
         out float bond)
     {
@@ -1125,9 +1186,9 @@ internal static class DesertBatflySocialLife
         bond = 0f;
         DesertBatfly best = null;
         float bestScore = float.MinValue;
-        for (int i = 0; i < candidates.Count; i++)
+        for (int i = 0; i < roosting.Count; i++)
         {
-            DesertBatfly other = candidates[i];
+            DesertBatfly other = roosting[i];
             if (other == bat || !ValidRoostSource(other, bat)) continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, other.mainBodyChunk.pos);
             if (distance > 190f ||
@@ -1148,21 +1209,6 @@ internal static class DesertBatflySocialLife
             bond = pairBond;
         }
         return best;
-    }
-
-    private static int CountRoostingNear(Room room, Vector2 point, float radius)
-    {
-        if (room == null || !DesertSwarmRoom.TryGet(room, out DesertSwarmRoom colony)) return 0;
-        int count = 0;
-        List<Fly> flies = colony.Hive.flies;
-        for (int i = 0; i < flies.Count; i++)
-        {
-            if (flies[i] is DesertBatfly bat && bat.room == room &&
-                bat.AI?.behavior == FlyAI.Behavior.Chain &&
-                Custom.DistLess(bat.mainBodyChunk.pos, point, radius))
-                count++;
-        }
-        return count;
     }
 
     private static bool ValidRoostSource(DesertBatfly source, DesertBatfly observer)
@@ -1218,29 +1264,23 @@ internal static class DesertBatflySocialLife
         DesertBatflySocialRoomRuntime.Reservation token = state.Token;
         if (token == null)
         {
-            EndStateOnly(state, reason);
+            FinalizeParticipant(bat, state, reason, true);
             return;
         }
-        var members = new List<DesertBatfly>(token.Members);
+
         token.Owner.Release(token);
-        for (int i = 0; i < members.Count; i++)
+        for (int i = 0; i < token.Members.Count; i++)
         {
-            DesertBatfly member = members[i];
+            DesertBatfly member = token.Members[i];
             if (member == null || !states.TryGetValue(member, out State memberState)) continue;
             DesertBatflySocialMode completed = memberState.Mode;
-            memberState.LastMode = completed;
-            memberState.LastPartnerKey = memberState.Partner != null
-                ? DesertBatflySocialRoomRuntime.Key(memberState.Partner)
-                : long.MinValue;
-            memberState.Drive = Mathf.Clamp01(memberState.Drive * 0.22f);
-            memberState.Cooldown = SocialCooldown(member, completed, true);
-            EndStateOnly(memberState, reason);
-            if (member.abstractCreature != null && AIDebugTrace.IsWatched(member.abstractCreature))
-                AIDebugTrace.Record(member.abstractCreature, AIDebugEventCategory.Social,
-                    "SocialInteractionCompleted", completed, reason);
+            FinalizeParticipant(member, memberState, reason, true);
+            if (completed == DesertBatflySocialMode.GroupDrift)
+                TraceGroupEvent(member, "MicroFlockLeft", token, reason);
         }
-        if (preserveRoost && bat?.AI?.behavior == FlyAI.Behavior.Chain)
-            state.DecisionReason = reason;
+        if (preserveRoost && bat?.AI?.behavior == FlyAI.Behavior.Chain &&
+            states.TryGetValue(bat, out State finishedState))
+            finishedState.DecisionReason = reason;
     }
 
     private static void CancelState(DesertBatfly bat, State state, string reason, bool releaseToken)
@@ -1248,32 +1288,62 @@ internal static class DesertBatflySocialLife
         DesertBatflySocialRoomRuntime.Reservation token = state.Token;
         if (releaseToken && token?.Active == true)
         {
-            var members = new List<DesertBatfly>(token.Members);
             token.Owner.Release(token);
-            for (int i = 0; i < members.Count; i++)
+            for (int i = 0; i < token.Members.Count; i++)
             {
-                DesertBatfly member = members[i];
+                DesertBatfly member = token.Members[i];
                 if (member == null || !states.TryGetValue(member, out State memberState)) continue;
                 DesertBatflySocialMode cancelled = memberState.Mode;
-                memberState.LastMode = cancelled;
-                memberState.LastPartnerKey = memberState.Partner != null
-                    ? DesertBatflySocialRoomRuntime.Key(memberState.Partner)
-                    : long.MinValue;
-                memberState.Drive = Mathf.Max(0.12f, memberState.Drive * 0.55f);
-                memberState.Cooldown = SocialCooldown(member, cancelled, false);
-                EndStateOnly(memberState, reason);
-                if (member.abstractCreature != null && AIDebugTrace.IsWatched(member.abstractCreature))
-                    AIDebugTrace.Record(member.abstractCreature, AIDebugEventCategory.Social,
-                        "SocialInteractionCancelled", cancelled, reason);
+                FinalizeParticipant(member, memberState, reason, false);
+                if (cancelled == DesertBatflySocialMode.GroupDrift)
+                    TraceGroupEvent(member, "MicroFlockLeft", token, reason);
             }
             return;
         }
 
+        FinalizeParticipant(bat, state, reason, false);
+    }
+
+    private static void FinalizeReleasedGroup(
+        DesertBatflySocialRoomRuntime.Reservation token,
+        string reason)
+    {
+        if (token == null) return;
+        for (int i = 0; i < token.Members.Count; i++)
+        {
+            DesertBatfly member = token.Members[i];
+            if (member == null || !states.TryGetValue(member, out State memberState) ||
+                memberState.Mode != DesertBatflySocialMode.GroupDrift)
+                continue;
+            FinalizeParticipant(member, memberState, reason, false);
+            TraceGroupEvent(member, "MicroFlockLeft", token, reason);
+        }
+    }
+
+    private static void FinalizeParticipant(
+        DesertBatfly bat,
+        State state,
+        string reason,
+        bool completed)
+    {
         DesertBatflySocialMode mode = state.Mode;
         state.LastMode = mode;
-        state.Drive = Mathf.Max(0.12f, state.Drive * 0.55f);
-        state.Cooldown = SocialCooldown(bat, mode, false);
+        state.LastPartnerKey = state.Partner != null
+            ? DesertBatflySocialRoomRuntime.Key(state.Partner)
+            : long.MinValue;
+        state.Drive = completed
+            ? Mathf.Clamp01(state.Drive * 0.22f)
+            : Mathf.Max(0.12f, state.Drive * 0.55f);
+        state.Cooldown = SocialCooldown(bat, mode, completed);
         EndStateOnly(state, reason);
+
+        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
+        AIDebugTrace.Record(
+            bat.abstractCreature,
+            AIDebugEventCategory.Social,
+            completed ? "SocialInteractionCompleted" : "SocialInteractionCancelled",
+            mode,
+            reason);
     }
 
     private static void EndStateOnly(State state, string reason)
@@ -1350,6 +1420,21 @@ internal static class DesertBatflySocialLife
         };
         if (specific != "SocialInteractionStarted")
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Social, specific, mode, details);
+    }
+
+    private static void TraceGroupEvent(
+        DesertBatfly bat,
+        string key,
+        DesertBatflySocialRoomRuntime.Reservation token,
+        string reason)
+    {
+        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
+        AIDebugTrace.Record(
+            bat.abstractCreature,
+            AIDebugEventCategory.Social,
+            key,
+            token?.Id ?? 0,
+            $"group={token?.Id ?? 0}; size={token?.Members.Count ?? 0}; {reason}");
     }
 
     private static void TraceDecision(DesertBatfly bat, string key, string reason)
