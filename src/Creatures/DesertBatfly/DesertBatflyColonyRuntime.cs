@@ -40,6 +40,17 @@ internal static class DesertBatflyColonyRuntime
     private static Dictionary<string, IndividualRecord> individuals =
         new(StringComparer.Ordinal);
     private static HashSet<string> deathsThisCycle = new(StringComparer.Ordinal);
+
+    // Rebuilt once when World changes. These indexes remove repeated whole-region scans
+    // from the 120-tick ecology loop while keeping AbstractCreature identity authoritative.
+    private static Dictionary<string, AbstractRoom> roomLookup =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static List<AbstractRoom> colonyRooms = new();
+    private static Dictionary<string, AbstractCreature> trackedBats =
+        new(StringComparer.Ordinal);
+    private static readonly List<string> staleBatKeys = new(16);
+    private static readonly List<AbstractCreature> sourceMembersScratch = new(64);
+
     private static WeakReference activeWorld;
     private static bool enabled;
     private static int abstractTick;
@@ -72,8 +83,14 @@ internal static class DesertBatflyColonyRuntime
         colonies = new Dictionary<string, DesertBatflyColonyState>(StringComparer.OrdinalIgnoreCase);
         individuals = new Dictionary<string, IndividualRecord>(StringComparer.Ordinal);
         deathsThisCycle = new HashSet<string>(StringComparer.Ordinal);
+        roomLookup = new Dictionary<string, AbstractRoom>(StringComparer.OrdinalIgnoreCase);
+        colonyRooms = new List<AbstractRoom>();
+        trackedBats = new Dictionary<string, AbstractCreature>(StringComparer.Ordinal);
+        staleBatKeys.Clear();
+        sourceMembersScratch.Clear();
         activeWorld = null;
         abstractTick = 0;
+        DesertBatflyRefuge.Reset();
         DesertBatflyTravelNavigation.Reset();
     }
 
@@ -107,6 +124,7 @@ internal static class DesertBatflyColonyRuntime
     internal static void EnsureIndividualOwnership(AbstractCreature creature)
     {
         if (!IsDesertBatfly(creature)) return;
+        TrackCreature(creature);
         IndividualRecord record = RecordFor(creature);
         if (!string.IsNullOrEmpty(record.CurrentColony)) return;
         AbstractRoom physical = creature.Room;
@@ -114,9 +132,25 @@ internal static class DesertBatflyColonyRuntime
             record.CurrentColony = physical.name.Trim().ToUpperInvariant();
     }
 
+    internal static void CollectOwnedBats(string colonyRoom, List<AbstractCreature> output)
+    {
+        output?.Clear();
+        if (output == null || string.IsNullOrWhiteSpace(colonyRoom)) return;
+        string normalized = colonyRoom.Trim().ToUpperInvariant();
+        foreach (AbstractCreature creature in trackedBats.Values)
+        {
+            if (!LivingDesertBatfly(creature)) continue;
+            IndividualRecord record = RecordFor(creature, false);
+            if (record != null && string.Equals(
+                    record.CurrentColony, normalized, StringComparison.OrdinalIgnoreCase))
+                output.Add(creature);
+        }
+    }
+
     internal static void CompletePermanentMigration(AbstractCreature creature, string destinationRoom, int cycle)
     {
         if (!IsDesertBatfly(creature) || string.IsNullOrWhiteSpace(destinationRoom)) return;
+        EnsureIndividualOwnership(creature);
         IndividualRecord record = RecordFor(creature);
         string destination = destinationRoom.Trim().ToUpperInvariant();
         if (!string.Equals(record.CurrentColony, destination, StringComparison.OrdinalIgnoreCase))
@@ -133,10 +167,10 @@ internal static class DesertBatflyColonyRuntime
     {
         if (victim?.abstractCreature == null || victim.world == null) return;
         EnsureWorld(victim.world);
+        EnsureIndividualOwnership(victim.abstractCreature);
         string identity = IdentityKey(victim.abstractCreature.ID);
         if (!deathsThisCycle.Add(identity)) return;
 
-        EnsureIndividualOwnership(victim.abstractCreature);
         IndividualRecord record = RecordFor(victim.abstractCreature, false);
         DesertBatflyColonyState colony = TryGetColony(record?.CurrentColony);
         if (colony == null && DesertSwarmRoom.IsDesertSwarmRoom(victim.abstractCreature.Room))
@@ -184,19 +218,17 @@ internal static class DesertBatflyColonyRuntime
     {
         if (world?.abstractRooms == null || world.region == null || world.game == null) return;
         bool changed = activeWorld == null || !activeWorld.IsAlive || !ReferenceEquals(activeWorld.Target, world);
-        if (changed)
-        {
-            activeWorld = new WeakReference(world);
-            deathsThisCycle.Clear();
-            DesertBatflyTravelNavigation.OnWorldChanged(world);
-        }
+        if (!changed) return;
+
+        activeWorld = new WeakReference(world);
+        deathsThisCycle.Clear();
+        RebuildWorldIndex(world);
+        DesertBatflyRefuge.Reset();
 
         CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
-        for (int i = 0; i < world.abstractRooms.Length; i++)
+        for (int i = 0; i < colonyRooms.Count; i++)
         {
-            AbstractRoom room = world.abstractRooms[i];
-            if (!DesertSwarmRoom.IsDesertSwarmRoom(room)) continue;
-
+            AbstractRoom room = colonyRooms[i];
             int physical = CountPhysical(room);
             string key = ColonyKey(world.region.name, room.name);
             if (!colonies.TryGetValue(key, out DesertBatflyColonyState colony))
@@ -205,9 +237,8 @@ internal static class DesertBatflyColonyRuntime
                 colony = new DesertBatflyColonyState(world.region.name, room.name, preferred);
                 colonies.Add(key, colony);
 
-                // One-time world/bootstrap ecology replaces the old first-realization
-                // 11+3 refill. Once a ledger entry exists, an empty colony stays empty
-                // until slow background recovery or immigration changes it.
+                // First Task-09 bootstrap only. Once this ledger entry exists, an empty
+                // colony can recover only through slow background recovery or immigration.
                 if (physical == 0 && template != null)
                 {
                     for (int n = 0; n < preferred; n++)
@@ -225,11 +256,14 @@ internal static class DesertBatflyColonyRuntime
                 colony.ConfigurePopulation(Mathf.Max(colony.PreferredPopulation,
                     PreferredPopulation(room, physical)));
             }
-
-            for (int c = 0; c < room.creatures.Count; c++)
-                EnsureIndividualOwnership(room.creatures[c]);
         }
+
+        foreach (AbstractCreature creature in trackedBats.Values)
+            EnsureIndividualOwnership(creature);
         RefreshPopulationCounts(world);
+
+        // Restore persisted migration routes only after room and ownership indexes exist.
+        DesertBatflyTravelNavigation.OnWorldChanged(world);
     }
 
     internal static int CurrentCycle(World world)
@@ -241,6 +275,10 @@ internal static class DesertBatflyColonyRuntime
     internal static AbstractRoom FindRoom(World world, string roomName)
     {
         if (world?.abstractRooms == null || string.IsNullOrWhiteSpace(roomName)) return null;
+        if (activeWorld?.IsAlive == true && ReferenceEquals(activeWorld.Target, world) &&
+            roomLookup.TryGetValue(roomName.Trim().ToUpperInvariant(), out AbstractRoom indexed))
+            return indexed;
+
         for (int i = 0; i < world.abstractRooms.Length; i++)
         {
             AbstractRoom room = world.abstractRooms[i];
@@ -266,7 +304,7 @@ internal static class DesertBatflyColonyRuntime
         if (room?.creatures == null) return 0f;
         int bats = 0;
         for (int i = 0; i < room.creatures.Count; i++)
-            if (IsDesertBatfly(room.creatures[i]) && room.creatures[i].state?.alive != false) bats++;
+            if (LivingDesertBatfly(room.creatures[i])) bats++;
         return Mathf.Clamp01(bats / 18f);
     }
 
@@ -311,7 +349,6 @@ internal static class DesertBatflyColonyRuntime
         for (int i = 0; i < regional.Count; i++)
             regional[i].SettleCycle(regional[i].CurrentPopulation, regionalEnvironment, cycle);
 
-        // Re-evaluate relative stress against the newly settled same-cycle regional mean.
         regionalEnvironment = DesertBatflyColonyMigration.RegionalEnvironmentalAverage(regional);
         for (int i = 0; i < regional.Count; i++)
         {
@@ -339,39 +376,36 @@ internal static class DesertBatflyColonyRuntime
 
     private static void ScheduleMigrationBatch(World world, DesertBatflyColonyState source, int cycle)
     {
-        if (!DesertBatflyColonyMigration.CanScheduleBatch(source) ||
-            !TryChooseMigrationDestination(world, source, out DesertBatflyColonyState destination,
-                out DesertBatflyWorldRoute sharedRoute))
+        if (!DesertBatflyColonyMigration.CanScheduleBatch(source)) return;
+        CollectOwnedBats(source.RoomName, sourceMembersScratch);
+        if (sourceMembersScratch.Count == 0 ||
+            !TryChooseMigrationDestination(world, source, sourceMembersScratch,
+                out DesertBatflyColonyState destination, out DesertBatflyWorldRoute sharedRoute))
             return;
 
         int wanted = source.RecommendedBatchSize();
         if (wanted <= 0) return;
         List<(AbstractCreature Creature, float Score)> candidates = new();
-        for (int r = 0; r < world.abstractRooms.Length; r++)
+        for (int i = 0; i < sourceMembersScratch.Count; i++)
         {
-            AbstractRoom room = world.abstractRooms[r];
-            if (room?.creatures == null) continue;
-            for (int i = 0; i < room.creatures.Count; i++)
-            {
-                AbstractCreature creature = room.creatures[i];
-                if (!IsDesertBatfly(creature) || creature.state?.alive == false) continue;
-                IndividualRecord record = RecordFor(creature);
-                if (!string.Equals(record.CurrentColony, source.RoomName, StringComparison.OrdinalIgnoreCase) ||
-                    !string.IsNullOrEmpty(record.PendingMigrationColony)) continue;
-                if (creature.state is not DesertBatflyState state) continue;
+            AbstractCreature creature = sourceMembersScratch[i];
+            if (!LivingDesertBatfly(creature)) continue;
+            IndividualRecord record = RecordFor(creature);
+            if (!string.IsNullOrEmpty(record.PendingMigrationColony) ||
+                creature.state is not DesertBatflyState state)
+                continue;
 
-                float capability = AbstractPhysicalCapability(state);
-                bool severe = state.WingMean >= 0.60f ||
-                              Mathf.Max(state.LeftWingInjury, state.RightWingInjury) >= 0.82f;
-                bool recovering = creature.realizedCreature is DesertBatfly realized && realized.Injury.IsRecovering;
-                float bondAtHome = BondPartnerOwnedBy(state.SocialBondTarget, source.RoomName)
-                    ? state.SocialBondStrength : state.SocialBondStrength * 0.25f;
-                float score = DesertBatflyColonyMigration.IndividualPropensity(
-                    state.Personality, capability, severe, recovering,
-                    DesertBatflyColonyMigration.ActiveTrauma(state), bondAtHome,
-                    source.ShelterFailureMemory, cycle, record.LastMigrationCycle);
-                if (score > 0f) candidates.Add((creature, score));
-            }
+            float capability = AbstractPhysicalCapability(state);
+            bool severe = state.WingMean >= 0.60f ||
+                          Mathf.Max(state.LeftWingInjury, state.RightWingInjury) >= 0.82f;
+            bool recovering = creature.realizedCreature is DesertBatfly realized && realized.Injury.IsRecovering;
+            float bondAtHome = BondPartnerOwnedBy(state.SocialBondTarget, source.RoomName)
+                ? state.SocialBondStrength : state.SocialBondStrength * 0.25f;
+            float score = DesertBatflyColonyMigration.IndividualPropensity(
+                state.Personality, capability, severe, recovering,
+                DesertBatflyColonyMigration.ActiveTrauma(state), bondAtHome,
+                source.ShelterFailureMemory, cycle, record.LastMigrationCycle);
+            if (score > 0f) candidates.Add((creature, score));
         }
 
         candidates.Sort((a, b) =>
@@ -399,8 +433,12 @@ internal static class DesertBatflyColonyRuntime
         destination.LastInboundBatch += selected;
     }
 
-    private static bool TryChooseMigrationDestination(World world, DesertBatflyColonyState source,
-        out DesertBatflyColonyState destination, out DesertBatflyWorldRoute route)
+    private static bool TryChooseMigrationDestination(
+        World world,
+        DesertBatflyColonyState source,
+        List<AbstractCreature> sourceMembers,
+        out DesertBatflyColonyState destination,
+        out DesertBatflyWorldRoute route)
     {
         destination = null;
         route = default;
@@ -431,14 +469,51 @@ internal static class DesertBatflyColonyRuntime
                 candidate.EnvironmentalPressure * 0.50f -
                 candidate.PredatorPressure * 0.20f -
                 candidate.ShelterFailureMemory * 0.30f);
+            DestinationAffinity(sourceMembers, candidate.RoomName,
+                out float familiarity, out float bondPresence);
             float score = DesertBatflyColonyMigration.DestinationSuitability(
-                candidate, habitat, travel, 0f, 0f);
+                candidate, habitat, travel, familiarity, bondPresence);
             if (score <= best) continue;
             best = score;
             destination = candidate;
             route = candidateRoute;
         }
         return destination != null && route.Valid && best > -0.35f;
+    }
+
+    private static void DestinationAffinity(
+        List<AbstractCreature> sourceMembers,
+        string destinationRoom,
+        out float formerColonyFamiliarity,
+        out float bondPartnerPresence)
+    {
+        formerColonyFamiliarity = 0f;
+        bondPartnerPresence = 0f;
+        if (sourceMembers == null || sourceMembers.Count == 0 || string.IsNullOrWhiteSpace(destinationRoom))
+            return;
+
+        int formerResidents = 0;
+        float strongestBond = 0f;
+        for (int i = 0; i < sourceMembers.Count; i++)
+        {
+            AbstractCreature creature = sourceMembers[i];
+            IndividualRecord record = RecordFor(creature, false);
+            if (record != null && string.Equals(
+                    record.PreviousColony, destinationRoom, StringComparison.OrdinalIgnoreCase))
+                formerResidents++;
+
+            if (creature?.state is not DesertBatflyState state ||
+                !state.SocialBondTarget.HasValue || state.SocialBondStrength <= strongestBond)
+                continue;
+            if (BondPartnerOwnedBy(state.SocialBondTarget, destinationRoom))
+                strongestBond = state.SocialBondStrength;
+        }
+
+        // Both are deliberately weak. A recovered former colony wins only when its
+        // actual safety/capacity is already competitive; familiarity never overrides danger.
+        formerColonyFamiliarity = Mathf.Clamp01(
+            formerResidents / Mathf.Max(1f, sourceMembers.Count * 0.30f));
+        bondPartnerPresence = Mathf.Clamp01(strongestBond);
     }
 
     private static float PermanentTravelRisk(World world, AbstractRoom room)
@@ -474,6 +549,7 @@ internal static class DesertBatflyColonyRuntime
         AbstractCreature creature = new(world, template, null, coordinate, world.game.GetNewID());
         if (creature.state is DesertBatflyState state) state.InHive = room.batHives > 0;
         room.AddEntity(creature);
+        TrackCreature(creature);
         return creature;
     }
 
@@ -493,8 +569,8 @@ internal static class DesertBatflyColonyRuntime
     private static int PreferredPopulation(AbstractRoom room, int existing)
     {
         int ecologicalBaseline = 8 + Mathf.Max(1, room?.batHives ?? 0) * 6;
-        int oldSpeciesBaseline = DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation;
-        return Mathf.Clamp(Mathf.Max(existing, ecologicalBaseline, oldSpeciesBaseline), 6, 40);
+        int legacyBaseline = DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation;
+        return Mathf.Clamp(Mathf.Max(existing, ecologicalBaseline, legacyBaseline), 6, 40);
     }
 
     private static int CountPhysical(AbstractRoom room)
@@ -502,31 +578,34 @@ internal static class DesertBatflyColonyRuntime
         if (room?.creatures == null) return 0;
         int count = 0;
         for (int i = 0; i < room.creatures.Count; i++)
-            if (IsDesertBatfly(room.creatures[i]) && room.creatures[i].state?.alive != false) count++;
+            if (LivingDesertBatfly(room.creatures[i])) count++;
         return count;
     }
 
     private static void RefreshPopulationCounts(World world)
     {
-        if (world?.abstractRooms == null) return;
+        if (world == null) return;
+        string region = world.region?.name?.Trim().ToUpperInvariant();
         foreach (DesertBatflyColonyState colony in colonies.Values)
-            if (world.region != null && colony.RegionName == world.region.name.Trim().ToUpperInvariant())
+            if (!string.IsNullOrEmpty(region) && colony.RegionName == region)
                 colony.CurrentPopulation = 0;
 
-        for (int r = 0; r < world.abstractRooms.Length; r++)
+        staleBatKeys.Clear();
+        foreach (KeyValuePair<string, AbstractCreature> pair in trackedBats)
         {
-            AbstractRoom room = world.abstractRooms[r];
-            if (room?.creatures == null) continue;
-            for (int i = 0; i < room.creatures.Count; i++)
+            AbstractCreature creature = pair.Value;
+            if (creature == null || creature.world != world || creature.slatedForDeletion)
             {
-                AbstractCreature creature = room.creatures[i];
-                if (!IsDesertBatfly(creature) || creature.state?.alive == false) continue;
-                EnsureIndividualOwnership(creature);
-                IndividualRecord record = RecordFor(creature, false);
-                DesertBatflyColonyState colony = TryGetColony(record?.CurrentColony);
-                if (colony != null) colony.CurrentPopulation++;
+                staleBatKeys.Add(pair.Key);
+                continue;
             }
+            if (!LivingDesertBatfly(creature)) continue;
+            EnsureIndividualOwnership(creature);
+            IndividualRecord record = RecordFor(creature, false);
+            DesertBatflyColonyState colony = TryGetColony(record?.CurrentColony);
+            if (colony != null) colony.CurrentPopulation++;
         }
+        for (int i = 0; i < staleBatKeys.Count; i++) trackedBats.Remove(staleBatKeys[i]);
     }
 
     private static List<DesertBatflyColonyState> RegionColonies(World world)
@@ -554,6 +633,31 @@ internal static class DesertBatflyColonyRuntime
             0.18f * (1f - Mathf.Clamp01(state.health)) -
             0.46f * wingSeverity -
             0.15f * state.WingAsymmetry);
+    }
+
+    private static void RebuildWorldIndex(World world)
+    {
+        roomLookup = new Dictionary<string, AbstractRoom>(StringComparer.OrdinalIgnoreCase);
+        colonyRooms = new List<AbstractRoom>();
+        trackedBats = new Dictionary<string, AbstractCreature>(StringComparer.Ordinal);
+        if (world?.abstractRooms == null) return;
+
+        for (int r = 0; r < world.abstractRooms.Length; r++)
+        {
+            AbstractRoom room = world.abstractRooms[r];
+            if (room == null) continue;
+            roomLookup[room.name.Trim().ToUpperInvariant()] = room;
+            if (DesertSwarmRoom.IsDesertSwarmRoom(room)) colonyRooms.Add(room);
+            if (room.creatures == null) continue;
+            for (int i = 0; i < room.creatures.Count; i++)
+                TrackCreature(room.creatures[i]);
+        }
+    }
+
+    private static void TrackCreature(AbstractCreature creature)
+    {
+        if (!IsDesertBatfly(creature)) return;
+        trackedBats[IdentityKey(creature.ID)] = creature;
     }
 
     private static void PrepareSave(SaveState save)
@@ -593,7 +697,11 @@ internal static class DesertBatflyColonyRuntime
         colonies.Clear();
         individuals.Clear();
         deathsThisCycle.Clear();
+        roomLookup.Clear();
+        colonyRooms.Clear();
+        trackedBats.Clear();
         activeWorld = null;
+        DesertBatflyRefuge.Reset();
         DesertBatflyTravelNavigation.Reset();
         if (save?.unrecognizedSaveStrings == null) return;
 
@@ -635,6 +743,9 @@ internal static class DesertBatflyColonyRuntime
             }
         }
     }
+
+    private static bool LivingDesertBatfly(AbstractCreature creature) =>
+        IsDesertBatfly(creature) && creature.state?.alive != false && !creature.slatedForDeletion;
 
     private static bool IsDesertBatfly(AbstractCreature creature) =>
         creature?.creatureTemplate?.type == DesertBatflyDefinition.CreatureType;
