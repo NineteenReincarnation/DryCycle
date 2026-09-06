@@ -17,6 +17,7 @@ internal static class DesertBatflyHooks
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
         DesertBatflyColonyRuntime.Enable();
+        DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
             AIDebugRegistry.Register(new DesertBatflyTask09DebugSource());
@@ -54,6 +55,7 @@ internal static class DesertBatflyHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyPlatformRoostRuntime.Disable();
         DesertBatflyColonyRuntime.Disable();
         DesertBatflyRefuge.Reset();
         DesertBatflyIntimidation.Reset();
