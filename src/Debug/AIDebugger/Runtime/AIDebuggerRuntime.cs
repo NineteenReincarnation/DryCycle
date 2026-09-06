@@ -17,12 +17,14 @@ internal static class AIDebuggerRuntime
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
+        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}.");
         AIDebugSettings.Load(logger);
         AIDebugInputGate.Install(logger);
         AIDebugSimulationControl.Install(logger);
         if (host != null)
         {
             host.Bind(rainWorld, logger);
+            logger?.LogInfo("DryCycle AI Observatory rebound to the current RainWorld instance.");
             return;
         }
 
@@ -46,6 +48,7 @@ internal static class AIDebuggerRuntime
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
+        logger?.LogInfo($"DryCycle AI Observatory host created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, cameraEnabled={camera.enabled}.");
     }
 
     internal static void Uninstall()
@@ -69,6 +72,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private readonly AIDebuggerWindowV3 window = new();
     private bool visible;
     private bool backendFailed;
+    private bool lifecycleLogged;
     private double overheadMs;
 
     internal bool Visible => visible;
@@ -93,8 +97,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
     private void Update()
     {
+        if (!lifecycleLogged)
+        {
+            lifecycleLogged = true;
+            logger?.LogInfo($"DryCycle AI Observatory host Update is running. visible={visible}, enabled={enabled}, active={gameObject.activeInHierarchy}.");
+        }
+
         if (Input.GetKeyDown(KeyCode.F7))
         {
+            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visibleBefore={visible}, backendFailed={backendFailed}, backendCreated={backend != null}.");
             if (backendFailed)
             {
                 logger?.LogWarning("DryCycle AI Observatory is disabled for this session because its ImGui backend previously failed. Check the earlier error and restart Rain World after fixing the runtime files.");
@@ -107,6 +118,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
             if (overlayCamera != null) overlayCamera.enabled = visible;
+            logger?.LogInfo($"DryCycle AI Observatory visibility toggled by F7. visibleNow={visible}, cameraEnabled={overlayCamera?.enabled == true}.");
         }
 
         // Whole-session export is intentionally independent of the Dock layout. It can
@@ -166,6 +178,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (backendFailed) return false;
         try
         {
+            logger?.LogInfo("DryCycle AI Observatory backend initialization started.");
             AIDebugStyleController.Reset();
             backend = new AIDebugImGuiBackend();
             // The backend constructor creates and selects the ImGui context. Dear ImGui
