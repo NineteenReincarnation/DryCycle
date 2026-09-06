@@ -187,8 +187,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         float height = Mathf.Min(320f * scale, Mathf.Max(1f, Screen.height - 32f));
         float x = Mathf.Max(8f, Screen.width - width - 16f);
         const float y = 16f;
+        // Dear ImGui hashes the substring after ### as the stable window ID. Passing the
+        // ASCII-only ID here avoids any Win32 ANSI/UTF-8 mismatch when the visible title
+        // is Chinese.
         AIDebugDockingNative.KeepWindowInViewport(
-            AIDebugLocalization.T("app.title") + "###AICompact",
+            "###AICompact",
             new System.Numerics.Vector2(x, y),
             new System.Numerics.Vector2(width, height));
     }
