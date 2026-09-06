@@ -92,9 +92,12 @@ internal static class AIDebugAdvancedCapture
     {
         output.Clear();
 
-        // Task 02's Sentinel/Bully/Opportunist utility surface was rejected and removed.
-        // Desert Batfly has no UtilityComparer-backed role module, so it should naturally
-        // produce an empty utility table here rather than manufacturing replacement scores.
+        // Task 02 social roles were rejected and physically removed. Desert Batfly does
+        // not own a UtilityComparer-backed role module anymore, so its utility table is
+        // intentionally empty. Do not synthesize Sentinel/Bully/Opportunist rows here.
+        if (creature?.realizedCreature is DryCycle.Creatures.DesertBatfly.DesertBatfly)
+            return;
+
         UtilityComparer comparer = creature?.abstractAI?.RealAI?.utilityComparer;
         if (comparer?.uTrackers == null) return;
         for (int i = 0; i < comparer.uTrackers.Count; i++)
