@@ -5,12 +5,12 @@ using Num = System.Numerics;
 
 namespace DryCycle.AIObservatory.RWImGui;
 
-// Historical Utility / Perception / Path panels. All rows are detached copies published
-// by AIDebuggerHost; this class never calls AI modules, Tracker, PathFinder, Creature or
-// any Unity/Rain World object from the Present thread.
+// Historical Utility / Perception / Path / Movement panels. All rows are detached copies
+// published by AIDebuggerHost; this class never calls AI modules, Tracker, PathFinder,
+// Creature or any Unity/Rain World object from the Present thread.
 internal static class ObservatoryAdvancedPanels
 {
-    internal const float PreferredHeight = 142f;
+    internal const float PreferredHeight = 166f;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
@@ -40,6 +40,12 @@ internal static class ObservatoryAdvancedPanels
             if (ImGui.BeginTabItem(L(snapshot, "Path", "寻路")))
             {
                 DrawPath(snapshot, selected);
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem(L(snapshot, "Movement", "移动")))
+            {
+                ObservatoryMovementPlayback.Draw(snapshot);
                 ImGui.EndTabItem();
             }
 
