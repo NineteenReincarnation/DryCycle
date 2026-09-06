@@ -14,9 +14,10 @@ namespace DryCycle.Debugging.AI;
 
 // Dear ImGui backend for Rain World's Unity 2020 Built-in render pipeline. Draw commands
 // are prepared during Update and owned by the dedicated overlay camera at
-// CameraEvent.AfterEverything. This is more deterministic than executing a free-standing
-// Graphics.ExecuteCommandBuffer from OnPostRender, where the active render target is not
-// an explicit part of the command buffer contract.
+// CameraEvent.AfterEverything. The final mesh transform deliberately follows the proven
+// ImGui-on-Unity Built-in pattern: convert ImGui vertices to bottom-left screen space and
+// cancel the camera view/projection in the DrawMesh model matrix. This avoids relying on
+// a custom SetViewProjectionMatrices state surviving the camera render path.
 internal sealed class AIDebugImGuiBackend : IDisposable
 {
     private static readonly IntPtr FontTextureId = new(1);
@@ -113,14 +114,11 @@ internal sealed class AIDebugImGuiBackend : IDisposable
                 indexFormat = IndexFormat.UInt32
             };
             mesh.MarkDynamic();
-            // Explicit command-buffer draws should not disappear because Unity evaluates
-            // the mesh against the camera's ordinary world-space frustum before our
-            // screen-space projection matrices are applied.
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 100000f);
 
             renderCamera.AddCommandBuffer(CameraEvent.AfterEverything, commands);
             commandBufferAttached = true;
-            logger?.LogInfo($"DryCycle AI Observatory renderer ready: shader={shaderName}, meshIndexFormat={mesh.indexFormat}, cameraEvent={CameraEvent.AfterEverything}, cameraId={renderCamera.GetInstanceID()}.");
+            logger?.LogInfo($"DryCycle AI Observatory renderer ready: shader={shaderName}, meshIndexFormat={mesh.indexFormat}, cameraEvent={CameraEvent.AfterEverything}, cameraId={renderCamera.GetInstanceID()}, transformMode=camera-compensated-model.");
         }
         catch
         {
@@ -346,6 +344,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         Num.Vector2 framebufferScale = data.FramebufferScale;
         float scaleX = framebufferScale.X > 0f ? framebufferScale.X : 1f;
         float scaleY = framebufferScale.Y > 0f ? framebufferScale.Y : 1f;
+        float framebufferHeight = Mathf.Max(1f, data.DisplaySize.Y * scaleY);
         Rect firstClip = default;
         Vector3 firstVertex = default;
         bool haveFirstClip = false;
@@ -360,7 +359,13 @@ internal sealed class AIDebugImGuiBackend : IDisposable
                 Num.Vector2 p = vertex.pos;
                 Num.Vector2 uv = vertex.uv;
                 uint packed = vertex.col;
-                Vector3 transformed = new((p.X - displayPos.X) * scaleX, (p.Y - displayPos.Y) * scaleY, 0f);
+                float x = (p.X - displayPos.X) * scaleX;
+                float yTop = (p.Y - displayPos.Y) * scaleY;
+                // Unity's screen-space mesh convention is bottom-left while Dear ImGui's
+                // vertex coordinates are top-left. Flip exactly once here and then use a
+                // normal bottom-left orthographic projection for the camera-compensated
+                // model transform below.
+                Vector3 transformed = new(x, framebufferHeight - yTop, 0f);
                 vertices.Add(transformed);
                 uvs.Add(new Vector2(uv.X, uv.Y));
                 colors.Add(new Color32((byte)(packed & 0xff), (byte)((packed >> 8) & 0xff),
@@ -430,7 +435,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             meshLogged = true;
             string clipText = haveFirstClip ? $"{firstClip.xMin:0.###},{firstClip.yMin:0.###},{firstClip.xMax:0.###},{firstClip.yMax:0.###}" : "none";
             string vertexText = haveFirstVertex ? $"{firstVertex.x:0.###},{firstVertex.y:0.###}" : "none";
-            logger?.LogInfo($"DryCycle AI Observatory first mesh: vertices={vertices.Count}, subMeshes={drawCommands.Count}, firstClip={clipText}, firstVertex={vertexText}.");
+            logger?.LogInfo($"DryCycle AI Observatory first mesh: vertices={vertices.Count}, subMeshes={drawCommands.Count}, firstClip={clipText}, firstVertex(bottomLeft)={vertexText}.");
         }
     }
 
@@ -447,9 +452,14 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
         commands.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
         commands.SetViewport(new Rect(0f, 0f, width, height));
-        commands.SetViewProjectionMatrices(
-            Matrix4x4.identity,
-            Matrix4x4.Ortho(0f, width, height, 0f, -1f, 1f));
+
+        // Let Unity keep the camera's own view/projection state. Instead, cancel those
+        // transforms in the object matrix and replace them with a bottom-left screen-space
+        // orthographic transform. This is the established approach used by working
+        // ImGui command-buffer renderers on the Built-in pipeline and avoids API-specific
+        // projection state being lost or transformed a second time.
+        Matrix4x4 guiProjection = Matrix4x4.Ortho(0f, width, 0f, height, 0f, 0.1f);
+        Matrix4x4 drawMatrix = renderCamera.cameraToWorldMatrix * renderCamera.projectionMatrix.inverse * guiProjection;
 
         for (int i = 0; i < drawCommands.Count; i++)
         {
@@ -469,7 +479,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             properties.Clear();
             properties.SetTexture("_MainTex", texture);
             commands.EnableScissorRect(new Rect(x1, height - y2, x2 - x1, y2 - y1));
-            commands.DrawMesh(mesh, Matrix4x4.identity, material, draw.SubMesh, 0, properties);
+            commands.DrawMesh(mesh, drawMatrix, material, draw.SubMesh, 0, properties);
             preparedDrawCount++;
         }
         commands.DisableScissorRect();
@@ -477,7 +487,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         if (!renderPreparedLogged)
         {
             renderPreparedLogged = true;
-            logger?.LogInfo($"DryCycle AI Observatory first camera render buffer prepared: drawCommands={preparedDrawCount}/{drawCommands.Count}, viewport={width:0}x{height:0}, shader={shaderName}, cameraEvent={CameraEvent.AfterEverything}.");
+            logger?.LogInfo($"DryCycle AI Observatory first camera render buffer prepared: drawCommands={preparedDrawCount}/{drawCommands.Count}, viewport={width:0}x{height:0}, shader={shaderName}, cameraEvent={CameraEvent.AfterEverything}, transformMode=camera-compensated-model.");
         }
     }
 
