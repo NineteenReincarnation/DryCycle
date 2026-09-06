@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using BepInEx.Logging;
 using UnityEngine;
 
@@ -13,6 +14,8 @@ namespace DryCycle.Debugging.AI;
 // Rawra's Win32 + DX11 Present backend.
 internal static class AIDebuggerRuntime
 {
+    private const string BridgeAssemblyName = "DryCycle.AIObservatory.RWImGui";
+    private const string RWImGuiAssemblyName = "rain-world-imgui-api";
     private static GameObject hostObject;
     private static AIDebuggerHost host;
 
@@ -27,7 +30,24 @@ internal static class AIDebuggerRuntime
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
         AIDebugSettings.Load(logger);
-        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}, renderer=RWImGUI-bridge.");
+
+        bool bridgeAssemblyLoaded = IsAssemblyLoaded(BridgeAssemblyName);
+        bool rwimguiAssemblyLoaded = IsAssemblyLoaded(RWImGuiAssemblyName);
+        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}, " +
+                        $"presentation=RWImGUI, bridgeAssemblyLoaded={bridgeAssemblyLoaded}, rwimguiApiLoaded={rwimguiAssemblyLoaded}.");
+
+        if (!rwimguiAssemblyLoaded)
+        {
+            logger?.LogWarning("DryCycle AI Observatory presentation is unavailable: Rain World ImGUI API is not loaded by BepInEx. " +
+                               "The official ImGUI API Workshop item (3417372413) requires Rawra's Library Loader (3326331909). " +
+                               "Install/enable both mods and restart Rain World. DryCycle gameplay systems will continue normally.");
+        }
+        else if (!bridgeAssemblyLoaded)
+        {
+            logger?.LogWarning("DryCycle AI Observatory presentation is unavailable: RWImGUI is loaded, but " +
+                               "DryCycle.AIObservatory.RWImGui.dll is not loaded. Rebuild DryCycle with the RWImGUI dependency available " +
+                               "and verify that the bridge DLL is present in Ancient Site/newest/plugins.");
+        }
 
         // These are independent main-thread systems. Their failure must not prevent the
         // RWImGUI frontend from drawing.
@@ -55,7 +75,8 @@ internal static class AIDebuggerRuntime
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
-        logger?.LogInfo($"DryCycle AI Observatory controller created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, legacyRenderer=disabled, overlayCamera=none.");
+        logger?.LogInfo($"DryCycle AI Observatory controller created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, " +
+                        $"legacyRenderer=disabled, overlayCamera=none, bridge={AIDebugPresentationBridgeStatus.Describe()}.");
     }
 
     internal static void Uninstall()
@@ -68,6 +89,19 @@ internal static class AIDebuggerRuntime
         hostObject = null;
         host = null;
     }
+
+    private static bool IsAssemblyLoaded(string name)
+    {
+        try
+        {
+            return AppDomain.CurrentDomain.GetAssemblies()
+                .Any(a => string.Equals(a.GetName().Name, name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
 
 internal sealed class AIDebuggerHost : MonoBehaviour
@@ -76,6 +110,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private ManualLogSource logger;
     private bool visible;
     private bool lifecycleLogged;
+    private bool missingBridgeWarningLogged;
 
     internal bool Visible => visible;
 
@@ -83,7 +118,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         rainWorld = rw;
         logger = log;
-        logger?.LogInfo($"DryCycle AI Observatory controller Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, presentation=RWImGUI.");
+        logger?.LogInfo($"DryCycle AI Observatory controller Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, " +
+                        $"presentationState={AIDebugPresentationBridgeStatus.Describe()}.");
     }
 
     internal void SetStartupVisible(bool value)
@@ -97,7 +133,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (!lifecycleLogged)
         {
             lifecycleLogged = true;
-            logger?.LogInfo($"DryCycle AI Observatory controller Update is running. visible={visible}, enabled={enabled}, active={gameObject.activeInHierarchy}, presentation=RWImGUI.");
+            logger?.LogInfo($"DryCycle AI Observatory controller Update is running. visible={visible}, enabled={enabled}, " +
+                            $"active={gameObject.activeInHierarchy}, presentationState={AIDebugPresentationBridgeStatus.Describe()}.");
         }
 
         if (Input.GetKeyDown(KeyCode.F7))
@@ -105,7 +142,19 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             bool before = visible;
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
-            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visible {before} -> {visible}. Presentation owner=RWImGUI bridge; legacy Unity renderer is disabled.");
+            string presentation = AIDebugPresentationBridgeStatus.CallbackRegistered
+                ? (AIDebugPresentationBridgeStatus.PresentSeen ? "RWImGUI-connected" : "RWImGUI-callback-waiting-for-Present")
+                : "UNAVAILABLE";
+            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visible {before} -> {visible}. presentation={presentation}; " +
+                            $"{AIDebugPresentationBridgeStatus.Describe()}.");
+
+            if (visible && !AIDebugPresentationBridgeStatus.CallbackRegistered && !missingBridgeWarningLogged)
+            {
+                missingBridgeWarningLogged = true;
+                logger?.LogWarning("DryCycle AI Observatory F7 state is ON, but no RWImGUI callback is registered, so no UI can appear. " +
+                                   "Check that BepInEx loads 'Rain World ImGUI API' and 'DryCycle AI Observatory RWImGUI Bridge'. " +
+                                   "ImGUI API also requires Rawra's Library Loader. Workshop IDs: ImGUI API=3417372413, Library Loader=3326331909.");
+            }
         }
 
         // Whole-session export is intentionally independent of the presentation frontend.
