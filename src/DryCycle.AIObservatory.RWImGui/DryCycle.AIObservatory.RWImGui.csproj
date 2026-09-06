@@ -28,9 +28,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Build against the same DryCycle source. Private=false prevents the bridge build
-         from treating DryCycle.dll as a bridge-owned redistributable dependency. -->
-    <ProjectReference Include="../DryCycle.csproj" Private="false" />
+    <!-- The normal DryCycle build runs first and places DryCycle.dll in GameModOutputDir.
+         Referencing that deployed assembly avoids a project-reference recursion when the
+         main project conditionally invokes this optional bridge after its own Build. -->
+    <Reference Include="DryCycle">
+      <HintPath>$(GameModOutputDir)/DryCycle.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
 
     <Reference Include="BepInEx">
       <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
@@ -67,6 +71,7 @@
 
   <Target Name="ValidateRWImGuiBridgeReferences" BeforeTargets="ResolveReferences">
     <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set for DryCycle.AIObservatory.RWImGui." />
+    <Error Condition="!Exists('$(GameModOutputDir)/DryCycle.dll')" Text="DryCycle.dll must be built before DryCycle.AIObservatory.RWImGui. Expected $(GameModOutputDir)/DryCycle.dll." />
     <Error Condition="'$(RWImGuiPluginDir)' == ''" Text="RWImGUI was not found. Install Steam Workshop item 3417372413 or pass -p:RWImGuiPluginDir=&quot;.../rwimgui/plugins&quot;. The normal DryCycle project does not require this bridge." />
     <Error Condition="!Exists('$(RWImGuiPluginDir)/rain-world-imgui-api.dll')" Text="rain-world-imgui-api.dll not found under $(RWImGuiPluginDir)." />
     <Error Condition="!Exists('$(RWImGuiPluginDir)/ImGui.NET.dll')" Text="RWImGUI modified ImGui.NET.dll not found under $(RWImGuiPluginDir). Do not substitute the NuGet version." />
