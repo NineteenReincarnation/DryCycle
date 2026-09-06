@@ -28,9 +28,6 @@ internal static class ObservatoryView
         float fullWidth = Math.Max(640f, display.X - 32f);
         float fullHeight = Math.Max(420f, display.Y - 32f);
 
-        // Full/Compact are size presets, not permanent locks. Apply the requested preset
-        // only on the frame after the toolbar button is pressed; after that the user owns
-        // window position and size through normal Dear ImGui dragging/resizing.
         if (modeLayoutPending)
         {
             ImGui.SetNextWindowPos(fullMode ? new Num.Vector2(16f, 16f) : new Num.Vector2(24f, 24f), ImGuiCond.Always);
@@ -41,8 +38,6 @@ internal static class ObservatoryView
         }
         else if (!fullMode)
         {
-            // Initial startup remains a compact window. FirstUseEver does not fight later
-            // manual resizing or movement.
             ImGui.SetNextWindowPos(new Num.Vector2(24f, 24f), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Num.Vector2(compactWidth, compactHeight), ImGuiCond.FirstUseEver);
         }
@@ -95,6 +90,25 @@ internal static class ObservatoryView
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.Step));
 
         ImGui.SameLine();
+        if (ImGui.Button(L(snapshot, "-1s", "-1秒")))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.SeekTicks(-40));
+
+        ImGui.SameLine();
+        if (ImGui.Button(L(snapshot, "+1s", "+1秒")))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.SeekTicks(40));
+
+        ImGui.SameLine();
+        if (snapshot.ViewMode == AIDebugViewMode.Historical)
+        {
+            if (ImGui.Button(L(snapshot, "Return Live", "返回实时")))
+                AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ReturnLive));
+        }
+        else
+        {
+            ImGui.TextDisabled("LIVE");
+        }
+
+        ImGui.SameLine();
         if (ImGui.Button(L(snapshot, "Refresh", "刷新")))
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.Refresh));
 
@@ -103,21 +117,22 @@ internal static class ObservatoryView
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ExportSession));
 
         ImGui.SameLine();
-        // Keep the default-English UI entirely inside the Latin atlas. Once switched to
-        // Chinese, the bridge pushes RWImGUI's CJK-capable merged font for the whole frame.
         if (ImGui.Button(snapshot.Language == AIDebugLanguage.Chinese ? "English" : "Chinese"))
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleLanguage));
 
         ImGui.SameLine();
-        ImGui.TextDisabled($"tick {snapshot.Tick} · {snapshot.Status} · F7");
+        string cursor = snapshot.ViewMode == AIDebugViewMode.Historical
+            ? $"HIST {snapshot.CursorTick} ({(snapshot.CursorTick - snapshot.Tick) / 40f:0.0}s)"
+            : $"tick {snapshot.Tick}";
+        ImGui.TextDisabled($"{cursor} · {snapshot.Status} · F7");
     }
 
     private static void DrawEntityBrowser(AIDebugPresentationSnapshot snapshot)
     {
         ImGui.Text(L(snapshot, "Entity Browser", "实体浏览器"));
         ImGui.TextDisabled(L(snapshot,
-            "Click a creature to inspect its captured AI state.",
-            "点击生物以查看主线程捕获的 AI 状态。"));
+            "Click a creature to inspect its recorded AI state.",
+            "点击生物以查看已记录的 AI 状态。"));
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText(L(snapshot, "Filter", "筛选") + "##AIEntityFilter", ref entityFilter, 96);
         ImGui.Separator();
@@ -166,12 +181,14 @@ internal static class ObservatoryView
             ImGui.Text(L(snapshot, "Inspector", "检查器"));
             ImGui.Separator();
             ImGui.TextDisabled(L(snapshot,
-                "Select a creature from the Entity Browser.",
-                "从左侧实体浏览器选择一个生物。"));
+                snapshot.ViewMode == AIDebugViewMode.Historical
+                    ? "No rich snapshot exists at or before this cursor position."
+                    : "Select a creature from the Entity Browser.",
+                snapshot.ViewMode == AIDebugViewMode.Historical
+                    ? "当前游标之前没有可用的完整快照。"
+                    : "从左侧实体浏览器选择一个生物。"));
             ImGui.Spacing();
-            ImGui.TextDisabled(L(snapshot,
-                "This frontend reads immutable snapshots; it does not re-run AI decisions from the Present callback.",
-                "此前端只读取不可变快照；不会在 Present 回调中重新运行 AI 决策。"));
+            DrawRecorderCursor(snapshot);
             return;
         }
 
@@ -183,7 +200,13 @@ internal static class ObservatoryView
             ImGui.SameLine();
             ImGui.TextDisabled(L(snapshot, "PAUSED", "已暂停"));
         }
+        if (snapshot.ViewMode == AIDebugViewMode.Historical)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled(L(snapshot, "HISTORICAL", "历史"));
+        }
 
+        DrawRecorderCursor(snapshot);
         ImGui.TextDisabled(L(snapshot, "Control Owner", "控制器") + ": " + selected.ControlOwner);
         ImGui.Separator();
 
@@ -254,7 +277,39 @@ internal static class ObservatoryView
         if (ImGui.Button(L(snapshot, "Clear selection", "取消选择")))
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ClearSelection));
         ImGui.SameLine();
-        ImGui.TextDisabled("RWImGUI · AddAlwaysCallback · snapshot/command-queue frontend");
+        ImGui.TextDisabled("RWImGUI · V5 recorder/resolver presentation");
+    }
+
+    private static void DrawRecorderCursor(AIDebugPresentationSnapshot snapshot)
+    {
+        if (!snapshot.CursorMotion.HasValue && !snapshot.CursorFastState.HasValue) return;
+
+        if (!ImGui.CollapsingHeader(L(snapshot, "Recorder Cursor", "记录游标"), ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        ImGui.TextDisabled($"tick {snapshot.CursorTick}");
+        if (snapshot.CursorMotion.HasValue)
+        {
+            double speed = Math.Sqrt(
+                snapshot.CursorMotion.VX * snapshot.CursorMotion.VX +
+                snapshot.CursorMotion.VY * snapshot.CursorMotion.VY);
+            ImGui.Text($"{L(snapshot, "Position", "位置")}: ({snapshot.CursorMotion.X:0.0}, {snapshot.CursorMotion.Y:0.0})");
+            ImGui.Text($"{L(snapshot, "Velocity", "速度")}: ({snapshot.CursorMotion.VX:0.00}, {snapshot.CursorMotion.VY:0.00})  |v|={speed:0.00}");
+            if (snapshot.CursorMotion.AgeTicks > 0)
+                ImGui.TextDisabled($"motion age {snapshot.CursorMotion.AgeTicks} ticks");
+        }
+
+        if (snapshot.CursorFastState.HasValue)
+        {
+            AIDebugFastState state = snapshot.CursorFastState.State;
+            ImGui.Text($"{L(snapshot, "Room", "房间")}: {state.Room}   {L(snapshot, "State", "状态")}: {StateText(snapshot, state.EntityState)}");
+            ImGui.Text($"{L(snapshot, "Destination", "目标坐标")}: {state.DestinationRoom}:{state.DestinationX},{state.DestinationY} node {state.DestinationNode}");
+            if (state.ModeToken != AIDebugFastState.UnknownToken)
+                ImGui.Text($"{L(snapshot, "Mode token", "模式编号")}: {state.ModeToken}");
+            if (state.TargetNumber != AIDebugFastState.UnknownToken)
+                ImGui.Text($"{L(snapshot, "Target ID", "目标ID")}: {state.TargetSpawner}:{state.TargetNumber}");
+            ImGui.TextDisabled($"flags: {state.Flags} · state age {snapshot.CursorFastState.AgeTicks} ticks");
+        }
     }
 
     private static bool Matches(AIDebugPresentationEntity entity)

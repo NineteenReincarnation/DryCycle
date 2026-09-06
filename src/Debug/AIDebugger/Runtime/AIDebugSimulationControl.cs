@@ -149,9 +149,12 @@ internal static class AIDebugSimulationControl
         orig(self);
 
         // RainWorldGame.clock increments exactly when the normal simulation branch runs.
-        // This keeps the recorder on simulation time rather than MonoBehaviour/Present
-        // frames, and naturally ignores native paused updates while preserving Step 1 Tick.
+        // Both fast and rich recorders therefore share one simulation-tick coordinator.
+        // Presentation never owns capture timing and Pause does not fabricate samples.
         if (self.clock != beforeClock)
+        {
             AIDebugRecorder.OnSimulationTick(self);
+            AIDebugRichRecorder.OnSimulationTick(self);
+        }
     }
 }

@@ -28,7 +28,7 @@ internal static class AIDebuggerRuntime
         bool bridgeAssemblyLoaded = IsAssemblyLoaded(BridgeAssemblyName);
         bool rwimguiAssemblyLoaded = IsAssemblyLoaded(RWImGuiAssemblyName);
         logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}, " +
-                        $"presentation=RWImGUI, bridgeAssemblyLoaded={bridgeAssemblyLoaded}, rwimguiApiLoaded={rwimguiAssemblyLoaded}.");
+                        $"presentation=RWIMGUI, bridgeAssemblyLoaded={bridgeAssemblyLoaded}, rwimguiApiLoaded={rwimguiAssemblyLoaded}.");
 
         if (!rwimguiAssemblyLoaded)
         {
@@ -61,8 +61,6 @@ internal static class AIDebuggerRuntime
         };
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
 
-        // No Camera or DryCycle-owned ImGui renderer is created. RWImGUI owns Win32/DX11
-        // presentation; this object only captures/publishes simulation state.
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
@@ -73,6 +71,7 @@ internal static class AIDebuggerRuntime
     internal static void Uninstall()
     {
         AIDebugSettings.Save();
+        AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugSimulationControl.Uninstall();
@@ -113,6 +112,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private bool hasSelection;
     private bool presentationDirty = true;
     private DebugEntityKey selectedKey;
+    private AIDebugViewMode viewMode = AIDebugViewMode.Live;
+    private int cursorTick;
     private int nextEntityRefreshFrame;
     private float nextPresentationTime;
 
@@ -148,6 +149,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             AIDebugRegistry.BindGame(game);
             AIDebugSimulationControl.Bind(game);
+            if (viewMode == AIDebugViewMode.Live) cursorTick = game.clock;
         }
 
         DrainUiCommands(game);
@@ -173,7 +175,6 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             }
         }
 
-        // Whole-session export remains available even when the frontend is hidden.
         if (Input.GetKeyDown(KeyCode.F8) &&
             (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
             (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
@@ -208,14 +209,28 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.SelectEntity:
                     selectedKey = command.Key;
                     hasSelection = true;
-                    if (game != null && !AIDebugRecorder.Select(game, command.Key))
-                        logger?.LogWarning("DryCycle AI Observatory recorder could not bind selected entity " + command.Key + ".");
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? 0;
+                    if (game != null)
+                    {
+                        if (!AIDebugRecorder.Select(game, command.Key))
+                        {
+                            logger?.LogWarning("DryCycle AI Observatory recorder could not bind selected entity " + command.Key + ".");
+                        }
+                        else
+                        {
+                            AIDebugRichRecorder.Select(game, command.Key);
+                        }
+                    }
                     presentationDirty = true;
                     break;
 
                 case AIDebugUiCommandKind.ClearSelection:
                     hasSelection = false;
                     selectedKey = default;
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? 0;
+                    AIDebugRichRecorder.ClearSelection();
                     AIDebugRecorder.ClearSelection();
                     presentationDirty = true;
                     break;
@@ -245,6 +260,25 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.Refresh:
                     nextEntityRefreshFrame = 0;
                     nextPresentationTime = 0f;
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.SeekCursorTicks:
+                    if (game != null && hasSelection)
+                    {
+                        if (viewMode == AIDebugViewMode.Live) cursorTick = game.clock;
+                        long desired = (long)cursorTick + command.IntValue;
+                        if (desired < 0L) desired = 0L;
+                        if (desired > game.clock) desired = game.clock;
+                        cursorTick = (int)desired;
+                        viewMode = cursorTick >= game.clock ? AIDebugViewMode.Live : AIDebugViewMode.Historical;
+                        presentationDirty = true;
+                    }
+                    break;
+
+                case AIDebugUiCommandKind.ReturnLive:
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? cursorTick;
                     presentationDirty = true;
                     break;
             }
@@ -303,18 +337,23 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 visibleRooms.Contains(creature.pos.room));
         }
 
+        int viewTick = viewMode == AIDebugViewMode.Historical ? Math.Min(cursorTick, game.clock) : game.clock;
+        if (viewMode == AIDebugViewMode.Live) cursorTick = viewTick;
+
         AIDebugPresentationCreature selectedPresentation = null;
+        AIDebugResolvedMotion cursorMotion = default;
+        AIDebugResolvedFastState cursorFastState = default;
         if (hasSelection)
         {
-            AbstractCreature selected = AIDebugRegistry.Resolve(game, selectedKey);
-            if (selected != null)
-            {
-                // Transitional frontend path. V5's next migration step will resolve the
-                // Inspector from recorder data so Presentation no longer performs this
-                // second Capture. Keeping it here for now preserves all current UI fields.
-                AIDebugSnapshot captured = AIDebugRegistry.Capture(selected, game);
-                selectedPresentation = CopySnapshot(captured);
-            }
+            AIDebugRecorderReadApi.TryResolveMotion(selectedKey, viewTick, out cursorMotion);
+            AIDebugRecorderReadApi.TryResolveFastState(selectedKey, viewTick, out cursorFastState);
+
+            AIDebugResolvedSnapshot resolvedRich;
+            bool hasRich = viewMode == AIDebugViewMode.Historical
+                ? AIDebugRichRecorder.TryResolve(viewTick, out resolvedRich)
+                : AIDebugRichRecorder.TryGetLatest(out resolvedRich);
+            if (hasRich && resolvedRich.HasValue)
+                selectedPresentation = CopySnapshot(resolvedRich.Snapshot, resolvedRich.AgeTicks);
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
@@ -331,7 +370,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugLocalization.Language,
             presentationEntities,
             selectedPresentation,
-            recorderStatus));
+            recorderStatus,
+            viewMode,
+            viewTick,
+            cursorMotion,
+            cursorFastState));
     }
 
     private void PublishHidden(RainWorldGame game)
@@ -344,11 +387,13 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugLocalization.Language,
             Array.Empty<AIDebugPresentationEntity>(),
             null,
-            string.Empty));
+            string.Empty,
+            viewMode,
+            cursorTick));
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
-    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source)
+    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source, int snapshotAgeTicks = 0)
     {
         if (source == null) return null;
 
@@ -364,7 +409,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     value.LabelKey,
                     value.RawName,
                     value.Value,
-                    value.AgeTicks,
+                    value.AgeTicks + snapshotAgeTicks,
                     value.Source);
             }
             sections[s] = new AIDebugPresentationSection(section.TitleKey, values);
@@ -407,6 +452,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private void OnDestroy()
     {
         AIDebugSettings.Save();
+        AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugPresentationHub.Reset();

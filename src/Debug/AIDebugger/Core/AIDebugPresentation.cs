@@ -4,6 +4,12 @@ using System.Threading;
 
 namespace DryCycle.Debugging.AI;
 
+internal enum AIDebugViewMode
+{
+    Live,
+    Historical
+}
+
 // Thread boundary between Rain World's Unity/main-thread AI capture and the RWImGUI
 // Present callback. Everything published here is detached from live Rain World / Unity
 // objects. The frontend may read it from the render/present thread without touching the
@@ -18,7 +24,11 @@ internal sealed class AIDebugPresentationSnapshot
         AIDebugLanguage.English,
         Array.Empty<AIDebugPresentationEntity>(),
         null,
-        "AI Observatory is waiting for RainWorldGame.");
+        "AI Observatory is waiting for RainWorldGame.",
+        AIDebugViewMode.Live,
+        0,
+        default,
+        default);
 
     internal readonly bool Visible;
     internal readonly bool HasGame;
@@ -28,6 +38,10 @@ internal sealed class AIDebugPresentationSnapshot
     internal readonly AIDebugPresentationEntity[] Entities;
     internal readonly AIDebugPresentationCreature Selected;
     internal readonly string Status;
+    internal readonly AIDebugViewMode ViewMode;
+    internal readonly int CursorTick;
+    internal readonly AIDebugResolvedMotion CursorMotion;
+    internal readonly AIDebugResolvedFastState CursorFastState;
 
     internal AIDebugPresentationSnapshot(
         bool visible,
@@ -37,7 +51,11 @@ internal sealed class AIDebugPresentationSnapshot
         AIDebugLanguage language,
         AIDebugPresentationEntity[] entities,
         AIDebugPresentationCreature selected,
-        string status)
+        string status,
+        AIDebugViewMode viewMode = AIDebugViewMode.Live,
+        int cursorTick = 0,
+        AIDebugResolvedMotion cursorMotion = default,
+        AIDebugResolvedFastState cursorFastState = default)
     {
         Visible = visible;
         HasGame = hasGame;
@@ -47,6 +65,10 @@ internal sealed class AIDebugPresentationSnapshot
         Entities = entities ?? Array.Empty<AIDebugPresentationEntity>();
         Selected = selected;
         Status = status ?? string.Empty;
+        ViewMode = viewMode;
+        CursorTick = cursorTick;
+        CursorMotion = cursorMotion;
+        CursorFastState = cursorFastState;
     }
 }
 
@@ -158,25 +180,32 @@ internal enum AIDebugUiCommandKind
     Step,
     ExportSession,
     ToggleLanguage,
-    Refresh
+    Refresh,
+    SeekCursorTicks,
+    ReturnLive
 }
 
 internal readonly struct AIDebugUiCommand
 {
     internal readonly AIDebugUiCommandKind Kind;
     internal readonly DebugEntityKey Key;
+    internal readonly int IntValue;
 
-    private AIDebugUiCommand(AIDebugUiCommandKind kind, DebugEntityKey key)
+    private AIDebugUiCommand(AIDebugUiCommandKind kind, DebugEntityKey key, int intValue)
     {
         Kind = kind;
         Key = key;
+        IntValue = intValue;
     }
 
     internal static AIDebugUiCommand Select(DebugEntityKey key) =>
-        new(AIDebugUiCommandKind.SelectEntity, key);
+        new(AIDebugUiCommandKind.SelectEntity, key, 0);
+
+    internal static AIDebugUiCommand SeekTicks(int deltaTicks) =>
+        new(AIDebugUiCommandKind.SeekCursorTicks, default, deltaTicks);
 
     internal static AIDebugUiCommand Simple(AIDebugUiCommandKind kind) =>
-        new(kind, default);
+        new(kind, default, 0);
 }
 
 internal static class AIDebugPresentationHub
