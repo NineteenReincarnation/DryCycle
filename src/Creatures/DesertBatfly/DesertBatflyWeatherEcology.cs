@@ -54,6 +54,11 @@ internal readonly struct DesertBatflyWeatherEcologySample
 /// </summary>
 internal static class DesertBatflyWeatherEcology
 {
+    // Bats should not evacuate at the start of a half-cycle merely because the scheduler
+    // already knows a disaster exists later. Three minutes is enough to evaluate a route,
+    // stagger departure and still preserve the idea of a near-term observable forecast.
+    private const int ForecastPlanningHorizonTicks = 7200;
+
     private readonly struct Profile
     {
         internal readonly float Immediate, Shelter, Migration, Travel;
@@ -119,8 +124,10 @@ internal static class DesertBatflyWeatherEcology
                 }
             }
 
-            // Forecast only hazards that materially require shelter. It does not feed
-            // MigrationStress until EventEnvelope becomes non-zero in this room.
+            // Forecast only hazards that materially require shelter. Forecasts may raise
+            // shelter urgency, but never MigrationStress: permanent migration still needs
+            // weather that actually happened in this room. The bounded planning horizon
+            // prevents animals from reacting to schedule information far in the future.
             if (profile.Shelter >= 0.50f)
             {
                 long start = EffectStart(scheduled);
@@ -128,11 +135,14 @@ internal static class DesertBatflyWeatherEcology
                 {
                     long delta = start - phaseTicks;
                     int ticks = delta >= int.MaxValue ? int.MaxValue : (int)delta;
-                    if (ticks < nearestDanger)
+                    if (ticks <= ForecastPlanningHorizonTicks && ticks < nearestDanger)
                     {
                         nearestDanger = ticks;
-                        if (hazardPriority < 0f)
+                        shelter = Mathf.Max(shelter, profile.Shelter);
+                        float forecastPriority = profile.Shelter + profile.Travel * 0.5f;
+                        if (hazardPriority < 0f || forecastPriority > hazardPriority)
                         {
+                            hazardPriority = forecastPriority;
                             hazardId = scheduled.Candidate.Id;
                             hazardKind = scheduled.Candidate.Kind;
                         }
