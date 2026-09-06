@@ -39,5 +39,6 @@ internal static partial class Program
     {
         RunTask09();
         RunTask10();
+        RunTask10Guards();
     }
 }
