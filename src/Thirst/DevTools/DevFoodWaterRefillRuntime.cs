@@ -1,7 +1,7 @@
 using DryCycle.HUD;
 using UnityEngine;
 
-namespace DryCycle.Thirst.DevTools;
+namespace DryCycle.Thirst;
 
 /// <summary>
 /// Extends Rain World's existing DevTools Q refill with one independent hydration pip.
