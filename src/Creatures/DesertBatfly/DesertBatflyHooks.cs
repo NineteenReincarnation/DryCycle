@@ -65,16 +65,25 @@ internal static class DesertBatflyHooks
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         orig(self);
-        // RainWorld.Awake has built CreatureUnlockList by this point, and optional
-        // Warp assemblies are already loaded. Keep both integrations soft.
         DesertBatflySandbox.Enable();
         DesertBatflyWarpCompatibility.Enable();
     }
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)
     {
-        if (self is DesertBatfly) DesertSwarmRoom.For(room).Hive.AddFly(self);
-        else orig(self, room);
+        if (self is DesertBatfly desert)
+        {
+            if (room?.world != null)
+            {
+                DesertBatflyColonyRuntime.EnsureWorld(room.world);
+                DesertBatflyColonyRuntime.EnsureIndividualOwnership(desert.abstractCreature);
+            }
+            DesertSwarmRoom.For(room).Hive.AddFly(self);
+        }
+        else
+        {
+            orig(self, room);
+        }
     }
 
     private static void Burrow(On.Fly.orig_Burrowed orig, Fly self)
@@ -122,7 +131,7 @@ internal static class DesertBatflyHooks
             (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
         {
             suspended.DesertAI.Update();
-            TraceTravel(suspended);
+            DesertBatflyDebugTrace.Sample(suspended);
             return;
         }
 
@@ -132,34 +141,12 @@ internal static class DesertBatflyHooks
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
             desert.DesertAI.CancelAttack();
-            TraceTravel(desert);
+            DesertBatflyDebugTrace.Sample(desert);
             return;
         }
 
         desert.DesertAI.Update();
-        TraceTravel(desert);
-    }
-
-    private static void TraceTravel(DesertBatfly bat)
-    {
-        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
-        bool active = DesertBatflyTravelNavigation.TryGetDebugState(
-            bat.abstractCreature, out DesertBatflyTravelDebugState travel);
-        AIDebugTrace.RecordChange(
-            bat.abstractCreature,
-            AIDebugEventCategory.Path,
-            "Task09TravelPurpose",
-            active ? travel.Purpose.ToString() : "None");
-        AIDebugTrace.RecordChange(
-            bat.abstractCreature,
-            AIDebugEventCategory.Path,
-            "Task09TravelDestination",
-            active && !string.IsNullOrEmpty(travel.DestinationRoom) ? travel.DestinationRoom : "—");
-        AIDebugTrace.RecordChange(
-            bat.abstractCreature,
-            AIDebugEventCategory.Path,
-            "Task09TravelProgress",
-            active ? $"{travel.RouteIndex}/{Mathf.Max(0, travel.RouteRooms.Length - 1)} next={travel.NextRoom}" : "—");
+        DesertBatflyDebugTrace.Sample(desert);
     }
 
     private static bool RestrainedByNonFly(DesertBatfly fly)
@@ -207,6 +194,8 @@ internal static class DesertBatflyHooks
             return;
         }
 
+        // No committed cross-room refuge route: remain locally afraid rather than
+        // inventing an unplanned one-hop permanent move.
         self.afraid = Mathf.Max(self.afraid, 2f);
     }
 
