@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using BepInEx.Logging;
+using ImGuiNET;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
@@ -17,8 +18,12 @@ internal static class AIDebuggerRuntime
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
-        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}.");
+        // Load first so the install diagnostics report the actual persisted AutoOpen value.
         AIDebugSettings.Load(logger);
+        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}.");
+
+        // Input isolation and world stepping are optional subsystems. Their failure must
+        // never prevent the renderer/host from being installed.
         AIDebugInputGate.Install(logger);
         AIDebugSimulationControl.Install(logger);
         if (host != null)
@@ -38,12 +43,16 @@ internal static class AIDebuggerRuntime
         Camera camera = hostObject.AddComponent<Camera>();
         camera.enabled = AIDebugSettings.AutoOpen;
         camera.clearFlags = CameraClearFlags.Depth;
+        camera.backgroundColor = Color.clear;
         camera.cullingMask = 0;
         camera.depth = 10000f;
         camera.orthographic = true;
         camera.allowHDR = false;
         camera.allowMSAA = false;
         camera.useOcclusionCulling = false;
+        camera.rect = new Rect(0f, 0f, 1f, 1f);
+        camera.targetTexture = null;
+        logger?.LogInfo($"DryCycle AI Observatory overlay camera created. id={camera.GetInstanceID()}, enabled={camera.enabled}, depth={camera.depth}, cullingMask={camera.cullingMask}, rect={camera.rect}, targetTexture=null.");
 
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
@@ -73,6 +82,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private bool visible;
     private bool backendFailed;
     private bool lifecycleLogged;
+    private bool windowDrawLogged;
+    private bool postRenderLogged;
     private double overheadMs;
 
     internal bool Visible => visible;
@@ -86,6 +97,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         rainWorld = rw;
         logger = log;
         overlayCamera = GetComponent<Camera>();
+        logger?.LogInfo($"DryCycle AI Observatory host Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, camera={(overlayCamera != null ? overlayCamera.GetInstanceID().ToString() : "missing")}.");
     }
 
     internal void SetStartupVisible(bool value)
@@ -105,7 +117,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.F7))
         {
-            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visibleBefore={visible}, backendFailed={backendFailed}, backendCreated={backend != null}.");
+            bool cameraBefore = overlayCamera?.enabled == true;
+            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visibleBefore={visible}, cameraBefore={cameraBefore}, backendFailed={backendFailed}, backendCreated={backend != null}.");
             if (backendFailed)
             {
                 logger?.LogWarning("DryCycle AI Observatory is disabled for this session because its ImGui backend previously failed. Check the earlier error and restart Rain World after fixing the runtime files.");
@@ -118,7 +131,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
             if (overlayCamera != null) overlayCamera.enabled = visible;
-            logger?.LogInfo($"DryCycle AI Observatory visibility toggled by F7. visibleNow={visible}, cameraEnabled={overlayCamera?.enabled == true}.");
+            logger?.LogInfo($"DryCycle AI Observatory visibility toggled by F7. visibleNow={visible}, cameraEnabled={overlayCamera?.enabled == true} (was {cameraBefore}).");
         }
 
         // Whole-session export is intentionally independent of the Dock layout. It can
@@ -142,6 +155,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             backend.BeginFrame();
             AIDebugStyleController.Apply();
             RainWorldGame game = rainWorld?.processManager?.currentMainLoop as RainWorldGame;
+            if (!windowDrawLogged)
+            {
+                windowDrawLogged = true;
+                logger?.LogInfo($"DryCycle AI Observatory Window.Draw entered. game={(game != null ? "RainWorldGame" : "none/menu")}, fullMode={window.FullMode}.");
+            }
             window.Draw(game, overheadMs);
             backend.EndFrame();
         }
@@ -162,6 +180,13 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private void OnPostRender()
     {
         if (!visible || backend == null || backendFailed) return;
+        if (!postRenderLogged)
+        {
+            postRenderLogged = true;
+            Rect rect = overlayCamera != null ? overlayCamera.rect : default;
+            string target = overlayCamera?.targetTexture != null ? overlayCamera.targetTexture.name : "backbuffer";
+            logger?.LogInfo($"DryCycle AI Observatory first OnPostRender: cameraId={(overlayCamera != null ? overlayCamera.GetInstanceID() : 0)}, cameraEnabled={overlayCamera?.enabled == true}, active={gameObject.activeInHierarchy}, screen={Screen.width}x{Screen.height}, rect={rect}, target={target}, cullingMask={(overlayCamera != null ? overlayCamera.cullingMask : 0)}.");
+        }
         try
         {
             backend.Render();
@@ -180,11 +205,13 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             logger?.LogInfo("DryCycle AI Observatory backend initialization started.");
             AIDebugStyleController.Reset();
-            backend = new AIDebugImGuiBackend();
+            backend = new AIDebugImGuiBackend(logger);
             // The backend constructor creates and selects the ImGui context. Dear ImGui
             // requires DockingEnable before the first NewFrame(), so initialize immutable
             // context flags here, immediately after context creation and before BeginFrame.
             AIDebugStyleController.InitializeContext();
+            ImGuiIOPtr io = ImGui.GetIO();
+            logger?.LogInfo($"DryCycle AI Observatory context flags configured before first NewFrame: ConfigFlags={io.ConfigFlags}, BackendFlags={io.BackendFlags}.");
             logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, Ctrl+Shift+F8 session export, whole-world pause/step enabled.");
             return true;
         }
@@ -215,21 +242,39 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         AIDebugTrace.SetVisible(false);
         if (overlayCamera != null) overlayCamera.enabled = false;
         logger?.LogError($"DryCycle AI Observatory {phase} failed: {error}");
-        backend?.Dispose();
-        backend = null;
-        AIDebugStyleController.Reset();
+        try
+        {
+            backend?.Dispose();
+        }
+        catch (Exception disposeError)
+        {
+            logger?.LogWarning("DryCycle AI Observatory backend dispose after failure also failed: " + disposeError);
+        }
+        finally
+        {
+            backend = null;
+            AIDebugStyleController.Reset();
+        }
     }
 
     private void OnDestroy()
     {
         try
         {
-            if (backend != null) AIDebugDockingNative.SaveLayout();
+            if (backend != null)
+            {
+                backend.MakeCurrent();
+                AIDebugDockingNative.SaveLayout();
+            }
         }
-        catch { }
+        catch (Exception error)
+        {
+            logger?.LogWarning("DryCycle AI Observatory layout save during shutdown failed: " + error.Message);
+        }
         AIDebugSettings.Save();
         AIDebugTrace.Reset();
-        backend?.Dispose();
+        try { backend?.Dispose(); }
+        catch (Exception error) { logger?.LogWarning("DryCycle AI Observatory backend dispose during shutdown failed: " + error.Message); }
         backend = null;
         AIDebugStyleController.Reset();
     }
