@@ -54,9 +54,18 @@ internal static class AIDebugRichRecorder
         selectedKey = key;
         selectedHandle = AIDebugRegistry.Resolve(game, key);
         hasSelection = selectedHandle != null;
-        nextCaptureTick = game.clock;
+        nextCaptureTick = game.clock + SnapshotIntervalTicks;
         lastFastStateTick = int.MinValue;
         ClearEntries();
+
+        // Selection is already a main-thread user action, so capture one compatibility
+        // snapshot immediately. The Inspector never needs to fall back to a second live
+        // capture while waiting for the next simulation tick.
+        if (selectedHandle != null)
+        {
+            AIDebugSnapshot snapshot = AIDebugRegistry.Capture(selectedHandle, game);
+            if (snapshot != null) Append(game.clock, snapshot);
+        }
     }
 
     internal static void ClearSelection()
