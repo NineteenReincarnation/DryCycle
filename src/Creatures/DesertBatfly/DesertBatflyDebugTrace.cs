@@ -21,9 +21,12 @@ internal static class DesertBatflyDebugTrace
 
         bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
             bat.abstractCreature, out DesertBatflyTravelDebugState travel);
+        bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
+            bat, out DesertBatflySocialDebugState social) &&
+            social.Mode != DesertBatflySocialMode.None;
         string suppression = Suppression(bat, hasTravel, travel);
-        string modeReason = ModeReason(bat, suppression, hasTravel, travel);
-        string controlOwner = ControlOwner(bat, suppression, hasTravel, travel);
+        string modeReason = ModeReason(bat, suppression, hasTravel, travel, hasSocial, social);
+        string controlOwner = ControlOwner(bat, suppression, hasTravel, travel, hasSocial, social);
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "Mode", bat.DesertAI.Mode, modeReason);
@@ -113,7 +116,9 @@ internal static class DesertBatflyDebugTrace
         DesertBatfly bat,
         string suppression,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel)
+        in DesertBatflyTravelDebugState travel,
+        bool hasSocial,
+        in DesertBatflySocialDebugState social)
     {
         switch (suppression)
         {
@@ -132,6 +137,9 @@ internal static class DesertBatflyDebugTrace
             case "Roost": return "roost / fly chain owns movement";
         }
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
+        if (hasSocial) return string.IsNullOrEmpty(social.DecisionReason)
+            ? "Task 10 neutral social interaction"
+            : social.DecisionReason;
         return "DesertBatflyAI state machine";
     }
 
@@ -165,7 +173,9 @@ internal static class DesertBatflyDebugTrace
         DesertBatfly bat,
         string suppression,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel)
+        in DesertBatflyTravelDebugState travel,
+        bool hasSocial,
+        in DesertBatflySocialDebugState social)
     {
         switch (suppression)
         {
@@ -182,7 +192,9 @@ internal static class DesertBatflyDebugTrace
             case "Grief": return "Grief";
             case "Vengeance": return "Vengeance";
             case "Roost": return "Roost / Chain";
-            default: return "DesertBatflyAI";
+            default:
+                if (hasSocial) return "Task 10 Social / " + social.Mode;
+                return "DesertBatflyAI";
         }
     }
 
