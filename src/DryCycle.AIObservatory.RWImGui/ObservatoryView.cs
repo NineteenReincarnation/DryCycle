@@ -12,6 +12,7 @@ internal static class ObservatoryView
 {
     private static string entityFilter = string.Empty;
     private static bool fullMode;
+    private static bool modeLayoutPending;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
@@ -22,25 +23,32 @@ internal static class ObservatoryView
         if (display.X < 1f) display.X = 1280f;
         if (display.Y < 1f) display.Y = 720f;
 
-        float width = fullMode ? Math.Max(640f, display.X - 32f) : Math.Min(930f, Math.Max(700f, display.X - 48f));
-        float height = fullMode ? Math.Max(420f, display.Y - 32f) : Math.Min(620f, Math.Max(460f, display.Y - 70f));
+        float compactWidth = Math.Min(930f, Math.Max(700f, display.X - 48f));
+        float compactHeight = Math.Min(620f, Math.Max(460f, display.Y - 70f));
+        float fullWidth = Math.Max(640f, display.X - 32f);
+        float fullHeight = Math.Max(420f, display.Y - 32f);
 
-        if (fullMode)
+        // Full/Compact are size presets, not permanent locks. Apply the requested preset
+        // only on the frame after the toolbar button is pressed; after that the user owns
+        // window position and size through normal Dear ImGui dragging/resizing.
+        if (modeLayoutPending)
         {
-            ImGui.SetNextWindowPos(new Num.Vector2(16f, 16f), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Always);
+            ImGui.SetNextWindowPos(fullMode ? new Num.Vector2(16f, 16f) : new Num.Vector2(24f, 24f), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(
+                fullMode ? new Num.Vector2(fullWidth, fullHeight) : new Num.Vector2(compactWidth, compactHeight),
+                ImGuiCond.Always);
+            modeLayoutPending = false;
         }
-        else
+        else if (!fullMode)
         {
+            // Initial startup remains a compact window. FirstUseEver does not fight later
+            // manual resizing or movement.
             ImGui.SetNextWindowPos(new Num.Vector2(24f, 24f), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Num.Vector2(compactWidth, compactHeight), ImGuiCond.FirstUseEver);
         }
 
         ImGui.SetNextWindowBgAlpha(0.96f);
-        if (!ImGui.Begin("DryCycle AI Observatory###DryCycleAIObservatory",
-                fullMode
-                    ? ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove
-                    : ImGuiWindowFlags.NoCollapse))
+        if (!ImGui.Begin("DryCycle AI Observatory###DryCycleAIObservatory", ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
             return;
@@ -73,7 +81,10 @@ internal static class ObservatoryView
     private static void DrawToolbar(AIDebugPresentationSnapshot snapshot)
     {
         if (ImGui.Button(fullMode ? L(snapshot, "Compact", "紧凑") : L(snapshot, "Full", "完整")))
+        {
             fullMode = !fullMode;
+            modeLayoutPending = true;
+        }
 
         ImGui.SameLine();
         if (ImGui.Button(snapshot.Paused ? L(snapshot, "Resume", "继续") : L(snapshot, "Pause", "暂停")))
