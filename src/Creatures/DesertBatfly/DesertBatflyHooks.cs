@@ -11,6 +11,7 @@ internal static class DesertBatflyHooks
         if (enabled) return;
         enabled = true;
         DesertBatflyIntimidation.Reset();
+        DesertBatflyColonyRuntime.Enable();
         On.Fly.ReportToFliesRoomAI += Report;
         On.Fly.Burrowed += Burrow;
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
@@ -19,6 +20,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.FlyAI.FleeFromRainUpdate += Rain;
+        On.Creature.Die += CreatureDie;
         On.LizardTongue.Update += TongueUpdate;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
@@ -37,10 +39,12 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.FlyAI.FleeFromRainUpdate -= Rain;
+        On.Creature.Die -= CreatureDie;
         On.LizardTongue.Update -= TongueUpdate;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyColonyRuntime.Disable();
         DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
@@ -117,7 +121,20 @@ internal static class DesertBatflyHooks
         // must keep running the normal FlyAI chain update. Treat only non-Fly grabs
         // (player/predator/etc.) as an AI suspension.
         orig(self);
-        if (self.fly is DesertBatfly desert) desert.DesertAI.Update();
+        if (self.fly is not DesertBatfly desert) return;
+
+        // Task 09 owns only the cross-room destination. Immediate danger and severe
+        // injury cause TryDriveRealized to yield, after which DesertBatflyAI handles
+        // Escape / InjuryRecovery normally. When travel is active, LeaveRoom uses the
+        // native FlyAI/AImap/shortcut path and ordinary harass/roost logic must not
+        // overwrite that room exit intent in the same tick.
+        if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+        {
+            desert.DesertAI.CancelAttack();
+            return;
+        }
+
+        desert.DesertAI.Update();
     }
 
     private static bool RestrainedByNonFly(DesertBatfly fly)
@@ -151,27 +168,27 @@ internal static class DesertBatflyHooks
 
     private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly || self.room.hives.Length > 0)
+        if (self.fly is not DesertBatfly desert)
         {
             orig(self);
             return;
         }
 
-        // Never ask the ordinary world swarm manager to route a desert colony.
-        // Prefer a connected desert room; otherwise use a real mapped exit.
-        self.afraid = 2f;
-        int chosen = -1;
-        for (int i = 0; i < self.room.abstractRoom.connections.Length; i++)
+        // A Task 09 refuge/return route always wins over the old one-hop desert-room
+        // fallback. The navigator only calls FlyAI.LeaveRoom and never controls velocity.
+        if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+            return;
+
+        if (self.room.hives.Length > 0)
         {
-            int connected = self.room.abstractRoom.connections[i];
-            if (connected < 0) continue;
-            int mapped = self.room.abstractRoom.CommonToCreatureSpecificNodeIndex(i, self.Template);
-            if (mapped < 0) continue;
-            chosen = mapped;
-            if (DesertSwarmRoom.IsDesertSwarmRoom(self.room.world.GetAbstractRoom(connected))) break;
+            orig(self);
+            return;
         }
-        self.followingDijkstraMap = self.leaveRoomDijkstra = chosen;
-        if (chosen >= 0) self.localGoal = self.ProgressLocalGoalAlongDijkstraMap(self.localGoal, chosen);
+
+        // No reachable Refuge is currently committed. Do not make a random permanent
+        // move merely because rain/danger exists; remain locally afraid and allow the
+        // next low-frequency weather evaluation to pick a survivable Refuge route.
+        self.afraid = Mathf.Max(self.afraid, 2f);
     }
 
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
@@ -185,6 +202,27 @@ internal static class DesertBatflyHooks
         }
         if (self.followingDijkstraMap < 0)
             self.followingDijkstraMap = self.room.exitAndDenIndex.Length + UnityEngine.Random.Range(0, self.room.hives.Length);
+    }
+
+    private static void CreatureDie(On.Creature.orig_Die orig, Creature self)
+    {
+        bool wasDead = self?.dead ?? true;
+        Creature likelyPredator = null;
+        if (!wasDead && self is DesertBatfly batBefore && batBefore.grabbedBy != null)
+        {
+            for (int i = 0; i < batBefore.grabbedBy.Count; i++)
+            {
+                Creature grabber = batBefore.grabbedBy[i]?.grabber;
+                if (grabber == null || grabber is Fly) continue;
+                likelyPredator = grabber;
+                if (grabber is Lizard) break;
+            }
+        }
+
+        orig(self);
+
+        if (!wasDead && self is DesertBatfly bat && bat.dead)
+            DesertBatflyColonyRuntime.ReportDeath(bat, likelyPredator);
     }
 
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
