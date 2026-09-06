@@ -125,25 +125,17 @@ internal sealed class DesertSwarmRoom
     }
 }
 
-// Value-only room snapshot.  It is now a general flock/environment snapshot,
-// not a social-role budget.  It deliberately never reads DesertBatfly.Roles.
+// Value-only room snapshot for ordinary flock/environment state.
 internal readonly struct DesertBatflyFlockSnapshot
 {
     internal readonly Vector2 Center, AverageVelocity;
     internal readonly int ActiveCount;
     internal readonly float PanicRatio, PreviousPanicRatio, RoostRatio;
 
-    // Temporary source-compatibility surface for the existing AI Observatory.
-    // Social roles are rejected, so this value is permanently zero and Capture
-    // performs no role lookup.  Remove this member when the Observatory panel is
-    // migrated away from Task 02 terminology.
-    internal int ExpressedRoleCount => 0;
-
     internal DesertBatflyFlockSnapshot(
         Vector2 center,
         Vector2 velocity,
         int active,
-        int roles,
         float panic,
         float previousPanic,
         float roost)
@@ -181,7 +173,7 @@ internal readonly struct DesertBatflyFlockSnapshot
             center += (bat.mainBodyChunk.pos - center) / count;
             velocity += (bat.mainBodyChunk.vel - velocity) / count;
 
-            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.BlocksSocialRoles(bat))
+            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.HasActiveFearSuppression(bat))
                 panic++;
             if (bat.AI?.behavior == FlyAI.Behavior.Chain ||
                 bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
@@ -192,7 +184,6 @@ internal readonly struct DesertBatflyFlockSnapshot
             center,
             velocity,
             count,
-            0,
             count == 0 ? 0f : (float)panic / count,
             previousPanic,
             count == 0 ? 0f : (float)roost / count);
