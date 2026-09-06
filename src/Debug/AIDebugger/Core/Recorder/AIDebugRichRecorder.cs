@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace DryCycle.Debugging.AI;
 
@@ -8,29 +9,57 @@ internal readonly struct AIDebugResolvedSnapshot
     internal readonly int Tick;
     internal readonly int AgeTicks;
     internal readonly AIDebugSnapshot Snapshot;
+    internal readonly AIDebugUtilityRow[] Utilities;
+    internal readonly int UtilityCount;
+    internal readonly bool UtilityTruncated;
+    internal readonly AIDebugPerceptionRow[] Perception;
+    internal readonly int PerceptionCount;
+    internal readonly bool PerceptionTruncated;
+    internal readonly AIDebugPathState Path;
 
-    internal AIDebugResolvedSnapshot(bool hasValue, int tick, int ageTicks, AIDebugSnapshot snapshot)
+    internal AIDebugResolvedSnapshot(
+        bool hasValue,
+        int tick,
+        int ageTicks,
+        AIDebugSnapshot snapshot,
+        AIDebugUtilityRow[] utilities,
+        int utilityCount,
+        bool utilityTruncated,
+        AIDebugPerceptionRow[] perception,
+        int perceptionCount,
+        bool perceptionTruncated,
+        AIDebugPathState path)
     {
         HasValue = hasValue;
         Tick = tick;
         AgeTicks = ageTicks;
         Snapshot = snapshot;
+        Utilities = utilities;
+        UtilityCount = utilityCount;
+        UtilityTruncated = utilityTruncated;
+        Perception = perception;
+        PerceptionCount = perceptionCount;
+        PerceptionTruncated = perceptionTruncated;
+        Path = path;
     }
 }
 
 // Transitional V5 rich recorder. The old AIDebugSnapshot object model is still used as a
 // compatibility payload so the current Inspector loses no fields while Presentation is
-// migrated away from live re-capture. Capture happens only on Rain World's simulation
-// thread, at a bounded low frequency or on an observed fast-state transition.
-//
-// This class is intentionally isolated: the final V5 raw/schema provider can replace the
-// payload without changing the simulation-tick ownership or the Presentation read path.
+// migrated to schema/raw providers. Advanced Utility/Perception/Path data is captured in
+// the same simulation-thread cadence and retained inside fixed Entry buffers; no ToArray()
+// or per-snapshot row-array allocation occurs here.
 internal static class AIDebugRichRecorder
 {
     private const int SnapshotIntervalTicks = 8; // 5 Hz at Rain World's 40 Hz simulation.
     private const int SnapshotCapacity = 64;
+    private const int UtilityCapacity = 32;
+    private const int PerceptionCapacity = 96;
 
     private static readonly Entry[] Entries = new Entry[SnapshotCapacity];
+    private static readonly List<AIDebugUtilityRow> UtilityScratch = new(UtilityCapacity);
+    private static readonly List<AIDebugPerceptionRow> PerceptionScratch = new(PerceptionCapacity);
+
     private static RainWorldGame boundGame;
     private static DebugEntityKey selectedKey;
     private static AbstractCreature selectedHandle;
@@ -44,6 +73,26 @@ internal static class AIDebugRichRecorder
     {
         internal int Tick;
         internal AIDebugSnapshot Snapshot;
+        internal readonly AIDebugUtilityRow[] Utilities = new AIDebugUtilityRow[UtilityCapacity];
+        internal int UtilityCount;
+        internal bool UtilityTruncated;
+        internal readonly AIDebugPerceptionRow[] Perception = new AIDebugPerceptionRow[PerceptionCapacity];
+        internal int PerceptionCount;
+        internal bool PerceptionTruncated;
+        internal AIDebugPathState Path;
+
+        internal void Reset()
+        {
+            Tick = 0;
+            Snapshot = null;
+            if (UtilityCount > 0) Array.Clear(Utilities, 0, UtilityCount);
+            UtilityCount = 0;
+            UtilityTruncated = false;
+            if (PerceptionCount > 0) Array.Clear(Perception, 0, PerceptionCount);
+            PerceptionCount = 0;
+            PerceptionTruncated = false;
+            Path = default;
+        }
     }
 
     internal static void Select(RainWorldGame game, DebugEntityKey key)
@@ -59,13 +108,9 @@ internal static class AIDebugRichRecorder
         ClearEntries();
 
         // Selection is already a main-thread user action, so capture one compatibility
-        // snapshot immediately. The Inspector never needs to fall back to a second live
-        // capture while waiting for the next simulation tick.
+        // snapshot immediately. The Inspector never falls back to a second live capture.
         if (selectedHandle != null)
-        {
-            AIDebugSnapshot snapshot = AIDebugRegistry.Capture(selectedHandle, game);
-            if (snapshot != null) Append(game.clock, snapshot);
-        }
+            CaptureAndAppend(game.clock, selectedHandle, game);
     }
 
     internal static void ClearSelection()
@@ -81,6 +126,8 @@ internal static class AIDebugRichRecorder
     internal static void Reset()
     {
         ClearSelection();
+        UtilityScratch.Clear();
+        PerceptionScratch.Clear();
         boundGame = null;
     }
 
@@ -115,9 +162,7 @@ internal static class AIDebugRichRecorder
             return;
         }
 
-        AIDebugSnapshot snapshot = AIDebugRegistry.Capture(creature, game);
-        if (snapshot == null) return;
-        Append(tick, snapshot);
+        CaptureAndAppend(tick, creature, game);
     }
 
     internal static bool TryResolve(int cursorTick, out AIDebugResolvedSnapshot resolved)
@@ -129,7 +174,7 @@ internal static class AIDebugRichRecorder
         }
 
         int bestTick = int.MinValue;
-        AIDebugSnapshot best = null;
+        Entry best = null;
         for (int i = 0; i < count; i++)
         {
             int index = writeIndex - 1 - i;
@@ -138,7 +183,7 @@ internal static class AIDebugRichRecorder
             if (entry == null || entry.Snapshot == null || entry.Tick > cursorTick) continue;
             if (entry.Tick < bestTick) continue;
             bestTick = entry.Tick;
-            best = entry.Snapshot;
+            best = entry;
             if (bestTick == cursorTick) break;
         }
 
@@ -148,7 +193,7 @@ internal static class AIDebugRichRecorder
             return false;
         }
 
-        resolved = new AIDebugResolvedSnapshot(true, bestTick, Math.Max(0, cursorTick - bestTick), best);
+        resolved = ResolveEntry(best, cursorTick);
         return true;
     }
 
@@ -170,11 +215,46 @@ internal static class AIDebugRichRecorder
         }
 
         int cursorTick = boundGame?.clock ?? entry.Tick;
-        resolved = new AIDebugResolvedSnapshot(true, entry.Tick, Math.Max(0, cursorTick - entry.Tick), entry.Snapshot);
+        resolved = ResolveEntry(entry, cursorTick);
         return true;
     }
 
-    private static void Append(int tick, AIDebugSnapshot snapshot)
+    private static AIDebugResolvedSnapshot ResolveEntry(Entry entry, int cursorTick)
+    {
+        // References below never cross to RWImGUI directly. AIDebuggerHost immediately
+        // copies only [0..Count) into detached Presentation arrays on this same main thread.
+        return new AIDebugResolvedSnapshot(
+            true,
+            entry.Tick,
+            Math.Max(0, cursorTick - entry.Tick),
+            entry.Snapshot,
+            entry.Utilities,
+            entry.UtilityCount,
+            entry.UtilityTruncated,
+            entry.Perception,
+            entry.PerceptionCount,
+            entry.PerceptionTruncated,
+            entry.Path);
+    }
+
+    private static void CaptureAndAppend(int tick, AbstractCreature creature, RainWorldGame game)
+    {
+        AIDebugSnapshot snapshot = AIDebugRegistry.Capture(creature, game);
+        if (snapshot == null) return;
+
+        AIDebugAdvancedCapture.CaptureUtilities(creature, UtilityScratch);
+        // Keep tracker order while recording. Presentation is free to order a detached copy.
+        AIDebugAdvancedCapture.CapturePerception(creature, PerceptionScratch, sortByPriority: false);
+        AIDebugPathState path = AIDebugAdvancedCapture.CapturePath(creature);
+        Append(tick, snapshot, UtilityScratch, PerceptionScratch, path);
+    }
+
+    private static void Append(
+        int tick,
+        AIDebugSnapshot snapshot,
+        List<AIDebugUtilityRow> utilities,
+        List<AIDebugPerceptionRow> perception,
+        AIDebugPathState path)
     {
         Entry entry = Entries[writeIndex];
         if (entry == null)
@@ -182,9 +262,25 @@ internal static class AIDebugRichRecorder
             entry = new Entry();
             Entries[writeIndex] = entry;
         }
+        else
+        {
+            entry.Reset();
+        }
 
         entry.Tick = tick;
         entry.Snapshot = snapshot;
+        entry.Path = path;
+
+        int utilityCount = Math.Min(utilities.Count, UtilityCapacity);
+        for (int i = 0; i < utilityCount; i++) entry.Utilities[i] = utilities[i];
+        entry.UtilityCount = utilityCount;
+        entry.UtilityTruncated = utilities.Count > UtilityCapacity;
+
+        int perceptionCount = Math.Min(perception.Count, PerceptionCapacity);
+        for (int i = 0; i < perceptionCount; i++) entry.Perception[i] = perception[i];
+        entry.PerceptionCount = perceptionCount;
+        entry.PerceptionTruncated = perception.Count > PerceptionCapacity;
+
         writeIndex++;
         if (writeIndex >= SnapshotCapacity) writeIndex = 0;
         if (count < SnapshotCapacity) count++;
@@ -205,11 +301,7 @@ internal static class AIDebugRichRecorder
     private static void ClearEntries()
     {
         for (int i = 0; i < Entries.Length; i++)
-        {
-            if (Entries[i] == null) continue;
-            Entries[i].Tick = 0;
-            Entries[i].Snapshot = null;
-        }
+            Entries[i]?.Reset();
         writeIndex = 0;
         count = 0;
     }
