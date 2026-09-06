@@ -104,6 +104,11 @@ internal sealed class AIDebugPresentationSnapshot
     internal readonly int PinnedCount;
     internal readonly bool SelectedPinned;
     internal readonly AIDebugPresentationTrackedEntity[] Tracked;
+    internal readonly AIDebugRecorderMode RecorderMode;
+    internal readonly string WriterStatus;
+    internal readonly AIDebugAnomalyStatus Anomaly;
+    internal readonly AIDebugProfilerStatus Profiler;
+    internal readonly AIDebugBreakpointStatus Breakpoint;
 
     internal AIDebugPresentationSnapshot(
         bool visible,
@@ -118,7 +123,12 @@ internal sealed class AIDebugPresentationSnapshot
         int cursorTick = 0,
         AIDebugResolvedMotion cursorMotion = default,
         AIDebugResolvedFastState cursorFastState = default,
-        AIDebugPresentationTimeline timeline = null)
+        AIDebugPresentationTimeline timeline = null,
+        AIDebugRecorderMode recorderMode = AIDebugRecorderMode.Armed,
+        string writerStatus = null,
+        AIDebugAnomalyStatus anomaly = default,
+        AIDebugProfilerStatus profiler = default,
+        AIDebugBreakpointStatus breakpoint = default)
     {
         Visible = visible;
         HasGame = hasGame;
@@ -132,6 +142,11 @@ internal sealed class AIDebugPresentationSnapshot
         CursorTick = cursorTick;
         CursorMotion = cursorMotion;
         CursorFastState = cursorFastState;
+        RecorderMode = recorderMode;
+        WriterStatus = writerStatus ?? string.Empty;
+        Anomaly = anomaly;
+        Profiler = profiler;
+        Breakpoint = breakpoint;
 
         int effectiveCursor = cursorTick == 0 ? tick : cursorTick;
         int pinned = 0;
@@ -323,7 +338,11 @@ internal enum AIDebugUiCommandKind
     Refresh,
     SeekCursorTicks,
     SetCursorTick,
-    ReturnLive
+    ReturnLive,
+    ToggleRecording,
+    TriggerCapture,
+    ToggleProfiler,
+    ToggleBreakpoint
 }
 
 internal readonly struct AIDebugUiCommand
