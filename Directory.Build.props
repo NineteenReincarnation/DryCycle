@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    Task 02 social roles were rejected and physically removed from the repository.
+    SDK-style projects compile every *.cs under a project directory by default, so an
+    old locally retained copy can otherwise re-enter the build after a pull and produce
+    references to DesertBatflyAI.Roles / ExpressedSocialRole. Keep these historical
+    filenames excluded globally; the rejection guard lives in Program.RejectedTask02.cs.
+  -->
+  <ItemGroup>
+    <Compile Remove="**/DesertBatflySocialRoles.cs" />
+    <Compile Remove="**/DesertBatflyRoleScores.cs" />
+    <Compile Remove="**/Program.SocialRoles.cs" />
+  </ItemGroup>
+</Project>
