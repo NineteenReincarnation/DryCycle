@@ -12,10 +12,14 @@ internal static class ObservatoryView
     private static string entityFilter = string.Empty;
     private static bool fullMode;
     private static bool modeLayoutPending;
+    private static bool offlineOpen;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
         snapshot ??= AIDebugPresentationSnapshot.Empty;
+
+        if (offlineOpen)
+            ObservatoryOfflineViewer.DrawWindow(ref offlineOpen, snapshot.Language);
 
         ImGuiIOPtr io = ImGui.GetIO();
         Num.Vector2 display = io.DisplaySize;
@@ -126,8 +130,51 @@ internal static class ObservatoryView
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ExportSession));
 
         ImGui.SameLine();
+        if (ImGui.Button(L(snapshot, "Offline", "离线")))
+        {
+            offlineOpen = true;
+            AIDebugOfflineSessionStore.RefreshAsync();
+        }
+
+        ImGui.SameLine();
         if (ImGui.Button(snapshot.Language == AIDebugLanguage.Chinese ? "English" : "Chinese"))
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleLanguage));
+
+        string recorderButton = snapshot.RecorderMode == AIDebugRecorderMode.Recording
+            ? L(snapshot, "Stop Rec", "停止记录")
+            : L(snapshot, "Record", "开始记录");
+        if (ImGui.Button(recorderButton))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleRecording));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(L(snapshot,
+                "Recording writes sealed Flight Recorder blocks on a background worker. F7 visibility does not control it.",
+                "Recording 会由后台线程写入封存的飞行记录器数据块；F7 界面显示与记录状态互相独立。"));
+
+        ImGui.SameLine();
+        if (ImGui.Button(L(snapshot, "Capture", "捕获")))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.TriggerCapture));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(L(snapshot,
+                "Create a zero-copy anomaly capture with 4s pre-roll and 2s post-roll for the selected creature.",
+                "为当前选择的生物创建零拷贝异常捕获：前录 4 秒，后录 2 秒。"));
+
+        ImGui.SameLine();
+        string breakpointText = snapshot.Breakpoint.Enabled
+            ? L(snapshot, "Breakpoints ON", "断点 开")
+            : L(snapshot, "Breakpoints OFF", "断点 关");
+        if (ImGui.Button(breakpointText))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleBreakpoint));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(L(snapshot,
+                "When enabled, death/formal-attack/immediate-danger/deletion anomaly transitions pause subsequent simulation ticks.",
+                "启用后，死亡、正式攻击、即时危险或删除异常会暂停后续模拟 tick。"));
+
+        ImGui.SameLine();
+        string profilerText = snapshot.Profiler.Enabled
+            ? L(snapshot, "Profiler ON", "分析器 开")
+            : L(snapshot, "Profiler OFF", "分析器 关");
+        if (ImGui.Button(profilerText))
+            AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleProfiler));
 
         ImGui.SameLine();
         string cursor = snapshot.ViewMode == AIDebugViewMode.Historical
