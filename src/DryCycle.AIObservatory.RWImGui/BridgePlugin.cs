@@ -28,6 +28,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         log = Logger;
         ProbeMenu.SetLogger(Logger);
+        AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
         Logger.LogInfo("DryCycle RWImGUI bridge loaded. Waiting for RainWorld.OnModsInit before registering the Present callback.");
     }
@@ -48,6 +49,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // process lifetime and make it a no-op when this plugin is disabled.
         ProbeMenu.Enabled = false;
         ProbeMenu.Visible = false;
+        AIDebugPresentationBridgeStatus.MarkFailure("RWImGUI bridge disabled");
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -71,13 +73,17 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         if (apiAssembly == null || imguiAssembly == null)
         {
-            log?.LogWarning("DryCycle RWImGUI bridge did not register: rain-world-imgui-api.dll and/or RWImGUI's ImGui.NET.dll is not loaded. DryCycle itself remains unaffected.");
+            string reason = "rain-world-imgui-api.dll and/or RWImGUI's ImGui.NET.dll is not loaded";
+            AIDebugPresentationBridgeStatus.MarkFailure(reason);
+            log?.LogWarning("DryCycle RWImGUI bridge did not register: " + reason + ". DryCycle itself remains unaffected.");
             return;
         }
 
         try
         {
-            log?.LogInfo($"DryCycle RWImGUI API inventory (runtime): api={apiAssembly.GetName().Name} {apiAssembly.GetName().Version}, imgui={imguiAssembly.GetName().Name} {imguiAssembly.GetName().Version}.");
+            Version apiVersion = apiAssembly.GetName().Version;
+            Version imguiVersion = imguiAssembly.GetName().Version;
+            log?.LogInfo($"DryCycle RWImGUI API inventory (runtime): api={apiAssembly.GetName().Name} {apiVersion}, imgui={imguiAssembly.GetName().Name} {imguiVersion}.");
             LogInstalledApiInventory(apiAssembly);
 
             // Verified integration shape from the RWImGUI public usage example:
@@ -88,11 +94,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
             ImGUIAPI.AddMenuCallback(&ProbeMenu.MenuCallback);
             callbackRegistered = true;
             ProbeMenu.Enabled = true;
+            AIDebugPresentationBridgeStatus.MarkCallbackRegistered(apiVersion?.ToString(), imguiVersion?.ToString());
             log?.LogInfo("DryCycle RWImGUI Present callback registered. Press F7 to show the minimal proof window.");
         }
         catch (Exception error)
         {
             ProbeMenu.Enabled = false;
+            AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
             log?.LogError("DryCycle RWImGUI callback registration failed. DryCycle gameplay systems remain active. " + error);
         }
     }
@@ -178,6 +186,7 @@ internal static unsafe class ProbeMenu
 
         try
         {
+            AIDebugPresentationBridgeStatus.MarkPresentSeen();
             if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
                 log?.LogInfo($"DryCycle RWImGUI callback reached Present. swapChain=0x{idxgiSwapChain:X}, syncInterval={syncInterval}, flags={flags}.");
 
@@ -202,6 +211,7 @@ internal static unsafe class ProbeMenu
         }
         catch (Exception error)
         {
+            AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
                 log?.LogError("DryCycle RWImGUI probe draw failed. The callback will remain registered for diagnostics. " + error);
         }
