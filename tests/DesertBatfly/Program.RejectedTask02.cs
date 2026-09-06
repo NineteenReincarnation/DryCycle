@@ -14,5 +14,6 @@ internal static partial class Program
             "rejected Task 02 enum is physically removed");
 
         Console.WriteLine("Task 02 social roles: rejected runtime types are physically absent.");
+        RunTask09();
     }
 }
