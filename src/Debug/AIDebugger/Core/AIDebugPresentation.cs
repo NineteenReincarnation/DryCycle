@@ -55,9 +55,7 @@ internal sealed class AIDebugPresentationTrackedEntity
     internal readonly AIDebugResolvedMotion Motion;
     internal readonly AIDebugResolvedFastState FastState;
 
-    internal AIDebugPresentationTrackedEntity(
-        AIDebugPresentationEntity entity,
-        int cursorTick)
+    internal AIDebugPresentationTrackedEntity(AIDebugPresentationEntity entity, int cursorTick)
     {
         Key = entity.Key;
         DisplayName = entity.DisplayName;
@@ -188,9 +186,6 @@ internal sealed class AIDebugPresentationSnapshot
             Tracked = tracked;
         }
 
-        // This constructor is invoked by the Unity/main-thread host. Build only the small
-        // visible recorder viewport here; RWImGUI receives detached arrays and never reads
-        // live recorder blocks concurrently with the simulation writer.
         Timeline = timeline ?? (hasGame && hasTimelineKey
             ? AIDebugTimelinePresentationBuilder.Build(timelineKey, tick, effectiveCursor, viewMode)
             : AIDebugPresentationTimeline.Empty);
@@ -233,6 +228,12 @@ internal sealed class AIDebugPresentationCreature
     internal readonly string ControlOwner;
     internal readonly AIDebugPresentationSection[] Sections;
     internal readonly AIDebugPresentationDecision[] Decisions;
+    internal readonly AIDebugUtilityRow[] Utilities;
+    internal readonly bool UtilitiesTruncated;
+    internal readonly AIDebugPerceptionRow[] Perception;
+    internal readonly bool PerceptionTruncated;
+    internal readonly AIDebugPathState Path;
+    internal readonly int AdvancedAgeTicks;
 
     internal AIDebugPresentationCreature(
         DebugEntityKey key,
@@ -240,7 +241,13 @@ internal sealed class AIDebugPresentationCreature
         AIDebugEntityState state,
         string controlOwner,
         AIDebugPresentationSection[] sections,
-        AIDebugPresentationDecision[] decisions)
+        AIDebugPresentationDecision[] decisions,
+        AIDebugUtilityRow[] utilities = null,
+        bool utilitiesTruncated = false,
+        AIDebugPerceptionRow[] perception = null,
+        bool perceptionTruncated = false,
+        AIDebugPathState path = default,
+        int advancedAgeTicks = 0)
     {
         Key = key;
         DisplayName = displayName ?? key.ToString();
@@ -248,6 +255,12 @@ internal sealed class AIDebugPresentationCreature
         ControlOwner = controlOwner ?? "—";
         Sections = sections ?? Array.Empty<AIDebugPresentationSection>();
         Decisions = decisions ?? Array.Empty<AIDebugPresentationDecision>();
+        Utilities = utilities ?? Array.Empty<AIDebugUtilityRow>();
+        UtilitiesTruncated = utilitiesTruncated;
+        Perception = perception ?? Array.Empty<AIDebugPerceptionRow>();
+        PerceptionTruncated = perceptionTruncated;
+        Path = path;
+        AdvancedAgeTicks = Math.Max(0, advancedAgeTicks);
     }
 }
 
