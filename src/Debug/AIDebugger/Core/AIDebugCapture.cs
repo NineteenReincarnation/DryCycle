@@ -90,7 +90,6 @@ internal static class AIDebugCaptureManager
                 .Append(",\"room\":\"").Append(Escape(f.Room)).Append("\"")
                 .Append(",\"mode\":\"").Append(Escape(f.Mode)).Append("\"")
                 .Append(",\"target\":\"").Append(Escape(f.Target)).Append("\"")
-                .Append(",\"role\":\"").Append(Escape(f.Role)).Append("\"")
                 .Append(",\"suppression\":\"").Append(Escape(f.Suppression)).Append("\"")
                 .Append(",\"position\":{").Append("\"x\":").Append(F(f.Position.x)).Append(",\"y\":").Append(F(f.Position.y)).Append("}")
                 .Append(",\"velocity\":{").Append("\"x\":").Append(F(f.Velocity.x)).Append(",\"y\":").Append(F(f.Velocity.y)).Append("}")
