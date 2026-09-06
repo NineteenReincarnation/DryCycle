@@ -12,12 +12,12 @@ internal interface IAIDebugRecorderFastProvider
 
 internal static class AIDebugRecorderProviderRegistry
 {
-    private static readonly IAIDebugRecorderFastProvider Generic = new GenericRecorderFastProvider();
-    private static readonly IAIDebugRecorderFastProvider DesertBatfly = new DesertBatflyRecorderFastProvider();
+    private static readonly IAIDebugRecorderFastProvider GenericProvider = new GenericRecorderFastProvider();
+    private static readonly IAIDebugRecorderFastProvider DesertBatflyProvider = new DesertBatflyRecorderFastProvider();
 
     internal static IAIDebugRecorderFastProvider Resolve(AbstractCreature creature)
     {
-        return creature?.realizedCreature is DesertBatfly ? DesertBatfly : Generic;
+        return creature?.realizedCreature is DesertBatfly ? DesertBatflyProvider : GenericProvider;
     }
 
     private sealed class GenericRecorderFastProvider : IAIDebugRecorderFastProvider
