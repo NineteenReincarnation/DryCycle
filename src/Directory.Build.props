@@ -8,6 +8,17 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <!-- Task 02 social roles were rejected and physically removed. src has its own
+       Directory.Build.props, so the repository-root exclusions are not inherited by
+       projects under src. Keep the historical filenames excluded here as well so old
+       locally retained copies cannot re-enter DryCycle.dll or AI Observatory builds. -->
+  <ItemGroup>
+    <Compile Remove="**/DesertBatflySocialRoles.cs" />
+    <Compile Remove="**/DesertBatflyRoleScores.cs" />
+    <Compile Remove="**/*DesertBatfly*SocialRoles*.cs" />
+    <Compile Remove="**/*DesertBatfly*RoleScores*.cs" />
+  </ItemGroup>
+
   <!-- Performance validation configuration for AI Observatory work. Profile keeps
        Release-style optimization enabled while retaining portable symbols so Mono/BepInEx
        stack traces and profiler captures remain useful. It intentionally does not define
