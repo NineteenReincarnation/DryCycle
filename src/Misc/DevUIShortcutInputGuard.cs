@@ -4,7 +4,7 @@ using UnityEngine;
 namespace DryCycle.Misc;
 
 /// <summary>
-/// Keeps keyboard input owned by DryCycle DevUI text fields from leaking into Rain
+/// Keeps keyboard input owned by DryCycle DevUI editors from leaking into Rain
 /// World's gameplay/dev-tool shortcuts. Text entry is processed exactly once per raw
 /// frame while the vanilla single-letter DevTools hotkeys are temporarily bypassed.
 /// </summary>
@@ -60,8 +60,9 @@ internal static class DevUIShortcutInputGuard
 
         // RainWorldGame.RawUpdate owns the raw A/S/Q/E/M/H/P/K/L/O DevTools keys.
         // Hide DevTools only for the vanilla RawUpdate call. This prevents those keys
-        // from firing while a text field is focused. We then run the already-open DevUI
-        // once ourselves, because vanilla skipped its normal update while hidden.
+        // from firing while a DryCycle text/palette editor owns the keyboard. We then
+        // run the already-open DevUI once ourselves, because vanilla skipped its normal
+        // update while hidden.
         //
         // Keep edge latches synchronized to the physical key state so releasing focus
         // cannot immediately replay a held editor letter as a DevTools command.
@@ -83,8 +84,7 @@ internal static class DevUIShortcutInputGuard
 
         // Exactly one text-input update for this raw frame. The previous implementation
         // did this from RainWorldGame.Update while vanilla had already updated DevUI in
-        // RawUpdate, causing Input.inputString to be consumed two or more times (for
-        // example one O keypress becoming several 'o' characters).
+        // RawUpdate, causing Input.inputString to be consumed two or more times.
         if (devToolsWasActive && focusedDevUi != null && ReferenceEquals(self.devUI, focusedDevUi))
         {
             focusedDevUi.Update();
@@ -96,9 +96,9 @@ internal static class DevUIShortcutInputGuard
         bool captured = IsKeyboardCapturedThisFrame(self) || HasFocusedTextField(self);
         if (captured)
         {
-            // RainWorldGame.Update owns the R restart shortcut and the pause edge. A text
-            // field may release focus during RawUpdate (Enter/Escape), so the raw-frame
-            // capture marker intentionally survives until this Update has completed.
+            // RainWorldGame.Update owns the R restart shortcut and the pause edge. An editor
+            // may release focus during RawUpdate (Enter/Escape), so the raw-frame capture
+            // marker intentionally survives until this Update has completed.
             self.lastRestartButton = Input.GetKey(KeyCode.R);
             self.lastPauseButton = true;
         }
@@ -227,7 +227,8 @@ internal static class DevUIShortcutInputGuard
 
     private static bool HasFocusedTextField(RainWorldGame game)
     {
-        return game != null && game.devUI != null && DryCycleInputFocus.Focused != null;
+        return game != null && game.devUI != null &&
+               (DryCycleInputFocus.Focused != null || PaletteDirectInputRuntime.HasActiveInput);
     }
 
     private static bool ShouldFilterEditorShortcuts(Player player)
