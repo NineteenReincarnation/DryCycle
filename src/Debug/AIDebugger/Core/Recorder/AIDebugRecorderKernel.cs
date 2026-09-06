@@ -162,6 +162,80 @@ internal static class AIDebugRecorder
         return new AIDebugRecorderStatus(mode, activeCaptureCount, retained, motion, states, overwritten, dropped);
     }
 
+    internal static bool TryGetSelectedKey(out DebugEntityKey key)
+    {
+        if (selectedSlot >= 0 && selectedSlot < Slots.Length)
+        {
+            AIDebugTrackedEntitySlot slot = Slots[selectedSlot];
+            if (slot != null && slot.Role == AIDebugTrackedRole.Selected)
+            {
+                key = slot.Key;
+                return true;
+            }
+        }
+
+        key = default;
+        return false;
+    }
+
+    internal static bool TryGetEntityStatus(DebugEntityKey key, out AIDebugRecorderEntityStatus status)
+    {
+        int index = FindSlot(key);
+        if (index < 0)
+        {
+            status = default;
+            return false;
+        }
+
+        AIDebugTrackedEntitySlot slot = Slots[index];
+        status = new AIDebugRecorderEntityStatus(
+            true,
+            slot.Key,
+            slot.Role,
+            slot.LastTouchedTick,
+            slot.Motion.TotalWritten,
+            slot.States.TotalWritten);
+        return true;
+    }
+
+    internal static bool TryResolveMotion(DebugEntityKey key, int cursorTick, out AIDebugResolvedMotion resolved)
+    {
+        int index = FindSlot(key);
+        if (index < 0 || !Slots[index].Motion.TryGetLatestAtOrBefore(cursorTick, out AIDebugMotionSample sample))
+        {
+            resolved = default;
+            return false;
+        }
+
+        resolved = new AIDebugResolvedMotion(
+            true,
+            sample.Tick,
+            Math.Max(0, cursorTick - sample.Tick),
+            sample.X,
+            sample.Y,
+            sample.VX,
+            sample.VY);
+        return true;
+    }
+
+    internal static bool TryResolveFastState(DebugEntityKey key, int cursorTick, out AIDebugResolvedFastState resolved)
+    {
+        int index = FindSlot(key);
+        if (index < 0 || !Slots[index].States.TryGetLatestAtOrBefore(cursorTick, out AIDebugFastStateSample sample))
+        {
+            resolved = default;
+            return false;
+        }
+
+        resolved = new AIDebugResolvedFastState(
+            true,
+            sample.Tick,
+            Math.Max(0, cursorTick - sample.Tick),
+            sample.Sequence,
+            sample.State);
+        return true;
+    }
+
     internal static void Reset()
     {
         ClearSlots();
