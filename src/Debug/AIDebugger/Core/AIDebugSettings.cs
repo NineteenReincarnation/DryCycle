@@ -9,8 +9,12 @@ namespace DryCycle.Debugging.AI;
 
 internal static class AIDebugSettings
 {
+    private const int LanguageSettingsVersion = 2;
+
     private static ManualLogSource logger;
     private static bool loaded;
+    private static int loadedLanguageVersion;
+    private static string pendingLanguage;
 
     internal static float UiScale = 1f;
     internal static float FontScale = 1f;
@@ -44,6 +48,8 @@ internal static class AIDebugSettings
         if (loaded) return;
         loaded = true;
         ResetDefaults(save: false);
+        loadedLanguageVersion = 0;
+        pendingLanguage = null;
         try
         {
             if (!File.Exists(ConfigPath)) return;
@@ -57,11 +63,25 @@ internal static class AIDebugSettings
                 string value = line.Substring(split + 1).Trim();
                 Apply(key, value);
             }
+
+            // Version 0/1 configs came from the pre-RWImGUI UI whose implicit default was
+            // Chinese. Do not carry that accidental default forward. Version 2+ records an
+            // explicit user language choice and is therefore respected across restarts.
+            if (loadedLanguageVersion >= LanguageSettingsVersion && !string.IsNullOrEmpty(pendingLanguage))
+                ApplyLanguage(pendingLanguage);
+            else
+                AIDebugLocalization.Language = AIDebugLanguage.English;
+
             Normalize();
         }
         catch (Exception error)
         {
             logger?.LogWarning("DryCycle AI Observatory settings could not be loaded: " + error.Message);
+        }
+        finally
+        {
+            loadedLanguageVersion = 0;
+            pendingLanguage = null;
         }
     }
 
@@ -73,6 +93,7 @@ internal static class AIDebugSettings
             Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath) ?? Paths.ConfigPath);
             using StreamWriter writer = new(ConfigPath, false);
             writer.WriteLine("# DryCycle AI Observatory developer settings");
+            Write(writer, "languageVersion", LanguageSettingsVersion);
             Write(writer, "language", AIDebugLocalization.Language == AIDebugLanguage.Chinese ? "zh-CN" : "en-US");
             Write(writer, "uiScale", UiScale);
             Write(writer, "fontScale", FontScale);
@@ -104,6 +125,7 @@ internal static class AIDebugSettings
 
     internal static void ResetDefaults(bool save = true)
     {
+        AIDebugLocalization.Language = AIDebugLanguage.English;
         UiScale = 1f;
         FontScale = 1f;
         Opacity = 0.96f;
@@ -132,10 +154,8 @@ internal static class AIDebugSettings
     {
         switch (key)
         {
-            case "language":
-                AIDebugLocalization.Language = value.Equals("en-US", StringComparison.OrdinalIgnoreCase)
-                    ? AIDebugLanguage.English : AIDebugLanguage.Chinese;
-                break;
+            case "languageVersion": loadedLanguageVersion = Int(value, loadedLanguageVersion); break;
+            case "language": pendingLanguage = value; break;
             case "uiScale": UiScale = Float(value, UiScale); break;
             case "fontScale": FontScale = Float(value, FontScale); break;
             case "opacity": Opacity = Float(value, Opacity); break;
@@ -158,6 +178,13 @@ internal static class AIDebugSettings
             case "detectAnomalies": DetectAnomalies = Bool(value, DetectAnomalies); break;
             case "breakpointPausesWorld": BreakpointPausesWorld = Bool(value, BreakpointPausesWorld); break;
         }
+    }
+
+    private static void ApplyLanguage(string value)
+    {
+        AIDebugLocalization.Language = value.Equals("zh-CN", StringComparison.OrdinalIgnoreCase)
+            ? AIDebugLanguage.Chinese
+            : AIDebugLanguage.English;
     }
 
     private static void Normalize()
