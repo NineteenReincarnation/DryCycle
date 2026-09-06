@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 
 namespace DryCycle.Debugging.AI;
 
@@ -24,7 +25,6 @@ internal enum AIDebugFieldFlags : byte
     Species = 1 << 3
 }
 
-// Static schema metadata is created once, not copied into every historical sample.
 internal readonly struct AIDebugFieldSchema
 {
     internal readonly ushort FieldId;
@@ -51,8 +51,22 @@ internal readonly struct AIDebugFieldSchema
     }
 }
 
+[StructLayout(LayoutKind.Explicit)]
+internal struct AIDebugFloatBits
+{
+    [FieldOffset(0)] internal float Float;
+    [FieldOffset(0)] internal int Bits;
+
+    internal static int Of(float value)
+    {
+        AIDebugFloatBits union = default;
+        union.Float = value;
+        return union.Bits;
+    }
+}
+
 // Compact value union for recorder storage. No object, boxing, strings, collections, or
-// Unity references are permitted. The schema determines how these four scalar slots are
+// Unity references are permitted. The schema determines how these scalar slots are
 // interpreted at presentation/export time.
 internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
 {
@@ -94,8 +108,8 @@ internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
 
     public bool Equals(AIDebugRawValue other) =>
         Kind == other.Kind && I0 == other.I0 && I1 == other.I1 &&
-        BitConverter.SingleToInt32Bits(F0) == BitConverter.SingleToInt32Bits(other.F0) &&
-        BitConverter.SingleToInt32Bits(F1) == BitConverter.SingleToInt32Bits(other.F1);
+        AIDebugFloatBits.Of(F0) == AIDebugFloatBits.Of(other.F0) &&
+        AIDebugFloatBits.Of(F1) == AIDebugFloatBits.Of(other.F1);
 
     public override bool Equals(object obj) => obj is AIDebugRawValue other && Equals(other);
 
@@ -106,8 +120,8 @@ internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
             int hash = (int)Kind;
             hash = hash * 397 ^ I0;
             hash = hash * 397 ^ I1;
-            hash = hash * 397 ^ BitConverter.SingleToInt32Bits(F0);
-            hash = hash * 397 ^ BitConverter.SingleToInt32Bits(F1);
+            hash = hash * 397 ^ AIDebugFloatBits.Of(F0);
+            hash = hash * 397 ^ AIDebugFloatBits.Of(F1);
             return hash;
         }
     }
@@ -116,8 +130,6 @@ internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
     public static bool operator !=(AIDebugRawValue left, AIDebugRawValue right) => !left.Equals(right);
 }
 
-// Reusable fixed-capacity writer used by Rich/Heavy providers. A provider fills the same
-// buffer each capture; the recorder decides whether a versioned snapshot must be emitted.
 internal sealed class AIDebugRawSnapshotBuffer
 {
     private readonly AIDebugRawValue[] values;
@@ -175,7 +187,8 @@ internal sealed class AIDebugRawSnapshotBuffer
 
     internal void CopyFrom(AIDebugRawSnapshotBuffer source)
     {
-        if (source == null || source.count > values.Length) throw new ArgumentException("Incompatible raw snapshot buffer.", nameof(source));
+        if (source == null || source.count > values.Length)
+            throw new ArgumentException("Incompatible raw snapshot buffer.", nameof(source));
         count = source.count;
         Array.Copy(source.values, values, count);
         Array.Copy(source.validWords, validWords, validWords.Length);
