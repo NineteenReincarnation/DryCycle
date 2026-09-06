@@ -120,6 +120,20 @@ internal static class AIDebugRecorder
         if (index != selectedSlot) ChangeRole(slot, AIDebugTrackedRole.Retained);
     }
 
+    internal static bool TogglePin(RainWorldGame game, DebugEntityKey key)
+    {
+        if (game == null) return false;
+        EnsureGame(game);
+        int index = FindSlot(key);
+        if (index >= 0 && Slots[index].Pinned)
+        {
+            Unpin(key);
+            return true;
+        }
+
+        return Pin(game, key);
+    }
+
     internal static void ClearSelection()
     {
         if (selectedSlot >= 0 && Slots[selectedSlot] != null)
@@ -134,6 +148,7 @@ internal static class AIDebugRecorder
     {
         if (mode == AIDebugRecorderMode.Off || game == null) return;
         EnsureGame(game);
+        DrainControlRequests();
         if (activeCaptureCount <= 0) return;
 
         for (int i = 0; i < Slots.Length; i++)
@@ -154,6 +169,8 @@ internal static class AIDebugRecorder
 
     internal static AIDebugRecorderStatus GetStatus()
     {
+        DrainControlRequests();
+
         int retained = 0;
         long motion = 0;
         long states = 0;
@@ -193,6 +210,8 @@ internal static class AIDebugRecorder
 
     internal static bool TryGetEntityStatus(DebugEntityKey key, out AIDebugRecorderEntityStatus status)
     {
+        DrainControlRequests();
+
         int index = FindSlot(key);
         if (index < 0)
         {
@@ -281,6 +300,7 @@ internal static class AIDebugRecorder
 
     internal static void Reset()
     {
+        AIDebugRecorderControl.Clear();
         ClearSlots();
         mode = AIDebugRecorderMode.Armed;
         boundGame = null;
@@ -294,6 +314,22 @@ internal static class AIDebugRecorder
             sequence = 0;
         }
         return sequence++;
+    }
+
+    private static void DrainControlRequests()
+    {
+        RainWorldGame game = boundGame;
+        if (game == null) return;
+
+        while (AIDebugRecorderControl.TryDequeue(out AIDebugRecorderControlRequest request))
+        {
+            switch (request.Kind)
+            {
+                case AIDebugRecorderControlKind.TogglePin:
+                    TogglePin(game, request.Key);
+                    break;
+            }
+        }
     }
 
     private static int EnsureSlot(RainWorldGame game, DebugEntityKey key)
@@ -327,6 +363,7 @@ internal static class AIDebugRecorder
     private static void EnsureGame(RainWorldGame game)
     {
         if (ReferenceEquals(boundGame, game)) return;
+        AIDebugRecorderControl.Clear();
         ClearSlots();
         boundGame = game;
     }
