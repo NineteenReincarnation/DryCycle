@@ -8,6 +8,13 @@ namespace DryCycle.Debugging.AI;
 
 internal static class AIDebugDockingNative
 {
+    // ImGuiDockNodeFlags_DockSpace is intentionally part of Dear ImGui's private
+    // ImGuiDockNodeFlagsPrivate_ enum and therefore is not generated into the public
+    // ImGui.NET ImGuiDockNodeFlags enum. cimgui 1.91.x defines it as 1 << 10.
+    // Keep the exact native bit here instead of referring to a non-existent managed
+    // enum member.
+    private const ImGuiDockNodeFlags DockSpaceNodeFlag = (ImGuiDockNodeFlags)(1 << 10);
+
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern uint igDockSpace(uint dockspace_id, Num.Vector2 size,
         ImGuiDockNodeFlags flags, IntPtr window_class);
@@ -44,7 +51,7 @@ internal static class AIDebugDockingNative
     internal static void BuildDefault(uint dockspaceId, Num.Vector2 size)
     {
         igDockBuilderRemoveNode(dockspaceId);
-        igDockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags.DockSpace);
+        igDockBuilderAddNode(dockspaceId, DockSpaceNodeFlag);
         igDockBuilderSetNodeSize(dockspaceId, size);
 
         uint left, rest;
