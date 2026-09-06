@@ -33,7 +33,7 @@ internal static class AIDebuggerRuntime
             return;
         }
 
-        AIDebugRegistry.Initialize();
+        AIDebugRegistry.Initialize(logger);
         hostObject = new GameObject("DryCycle AI Observatory")
         {
             hideFlags = HideFlags.HideAndDontSave
@@ -84,6 +84,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private bool lifecycleLogged;
     private bool windowDrawLogged;
     private bool postRenderLogged;
+    private string lastUiFailureSignature;
     private double overheadMs;
 
     internal bool Visible => visible;
@@ -152,24 +153,48 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         Stopwatch watch = Stopwatch.StartNew();
         try
         {
-            backend.BeginFrame();
-            AIDebugStyleController.Apply();
+            try
+            {
+                backend.BeginFrame();
+                AIDebugStyleController.Apply();
+            }
+            catch (Exception error)
+            {
+                FailBackend("begin frame", error);
+                return;
+            }
+
             RainWorldGame game = rainWorld?.processManager?.currentMainLoop as RainWorldGame;
             if (!windowDrawLogged)
             {
                 windowDrawLogged = true;
                 logger?.LogInfo($"DryCycle AI Observatory Window.Draw entered. game={(game != null ? "RainWorldGame" : "none/menu")}, fullMode={window.FullMode}.");
             }
-            window.Draw(game, overheadMs);
-            if (!window.FullMode && game != null) KeepCompactOnScreen();
-            // EndFrame also rebuilds the camera-owned CommandBuffer. The camera executes
-            // it later in this same Unity frame at CameraEvent.AfterEverything.
-            backend.EndFrame();
-        }
-        catch (Exception error)
-        {
-            FailBackend("frame", error);
-            return;
+
+            bool uiFailed = false;
+            try
+            {
+                window.Draw(game, overheadMs);
+                if (!window.FullMode && game != null) KeepCompactOnScreen();
+                lastUiFailureSignature = null;
+            }
+            catch (Exception error)
+            {
+                uiFailed = true;
+                ReportUiFrameFailure(error);
+            }
+
+            try
+            {
+                // EndFrame also rebuilds the camera-owned CommandBuffer. The camera executes
+                // it later in this same Unity frame at CameraEvent.AfterEverything.
+                backend.EndFrame();
+            }
+            catch (Exception error)
+            {
+                FailBackend(uiFailed ? "frame recovery" : "end frame", error);
+                return;
+            }
         }
         finally
         {
@@ -178,6 +203,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
         overheadMs = overheadMs <= 0.0 ? watch.Elapsed.TotalMilliseconds
             : overheadMs * 0.88 + watch.Elapsed.TotalMilliseconds * 0.12;
+    }
+
+    private void ReportUiFrameFailure(Exception error)
+    {
+        string signature = error.GetType().FullName + "|" + error.Message + "|" + error.StackTrace;
+        if (string.Equals(signature, lastUiFailureSignature, StringComparison.Ordinal)) return;
+        lastUiFailureSignature = signature;
+        logger?.LogError("DryCycle AI Observatory UI/data frame failed. The ImGui renderer remains enabled; " +
+                         "only a renderer/NewFrame/Render failure disables the backend. " + error);
     }
 
     private void KeepCompactOnScreen()
