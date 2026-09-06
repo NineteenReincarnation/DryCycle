@@ -113,6 +113,15 @@ internal static class AIDebugExtendedLocalization
         "RoleSustain" => B("Role Sustain", "角色维持"),
         "SentinelAlarm" => B("Sentinel Alarm", "哨兵警报"),
         "OpportunistEarlyReturn" => B("Opportunist Early Return", "机会主义提前返回"),
+        "InjuryApplied" => B("Injury Applied", "伤病产生"),
+        "WingDamageLeft" => B("Left Wing Damage", "左翼受伤"),
+        "WingDamageRight" => B("Right Wing Damage", "右翼受伤"),
+        "PostStunShock" => B("Post-stun Shock", "重击后休克"),
+        "InjuryRecoveryEntered" => B("Injury Recovery Entered", "进入伤病恢复"),
+        "InjuryRecoveryExited" => B("Injury Recovery Exited", "退出伤病恢复"),
+        "PeachTongueSurvivor" => B("Peach Tongue Survivor", "桃蜥舌头幸存"),
+        "InjuryTraumaEscalated" => B("Injury Trauma Escalated", "伤病创伤加深"),
+        "WingRecovered" => B("Wing Recovered", "翼伤恢复"),
         "StateOscillation" => B("State Oscillation", "状态振荡"),
         "TargetThrashing" => B("Target Thrashing", "目标抖动"),
         "PossibleStuck" => B("Possible Stuck", "可能卡住"),
@@ -185,6 +194,7 @@ internal static class AIDebugExtendedLocalization
             "vanilla FlyAI priority" => "原版 FlyAI 优先级接管",
             "formal attack state machine" => "正式攻击状态机接管",
             "DesertBatflyAI state machine" => "DesertBatflyAI 状态机控制",
+            "physical injury / post-stun expression limit" => "身体伤病或重击后休克限制角色表达",
             _ => raw
         };
     }
