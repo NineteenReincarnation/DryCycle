@@ -5,6 +5,10 @@
   <PropertyGroup>
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
+    <!-- ImGuiIO exposes IniFilename as a native pointer. The Observatory disables
+         Dear ImGui's default shared imgui.ini before first NewFrame and uses its own
+         explicit UTF-8 layout file instead. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- DryCycle is a class library, but the mod plugin directory is also its runtime
          probing directory. Copy PackageReference runtime assets (ImGui.NET plus its
          netstandard support dependencies) beside DryCycle.dll instead of assuming the
