@@ -150,8 +150,6 @@ internal static class AIDebugRecorderRichProviderRegistry
     private sealed class DesertBatflyRichProvider : IAIDebugRecorderRichProvider
     {
         private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-        // The 40 Hz Fast provider is reflection-free. These retained legacy counters are
-        // sampled only on the sparse Heavy path until the creature exposes direct accessors.
         private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);
         private static readonly FieldInfo MemoryField = typeof(DesertBatflyAI).GetField("memory", PrivateInstance);
         private static readonly FieldInfo InterestField = typeof(DesertBatflyAI).GetField("interest", PrivateInstance);
@@ -170,7 +168,7 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.restrained","Creature.grabbedBy",1),
                 D("decision.survival","DesertBatfly survival"),
                 D("decision.danger","DesertBatflyAI.HasImmediateDanger",1),
-                D("decision.fear","DesertBatflyIntimidation.BlocksSocialRoles",1),
+                D("decision.fear","DesertBatflyIntimidation.HasActiveFearSuppression",1),
                 D("decision.trauma","DesertBatflyState Trauma",1),
                 D("decision.physical_condition","DesertBatflyInjury.BlocksCombat"),
                 D("field.health","DesertBatflyState.health",1),
@@ -216,7 +214,6 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(8, AIDebugRawValue.Bool(creature.InDen));
             fields.Set(9, AIDebugRawValue.Float(state.Thirst));
             fields.Set(10, AIDebugRawValue.Int(state.Cooldown));
-
             fields.Set(11, AIDebugRawValue.Float(state.health));
             fields.Set(12, AIDebugRawValue.Float(state.LeftWingInjury));
             fields.Set(13, AIDebugRawValue.Float(state.RightWingInjury));
@@ -233,7 +230,6 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(24, Str(injury.LastInjurySource));
             fields.Set(25, Str(injury.LastInjuryDamageType));
             fields.Set(26, AIDebugRawValue.Int(injury.LastInjuryTick));
-
             fields.Set(27, Str(p.Sex.ToString()));
             fields.Set(28, AIDebugRawValue.Float(p.Temperament));
             fields.Set(29, AIDebugRawValue.Float(p.Nerve));
@@ -242,7 +238,6 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(32, AIDebugRawValue.Float(p.VengeanceAffinity));
             fields.Set(33, AIDebugRawValue.Float(p.SandSpitAffinity));
             fields.Set(34, AIDebugRawValue.Bool(p.Aggressive));
-
             fields.Set(35, Str(ai.Mode.ToString()));
             if (ai.Target?.abstractCreature != null) fields.Set(36, Entity(ai.Target.abstractCreature.ID));
             fields.Set(37, AIDebugRawValue.Bool(ai.FormalAttack));
@@ -287,7 +282,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             }
 
             bool restrained = RestrainedByNonFly(bat);
-            bool fear = DesertBatflyIntimidation.BlocksSocialRoles(bat);
+            bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
             float trauma = ActiveTrauma(bat);
             bool traumatized = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
             bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
