@@ -290,7 +290,7 @@ internal static class ObservatoryView
         ImGui.TextDisabled($"tick {snapshot.CursorTick}");
         if (snapshot.CursorMotion.HasValue)
         {
-            float speed = MathF.Sqrt(
+            double speed = Math.Sqrt(
                 snapshot.CursorMotion.VX * snapshot.CursorMotion.VX +
                 snapshot.CursorMotion.VY * snapshot.CursorMotion.VY);
             ImGui.Text($"{L(snapshot, "Position", "位置")}: ({snapshot.CursorMotion.X:0.0}, {snapshot.CursorMotion.Y:0.0})");
