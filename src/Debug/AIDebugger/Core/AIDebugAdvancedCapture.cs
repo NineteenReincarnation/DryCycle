@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using DryCycle.Creatures.DesertBatfly;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
@@ -92,19 +91,10 @@ internal static class AIDebugAdvancedCapture
     internal static void CaptureUtilities(AbstractCreature creature, List<AIDebugUtilityRow> output)
     {
         output.Clear();
-        if (creature?.realizedCreature is DesertBatfly bat)
-        {
-            DesertBatflyRoleScores scores = bat.DesertAI.Roles.Scores;
-            ExpressedSocialRole role = bat.DesertAI.Roles.Expressed;
-            output.Add(new AIDebugUtilityRow("Sentinel", scores.Sentinel, scores.Sentinel, 1f,
-                scores.Sentinel, 0f, role == ExpressedSocialRole.Sentinel));
-            output.Add(new AIDebugUtilityRow("Bully", scores.Bully, scores.Bully, 1f,
-                scores.Bully, 0f, role == ExpressedSocialRole.Bully));
-            output.Add(new AIDebugUtilityRow("Opportunist", scores.Opportunist, scores.Opportunist, 1f,
-                scores.Opportunist, 0f, role == ExpressedSocialRole.Opportunist));
-            return;
-        }
 
+        // Task 02's Sentinel/Bully/Opportunist utility surface was rejected and removed.
+        // Desert Batfly has no UtilityComparer-backed role module, so it should naturally
+        // produce an empty utility table here rather than manufacturing replacement scores.
         UtilityComparer comparer = creature?.abstractAI?.RealAI?.utilityComparer;
         if (comparer?.uTrackers == null) return;
         for (int i = 0; i < comparer.uTrackers.Count; i++)
