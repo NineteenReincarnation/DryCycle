@@ -113,9 +113,6 @@ internal static class AIDebugAdvancedCapture
             if (tracker == null) continue;
             string name = tracker.module?.GetType().Name ?? "<null>";
 
-            // Rain World's UtilityTracker.SmoothedUtility() calls module.Utility() when
-            // smoother == null. Never call it from the Observatory. Only a non-null
-            // smoother means the AI retained a weighted utility in smoothedUtility.
             float weighted = tracker.smoother != null ? tracker.smoothedUtility : float.NaN;
             float nonWeighted = tracker.smoother != null && Mathf.Abs(tracker.weight) > 0.000001f
                 ? tracker.smoothedUtility / tracker.weight
@@ -144,10 +141,6 @@ internal static class AIDebugAdvancedCapture
             string relationshipName = rep.dynamicRelationship == null ? "—" : relationship.type.ToString();
             float intensity = rep.dynamicRelationship == null ? 0f : relationship.intensity;
 
-            // Do not call BestGuessForPosition() here. ElaborateCreatureRepresentation
-            // can run FindBestGhost() from that getter and mutate the AI's cache. Read a
-            // clean retained bestGhost only when the real tracker has already resolved it;
-            // otherwise lastSeenCoord is the safest truthful value available.
             WorldCoordinate bestGuess = rep.lastSeenCoord;
             if (rep is Tracker.ElaborateCreatureRepresentation elaborate &&
                 !elaborate.bestGhostDirty && elaborate.bestGhost != null)
@@ -162,14 +155,16 @@ internal static class AIDebugAdvancedCapture
                 relationshipName, intensity));
         }
 
-        // Recorder capture deliberately keeps tracker order. Sorting is a presentation
-        // concern and must not add O(n log n) work to every historical sample.
         if (sortByPriority)
             output.Sort((a, b) => b.Priority.CompareTo(a.Priority));
     }
 
     internal static AIDebugPathState CapturePath(AbstractCreature creature)
     {
+        // Capture static physical/AIMap geometry only when a lower-frequency Path sample
+        // is already due. The immutable cache is then safe for RWImGUI historical playback.
+        AIDebugRoomGeometryCache.Capture(creature?.realizedCreature?.room);
+
         ArtificialIntelligence ai = creature?.abstractAI?.RealAI;
         PathFinder pathFinder = ai?.pathFinder;
         WorldCoordinate destination = creature?.abstractAI?.destination ?? default;
