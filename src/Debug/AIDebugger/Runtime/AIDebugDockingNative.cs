@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -11,9 +12,8 @@ internal static class AIDebugDockingNative
     // ImGuiDockNodeFlags_DockSpace is intentionally part of Dear ImGui's private
     // ImGuiDockNodeFlagsPrivate_ enum and therefore is not generated into the public
     // ImGui.NET ImGuiDockNodeFlags enum. cimgui 1.91.x defines it as 1 << 10.
-    // Keep the exact native bit here instead of referring to a non-existent managed
-    // enum member.
     private const ImGuiDockNodeFlags DockSpaceNodeFlag = (ImGuiDockNodeFlags)(1 << 10);
+    private const string DockingIniHeader = "[Docking][Data]";
 
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern uint igDockSpace(uint dockspace_id, Num.Vector2 size,
@@ -38,11 +38,13 @@ internal static class AIDebugDockingNative
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern void igDockBuilderFinish(uint node_id);
 
+    // Dear ImGui/cimgui uses size_t here. UIntPtr is required on Rain World's x64
+    // process; using uint/out uint corrupts the native ABI because size_t is 8 bytes.
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void igLoadIniSettingsFromMemory(IntPtr ini_data, uint ini_size);
+    private static extern void igLoadIniSettingsFromMemory(IntPtr ini_data, UIntPtr ini_size);
 
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr igSaveIniSettingsToMemory(out uint out_ini_size);
+    private static extern IntPtr igSaveIniSettingsToMemory(out UIntPtr out_ini_size);
 
     internal static void DockSpace(uint dockspaceId, Num.Vector2 size,
         ImGuiDockNodeFlags flags = ImGuiDockNodeFlags.None) =>
@@ -83,12 +85,13 @@ internal static class AIDebugDockingNative
         string path = AIDebugSettings.LayoutPath;
         if (!File.Exists(path)) return false;
         byte[] data = File.ReadAllBytes(path);
-        if (data.Length == 0) return false;
+        if (!ContainsDockingData(data)) return false;
+
         IntPtr memory = Marshal.AllocHGlobal(data.Length);
         try
         {
             Marshal.Copy(data, 0, memory, data.Length);
-            igLoadIniSettingsFromMemory(memory, checked((uint)data.Length));
+            igLoadIniSettingsFromMemory(memory, new UIntPtr((uint)data.Length));
         }
         finally
         {
@@ -101,10 +104,17 @@ internal static class AIDebugDockingNative
     {
         string directory = Path.GetDirectoryName(AIDebugSettings.LayoutPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-        IntPtr memory = igSaveIniSettingsToMemory(out uint size);
-        if (memory == IntPtr.Zero || size == 0) return;
-        byte[] data = new byte[checked((int)size)];
+
+        IntPtr memory = igSaveIniSettingsToMemory(out UIntPtr nativeSize);
+        ulong rawSize = nativeSize.ToUInt64();
+        if (memory == IntPtr.Zero || rawSize == 0 || rawSize > int.MaxValue) return;
+
+        byte[] data = new byte[(int)rawSize];
         Marshal.Copy(memory, data, 0, data.Length);
+
+        // Compact mode also creates ordinary ImGui window settings. Never overwrite a
+        // valid DockSpace layout with a compact-only ini that contains no docking tree.
+        if (!ContainsDockingData(data)) return;
         File.WriteAllBytes(AIDebugSettings.LayoutPath, data);
     }
 
@@ -112,5 +122,14 @@ internal static class AIDebugDockingNative
     {
         string path = AIDebugSettings.LayoutPath;
         if (File.Exists(path)) File.Delete(path);
+    }
+
+    private static bool ContainsDockingData(byte[] data)
+    {
+        if (data == null || data.Length < DockingIniHeader.Length) return false;
+        // ImGui ini syntax is ASCII-compatible even when localized window labels contain
+        // UTF-8. Searching the decoded text is safe and keeps corrupted/partial files out.
+        string text = Encoding.UTF8.GetString(data);
+        return text.IndexOf(DockingIniHeader, StringComparison.Ordinal) >= 0;
     }
 }
