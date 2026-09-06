@@ -126,7 +126,10 @@ internal static class AIDebugAdvancedCapture
         }
     }
 
-    internal static void CapturePerception(AbstractCreature creature, List<AIDebugPerceptionRow> output)
+    internal static void CapturePerception(
+        AbstractCreature creature,
+        List<AIDebugPerceptionRow> output,
+        bool sortByPriority = true)
     {
         output.Clear();
         Tracker tracker = creature?.abstractAI?.RealAI?.tracker;
@@ -158,7 +161,11 @@ internal static class AIDebugAdvancedCapture
                 rep.EstimatedChanceOfFinding, rep.priority, rep.lastSeenCoord, bestGuess,
                 relationshipName, intensity));
         }
-        output.Sort((a, b) => b.Priority.CompareTo(a.Priority));
+
+        // Recorder capture deliberately keeps tracker order. Sorting is a presentation
+        // concern and must not add O(n log n) work to every historical sample.
+        if (sortByPriority)
+            output.Sort((a, b) => b.Priority.CompareTo(a.Priority));
     }
 
     internal static AIDebugPathState CapturePath(AbstractCreature creature)

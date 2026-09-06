@@ -99,7 +99,7 @@ internal static class AIDebuggerRuntime
 internal sealed class AIDebuggerHost : MonoBehaviour
 {
     private const float PresentationInterval = 0.10f;
-    private const int EntityRefreshFrames = 15;
+    private const float EntityRefreshInterval = 1.0f;
 
     private readonly List<AbstractCreature> entities = new(128);
     private readonly HashSet<int> visibleRooms = new();
@@ -114,7 +114,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private DebugEntityKey selectedKey;
     private AIDebugViewMode viewMode = AIDebugViewMode.Live;
     private int cursorTick;
-    private int nextEntityRefreshFrame;
+    private float nextEntityRefreshTime;
     private float nextPresentationTime;
 
     internal bool Visible => visible;
@@ -124,6 +124,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         rainWorld = rw;
         logger = log;
         presentationDirty = true;
+        nextEntityRefreshTime = 0f;
         logger?.LogInfo($"DryCycle AI Observatory controller Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, " +
                         $"presentationState={AIDebugPresentationBridgeStatus.Describe()}.");
     }
@@ -258,7 +259,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     break;
 
                 case AIDebugUiCommandKind.Refresh:
-                    nextEntityRefreshFrame = 0;
+                    nextEntityRefreshTime = 0f;
                     nextPresentationTime = 0f;
                     presentationDirty = true;
                     break;
@@ -267,13 +268,13 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     if (game != null && hasSelection)
                     {
                         if (viewMode == AIDebugViewMode.Live) cursorTick = game.clock;
-                        long desired = (long)cursorTick + command.IntValue;
-                        if (desired < 0L) desired = 0L;
-                        if (desired > game.clock) desired = game.clock;
-                        cursorTick = (int)desired;
-                        viewMode = cursorTick >= game.clock ? AIDebugViewMode.Live : AIDebugViewMode.Historical;
-                        presentationDirty = true;
+                        SetCursor(game, (long)cursorTick + command.IntValue);
                     }
+                    break;
+
+                case AIDebugUiCommandKind.SetCursorTick:
+                    if (game != null && hasSelection)
+                        SetCursor(game, command.IntValue);
                     break;
 
                 case AIDebugUiCommandKind.ReturnLive:
@@ -283,6 +284,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     break;
             }
         }
+    }
+
+    private void SetCursor(RainWorldGame game, long desired)
+    {
+        if (desired < 0L) desired = 0L;
+        if (desired > game.clock) desired = game.clock;
+        cursorTick = (int)desired;
+        viewMode = cursorTick >= game.clock ? AIDebugViewMode.Live : AIDebugViewMode.Historical;
+        presentationDirty = true;
     }
 
     private void PublishPresentation(RainWorldGame game)
@@ -305,10 +315,13 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             return;
         }
 
-        if (Time.frameCount >= nextEntityRefreshFrame || entities.Count == 0)
+        // Entity Browser discovery is not part of the recorder hot path. Refresh the
+        // complete World list at most once per second while the Observatory is visible;
+        // tracked entities continue recording at 40 Hz from direct slot handles.
+        if (Time.unscaledTime >= nextEntityRefreshTime || entities.Count == 0)
         {
             AIDebugRegistry.CollectWorld(game, entities);
-            nextEntityRefreshFrame = Time.frameCount + EntityRefreshFrames;
+            nextEntityRefreshTime = Time.unscaledTime + EntityRefreshInterval;
         }
 
         visibleRooms.Clear();
@@ -353,12 +366,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 ? AIDebugRichRecorder.TryResolve(viewTick, out resolvedRich)
                 : AIDebugRichRecorder.TryGetLatest(out resolvedRich);
             if (hasRich && resolvedRich.HasValue)
-                selectedPresentation = CopySnapshot(resolvedRich.Snapshot, resolvedRich.AgeTicks);
+                selectedPresentation = CopySnapshot(resolvedRich);
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
         string recorderStatus = recorder.ActiveTracked > 0
-            ? $"{presentationEntities.Length} entities · recorder {recorder.Mode} · tracked {recorder.ActiveTracked} · motion {recorder.MotionSamples} · changes {recorder.StateChanges}" +
+            ? $"{presentationEntities.Length} entities · recorder {recorder.Mode} · tracked {recorder.ActiveTracked} · pinned {recorder.PinnedEntities}/{AIDebugRecorder.MaxPinnedEntities} · motion {recorder.MotionSamples} · changes {recorder.StateChanges}" +
               (recorder.DroppedRecords > 0 ? $" · LOST {recorder.DroppedRecords}" : string.Empty)
             : $"{presentationEntities.Length} entities · recorder {recorder.Mode}";
 
@@ -393,8 +406,9 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
-    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source, int snapshotAgeTicks = 0)
+    private static AIDebugPresentationCreature CopySnapshot(AIDebugResolvedSnapshot resolved)
     {
+        AIDebugSnapshot source = resolved.Snapshot;
         if (source == null) return null;
 
         var sections = new AIDebugPresentationSection[source.Sections.Count];
@@ -409,7 +423,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     value.LabelKey,
                     value.RawName,
                     value.Value,
-                    value.AgeTicks + snapshotAgeTicks,
+                    value.AgeTicks + resolved.AgeTicks,
                     value.Source);
             }
             sections[s] = new AIDebugPresentationSection(section.TitleKey, values);
@@ -427,13 +441,48 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 decision.Depth);
         }
 
+        AIDebugUtilityRow[] utilities;
+        if (resolved.UtilityCount <= 0)
+        {
+            utilities = Array.Empty<AIDebugUtilityRow>();
+        }
+        else
+        {
+            utilities = new AIDebugUtilityRow[resolved.UtilityCount];
+            Array.Copy(resolved.Utilities, utilities, resolved.UtilityCount);
+        }
+
+        AIDebugPerceptionRow[] perception;
+        if (resolved.PerceptionCount <= 0)
+        {
+            perception = Array.Empty<AIDebugPerceptionRow>();
+        }
+        else
+        {
+            perception = new AIDebugPerceptionRow[resolved.PerceptionCount];
+            Array.Copy(resolved.Perception, perception, resolved.PerceptionCount);
+            Array.Sort(perception, PerceptionPriorityComparer.Instance);
+        }
+
         return new AIDebugPresentationCreature(
             source.Key,
             source.DisplayName,
             source.EntityState,
             source.ControlOwner,
             sections,
-            decisions);
+            decisions,
+            utilities,
+            resolved.UtilityTruncated,
+            perception,
+            resolved.PerceptionTruncated,
+            resolved.Path,
+            resolved.AgeTicks);
+    }
+
+    private sealed class PerceptionPriorityComparer : IComparer<AIDebugPerceptionRow>
+    {
+        internal static readonly PerceptionPriorityComparer Instance = new();
+        public int Compare(AIDebugPerceptionRow x, AIDebugPerceptionRow y) => y.Priority.CompareTo(x.Priority);
     }
 
     private void TryExportSession()
