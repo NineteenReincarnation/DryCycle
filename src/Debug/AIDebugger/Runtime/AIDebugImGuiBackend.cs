@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using BepInEx.Logging;
 using ImGuiNET;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,6 +18,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 {
     private static readonly IntPtr FontTextureId = new(1);
 
+    private readonly ManualLogSource logger;
     private readonly Mesh mesh;
     private readonly Material material;
     private readonly MaterialPropertyBlock properties = new();
@@ -31,6 +33,11 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     private IntPtr context;
     private bool frameReady;
     private bool disposed;
+    private bool beginFrameLogged;
+    private bool drawDataLogged;
+    private bool emptyDrawDataLogged;
+    private bool meshLogged;
+    private bool renderLogged;
     private int previousSubMeshCount = -1;
 
     private readonly struct DrawCommand
@@ -45,11 +52,16 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         }
     }
 
-    internal AIDebugImGuiBackend()
+    internal AIDebugImGuiBackend(ManualLogSource log)
     {
-        AIDebugNativeBootstrap.Preload();
+        logger = log;
+        AIDebugNativeBootstrap.Preload(logger);
+
         context = ImGui.CreateContext();
+        if (context == IntPtr.Zero)
+            throw new InvalidOperationException("DryCycle AI Observatory: ImGui.CreateContext returned null.");
         ImGui.SetCurrentContext(context);
+        logger?.LogInfo("DryCycle AI Observatory ImGui context ready.");
 
         ImGuiIOPtr io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
@@ -58,8 +70,8 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         BuildFontAtlas(io);
         ConfigureStyle();
 
-        // Futile/Basic is loaded by Rain World itself and therefore cannot be stripped
-        // from this player build. Unity built-in shaders remain fallbacks.
+        // Keep the established shader order until live diagnostics prove a shader-specific
+        // failure. The runtime task explicitly requires DrawData/Mesh/Render evidence first.
         Shader shader = Shader.Find("Futile/Basic") ?? Shader.Find("Sprites/Default") ?? Shader.Find("UI/Default");
         if (shader == null) throw new InvalidOperationException("DryCycle AI Observatory: no compatible UI shader found.");
         material = new Material(shader)
@@ -69,6 +81,8 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         };
         material.mainTexture = fontTexture;
         if (material.HasProperty("_ZTest")) material.SetInt("_ZTest", (int)CompareFunction.Always);
+        if (material.HasProperty("_ZWrite")) material.SetInt("_ZWrite", 0);
+        if (material.HasProperty("_Cull")) material.SetInt("_Cull", (int)CullMode.Off);
 
         mesh = new Mesh
         {
@@ -77,12 +91,18 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             indexFormat = IndexFormat.UInt32
         };
         mesh.MarkDynamic();
+        logger?.LogInfo($"DryCycle AI Observatory renderer ready: shader={shader.name}, meshIndexFormat={mesh.indexFormat}.");
+    }
+
+    internal void MakeCurrent()
+    {
+        if (!disposed && context != IntPtr.Zero) ImGui.SetCurrentContext(context);
     }
 
     internal void BeginFrame()
     {
         if (disposed) return;
-        ImGui.SetCurrentContext(context);
+        MakeCurrent();
         ImGuiIOPtr io = ImGui.GetIO();
         io.DisplaySize = new Num.Vector2(Mathf.Max(1, Screen.width), Mathf.Max(1, Screen.height));
         io.DisplayFramebufferScale = Num.Vector2.One;
@@ -91,27 +111,69 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         FeedKeyboard(io);
         ImGui.NewFrame();
         frameReady = false;
+
+        if (!beginFrameLogged)
+        {
+            beginFrameLogged = true;
+            logger?.LogInfo($"DryCycle AI Observatory first BeginFrame: display={io.DisplaySize.X:0}x{io.DisplaySize.Y:0}, framebufferScale={io.DisplayFramebufferScale.X:0.###},{io.DisplayFramebufferScale.Y:0.###}, delta={io.DeltaTime:0.0000}.");
+        }
     }
 
     internal void EndFrame()
     {
         if (disposed) return;
+        MakeCurrent();
         ImGui.Render();
         frameReady = true;
+
+        ImDrawDataPtr data = ImGui.GetDrawData();
+        if (!drawDataLogged && data.CmdListsCount > 0 && data.TotalVtxCount > 0 && data.TotalIdxCount > 0)
+        {
+            drawDataLogged = true;
+            logger?.LogInfo($"DryCycle AI Observatory first DrawData: cmdLists={data.CmdListsCount}, vertices={data.TotalVtxCount}, indices={data.TotalIdxCount}, displayPos={data.DisplayPos.X:0.###},{data.DisplayPos.Y:0.###}, displaySize={data.DisplaySize.X:0.###}x{data.DisplaySize.Y:0.###}, framebufferScale={data.FramebufferScale.X:0.###},{data.FramebufferScale.Y:0.###}.");
+        }
     }
 
     internal void Render()
     {
         if (disposed || !frameReady || context == IntPtr.Zero) return;
-        ImGui.SetCurrentContext(context);
+        MakeCurrent();
         ImDrawDataPtr data = ImGui.GetDrawData();
-        if (data.TotalVtxCount <= 0 || data.CmdListsCount <= 0) return;
+        if (data.TotalVtxCount <= 0 || data.TotalIdxCount <= 0 || data.CmdListsCount <= 0)
+        {
+            if (!emptyDrawDataLogged)
+            {
+                emptyDrawDataLogged = true;
+                logger?.LogWarning($"DryCycle AI Observatory render reached with empty DrawData: cmdLists={data.CmdListsCount}, vertices={data.TotalVtxCount}, indices={data.TotalIdxCount}.");
+            }
+            frameReady = false;
+            return;
+        }
+
         BuildMesh(data);
         ExecuteDrawCommands(data);
+        frameReady = false;
     }
 
-    internal bool WantsMouse => !disposed && context != IntPtr.Zero && ImGui.GetIO().WantCaptureMouse;
-    internal bool WantsKeyboard => !disposed && context != IntPtr.Zero && ImGui.GetIO().WantCaptureKeyboard;
+    internal bool WantsMouse
+    {
+        get
+        {
+            if (disposed || context == IntPtr.Zero) return false;
+            MakeCurrent();
+            return ImGui.GetIO().WantCaptureMouse;
+        }
+    }
+
+    internal bool WantsKeyboard
+    {
+        get
+        {
+            if (disposed || context == IntPtr.Zero) return false;
+            MakeCurrent();
+            return ImGui.GetIO().WantCaptureKeyboard;
+        }
+    }
 
     private static void FeedMouse(ImGuiIOPtr io)
     {
@@ -162,7 +224,13 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         for (int i = 0; i < text.Length; i++)
         {
             char c = text[i];
-            if (!char.IsControl(c)) io.AddInputCharacter(c);
+            if (char.IsControl(c)) continue;
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                io.AddInputCharacter((uint)char.ConvertToUtf32(c, text[++i]));
+                continue;
+            }
+            if (!char.IsSurrogate(c)) io.AddInputCharacter(c);
         }
     }
 
@@ -181,6 +249,8 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         }
 
         io.Fonts.GetTexDataAsRGBA32(out IntPtr pixels, out int width, out int height, out int bytesPerPixel);
+        if (pixels == IntPtr.Zero || width <= 0 || height <= 0 || bytesPerPixel <= 0)
+            throw new InvalidOperationException("DryCycle AI Observatory: ImGui font atlas returned invalid pixel data.");
         int byteCount = checked(width * height * bytesPerPixel);
         byte[] managed = new byte[byteCount];
         Marshal.Copy(pixels, managed, 0, byteCount);
@@ -195,6 +265,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         fontTexture.Apply(false, true);
         io.Fonts.TexID = FontTextureId;
         io.Fonts.ClearTexData();
+        logger?.LogInfo($"DryCycle AI Observatory font atlas built: {width}x{height}, source={(font ?? "ImGui default")}, language={AIDebugLocalization.Language}.");
     }
 
     private static string FindCjkFont()
@@ -244,6 +315,14 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         drawCommands.Clear();
         int vertexBase = 0;
         int subMesh = 0;
+        Num.Vector2 displayPos = data.DisplayPos;
+        Num.Vector2 framebufferScale = data.FramebufferScale;
+        float scaleX = framebufferScale.X > 0f ? framebufferScale.X : 1f;
+        float scaleY = framebufferScale.Y > 0f ? framebufferScale.Y : 1f;
+        Rect firstClip = default;
+        Vector3 firstVertex = default;
+        bool haveFirstClip = false;
+        bool haveFirstVertex = false;
 
         for (int listIndex = 0; listIndex < data.CmdListsCount; listIndex++)
         {
@@ -254,25 +333,49 @@ internal sealed class AIDebugImGuiBackend : IDisposable
                 Num.Vector2 p = vertex.pos;
                 Num.Vector2 uv = vertex.uv;
                 uint packed = vertex.col;
-                vertices.Add(new Vector3(p.X, p.Y, 0f));
+                Vector3 transformed = new((p.X - displayPos.X) * scaleX, (p.Y - displayPos.Y) * scaleY, 0f);
+                vertices.Add(transformed);
                 uvs.Add(new Vector2(uv.X, uv.Y));
                 colors.Add(new Color32((byte)(packed & 0xff), (byte)((packed >> 8) & 0xff),
                     (byte)((packed >> 16) & 0xff), (byte)((packed >> 24) & 0xff)));
+                if (!haveFirstVertex)
+                {
+                    firstVertex = transformed;
+                    haveFirstVertex = true;
+                }
             }
 
             for (int cmdIndex = 0; cmdIndex < list.CmdBuffer.Size; cmdIndex++)
             {
                 ImDrawCmdPtr cmd = list.CmdBuffer[cmdIndex];
                 if (cmd.UserCallback != IntPtr.Zero || cmd.ElemCount == 0) continue;
-                List<int> indices = IndexBuffer(subMesh);
                 int firstIndex = checked((int)cmd.IdxOffset);
                 int vtxOffset = checked((int)cmd.VtxOffset);
                 int elemCount = checked((int)cmd.ElemCount);
+                if (firstIndex < 0 || elemCount < 0 || firstIndex + elemCount > list.IdxBuffer.Size)
+                    throw new InvalidOperationException($"DryCycle AI Observatory: ImGui index range invalid (first={firstIndex}, count={elemCount}, buffer={list.IdxBuffer.Size}).");
+
+                List<int> indices = IndexBuffer(subMesh);
                 for (int i = 0; i < elemCount; i++)
-                    indices.Add(vertexBase + vtxOffset + list.IdxBuffer[firstIndex + i]);
+                {
+                    int localIndex = vtxOffset + list.IdxBuffer[firstIndex + i];
+                    if (localIndex < 0 || localIndex >= list.VtxBuffer.Size)
+                        throw new InvalidOperationException($"DryCycle AI Observatory: ImGui vertex index {localIndex} outside list vertex range {list.VtxBuffer.Size}.");
+                    indices.Add(vertexBase + localIndex);
+                }
 
                 Num.Vector4 clip = cmd.ClipRect;
-                drawCommands.Add(new DrawCommand(Rect.MinMaxRect(clip.X, clip.Y, clip.Z, clip.W), subMesh));
+                Rect transformedClip = Rect.MinMaxRect(
+                    (clip.X - displayPos.X) * scaleX,
+                    (clip.Y - displayPos.Y) * scaleY,
+                    (clip.Z - displayPos.X) * scaleX,
+                    (clip.W - displayPos.Y) * scaleY);
+                drawCommands.Add(new DrawCommand(transformedClip, subMesh));
+                if (!haveFirstClip && transformedClip.width > 0f && transformedClip.height > 0f)
+                {
+                    firstClip = transformedClip;
+                    haveFirstClip = true;
+                }
                 subMesh++;
             }
             vertexBase += list.VtxBuffer.Size;
@@ -293,23 +396,34 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         mesh.SetColors(colors);
         mesh.subMeshCount = drawCommands.Count;
         for (int i = 0; i < drawCommands.Count; i++) mesh.SetTriangles(indexBuffers[i], i, false);
-        float width = Mathf.Max(1f, data.DisplaySize.X * data.FramebufferScale.X);
-        float height = Mathf.Max(1f, data.DisplaySize.Y * data.FramebufferScale.Y);
+        float width = Mathf.Max(1f, data.DisplaySize.X * scaleX);
+        float height = Mathf.Max(1f, data.DisplaySize.Y * scaleY);
         mesh.bounds = new Bounds(new Vector3(width * 0.5f, height * 0.5f, 0f), new Vector3(width, height, 1f));
+
+        if (!meshLogged)
+        {
+            meshLogged = true;
+            string clipText = haveFirstClip ? $"{firstClip.xMin:0.###},{firstClip.yMin:0.###},{firstClip.xMax:0.###},{firstClip.yMax:0.###}" : "none";
+            string vertexText = haveFirstVertex ? $"{firstVertex.x:0.###},{firstVertex.y:0.###}" : "none";
+            logger?.LogInfo($"DryCycle AI Observatory first mesh: vertices={vertices.Count}, subMeshes={drawCommands.Count}, firstClip={clipText}, firstVertex={vertexText}.");
+        }
     }
 
     private void ExecuteDrawCommands(ImDrawDataPtr data)
     {
         if (drawCommands.Count == 0) return;
-        float width = Mathf.Max(1f, data.DisplaySize.X * data.FramebufferScale.X);
-        float height = Mathf.Max(1f, data.DisplaySize.Y * data.FramebufferScale.Y);
+        float scaleX = data.FramebufferScale.X > 0f ? data.FramebufferScale.X : 1f;
+        float scaleY = data.FramebufferScale.Y > 0f ? data.FramebufferScale.Y : 1f;
+        float width = Mathf.Max(1f, data.DisplaySize.X * scaleX);
+        float height = Mathf.Max(1f, data.DisplaySize.Y * scaleY);
         commands.Clear();
         commands.SetViewport(new Rect(0f, 0f, width, height));
         commands.SetViewProjectionMatrices(
-            Matrix4x4.Translate(new Vector3(0.5f / width, 0.5f / height, 0f)),
-            Matrix4x4.Ortho(0f, width, height, 0f, 0f, 1f));
+            Matrix4x4.identity,
+            Matrix4x4.Ortho(0f, width, height, 0f, -1f, 1f));
         properties.SetTexture("_MainTex", fontTexture);
 
+        int executed = 0;
         for (int i = 0; i < drawCommands.Count; i++)
         {
             DrawCommand draw = drawCommands[i];
@@ -320,9 +434,16 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             if (x2 <= x1 || y2 <= y1) continue;
             commands.EnableScissorRect(new Rect(x1, height - y2, x2 - x1, y2 - y1));
             commands.DrawMesh(mesh, Matrix4x4.identity, material, draw.SubMesh, -1, properties);
+            executed++;
         }
         commands.DisableScissorRect();
         Graphics.ExecuteCommandBuffer(commands);
+
+        if (!renderLogged)
+        {
+            renderLogged = true;
+            logger?.LogInfo($"DryCycle AI Observatory first render: drawCommands={executed}/{drawCommands.Count}, viewport={width:0}x{height:0}, ExecuteCommandBuffer completed.");
+        }
     }
 
     public void Dispose()
@@ -336,6 +457,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         if (fontTexture != null) Object.Destroy(fontTexture);
         if (context != IntPtr.Zero)
         {
+            ImGui.SetCurrentContext(context);
             ImGui.DestroyContext(context);
             context = IntPtr.Zero;
         }
@@ -348,14 +470,33 @@ internal static class AIDebugNativeBootstrap
     private static extern IntPtr LoadLibrary(string lpFileName);
 
     private static bool attempted;
+    private static IntPtr handle;
 
-    internal static void Preload()
+    internal static void Preload(ManualLogSource logger)
     {
         if (attempted) return;
         attempted = true;
-        if (Environment.OSVersion.Platform != PlatformID.Win32NT) return;
+        if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+        {
+            logger?.LogInfo("DryCycle AI Observatory cimgui native preload skipped on non-Windows platform.");
+            return;
+        }
+
         string folder = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string path = Path.Combine(folder ?? string.Empty, "cimgui.dll");
-        if (File.Exists(path)) LoadLibrary(path);
+        if (!File.Exists(path))
+        {
+            logger?.LogWarning("DryCycle AI Observatory cimgui native preload file not found beside DryCycle.dll: " + path);
+            return;
+        }
+
+        handle = LoadLibrary(path);
+        if (handle == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            logger?.LogWarning($"DryCycle AI Observatory cimgui native preload failed: Win32Error={error}, path={path}. Normal DllImport probing will still be attempted.");
+            return;
+        }
+        logger?.LogInfo("DryCycle AI Observatory cimgui native preload success: " + path);
     }
 }
