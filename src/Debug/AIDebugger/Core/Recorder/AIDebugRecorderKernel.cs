@@ -17,6 +17,24 @@ internal enum AIDebugTrackedRole
     Pinned
 }
 
+internal readonly struct AIDebugRecorderRangePin
+{
+    internal readonly DebugEntityKey Key;
+    internal readonly AIDebugPinnedRangeHandle Motion;
+    internal readonly AIDebugPinnedRangeHandle States;
+    internal bool IsValid => Motion.IsValid || States.IsValid;
+
+    internal AIDebugRecorderRangePin(
+        DebugEntityKey key,
+        AIDebugPinnedRangeHandle motion,
+        AIDebugPinnedRangeHandle states)
+    {
+        Key = key;
+        Motion = motion;
+        States = states;
+    }
+}
+
 internal readonly struct AIDebugRecorderStatus
 {
     internal readonly AIDebugRecorderMode Mode;
@@ -69,7 +87,22 @@ internal static class AIDebugRecorder
 
     internal static AIDebugRecorderMode Mode => mode;
 
-    internal static void SetMode(AIDebugRecorderMode value) => mode = value;
+    internal static void SetMode(AIDebugRecorderMode value)
+    {
+        if (mode == value) return;
+        AIDebugRecorderMode previous = mode;
+        mode = value;
+
+        if (value == AIDebugRecorderMode.Recording)
+        {
+            AIDebugSessionBlockWriter.StartSession();
+        }
+        else if (previous == AIDebugRecorderMode.Recording)
+        {
+            FlushRetainedToWriter();
+            AIDebugSessionBlockWriter.StopSession();
+        }
+    }
 
     internal static bool Select(RainWorldGame game, DebugEntityKey key)
     {
@@ -149,22 +182,26 @@ internal static class AIDebugRecorder
         if (mode == AIDebugRecorderMode.Off || game == null) return;
         EnsureGame(game);
         DrainControlRequests();
-        if (activeCaptureCount <= 0) return;
 
-        for (int i = 0; i < Slots.Length; i++)
+        if (activeCaptureCount > 0)
         {
-            AIDebugTrackedEntitySlot slot = Slots[i];
-            if (slot == null || !slot.IsCapturing) continue;
-            if (slot.CaptureTick(game, game.clock)) continue;
-
-            if (slot.Pinned)
+            for (int i = 0; i < Slots.Length; i++)
             {
-                slot.Pinned = false;
-                if (pinnedCount > 0) pinnedCount--;
+                AIDebugTrackedEntitySlot slot = Slots[i];
+                if (slot == null || !slot.IsCapturing) continue;
+                if (slot.CaptureTick(game, game.clock)) continue;
+
+                if (slot.Pinned)
+                {
+                    slot.Pinned = false;
+                    if (pinnedCount > 0) pinnedCount--;
+                }
+                ChangeRole(slot, AIDebugTrackedRole.Retained);
+                if (selectedSlot == i) selectedSlot = -1;
             }
-            ChangeRole(slot, AIDebugTrackedRole.Retained);
-            if (selectedSlot == i) selectedSlot = -1;
         }
+
+        AIDebugAnomalyCapture.OnSimulationTick(game.clock);
     }
 
     internal static AIDebugRecorderStatus GetStatus()
@@ -298,9 +335,67 @@ internal static class AIDebugRecorder
         return true;
     }
 
+    internal static bool TryPinRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        out AIDebugRecorderRangePin pin)
+    {
+        int index = FindSlot(key);
+        if (index < 0)
+        {
+            pin = default;
+            return false;
+        }
+
+        AIDebugTrackedEntitySlot slot = Slots[index];
+        AIDebugPinnedRangeHandle motion = slot.Motion.PinRange(startTick, endTick);
+        AIDebugPinnedRangeHandle states = slot.States.PinRange(startTick, endTick);
+        if (!motion.IsValid && !states.IsValid)
+        {
+            pin = default;
+            return false;
+        }
+
+        pin = new AIDebugRecorderRangePin(key, motion, states);
+        return true;
+    }
+
+    internal static void ReleasePinnedRange(AIDebugRecorderRangePin pin)
+    {
+        if (!pin.IsValid) return;
+        int index = FindSlot(pin.Key);
+        if (index < 0) return;
+        Slots[index].Motion.UnpinRange(pin.Motion);
+        Slots[index].States.UnpinRange(pin.States);
+    }
+
+    internal static int LeaseMotionRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        Action<AIDebugSealedBlockLease<AIDebugMotionSample>> consumer)
+    {
+        int index = FindSlot(key);
+        return index < 0 ? 0 : Slots[index].Motion.LeaseRange(startTick, endTick, consumer);
+    }
+
+    internal static int LeaseFastStateRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        Action<AIDebugSealedBlockLease<AIDebugFastStateSample>> consumer)
+    {
+        int index = FindSlot(key);
+        return index < 0 ? 0 : Slots[index].States.LeaseRange(startTick, endTick, consumer);
+    }
+
     internal static void Reset()
     {
         AIDebugRecorderControl.Clear();
+        AIDebugAnomalyCapture.Reset();
+        if (AIDebugSessionBlockWriter.State != AIDebugSessionWriterState.Idle)
+            AIDebugSessionBlockWriter.StopSession(wait: true);
         ClearSlots();
         mode = AIDebugRecorderMode.Armed;
         boundGame = null;
@@ -363,9 +458,42 @@ internal static class AIDebugRecorder
     private static void EnsureGame(RainWorldGame game)
     {
         if (ReferenceEquals(boundGame, game)) return;
+
+        bool restartRecording = mode == AIDebugRecorderMode.Recording;
+        AIDebugAnomalyCapture.Reset();
+        if (AIDebugSessionBlockWriter.State != AIDebugSessionWriterState.Idle)
+            AIDebugSessionBlockWriter.StopSession(wait: true);
         AIDebugRecorderControl.Clear();
         ClearSlots();
         boundGame = game;
+        if (restartRecording) AIDebugSessionBlockWriter.StartSession();
+    }
+
+    private static void FlushRetainedToWriter()
+    {
+        if (AIDebugSessionBlockWriter.State != AIDebugSessionWriterState.Recording) return;
+        for (int i = 0; i < Slots.Length; i++)
+        {
+            AIDebugTrackedEntitySlot slot = Slots[i];
+            if (slot == null || slot.Role == AIDebugTrackedRole.None) continue;
+            if (!slot.Motion.TryGetRetainedTickRange(out int motionStart, out int motionEnd))
+            {
+                motionStart = 0;
+                motionEnd = -1;
+            }
+            if (motionEnd >= motionStart)
+                slot.Motion.LeaseRange(motionStart, motionEnd,
+                    lease => AIDebugSessionBlockWriter.EnqueueMotion(slot.Key, lease, force: true));
+
+            if (!slot.States.TryGetRetainedTickRange(out int stateStart, out int stateEnd))
+            {
+                stateStart = 0;
+                stateEnd = -1;
+            }
+            if (stateEnd >= stateStart)
+                slot.States.LeaseRange(stateStart, stateEnd,
+                    lease => AIDebugSessionBlockWriter.EnqueueState(slot.Key, lease, force: true));
+        }
     }
 
     private static void ClearSlots()
@@ -455,6 +583,8 @@ internal static class AIDebugRecorder
         {
             Motion = new AIDebugBlockRing<AIDebugMotionSample>(motionBlockCount, motionSamplesPerBlock);
             States = new AIDebugBlockRing<AIDebugFastStateSample>(stateBlockCount, stateSamplesPerBlock);
+            Motion.SetSealedBlockSink(lease => AIDebugSessionBlockWriter.EnqueueMotion(Key, lease));
+            States.SetSealedBlockSink(lease => AIDebugSessionBlockWriter.EnqueueState(Key, lease));
         }
 
         internal void Bind(AbstractCreature creature, DebugEntityKey key, int tick)
@@ -497,6 +627,11 @@ internal static class AIDebugRecorder
 
             if (!hasFastState || fastState != lastFastState)
             {
+                if (hasFastState)
+                    AIDebugAnomalyCapture.OnFastStateChanged(Key, tick, lastFastState, fastState);
+                else if ((fastState.Flags & (AIDebugFastFlags.Dead | AIDebugFastFlags.HasImmediateDanger)) != 0)
+                    AIDebugAnomalyCapture.Trigger(Key, tick, "initial-critical-state");
+
                 States.Append(
                     new AIDebugFastStateSample(tick, AIDebugRecorder.NextSequence(tick), fastState), tick);
                 lastFastState = fastState;
