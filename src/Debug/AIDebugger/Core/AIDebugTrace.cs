@@ -66,7 +66,6 @@ internal readonly struct AIDebugTraceFrame
     internal readonly Vector2 LocalGoal;
     internal readonly string Mode;
     internal readonly string Target;
-    internal readonly string Role;
     internal readonly string Suppression;
     internal readonly string ControlOwner;
     internal readonly float Utility0;
@@ -77,18 +76,18 @@ internal readonly struct AIDebugTraceFrame
     internal readonly AIDebugHistoricalState History;
 
     internal AIDebugTraceFrame(string room, Vector2 position, Vector2 velocity, Vector2 localGoal,
-        string mode, string target, string role, string suppression, string controlOwner,
+        string mode, string target, string suppression, string controlOwner,
         float utility0 = 0f, float utility1 = 0f, float utility2 = 0f, float panic = 0f,
         AIDebugHistoricalState history = null, float health = 0f, float leftWing = 0f,
         float rightWing = 0f, float postStun = 0f, float physicalCapability = 0f)
         : this(AIDebugTrace.SimulationTick, AIDebugTrace.SimulationTime, room, position, velocity,
-            localGoal, mode, target, role, suppression, controlOwner,
+            localGoal, mode, target, suppression, controlOwner,
             utility0, utility1, utility2, panic, history, health, leftWing, rightWing, postStun, physicalCapability)
     {
     }
 
     private AIDebugTraceFrame(int frame, float time, string room, Vector2 position,
-        Vector2 velocity, Vector2 localGoal, string mode, string target, string role,
+        Vector2 velocity, Vector2 localGoal, string mode, string target,
         string suppression, string controlOwner, float utility0, float utility1,
         float utility2, float panic, AIDebugHistoricalState history, float health, float leftWing,
         float rightWing, float postStun, float physicalCapability)
@@ -101,7 +100,6 @@ internal readonly struct AIDebugTraceFrame
         LocalGoal = localGoal;
         Mode = mode ?? "—";
         Target = target ?? "—";
-        Role = role ?? "—";
         Suppression = suppression ?? "—";
         ControlOwner = controlOwner ?? "—";
         Utility0 = utility0;
@@ -113,7 +111,7 @@ internal readonly struct AIDebugTraceFrame
     }
 
     internal AIDebugTraceFrame WithHistory(AIDebugHistoricalState history) =>
-        new(Frame, Time, Room, Position, Velocity, LocalGoal, Mode, Target, Role,
+        new(Frame, Time, Room, Position, Velocity, LocalGoal, Mode, Target,
             Suppression, ControlOwner, Utility0, Utility1, Utility2, Panic, history, Health, LeftWing, RightWing, PostStun, PhysicalCapability);
 }
 
