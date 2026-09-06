@@ -13,6 +13,7 @@ using Num = System.Numerics;
 namespace DryCycle.AIObservatory.RWImGui;
 
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
+[BepInDependency("Anno", BepInDependency.DependencyFlags.HardDependency)]
 public sealed class BridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.AIObservatory.RWImGui";
