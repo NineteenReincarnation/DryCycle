@@ -10,6 +10,41 @@ internal enum AIDebugViewMode
     Historical
 }
 
+internal sealed class AIDebugPresentationTimeline
+{
+    internal static readonly AIDebugPresentationTimeline Empty = new(
+        0, 0, 0, 0,
+        Array.Empty<AIDebugMotionSample>(),
+        Array.Empty<AIDebugFastStateSample>(),
+        false);
+
+    internal readonly int StartTick;
+    internal readonly int EndTick;
+    internal readonly int OldestRetainedTick;
+    internal readonly int NewestRetainedTick;
+    internal readonly AIDebugMotionSample[] Motion;
+    internal readonly AIDebugFastStateSample[] States;
+    internal readonly bool Truncated;
+
+    internal AIDebugPresentationTimeline(
+        int startTick,
+        int endTick,
+        int oldestRetainedTick,
+        int newestRetainedTick,
+        AIDebugMotionSample[] motion,
+        AIDebugFastStateSample[] states,
+        bool truncated)
+    {
+        StartTick = startTick;
+        EndTick = endTick;
+        OldestRetainedTick = oldestRetainedTick;
+        NewestRetainedTick = newestRetainedTick;
+        Motion = motion ?? Array.Empty<AIDebugMotionSample>();
+        States = states ?? Array.Empty<AIDebugFastStateSample>();
+        Truncated = truncated;
+    }
+}
+
 // Thread boundary between Rain World's Unity/main-thread AI capture and the RWImGUI
 // Present callback. Everything published here is detached from live Rain World / Unity
 // objects. The frontend may read it from the render/present thread without touching the
@@ -28,7 +63,8 @@ internal sealed class AIDebugPresentationSnapshot
         AIDebugViewMode.Live,
         0,
         default,
-        default);
+        default,
+        AIDebugPresentationTimeline.Empty);
 
     internal readonly bool Visible;
     internal readonly bool HasGame;
@@ -42,6 +78,7 @@ internal sealed class AIDebugPresentationSnapshot
     internal readonly int CursorTick;
     internal readonly AIDebugResolvedMotion CursorMotion;
     internal readonly AIDebugResolvedFastState CursorFastState;
+    internal readonly AIDebugPresentationTimeline Timeline;
 
     internal AIDebugPresentationSnapshot(
         bool visible,
@@ -55,7 +92,8 @@ internal sealed class AIDebugPresentationSnapshot
         AIDebugViewMode viewMode = AIDebugViewMode.Live,
         int cursorTick = 0,
         AIDebugResolvedMotion cursorMotion = default,
-        AIDebugResolvedFastState cursorFastState = default)
+        AIDebugResolvedFastState cursorFastState = default,
+        AIDebugPresentationTimeline timeline = null)
     {
         Visible = visible;
         HasGame = hasGame;
@@ -69,6 +107,7 @@ internal sealed class AIDebugPresentationSnapshot
         CursorTick = cursorTick;
         CursorMotion = cursorMotion;
         CursorFastState = cursorFastState;
+        Timeline = timeline ?? AIDebugPresentationTimeline.Empty;
     }
 }
 
@@ -182,6 +221,7 @@ internal enum AIDebugUiCommandKind
     ToggleLanguage,
     Refresh,
     SeekCursorTicks,
+    SetCursorTick,
     ReturnLive
 }
 
@@ -203,6 +243,9 @@ internal readonly struct AIDebugUiCommand
 
     internal static AIDebugUiCommand SeekTicks(int deltaTicks) =>
         new(AIDebugUiCommandKind.SeekCursorTicks, default, deltaTicks);
+
+    internal static AIDebugUiCommand SetCursor(int tick) =>
+        new(AIDebugUiCommandKind.SetCursorTick, default, tick);
 
     internal static AIDebugUiCommand Simple(AIDebugUiCommandKind kind) =>
         new(kind, default, 0);
