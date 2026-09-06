@@ -53,7 +53,6 @@ internal static class DesertBatflyDebugTrace
             localGoal,
             bat.DesertAI.Mode.ToString(),
             AIDebugFormat.Creature(bat.DesertAI.Target),
-            null,
             suppression,
             controlOwner,
             0f,
