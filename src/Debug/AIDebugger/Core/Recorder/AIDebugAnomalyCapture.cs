@@ -151,12 +151,12 @@ internal static class AIDebugAnomalyCapture
                     capture.Key,
                     capture.StartTick,
                     capture.EndTick,
-                    lease => AIDebugSessionBlockWriter.EnqueueMotion(capture.Key, lease));
+                    lease => AIDebugSessionBlockWriter.EnqueueMotion(capture.Key, lease, force: true));
                 int stateBlocks = AIDebugRecorder.LeaseFastStateRange(
                     capture.Key,
                     capture.StartTick,
                     capture.EndTick,
-                    lease => AIDebugSessionBlockWriter.EnqueueState(capture.Key, lease));
+                    lease => AIDebugSessionBlockWriter.EnqueueState(capture.Key, lease, force: true));
 
                 AIDebugSessionBlockWriter.EnqueueCaptureMetadata(
                     capture.Id,
@@ -181,6 +181,9 @@ internal static class AIDebugAnomalyCapture
                 activeCount--;
             }
         }
+
+        if (activeCount == 0 && AIDebugSessionBlockWriter.AutomaticSession)
+            AIDebugSessionBlockWriter.StopSession();
     }
 
     internal static void Reset()
