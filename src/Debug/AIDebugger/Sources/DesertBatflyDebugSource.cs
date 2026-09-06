@@ -223,7 +223,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.custom_ai", AIDebugDecisionState.Active,
             bat.DesertAI.Mode.ToString(), "DesertBatflyAI.Mode"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vanilla_ai", AIDebugDecisionState.Ready,
-            bat.AI?.behavior.ToString(), "FlyAI.behavior"));
+            AIDebugFormat.Value(bat.AI?.behavior), "FlyAI.behavior"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.motor", AIDebugDecisionState.Active,
             AIDebugFormat.Value(bat.AI?.localGoal), "FlyAI.localGoal"));
     }
