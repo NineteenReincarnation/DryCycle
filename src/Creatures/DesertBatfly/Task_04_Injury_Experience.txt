@@ -165,15 +165,23 @@ healthBefore
 6. Rock 特殊规则
 ============================================================
 
-现有规则必须保持：
-Rock 只能 Stun Desert Batfly，不能造成生命伤害。
+Rock 不再是纯 Stun-only。
 
-因此 Rock：
-- Health Damage = 0
-- Wing Injury = 0
-- 可以增加 PostStunShock
+Rock 对 Desert Batfly 必须保留原版 Rock 的真实 Blunt Violence：
+- 可以造成 Health Damage；
+- 可以产生 Stun；
+- 可以增加 PostStunShock；
+- 因为存在真实 actualHealthLoss，所以允许按普通 Blunt Damage 规则产生与伤害量匹配的 Wing Injury / Trauma。
 
-不得因为 Task 04 破坏 stun-only 规则。
+但是 Rock 有一条物种特例：
+- Rock 不能成为 Desert Batfly 的直接致死一击；
+- Rock Violence 内部若因为 quick-death roll、instantDeathDamageLimit 或其他该次 Rock Violence 直接触发 Die()，必须仅阻止这一次 live -> dead 转换；
+- 该次伤害仍然保留，Health 最低钳制到一个很小的正值 survival floor；
+- 连续 Rock 可以不断压低 Health / 制造伤病和 Shock，但不能用 Rock 本身完成最后击杀；
+- Rock 处理结束后，不得继续提供死亡保护。随后 Spear、Bite、Predator、Drowning、环境伤害等仍可正常杀死该个体；
+- Rock 不应被登记成 recent lethal damager，以免之后其他死亡被错误归因给 Rock 投掷者。
+
+这不是 Rock 免伤，也不是无敌机制，而是“有伤害，但 Rock 不能直接补最后一下”。
 
 ============================================================
 7. PostStunShock
@@ -350,7 +358,10 @@ Task 04 只处理“这次经历很可怕”，不处理“学会识别某种攻
 - PostStunShock
 - PlayerTrauma
 
-Rock 例外：不制造 Wing Injury / Health Damage。
+Rock 也属于真实非致死伤害来源：
+- 保留原版 Blunt Health Damage；
+- 可以制造少量 Wing Injury / Trauma / Shock；
+- 唯一特殊点是 Rock 不能直接完成最后致死一击。
 
 ============================================================
 15. 地形碰撞
@@ -626,12 +637,15 @@ Runtime：
 ============================================================
 
 Case 1 - Rock
-- Health 不下降
-- Wing Injury = 0
-- Stun 明显
-- PostStunShock 增加
-- 醒来后短期更谨慎
-- 后续恢复正常
+- Health 必须下降，数值沿用原版 Rock Blunt Violence；
+- 可以产生与 actualHealthLoss 对应的少量 Wing Injury；
+- Stun 明显；
+- PostStunShock 增加；
+- 当 Health 很低时，Rock 仍不能直接把活体打成 dead；
+- 致死路径被该次 Rock Violence 阻止后，Health 保留在很小的正 survival floor；
+- 后续 Spear / Bite / Predator / Drowning 仍可正常杀死；
+- Rock 不应污染 recent lethal damager；
+- 醒来后短期更谨慎，后续恢复正常。
 
 Case 2 - Spear 幸存
 - Health 下降
@@ -733,7 +747,8 @@ Case 16 - Performance
 身体：
 - 左右翼分别保存 Injury
 - 真实非致死伤害可制造伤病
-- Rock 不制造 Wing Injury
+- Rock 保留 Health Damage / Stun / Shock，并可按实际伤害产生 Injury
+- Rock 无法成为直接致死一击，但不会影响之后其他来源正常致死
 - 单侧/双侧伤表现不同
 
 飞行：
