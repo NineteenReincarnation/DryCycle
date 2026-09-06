@@ -32,6 +32,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         DesertBatflySocialRoles roles = ai.Roles;
         DesertBatflyState state = bat.DesertState;
         DesertBatflyPersonality p = bat.Personality;
+        DesertBatflyInjury injury = bat.Injury;
         SocialRoleSuppression suppression = roles.Suppression;
         string controlOwner = ControlOwner(bat, suppression);
         var snapshot = new AIDebugSnapshot(DebugEntityKey.From(creature),
@@ -51,6 +52,25 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.in_den", "AbstractCreature.InDen", creature.InDen)
             .Add("field.thirst", "DesertBatflyState.Thirst", state.Thirst)
             .Add("field.cooldown", "DesertBatflyState.Cooldown", state.Cooldown));
+
+        snapshot.Sections.Add(new AIDebugSection("section.injury")
+            .Add("field.health", "DesertBatflyState.health", state.health)
+            .Add("field.left_wing_injury", "DesertBatflyState.LeftWingInjury", state.LeftWingInjury)
+            .Add("field.right_wing_injury", "DesertBatflyState.RightWingInjury", state.RightWingInjury)
+            .Add("field.wing_mean", "DesertBatflyInjury.WingMean", injury.WingMean)
+            .Add("field.wing_asymmetry", "DesertBatflyInjury.WingAsymmetry", injury.WingAsymmetry)
+            .Add("field.wing_bias", "DesertBatflyInjury.WingBias", injury.WingBias)
+            .Add("field.post_stun_shock", "DesertBatflyInjury.PostStunShock", injury.PostStunShock)
+            .Add("field.physical_capability", "DesertBatflyInjury.PhysicalCapability", injury.PhysicalCapability)
+            .Add("field.forward_control", "DesertBatflyInjury.ForwardControl", injury.ForwardControl)
+            .Add("field.turn_control", "DesertBatflyInjury.TurnControl", injury.TurnControl)
+            .Add("field.lift_control", "DesertBatflyInjury.LiftControl", injury.LiftControl)
+            .Add("field.recovery_state", "DesertBatflyInjury.RecoveryState", injury.RecoveryState)
+            .Add("field.recovery_target", "DesertBatflyInjury.RecoveryTarget",
+                injury.RecoveryTarget.HasValue ? injury.RecoveryTarget.Value.ToString() : "—")
+            .Add("field.last_injury_source", "DesertBatflyInjury.LastInjurySource", injury.LastInjurySource)
+            .Add("field.last_injury_damage_type", "DesertBatflyInjury.LastInjuryDamageType", injury.LastInjuryDamageType)
+            .Add("field.last_injury_tick", "DesertBatflyInjury.LastInjuryTick", injury.LastInjuryTick));
 
         snapshot.Sections.Add(new AIDebugSection("section.personality")
             .Add("field.sex", "DesertBatflyPersonality.Sex", p.Sex)
@@ -134,6 +154,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
     private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat, SocialRoleSuppression suppression)
     {
         DesertBatflySocialRoles roles = bat.DesertAI.Roles;
+        DesertBatflyInjury injury = bat.Injury;
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.availability", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.conscious",
             bat.Consious ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked, null, "Creature.Consious", 1));
@@ -148,10 +169,49 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         AddSuppression(snapshot, "decision.fear", SocialRoleSuppression.Fear, suppression, 1);
         AddSuppression(snapshot, "decision.trauma", SocialRoleSuppression.Trauma, suppression, 1);
 
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.physical_condition",
+            injury.BlocksCombat ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
+            $"capability={injury.PhysicalCapability:0.000}", "DesertBatflyInjury", 0));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.health",
+            bat.DesertState.health < 0.45f ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
+            $"{bat.DesertState.health:0.000}", "DesertBatflyState.health", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.wing_injury",
+            injury.WingMean >= 0.15f ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
+            $"L={bat.DesertState.LeftWingInjury:0.000} R={bat.DesertState.RightWingInjury:0.000}",
+            "DesertBatflyState.LeftWingInjury/RightWingInjury", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.post_stun",
+            injury.PostStunShock >= 0.15f ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
+            $"{injury.PostStunShock:0.000}", "DesertBatflyInjury.PostStunShock", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.capability",
+            injury.PhysicalCapability < 0.70f ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
+            $"{injury.PhysicalCapability:0.000}", "DesertBatflyInjury.PhysicalCapability", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_recovery",
+            injury.IsRecovering ? AIDebugDecisionState.Active :
+                injury.IsSeverelyInjured ? AIDebugDecisionState.Ready : AIDebugDecisionState.Inactive,
+            injury.IsRecovering ? injury.RecoveryReason : injury.CombatBlockReason,
+            "DesertBatflyInjury.RecoveryState", 1));
+
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.special", AIDebugDecisionState.Active));
+        AddSuppression(snapshot, "decision.injury", SocialRoleSuppression.Injury, suppression, 1);
         AddSuppression(snapshot, "decision.grief", SocialRoleSuppression.Grief, suppression, 1);
         AddSuppression(snapshot, "decision.vengeance", SocialRoleSuppression.Vengeance, suppression, 1);
         AddSuppression(snapshot, "decision.roost", SocialRoleSuppression.Roost, suppression, 1);
+
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_overrides",
+            injury.BlocksCombat ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            injury.CombatBlockReason, "DesertBatflyInjury.BlocksCombat"));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.bully_injury",
+            injury.BlocksRole(ExpressedSocialRole.Bully) ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
+            injury.BlocksRole(ExpressedSocialRole.Bully) ? injury.CombatBlockReason : null,
+            "DesertBatflyInjury.BlocksRole(Bully)", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.retaliation_injury",
+            injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
+            injury.BlocksCombat ? injury.CombatBlockReason : null,
+            "DesertBatflyInjury.BlocksCombat", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance_injury",
+            injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
+            injury.BlocksCombat ? injury.CombatBlockReason : null,
+            "DesertBatflyIntimidation.Update injury gate", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.social_role",
             suppression == SocialRoleSuppression.None ? AIDebugDecisionState.Active : AIDebugDecisionState.Blocked,
@@ -193,6 +253,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         if (bat.inShortcut) return "Shortcut";
         return suppression switch
         {
+            SocialRoleSuppression.Injury => bat.Injury.IsRecovering ? "Injury Recovery" : "Physical Condition",
             SocialRoleSuppression.VanillaPriority => "Vanilla FlyAI",
             SocialRoleSuppression.Danger => "Danger / Escape",
             SocialRoleSuppression.Fear => "Fear / Intimidation",
@@ -203,7 +264,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             SocialRoleSuppression.Restrained => "Grasp / Restraint",
             SocialRoleSuppression.Emergence => "Emergence",
             SocialRoleSuppression.Unavailable => "Creature lifecycle",
-            _ => "DesertBatflyAI"
+            _ => bat.Injury.IsRecovering ? "Injury Recovery" : "DesertBatflyAI"
         };
     }
 
