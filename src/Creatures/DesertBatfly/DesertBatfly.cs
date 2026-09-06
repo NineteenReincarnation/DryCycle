@@ -68,7 +68,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         Injury.Tick();
         Vector2 previousFlightVelocity = mainBodyChunk?.vel ?? Vector2.zero;
-        DesertAI.Roles.Tick();
         TrackPlayerRelease();
         if (sandSpitCooldown > 0) sandSpitCooldown--;
         if (recentLethalDamageTicks > 0 && --recentLethalDamageTicks == 0)
@@ -123,7 +122,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!dead)
         {
             DesertBatflyIntimidation.Update(this);
-            DesertAI.Roles.CheckSuppression();
             extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
             if (extremeVengeance)
                 DesertAI.CancelAttack();
@@ -432,7 +430,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!wasDead && dead)
         {
             injury?.ClearTransient();
-            DesertAI?.Roles.Reset();
             if (!DesertBatflyIntimidation.IsSupportedLethalThreat(killer) && room != null)
                 foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
                     if (member is DesertBatfly observer && observer != this &&
@@ -451,7 +448,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     public override void Destroy()
     {
         injury?.ClearTransient();
-        DesertAI?.Roles.Reset();
         playerHolder = null;
         recentLethalDamager = null;
         recentLethalDamageTicks = 0;
