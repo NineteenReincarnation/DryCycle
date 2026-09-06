@@ -17,13 +17,14 @@
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
 
-    <!-- Steam Workshop item 3417372413 is Rawra's Rain World ImGUI API. The property
-         remains overrideable because users can use another Steam library or a manual
-         local install. Example:
-         dotnet build -p:RWImGuiPluginDir="X:/.../rwimgui/plugins" -->
-    <RWImGuiWorkshopPluginDir>$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPluginDir>
+    <!-- Steam Workshop installs often expose the published mod root directly as the item
+         directory, while release ZIPs contain a nested rwimgui/ folder. Support both. -->
+    <RWImGuiWorkshopRootPluginDir>$(RainWorldDir)/../../workshop/content/312520/3417372413/plugins</RWImGuiWorkshopRootPluginDir>
+    <RWImGuiWorkshopPackagePluginDir>$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPackagePluginDir>
     <RWImGuiLocalPluginDir>$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/rwimgui/plugins</RWImGuiLocalPluginDir>
-    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPluginDir)</RWImGuiPluginDir>
+
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopRootPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopRootPluginDir)</RWImGuiPluginDir>
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPackagePluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPackagePluginDir)</RWImGuiPluginDir>
     <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</RWImGuiPluginDir>
   </PropertyGroup>
 
@@ -72,7 +73,7 @@
   <Target Name="ValidateRWImGuiBridgeReferences" BeforeTargets="ResolveReferences">
     <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set for DryCycle.AIObservatory.RWImGui." />
     <Error Condition="!Exists('$(GameModOutputDir)/DryCycle.dll')" Text="DryCycle.dll must be built before DryCycle.AIObservatory.RWImGui. Expected $(GameModOutputDir)/DryCycle.dll." />
-    <Error Condition="'$(RWImGuiPluginDir)' == ''" Text="RWImGUI was not found. Install Steam Workshop item 3417372413 or pass -p:RWImGuiPluginDir=&quot;.../rwimgui/plugins&quot;. The normal DryCycle project does not require this bridge." />
+    <Error Condition="'$(RWImGuiPluginDir)' == ''" Text="RWImGUI was not found. Install Steam Workshop item 3417372413 or pass -p:RWImGuiPluginDir=&quot;.../plugins&quot;. The normal DryCycle project does not require this bridge." />
     <Error Condition="!Exists('$(RWImGuiPluginDir)/rain-world-imgui-api.dll')" Text="rain-world-imgui-api.dll not found under $(RWImGuiPluginDir)." />
     <Error Condition="!Exists('$(RWImGuiPluginDir)/ImGui.NET.dll')" Text="RWImGUI modified ImGui.NET.dll not found under $(RWImGuiPluginDir). Do not substitute the NuGet version." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
