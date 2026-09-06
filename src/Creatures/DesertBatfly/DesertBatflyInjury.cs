@@ -195,6 +195,11 @@ internal sealed class DesertBatflyInjury
     {
         capturePredator = null;
         capturePending = false;
+        PostStunShock = 0f;
+        shockTicks = 0;
+        impulseGrace = 0;
+        recoverySample = 0;
+        recoveredSinceEvent = 0f;
         NominalFlightSpeed = 0f;
         SetRecovery(InjuryRecoveryState.None, null, "creature lifecycle");
     }
