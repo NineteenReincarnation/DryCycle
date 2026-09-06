@@ -1,9 +1,11 @@
 using System;
+using System.Reflection;
 
 internal static partial class Program
 {
     // Historical entry-point name is kept only because Program.cs invokes it.
-    // This guard requires the rejected Task 02 runtime types to remain physically absent.
+    // This guard requires the rejected Task 02 runtime types and API surfaces to remain
+    // physically absent. Any compatibility shell is considered a regression.
     private static void RunRoleDistribution()
     {
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
@@ -13,7 +15,21 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "rejected Task 02 enum is physically removed");
 
-        Console.WriteLine("Task 02 social roles: rejected runtime types are physically absent.");
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Check(ai.GetField("Roles", Flags) == null && ai.GetProperty("Roles", Flags) == null,
+            "DesertBatflyAI has no rejected Roles API");
+
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Check(intimidation.GetMethod("BlocksSocialRoles", Flags) == null,
+            "fear/intimidation no longer exposes BlocksSocialRoles");
+        Check(intimidation.GetMethod("HasActiveFearSuppression", Flags) != null,
+            "fear suppression uses its current non-role API");
+
+        Type traceFrame = mod.GetType("DryCycle.Debugging.AI.AIDebugTraceFrame", true);
+        Check(traceFrame.GetField("Role", Flags) == null && traceFrame.GetProperty("Role", Flags) == null,
+            "AI Observatory trace frame has no rejected Role slot");
+
+        Console.WriteLine("Task 02 social roles: runtime types, AI API, fear API and Observatory Role slot are physically absent.");
     }
 
     // Program.cs historically ended by calling RunRoleIntegration from the removed
