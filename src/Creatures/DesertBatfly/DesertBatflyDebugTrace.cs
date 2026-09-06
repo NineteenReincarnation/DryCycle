@@ -147,7 +147,6 @@ internal static class DesertBatflyDebugTrace
             return "Injury Recovery";
         return suppression switch
         {
-            SocialRoleSuppression.Injury => "Physical Condition",
             SocialRoleSuppression.Fear => "Fear / Intimidation",
             SocialRoleSuppression.Trauma => "Trauma",
             SocialRoleSuppression.Grief => "Grief",
