@@ -731,7 +731,8 @@ internal sealed class AIDebuggerWindowV3
     private void DrawWorld(RainWorldGame game)
     {
         if (!AIDebugSettings.Overlay || selected == null) return;
-        bool frozen = freezeView && TryActiveFrame(out AIDebugTraceFrame frozenFrame);
+        AIDebugTraceFrame frozenFrame = default;
+        bool frozen = freezeView && TryActiveFrame(out frozenFrame);
         if (!frozen)
             AIDebugWorldOverlay.Draw(game, selected, pinned, FindEntity,
                 AIDebugSettings.OverlayPath, AIDebugSettings.OverlayPerception, AIDebugSettings.OverlayLabels);
