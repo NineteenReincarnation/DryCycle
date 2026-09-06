@@ -23,6 +23,7 @@ internal static class AIDebugSimulationControl
     internal static void Install(ManualLogSource log)
     {
         logger = log;
+        AIDebugSessionBlockWriter.Initialize(log);
         if (updateHook != null) return;
         try
         {
@@ -100,6 +101,14 @@ internal static class AIDebugSimulationControl
         {
             logger?.LogWarning("AI Observatory world-step hook dispose failed: " + error.Message);
         }
+
+        // These subsystems do not own Rain World objects after reset. Shut them down after
+        // the update hook is removed so no new simulation samples can race teardown.
+        AIDebugBreakpointManager.Reset();
+        AIDebugDeepProfiler.Reset();
+        AIDebugOfflineSessionStore.Reset();
+        AIDebugSessionBlockWriter.Shutdown();
+
         updateHook = null;
         debuggerPaused = false;
         stepRequested = false;
@@ -149,8 +158,8 @@ internal static class AIDebugSimulationControl
         orig(self);
 
         // RainWorldGame.clock increments exactly when the normal simulation branch runs.
-        // Both fast and rich recorders therefore share one simulation-tick coordinator.
-        // Presentation never owns capture timing and Pause does not fabricate samples.
+        // Fast/Motion and Rich/Heavy recorders therefore share one simulation-tick
+        // coordinator. Presentation never owns capture timing and Pause fabricates no data.
         if (self.clock != beforeClock)
         {
             long profile = AIDebugDeepProfiler.BeginTick();
