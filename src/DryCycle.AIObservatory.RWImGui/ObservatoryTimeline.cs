@@ -7,7 +7,7 @@ namespace DryCycle.AIObservatory.RWImGui;
 
 internal static class ObservatoryTimeline
 {
-    internal const float PreferredHeight = 228f;
+    internal const float PreferredHeight = 378f;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
@@ -59,6 +59,7 @@ internal static class ObservatoryTimeline
         }
 
         ObservatoryTrackedCompare.Draw(snapshot);
+        ObservatoryAdvancedPanels.Draw(snapshot);
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         float width = Math.Max(120f, available.X);
