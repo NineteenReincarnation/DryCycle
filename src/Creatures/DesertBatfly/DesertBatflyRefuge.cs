@@ -30,23 +30,21 @@ internal readonly struct DesertBatflyRefugeTarget
 
 internal static class DesertBatflyRefuge
 {
-    private const float MinimumRefugeQuality = 0.62f;
+    internal const float MinimumRefugeQuality = 0.62f;
     private const float MinimumImprovement = 0.12f;
     private const int SafetyMarginTicks = 600;
 
-    // Geometry is inspected only when a room is actually realized, then retained as a
-    // lightweight room-level memory. This avoids loading rooms or scanning tile grids
-    // during every weather evaluation while still allowing ordinary caves to become
-    // refuges without an authored tag.
     private static Dictionary<string, float> autoShelterQuality =
         new(StringComparer.OrdinalIgnoreCase);
     private static Dictionary<string, IntVector2> autoShelterTile =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<int> candidateScratch = new(32);
 
     internal static void Reset()
     {
         autoShelterQuality = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         autoShelterTile = new Dictionary<string, IntVector2>(StringComparer.OrdinalIgnoreCase);
+        candidateScratch.Clear();
     }
 
     internal static void ObserveRoom(Room room)
@@ -91,8 +89,6 @@ internal static class DesertBatflyRefuge
         }
 
         float demand = DesertBatflyWeatherEcology.HazardShelterDemand(hazardKind, hazardId);
-        // Heat exposure cares strongly about roof; violent sand/rain also benefits from
-        // actual enclosed shelters. For low-demand weather the colony need not evacuate.
         return Mathf.Clamp01(Mathf.Lerp(1f, baseQuality, demand));
     }
 
@@ -112,9 +108,6 @@ internal static class DesertBatflyRefuge
         if (autoShelterQuality.TryGetValue(RoomKey(room), out float automatic))
             return automatic;
 
-        // An abstract Den is a useful conservative fallback for an unloaded room. It is
-        // weaker than observed terrain or an explicit author tag because we do not load
-        // geometry merely to search for Refuge candidates.
         if (room.nodes != null)
             for (int i = 0; i < room.nodes.Length; i++)
                 if (room.nodes[i].type == AbstractRoomNode.Type.Den)
@@ -134,25 +127,61 @@ internal static class DesertBatflyRefuge
         Func<AbstractRoom, float> crowding,
         out DesertBatflyRefugeTarget target)
     {
+        return TryFindEmergencyRefugeFrom(
+            world, home, home, template, hazard, physicalCapability, knownRefuge,
+            predatorRisk, crowding, -1, false, out target);
+    }
+
+    /// <summary>
+    /// Replans from the bat's actual current room while retaining the original Home
+    /// Colony as the shelter-quality baseline. Used when a committed refuge route or
+    /// destination becomes unsafe after departure. Candidate discovery is bounded BFS.
+    /// </summary>
+    internal static bool TryFindEmergencyRefugeFrom(
+        World world,
+        AbstractRoom start,
+        AbstractRoom home,
+        CreatureTemplate template,
+        DesertBatflyWeatherEcologySample hazard,
+        float physicalCapability,
+        string knownRefuge,
+        Func<AbstractRoom, float> predatorRisk,
+        Func<AbstractRoom, float> crowding,
+        int excludedRoom,
+        bool alreadyEvacuating,
+        out DesertBatflyRefugeTarget target)
+    {
         target = default;
-        if (world?.abstractRooms == null || home == null || template == null || !hazard.HasHazard)
+        if (world?.abstractRooms == null || start == null || home == null ||
+            template == null || !hazard.HasHazard)
             return false;
 
         float homeQuality = HomeHiveShelterQuality(home, hazard.HazardKind, hazard.HazardId);
-        if (homeQuality >= Mathf.Max(0.72f, hazard.ShelterUrgency + 0.05f)) return false;
+        if (!alreadyEvacuating &&
+            homeQuality >= Mathf.Max(0.72f, hazard.ShelterUrgency + 0.05f))
+            return false;
+
+        DesertBatflyWorldRoutePlanner.CollectReachableRooms(
+            world, start.index, template, DesertBatflyWorldRoutePlanner.RefugeMaxHops,
+            candidateScratch);
 
         float bestScore = float.NegativeInfinity;
-        for (int i = 0; i < world.abstractRooms.Length; i++)
+        for (int c = 0; c < candidateScratch.Count; c++)
         {
-            AbstractRoom candidate = world.abstractRooms[i];
-            if (candidate == null || candidate.index == home.index) continue;
+            int roomIndex = candidateScratch[c];
+            if (roomIndex == start.index || roomIndex == excludedRoom) continue;
+            AbstractRoom candidate = world.GetAbstractRoom(roomIndex);
+            if (candidate == null) continue;
 
             float quality = RefugeShelterQuality(candidate, hazard.HazardKind, hazard.HazardId);
-            if (quality < MinimumRefugeQuality || quality < homeQuality + MinimumImprovement) continue;
+            float requiredQuality = alreadyEvacuating
+                ? MinimumRefugeQuality
+                : Mathf.Max(MinimumRefugeQuality, homeQuality + MinimumImprovement);
+            if (quality < requiredQuality) continue;
 
             if (!DesertBatflyWorldRoutePlanner.TryPlan(
                     world,
-                    home.index,
+                    start.index,
                     candidate.index,
                     template,
                     DesertBatflyTravelPurpose.EmergencyRefuge,
@@ -162,7 +191,7 @@ internal static class DesertBatflyRefuge
                 continue;
 
             int travelTicks = EstimateTravelTicks(route, physicalCapability);
-            if (!CanLeaveBeforeDanger(hazard, travelTicks)) continue;
+            if (!CanReachRefuge(hazard, travelTicks, route, alreadyEvacuating)) continue;
 
             float routeCost = DesertBatflyWorldRoutePlanner.NormalizedTravelCost(
                 route, DesertBatflyWorldRoutePlanner.RefugeMaxHops);
@@ -209,6 +238,14 @@ internal static class DesertBatflyRefuge
         return required < hazard.TimeUntilDangerTicks;
     }
 
+    internal static bool CanArriveBeforeDanger(int estimatedTravelTicks, int timeUntilDangerTicks)
+    {
+        if (estimatedTravelTicks < 0 || estimatedTravelTicks == int.MaxValue ||
+            timeUntilDangerTicks <= 0 || timeUntilDangerTicks == int.MaxValue)
+            return false;
+        return (long)estimatedTravelTicks + SafetyMarginTicks < timeUntilDangerTicks;
+    }
+
     internal static int ChooseRefugeNode(AbstractRoom room, CreatureTemplate template)
     {
         if (room?.nodes == null || room.nodes.Length == 0 || template == null) return -1;
@@ -225,16 +262,25 @@ internal static class DesertBatflyRefuge
         return fallback;
     }
 
-    private static float RouteRisk(World world, AbstractRoom room,
+    internal static bool RefugeStillSuitable(
+        World world,
+        AbstractRoom room,
+        WeatherScheduleEventKind hazardKind,
+        string hazardId)
+    {
+        if (world == null || room == null) return false;
+        DesertBatflyWeatherEcologySample local = DesertBatflyWeatherEcology.Sample(world, room);
+        if (local.LethalNow) return false;
+        return RefugeShelterQuality(room, hazardKind, hazardId) >= MinimumRefugeQuality;
+    }
+
+    internal static float RouteRisk(World world, AbstractRoom room,
         in DesertBatflyWeatherEcologySample hazard, Func<AbstractRoom, float> predatorRisk)
     {
         if (room == null) return 8f;
         DesertBatflyWeatherEcologySample local = DesertBatflyWeatherEcology.Sample(world, room);
         if (local.LethalNow) return 8f;
         float weather = local.TravelExposure;
-        // During forecast travel, any room that will actually receive this hazard gets a
-        // conservative potential-exposure surcharge. This avoids a short route through
-        // a room known to become lethal before arrival without reading future cycles.
         if (hazard.ForecastDanger &&
             DryCycle.Weather.Spatial.WeatherSpatialRegistry.IsAllowed(
                 world.region?.name, room.name, hazard.HazardKind, hazard.HazardId))
@@ -242,6 +288,22 @@ internal static class DesertBatflyRefuge
                 DesertBatflyWeatherEcology.HazardShelterDemand(hazard.HazardKind, hazard.HazardId) * 0.46f);
         float pred = Mathf.Clamp01(predatorRisk?.Invoke(room) ?? 0f);
         return Mathf.Clamp01(weather * 0.78f + pred * 0.22f);
+    }
+
+    private static bool CanReachRefuge(
+        in DesertBatflyWeatherEcologySample hazard,
+        int estimatedTravelTicks,
+        in DesertBatflyWorldRoute route,
+        bool alreadyEvacuating)
+    {
+        if (!alreadyEvacuating) return CanLeaveBeforeDanger(hazard, estimatedTravelTicks);
+        if (!route.Valid || estimatedTravelTicks == int.MaxValue) return false;
+        if (route.Survivability < 0.36f) return false;
+        if (!hazard.LethalNow) return true;
+        // Once already displaced, a one-hop retreat to a materially safer refuge is
+        // preferable to freezing in a route that has become lethal. Longer late trips
+        // remain forbidden.
+        return route.HopCount <= 1 && route.Survivability >= 0.58f;
     }
 
     private static float RealizedHiveCoverage(Room room)
