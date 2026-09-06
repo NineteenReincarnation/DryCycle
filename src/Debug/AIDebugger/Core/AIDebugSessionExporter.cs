@@ -112,7 +112,6 @@ internal static class AIDebugSessionExporter
         Vector(b, "localGoal", f.LocalGoal, true, indent + 1);
         Property(b, "mode", f.Mode, true, indent + 1);
         Property(b, "target", f.Target, true, indent + 1);
-        Property(b, "role", f.Role, true, indent + 1);
         Property(b, "suppression", f.Suppression, true, indent + 1);
         Property(b, "controlOwner", f.ControlOwner, true, indent + 1);
         Property(b, "utility0", f.Utility0, true, indent + 1);
@@ -321,18 +320,38 @@ internal static class AIDebugSessionExporter
         if (comma) b.Append(',');
     }
 
-    private static void Number(StringBuilder b, float value)
+    private static StringBuilder Indent(StringBuilder b, int indent)
     {
-        if (float.IsNaN(value) || float.IsInfinity(value)) b.Append("null");
-        else b.Append(value.ToString("0.######", CultureInfo.InvariantCulture));
+        for (int i = 0; i < indent; i++) b.Append("  ");
+        return b;
     }
 
-    private static StringBuilder Indent(StringBuilder b, int indent) => b.Append(' ', indent * 2);
+    private static void Number(StringBuilder b, float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value)) b.Append('0');
+        else b.Append(value.ToString("R", CultureInfo.InvariantCulture));
+    }
 
-    private static string Escape(string value) => (value ?? string.Empty)
-        .Replace("\\", "\\\\")
-        .Replace("\"", "\\\"")
-        .Replace("\r", "\\r")
-        .Replace("\n", "\\n")
-        .Replace("\t", "\\t");
+    private static string Escape(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        StringBuilder b = new(value.Length + 8);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            switch (c)
+            {
+                case '\\': b.Append("\\\\"); break;
+                case '"': b.Append("\\\""); break;
+                case '\r': b.Append("\\r"); break;
+                case '\n': b.Append("\\n"); break;
+                case '\t': b.Append("\\t"); break;
+                default:
+                    if (c < 32) b.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                    else b.Append(c);
+                    break;
+            }
+        }
+        return b.ToString();
+    }
 }
