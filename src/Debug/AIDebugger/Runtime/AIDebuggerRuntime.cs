@@ -168,6 +168,10 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             AIDebugStyleController.Reset();
             backend = new AIDebugImGuiBackend();
+            // The backend constructor creates and selects the ImGui context. Dear ImGui
+            // requires DockingEnable before the first NewFrame(), so initialize immutable
+            // context flags here, immediately after context creation and before BeginFrame.
+            AIDebugStyleController.InitializeContext();
             logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, Ctrl+Shift+F8 session export, whole-world pause/step enabled.");
             return true;
         }
