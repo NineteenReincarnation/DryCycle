@@ -5,9 +5,9 @@ using Num = System.Numerics;
 
 namespace DryCycle.AIObservatory.RWImGui;
 
-// Deferred range analysis over the detached visible Timeline viewport. No work is done
-// until the user Shift-clicks two Timeline points; analysis never touches recorder blocks
-// or Rain World objects from Present.
+// Deferred range analysis over the detached Timeline viewport. No work is done until the
+// user Shift-clicks two Timeline points; analysis never touches recorder blocks or Rain
+// World objects from Present.
 internal static class ObservatoryRangeAnalysis
 {
     private static bool hasStart;
@@ -63,7 +63,8 @@ internal static class ObservatoryRangeAnalysis
             out double maxSpeed,
             out int stateRecords,
             out int modeChanges,
-            out int targetChanges);
+            out int targetChanges,
+            out int roomChanges);
 
         float seconds = Math.Max(0, b - a) / 40f;
         ImGui.TextDisabled($"{L(snapshot, "Range", "范围")}: {a}..{b} ({seconds:0.00}s)");
@@ -72,12 +73,13 @@ internal static class ObservatoryRangeAnalysis
                               $"avg v {averageSpeed:0.00}  max v {maxSpeed:0.00}  " +
                               $"{L(snapshot, "states", "状态记录")} {stateRecords}  " +
                               $"{L(snapshot, "mode changes", "模式变化")} {modeChanges}  " +
-                              $"{L(snapshot, "target changes", "目标变化")} {targetChanges}");
+                              $"{L(snapshot, "target changes", "目标变化")} {targetChanges}  " +
+                              $"{L(snapshot, "room changes", "房间变化")} {roomChanges}");
         ImGui.SameLine();
         if (ImGui.SmallButton(L(snapshot, "Clear##Range", "清除##Range"))) Clear();
 
         if (motionSamples == 0)
-            ImGui.TextDisabled(L(snapshot, "No Motion samples fall inside this visible range.", "当前可见范围内没有 Motion 样本。"));
+            ImGui.TextDisabled(L(snapshot, "No Motion samples fall inside this retained viewport.", "当前保留视口内没有 Motion 样本。"));
     }
 
     internal static void DrawBoundaries(
@@ -89,22 +91,23 @@ internal static class ObservatoryRangeAnalysis
         float y1)
     {
         if (!hasStart) return;
-        AIDebugPresentationTimeline timeline = snapshot.Timeline ?? AIDebugPresentationTimeline.Empty;
-        if (timeline.EndTick <= timeline.StartTick) return;
+        int viewStart = ObservatoryTimelineTools.ViewStart;
+        int viewEnd = ObservatoryTimelineTools.ViewEnd;
+        if (viewEnd <= viewStart) return;
 
         uint color = ImGui.GetColorU32(ImGuiCol.HeaderHovered);
         int a = hasEnd ? Math.Min(startTick, endTick) : startTick;
         int b = hasEnd ? Math.Max(startTick, endTick) : startTick;
 
-        if (a >= timeline.StartTick && a <= timeline.EndTick)
+        if (a >= viewStart && a <= viewEnd)
         {
-            float x = TickToX(a, timeline.StartTick, timeline.EndTick, x0, x1);
+            float x = TickToX(a, viewStart, viewEnd, x0, x1);
             draw.AddLine(new Num.Vector2(x, y0), new Num.Vector2(x, y1), color, 2f);
         }
 
-        if (hasEnd && b >= timeline.StartTick && b <= timeline.EndTick)
+        if (hasEnd && b >= viewStart && b <= viewEnd)
         {
-            float x = TickToX(b, timeline.StartTick, timeline.EndTick, x0, x1);
+            float x = TickToX(b, viewStart, viewEnd, x0, x1);
             draw.AddLine(new Num.Vector2(x, y0), new Num.Vector2(x, y1), color, 2f);
         }
     }
@@ -119,7 +122,8 @@ internal static class ObservatoryRangeAnalysis
         out double maxSpeed,
         out int stateRecords,
         out int modeChanges,
-        out int targetChanges)
+        out int targetChanges,
+        out int roomChanges)
     {
         motionSamples = 0;
         distance = 0.0;
@@ -128,6 +132,7 @@ internal static class ObservatoryRangeAnalysis
         stateRecords = 0;
         modeChanges = 0;
         targetChanges = 0;
+        roomChanges = 0;
 
         AIDebugMotionSample[] motion = timeline.Motion ?? Array.Empty<AIDebugMotionSample>();
         bool havePrevious = false;
@@ -170,6 +175,7 @@ internal static class ObservatoryRangeAnalysis
                 if (sample.State.ModeToken != last.ModeToken) modeChanges++;
                 if (sample.State.TargetSpawner != last.TargetSpawner ||
                     sample.State.TargetNumber != last.TargetNumber) targetChanges++;
+                if (sample.State.Room != last.Room) roomChanges++;
             }
 
             last = sample.State;
