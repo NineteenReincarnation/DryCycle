@@ -1,4 +1,11 @@
 <Project>
+  <!-- The bridge project lives below src/, so the SDK-style DryCycle project would
+       otherwise glob BridgePlugin.cs into DryCycle.dll as well. Remove those sources from
+       the core project after default Compile items have been evaluated. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
+    <Compile Remove="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/**/*.cs" />
+  </ItemGroup>
+
   <!-- Late-imported properties can safely use RainWorldDir from DryCycle.csproj. -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
     <BuildRWImGuiBridge Condition="'$(BuildRWImGuiBridge)' == ''">true</BuildRWImGuiBridge>
