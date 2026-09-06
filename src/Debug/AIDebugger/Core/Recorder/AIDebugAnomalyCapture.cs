@@ -132,6 +132,7 @@ internal static class AIDebugAnomalyCapture
         lastTriggerTick = tick;
         lastTriggerKey = key;
         lastReason = capture.Reason;
+        AIDebugBreakpointManager.OnAnomaly(key, tick, capture.Reason);
         return true;
     }
 
