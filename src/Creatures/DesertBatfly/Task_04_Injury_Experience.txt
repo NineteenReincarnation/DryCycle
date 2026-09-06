@@ -1,0 +1,807 @@
+Desert Batfly Task 04
+Injury & Experience / 伤病与经历后遗症
+Codex Execution Specification
+
+============================================================
+0. 任务性质
+============================================================
+
+本任务实现 Desert Batfly 第 4 项：Injury & Experience / 伤病与经历后遗症。
+
+目标不是增加一个简单 RPG 式 Injury Debuff，而是让非致死伤害真实影响 Desert Batfly 的飞行能力、行为选择、休息倾向和短中期经历，并让玩家无需 HUD 也能从飞行姿态和行为中判断“这只蝠蝇受过伤”。
+
+本任务必须建立在现有：
+- HealthState
+- DesertBatflyAI
+- Fly / FlyGraphics
+- PlayerTrauma / PredatorTrauma
+- SocialRoles
+- Grief
+- Extreme Vengeance
+- AttackSlots
+- AI Observatory
+之上。
+
+禁止建立第二套 Health / Fear / Trauma / AI。
+
+============================================================
+1. 当前项目基线
+============================================================
+
+执行前必须重新阅读 main 当前实现，至少包括：
+
+src/Creatures/DesertBatfly/
+- DesertBatfly.cs
+- DesertBatflyAI.cs
+- DesertBatflyState.cs
+- DesertBatflyDefinition.cs
+- DesertBatflyGraphics.cs
+- DesertBatflyIntimidation.cs
+- DesertBatflySocialRoles.cs
+- DesertBatflySocialBond.cs
+- DesertBatflyDebugTrace.cs
+- DesertSwarmRoom.cs
+- DiscussionStatus.txt
+
+以及相关 docs。
+
+如果文档与 main 当前代码冲突，以 main 当前代码为准。
+
+============================================================
+2. 四层状态模型
+============================================================
+
+严格区分：
+
+1) HealthState.health
+   - 整体生命状态
+   - 继续使用原版 HealthState
+
+2) LeftWingInjury / RightWingInjury
+   - 身体飞行器官损伤
+   - 持久化
+
+3) PostStunShock
+   - 重击后的短期生理混乱
+   - runtime only
+
+4) PlayerTrauma / PredatorTrauma
+   - 长期心理记忆
+   - 继续复用已有系统
+
+不得混成一条“总体受伤值”。
+
+============================================================
+3. Wing Injury / 翅部伤病
+============================================================
+
+新增：
+- LeftWingInjury : 0..1
+- RightWingInjury : 0..1
+
+0 = 健康
+1 = 极严重损伤
+
+左右翼必须独立。
+
+允许动态派生：
+- WingMean = (L + R) / 2
+- WingAsymmetry = abs(L - R)
+- WingBias = R - L
+
+派生值不存档。
+
+内部可以派生轻伤/中伤/重伤标签用于 Debug，但实际行为必须使用连续函数，不要做 RPG 阶段硬切。
+
+============================================================
+4. 飞行影响原则
+============================================================
+
+伤病优先影响：
+1. 转向能力
+2. 低速控制
+3. 飞行稳定性
+4. 升力
+5. 加速度
+6. 最高直线速度
+
+禁止简单 speed *= 0.5。
+
+初始调参目标：
+- 严重伤直线速度仍约 82%~88%
+- 中伤转向响应约 75%~85%
+- 严重伤转向响应约 50%~65%
+
+实际数值必须实机调参。
+
+单侧伤：
+- body 轻微倾斜
+- 左右转向能力不完全相同
+- 持续、确定性的偏置
+- AI/locomotion 需要持续修正
+
+禁止每帧 Random 抖动。
+
+双侧伤：
+- 整体升力下降
+- 转向响应下降
+- 加速度下降
+- 高度控制变差
+- Roost / Hive 倾向提高
+
+============================================================
+5. Injury 来源
+============================================================
+
+结构性 Wing Injury 只来自真实非致死伤害，例如：
+- Spear
+- Creature Bite
+- 真实 Blunt Damage
+- Predator Attack
+- 其他真实 DamageType
+
+必须根据实际 Health Loss，而不是 Violence 的输入 damage 参数直接计算：
+
+healthBefore
+-> base.Violence()
+-> healthAfter
+-> actualHealthLoss
+
+然后根据：
+- actualHealthLoss
+- DamageType
+- 攻击来源
+- 冲量
+- 剩余 Health
+- stable event seed
+决定伤病。
+
+左右翼分配建议：
+- 一次伤害主伤一侧
+- 另一侧少量波及
+- 一次事件稳定决定，不要逐帧随机
+
+============================================================
+6. Rock 特殊规则
+============================================================
+
+现有规则必须保持：
+Rock 只能 Stun Desert Batfly，不能造成生命伤害。
+
+因此 Rock：
+- Health Damage = 0
+- Wing Injury = 0
+- 可以增加 PostStunShock
+
+不得因为 Task 04 破坏 stun-only 规则。
+
+============================================================
+7. PostStunShock
+============================================================
+
+新增 runtime 状态：
+PostStunShock : 0..1
+
+来源包括：
+- Rock 重击
+- 大 Stun
+- Predator 冲撞
+- 严重 Violence 幸存
+- Peach Tongue 捕获后挣脱
+- Peach Grasp 被救出
+
+PostStunShock 不修改 Personality。
+禁止修改：
+- Nerve
+- Temperament
+- Conformity
+- RoostAffinity
+- VengeanceAffinity
+- SandSpitAffinity
+
+允许派生 EffectiveNerve / EffectiveAggression。
+
+高 Shock 时：
+- Harass 意愿下降
+- Observe / Approach 更容易取消
+- Dive 意愿降低
+- Retaliation 更难触发
+- 更愿保持距离
+- 更愿找安全位置
+- 重度时可临时压制显性 Social Role
+
+建议恢复时间：
+- 轻度：5~15 秒
+- 中度：15~35 秒
+- 重度：30~60 秒
+
+以 simulation tick 计算，实机调参。
+
+============================================================
+8. Persistence / 存档
+============================================================
+
+LeftWingInjury / RightWingInjury 必须写入 DesertBatflyState：
+- 跨房间保持
+- Unrealize/Realize 保持
+- Shortcut 保持
+- Cycle 后可恢复
+- 旧存档缺字段时默认 0
+- clamp 0..1
+- 防 NaN / Infinity
+
+PostStunShock 默认 runtime only，不持久化。
+
+不得破坏已有 Trauma / SocialBond / Grief 数据。
+
+============================================================
+9. 不做永久残疾
+============================================================
+
+Task 04 禁止：
+- WingDestroyed
+- PermanentMissingWing
+- PermanentFlightless
+- 永久断翼
+
+当前所有非致死伤病必须可恢复。
+
+============================================================
+10. InjuryRecovery AI
+============================================================
+
+新增轻量高优先级 Recovery 行为，可作为 DesertBatflyAI 现有模式的一部分。
+
+推荐优先关系：
+Dead / Unconscious / Grabbed / Shortcut
+-> Immediate Danger / Escape
+-> Severe Physical Injury Recovery
+-> Severe Trauma / Grief / Vengeance override
+-> Social Role
+-> Harass / Roost / ordinary Fly behavior
+
+即时危险永远高于 Recovery。
+
+Recovery 安全时优先：
+1. 合法 Roost
+2. 安全 Hive
+3. 低风险普通 Flight
+
+禁止新增第二个 PathFinder。
+
+重伤安全时：
+- CancelAttack
+- Release AttackSlot
+- Suppress expressed Role
+- InjuryRecovery
+- Roost / Hive
+
+============================================================
+11. Attack / Retaliation / Vengeance
+============================================================
+
+中度 Injury：
+- Roost desire 上升
+- Harass desire 下降
+- Circle / FakeDive / Dive 下降
+
+重度 Injury：
+- 释放 AttackSlot
+- 压制普通 Retaliation
+- 可以中止 Extreme Vengeance
+
+True Avenger 不代表无视身体极限。
+
+Grief 可以继续影响注意与愤怒，但不能绕过 PhysicalCapability 强行 Charge。
+
+============================================================
+12. Social Roles
+============================================================
+
+伤病影响的是“角色表达资格”，不是人格或永久职业。
+
+建议新增：
+SocialRoleSuppression.Injury
+
+Bully：
+- 对 Injury 最敏感
+- 中伤明显降低表达
+- 重伤直接 suppression
+
+Sentinel：
+- 轻伤仍可观察
+- 中重伤减少外围冒险确认
+- 重伤 suppression
+
+Opportunist：
+- 轻伤最兼容
+- 重伤仍由 InjuryRecovery 压过
+
+恢复后允许重新正常评估角色。
+
+============================================================
+13. Peach Tongue Survivor
+============================================================
+
+事件：
+Peach Tongue Attach -> 未死亡 -> 逃脱/Rescue
+
+效果：
+- PostStunShock 增加
+- PredatorTrauma 增加
+- 默认 Wing Injury 不增加，除非实际发生真实 Violence
+
+禁止新建：
+- TongueAvoidanceMemory
+- SpearAvoidanceMemory
+- RockStyleMemory
+- ThreatStyleMemory
+
+这些属于后续 Task 08。
+
+Task 04 只处理“这次经历很可怕”，不处理“学会识别某种攻击方式”。
+
+============================================================
+14. Player 非致死攻击
+============================================================
+
+玩家真实非致死伤害可同时产生：
+- Wing Injury
+- PostStunShock
+- PlayerTrauma
+
+Rock 例外：不制造 Wing Injury / Health Damage。
+
+============================================================
+15. 地形碰撞
+============================================================
+
+普通撞墙默认不增加结构性 Injury。
+
+避免形成：
+飞歪 -> 撞墙 -> 翅伤 -> 更飞歪 -> 再撞 -> 死亡螺旋
+
+如后续需要高速撞击伤病，另行讨论。
+
+============================================================
+16. Recovery
+============================================================
+
+Wing Injury 必须可以实时恢复并跨 Cycle 恢复。
+
+恢复速度建议：
+- Safe Roost：最快
+- Hive / 安全休息：较快
+- 普通 Flight：很慢
+- Escape / Combat：基本不恢复
+
+初始目标：
+- 轻伤：几十秒可明显恢复
+- 中伤：约 1~3 分钟
+- 重伤：依赖长期休息 / Cycle recovery
+
+严重伤不能 10 秒痊愈，也不能普通伤几十分钟不恢复。
+
+进入 Hive 不得瞬间 full heal。
+
+============================================================
+17. PhysicalCapability
+============================================================
+
+建议建立统一派生值：
+PhysicalCapability : 0..1
+
+由：
+- Health
+- WingMean
+- WingAsymmetry
+- PostStunShock
+综合得到。
+
+用途：
+- Role expression
+- Harass
+- Dive
+- Vengeance
+- Recovery
+- Roost bias
+
+PhysicalCapability 不存档。
+
+============================================================
+18. Movement 接入原则
+============================================================
+
+禁止创建 InjuryFlyPhysics。
+
+在现有 Desert Batfly movement 的明确最终执行层应用：
+- forward modifier
+- turn modifier
+- lift modifier
+- asymmetry bias
+
+必须避免 AI 和 Physics 双重处罚。
+
+原则：
+- AI 决定想去哪
+- Movement modifier 决定实际执行能力
+
+============================================================
+19. Graphics
+============================================================
+
+伤病必须可从游戏画面观察，不得只存在于 Inspector。
+
+单侧伤：
+- 左右翼 amplitude 不同
+- 受伤侧拍幅更小
+- 允许轻微 phase lag
+- body 轻微倾斜
+- 飞行轨迹自然偏斜
+
+双侧伤：
+- 两翼有效拍幅都下降
+- 可轻微提高拍翼频率进行补偿
+- body bob 更明显
+- 悬停稳定性下降
+
+严重伤可允许：
+- 轻微暗斑
+- 小缺口
+- 不规则边缘
+- 局部透明度变化
+
+禁止：
+- 大量血
+- 全翼断裂
+- 长期血液粒子
+- 新 gore 系统
+
+继续继承 FlyGraphics，不重写完整 Wing Animation。
+
+============================================================
+20. 捕食风险
+============================================================
+
+第一版禁止：
+if injured -> Peach captureChance *= X
+
+让受伤个体因为真实飞行性能下降而自然更容易被捕获。
+
+只有实机证明差异不足时，再单独讨论轻微 predator preference。
+
+============================================================
+21. SocialBond / 同伴
+============================================================
+
+SocialBond 不治疗伤病。
+
+允许极轻微行为 bias，例如 BondTarget 在安全 Roost 附近时更愿意去附近恢复。
+
+Task 04 不实现：
+- 同伴照顾
+- 喂食
+- 搬运
+- 医疗
+- 保护队形
+- HelpMeSignal
+
+============================================================
+22. 与后续任务边界
+============================================================
+
+Task 04 不提前实现：
+- Task 03 完整 Social Signal System
+- Task 08 ThreatStyleMemory
+- Corpse Ecology
+
+只允许暴露简单只读接口：
+- WingMean
+- WingAsymmetry
+- PhysicalCapability
+- IsSeverelyInjured
+- IsRecovering
+
+供后续系统读取。
+
+============================================================
+23. AI Observatory
+============================================================
+
+Task 04 从第一版就必须接 Observatory。
+
+Inspector 至少显示：
+- Health
+- LeftWingInjury
+- RightWingInjury
+- WingMean
+- WingAsymmetry
+- WingBias
+- PostStunShock
+- PhysicalCapability
+- ForwardControl
+- TurnControl
+- LiftControl
+- RecoveryState
+- RecoveryTarget
+- LastInjurySource
+- LastInjuryDamageType
+- LastInjuryTick
+
+Decision Stack 示例：
+PHYSICAL CONDITION
+- Health
+- Left Wing
+- Right Wing
+- Post Stun
+- Physical Capability
+
+INJURY RECOVERY
+- ACTIVE / INACTIVE
+
+OVERRIDES
+- Bully BLOCKED
+- Retaliation BLOCKED
+- Extreme Vengeance BLOCKED
+
+Why / Why Not 必须记录真实原因，不允许 UI 自己重新推断。
+
+Timeline 至少记录：
+- Health
+- LeftWing
+- RightWing
+- PostStun
+- PhysicalCapability
+- Mode
+- Role
+- Target
+
+事件：
+- InjuryApplied
+- InjuryRecoveryEntered
+- InjuryRecoveryExited
+- WingRecovered（阶段性，禁止每 tick spam）
+
+示例 InjuryApplied：
+source=Spear
+healthLoss=0.42
+leftWing+=0.51
+rightWing+=0.14
+
+============================================================
+24. 推荐文件职责
+============================================================
+
+建议新增：
+src/Creatures/DesertBatfly/DesertBatflyInjury.cs
+
+职责：
+- Injury 计算
+- ApplyShock
+- Recovery
+- PhysicalCapability
+- movement modifiers
+
+DesertBatflyState：
+- LeftWingInjury
+- RightWingInjury
+- save/load
+
+DesertBatflyAI：
+- InjuryRecovery 是否进入
+- Recovery target
+- 行为 suppression
+
+DesertBatflyGraphics：
+- wing visual asymmetry
+- body tilt
+- injury appearance
+
+Observatory：
+- 展示与 trace
+
+不要继续把全部伤病逻辑堆进 DesertBatflyAI.cs / DesertBatflyIntimidation.cs。
+
+============================================================
+25. 性能约束
+============================================================
+
+每只 Desert Batfly 只增加极少状态：
+Persistent：
+- 2 float Wing Injury
+
+Runtime：
+- 1 float PostStunShock
+- 少量 timer/debug state
+
+禁止：
+- Injury object list
+- 保存全部历史受伤事件
+- 每帧全群扫描
+- 新 O(n^2)
+- 新复杂肢体物理
+
+============================================================
+26. 必测场景
+============================================================
+
+Case 1 - Rock
+- Health 不下降
+- Wing Injury = 0
+- Stun 明显
+- PostStunShock 增加
+- 醒来后短期更谨慎
+- 后续恢复正常
+
+Case 2 - Spear 幸存
+- Health 下降
+- Wing Injury 增加
+- Shock 增加
+- PlayerTrauma 可能增加
+- 立即 Escape
+- 安全后 Recovery
+
+Case 3 - 单侧伤
+人工构造 L=0.7, R=0.1：
+- 有稳定偏置
+- wing amplitude 不对称
+- body tilt
+- 转向半径变化
+- 无随机漂移
+
+Case 4 - 双侧伤
+L=0.65, R=0.62：
+- 无明显单侧偏转
+- 整体操控下降
+- Recovery/Roost 倾向提高
+
+Case 5 - Peach Tongue Survivor
+- 默认 Wing Injury 不增加
+- Shock 增加
+- PredatorTrauma 增加
+
+Case 6 - Peach Bite Survivor
+- Health / Wing Injury / Shock / PredatorTrauma 合理增加
+
+Case 7 - Bully
+- 重伤后 Role suppression
+- AttackSlot 释放
+- Harass 停止
+- Recovery 优先
+- 恢复后可重新成为 Bully
+
+Case 8 - Sentinel
+- 轻伤仍可观察
+- 重伤不再冒险前出确认
+
+Case 9 - Opportunist
+- 轻伤仍可中距离观察
+- 重伤 Recovery 优先
+
+Case 10 - Extreme Vengeance
+- 重伤后必须能够退出/撤退
+
+Case 11 - Grief + Injury
+- 仍有情绪/关注
+- 不允许身体能力被绕过
+
+Case 12 - Roost Recovery
+- Roost 恢复快于普通 Flight
+
+Case 13 - Cycle Recovery
+- Wing Injury 保持并获得明显恢复
+- Personality 不变
+- Trauma 不被错误清零
+
+Case 14 - Shortcut
+- Wing Injury 不变
+- 出 Shortcut 后重新评估
+
+Case 15 - Save Compatibility
+- 旧存档无 Wing 字段时 L=0, R=0
+- 不报错
+
+Case 16 - Performance
+- 11+3 Desert Batfly 下无明显 GC / 新 O(n^2)
+
+============================================================
+27. 明确禁止事项
+============================================================
+
+禁止：
+- 完整肢体物理
+- 断翼
+- 永久残疾
+- 新 Health 系统
+- 新 Fear 系统
+- 新 Trauma 系统
+- TongueAvoidanceMemory
+- ThreatStyleMemory
+- 伤员医疗社会
+- 伤员搬运
+- 同伴喂食
+- 新 PathFinder
+- 受伤 Peach 捕获率硬 Buff
+- 修改 Personality
+- RPG 式状态图标
+- 每帧随机 flight jitter
+
+============================================================
+28. Definition of Done
+============================================================
+
+身体：
+- 左右翼分别保存 Injury
+- 真实非致死伤害可制造伤病
+- Rock 不制造 Wing Injury
+- 单侧/双侧伤表现不同
+
+飞行：
+- 转向明显受影响
+- 直线速度影响较轻
+- 无随机漂移
+- 单侧伤有稳定偏置
+- 重伤仍尽量可飞
+
+AI：
+- 中重伤降低危险行为
+- 重伤进入 Recovery
+- Immediate Danger 始终优先 Escape
+- AttackSlots 正确释放
+- 重伤可中止 Vengeance
+- Role 被 Injury 正确压制
+
+Experience：
+- 重 Stun 产生 PostStunShock
+- Peach Tongue Survivor 增加 Shock + PredatorTrauma
+- 不实现 ThreatStyleMemory
+
+Recovery：
+- Runtime 可恢复
+- Roost/Hive 更快
+- Cycle 有明显恢复
+- 普通非致死伤不会永久废掉
+
+Graphics：
+- 玩家无需 Debugger 可识别中重伤
+- 左右伤表现不同
+- 不重写 FlyGraphics
+
+Persistence：
+- Wing Injury 正确保存
+- 旧存档兼容
+- Shortcut / room transition 保持
+
+Observatory：
+- Inspector 完整 Injury 数据
+- Decision Stack 显示 Injury suppression
+- Timeline 可回看伤病
+- Event Log 记录真实 Injury / Recovery
+
+Performance：
+- 无每帧全群扫描
+- 无 O(n^2)
+- 无明显 GC
+- 无第二套 AI
+
+============================================================
+29. 最终体验目标
+============================================================
+
+玩家用 Spear 刺中一只 Desert Batfly，但它幸存：
+
+Spear Hit
+-> 立即逃跑
+-> 一侧翅膀拍动较弱
+-> 转弯变宽
+-> 飞行轻微偏斜
+-> 放弃继续骚扰
+-> 找安全倒挂位置
+-> 休息
+-> 飞行逐渐恢复
+-> 重新加入群落
+-> 之后仍可能重新表达原本的 Bully/Sentinel/Opportunist 倾向
+
+核心原则：
+
+“身体会恢复，但经历可以留下。”
