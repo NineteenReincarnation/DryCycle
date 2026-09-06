@@ -73,6 +73,7 @@ internal static class AIDebuggerRuntime
     internal static void Uninstall()
     {
         AIDebugSettings.Save();
+        AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugSimulationControl.Uninstall();
@@ -208,14 +209,24 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.SelectEntity:
                     selectedKey = command.Key;
                     hasSelection = true;
-                    if (game != null && !AIDebugRecorder.Select(game, command.Key))
-                        logger?.LogWarning("DryCycle AI Observatory recorder could not bind selected entity " + command.Key + ".");
+                    if (game != null)
+                    {
+                        if (!AIDebugRecorder.Select(game, command.Key))
+                        {
+                            logger?.LogWarning("DryCycle AI Observatory recorder could not bind selected entity " + command.Key + ".");
+                        }
+                        else
+                        {
+                            AIDebugRichRecorder.Select(game, command.Key);
+                        }
+                    }
                     presentationDirty = true;
                     break;
 
                 case AIDebugUiCommandKind.ClearSelection:
                     hasSelection = false;
                     selectedKey = default;
+                    AIDebugRichRecorder.ClearSelection();
                     AIDebugRecorder.ClearSelection();
                     presentationDirty = true;
                     break;
@@ -304,17 +315,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         }
 
         AIDebugPresentationCreature selectedPresentation = null;
-        if (hasSelection)
+        if (hasSelection && AIDebugRichRecorder.TryGetLatest(out AIDebugResolvedSnapshot resolved) && resolved.HasValue)
         {
-            AbstractCreature selected = AIDebugRegistry.Resolve(game, selectedKey);
-            if (selected != null)
-            {
-                // Transitional frontend path. V5's next migration step will resolve the
-                // Inspector from recorder data so Presentation no longer performs this
-                // second Capture. Keeping it here for now preserves all current UI fields.
-                AIDebugSnapshot captured = AIDebugRegistry.Capture(selected, game);
-                selectedPresentation = CopySnapshot(captured);
-            }
+            // V5 Presentation no longer asks AIDebugRegistry to inspect the live creature.
+            // The only source here is a detached compatibility snapshot captured by the
+            // simulation-tick recorder. Raw/schema storage will replace this payload later.
+            selectedPresentation = CopySnapshot(resolved.Snapshot, resolved.AgeTicks);
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
@@ -348,7 +354,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
-    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source)
+    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source, int snapshotAgeTicks = 0)
     {
         if (source == null) return null;
 
@@ -364,7 +370,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                     value.LabelKey,
                     value.RawName,
                     value.Value,
-                    value.AgeTicks,
+                    value.AgeTicks + snapshotAgeTicks,
                     value.Source);
             }
             sections[s] = new AIDebugPresentationSection(section.TitleKey, values);
@@ -407,6 +413,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private void OnDestroy()
     {
         AIDebugSettings.Save();
+        AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugPresentationHub.Reset();
