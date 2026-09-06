@@ -4,10 +4,8 @@ using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
 
-// Desert Batfly Observatory adapter.  Social Roles were rejected and therefore
-// are deliberately absent from this diagnostic surface: the debugger reports
-// real gameplay state (personality, injury, social memory, AI and movement)
-// rather than keeping a dead Task 02 concept visually alive.
+// Desert Batfly Observatory adapter for current gameplay state: personality,
+// injury, social memory, AI and movement.
 internal sealed class DesertBatflyDebugSource : IAIDebugSource
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -94,8 +92,6 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.unseen", "DesertBatflyAI.unseen", Read<int>(UnseenField, ai))
             .Add("field.has_slot", "DesertBatflyAI.hasSlot", Read<bool>(HasSlotField, ai)));
 
-        // Read-only room snapshot.  The rejected Task 02 role population field is
-        // intentionally not displayed and Capture no longer reads role state.
         if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
         {
             DesertBatflyFlockSnapshot flock = colony.Flock;
@@ -137,7 +133,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
     {
         DesertBatflyInjury injury = bat.Injury;
         bool restrained = RestrainedByNonFly(bat);
-        bool fear = DesertBatflyIntimidation.BlocksSocialRoles(bat);
+        bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
         bool traumatized = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
         bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
@@ -164,7 +160,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.fear",
             fear ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             fear ? "DesertBatflyIntimidation fear gate" : null,
-            "DesertBatflyIntimidation.BlocksSocialRoles", 1));
+            "DesertBatflyIntimidation.HasActiveFearSuppression", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.trauma",
             traumatized ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             traumatized ? $"active trauma={trauma:0.000}" : null,
@@ -257,7 +253,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
         if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
-        if (DesertBatflyIntimidation.BlocksSocialRoles(bat)) return "Fear / Intimidation";
+        if (DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return "Fear / Intimidation";
         if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
             return "Roost / Chain";
         return "DesertBatflyAI";
