@@ -69,8 +69,7 @@ internal readonly struct AIDebugRecorderEntityStatus
 }
 
 // Detached read-only query surface for the V5 recorder. Queries never touch Rain World
-// objects and never allocate. Presentation/historical code should migrate to this API
-// rather than re-capturing live AI state.
+// objects. Point and range reads write only to caller-owned buffers and allocate nothing.
 internal static class AIDebugRecorderReadApi
 {
     internal static bool TryGetEntityStatus(DebugEntityKey key, out AIDebugRecorderEntityStatus status) =>
@@ -81,4 +80,23 @@ internal static class AIDebugRecorderReadApi
 
     internal static bool TryResolveFastState(DebugEntityKey key, int cursorTick, out AIDebugResolvedFastState resolved) =>
         AIDebugRecorder.TryResolveFastState(key, cursorTick, out resolved);
+
+    internal static int CopyMotionRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        AIDebugMotionSample[] destination,
+        int destinationOffset = 0) =>
+        AIDebugRecorder.CopyMotionRange(key, startTick, endTick, destination, destinationOffset);
+
+    internal static int CopyFastStateRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        AIDebugFastStateSample[] destination,
+        int destinationOffset = 0) =>
+        AIDebugRecorder.CopyFastStateRange(key, startTick, endTick, destination, destinationOffset);
+
+    internal static bool TryGetRetainedTickRange(DebugEntityKey key, out int oldestTick, out int newestTick) =>
+        AIDebugRecorder.TryGetRetainedTickRange(key, out oldestTick, out newestTick);
 }
