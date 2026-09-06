@@ -235,7 +235,7 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
         }
     }
 
-    private struct PinRange
+    private struct PinRangeState
     {
         internal int Id;
         internal int StartTick;
@@ -245,7 +245,7 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
 
     private readonly Block[] blocks;
     private readonly int itemsPerBlock;
-    private readonly PinRange[] pinRanges = new PinRange[MaxPinnedRanges];
+    private readonly PinRangeState[] pinRanges = new PinRangeState[MaxPinnedRanges];
     private int writeBlock;
     private int retainedCount;
     private int nextPinId = 1;
@@ -331,7 +331,7 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
 
         int id = nextPinId++;
         if (nextPinId <= 0) nextPinId = 1;
-        pinRanges[slot] = new PinRange { Id = id, StartTick = startTick, EndTick = endTick, Active = true };
+        pinRanges[slot] = new PinRangeState { Id = id, StartTick = startTick, EndTick = endTick, Active = true };
 
         for (int i = 0; i < blocks.Length; i++)
         {
@@ -346,7 +346,7 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
         if (!handle.IsValid) return;
         for (int i = 0; i < pinRanges.Length; i++)
         {
-            PinRange range = pinRanges[i];
+            PinRangeState range = pinRanges[i];
             if (!range.Active || range.Id != handle.Id) continue;
 
             for (int b = 0; b < blocks.Length; b++)
@@ -454,9 +454,6 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
         return false;
     }
 
-    // Copies a bounded visible timeline range in chronological order into caller-owned
-    // storage. No delegate/LINQ/temp array is used. If the destination fills, newer data
-    // outside the destination is intentionally omitted and the returned count exposes it.
     internal int CopyRange(int startTick, int endTick, T[] destination, int destinationOffset = 0)
     {
         if (destination == null) throw new ArgumentNullException(nameof(destination));
@@ -555,7 +552,7 @@ internal sealed class AIDebugBlockRing<T> where T : struct, IAIDebugTicked
         int count = 0;
         for (int i = 0; i < pinRanges.Length; i++)
         {
-            PinRange range = pinRanges[i];
+            PinRangeState range = pinRanges[i];
             if (range.Active && tick >= range.StartTick && tick <= range.EndTick) count++;
         }
         return count;
