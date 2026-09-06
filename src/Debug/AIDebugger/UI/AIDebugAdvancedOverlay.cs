@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using DryCycle.Creatures.DesertBatfly;
 using ImGuiNET;
 using UnityEngine;
@@ -13,13 +12,6 @@ internal static class AIDebugAdvancedOverlay
     private static readonly List<AIDebugCandidate> CandidateScratch = new(64);
     private static readonly List<DesertBatfly> AttackersScratch = new(4);
     private static readonly List<DesertBatfly> WaitingScratch = new(8);
-
-    private static readonly FieldInfo VisibleThreatField = typeof(DesertBatflySocialRoles)
-        .GetField("visibleThreat", BindingFlags.Instance | BindingFlags.NonPublic);
-    private static readonly FieldInfo ClearSightField = typeof(DesertBatflySocialRoles)
-        .GetField("clearSightTicks", BindingFlags.Instance | BindingFlags.NonPublic);
-    private static readonly FieldInfo WatchTicksField = typeof(DesertBatflySocialRoles)
-        .GetField("watchTicks", BindingFlags.Instance | BindingFlags.NonPublic);
 
     internal static void Draw(RainWorldGame game, AbstractCreature selected, bool frozen,
         AIDebugTraceFrame frozenFrame)
@@ -68,7 +60,7 @@ internal static class AIDebugAdvancedOverlay
         if (AIDebugSettings.OverlayLabels)
         {
             draw.AddText(p + new Num.Vector2(15f, -10f), ghost,
-                $"HISTORY {frame.Frame} · {frame.Mode} · {frame.Role}");
+                $"HISTORY {frame.Frame} · {frame.Mode}");
             draw.AddText(g + new Num.Vector2(8f, -8f), goal, "localGoal");
         }
     }
@@ -173,41 +165,37 @@ internal static class AIDebugAdvancedOverlay
 
     private static void DrawDesertSocial(ImDrawListPtr draw, RoomCamera camera, DesertBatfly bat)
     {
-        if (bat.room == null || !DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony)) return;
-        DesertBatflySocialRoles roles = bat.DesertAI.Roles;
-        Num.Vector2 center = World(camera, colony.Flock.Center);
-        float scale = AIDebugCameraUtil.ScreenScale(camera);
+        if (bat.room == null || bat.mainBodyChunk == null ||
+            !DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony)) return;
+
+        DesertBatflyFlockSnapshot flock = colony.Flock;
+        Num.Vector2 center = World(camera, flock.Center);
         uint social = Col(0.46f, 0.88f, 0.62f, 0.88f);
-        uint watch = Col(0.72f, 0.56f, 0.96f, 0.92f);
+        uint bond = Col(0.72f, 0.56f, 0.96f, 0.92f);
         draw.AddCircle(center, 11f, social, 24, 1.6f);
 
-        ExpressedSocialRole role = roles.Expressed;
-        if (role == ExpressedSocialRole.Sentinel)
+        if (AIDebugSettings.OverlayLabels)
+            draw.AddText(center + new Num.Vector2(12f, -10f), social,
+                $"FLOCK active={flock.ActiveCount} panic={flock.PanicRatio:0.00} roost={flock.RoostRatio:0.00}");
+
+        if (!bat.DesertState.SocialBondTarget.HasValue || bat.room.abstractRoom?.creatures == null)
+            return;
+
+        EntityID targetId = bat.DesertState.SocialBondTarget.Value;
+        for (int i = 0; i < bat.room.abstractRoom.creatures.Count; i++)
         {
-            draw.AddCircle(center, 190f * scale, watch, 64, 1.3f);
-            Creature threat = VisibleThreatField?.GetValue(roles) as Creature;
-            if (threat?.room == bat.room && threat.mainBodyChunk != null)
-                Arrow(draw, World(camera, bat.mainBodyChunk.pos), World(camera, threat.mainBodyChunk.pos), watch, 1.6f);
+            AbstractCreature abs = bat.room.abstractRoom.creatures[i];
+            if (abs == null || abs.ID.spawner != targetId.spawner || abs.ID.number != targetId.number ||
+                abs.realizedCreature is not DesertBatfly partner || partner.mainBodyChunk == null)
+                continue;
+
+            Num.Vector2 from = World(camera, bat.mainBodyChunk.pos);
+            Num.Vector2 to = World(camera, partner.mainBodyChunk.pos);
+            draw.AddLine(from, to, bond, 1.6f);
             if (AIDebugSettings.OverlayLabels)
-            {
-                int watchTicks = WatchTicksField?.GetValue(roles) is int w ? w : 0;
-                draw.AddText(World(camera, bat.mainBodyChunk.pos) + new Num.Vector2(12f, -22f), watch,
-                    $"SENTINEL conf={roles.SentinelAlertConfidence:0.00} watch={watchTicks}");
-            }
-        }
-        else if (role == ExpressedSocialRole.Opportunist || roles.OpportunistRecoveryActive)
-        {
-            draw.AddCircle(center, 95f * scale, watch, 48, 1.3f);
-            if (AIDebugSettings.OverlayLabels)
-            {
-                int safe = ClearSightField?.GetValue(roles) is int c ? c : 0;
-                draw.AddText(World(camera, bat.mainBodyChunk.pos) + new Num.Vector2(12f, -22f), watch,
-                    $"OPPORTUNIST window={roles.OpportunityTicks} safe={safe}/40 recovery={roles.OpportunistRecoveryActive}");
-            }
-        }
-        else if (role == ExpressedSocialRole.Bully && AIDebugSettings.OverlayLabels)
-        {
-            draw.AddText(World(camera, bat.mainBodyChunk.pos) + new Num.Vector2(12f, -22f), watch, "BULLY");
+                draw.AddText((from + to) * 0.5f + new Num.Vector2(5f, -7f), bond,
+                    $"BOND {bat.DesertState.SocialBondStrength:0.00}");
+            break;
         }
     }
 
