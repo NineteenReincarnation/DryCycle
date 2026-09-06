@@ -21,14 +21,15 @@ internal static class DesertBatflyDebugTrace
             flockAge = colony.SnapshotAge;
         }
 
+        string modeReason = ModeReason(bat, suppression);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
-            "Mode", bat.DesertAI.Mode, ModeReason(bat, suppression));
+            "Mode", bat.DesertAI.Mode, modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Decision,
-            "ControlOwner", ControlOwner(bat, suppression), suppression.ToString());
+            "ControlOwner", ControlOwner(bat, suppression), modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Suppression", suppression, SuppressionReason(suppression));
+            "Suppression", suppression, SuppressionReason(bat, suppression));
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "StoredRole", roles.Role, RoleReason(bat, flock));
+            "StoredRole", roles.Role, RoleReason(bat));
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "ExpressedRole", roles.Expressed, suppression == SocialRoleSuppression.None
                 ? "role visible" : "suppressed by " + suppression);
@@ -84,46 +85,41 @@ internal static class DesertBatflyDebugTrace
                 "StaleFlockSnapshot", flockAge, "FlockSnapshot age exceeded refresh period");
     }
 
-    private static string RoleReason(DesertBatfly bat, DesertBatflyFlockSnapshot flock)
+    // Do not re-run role selection in the debugger. Why/Why Not must come from the
+    // runtime role events; this summary only reports retained state between evaluations.
+    private static string RoleReason(DesertBatfly bat)
     {
         DesertBatflySocialRoles roles = bat.DesertAI.Roles;
         if (roles.Role != ExpressedSocialRole.None) return "commitment=" + roles.Commitment;
+        if (roles.LastSuppression != SocialRoleSuppression.None)
+            return "suppressed by " + roles.LastSuppression;
         if (roles.Cooldown > 0) return "cooldown=" + roles.Cooldown;
         if (bat.DesertAI.FormalAttack) return "formal attack owns behavior";
-        if (flock.ActiveCount <= 0) return "no active flock";
-        DesertBatflyRoleScores scores = roles.Scores;
-        ExpressedSocialRole best = ExpressedSocialRole.Sentinel;
-        if (scores.Bully > scores.For(best)) best = ExpressedSocialRole.Bully;
-        if (scores.Opportunist > scores.For(best)) best = ExpressedSocialRole.Opportunist;
-        float second = best switch
-        {
-            ExpressedSocialRole.Sentinel => Mathf.Max(scores.Bully, scores.Opportunist),
-            ExpressedSocialRole.Bully => Mathf.Max(scores.Sentinel, scores.Opportunist),
-            _ => Mathf.Max(scores.Sentinel, scores.Bully)
-        };
-        float threshold = DesertBatflyRoleScores.EntryThreshold(flock.ActiveCount, flock.ExpressedRoleCount);
-        float bestScore = scores.For(best);
-        if (bestScore < threshold) return $"{best} {bestScore:0.000} < threshold {threshold:0.000}";
-        if (bestScore - second < 0.12f) return $"{best} lead {bestScore - second:0.000} < 0.120";
-        if (best != ExpressedSocialRole.Bully && bat.DesertAI.Target != null) return "watch role blocked by existing target";
-        return $"{best} eligible; awaiting evaluation tick {roles.EvaluationTicks}";
+        return "no stored role; see RoleEvaluation / RoleEvaluationBlocked events";
     }
 
     private static string ModeReason(DesertBatfly bat, SocialRoleSuppression suppression)
     {
         if (bat.dead || !bat.Consious) return "creature unavailable";
         if (bat.inShortcut) return "shortcut owns movement";
-        if (suppression == SocialRoleSuppression.Danger) return "danger / retreat owns movement";
-        if (suppression == SocialRoleSuppression.Fear) return "fear / intimidation priority";
+        if (suppression == SocialRoleSuppression.Restrained) return "non-fly grasp or cannot respond";
+        if (suppression == SocialRoleSuppression.Emergence) return "emergence animation owns behavior";
         if (suppression == SocialRoleSuppression.VanillaPriority) return "vanilla FlyAI priority";
-        if (bat.Injury.IsRecovering) return bat.Injury.RecoveryReason;
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+            return "danger / retreat owns movement";
+        if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
+            return bat.Injury.RecoveryReason;
+        if (suppression == SocialRoleSuppression.Fear) return "fear / intimidation priority";
+        if (suppression == SocialRoleSuppression.Trauma) return "trauma above aggression block";
+        if (suppression == SocialRoleSuppression.Grief) return "grief state limits behavior";
+        if (suppression == SocialRoleSuppression.Vengeance) return "extreme vengeance owns behavior";
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
         return "DesertBatflyAI state machine";
     }
 
-    private static string SuppressionReason(SocialRoleSuppression suppression) => suppression switch
+    private static string SuppressionReason(DesertBatfly bat, SocialRoleSuppression suppression) => suppression switch
     {
-        SocialRoleSuppression.Injury => "physical injury / post-stun expression limit",
+        SocialRoleSuppression.Injury => bat.Injury.RoleBlockReason(bat.DesertAI.Roles.Role),
         SocialRoleSuppression.None => "no higher-priority blocker",
         SocialRoleSuppression.Unavailable => "dead / unconscious / shortcut / no room",
         SocialRoleSuppression.Restrained => "non-fly grasp or cannot respond",
@@ -142,18 +138,21 @@ internal static class DesertBatflyDebugTrace
     {
         if (bat.dead || !bat.Consious) return "Creature / Physics";
         if (bat.inShortcut) return "Shortcut";
+        if (suppression == SocialRoleSuppression.Restrained) return "Grasp / Restraint";
+        if (suppression == SocialRoleSuppression.Emergence) return "Emergence";
+        if (suppression == SocialRoleSuppression.VanillaPriority) return "Vanilla FlyAI";
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+            return "Danger / Escape";
+        if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
+            return "Injury Recovery";
         return suppression switch
         {
-            SocialRoleSuppression.Injury => bat.Injury.IsRecovering ? "Injury Recovery" : "Physical Condition",
-            SocialRoleSuppression.VanillaPriority => "Vanilla FlyAI",
-            SocialRoleSuppression.Danger => "Danger / Escape",
+            SocialRoleSuppression.Injury => "Physical Condition",
             SocialRoleSuppression.Fear => "Fear / Intimidation",
             SocialRoleSuppression.Trauma => "Trauma",
             SocialRoleSuppression.Grief => "Grief",
             SocialRoleSuppression.Vengeance => "Vengeance",
             SocialRoleSuppression.Roost => "Roost / Chain",
-            SocialRoleSuppression.Restrained => "Grasp / Restraint",
-            SocialRoleSuppression.Emergence => "Emergence",
             SocialRoleSuppression.Unavailable => "Creature lifecycle",
             _ => "DesertBatflyAI"
         };
