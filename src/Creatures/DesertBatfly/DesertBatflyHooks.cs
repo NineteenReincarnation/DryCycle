@@ -25,6 +25,8 @@ internal static class DesertBatflyHooks
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
+        On.Fly.NewRoom += FlyNewRoom;
+        On.Fly.Grabbed += FlyGrabbed;
         On.Fly.Burrowed += Burrow;
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
         On.FlyAI.Update += UpdateAI;
@@ -44,6 +46,8 @@ internal static class DesertBatflyHooks
         if (!enabled) return;
         enabled = false;
         On.Fly.ReportToFliesRoomAI -= Report;
+        On.Fly.NewRoom -= FlyNewRoom;
+        On.Fly.Grabbed -= FlyGrabbed;
         On.Fly.Burrowed -= Burrow;
         On.FliesRoomAI.FlyEmergeFromHive -= Emerge;
         On.FlyAI.Update -= UpdateAI;
@@ -88,6 +92,20 @@ internal static class DesertBatflyHooks
         {
             orig(self, room);
         }
+    }
+
+    private static void FlyNewRoom(On.Fly.orig_NewRoom orig, Fly self, Room room)
+    {
+        if (self is DesertBatfly desert)
+            DesertBatflySocialLife.CancelForPriority(desert, "room transition");
+        orig(self, room);
+    }
+
+    private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
+    {
+        if (self is DesertBatfly desert)
+            DesertBatflySocialLife.CancelForPriority(desert, "grabbed / restraint");
+        orig(self, grasp);
     }
 
     private static void Burrow(On.Fly.orig_Burrowed orig, Fly self)
