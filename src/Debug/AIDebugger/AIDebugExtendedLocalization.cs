@@ -76,7 +76,7 @@ internal static class AIDebugExtendedLocalization
         ["settings.path"] = new("Path", "路径"),
         ["settings.aimap"] = new("AImap heatmap", "AImap 热图"),
         ["settings.perception"] = new("Perception", "感知"),
-        ["settings.social"] = new("Social / role", "社交 / 角色"),
+        ["settings.social"] = new("Social", "社交"),
         ["settings.combat"] = new("Combat", "战斗"),
         ["settings.labels"] = new("Labels", "标签"),
         ["settings.full_history"] = new("Record full historical snapshots", "记录完整历史快照"),
@@ -106,13 +106,6 @@ internal static class AIDebugExtendedLocalization
 
     internal static string EventName(string raw) => raw switch
     {
-        "RoleEntered" => B("Role Entered", "角色进入"),
-        "RoleExit" => B("Role Exit", "角色退出"),
-        "RoleEvaluation" => B("Role Evaluation", "角色评估"),
-        "RoleEvaluationBlocked" => B("Role Evaluation Blocked", "角色评估被阻止"),
-        "RoleSustain" => B("Role Sustain", "角色维持"),
-        "SentinelAlarm" => B("Sentinel Alarm", "哨兵警报"),
-        "OpportunistEarlyReturn" => B("Opportunist Early Return", "机会主义提前返回"),
         "InjuryApplied" => B("Injury Applied", "伤病产生"),
         "WingDamageLeft" => B("Left Wing Damage", "左翼受伤"),
         "WingDamageRight" => B("Right Wing Damage", "右翼受伤"),
@@ -135,9 +128,6 @@ internal static class AIDebugExtendedLocalization
         "HighestUtility" => B("Highest Utility", "最高效用模块"),
         "Mode" => B("Mode", "模式"),
         "Suppression" => B("Suppression", "抑制状态"),
-        "StoredRole" => B("Stored Role", "内部角色"),
-        "ExpressedRole" => B("Expressed Role", "显性角色"),
-        "OpportunistRecovery" => B("Opportunist Recovery", "机会主义恢复窗口"),
         "FormalAttack" => B("Formal Attack", "正式攻击"),
         "Target" => B("Target", "目标"),
         "VanillaBehavior" => B("Vanilla Behavior", "原版行为"),
@@ -156,8 +146,6 @@ internal static class AIDebugExtendedLocalization
 
         if (raw.StartsWith("suppressed by ", StringComparison.Ordinal))
             return "被以下状态抑制：" + raw.Substring("suppressed by ".Length);
-        if (raw.StartsWith("role cooldown", StringComparison.Ordinal))
-            return "角色冷却中" + raw.Substring("role cooldown".Length);
 
         return raw switch
         {
@@ -167,15 +155,10 @@ internal static class AIDebugExtendedLocalization
             "UtilityComparer winner" => "来自 UtilityComparer 当前胜出模块",
             "formal attack owns behavior" => "正式攻击状态机当前拥有行为控制权",
             "no active flock" => "当前没有有效群体成员",
-            "no score passed threshold + 0.12 dominance lead" => "没有角色同时通过进入阈值与 0.12 领先差要求",
-            "watch role blocked by existing target" => "已有目标时禁止监视型角色接管",
-            "commitment expired" => "角色承诺时间已结束",
-            "commitment/score ended expression" => "角色承诺或评分不再满足维持条件",
             "automatic anomaly detector" => "自动异常检测器触发",
             "recent threat window" => "存在最近威胁恢复窗口",
             "no recovery window" => "当前没有恢复窗口",
             "no target" => "当前没有目标",
-            "role visible" => "角色当前允许显性表达",
             "no higher-priority blocker" => "没有更高优先级阻断项",
             "dead / unconscious / shortcut / no room" => "死亡、失去意识、位于捷径或没有房间",
             "non-fly grasp or cannot respond" => "被非 Fly 生物抓住或当前无法响应",
@@ -194,7 +177,6 @@ internal static class AIDebugExtendedLocalization
             "vanilla FlyAI priority" => "原版 FlyAI 优先级接管",
             "formal attack state machine" => "正式攻击状态机接管",
             "DesertBatflyAI state machine" => "DesertBatflyAI 状态机控制",
-            "physical injury / post-stun expression limit" => "身体伤病或重击后休克限制角色表达",
             _ => raw
         };
     }
