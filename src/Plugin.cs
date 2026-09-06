@@ -60,6 +60,13 @@ internal sealed class Plugin : BaseUnityPlugin
 
         DryCycleShaderAssets.Enable();
 
+        // Direct-number editing is a DevTools input facility, not a gameplay system.
+        // Install it as soon as the plugin is enabled so palette/day-night numeric fields
+        // are available even if a later OnModsInit subsystem fails before MiscRuntime.
+        // MiscRuntime.Enable keeps the same idempotent calls for normal initialization.
+        PaletteDirectInputRuntime.Enable();
+        DevUIShortcutInputGuard.Enable();
+
         DryCycleContent.Enable();
         MossySpiderBackPlatform.Enable();
         DesertBatflyHooks.Enable();
@@ -84,6 +91,11 @@ internal sealed class Plugin : BaseUnityPlugin
         RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
+
+        // These two hooks are installed from OnEnable, so always remove them even when
+        // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
+        DevUIShortcutInputGuard.Disable();
+        PaletteDirectInputRuntime.Disable();
 
         if (_initialized)
         {
