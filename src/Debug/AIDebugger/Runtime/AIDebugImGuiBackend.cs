@@ -268,7 +268,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     {
         string font = FindCjkFont();
         if (font != null)
-            io.Fonts.AddFontFromFileTTF(font, 17f, default(ImFontConfigPtr), io.Fonts.GetGlyphRangesChineseFull());
+            io.Fonts.AddFontFromFileTTF(font, 17f, default(ImFontConfigPtr), io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
         else
         {
             AIDebugLocalization.Language = AIDebugLanguage.English;
@@ -292,7 +292,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         fontTexture.Apply(false, true);
         io.Fonts.TexID = FontTextureId;
         io.Fonts.ClearTexData();
-        logger?.LogInfo($"DryCycle AI Observatory font atlas built: {width}x{height}, source={(font ?? "ImGui default")}, language={AIDebugLocalization.Language}.");
+        logger?.LogInfo($"DryCycle AI Observatory font atlas built: {width}x{height}, source={(font ?? "ImGui default")}, glyphRange=ChineseSimplifiedCommon, language={AIDebugLocalization.Language}.");
     }
 
     private static string FindCjkFont()
