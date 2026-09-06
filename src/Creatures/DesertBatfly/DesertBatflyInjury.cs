@@ -27,12 +27,17 @@ internal sealed class DesertBatflyInjury
     internal float WingMean => State.WingMean;
     internal float WingAsymmetry => State.WingAsymmetry;
     internal float WingBias => State.WingBias;
+    internal float WingSeverity => Mathf.SmoothStep(0f, 1f, WingMean);
     internal float PhysicalCapability => Mathf.Clamp01(1f - 0.18f * (1f - Mathf.Clamp01(State.health)) -
-        0.48f * WingMean - 0.15f * WingAsymmetry - 0.25f * PostStunShock);
-    internal float ForwardControl => 1f - 0.15f * WingMean;
-    internal float TurnControl => Mathf.Clamp(1f - 0.42f * WingMean - 0.14f * WingAsymmetry - 0.10f * PostStunShock, 0.50f, 1f);
-    internal float LiftControl => 1f - 0.25f * WingMean - 0.08f * PostStunShock;
-    internal float AccelerationControl => 1f - 0.25f * WingMean - 0.08f * PostStunShock;
+        0.46f * WingSeverity - 0.15f * WingAsymmetry - 0.25f * PostStunShock);
+
+    // Task 04 tuning target: structural injury hits turning/lift much harder than straight speed.
+    // At WingMean ~= 0.65, symmetric injury lands near 86% forward / 60% turn / 73% lift.
+    internal float ForwardControl => Mathf.Clamp(1f - 0.20f * WingSeverity - 0.04f * WingAsymmetry, 0.80f, 1f);
+    internal float TurnControl => Mathf.Clamp(1f - 0.55f * WingSeverity - 0.18f * WingAsymmetry -
+        0.10f * PostStunShock, 0.48f, 1f);
+    internal float LiftControl => Mathf.Clamp(1f - 0.38f * WingSeverity - 0.08f * PostStunShock, 0.68f, 1f);
+    internal float AccelerationControl => Mathf.Clamp(1f - 0.32f * WingSeverity - 0.08f * PostStunShock, 0.68f, 1f);
     internal float EffectiveNerve => bat.Personality.Nerve * Mathf.Lerp(0.55f, 1f, PhysicalCapability);
     internal float AggressionScale => PhysicalCapability * (1f - 0.35f * PostStunShock);
     internal float RoostScale => 1f + WingMean * 1.3f + PostStunShock * 0.5f;
@@ -53,9 +58,14 @@ internal sealed class DesertBatflyInjury
     internal void ApplyShock(float gain)
     {
         if (bat.dead || bat.slatedForDeletetion || float.IsNaN(gain) || float.IsInfinity(gain) || gain <= 0f) return;
+        float previous = PostStunShock;
         PostStunShock = Mathf.Clamp01(PostStunShock + gain);
         shockTicks = Mathf.Max(shockTicks, Mathf.RoundToInt(Mathf.Lerp(200f, 2400f, PostStunShock)));
         if (BlocksCombat) bat.DesertAI?.CancelPhysicalAttack();
+        float applied = PostStunShock - previous;
+        if (applied >= 0.02f && AIDebugTrace.IsWatched(bat.abstractCreature))
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "PostStunShock", PostStunShock,
+                $"gain={applied:0.000}, durationTicks={shockTicks}");
     }
 
     internal void OnHealthLoss(float before, Creature.DamageType type, PhysicalObject source, Creature attacker, Vector2? momentum)
@@ -75,14 +85,28 @@ internal sealed class DesertBatflyInjury
         float oldLeft = State.LeftWingInjury, oldRight = State.RightWingInjury;
         State.LeftWingInjury = Mathf.Clamp01(oldLeft + gain * (left ? 1f : 0.24f));
         State.RightWingInjury = Mathf.Clamp01(oldRight + gain * (left ? 0.24f : 1f));
+        float leftGain = State.LeftWingInjury - oldLeft;
+        float rightGain = State.RightWingInjury - oldRight;
         ApplyShock(Mathf.Clamp(loss * 0.8f + 0.08f, 0.08f, 0.65f));
-        DesertBatflyIntimidation.AddTrauma(bat, attacker, Mathf.Clamp(loss * 0.35f, 0.02f, 0.25f));
+        float traumaGain = Mathf.Clamp(loss * 0.35f, 0.02f, 0.25f);
+        DesertBatflyIntimidation.AddTrauma(bat, attacker, traumaGain);
         LastInjurySource = source is Weapon weapon ? weapon.GetType().Name : source?.GetType().Name ?? attacker?.GetType().Name ?? "environment";
         LastInjuryDamageType = type?.value ?? "unknown";
         LastInjuryTick = bat.room?.game?.clock ?? MotionTick;
         if (AIDebugTrace.IsWatched(bat.abstractCreature))
+        {
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "InjuryApplied", loss,
-                $"source={LastInjurySource} type={LastInjuryDamageType} healthLoss={loss:0.000} leftWing+={State.LeftWingInjury-oldLeft:0.000} rightWing+={State.RightWingInjury-oldRight:0.000}");
+                $"source={LastInjurySource} type={LastInjuryDamageType} healthLoss={loss:0.000} leftWing+={leftGain:0.000} rightWing+={rightGain:0.000}");
+            if (leftGain > 0f)
+                AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "WingDamageLeft", State.LeftWingInjury,
+                    $"delta={leftGain:0.000}, source={LastInjurySource}");
+            if (rightGain > 0f)
+                AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "WingDamageRight", State.RightWingInjury,
+                    $"delta={rightGain:0.000}, source={LastInjurySource}");
+            if (attacker != null && traumaGain > 0f)
+                AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "InjuryTraumaEscalated", traumaGain,
+                    $"threat={AIDebugFormat.Creature(attacker)}, source={LastInjurySource}");
+        }
         bat.DesertAI?.Threatened(attacker, false);
         if (BlocksCombat) bat.DesertAI?.CancelPhysicalAttack();
     }
@@ -90,29 +114,42 @@ internal sealed class DesertBatflyInjury
     internal void BeginCapture(Lizard predator)
     {
         if (bat.dead || predator == null || predator.room != bat.room) return;
-        capturePredator = predator; capturePending = true;
+        capturePredator = predator;
+        capturePending = true;
     }
+
     internal void CheckCaptureRelease()
     {
         if (!capturePending) return;
         Lizard predator = capturePredator;
         if (bat.dead || bat.slatedForDeletetion || bat.room == null || predator == null || predator.room != bat.room || bat.inShortcut)
-        { capturePending = false; capturePredator = null; return; }
+        {
+            capturePending = false;
+            capturePredator = null;
+            return;
+        }
         if (predator.tongue?.attached?.owner == bat && predator.tongue.state == LizardTongue.State.AttachedInSmallObject) return;
         if (predator.grasps != null)
-            foreach (var grasp in predator.grasps) if (grasp?.grabbed == bat) return;
-        capturePending = false; capturePredator = null;
+            foreach (var grasp in predator.grasps)
+                if (grasp?.grabbed == bat) return;
+        capturePending = false;
+        capturePredator = null;
         ApplyShock(0.38f);
         DesertBatflyIntimidation.AddTrauma(bat, predator, 0.16f);
         impulseGrace = 3;
         if (AIDebugTrace.IsWatched(bat.abstractCreature))
-            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "PeachCaptureSurvived", PostStunShock, "released alive; existing PredatorTrauma; no structural wing damage");
+            AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "PeachTongueSurvivor", PostStunShock,
+                "released alive; existing PredatorTrauma; no structural wing damage without Violence");
     }
 
     internal void Tick()
     {
         NominalFlightSpeed = 0f;
-        if (bat.dead || bat.slatedForDeletetion) { ClearTransient(); return; }
+        if (bat.dead || bat.slatedForDeletetion)
+        {
+            ClearTransient();
+            return;
+        }
         MotionTick++;
         if (impulseGrace > 0) impulseGrace--;
         if (shockTicks > 0)
@@ -149,11 +186,16 @@ internal sealed class DesertBatflyInjury
         if (RecoveryState != state && AIDebugTrace.IsWatched(bat.abstractCreature))
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State,
                 state == InjuryRecoveryState.None ? "InjuryRecoveryExited" : "InjuryRecoveryEntered", state, reason);
-        RecoveryState = state; RecoveryTarget = target; RecoveryReason = reason;
+        RecoveryState = state;
+        RecoveryTarget = target;
+        RecoveryReason = reason;
     }
+
     internal void ClearTransient()
     {
-        capturePredator = null; capturePending = false;
+        capturePredator = null;
+        capturePending = false;
+        NominalFlightSpeed = 0f;
         SetRecovery(InjuryRecoveryState.None, null, "creature lifecycle");
     }
 
@@ -175,6 +217,7 @@ internal sealed class DesertBatflyInjury
         velocity.y += Mathf.Sin((MotionTick + (bat.Personality.VisualSeed & 255)) * 0.09f) * WingMean * lowSpeed * 0.025f;
         return velocity;
     }
+
     internal void ApplyFlight(Vector2 previous)
     {
         if (impulseGrace > 0 || !bat.Consious || bat.dead || bat.room == null || bat.inShortcut ||
