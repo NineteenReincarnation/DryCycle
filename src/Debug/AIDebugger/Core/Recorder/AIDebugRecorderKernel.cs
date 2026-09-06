@@ -59,7 +59,9 @@ internal static class AIDebugRecorder
 
     private static readonly AIDebugTrackedEntitySlot[] Slots = new AIDebugTrackedEntitySlot[MaxRetainedSlots];
     private static AIDebugRecorderMode mode = AIDebugRecorderMode.Armed;
+    private static RainWorldGame boundGame;
     private static int selectedSlot = -1;
+    private static int activeCaptureCount;
     private static int sequenceTick = int.MinValue;
     private static uint sequence;
 
@@ -73,6 +75,7 @@ internal static class AIDebugRecorder
     internal static bool Select(RainWorldGame game, DebugEntityKey key)
     {
         if (game == null) return false;
+        EnsureGame(game);
 
         int existing = FindSlot(key);
         if (existing < 0)
@@ -101,10 +104,10 @@ internal static class AIDebugRecorder
         }
 
         if (selectedSlot >= 0 && selectedSlot != existing && Slots[selectedSlot] != null)
-            Slots[selectedSlot].Role = AIDebugTrackedRole.Retained;
+            ChangeRole(Slots[selectedSlot], AIDebugTrackedRole.Retained);
 
         selectedSlot = existing;
-        Slots[existing].Role = AIDebugTrackedRole.Selected;
+        ChangeRole(Slots[existing], AIDebugTrackedRole.Selected);
         Slots[existing].LastTouchedTick = game.clock;
         return true;
     }
@@ -112,31 +115,32 @@ internal static class AIDebugRecorder
     internal static void ClearSelection()
     {
         if (selectedSlot >= 0 && Slots[selectedSlot] != null)
-            Slots[selectedSlot].Role = AIDebugTrackedRole.Retained;
+            ChangeRole(Slots[selectedSlot], AIDebugTrackedRole.Retained);
         selectedSlot = -1;
     }
 
     internal static void OnSimulationTick(RainWorldGame game)
     {
         if (mode == AIDebugRecorderMode.Off || game == null) return;
+        EnsureGame(game);
 
-        bool hasActive = false;
+        // ARMED + zero tracked entities is the common idle path. Keep it to two cheap
+        // branches: no slot scan, no world scan, no allocation, and no presentation work.
+        if (activeCaptureCount <= 0) return;
+
         for (int i = 0; i < Slots.Length; i++)
         {
             AIDebugTrackedEntitySlot slot = Slots[i];
             if (slot == null || !slot.IsCapturing) continue;
-            hasActive = true;
-            slot.CaptureTick(game, game.clock);
-        }
+            if (slot.CaptureTick(game, game.clock)) continue;
 
-        // Keep the zero-entity armed path trivial. No world scan, presentation building,
-        // disk work, or timeline maintenance occurs here when nothing is tracked.
-        if (!hasActive) return;
+            ChangeRole(slot, AIDebugTrackedRole.Retained);
+            if (selectedSlot == i) selectedSlot = -1;
+        }
     }
 
     internal static AIDebugRecorderStatus GetStatus()
     {
-        int active = 0;
         int retained = 0;
         long motion = 0;
         long states = 0;
@@ -148,28 +152,20 @@ internal static class AIDebugRecorder
             AIDebugTrackedEntitySlot slot = Slots[i];
             if (slot == null || slot.Role == AIDebugTrackedRole.None) continue;
             retained++;
-            if (slot.IsCapturing) active++;
             motion += slot.Motion.TotalWritten;
             states += slot.States.TotalWritten;
             overwritten += slot.Motion.OverwrittenBlocks + slot.States.OverwrittenBlocks;
             dropped += slot.Motion.DroppedRecords + slot.States.DroppedRecords;
         }
 
-        return new AIDebugRecorderStatus(mode, active, retained, motion, states, overwritten, dropped);
+        return new AIDebugRecorderStatus(mode, activeCaptureCount, retained, motion, states, overwritten, dropped);
     }
 
     internal static void Reset()
     {
-        for (int i = 0; i < Slots.Length; i++)
-        {
-            Slots[i]?.Clear();
-            Slots[i] = null;
-        }
-
+        ClearSlots();
         mode = AIDebugRecorderMode.Armed;
-        selectedSlot = -1;
-        sequenceTick = int.MinValue;
-        sequence = 0;
+        boundGame = null;
     }
 
     internal static uint NextSequence(int tick)
@@ -180,6 +176,43 @@ internal static class AIDebugRecorder
             sequence = 0;
         }
         return sequence++;
+    }
+
+    private static void EnsureGame(RainWorldGame game)
+    {
+        if (ReferenceEquals(boundGame, game)) return;
+
+        // AbstractCreature handles are only valid for the RainWorldGame/world that owns
+        // them. Never carry a tracked handle into a new session just because its numeric
+        // EntityID happens to match an entity from the previous world.
+        ClearSlots();
+        boundGame = game;
+    }
+
+    private static void ClearSlots()
+    {
+        for (int i = 0; i < Slots.Length; i++)
+        {
+            Slots[i]?.Clear();
+            Slots[i] = null;
+        }
+
+        selectedSlot = -1;
+        activeCaptureCount = 0;
+        sequenceTick = int.MinValue;
+        sequence = 0;
+    }
+
+    private static void ChangeRole(AIDebugTrackedEntitySlot slot, AIDebugTrackedRole next)
+    {
+        if (slot == null || slot.Role == next) return;
+
+        bool wasCapturing = slot.IsCapturing;
+        slot.Role = next;
+        bool isCapturing = slot.IsCapturing;
+        if (wasCapturing == isCapturing) return;
+        activeCaptureCount += isCapturing ? 1 : -1;
+        if (activeCaptureCount < 0) activeCaptureCount = 0;
     }
 
     private static int FindSlot(DebugEntityKey key)
@@ -251,12 +284,15 @@ internal static class AIDebugRecorder
 
         internal void RefreshHandle(RainWorldGame game)
         {
-            if (handle != null && DebugEntityKey.From(handle) == Key) return;
+            if (handle != null && !handle.slatedForDeletion && DebugEntityKey.From(handle) == Key) return;
             handle = AIDebugRegistry.Resolve(game, Key);
             provider = AIDebugRecorderProviderRegistry.Resolve(handle);
         }
 
-        internal void CaptureTick(RainWorldGame game, int tick)
+        // Returns false only when this tracked entity has been explicitly deleted and the
+        // active role should be retired. Temporary inability to resolve an AbstractCreature
+        // leaves the slot active so a normal realize/unrealize transition can recover.
+        internal bool CaptureTick(RainWorldGame game, int tick)
         {
             AbstractCreature creature = handle;
             if (creature == null)
@@ -266,7 +302,7 @@ internal static class AIDebugRecorder
                 provider = AIDebugRecorderProviderRegistry.Resolve(creature);
             }
 
-            if (creature == null) return;
+            if (creature == null) return true;
 
             AIDebugFastState fastState = CaptureBaseFastState(creature);
             IAIDebugRecorderFastProvider nextProvider = AIDebugRecorderProviderRegistry.Resolve(creature);
@@ -292,13 +328,11 @@ internal static class AIDebugRecorder
             }
 
             LastTouchedTick = tick;
+            if (!creature.slatedForDeletion) return true;
 
-            if (creature.slatedForDeletion)
-            {
-                Role = AIDebugTrackedRole.Retained;
-                handle = null;
-                provider = null;
-            }
+            handle = null;
+            provider = null;
+            return false;
         }
 
         internal void Clear()
