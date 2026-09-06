@@ -1,17 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using BepInEx.Logging;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
 
-// Transitional main-thread host for the RWImGUI migration.
-//
-// The old DryCycle-owned ImGui renderer (Camera -> Mesh -> CommandBuffer -> Futile) is
-// intentionally not constructed anymore. F7 visibility, trace visibility, session export,
-// input-gate installation and world-step installation remain owned by DryCycle. The
-// optional DryCycle.AIObservatory.RWImGui bridge reads this state and presents the UI via
-// Rawra's Win32 + DX11 Present backend.
+// Main-thread owner for the RWImGUI Observatory migration. Rain World / Unity objects are
+// read only here. The Present callback consumes the detached AIDebugPresentationSnapshot
+// and sends user actions back through AIDebugPresentationHub's command queue.
 internal static class AIDebuggerRuntime
 {
     private const string BridgeAssemblyName = "DryCycle.AIObservatory.RWImGui";
@@ -20,12 +17,9 @@ internal static class AIDebuggerRuntime
     private static AIDebuggerHost host;
 
     internal static bool Visible => host?.Visible == true;
-
-    // These stay false until the RWImGUI frontend publishes its capture state back to the
-    // main thread. Returning false is safer than letting the retired renderer steal input.
-    internal static bool WantsMouse => false;
-    internal static bool WantsKeyboard => false;
-    internal static bool BlocksPlayerInput => false;
+    internal static bool WantsMouse => AIDebugPresentationHub.WantsMouse;
+    internal static bool WantsKeyboard => AIDebugPresentationHub.WantsKeyboard;
+    internal static bool BlocksPlayerInput => Visible && (WantsMouse || WantsKeyboard);
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
@@ -49,8 +43,6 @@ internal static class AIDebuggerRuntime
                                "and verify that the bridge DLL is present in Ancient Site/newest/plugins.");
         }
 
-        // These are independent main-thread systems. Their failure must not prevent the
-        // RWImGUI frontend from drawing.
         AIDebugInputGate.Install(logger);
         AIDebugSimulationControl.Install(logger);
 
@@ -62,16 +54,15 @@ internal static class AIDebuggerRuntime
         }
 
         AIDebugRegistry.Initialize(logger);
+        AIDebugPresentationHub.Reset();
         hostObject = new GameObject("DryCycle AI Observatory Controller")
         {
             hideFlags = HideFlags.HideAndDontSave
         };
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
 
-        // Deliberately do not add a Camera. RWImGUI owns presentation through the game's
-        // DX11 swap-chain Present path. Keeping a second Unity/Futile renderer active would
-        // duplicate ImGui contexts and reintroduce the visibility problems this migration
-        // is designed to remove.
+        // No Camera or DryCycle-owned ImGui renderer is created. RWImGUI owns Win32/DX11
+        // presentation; this object only captures/publishes simulation state.
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
@@ -85,6 +76,7 @@ internal static class AIDebuggerRuntime
         AIDebugTrace.Reset();
         AIDebugSimulationControl.Uninstall();
         AIDebugInputGate.Uninstall();
+        AIDebugPresentationHub.Reset();
         if (hostObject != null) UnityEngine.Object.Destroy(hostObject);
         hostObject = null;
         host = null;
@@ -106,11 +98,22 @@ internal static class AIDebuggerRuntime
 
 internal sealed class AIDebuggerHost : MonoBehaviour
 {
+    private const float PresentationInterval = 0.10f;
+    private const int EntityRefreshFrames = 15;
+
+    private readonly List<AbstractCreature> entities = new(128);
+    private readonly HashSet<int> visibleRooms = new();
+
     private RainWorld rainWorld;
     private ManualLogSource logger;
     private bool visible;
     private bool lifecycleLogged;
     private bool missingBridgeWarningLogged;
+    private bool hasSelection;
+    private bool presentationDirty = true;
+    private DebugEntityKey selectedKey;
+    private int nextEntityRefreshFrame;
+    private float nextPresentationTime;
 
     internal bool Visible => visible;
 
@@ -118,6 +121,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         rainWorld = rw;
         logger = log;
+        presentationDirty = true;
         logger?.LogInfo($"DryCycle AI Observatory controller Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, " +
                         $"presentationState={AIDebugPresentationBridgeStatus.Describe()}.");
     }
@@ -126,6 +130,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         visible = value;
         AIDebugTrace.SetVisible(value);
+        presentationDirty = true;
     }
 
     private void Update()
@@ -137,11 +142,21 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                             $"active={gameObject.activeInHierarchy}, presentationState={AIDebugPresentationBridgeStatus.Describe()}.");
         }
 
+        RainWorldGame game = CurrentGame();
+        if (game != null)
+        {
+            AIDebugRegistry.BindGame(game);
+            AIDebugSimulationControl.Bind(game);
+        }
+
+        DrainUiCommands(game);
+
         if (Input.GetKeyDown(KeyCode.F7))
         {
             bool before = visible;
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
+            presentationDirty = true;
             string presentation = AIDebugPresentationBridgeStatus.CallbackRegistered
                 ? (AIDebugPresentationBridgeStatus.PresentSeen ? "RWImGUI-connected" : "RWImGUI-callback-waiting-for-Present")
                 : "UNAVAILABLE";
@@ -157,13 +172,210 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             }
         }
 
-        // Whole-session export is intentionally independent of the presentation frontend.
+        // Whole-session export remains available even when the frontend is hidden.
         if (Input.GetKeyDown(KeyCode.F8) &&
             (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
             (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
         {
             TryExportSession();
         }
+
+        if (visible)
+            PublishPresentation(game);
+        else if (AIDebugPresentationHub.Current.Visible)
+            PublishHidden(game);
+    }
+
+    private RainWorldGame CurrentGame()
+    {
+        try
+        {
+            return rainWorld?.processManager?.currentMainLoop as RainWorldGame;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void DrainUiCommands(RainWorldGame game)
+    {
+        while (AIDebugPresentationHub.TryDequeue(out AIDebugUiCommand command))
+        {
+            switch (command.Kind)
+            {
+                case AIDebugUiCommandKind.SelectEntity:
+                    selectedKey = command.Key;
+                    hasSelection = true;
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.ClearSelection:
+                    hasSelection = false;
+                    selectedKey = default;
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.TogglePause:
+                    if (game != null) AIDebugSimulationControl.Toggle(game);
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.Step:
+                    if (game != null) AIDebugSimulationControl.Step(game);
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.ExportSession:
+                    TryExportSession();
+                    break;
+
+                case AIDebugUiCommandKind.ToggleLanguage:
+                    AIDebugLocalization.Language = AIDebugLocalization.Language == AIDebugLanguage.Chinese
+                        ? AIDebugLanguage.English
+                        : AIDebugLanguage.Chinese;
+                    AIDebugSettings.Save();
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.Refresh:
+                    nextEntityRefreshFrame = 0;
+                    nextPresentationTime = 0f;
+                    presentationDirty = true;
+                    break;
+            }
+        }
+    }
+
+    private void PublishPresentation(RainWorldGame game)
+    {
+        if (!presentationDirty && Time.unscaledTime < nextPresentationTime) return;
+        nextPresentationTime = Time.unscaledTime + PresentationInterval;
+        presentationDirty = false;
+
+        if (game == null)
+        {
+            AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
+                true,
+                false,
+                false,
+                0,
+                AIDebugLocalization.Language,
+                Array.Empty<AIDebugPresentationEntity>(),
+                null,
+                "RainWorldGame is not active."));
+            return;
+        }
+
+        if (Time.frameCount >= nextEntityRefreshFrame || entities.Count == 0)
+        {
+            AIDebugRegistry.CollectWorld(game, entities);
+            nextEntityRefreshFrame = Time.frameCount + EntityRefreshFrames;
+        }
+
+        visibleRooms.Clear();
+        if (game.cameras != null)
+        {
+            for (int i = 0; i < game.cameras.Length; i++)
+            {
+                AbstractRoom room = game.cameras[i]?.room?.abstractRoom;
+                if (room != null) visibleRooms.Add(room.index);
+            }
+        }
+
+        var presentationEntities = new AIDebugPresentationEntity[entities.Count];
+        for (int i = 0; i < entities.Count; i++)
+        {
+            AbstractCreature creature = entities[i];
+            DebugEntityKey key = DebugEntityKey.From(creature);
+            string type = creature.creatureTemplate?.type?.value ?? "Creature";
+            string room = creature.Room?.name ?? $"room {creature.pos.room}";
+            presentationEntities[i] = new AIDebugPresentationEntity(
+                key,
+                $"{type} #{creature.ID.number}",
+                room,
+                AIDebugRegistry.EntityState(creature),
+                hasSelection && key == selectedKey,
+                visibleRooms.Contains(creature.pos.room));
+        }
+
+        AIDebugPresentationCreature selectedPresentation = null;
+        if (hasSelection)
+        {
+            AbstractCreature selected = AIDebugRegistry.Resolve(game, selectedKey);
+            if (selected != null)
+            {
+                AIDebugSnapshot captured = AIDebugRegistry.Capture(selected, game);
+                selectedPresentation = CopySnapshot(captured);
+            }
+        }
+
+        AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
+            true,
+            true,
+            AIDebugSimulationControl.Paused,
+            game.clock,
+            AIDebugLocalization.Language,
+            presentationEntities,
+            selectedPresentation,
+            $"{presentationEntities.Length} entities"));
+    }
+
+    private void PublishHidden(RainWorldGame game)
+    {
+        AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
+            false,
+            game != null,
+            AIDebugSimulationControl.Paused,
+            game?.clock ?? 0,
+            AIDebugLocalization.Language,
+            Array.Empty<AIDebugPresentationEntity>(),
+            null,
+            string.Empty));
+        AIDebugPresentationHub.SetCaptureState(false, false);
+    }
+
+    private static AIDebugPresentationCreature CopySnapshot(AIDebugSnapshot source)
+    {
+        if (source == null) return null;
+
+        var sections = new AIDebugPresentationSection[source.Sections.Count];
+        for (int s = 0; s < source.Sections.Count; s++)
+        {
+            AIDebugSection section = source.Sections[s];
+            var values = new AIDebugPresentationValue[section.Values.Count];
+            for (int i = 0; i < section.Values.Count; i++)
+            {
+                AIDebugValue value = section.Values[i];
+                values[i] = new AIDebugPresentationValue(
+                    value.LabelKey,
+                    value.RawName,
+                    value.Value,
+                    value.AgeTicks,
+                    value.Source);
+            }
+            sections[s] = new AIDebugPresentationSection(section.TitleKey, values);
+        }
+
+        var decisions = new AIDebugPresentationDecision[source.Decisions.Count];
+        for (int i = 0; i < source.Decisions.Count; i++)
+        {
+            AIDebugDecisionNode decision = source.Decisions[i];
+            decisions[i] = new AIDebugPresentationDecision(
+                decision.LabelKey,
+                decision.State,
+                decision.Detail,
+                decision.RawName,
+                decision.Depth);
+        }
+
+        return new AIDebugPresentationCreature(
+            source.Key,
+            source.DisplayName,
+            source.EntityState,
+            source.ControlOwner,
+            sections,
+            decisions);
     }
 
     private void TryExportSession()
@@ -183,5 +395,6 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         AIDebugSettings.Save();
         AIDebugTrace.Reset();
+        AIDebugPresentationHub.Reset();
     }
 }
