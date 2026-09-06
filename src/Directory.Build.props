@@ -9,14 +9,17 @@
          Dear ImGui's default shared imgui.ini before first NewFrame and uses its own
          explicit UTF-8 layout file instead. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- DryCycle is a class library, but the mod plugin directory is also its runtime
-         probing directory. Copy PackageReference runtime assets (ImGui.NET plus its
-         netstandard support dependencies) beside DryCycle.dll instead of assuming the
-         game already ships compatible versions. -->
+    <!-- Keep ordinary project dependencies local where required. ImGui.NET itself is
+         now compile-only during the RWImGUI migration; its runtime DLL/native backend
+         must come from the dedicated RWImGUI mod, never from DryCycle. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
+  <!-- Transitional compile reference for the legacy Observatory source that still lives
+       in DryCycle.dll. Exclude runtime assets so this project cannot overwrite RWImGUI's
+       modified ImGui.NET/cimguiaio runtime. This PackageReference will be removed entirely
+       once the ImGui views have moved into DryCycle.AIObservatory.RWImGui.dll. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
+    <PackageReference Include="ImGui.NET" Version="1.91.6.1" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>
