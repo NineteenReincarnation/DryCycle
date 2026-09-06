@@ -44,10 +44,18 @@
 
   <!-- Build the optional frontend automatically when RWImGUI is installed. The bridge
        references the DryCycle.dll that has just been produced, so there is no recursive
-       ProjectReference. Users without RWImGUI can still build and run DryCycle normally. -->
+       ProjectReference. Because the bridge is not a top-level solution project, Visual
+       Studio will not restore it automatically. Explicitly restore it before Build so the
+       SDK can generate obj/project.assets.json on a clean checkout. -->
   <Target Name="BuildOptionalRWImGuiBridge"
           AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
+    <Message Importance="high"
+             Text="DryCycle RWImGUI migration: restoring optional bridge against $(ResolvedRWImGuiPluginDir)." />
+    <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
+             Targets="Restore"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
     <Message Importance="high"
              Text="DryCycle RWImGUI migration: building optional bridge against $(ResolvedRWImGuiPluginDir)." />
     <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
