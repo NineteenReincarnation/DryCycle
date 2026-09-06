@@ -1,5 +1,4 @@
 using System;
-using DryCycle.Creatures.DesertBatfly;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
@@ -520,19 +519,6 @@ internal static class AIDebugRichRecorder
 
         private static void CaptureUtilities(AbstractCreature creature, TableEntry output)
         {
-            if (creature?.realizedCreature is DesertBatfly bat)
-            {
-                DesertBatflyRoleScores scores = bat.DesertAI.Roles.Scores;
-                ExpressedSocialRole role = bat.DesertAI.Roles.Expressed;
-                AddUtility(output, "Sentinel", scores.Sentinel, scores.Sentinel, 1f, scores.Sentinel, 0f,
-                    role == ExpressedSocialRole.Sentinel);
-                AddUtility(output, "Bully", scores.Bully, scores.Bully, 1f, scores.Bully, 0f,
-                    role == ExpressedSocialRole.Bully);
-                AddUtility(output, "Opportunist", scores.Opportunist, scores.Opportunist, 1f, scores.Opportunist, 0f,
-                    role == ExpressedSocialRole.Opportunist);
-                return;
-            }
-
             UtilityComparer comparer = creature?.abstractAI?.RealAI?.utilityComparer;
             if (comparer?.uTrackers == null) return;
             for (int i = 0; i < comparer.uTrackers.Count; i++)
@@ -553,18 +539,6 @@ internal static class AIDebugRichRecorder
                     name, float.NaN, nonWeighted, tracker.weight, weighted, tracker.continuationBonus,
                     ReferenceEquals(tracker, comparer.highestUtilityTracker));
             }
-        }
-
-        private static void AddUtility(TableEntry output, string name, float raw, float smooth, float weight,
-            float weighted, float bonus, bool winner)
-        {
-            if (output.UtilityCount >= output.Utilities.Length)
-            {
-                output.UtilityTruncated = true;
-                return;
-            }
-            output.Utilities[output.UtilityCount++] =
-                new AIDebugUtilityRow(name, raw, smooth, weight, weighted, bonus, winner);
         }
 
         private static void CapturePerception(AbstractCreature creature, TableEntry output)
