@@ -6,7 +6,6 @@ using BepInEx.Logging;
 using DryCycle.Debugging.AI;
 using ImGuiNET;
 using RWIMGUI.API;
-using Num = System.Numerics;
 
 namespace DryCycle.AIObservatory.RWImGui;
 
@@ -17,7 +16,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.AIObservatory.RWImGui";
     public const string PluginName = "DryCycle AI Observatory RWImGUI Bridge";
-    public const string PluginVersion = "0.1.3";
+    public const string PluginVersion = "0.2.0";
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
@@ -25,7 +24,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void OnEnable()
     {
         log = Logger;
-        ProbeMenu.SetLogger(Logger);
+        ObservatoryFrontend.SetLogger(Logger);
         AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
         Logger.LogInfo(
@@ -35,17 +34,18 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
-        // Unity/Rain World state is copied only on the Unity main thread. The RWImGUI
-        // Present callback consumes this bool and never reads Unity input or live Rain
-        // World objects directly from the graphics hook.
-        ProbeMenu.Visible = AIDebuggerRuntime.Visible;
+        // Only copy the visibility bit from Unity's main thread. All actual Observatory
+        // data reaches the Present callback through AIDebugPresentationHub's immutable
+        // presentation snapshot.
+        ObservatoryFrontend.Visible = AIDebuggerRuntime.Visible;
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        ProbeMenu.Enabled = false;
-        ProbeMenu.Visible = false;
+        ObservatoryFrontend.Enabled = false;
+        ObservatoryFrontend.Visible = false;
+        AIDebugPresentationHub.SetCaptureState(false, false);
         TryUnregisterCallback();
         AIDebugPresentationBridgeStatus.MarkFailure("RWImGUI bridge disabled");
     }
@@ -60,7 +60,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (callbackRegistered)
         {
-            ProbeMenu.Enabled = true;
+            ObservatoryFrontend.Enabled = true;
             return;
         }
 
@@ -69,13 +69,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
             Version apiVersion = typeof(ImGUIAPI).Assembly.GetName().Version;
             Version imguiVersion = typeof(ImGui).Assembly.GetName().Version;
 
-            // Verified against the user's RWImGUI 1.12.0 assembly. AddAlwaysCallback takes
-            // delegate*<ref IntPtr, ref uint, ref uint, void> and is invoked unconditionally
-            // after ImGui.NewFrame in idxgiswapchain_present_hook_impl, before context Render.
-            ImGUIAPI.AddAlwaysCallback(&ProbeMenu.FrameCallback);
+            // Verified against RWImGUI 1.12.0: this callback is invoked after the backend
+            // NewFrame calls and before RWImGUI renders the frame, regardless of whether
+            // RWImGUI's own menu is visible.
+            ImGUIAPI.AddAlwaysCallback(&ObservatoryFrontend.FrameCallback);
 
             callbackRegistered = true;
-            ProbeMenu.Enabled = true;
+            ObservatoryFrontend.Enabled = true;
             AIDebugPresentationBridgeStatus.MarkCallbackRegistered(
                 apiVersion?.ToString(),
                 imguiVersion?.ToString());
@@ -83,11 +83,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
             log?.LogInfo(
                 "DryCycle RWImGUI AddAlwaysCallback registered directly through RWIMGUI.API.ImGUIAPI. " +
                 $"api={apiVersion}, imgui={imguiVersion}, hasContext={ImGUIAPI.HasContext}. " +
-                "The callback does not require the RWImGUI menu to be opened; press F7 directly.");
+                "The Observatory frontend now consumes main-thread snapshots; press F7 directly.");
         }
         catch (Exception error)
         {
-            ProbeMenu.Enabled = false;
+            ObservatoryFrontend.Enabled = false;
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
             log?.LogError(
                 "DryCycle RWImGUI AddAlwaysCallback registration failed. " +
@@ -102,21 +102,19 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         try
         {
-            ImGUIAPI.RemoveAlwaysCallback(&ProbeMenu.FrameCallback);
+            ImGUIAPI.RemoveAlwaysCallback(&ObservatoryFrontend.FrameCallback);
             callbackRegistered = false;
             log?.LogInfo("DryCycle RWImGUI AddAlwaysCallback unregistered.");
         }
         catch (Exception error)
         {
-            // The callback itself is already disabled, so a removal failure is harmless at
-            // shutdown and must not interfere with the rest of DryCycle.
             log?.LogWarning("DryCycle RWImGUI callback removal failed during shutdown: " + error.Message);
         }
     }
 }
 
 [SuppressUnmanagedCodeSecurity]
-internal static class ProbeMenu
+internal static class ObservatoryFrontend
 {
     private static ManualLogSource log;
     private static int firstPresentLogged;
@@ -150,34 +148,27 @@ internal static class ProbeMenu
             }
 
             if (!Visible)
-                return;
-
-            if (Interlocked.Exchange(ref firstVisibleDrawLogged, 1) == 0)
-                log?.LogInfo("DryCycle RWImGUI F7-visible frame reached Present; drawing minimal proof window.");
-
-            ImGui.SetNextWindowPos(new Num.Vector2(24f, 24f), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSize(new Num.Vector2(420f, 150f), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin(
-                    "DryCycle AI Observatory - RWImGUI Probe###DryCycleRWImGuiProbe",
-                    ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
             {
-                ImGui.TextColored(new Num.Vector4(0.35f, 0.9f, 0.48f, 1f), "RWImGUI backend connected");
-                ImGui.Separator();
-                ImGui.Text("F7 visibility state: ON");
-                ImGui.Text("Present callback: OK (AddAlwaysCallback)");
-                ImGui.Text("Renderer owner: RWImGUI Win32 + DX11");
-                ImGui.Text("Legacy DryCycle Unity/Futile renderer: DISABLED");
+                AIDebugPresentationHub.SetCaptureState(false, false);
+                return;
             }
 
-            ImGui.End();
+            if (Interlocked.Exchange(ref firstVisibleDrawLogged, 1) == 0)
+                log?.LogInfo("DryCycle RWImGUI F7-visible frame reached Present; drawing functional snapshot/command-queue Observatory UI.");
+
+            ObservatoryView.Draw(AIDebugPresentationHub.Current);
+
+            ImGuiIOPtr io = ImGui.GetIO();
+            AIDebugPresentationHub.SetCaptureState(io.WantCaptureMouse, io.WantCaptureKeyboard);
         }
         catch (Exception error)
         {
+            AIDebugPresentationHub.SetCaptureState(false, false);
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
             {
                 log?.LogError(
-                    "DryCycle RWImGUI probe draw failed. The callback remains registered for diagnostics. " + error);
+                    "DryCycle RWImGUI Observatory draw failed. The callback remains registered for diagnostics. " + error);
             }
         }
     }
