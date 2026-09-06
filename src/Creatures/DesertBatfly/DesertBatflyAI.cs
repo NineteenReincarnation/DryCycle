@@ -19,7 +19,8 @@ internal sealed class DesertBatflyAI
         Interfere,
         Escape,
         Cooldown,
-        Roost
+        Roost,
+        InjuryRecovery
     }
 
     private readonly DesertBatfly fly;
@@ -91,6 +92,7 @@ internal sealed class DesertBatflyAI
 
     internal void ResetRoom()
     {
+        fly.Injury.ClearTransient();
         Roles.Reset();
         if (Mode == Activity.Roost) StopRoost(false);
         CancelAttack();
@@ -102,6 +104,7 @@ internal sealed class DesertBatflyAI
 
     internal void Threatened(Creature source, bool directAttack = false)
     {
+        fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "immediate threat / escape");
         if (source != null && source != fly && source is not DesertBatfly)
         {
             attacker = source;
@@ -227,7 +230,7 @@ internal sealed class DesertBatflyAI
 
     private void ArmRetaliation(Player player, float strength)
     {
-        if (!fly.Personality.Aggressive || player == null || IsTraumatizedPlayer(player))
+        if (fly.Injury.BlocksCombat || !fly.Personality.Aggressive || player == null || IsTraumatizedPlayer(player))
             return;
 
         float drive = fly.Personality.AggressionDrive;
@@ -271,6 +274,38 @@ internal sealed class DesertBatflyAI
         retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
         CancelAttack();
         SetMode(Activity.Escape);
+    }
+
+    internal void CancelPhysicalAttack()
+    {
+        if (Target != null || hasSlot) CancelAttack();
+        retaliationCharges = retaliationRecovery = 0;
+        Roles?.CheckSuppression();
+    }
+
+    internal bool TryInjuryRecovery()
+    {
+        var injury = fly.Injury;
+        if (!injury.IsSeverelyInjured || fly.dead || !fly.Consious || fly.room == null ||
+            RestrainedByNonFly() || fly.inShortcut || fly.Emergence?.Active == true || HasImmediateDanger)
+        {
+            injury.SetRecovery(InjuryRecoveryState.None, null, "not severe or immediate survival priority");
+            if (Mode == Activity.InjuryRecovery) SetMode(Activity.Flight);
+            return false;
+        }
+        CancelPhysicalAttack();
+        UpdateRoost(true);
+        if (fly.AI.behavior == FlyAI.Behavior.Chain)
+            injury.SetRecovery(InjuryRecoveryState.Roost, fly.burrowOrHangSpot, "severe injury; legal local roost");
+        else if (!DesertBatflyIntimidation.BlocksSocialRoles(fly) && fly.room.GetTile(fly.mainBodyChunk.pos).hive)
+        {
+            fly.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
+            injury.SetRecovery(InjuryRecoveryState.Hive, fly.mainBodyChunk.pos, "severe injury; native hive tile");
+        }
+        else
+            injury.SetRecovery(InjuryRecoveryState.SafeFlight, fly.AI.localGoal, "severe injury; no legal local rest point; vanilla flight");
+        SetMode(Activity.InjuryRecovery);
+        return true;
     }
 
     internal void CancelAttack()
@@ -325,6 +360,7 @@ internal sealed class DesertBatflyAI
         {
             if (Mode == Activity.Roost) StopRoost(true);
             CancelAttack();
+            fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "unavailable / restraint / shortcut");
             fly.movMode = Fly.MovementMode.Passive;
             return;
         }
@@ -350,6 +386,7 @@ internal sealed class DesertBatflyAI
 
         if (danger != null || retreat > 0)
         {
+            fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "danger / escape");
             hasSlot = false;
             attachedChunk = null;
             Target = null;
@@ -364,6 +401,14 @@ internal sealed class DesertBatflyAI
         }
 
         if (Mode == Activity.Escape) SetMode(Activity.Flight);
+        if (TryInjuryRecovery()) return;
+        if (fly.Injury.BlocksCombat)
+        {
+            CancelPhysicalAttack();
+            if (Mode != Activity.Roost) CancelAttack();
+            UpdateRoost();
+            return;
+        }
         var flock = DesertSwarmRoom.For(fly.room).Flock;
         Roles.Evaluate(flock);
         Roles.BiasOrdinaryFlight(flock);
@@ -443,7 +488,7 @@ internal sealed class DesertBatflyAI
                             ? fly.DesertState.GrabMemoryStrength * 0.18f
                             : 0f;
                         if (Random.value < Mathf.Clamp01(
-                                fly.Personality.RetaliationChance + memoryBoost) &&
+                                fly.Personality.RetaliationChance * fly.Injury.AggressionScale + memoryBoost) &&
                             AcquireSlot())
                         {
                             retaliationCharges--;
@@ -459,7 +504,7 @@ internal sealed class DesertBatflyAI
                         DesertBatflyTuning.AttackThirst,
                         DesertBatflyTuning.ObserveThirst,
                         fly.Personality.AggressionDrive * 0.35f);
-                    bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale > effectiveAttackThirst;
+                    bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale * fly.Injury.AggressionScale > effectiveAttackThirst;
                     bool revengeDrink = grudge &&
                                         fly.DesertState.GrabMemoryStrength > 0.12f;
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
@@ -740,6 +785,7 @@ internal sealed class DesertBatflyAI
 
     private bool AcquireSlot()
     {
+        if (fly.Injury.BlocksCombat) { hasSlot = false; return false; }
         if (Target is Player player && IsTraumatizedPlayer(player))
         {
             hasSlot = false;
@@ -772,8 +818,9 @@ internal sealed class DesertBatflyAI
                 fly.abstractCreature.rippleBothSides);
     }
 
-    private bool GriefAllowsHarass() => fly.DesertState.GriefStrength <= 0f ||
-        fly.DesertState.Thirst * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst;
+    private bool GriefAllowsHarass() => !fly.Injury.BlocksCombat &&
+        (fly.DesertState.GriefStrength <= 0f || fly.DesertState.Thirst * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst) &&
+        (fly.Injury.AggressionScale >= 0.99f || fly.DesertState.Thirst * fly.Injury.AggressionScale >= DesertBatflyTuning.ObserveThirst);
 
     private bool CanHarass(Creature creature)
     {
@@ -1087,6 +1134,7 @@ internal sealed class DesertBatflyAI
 
     private void Steer(Vector2 goal, float speed)
     {
+        fly.Injury.NominalFlightSpeed = speed;
         fly.LoseAllGrasps();
         fly.burrowOrHangSpot = null;
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
@@ -1115,11 +1163,11 @@ internal sealed class DesertBatflyAI
             0.22f);
     }
 
-    private void UpdateRoost()
+    private void UpdateRoost(bool recovery = false)
     {
-        if (Mode == Activity.Roost)
+        if (Mode == Activity.Roost || (Mode == Activity.InjuryRecovery && hasRoost))
         {
-            if (!hasRoost || ticks > fly.Personality.RoostDuration ||
+            if (!hasRoost || (!recovery && ticks > fly.Personality.RoostDuration) ||
                 fly.AI.fleeFromRain)
             {
                 StopRoost(true);
@@ -1135,7 +1183,7 @@ internal sealed class DesertBatflyAI
         }
 
         if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
-        if (scan != 0 || Random.value > fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly)) return;
+        if (scan != 0 || (!recovery && Random.value > fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)) return;
         if (!TryFindRoost(out Vector2 spot)) return;
 
         roost = spot;

@@ -5,6 +5,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 internal sealed class DesertBatfly : Fly, IPlayerEdible
 {
+    private DesertBatflyInjury injury;
+    internal DesertBatflyInjury Injury => injury ??= new DesertBatflyInjury(this);
     internal readonly DesertBatflyAI DesertAI;
     internal readonly DesertBatflyEmergence Emergence;
     internal DesertBatflyState DesertState => (DesertBatflyState)State;
@@ -13,8 +15,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private int mealFood = 2;
     private int socialSampleTicks;
     private bool runningVanillaUpdate;
-    private int rockDeathGuardTicks;
-    private bool resolvingNonRockViolence;
     private Player playerHolder;
 
     private Creature recentLethalDamager;
@@ -48,6 +48,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void NewRoom(Room newRoom)
     {
+        injury?.ClearTransient();
         DesertAI?.ResetRoom();
         base.NewRoom(newRoom);
     }
@@ -60,16 +61,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!hive.inHive.Contains(this)) hive.MoveFlyToHive(this);
     }
 
-    internal void BeginRockStunGuard()
-    {
-        rockDeathGuardTicks = Mathf.Max(rockDeathGuardTicks, 8);
-    }
-
     public override void Update(bool eu)
     {
+        Injury.Tick();
+        Vector2 previousFlightVelocity = mainBodyChunk?.vel ?? Vector2.zero;
         DesertAI.Roles.Tick();
         TrackPlayerRelease();
-        if (rockDeathGuardTicks > 0) rockDeathGuardTicks--;
         if (sandSpitCooldown > 0) sandSpitCooldown--;
         if (recentLethalDamageTicks > 0 && --recentLethalDamageTicks == 0)
         {
@@ -133,6 +130,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         Emergence.Update(eu);
         if (!extremeVengeance)
             DesertAI.AfterPhysics(eu);
+        Injury.ApplyFlight(previousFlightVelocity);
     }
 
     private void UpdateHeldSandStruggle()
@@ -242,6 +240,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             DesertAI.PlayerReleased(releasedBy, mainBodyChunk.vel.magnitude);
     }
 
+    public override void Stun(int ticks)
+    {
+        if (!dead && ticks >= 40) Injury.ApplyShock(Mathf.Clamp(ticks / 300f, 0.08f, 0.65f));
+        base.Stun(ticks);
+    }
+
     public override void Violence(
         BodyChunk source,
         Vector2? momentum,
@@ -253,18 +257,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         if (!RippleViolenceCheck(source)) return;
         Creature attacker = source?.owner as Creature ?? (source?.owner as Weapon)?.thrownBy;
-
-        if (source?.owner is Rock)
-        {
-            DesertAI.Threatened(attacker, true);
-            BeginRockStunGuard();
-
-            BodyChunk chunk = hitChunk ?? mainBodyChunk;
-            if (momentum.HasValue)
-                chunk.vel += Vector2.ClampMagnitude(momentum.Value / chunk.mass, 10f);
-            Stun(Mathf.Max(DesertBatflyTuning.RockStun, Mathf.CeilToInt(stunBonus)));
-            return;
-        }
 
         bool supportedLethalThreat = damage > 0f &&
             DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
@@ -284,15 +276,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             DesertAI.Threatened(attacker, true);
         }
 
-        resolvingNonRockViolence = true;
-        try
-        {
-            base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
-        }
-        finally
-        {
-            resolvingNonRockViolence = false;
-        }
+        float healthBefore = DesertState.health;
+        base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
+
+        Injury.OnHealthLoss(healthBefore, type, source?.owner, attacker, momentum);
 
         if (supportedLethalThreat && !dead && !slatedForDeletetion)
             DesertAI.Threatened(attacker, true);
@@ -346,20 +333,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         }
 
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
-        bool previousLegitimateDeathContext = resolvingNonRockViolence;
-        resolvingNonRockViolence = true;
-        try
-        {
-            // A Rock collision guard may still be active for a few ticks. Player eating
-            // is a separate legitimate death path and must not be mistaken for delayed
-            // Rock lethality by Die().
-            base.BitByPlayer(grasp, eu);
-        }
-        finally
-        {
-            resolvingNonRockViolence = previousLegitimateDeathContext;
-            mealFood = 2;
-        }
+        base.BitByPlayer(grasp, eu);
+        mealFood = 2;
 
         DesertState.Bites = bites;
         if (bites != 0 || DesertState.MealConsumed) return;
@@ -371,9 +346,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Die()
     {
-        if (!dead && rockDeathGuardTicks > 0 && !resolvingNonRockViolence && drown < 1f)
-            return;
-
         if (runningVanillaUpdate && !dead && drown < 1f &&
             grabbedBy.Count > 0 && grabbedBy[0].grabber is Player)
             return;
@@ -428,6 +400,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         if (!wasDead && dead)
         {
+            injury?.ClearTransient();
             DesertAI?.Roles.Reset();
             if (!DesertBatflyIntimidation.IsSupportedLethalThreat(killer) && room != null)
                 foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
@@ -446,6 +419,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Destroy()
     {
+        injury?.ClearTransient();
         DesertAI?.Roles.Reset();
         playerHolder = null;
         recentLethalDamager = null;

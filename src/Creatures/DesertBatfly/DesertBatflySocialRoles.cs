@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum SocialRoleSuppression { None, Unavailable, Restrained, Emergence, VanillaPriority, Danger, Fear, Trauma, Grief, Vengeance, Roost }
+internal enum SocialRoleSuppression { None, Unavailable, Restrained, Emergence, VanillaPriority, Danger, Fear, Trauma, Grief, Vengeance, Roost, Injury }
 
 // Owned by the existing DesertAI, with a fixed number of counters and one visible threat.
 internal sealed class DesertBatflySocialRoles
@@ -45,6 +45,7 @@ internal sealed class DesertBatflySocialRoles
             if (bat.Emergence?.Active == true) return SocialRoleSuppression.Emergence;
             if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
                 bat.AI.luredCounter > 0 || bat.safariControlled) return SocialRoleSuppression.VanillaPriority;
+            if (bat.Injury.BlocksRole(Role)) return SocialRoleSuppression.Injury;
             if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return SocialRoleSuppression.Vengeance;
             if (Trauma >= DesertBatflyTuning.TraumaAggressionBlock) return SocialRoleSuppression.Trauma;
             if (bat.DesertState.GriefStrength >= 0.30f) return SocialRoleSuppression.Grief;
@@ -175,6 +176,7 @@ internal sealed class DesertBatflySocialRoles
                 "RoleEvaluationBlocked", candidate, "watch role blocked by existing target");
             return;
         }
+        if (bat.Injury.BlocksRole(candidate)) return;
         Role = candidate;
         opportunistRecovery = false;
         Commitment = 800 + (int)((uint)bat.Personality.VisualSeed % 301u);

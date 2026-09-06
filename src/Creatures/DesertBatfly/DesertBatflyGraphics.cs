@@ -70,6 +70,12 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         // wind-up we only exaggerate its existing wing/body motion so the player gets
         // a readable warning without replacing FlyGraphics with a custom animation.
         base.Update();
+        if (!desert.dead && desert.Injury.WingMean > 0f)
+        {
+            for (int sideIndex = 0; sideIndex < 2; sideIndex++)
+                wings[sideIndex, 0] = 0.5f + (wings[sideIndex, 0] - 0.5f) * desert.Injury.WingAmplitude(sideIndex);
+            lowerBody.vel.y += Mathf.Sin(desert.Injury.MotionTick * 0.11f) * desert.Injury.WingMean * 0.05f;
+        }
         if (!desert.SandSpitWindingUp || desert.dead || desert.grabbedBy.Count == 0) return;
 
         int phase = desert.SandSpitWindupRemaining;
@@ -174,6 +180,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         Vector2 forward = Custom.DirVec(tail, head);
         if (forward.sqrMagnitude < 0.01f) forward = Vector2.up;
         Vector2 right = Custom.PerpendicularVector(forward);
+        sLeaser.sprites[0].rotation += desert.Injury.BodyTilt;
         float bodyRotation = sLeaser.sprites[0].rotation;
 
         for (int i = 0; i < patterns.Length; i++)
@@ -247,5 +254,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         // physically moved through the surface. Normal hive emergence stays at 1.
         for (int i = 0; i < VanillaSpriteCount; i++)
             sLeaser.sprites[i].alpha = alpha;
+        sLeaser.sprites[1].alpha *= 1f - desert.DesertState.LeftWingInjury * 0.15f;
+        sLeaser.sprites[2].alpha *= 1f - desert.DesertState.RightWingInjury * 0.15f;
     }
 }

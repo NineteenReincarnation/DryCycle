@@ -231,6 +231,23 @@ internal sealed class DesertBatflyState : HealthState
     private const string SaveKey = "DCDesertBatflyV1";
     internal DesertBatflyPersonality Personality;
     internal float Thirst;
+    internal float LeftWingInjury, RightWingInjury;
+    internal float WingMean => (LeftWingInjury + RightWingInjury) * 0.5f;
+    internal float WingAsymmetry => Mathf.Abs(LeftWingInjury - RightWingInjury);
+    internal float WingBias => RightWingInjury - LeftWingInjury;
+
+    internal void RecoverWings(float amount)
+    {
+        if (!alive || float.IsNaN(amount) || float.IsInfinity(amount) || amount <= 0f) return;
+        LeftWingInjury = Mathf.Max(0f, LeftWingInjury - amount);
+        RightWingInjury = Mathf.Max(0f, RightWingInjury - amount);
+    }
+
+    public override void CycleTick()
+    {
+        base.CycleTick();
+        RecoverWings(0.35f);
+    }
     internal int Cooldown, Bites = 3;
     internal bool MealConsumed, InHive;
 
@@ -355,12 +372,15 @@ internal sealed class DesertBatflyState : HealthState
             PredatorTraumaTicks.ToString(CultureInfo.InvariantCulture),
             SaveIdentity(SocialBondTarget), SocialBondStrength.ToString("R", CultureInfo.InvariantCulture),
             GriefStrength.ToString("R", CultureInfo.InvariantCulture), GriefTicks.ToString(CultureInfo.InvariantCulture),
-            SaveIdentity(GriefThreatIdentity) });
+            SaveIdentity(GriefThreatIdentity),
+            LeftWingInjury.ToString("R", CultureInfo.InvariantCulture),
+            RightWingInjury.ToString("R", CultureInfo.InvariantCulture) });
         return base.ToString();
     }
 
     public override void LoadFromString(string[] data)
     {
+        LeftWingInjury = RightWingInjury = 0f;
         SocialBondTarget = GriefThreatIdentity = null;
         SocialBondStrength = GriefStrength = 0f;
         GriefTicks = 0;
@@ -426,6 +446,9 @@ internal sealed class DesertBatflyState : HealthState
             if (GriefTicks <= 0 || GriefStrength <= 0f)
             { GriefStrength = 0f; GriefTicks = 0; GriefThreatIdentity = null; }
         }
+
+        if (values.Length > 20) LeftWingInjury = LoadStrength(values[20]);
+        if (values.Length > 21) RightWingInjury = LoadStrength(values[21]);
 
         if (GrabMemoryTicks <= 0 || GrabMemoryStrength <= 0f)
         {

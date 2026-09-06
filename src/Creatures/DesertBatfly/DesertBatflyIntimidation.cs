@@ -285,6 +285,7 @@ internal static class DesertBatflyIntimidation
             return;
         }
 
+        if (bat.Injury.BlocksCombat) ClearVengeance(state);
         EnforcePersistentTrauma(bat, state);
 
         bool vengeanceControlsMovement = state.Vengeance is
@@ -328,6 +329,7 @@ internal static class DesertBatflyIntimidation
         if (victim?.room == null || !IsPeach(predator) || predator.room != victim.room)
             return;
 
+        victim.Injury.BeginCapture(predator);
         CaptureStamp stamp = captureStamps.GetOrCreateValue(victim);
         int clock = victim.room.game?.clock ?? -1;
         int identity = ThreatIdentity(predator);
@@ -741,7 +743,7 @@ internal static class DesertBatflyIntimidation
                  participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
             {
                 DesertBatfly bat = trueCandidates[i];
-                if (!DesertBatflySocialBond.CanRespond(bat)) continue;
+                if (bat.Injury.BlocksCombat || !DesertBatflySocialBond.CanRespond(bat)) continue;
                 State state = StateFor(bat);
                 FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
                 float trauma = PersistentTraumaStrength(bat, threat);
@@ -773,7 +775,7 @@ internal static class DesertBatflyIntimidation
         for (int i = 0; i < bats.Count; i++)
         {
             DesertBatfly bat = bats[i];
-            if (!DesertBatflySocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
+            if (bat.Injury.BlocksCombat || !DesertBatflySocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
                 bat.Personality.Conformity < DesertBatflyTuning.SocialFollowerMinConformity ||
                 IsExtremeVengeanceActive(bat))
                 continue;
@@ -1152,6 +1154,7 @@ internal static class DesertBatflyIntimidation
             lizard.ReleaseGrasp(0);
 
         if (victim.dead || RescueStillPossible(state, target)) return false;
+        victim.Injury.CheckCaptureRelease();
         DesertBatflySocialBond.OnSuccessfulRescue(bat, victim);
         Vector2 away = Custom.DirVec(
             lizard.mainBodyChunk.pos,
@@ -1571,6 +1574,7 @@ internal static class DesertBatflyIntimidation
             speed = Mathf.Min(speed, 7f);
         }
 
+        bat.Injury.NominalFlightSpeed = speed;
         bat.AI.localGoal = goal;
         bat.mainBodyChunk.vel = Vector2.Lerp(
             bat.mainBodyChunk.vel,

@@ -75,7 +75,9 @@ internal static class DesertBatflyDebugTrace
             scores.Sentinel,
             scores.Bully,
             scores.Opportunist,
-            flock.PanicRatio));
+            flock.PanicRatio, health: bat.DesertState.health,
+            leftWing: bat.DesertState.LeftWingInjury, rightWing: bat.DesertState.RightWingInjury,
+            postStun: bat.Injury.PostStunShock, physicalCapability: bat.Injury.PhysicalCapability));
 
         if (flockAge > 30)
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.Warning,
@@ -114,12 +116,14 @@ internal static class DesertBatflyDebugTrace
         if (suppression == SocialRoleSuppression.Danger) return "danger / retreat owns movement";
         if (suppression == SocialRoleSuppression.Fear) return "fear / intimidation priority";
         if (suppression == SocialRoleSuppression.VanillaPriority) return "vanilla FlyAI priority";
+        if (bat.Injury.IsRecovering) return bat.Injury.RecoveryReason;
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
         return "DesertBatflyAI state machine";
     }
 
     private static string SuppressionReason(SocialRoleSuppression suppression) => suppression switch
     {
+        SocialRoleSuppression.Injury => "physical injury / post-stun expression limit",
         SocialRoleSuppression.None => "no higher-priority blocker",
         SocialRoleSuppression.Unavailable => "dead / unconscious / shortcut / no room",
         SocialRoleSuppression.Restrained => "non-fly grasp or cannot respond",
@@ -140,6 +144,7 @@ internal static class DesertBatflyDebugTrace
         if (bat.inShortcut) return "Shortcut";
         return suppression switch
         {
+            SocialRoleSuppression.Injury => bat.Injury.IsRecovering ? "Injury Recovery" : "Physical Condition",
             SocialRoleSuppression.VanillaPriority => "Vanilla FlyAI",
             SocialRoleSuppression.Danger => "Danger / Escape",
             SocialRoleSuppression.Fear => "Fear / Intimidation",

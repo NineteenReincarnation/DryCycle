@@ -79,6 +79,11 @@ internal sealed class DesertSwarmRoom
         // Native hive emergence respects rain, grass nodes, predators and sounds.
         // Clean up consumed/dead entries rather than resurrecting them on exit.
         Hive.inHive.RemoveAll(fly => fly.slatedForDeletetion || fly.dead);
+        // Hive occupants are removed from Room.Update by vanilla: recover them here once,
+        // only while still inHive; entering a hive never grants an instant heal.
+        foreach (Fly member in Hive.inHive)
+            if (member is DesertBatfly resting && !resting.dead)
+                resting.Injury.Recover(0.0032f / 40f);
         Hive.Update(eu);
         if (--flockRefresh <= 0)
         {
