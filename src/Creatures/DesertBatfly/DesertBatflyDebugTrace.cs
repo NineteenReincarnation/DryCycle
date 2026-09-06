@@ -5,10 +5,6 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 // Debug instrumentation is deliberately outside the behavior code. When the Observatory
 // is closed AIDebugTrace.IsWatched is false and this method returns before allocating strings.
-//
-// The experimental Sentinel/Bully/Opportunist arbitration was rejected. The retained
-// DesertBatflySocialRoles seam therefore always reports None/zero and must not be treated
-// as an active behavior controller by the trace system.
 internal static class DesertBatflyDebugTrace
 {
     internal static void Sample(DesertBatfly bat)
@@ -33,9 +29,6 @@ internal static class DesertBatflyDebugTrace
             "ControlOwner", controlOwner, modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "Suppression", suppression, SuppressionReason(bat, suppression));
-        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "ExpressedRole", ExpressedSocialRole.None,
-            "emergent social-role arbitration disabled; individual-first AI");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Combat,
             "FormalAttack", bat.DesertAI.FormalAttack, bat.DesertAI.Target == null
                 ? "no target" : AIDebugFormat.Creature(bat.DesertAI.Target));
@@ -44,8 +37,7 @@ internal static class DesertBatflyDebugTrace
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
-        // Candidate instrumentation must describe active runtime choices. Social-role
-        // candidates are intentionally omitted because that feature is disabled.
+        // Candidate instrumentation describes only active runtime choices.
         AIDebugCandidateRegistry.Begin(bat.abstractCreature);
         if (bat.AI != null)
             AIDebugCandidateRegistry.Record(bat.abstractCreature, "Motor", "localGoal",
@@ -61,7 +53,7 @@ internal static class DesertBatflyDebugTrace
             localGoal,
             bat.DesertAI.Mode.ToString(),
             AIDebugFormat.Creature(bat.DesertAI.Target),
-            ExpressedSocialRole.None.ToString(),
+            null,
             suppression,
             controlOwner,
             0f,
@@ -93,7 +85,7 @@ internal static class DesertBatflyDebugTrace
         if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
         if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
-        if (DesertBatflyIntimidation.BlocksSocialRoles(bat)) return "Fear";
+        if (DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return "Fear";
         if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
             return "Roost";
         return "None";
