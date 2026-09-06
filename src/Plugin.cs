@@ -152,6 +152,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
             SlugCatKarmicArmorRuntime.Disable();
+            DevFoodWaterRefillRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
@@ -199,6 +200,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearPlayerEffects.Enable();
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
+            DevFoodWaterRefillRuntime.Enable();
             SlugCatKarmicArmorRuntime.Enable();
             TemperatureSystemRuntime.Enable();
             DewPodHooks.Enable();
@@ -314,6 +316,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
             SlugCatKarmicArmorRuntime.Disable();
+            DevFoodWaterRefillRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
             KingVultureSpearPlayerEffects.Disable();
