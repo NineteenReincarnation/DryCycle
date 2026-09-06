@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using UnityEngine;
 
 internal static partial class Program
@@ -103,12 +104,23 @@ internal static partial class Program
         Check((float)separationX.GetValue(null) > (float)separationY.GetValue(null) * 3f,
             "Task10 GroupDrift separation is explicitly horizontal-biased");
 
-        Check(roomRuntimeType.GetNestedType("Reservation", Flags) != null &&
-              roomRuntimeType.GetNestedType("RoomState", Flags) != null,
+        Type roomStateType = roomRuntimeType.GetNestedType("RoomState", Flags);
+        Check(roomRuntimeType.GetNestedType("Reservation", Flags) != null && roomStateType != null,
             "Task10 has explicit room-scoped reservation/candidate-cache structures");
+        Check(roomStateType.GetProperty("Roosting", Flags) != null &&
+              roomStateType.GetMethod("CountRoostingNear", Flags) != null,
+            "Task10 caches roosting bats at room scope instead of rescanning the flock for every roost tile");
+        MethodInfo removeGroupMember = roomStateType.GetMethod("RemoveGroupMember", Flags);
+        Check(removeGroupMember != null && removeGroupMember.ReturnType == typeof(bool),
+            "Task10 group removal reports whether the microflock remains valid for synchronous cleanup");
         Check(socialType.GetMethod("CancelForPriority", Flags) != null &&
               socialType.GetMethod("Reset", Flags) != null,
             "Task10 exposes cleanup hooks for death/travel/disable lifecycle");
+
+        MethodInfo socialSteer = socialType.GetMethod("SocialSteer", Flags);
+        Check(socialSteer != null, "Task10 has one centralized neutral social steering bridge");
+        Check(!MethodWritesField(socialSteer, typeof(BodyChunk), "vel"),
+            "Task10 SocialSteer never writes BodyChunk.vel; vanilla BatFlight owns flight physics");
 
         foreach (string field in new[]
         {
@@ -133,6 +145,103 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
             "Task10 does not revive any rejected Task02 social-role runtime type");
 
-        Console.WriteLine("Task 10: temporary mode set, SocialDrive/threshold, priority gates, weak Bond preference, stable pair side, horizontal layout, room reservations, non-persistence and debug shape verified.");
+        Console.WriteLine("Task 10: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");
+    }
+
+    private static bool MethodWritesField(MethodInfo method, Type declaringType, string fieldName)
+    {
+        byte[] il = method?.GetMethodBody()?.GetILAsByteArray();
+        if (il == null || il.Length == 0) return false;
+
+        int offset = 0;
+        while (offset < il.Length)
+        {
+            OpCode opcode;
+            byte first = il[offset++];
+            if (first == 0xFE)
+            {
+                if (offset >= il.Length) break;
+                opcode = MultiByteOpCode(il[offset++]);
+            }
+            else
+            {
+                opcode = SingleByteOpCode(first);
+            }
+
+            int operandOffset = offset;
+            int operandSize = OperandSize(opcode.OperandType, il, operandOffset);
+            if ((opcode == OpCodes.Stfld || opcode == OpCodes.Stsfld) && operandSize >= 4)
+            {
+                int token = BitConverter.ToInt32(il, operandOffset);
+                try
+                {
+                    FieldInfo field = method.Module.ResolveField(token);
+                    if (field != null && field.DeclaringType == declaringType && field.Name == fieldName)
+                        return true;
+                }
+                catch (ArgumentException)
+                {
+                    // Malformed metadata would fail the real build/test elsewhere; it is
+                    // irrelevant to this focused ownership assertion.
+                }
+            }
+            offset += operandSize;
+        }
+        return false;
+    }
+
+    private static OpCode SingleByteOpCode(byte value)
+    {
+        foreach (FieldInfo field in typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
+        {
+            if (field.GetValue(null) is OpCode opcode && opcode.Size == 1 && (byte)opcode.Value == value)
+                return opcode;
+        }
+        return default;
+    }
+
+    private static OpCode MultiByteOpCode(byte second)
+    {
+        short value = unchecked((short)(0xFE00 | second));
+        foreach (FieldInfo field in typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
+        {
+            if (field.GetValue(null) is OpCode opcode && opcode.Size == 2 && opcode.Value == value)
+                return opcode;
+        }
+        return default;
+    }
+
+    private static int OperandSize(OperandType type, byte[] il, int offset)
+    {
+        switch (type)
+        {
+            case OperandType.InlineNone:
+                return 0;
+            case OperandType.ShortInlineBrTarget:
+            case OperandType.ShortInlineI:
+            case OperandType.ShortInlineVar:
+                return 1;
+            case OperandType.InlineVar:
+                return 2;
+            case OperandType.InlineI:
+            case OperandType.InlineBrTarget:
+            case OperandType.InlineField:
+            case OperandType.InlineMethod:
+            case OperandType.InlineSig:
+            case OperandType.InlineString:
+            case OperandType.InlineTok:
+            case OperandType.InlineType:
+            case OperandType.ShortInlineR:
+                return 4;
+            case OperandType.InlineI8:
+            case OperandType.InlineR:
+                return 8;
+            case OperandType.InlineSwitch:
+                if (offset + 4 > il.Length) return Math.Max(0, il.Length - offset);
+                int count = BitConverter.ToInt32(il, offset);
+                return 4 + Math.Max(0, count) * 4;
+            default:
+                return 0;
+        }
     }
 }
