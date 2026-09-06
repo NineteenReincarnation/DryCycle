@@ -24,6 +24,7 @@ internal static class AIDebuggerRuntime
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
         AIDebugSettings.Load(logger);
+        AIDebugSessionBlockWriter.Initialize(logger);
 
         bool bridgeAssemblyLoaded = IsAssemblyLoaded(BridgeAssemblyName);
         bool rwimguiAssemblyLoaded = IsAssemblyLoaded(RWImGuiAssemblyName);
@@ -55,6 +56,7 @@ internal static class AIDebuggerRuntime
 
         AIDebugRegistry.Initialize(logger);
         AIDebugPresentationHub.Reset();
+        AIDebugOfflineSessionStore.RefreshAsync();
         hostObject = new GameObject("DryCycle AI Observatory Controller")
         {
             hideFlags = HideFlags.HideAndDontSave
@@ -73,10 +75,14 @@ internal static class AIDebuggerRuntime
         AIDebugSettings.Save();
         AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
+        AIDebugBreakpointManager.Reset();
+        AIDebugDeepProfiler.Reset();
         AIDebugTrace.Reset();
         AIDebugSimulationControl.Uninstall();
         AIDebugInputGate.Uninstall();
         AIDebugPresentationHub.Reset();
+        AIDebugOfflineSessionStore.Reset();
+        AIDebugSessionBlockWriter.Shutdown();
         if (hostObject != null) UnityEngine.Object.Destroy(hostObject);
         hostObject = null;
         host = null;
@@ -261,6 +267,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.Refresh:
                     nextEntityRefreshTime = 0f;
                     nextPresentationTime = 0f;
+                    AIDebugOfflineSessionStore.RefreshAsync();
                     presentationDirty = true;
                     break;
 
@@ -280,6 +287,35 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.ReturnLive:
                     viewMode = AIDebugViewMode.Live;
                     cursorTick = game?.clock ?? cursorTick;
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.ToggleRecording:
+                    if (game != null)
+                    {
+                        AIDebugRecorder.SetMode(AIDebugRecorder.Mode == AIDebugRecorderMode.Recording
+                            ? AIDebugRecorderMode.Armed
+                            : AIDebugRecorderMode.Recording);
+                        presentationDirty = true;
+                    }
+                    break;
+
+                case AIDebugUiCommandKind.TriggerCapture:
+                    if (game != null && hasSelection)
+                    {
+                        bool queued = AIDebugAnomalyCapture.Trigger(selectedKey, game.clock, "manual");
+                        logger?.LogInfo($"DryCycle AI Observatory manual capture {(queued ? "armed" : "ignored")} for {selectedKey} at tick {game.clock}.");
+                        presentationDirty = true;
+                    }
+                    break;
+
+                case AIDebugUiCommandKind.ToggleProfiler:
+                    AIDebugDeepProfiler.Toggle();
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.ToggleBreakpoint:
+                    AIDebugBreakpointManager.Toggle();
                     presentationDirty = true;
                     break;
             }
@@ -311,7 +347,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 AIDebugLocalization.Language,
                 Array.Empty<AIDebugPresentationEntity>(),
                 null,
-                "RainWorldGame is not active."));
+                "RainWorldGame is not active.",
+                recorderMode: AIDebugRecorder.Mode,
+                writerStatus: AIDebugSessionBlockWriter.Describe(),
+                anomaly: AIDebugAnomalyCapture.GetStatus(),
+                profiler: AIDebugDeepProfiler.GetStatus(),
+                breakpoint: AIDebugBreakpointManager.GetStatus()));
             return;
         }
 
@@ -370,12 +411,23 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
+        AIDebugAnomalyStatus anomaly = AIDebugAnomalyCapture.GetStatus();
+        AIDebugProfilerStatus profiler = AIDebugDeepProfiler.GetStatus();
+        AIDebugBreakpointStatus breakpoint = AIDebugBreakpointManager.GetStatus();
+        string writerStatus = AIDebugSessionBlockWriter.Describe();
         string exportStatus = AIDebugV5SessionExporter.Describe();
         string recorderStatus = recorder.ActiveTracked > 0
             ? $"{presentationEntities.Length} entities · recorder {recorder.Mode} · tracked {recorder.ActiveTracked} · pinned {recorder.PinnedEntities}/{AIDebugRecorder.MaxPinnedEntities} · motion {recorder.MotionSamples} · changes {recorder.StateChanges}" +
               (recorder.DroppedRecords > 0 ? $" · LOST {recorder.DroppedRecords}" : string.Empty)
             : $"{presentationEntities.Length} entities · recorder {recorder.Mode}";
+        if (!string.IsNullOrEmpty(writerStatus)) recorderStatus += " · " + writerStatus;
         if (!string.IsNullOrEmpty(exportStatus)) recorderStatus += " · export " + exportStatus;
+        if (anomaly.Active > 0 || anomaly.Completed > 0 || anomaly.Dropped > 0)
+            recorderStatus += $" · capture {anomaly.Active} active/{anomaly.Completed} done/{anomaly.Dropped} lost";
+        if (breakpoint.Enabled)
+            recorderStatus += $" · breakpoint ON ({breakpoint.Hits} hits)";
+        if (profiler.Enabled)
+            recorderStatus += $" · profiler avg {profiler.AverageMs:0.000} / p95 {profiler.P95Ms:0.000} / max {profiler.MaxMs:0.000} ms";
 
         AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
             true,
@@ -389,7 +441,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             viewMode,
             viewTick,
             cursorMotion,
-            cursorFastState));
+            cursorFastState,
+            recorderMode: recorder.Mode,
+            writerStatus: writerStatus,
+            anomaly: anomaly,
+            profiler: profiler,
+            breakpoint: breakpoint));
     }
 
     private void PublishHidden(RainWorldGame game)
@@ -404,7 +461,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             null,
             string.Empty,
             viewMode,
-            cursorTick));
+            cursorTick,
+            recorderMode: AIDebugRecorder.Mode,
+            writerStatus: AIDebugSessionBlockWriter.Describe(),
+            anomaly: AIDebugAnomalyCapture.GetStatus(),
+            profiler: AIDebugDeepProfiler.GetStatus(),
+            breakpoint: AIDebugBreakpointManager.GetStatus()));
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
@@ -521,7 +583,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         AIDebugSettings.Save();
         AIDebugRichRecorder.Reset();
         AIDebugRecorder.Reset();
+        AIDebugBreakpointManager.Reset();
+        AIDebugDeepProfiler.Reset();
         AIDebugTrace.Reset();
         AIDebugPresentationHub.Reset();
+        AIDebugOfflineSessionStore.Reset();
+        AIDebugSessionBlockWriter.Shutdown();
     }
 }
