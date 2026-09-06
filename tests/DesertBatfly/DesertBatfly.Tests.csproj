@@ -6,6 +6,12 @@
     <RainWorldDir Condition="'$(RainWorldDir)' == ''">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Rejected Task 02 sources must never compile even if old local files survive a pull. -->
+    <Compile Remove="Program.SocialRoles.cs" />
+    <Compile Remove="**/Program.SocialRoles.cs" />
+    <Compile Remove="**/DesertBatflySocialRoles.cs" />
+    <Compile Remove="**/DesertBatflyRoleScores.cs" />
+
     <Compile Include="../../src/Creatures/DesertBatfly/DesertBatflyState.cs" Link="DesertBatflyState.cs" />
     <Reference Include="PUBLIC-Assembly-CSharp"><HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="HOOKS-Assembly-CSharp"><HintPath>$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
