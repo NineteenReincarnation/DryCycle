@@ -161,6 +161,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 logger?.LogInfo($"DryCycle AI Observatory Window.Draw entered. game={(game != null ? "RainWorldGame" : "none/menu")}, fullMode={window.FullMode}.");
             }
             window.Draw(game, overheadMs);
+            if (!window.FullMode && game != null) KeepCompactOnScreen();
             backend.EndFrame();
         }
         catch (Exception error)
@@ -175,6 +176,19 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 
         overheadMs = overheadMs <= 0.0 ? watch.Elapsed.TotalMilliseconds
             : overheadMs * 0.88 + watch.Elapsed.TotalMilliseconds * 0.12;
+    }
+
+    private void KeepCompactOnScreen()
+    {
+        float scale = Mathf.Clamp(AIDebugSettings.UiScale, 0.75f, 1.75f);
+        float width = Mathf.Min(405f * scale, Mathf.Max(1f, Screen.width - 16f));
+        float height = Mathf.Min(320f * scale, Mathf.Max(1f, Screen.height - 32f));
+        float x = Mathf.Max(8f, Screen.width - width - 16f);
+        const float y = 16f;
+        AIDebugDockingNative.KeepWindowInViewport(
+            AIDebugLocalization.T("app.title") + "###AICompact",
+            new System.Numerics.Vector2(x, y),
+            new System.Numerics.Vector2(width, height));
     }
 
     private void OnPostRender()
