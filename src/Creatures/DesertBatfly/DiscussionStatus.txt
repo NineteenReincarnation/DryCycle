@@ -11,6 +11,7 @@ Desert Batfly 复杂机制讨论状态
 - 【采纳·部分已敲定】= 该大方向中已有一部分可以进入任务书，但仍有明确子项尚未进行额外深入讨论；Codex 只能实现已敲定部分。
 - 【尚未进行额外深入讨论】= 已经列入正式讨论清单，但当前没有足够细节可直接实现，禁止 Codex 自行补完设计。
 - 【暂时否决】= 当前阶段暂不加入，不代表永久删除。后续讨论可以重新启用。
+- 【否决·已移除】= 已经过实现/实机观察后明确否决，并从当前运行时设计中移除；不得根据旧任务书自行恢复，只有用户重新明确提出并完成新讨论后才可重新设计。
 
 当前基线说明：
 Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 AttackSlots、抓取记忆、喷沙、玩家/Peach 死亡威慑、有限链式恐惧、Conformity、Extreme Vengeance、Follower、PTSD/Trauma、Peach 捕食和尸体捡食等系统。以下内容是在这些已有机制上的下一阶段扩展。
@@ -31,76 +32,75 @@ Desert Batfly 已经具有个体 Personality、Roost/Chain、普通骚扰与 Att
 
 
 2. Emergent Social Roles / 稀疏涌现式社会角色
-状态：【已实现 / 待实机验收】
+状态：【否决·已移除】
 
-最终核心原则：
-- 职业只是群落行为的点缀，不是整个物种的社会结构主体。
-- 绝大多数 Desert Batfly 必须保持普通 / None，不需要显性职业。
-- 正常群落目标观感：约 70%~85% 为普通个体，显性角色合计通常约 15%~30%。
-- 正常约 11+3 的群落通常只出现约 2~4 个明显角色；允许某个群落只有 0~1 个，也允许偶尔略多。
-- 不保证每个群落拥有所有职业，不允许按人数硬分配岗位。
-- 普通 / None 仍然拥有完整 Personality、SocialBond、Trauma、Grief、Roost、Harass、Vengeance 等复杂逻辑。
+原方案：
+- 使用 Sentinel / Bully / Opportunist 三种 runtime 显性角色，让少数个体临时表现出更鲜明的群落分工。
+- 通过 Personality + runtime context 计算角色分数，并使用软预算限制角色数量。
+- Sentinel 会偏向群体外围并确认威胁；Bully 更容易发起普通骚扰；Opportunist 在危险结束后更早回到活动区。
 
-正式显性角色只保留三种：
-1) Sentinel / 哨戒者
-   - 更常位于群落外围；
-   - 更愿意观察潜在威胁；
-   - 允许在安全距离主动靠近一点进行威胁确认；
-   - 不应一看到玩家就立即全群报警；
-   - 可以根据真实可观察行为逐步提高 ThreatConfidence；
-   - 确认后复用现有 Alarm / Threatened / Fear 逻辑；
-   - 不获得全知、伤害、防御或额外攻击槽。
+否决原因：
+1) 实机行为暴露出明显的人工控制痕迹。
+   - Sentinel/Opportunist 的角色移动会直接改写 FlyAI.localGoal，并额外修正 mainBodyChunk.vel。
+   - Sentinel 还会围绕 Flock.Center 维持近似固定外围半径。
+   - 当个体和群体中心在近似同一竖直/水平轴上时，这类持续位置纠正容易退化为上下或左右直线往返，形成机械振荡。
+   - 这违背了“基于原版 Fly locomotion 自然飞行，只做生态层行为扩展”的目标。
 
-2) Bully / 挑衅者、骚扰发起者
-   - 更容易主动发起 Observe / Probe / FakeDive / Circle 等普通骚扰；
-   - 主要是“更爱找事”，不是更高伤害职业；
-   - 必须继续受 AttackSlots=2 硬限制；
-   - 不得提高 Extreme Vengeance 伤害或资格；
-   - 玩家反杀、Peach、PTSD、DeathShock 等仍然正常压过 Bully 行为。
+2) “社会角色”抽象本身过度强化了物种的组织化程度。
+   - Desert Batfly 不需要形成哨兵、恶霸、机会主义者这样的隐式职业社会。
+   - 当前 Personality、Conformity、SocialBond、Grief、Trauma、GrabMemory、普通 Harass、Fear、Vengeance、Roost 已经足够产生大量个体差异。
+   - 同一种行为差异更适合从这些通用状态自然涌现，而不是先给个体套一个 role，再由 role 反向修改行为。
 
-3) Opportunist / 机会主义观察者
-   - 不轻易第一个冲入危险；
-   - 更愿意在中距离观察局势；
-   - 当真实危险下降后，比普通个体更早回到活动区域；
-   - 允许在已有 Fear / CorpseWarning 等危险提示真正降低后，较早重新接近刚发生过事件的区域；
-   - 当前不实现主动找尸体/捡资源，未来与第 10 项 Corpse Ecology 接口。
+3) 实现产生了不必要的横向耦合。
+   - Role 状态进入 DesertBatflyAI 的扫描、Observe、Harass 和普通 Flight。
+   - Injury 增加了 BlocksRole / RoleBlockReason。
+   - FlockSnapshot 增加 ExpressedRoleCount。
+   - AI Observatory、调试 Trace 和托管测试又继续依赖 Role/Suppression/Score。
+   - 一个生态点缀功能因此变成跨 AI、移动、伤病、群体快照、调试和测试的控制层，不符合当前维护目标。
 
-明确不是正式职业：
-- Follower-like：主要由现有 Conformity 自然表现，不建立 FollowerRole；
-- Loner-like：主要由低 Conformity / 低 RoostAffinity 等自然表现，不建立 LonerRole。
+最终决定：
+- 删除 Sentinel / Bully / Opportunist 作为实际游戏机制。
+- 不再存在角色评分、角色进入阈值、角色 commitment/cooldown、soft role budget 或角色人口目标。
+- 不允许任何“社会角色”代码改写 FlyAI.localGoal、直接施加角色专属速度、维持固定群落外围半径或接管原版飞行。
+- 不再给 Bully 提供 HarassThreshold / ObserveDuration / ObserveRadius / FakeDiveChance 专属修正。
+- 不再给 Sentinel 提供 ThreatConfidence、主动确认、角色专属 Alarm 或外围站岗逻辑。
+- 不再给 Opportunist 提供角色专属 Opportunity/recovery-return 状态。
+- Follower-like / Loner-like 继续只作为 Personality/Conformity/RoostAffinity 的自然行为描述，不建立正式 Role。
 
-角色表达方式：
-- 允许内部计算 Sentinel/Bully/Opportunist tendency；
-- tendency 只是权重，不代表拥有职业；
-- 只有最高倾向明显超过阈值，并且明显高于第二高倾向时，才允许出现显性角色；
-- 如果几个倾向都差不多，即使都不低，也应保持 None；
-- 显性角色是 runtime expression，不是出生永久标签，不建议写入存档；
-- 危险、PTSD、Grief、Extreme Vengeance、被抓、Shortcut、恶劣天气撤离等可以立即压制角色表达。
+保留内容：
+- Personality 各轴及其直接行为影响；
+- Conformity；
+- Sex；
+- SocialBond；
+- Grief；
+- Trauma / PTSD；
+- GrabMemory；
+- 普通 Observe / Harass / FakeDive / Dive / Attach；
+- AttackSlots；
+- Fear / local alarm；
+- Extreme Vengeance / Social Follower；
+- Roost / Chain；
+- Injury；
+- SandSpit；
+- Peach 捕食、救援和尸体相关逻辑。
 
-稀疏化：
-- 可以采用 soft role budget 控制整个群落显性角色总量；
-- 软预算只提高后续显性化门槛，不得为了填坑强制把低分个体分配成角色；
-- 极端高分个体可以偶尔越过软预算；
-- 禁止 MaxSentinel=1 / 每群固定1个Bully 等岗位分配逻辑。
+后续设计原则：
+- 个体差异优先来自通用 Personality + 经历 + 当前环境，而不是职业标签。
+- 群体行为优先通过真实事件、可观察信号、局部传播和 Conformity 实现。
+- 如果未来需要“某些个体更警觉 / 更爱挑衅 / 更快回来”，应直接调整通用决策权重，并保持连续差异，而不是重新建立 Sentinel/Bully/Opportunist enum。
+- 社会系统不得成为第二套 locomotion controller。
 
-群体上下文：
-- 允许增加低频 FlockSnapshot，例如 Center / AverageVelocity / ActiveCount / PanicRatio / RoostRatio / ExpressedRoleCount；
-- room-level 每约 20~40 tick 一次 O(n) 即可；
-- 禁止每只 Bat 每帧 O(n) 或 O(n²) 扫描；
-- FlockSnapshot 只是社会上下文，禁止把原版 Fly locomotion 改造成完整 Boids。
-
-与其他系统接口：
-- SocialBond 与职业独立；低 Conformity/Loner-like 个体仍然可以特别在意 BondTarget；
-- Grief 会压低 Bully/Opportunist 等角色表达；
-- severe PTSD/Fear 高于全部职业逻辑；
-- Extreme Vengeance 与职业完全分离，Bully != True Avenger；
-- 第 3 项未来 Social Signal System 可以读取 Sentinel/Bully 等角色倾向，但本任务不提前实现完整信号系统；
-- 第 8 项 ThreatStyleMemory 和第 10 项 Corpse Ecology 仍需另行深入讨论，不允许 Task 02 擅自补完。
+代码迁移状态：
+- 角色运行时行为已经失效化：所有 role score 为 0，选择结果永久为 None，所有角色行为修正为中性值。
+- Sentinel/Opportunist 的 visible scan 与普通飞行 bias 已改为无操作，不再写 localGoal 或速度。
+- 旧的类型/方法名称目前只允许作为迁移兼容层存在，用于逐步拆除 AI Observatory、Injury、FlockSnapshot 等旧调用点；兼容层不得拥有游戏行为权。
+- 回归测试已改成“否决保护”：验证 10,000 个 Personality 均产生 0 个显性角色，并验证旧构造器/阈值不能重新激活角色。
+- Task_02_EmergentSocialRoles.txt 与 docs/DesertBatfly-Emergent-Social-Roles.md 只保留为否决记录，不再是可执行功能规范。
 
 当前结论：
-- 深度讨论已经完成。
-- 可执行任务书已建立：src/Creatures/DesertBatfly/Task_02_EmergentSocialRoles.txt。
-- 已实现并完成角色与 PTSD / Grief / SocialBond / AttackSlots / Vengeance / Roost / room transition 的代码复盘及托管测试；参数、结果和实机清单见 docs/DesertBatfly-Emergent-Social-Roles.md。
+- 第 2 项正式否决并从当前设计中移除。
+- 旧实现不得作为未来 Codex 的实现依据。
+- 若未来重新讨论类似个体行为差异，应建立新的、无 Role、无专属移动控制器的任务，而不是恢复 Task 02。
 
 
 3. Social Signal System / 群体信号系统
@@ -340,11 +340,11 @@ F. 性能
 
 后续深入讨论顺序
 ----------------
-1. 第 2 项已完成深度讨论并建立 Task_02_EmergentSocialRoles.txt。
+1. 第 2 项已正式否决并移除；Task_02 仅保留为否决记录，不再执行。
 2. 第 5A 已实现；第 5B 繁殖相关内容保留为【尚未进行额外深入讨论】。
 3. 第 8 项：Threat Style Memory（需要深度讨论）。
 4. 第 10 项：Corpse Ecology（需要深度讨论）。
 5. 再回看第 3 / 4 / 7 / 9 项之间的接口和任务书拆分。
 6. 后续单独回到第 5B：Courtship / MateBond / Gravid / Reproduction / Population integration。
 
-暂时否决的第 1、6 项保留在本文件中，不从设计历史中删除。
+暂时否决的第 1、6 项继续保留在本文件中；第 2 项作为【否决·已移除】的设计历史保留，不得从旧任务书恢复实现。

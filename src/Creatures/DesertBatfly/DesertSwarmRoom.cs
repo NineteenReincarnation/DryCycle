@@ -27,13 +27,19 @@ internal sealed class DesertSwarmRoom
 
     internal static bool IsDesertSwarmRoom(AbstractRoom room) => room?.roomTags?.Contains("DESERTSWARMROOM") == true;
     internal static DesertSwarmRoom For(Room room) => rooms.GetValue(room, value => new DesertSwarmRoom(value));
+
     // Debug/read-only callers must not create a colony merely by inspecting it.
     internal static bool TryGet(Room room, out DesertSwarmRoom colony)
     {
         colony = null;
         return room != null && rooms.TryGetValue(room, out colony);
     }
-    internal static void Reset() { rooms = new(); populations = new(); }
+
+    internal static void Reset()
+    {
+        rooms = new();
+        populations = new();
+    }
 
     internal static void UpdateRoom(Room room, bool eu)
     {
@@ -53,8 +59,12 @@ internal sealed class DesertSwarmRoom
                 int existing = 0;
                 foreach (var creature in room.abstractRoom.creatures)
                     if (creature.creatureTemplate.type == DesertBatflyDefinition.CreatureType) existing++;
+
                 int desired = DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation;
-                population.CurveRemaining = Mathf.Min(DesertBatflyTuning.CurvePopulation, Mathf.Max(0, desired - existing));
+                population.CurveRemaining = Mathf.Min(
+                    DesertBatflyTuning.CurvePopulation,
+                    Mathf.Max(0, desired - existing));
+
                 if (room.hives.Length > 0)
                     for (int i = existing; i < DesertBatflyTuning.HivePopulation; i++)
                     {
@@ -64,6 +74,7 @@ internal sealed class DesertSwarmRoom
                         Hive.inHive.Add((DesertBatfly)creature.realizedCreature);
                     }
             }
+
             if (population.CurveRemaining > 0 && --curveTimer <= 0)
             {
                 curveTimer = Random.Range(180, 420);
@@ -76,15 +87,19 @@ internal sealed class DesertSwarmRoom
                 }
             }
         }
+
         // Native hive emergence respects rain, grass nodes, predators and sounds.
         // Clean up consumed/dead entries rather than resurrecting them on exit.
         Hive.inHive.RemoveAll(fly => fly.slatedForDeletetion || fly.dead);
+
         // Hive occupants are removed from Room.Update by vanilla: recover them here once,
         // only while still inHive; entering a hive never grants an instant heal.
         foreach (Fly member in Hive.inHive)
             if (member is DesertBatfly resting && !resting.dead)
                 resting.Injury.Recover(0.0032f / 40f);
+
         Hive.Update(eu);
+
         if (--flockRefresh <= 0)
         {
             Flock = DesertBatflyFlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
@@ -93,48 +108,93 @@ internal sealed class DesertSwarmRoom
     }
 
     internal bool SafeWeather() => FlyAI.RoomNotACycleHazard(room) ||
-        (room.world.rainCycle.RainApproaching >= 0.3f && !room.world.rainCycle.RainGameOver && room.world.rainCycle.preTimer <= 0);
+        (room.world.rainCycle.RainApproaching >= 0.3f &&
+         !room.world.rainCycle.RainGameOver &&
+         room.world.rainCycle.preTimer <= 0);
 
     private AbstractCreature Create(WorldCoordinate coordinate)
     {
-        var creature = new AbstractCreature(room.world,
-            StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType), null, coordinate, room.game.GetNewID());
+        var creature = new AbstractCreature(
+            room.world,
+            StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType),
+            null,
+            coordinate,
+            room.game.GetNewID());
         room.abstractRoom.AddEntity(creature);
         return creature;
     }
 }
 
-// Value-only snapshot: does not retain dead, absent, or unrealized creature references.
+// Value-only room snapshot.  It is now a general flock/environment snapshot,
+// not a social-role budget.  It deliberately never reads DesertBatfly.Roles.
 internal readonly struct DesertBatflyFlockSnapshot
 {
     internal readonly Vector2 Center, AverageVelocity;
-    internal readonly int ActiveCount, ExpressedRoleCount;
+    internal readonly int ActiveCount;
     internal readonly float PanicRatio, PreviousPanicRatio, RoostRatio;
-    internal DesertBatflyFlockSnapshot(Vector2 center, Vector2 velocity, int active, int roles,
-        float panic, float previousPanic, float roost)
+
+    // Temporary source-compatibility surface for the existing AI Observatory.
+    // Social roles are rejected, so this value is permanently zero and Capture
+    // performs no role lookup.  Remove this member when the Observatory panel is
+    // migrated away from Task 02 terminology.
+    internal int ExpressedRoleCount => 0;
+
+    internal DesertBatflyFlockSnapshot(
+        Vector2 center,
+        Vector2 velocity,
+        int active,
+        int roles,
+        float panic,
+        float previousPanic,
+        float roost)
     {
-        Center = center; AverageVelocity = velocity; ActiveCount = active; ExpressedRoleCount = roles;
-        PanicRatio = panic; PreviousPanicRatio = previousPanic; RoostRatio = roost;
+        Center = center;
+        AverageVelocity = velocity;
+        ActiveCount = active;
+        PanicRatio = panic;
+        PreviousPanicRatio = previousPanic;
+        RoostRatio = roost;
     }
-    private static bool Finite(Vector2 v) => !float.IsNaN(v.x) && !float.IsNaN(v.y) &&
-        !float.IsInfinity(v.x) && !float.IsInfinity(v.y);
-    internal static DesertBatflyFlockSnapshot Capture(Room room, System.Collections.Generic.IEnumerable<Fly> flies, float previousPanic)
+
+    private static bool Finite(Vector2 value) =>
+        !float.IsNaN(value.x) && !float.IsNaN(value.y) &&
+        !float.IsInfinity(value.x) && !float.IsInfinity(value.y);
+
+    internal static DesertBatflyFlockSnapshot Capture(
+        Room room,
+        System.Collections.Generic.IEnumerable<Fly> flies,
+        float previousPanic)
     {
-        Vector2 center = Vector2.zero, velocity = Vector2.zero;
-        int count = 0, roles = 0, panic = 0, roost = 0;
+        Vector2 center = Vector2.zero;
+        Vector2 velocity = Vector2.zero;
+        int count = 0, panic = 0, roost = 0;
+
         foreach (Fly fly in flies)
         {
-            if (fly is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion || bat.room != room ||
-                bat.inShortcut || bat.DesertState.InHive || bat.mainBodyChunk == null ||
-                !Finite(bat.mainBodyChunk.pos) || !Finite(bat.mainBodyChunk.vel)) continue;
+            if (fly is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion ||
+                bat.room != room || bat.inShortcut || bat.DesertState.InHive ||
+                bat.mainBodyChunk == null || !Finite(bat.mainBodyChunk.pos) ||
+                !Finite(bat.mainBodyChunk.vel))
+                continue;
+
             count++;
             center += (bat.mainBodyChunk.pos - center) / count;
             velocity += (bat.mainBodyChunk.vel - velocity) / count;
-            if (bat.DesertAI.Roles.Expressed != ExpressedSocialRole.None) roles++;
-            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.BlocksSocialRoles(bat)) panic++;
-            if (bat.AI?.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost) roost++;
+
+            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.BlocksSocialRoles(bat))
+                panic++;
+            if (bat.AI?.behavior == FlyAI.Behavior.Chain ||
+                bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
+                roost++;
         }
-        return new DesertBatflyFlockSnapshot(center, velocity, count, roles,
-            count == 0 ? 0f : (float)panic / count, previousPanic, count == 0 ? 0f : (float)roost / count);
+
+        return new DesertBatflyFlockSnapshot(
+            center,
+            velocity,
+            count,
+            0,
+            count == 0 ? 0f : (float)panic / count,
+            previousPanic,
+            count == 0 ? 0f : (float)roost / count);
     }
 }
