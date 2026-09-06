@@ -24,7 +24,6 @@ internal sealed class DesertBatflyAI
     }
 
     private readonly DesertBatfly fly;
-    internal readonly DesertBatflySocialRoles Roles;
     internal bool HasImmediateDanger => danger != null || retreat > 0 || Mode == Activity.Escape;
     internal Activity Mode { get; private set; }
     internal Creature Target { get; private set; }
@@ -48,7 +47,6 @@ internal sealed class DesertBatflyAI
     internal DesertBatflyAI(DesertBatfly fly)
     {
         this.fly = fly;
-        Roles = new DesertBatflySocialRoles(fly);
     }
 
     internal void TickMemory()
@@ -94,7 +92,6 @@ internal sealed class DesertBatflyAI
     internal void ResetRoom()
     {
         fly.Injury.ClearTransient();
-        Roles.Reset();
         if (Mode == Activity.Roost) StopRoost(false);
         CancelAttack();
         attacker = danger = null;
@@ -136,7 +133,6 @@ internal sealed class DesertBatflyAI
             SetMode(Activity.Escape);
         }
 
-        Roles.CheckSuppression();
         RaiseLocalAlarm();
     }
 
@@ -160,7 +156,6 @@ internal sealed class DesertBatflyAI
             SetMode(Activity.Escape);
         }
 
-        Roles.CheckSuppression();
         RaiseLocalAlarm();
     }
 
@@ -260,7 +255,6 @@ internal sealed class DesertBatflyAI
 
             bat.DesertAI.escapeFrom = escapeFrom;
             bat.DesertAI.retreat = Mathf.Max(bat.DesertAI.retreat, 25);
-            bat.DesertAI.Roles.CheckSuppression();
         }
     }
 
@@ -284,7 +278,6 @@ internal sealed class DesertBatflyAI
     {
         if (Target != null || hasSlot) CancelAttack();
         retaliationCharges = retaliationRecovery = 0;
-        Roles?.CheckSuppression();
     }
 
     internal bool TryInjuryRecovery()
@@ -504,7 +497,6 @@ internal sealed class DesertBatflyAI
 
     internal void BeginGriefResponse()
     {
-        Roles.CheckSuppression();
         CancelAttack();
         attacker = null;
         memory = 0;
@@ -536,7 +528,6 @@ internal sealed class DesertBatflyAI
     internal void Update()
     {
         if (fly.room == null) return;
-        Roles.CheckSuppression();
         ticks++;
 
         if (fly.Emergence.Active || RestrainedByNonFly() ||
@@ -555,7 +546,6 @@ internal sealed class DesertBatflyAI
             scan = 0;
             ScanCreatures();
             ScanWeapons();
-            Roles.CheckSuppression();
         }
 
         bool recoveryBurrow = fly.AI.behavior == FlyAI.Behavior.Burrow &&
@@ -620,9 +610,6 @@ internal sealed class DesertBatflyAI
             UpdateRoost();
             return;
         }
-        var flock = DesertSwarmRoom.For(fly.room).Flock;
-        Roles.Evaluate(flock);
-        Roles.BiasOrdinaryFlight(flock);
 
         bool retaliationReady = fly.Personality.Aggressive &&
             retaliationCharges > 0 && retaliationRecovery <= 0;
@@ -683,8 +670,8 @@ internal sealed class DesertBatflyAI
         switch (Mode)
         {
             case Activity.Observe:
-                Steer(center + Orbit(Roles.ObserveRadius, 90f), 4.5f);
-                if (ticks > fly.Personality.ObserveDuration * Roles.ObserveDurationScale)
+                Steer(center + Orbit(150f, 90f), 4.5f);
+                if (ticks > fly.Personality.ObserveDuration)
                 {
                     bool counter = Target == attacker && memory > 0;
                     bool grudge = Target is Player targetPlayer &&
@@ -720,7 +707,7 @@ internal sealed class DesertBatflyAI
                                         fly.DesertState.GrabMemoryStrength > 0.12f;
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
 
-                    float fakeChance = Mathf.Clamp01(fly.Personality.FakeDiveChance + Roles.FakeDiveBonus);
+                    float fakeChance = Mathf.Clamp01(fly.Personality.FakeDiveChance);
                     if (grudge)
                         fakeChance *= Mathf.Lerp(
                             0.8f,
@@ -1054,7 +1041,6 @@ internal sealed class DesertBatflyAI
     private void ScanCreatures()
     {
         danger = null;
-        Roles.BeginVisibleScan();
         Creature candidate = null;
         Player rememberedCandidate = null;
         float closest = DesertBatflyTuning.SightRange;
@@ -1082,8 +1068,6 @@ internal sealed class DesertBatflyAI
                 (relation.type == CreatureTemplate.Relationship.Type.Afraid ||
                  reverse.type == CreatureTemplate.Relationship.Type.Eats ||
                  reverse.type == CreatureTemplate.Relationship.Type.Attacks);
-
-            Roles.ObserveVisible(creature, distance, predator);
 
             if (predator)
             {
@@ -1179,9 +1163,6 @@ internal sealed class DesertBatflyAI
             }
         }
 
-        Roles.EndVisibleScan(DesertSwarmRoom.For(fly.room).Flock);
-        if (danger != null) Roles.CheckSuppression();
-        if (Roles.WatchesInsteadOfInitiating && memory <= 0 && retaliationCharges == 0) return;
         if (Target != null || !fly.Personality.Aggressive || retreat > 0)
             return;
 
@@ -1204,7 +1185,7 @@ internal sealed class DesertBatflyAI
             ? Mathf.Lerp(1f, 0.72f, fly.Personality.Conformity)
             : 1f;
         bool motivated = fly.DesertState.Thirst >
-                          observeThreshold * socialMotivationScale * Roles.HarassThresholdScale ||
+                          observeThreshold * socialMotivationScale ||
                           memory > 0 || rememberedCandidate != null;
         if (!motivated) return;
 
