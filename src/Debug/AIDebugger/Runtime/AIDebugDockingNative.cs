@@ -14,6 +14,7 @@ internal static class AIDebugDockingNative
     // ImGui.NET ImGuiDockNodeFlags enum. cimgui 1.91.x defines it as 1 << 10.
     private const ImGuiDockNodeFlags DockSpaceNodeFlag = (ImGuiDockNodeFlags)(1 << 10);
     private const string DockingIniHeader = "[Docking][Data]";
+    private static bool runtimeLayoutAvailable;
 
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern uint igDockSpace(uint dockspace_id, Num.Vector2 size,
@@ -78,10 +79,16 @@ internal static class AIDebugDockingNative
         igDockBuilderDockWindow("Captures / Breakpoints###AICaptures", right);
         igDockBuilderDockWindow("Settings###AISettings", right);
         igDockBuilderFinish(dockspaceId);
+        runtimeLayoutAvailable = true;
     }
 
     internal static bool LoadLayout()
     {
+        // AIDebuggerWindowV3 historically calls LoadLayout again whenever no on-disk
+        // layout existed. Once BuildDefault has created a valid runtime tree, report it
+        // as available so the DockBuilder is not destructively rebuilt every frame.
+        if (runtimeLayoutAvailable) return true;
+
         string path = AIDebugSettings.LayoutPath;
         if (!File.Exists(path)) return false;
         byte[] data = File.ReadAllBytes(path);
@@ -97,6 +104,7 @@ internal static class AIDebugDockingNative
         {
             Marshal.FreeHGlobal(memory);
         }
+        runtimeLayoutAvailable = true;
         return true;
     }
 
@@ -116,12 +124,14 @@ internal static class AIDebugDockingNative
         // valid DockSpace layout with a compact-only ini that contains no docking tree.
         if (!ContainsDockingData(data)) return;
         File.WriteAllBytes(AIDebugSettings.LayoutPath, data);
+        runtimeLayoutAvailable = true;
     }
 
     internal static void DeleteLayout()
     {
         string path = AIDebugSettings.LayoutPath;
         if (File.Exists(path)) File.Delete(path);
+        runtimeLayoutAvailable = false;
     }
 
     private static bool ContainsDockingData(byte[] data)
