@@ -45,11 +45,29 @@ internal sealed class DesertBatflyInjury
         (WingMean > 0.1f && PhysicalCapability < 0.48f);
     internal bool BlocksCombat => IsSeverelyInjured || PostStunShock >= 0.55f;
     internal bool IsRecovering => RecoveryState != InjuryRecoveryState.None;
-    internal string CombatBlockReason => IsSeverelyInjured ? "severe wing injury / physical capability" :
-        PostStunShock >= 0.55f ? "post-stun shock >= 0.55" : "physical condition permits combat";
+    internal string CombatBlockReason
+    {
+        get
+        {
+            if (IsSeverelyInjured)
+                return $"IsSeverelyInjured=true; WingMean={WingMean:0.000}, MaxWing={Mathf.Max(State.LeftWingInjury, State.RightWingInjury):0.000}, PhysicalCapability={PhysicalCapability:0.000}";
+            if (PostStunShock >= 0.55f)
+                return $"PostStunShock={PostStunShock:0.000} >= 0.550";
+            return "BlocksCombat=false";
+        }
+    }
     internal bool BlocksRole(ExpressedSocialRole role) => BlocksCombat ||
         (role == ExpressedSocialRole.Bully && PhysicalCapability < 0.78f) ||
         (role == ExpressedSocialRole.Sentinel && PhysicalCapability < 0.66f);
+    internal string RoleBlockReason(ExpressedSocialRole role)
+    {
+        if (BlocksCombat) return CombatBlockReason;
+        if (role == ExpressedSocialRole.Bully && PhysicalCapability < 0.78f)
+            return $"PhysicalCapability={PhysicalCapability:0.000} < Bully 0.780";
+        if (role == ExpressedSocialRole.Sentinel && PhysicalCapability < 0.66f)
+            return $"PhysicalCapability={PhysicalCapability:0.000} < Sentinel 0.660";
+        return $"BlocksRole({role})=false";
+    }
     internal float WingAmplitude(int side) => 1f - 0.48f * (side == 0 ? State.LeftWingInjury : State.RightWingInjury);
     internal float BodyTilt => WingBias * 9f;
 
