@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Security;
@@ -77,6 +78,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         try
         {
             log?.LogInfo($"DryCycle RWImGUI API inventory (runtime): api={apiAssembly.GetName().Name} {apiAssembly.GetName().Version}, imgui={imguiAssembly.GetName().Name} {imguiAssembly.GetName().Version}.");
+            LogInstalledApiInventory(apiAssembly);
 
             // Verified integration shape from the RWImGUI public usage example:
             //   ImGUIAPI.AddMenuCallback(&MenuCallback)
@@ -92,6 +94,62 @@ public sealed class BridgePlugin : BaseUnityPlugin
         {
             ProbeMenu.Enabled = false;
             log?.LogError("DryCycle RWImGUI callback registration failed. DryCycle gameplay systems remain active. " + error);
+        }
+    }
+
+    private static void LogInstalledApiInventory(Assembly apiAssembly)
+    {
+        try
+        {
+            Type[] types;
+            try
+            {
+                types = apiAssembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException partial)
+            {
+                types = partial.Types.Where(t => t != null).ToArray();
+                string loaderErrors = string.Join(" | ", partial.LoaderExceptions
+                    .Where(e => e != null)
+                    .Select(e => e.GetType().Name + ": " + e.Message));
+                log?.LogWarning("DryCycle RWImGUI inventory loaded only part of the API assembly: " + loaderErrors);
+            }
+
+            List<string> pluginMetadata = new();
+            foreach (Type type in types)
+            {
+                foreach (CustomAttributeData attribute in CustomAttributeData.GetCustomAttributes(type))
+                {
+                    if (!string.Equals(attribute.AttributeType.FullName, "BepInEx.BepInPlugin", StringComparison.Ordinal))
+                        continue;
+                    string args = string.Join(", ", attribute.ConstructorArguments.Select(a => a.Value?.ToString() ?? "null"));
+                    pluginMetadata.Add(type.FullName + " => " + args);
+                }
+            }
+            if (pluginMetadata.Count > 0)
+                log?.LogInfo("DryCycle RWImGUI installed BepInPlugin metadata: " + string.Join(" || ", pluginMetadata));
+
+            Type[] apiCandidates = types
+                .Where(t => string.Equals(t.Name, "ImGUIAPI", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            foreach (Type type in apiCandidates)
+            {
+                string methods = string.Join(", ", type
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .Where(m => m.Name.IndexOf("Callback", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                m.Name.IndexOf("Context", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                m.Name.IndexOf("Font", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                m.Name.IndexOf("Texture", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                m.Name.IndexOf("Dock", StringComparison.OrdinalIgnoreCase) >= 0)
+                    .Select(m => m.Name + "(" + m.GetParameters().Length + ")")
+                    .Distinct());
+                log?.LogInfo($"DryCycle RWImGUI API type discovered: {type.FullName}; relevantMethods=[{methods}].");
+            }
+        }
+        catch (Exception error)
+        {
+            // Inventory failure is diagnostic only and must never stop callback registration.
+            log?.LogWarning("DryCycle RWImGUI runtime API inventory failed: " + error.Message);
         }
     }
 }
