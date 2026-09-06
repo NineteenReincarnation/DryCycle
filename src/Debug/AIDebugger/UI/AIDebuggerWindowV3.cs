@@ -134,6 +134,7 @@ internal sealed class AIDebuggerWindowV3
         CompactRaw(active, "DesertBatflySocialRoles.Expressed", AIDebugLocalization.T("field.expressed_role"));
         CompactRaw(active, "DesertBatflyAI.Target", AIDebugLocalization.T("field.target"));
         CompactRaw(active, "DesertBatflySocialRoles.Suppression", AIDebugLocalization.T("field.suppression"));
+        CompactRaw(active, "DesertBatflyInjury.PhysicalCapability", AIDebugLocalization.T("field.physical_capability"));
 
         if (events.Count > 0)
         {
@@ -400,6 +401,14 @@ internal sealed class AIDebuggerWindowV3
                     Row(AIDebugLocalization.T("field.position"), AIDebugFormat.Value(f.Position));
                     Row(AIDebugLocalization.T("field.velocity"), AIDebugFormat.Value(f.Velocity));
                     Row(AIDebugLocalization.T("field.local_goal"), AIDebugFormat.Value(f.LocalGoal));
+                    if (selected?.realizedCreature is DesertBatfly || selected?.creatureTemplate?.type == DesertBatflyDefinition.CreatureType)
+                    {
+                        Row(AIDebugLocalization.T("field.health"), f.Health.ToString("0.000"));
+                        Row(AIDebugLocalization.T("field.left_wing_injury"), f.LeftWing.ToString("0.000"));
+                        Row(AIDebugLocalization.T("field.right_wing_injury"), f.RightWing.ToString("0.000"));
+                        Row(AIDebugLocalization.T("field.post_stun_shock"), f.PostStun.ToString("0.000"));
+                        Row(AIDebugLocalization.T("field.physical_capability"), f.PhysicalCapability.ToString("0.000"));
+                    }
                     ImGui.EndTable();
                 }
             }
@@ -955,7 +964,7 @@ internal sealed class AIDebuggerWindowV3
     {
         if (!hasSelection || frames.Count < 3) return;
         string title = section.TitleKey;
-        if (title != "section.social_role" && title != "section.flock" && title != "section.movement") return;
+        if (title != "section.social_role" && title != "section.flock" && title != "section.movement" && title != "section.injury") return;
         if (title == "section.social_role")
         {
             MiniGraph("Sentinel", frame => frame.Utility0);
@@ -963,6 +972,14 @@ internal sealed class AIDebuggerWindowV3
             MiniGraph("Opportunist", frame => frame.Utility2);
         }
         else if (title == "section.flock") MiniGraph("Panic", frame => frame.Panic);
+        else if (title == "section.injury")
+        {
+            MiniGraph("Health", frame => frame.Health);
+            MiniGraph("Left Wing", frame => frame.LeftWing);
+            MiniGraph("Right Wing", frame => frame.RightWing);
+            MiniGraph("Post Stun", frame => frame.PostStun);
+            MiniGraph("Capability", frame => frame.PhysicalCapability);
+        }
         else MiniGraph("Speed", frame => frame.Velocity.magnitude);
     }
 
@@ -1137,6 +1154,7 @@ internal sealed class AIDebuggerWindowV3
             "Dive" or "Attach" or "RetaliationCharge" or "Interfere" => new Num.Vector4(0.92f, 0.48f, 0.20f, 0.88f),
             "Observe" or "Circle" or "FakeDive" => new Num.Vector4(0.86f, 0.72f, 0.26f, 0.88f),
             "Roost" => new Num.Vector4(0.62f, 0.48f, 0.84f, 0.88f),
+            "InjuryRecovery" => new Num.Vector4(0.62f, 0.42f, 0.72f, 0.92f),
             _ => new Num.Vector4(0.28f, 0.68f, 0.82f, 0.80f)
         };
         return ImGui.ColorConvertFloat4ToU32(color);
