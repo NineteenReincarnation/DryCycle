@@ -13,6 +13,7 @@ internal static class AIDebugStyleController
     internal static void InitializeContext()
     {
         ImGuiIOPtr io = ImGui.GetIO();
+        AIDebugImGuiIniIsolation.DisableAutomaticPersistence(io);
         io.ConfigFlags |= ImGuiConfigFlags.DockingEnable | ImGuiConfigFlags.NavEnableKeyboard;
     }
 
