@@ -1,0 +1,245 @@
+using System;
+using System.Collections.Generic;
+using DryCycle.Weather.Scheduling;
+using UnityEngine;
+
+namespace DryCycle.Creatures.DesertBatfly;
+
+internal readonly struct DesertBatflyRefugeTarget
+{
+    internal readonly int RoomIndex;
+    internal readonly int AbstractNode;
+    internal readonly float ShelterQuality;
+    internal readonly float Score;
+    internal readonly int EstimatedTravelTicks;
+    internal readonly DesertBatflyWorldRoute Route;
+
+    internal bool Valid => RoomIndex >= 0 && Route.Valid;
+
+    internal DesertBatflyRefugeTarget(int roomIndex, int abstractNode, float quality,
+        float score, int estimatedTravelTicks, DesertBatflyWorldRoute route)
+    {
+        RoomIndex = roomIndex;
+        AbstractNode = abstractNode;
+        ShelterQuality = Mathf.Clamp01(quality);
+        Score = score;
+        EstimatedTravelTicks = Mathf.Max(0, estimatedTravelTicks);
+        Route = route;
+    }
+}
+
+internal static class DesertBatflyRefuge
+{
+    private const float MinimumRefugeQuality = 0.62f;
+    private const float MinimumImprovement = 0.12f;
+    private const int SafetyMarginTicks = 600;
+
+    internal static float HomeHiveShelterQuality(
+        AbstractRoom room,
+        WeatherScheduleEventKind hazardKind,
+        string hazardId)
+    {
+        if (room == null) return 0f;
+        if (TryTagQuality(room, "DESERTHIVESHELTER=", out float tagged)) return tagged;
+        if (room.shelter) return 0.96f;
+
+        float baseQuality = room.batHives > 0 ? 0.68f : 0.42f;
+        if (room.realizedRoom != null && room.realizedRoom.hives != null && room.realizedRoom.hives.Length > 0)
+            baseQuality = Mathf.Max(baseQuality, RealizedHiveCoverage(room.realizedRoom));
+
+        float demand = DesertBatflyWeatherEcology.HazardShelterDemand(hazardKind, hazardId);
+        // Heat exposure cares strongly about roof; violent sand/rain also benefits from
+        // actual enclosed shelters. For low-demand weather the colony need not evacuate.
+        return Mathf.Clamp01(Mathf.Lerp(1f, baseQuality, demand));
+    }
+
+    internal static float RefugeShelterQuality(
+        AbstractRoom room,
+        WeatherScheduleEventKind hazardKind,
+        string hazardId)
+    {
+        if (room == null) return 0f;
+        if (TryTagQuality(room, "DESERTREFUGE=", out float tagged)) return tagged;
+        if (HasTag(room, "DESERTREFUGE")) return 0.90f;
+        if (room.shelter) return 0.96f;
+        if (room.batHives > 0)
+            return Mathf.Clamp01(HomeHiveShelterQuality(room, hazardKind, hazardId) - 0.03f);
+        return 0.20f;
+    }
+
+    internal static bool TryFindEmergencyRefuge(
+        World world,
+        AbstractRoom home,
+        CreatureTemplate template,
+        DesertBatflyWeatherEcologySample hazard,
+        float physicalCapability,
+        string knownRefuge,
+        Func<AbstractRoom, float> predatorRisk,
+        Func<AbstractRoom, float> crowding,
+        out DesertBatflyRefugeTarget target)
+    {
+        target = default;
+        if (world?.abstractRooms == null || home == null || template == null || !hazard.HasHazard)
+            return false;
+
+        float homeQuality = HomeHiveShelterQuality(home, hazard.HazardKind, hazard.HazardId);
+        if (homeQuality >= Mathf.Max(0.72f, hazard.ShelterUrgency + 0.05f)) return false;
+
+        float bestScore = float.NegativeInfinity;
+        for (int i = 0; i < world.abstractRooms.Length; i++)
+        {
+            AbstractRoom candidate = world.abstractRooms[i];
+            if (candidate == null || candidate.index == home.index) continue;
+
+            float quality = RefugeShelterQuality(candidate, hazard.HazardKind, hazard.HazardId);
+            if (quality < MinimumRefugeQuality || quality < homeQuality + MinimumImprovement) continue;
+
+            if (!DesertBatflyWorldRoutePlanner.TryPlan(
+                    world,
+                    home.index,
+                    candidate.index,
+                    template,
+                    DesertBatflyTravelPurpose.EmergencyRefuge,
+                    room => RouteRisk(world, room, hazard, predatorRisk),
+                    DesertBatflyWorldRoutePlanner.RefugeMaxHops,
+                    out DesertBatflyWorldRoute route))
+                continue;
+
+            int travelTicks = EstimateTravelTicks(route, physicalCapability);
+            if (!CanLeaveBeforeDanger(hazard, travelTicks)) continue;
+
+            float routeCost = DesertBatflyWorldRoutePlanner.NormalizedTravelCost(
+                route, DesertBatflyWorldRoutePlanner.RefugeMaxHops);
+            float pred = Mathf.Clamp01(predatorRisk?.Invoke(candidate) ?? 0f);
+            float crowd = Mathf.Clamp01(crowding?.Invoke(candidate) ?? 0f);
+            float familiarity = string.Equals(candidate.name, knownRefuge,
+                StringComparison.OrdinalIgnoreCase) ? 0.06f : 0f;
+            float score = quality * 0.58f - routeCost * 0.20f - pred * 0.12f - crowd * 0.10f + familiarity;
+            if (score <= bestScore) continue;
+
+            bestScore = score;
+            target = new DesertBatflyRefugeTarget(
+                candidate.index,
+                ChooseRefugeNode(candidate, template),
+                quality,
+                score,
+                travelTicks,
+                route);
+        }
+        return target.Valid;
+    }
+
+    internal static int EstimateTravelTicks(in DesertBatflyWorldRoute route, float physicalCapability)
+    {
+        if (!route.Valid) return int.MaxValue;
+        physicalCapability = Mathf.Clamp(physicalCapability, 0.25f, 1f);
+        float perHop = 760f + route.Cost * 95f;
+        float injuryScale = Mathf.Lerp(1.85f, 1f, physicalCapability);
+        long ticks = (long)Mathf.Ceil(perHop * Mathf.Max(1, route.HopCount) * injuryScale);
+        return ticks >= int.MaxValue ? int.MaxValue : (int)ticks;
+    }
+
+    internal static bool CanLeaveBeforeDanger(
+        in DesertBatflyWeatherEcologySample hazard,
+        int estimatedTravelTicks)
+    {
+        if (estimatedTravelTicks == int.MaxValue) return false;
+        if (hazard.LethalNow) return false;
+        if (!hazard.ForecastDanger)
+            return hazard.ImmediateDanger < 0.72f;
+        if (hazard.TimeUntilDangerTicks <= 0)
+            return hazard.ImmediateDanger < 0.58f;
+        long required = (long)estimatedTravelTicks + SafetyMarginTicks;
+        return required < hazard.TimeUntilDangerTicks;
+    }
+
+    internal static int ChooseRefugeNode(AbstractRoom room, CreatureTemplate template)
+    {
+        if (room?.nodes == null || room.nodes.Length == 0 || template == null) return -1;
+        int fallback = -1;
+        for (int i = 0; i < room.nodes.Length; i++)
+        {
+            int mapped = room.CommonToCreatureSpecificNodeIndex(i, template);
+            if (mapped < 0) continue;
+            if (fallback < 0) fallback = i;
+            AbstractRoomNode.Type type = room.nodes[i].type;
+            if (type == AbstractRoomNode.Type.BatHive || type == AbstractRoomNode.Type.Den)
+                return i;
+        }
+        return fallback;
+    }
+
+    private static float RouteRisk(World world, AbstractRoom room,
+        in DesertBatflyWeatherEcologySample hazard, Func<AbstractRoom, float> predatorRisk)
+    {
+        if (room == null) return 8f;
+        DesertBatflyWeatherEcologySample local = DesertBatflyWeatherEcology.Sample(world, room);
+        if (local.LethalNow) return 8f;
+        float weather = local.TravelExposure;
+        // During forecast travel, any room that will actually receive this hazard gets a
+        // conservative potential-exposure surcharge. This avoids a short route through
+        // a room known to become lethal before arrival without reading future cycles.
+        if (hazard.ForecastDanger &&
+            DryCycle.Weather.Spatial.WeatherSpatialRegistry.IsAllowed(
+                world.region?.name, room.name, hazard.HazardKind, hazard.HazardId))
+            weather = Mathf.Max(weather,
+                DesertBatflyWeatherEcology.HazardShelterDemand(hazard.HazardKind, hazard.HazardId) * 0.46f);
+        float pred = Mathf.Clamp01(predatorRisk?.Invoke(room) ?? 0f);
+        return Mathf.Clamp01(weather * 0.78f + pred * 0.22f);
+    }
+
+    private static float RealizedHiveCoverage(Room room)
+    {
+        int samples = 0, covered = 0;
+        for (int h = 0; h < room.hives.Length; h++)
+        {
+            IntVector2[] hive = room.hives[h];
+            if (hive == null) continue;
+            int stride = Mathf.Max(1, hive.Length / 12);
+            for (int i = 0; i < hive.Length; i += stride)
+            {
+                IntVector2 tile = hive[i];
+                samples++;
+                bool roof = false;
+                for (int y = 1; y <= 7 && tile.y + y < room.TileHeight; y++)
+                {
+                    if (!room.GetTile(new IntVector2(tile.x, tile.y + y)).Solid) continue;
+                    roof = true;
+                    break;
+                }
+                if (roof) covered++;
+            }
+        }
+        if (samples == 0) return 0.55f;
+        return Mathf.Lerp(0.50f, 0.92f, covered / (float)samples);
+    }
+
+    private static bool HasTag(AbstractRoom room, string exact)
+    {
+        if (room?.roomTags == null) return false;
+        for (int i = 0; i < room.roomTags.Count; i++)
+            if (string.Equals(room.roomTags[i]?.Trim(), exact, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    private static bool TryTagQuality(AbstractRoom room, string prefix, out float quality)
+    {
+        quality = 0f;
+        if (room?.roomTags == null) return false;
+        for (int i = 0; i < room.roomTags.Count; i++)
+        {
+            string tag = room.roomTags[i]?.Trim();
+            if (string.IsNullOrEmpty(tag) || !tag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            string raw = tag.Substring(prefix.Length);
+            if (float.TryParse(raw, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float value) &&
+                !float.IsNaN(value) && !float.IsInfinity(value))
+            {
+                quality = Mathf.Clamp01(value);
+                return true;
+            }
+        }
+        return false;
+    }
+}
