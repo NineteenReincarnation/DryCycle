@@ -41,7 +41,12 @@
   <Target Name="ReportMissingOptionalRWImGuiBridge"
           AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' == ''">
+    <ItemGroup>
+      <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
+      <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.pdb" />
+    </ItemGroup>
+    <Delete Files="@(StaleRWImGuiBridge)" />
     <Message Importance="high"
-             Text="DryCycle RWImGUI migration: RWImGUI not found; optional Observatory bridge was skipped. Install Workshop 3417372413 or pass -p:RWImGuiPluginDir=... to build it." />
+             Text="DryCycle RWImGUI migration: RWImGUI not found; optional Observatory bridge was skipped and stale bridge output was removed. Install Workshop 3417372413 or pass -p:RWImGuiPluginDir=... to build it." />
   </Target>
 </Project>
