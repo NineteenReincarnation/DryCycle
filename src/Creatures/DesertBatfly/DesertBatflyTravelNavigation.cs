@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.Weather.Scheduling;
 using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -14,6 +15,10 @@ internal readonly struct DesertBatflyTravelDebugState
     internal readonly int NextRoom;
     internal readonly int DepartureDelay;
     internal readonly bool WaitingAtRefuge;
+    internal readonly bool Suspended;
+    internal readonly string StatusReason;
+    internal readonly float RouteCost;
+    internal readonly float RouteSurvivability;
 
     internal DesertBatflyTravelDebugState(
         DesertBatflyTravelPurpose purpose,
@@ -23,7 +28,11 @@ internal readonly struct DesertBatflyTravelDebugState
         int[] routeRooms,
         int nextRoom,
         int departureDelay,
-        bool waitingAtRefuge)
+        bool waitingAtRefuge,
+        bool suspended,
+        string statusReason,
+        float routeCost,
+        float routeSurvivability)
     {
         Purpose = purpose;
         HomeColony = homeColony ?? string.Empty;
@@ -33,16 +42,24 @@ internal readonly struct DesertBatflyTravelDebugState
         NextRoom = nextRoom;
         DepartureDelay = Mathf.Max(0, departureDelay);
         WaitingAtRefuge = waitingAtRefuge;
+        Suspended = suspended;
+        StatusReason = statusReason ?? string.Empty;
+        RouteCost = routeCost;
+        RouteSurvivability = Mathf.Clamp01(routeSurvivability);
     }
 }
 
 /// <summary>
-/// High-level cross-room travel state for Task 09. This never replaces FlyAI's
-/// room-local locomotion: realized bats are pointed at the next room via LeaveRoom,
-/// while unrealized bats advance one abstract room at a time with AbstractCreature.Move.
+/// High-level cross-room travel state for Task 09. It owns destination/room route only.
+/// Realized room-local movement is still FlyAI.LeaveRoom/AImap/shortcut; no travel code
+/// writes body velocity or maintains a second tile pathfinder.
 /// </summary>
 internal static class DesertBatflyTravelNavigation
 {
+    private const int NativeExitTimeoutTicks = 1200;
+    private const int ReplanCooldownTicks = 160;
+    private const int RefugeGoalRefreshTicks = 80;
+
     private sealed class TravelIntent
     {
         internal readonly AbstractCreature Creature;
@@ -53,6 +70,15 @@ internal static class DesertBatflyTravelNavigation
         internal int RouteIndex;
         internal int DepartureDelay;
         internal bool WaitingAtRefuge;
+        internal bool Suspended;
+        internal string StatusReason;
+        internal int ReplanCooldown;
+        internal int SameRoomTravelTicks;
+        internal int LastObservedRoom = int.MinValue;
+        internal int LastObservedFrame = int.MinValue;
+        internal int RefugeGoalRefresh;
+        internal DesertBatflyWeatherEcologySample Hazard;
+        internal float RefugeScore;
 
         internal TravelIntent(
             AbstractCreature creature,
@@ -60,7 +86,9 @@ internal static class DesertBatflyTravelNavigation
             string homeColony,
             string destinationRoom,
             in DesertBatflyWorldRoute route,
-            int departureDelay)
+            int departureDelay,
+            in DesertBatflyWeatherEcologySample hazard,
+            float refugeScore = 0f)
         {
             Creature = creature;
             Purpose = purpose;
@@ -69,6 +97,9 @@ internal static class DesertBatflyTravelNavigation
             Route = CopyRoute(route);
             RouteIndex = 0;
             DepartureDelay = Mathf.Max(0, departureDelay);
+            Hazard = hazard;
+            RefugeScore = refugeScore;
+            StatusReason = departureDelay > 0 ? "scheduled / staggered departure" : "route committed";
         }
     }
 
@@ -126,7 +157,11 @@ internal static class DesertBatflyTravelNavigation
             routeRooms,
             next,
             intent.DepartureDelay,
-            intent.WaitingAtRefuge);
+            intent.WaitingAtRefuge,
+            intent.Suspended,
+            intent.StatusReason,
+            intent.Route.Valid ? intent.Route.Cost : float.PositiveInfinity,
+            intent.Route.Valid ? intent.Route.Survivability : 0f);
         return true;
     }
 
@@ -149,7 +184,8 @@ internal static class DesertBatflyTravelNavigation
             record?.CurrentColony,
             destinationRoom,
             route,
-            departureDelay);
+            departureDelay,
+            DesertBatflyWeatherEcologySample.None);
     }
 
     internal static void UpdateAbstractWorld(World world)
@@ -168,27 +204,35 @@ internal static class DesertBatflyTravelNavigation
                 continue;
             }
 
+            TickCooldownAbstract(intent);
             if (intent.DepartureDelay > 0)
             {
                 intent.DepartureDelay = Mathf.Max(0, intent.DepartureDelay - 120);
+                intent.StatusReason = "scheduled / staggered departure";
                 continue;
             }
-
-            if (creature.realizedCreature != null || creature.InDen)
-                continue;
 
             if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
                 continue;
 
+            if (creature.realizedCreature is DesertBatfly realized)
+            {
+                TryEmergeForTravel(realized, intent);
+                continue;
+            }
+
             int currentRoom = creature.pos.room;
+            TickRoomProgress(intent, currentRoom, 120);
             if (ReachedDestination(intent, currentRoom))
             {
                 HandleArrival(world, intent);
                 continue;
             }
 
-            if (!TrySynchronizeRouteIndex(intent, currentRoom) &&
-                !TryReplan(world, intent, currentRoom))
+            float capability = creature.state is DesertBatflyState state
+                ? PhysicalCapability(state)
+                : 1f;
+            if (!EnsureRouteSafety(world, intent, currentRoom, capability))
                 continue;
 
             if (intent.RouteIndex + 1 >= intent.Route.Rooms.Length)
@@ -200,15 +244,27 @@ internal static class DesertBatflyTravelNavigation
             int nextRoomIndex = intent.Route.Rooms[intent.RouteIndex + 1];
             AbstractRoom nextRoom = world.GetAbstractRoom(nextRoomIndex);
             AbstractRoom current = world.GetAbstractRoom(currentRoom);
-            if (nextRoom == null || current == null) continue;
+            if (nextRoom == null || current == null)
+            {
+                Suspend(intent, "route blocked: next room missing");
+                continue;
+            }
 
             int arrivalNode = world.NodeInALeadingToB(nextRoom, current).abstractNode;
             if (arrivalNode < 0)
                 arrivalNode = nextRoom.RandomRelevantNode(creature.creatureTemplate);
-            if (arrivalNode < 0) continue;
+            if (arrivalNode < 0)
+            {
+                Suspend(intent, "route blocked: no relevant arrival node");
+                continue;
+            }
 
             creature.Move(new WorldCoordinate(nextRoomIndex, -1, -1, arrivalNode));
             intent.RouteIndex++;
+            intent.Suspended = false;
+            intent.StatusReason = "abstract transit -> " + nextRoom.name;
+            intent.SameRoomTravelTicks = 0;
+            intent.LastObservedRoom = creature.pos.room;
 
             if (ReachedDestination(intent, creature.pos.room))
                 HandleArrival(world, intent);
@@ -216,9 +272,9 @@ internal static class DesertBatflyTravelNavigation
     }
 
     /// <summary>
-    /// Called from the realized FlyAI hook. Returns true only when travel currently
-    /// owns the cross-room destination. Immediate danger/injury may suspend travel
-    /// without deleting the route.
+    /// Returns true whenever Task 09 owns the current high-level travel behavior.
+    /// Immediate danger/injury return false so existing survival AI can run while the
+    /// TravelIntent remains intact for later resumption.
     /// </summary>
     internal static bool TryDriveRealized(DesertBatfly bat)
     {
@@ -229,41 +285,62 @@ internal static class DesertBatflyTravelNavigation
         if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out TravelIntent intent))
             return false;
 
+        TickCooldownRealized(intent);
         if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
-            return false;
+            return HoldAtRefuge(bat, intent);
 
         if (intent.DepartureDelay > 0)
         {
             intent.DepartureDelay--;
-            return false;
+            intent.StatusReason = "scheduled / staggered departure";
+            return true;
         }
 
-        if (bat.DesertAI.HasImmediateDanger || bat.Injury.IsSeverelyInjured ||
-            bat.Injury.IsRecovering || RestrainedByNonFly(bat))
+        if (RestrainedByNonFly(bat))
+        {
+            Suspend(intent, "suspended: restrained by non-Fly");
             return false;
+        }
+        if (bat.DesertAI.HasImmediateDanger)
+        {
+            Suspend(intent, "suspended: immediate threat / escape");
+            return false;
+        }
+        if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering)
+        {
+            Suspend(intent, "suspended: severe injury / recovery");
+            return false;
+        }
 
         World world = bat.abstractCreature.world;
         int currentRoom = bat.room.abstractRoom.index;
+        TickRoomProgressRealized(intent, currentRoom);
         if (ReachedDestination(intent, currentRoom))
         {
             HandleArrival(world, intent);
-            return false;
+            return intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge;
         }
 
-        if (!TrySynchronizeRouteIndex(intent, currentRoom) &&
-            !TryReplan(world, intent, currentRoom))
+        if (!EnsureRouteSafety(world, intent, currentRoom, bat.Injury.PhysicalCapability))
             return false;
 
         if (intent.RouteIndex + 1 >= intent.Route.Rooms.Length)
             return false;
 
         int nextRoom = intent.Route.Rooms[intent.RouteIndex + 1];
-        if (world.GetAbstractRoom(nextRoom) == null) return false;
+        AbstractRoom next = world.GetAbstractRoom(nextRoom);
+        if (next == null)
+        {
+            Suspend(intent, "route blocked: next room missing");
+            return false;
+        }
 
         bat.AI.LeaveRoom(new WorldCoordinate(nextRoom, -1, -1, -1));
         bat.AI.afraid = Mathf.Max(
             bat.AI.afraid,
             intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge ? 1.65f : 0.75f);
+        intent.Suspended = false;
+        intent.StatusReason = "traveling via native FlyAI.LeaveRoom -> " + next.name;
         return true;
     }
 
@@ -312,6 +389,8 @@ internal static class DesertBatflyTravelNavigation
                 continue;
             }
 
+            // Existing emergency intents dynamically validate their next room and refuge;
+            // the colony-level key prevents rescheduling the entire group every 120 ticks.
             if (activeEvacuations.Contains(evacuationKey)) continue;
 
             if (!DesertBatflyRefuge.TryFindEmergencyRefuge(
@@ -323,11 +402,11 @@ internal static class DesertBatflyTravelNavigation
                     colony.LastSuccessfulRefuge,
                     DesertBatflyColonyRuntime.PredatorRisk,
                     DesertBatflyColonyRuntime.RefugeCrowding,
-                    out DesertBatflyRefugeTarget refuge))
+                    out DesertBatflyRefugeTarget sharedRefuge))
                 continue;
 
-            AbstractRoom refugeRoom = world.GetAbstractRoom(refuge.RoomIndex);
-            if (refugeRoom == null) continue;
+            AbstractRoom sharedRefugeRoom = world.GetAbstractRoom(sharedRefuge.RoomIndex);
+            if (sharedRefugeRoom == null) continue;
 
             int started = 0;
             for (int r = 0; r < world.abstractRooms.Length; r++)
@@ -358,23 +437,41 @@ internal static class DesertBatflyTravelNavigation
                     bool severe = state.WingMean >= 0.60f ||
                                   Mathf.Max(state.LeftWingInjury, state.RightWingInjury) >= 0.82f ||
                                   capability < 0.48f;
-                    if (severe)
-                        continue;
+                    if (severe) continue;
+
+                    DesertBatflyRefugeTarget personalRefuge = sharedRefuge;
+                    if (creature.pos.room != home.index)
+                    {
+                        AbstractRoom actual = world.GetAbstractRoom(creature.pos.room);
+                        if (actual == null ||
+                            !DesertBatflyRefuge.TryFindEmergencyRefugeFrom(
+                                world, actual, home, template, hazard, capability,
+                                colony.LastSuccessfulRefuge,
+                                DesertBatflyColonyRuntime.PredatorRisk,
+                                DesertBatflyColonyRuntime.RefugeCrowding,
+                                -1, true, out personalRefuge))
+                            continue;
+                    }
 
                     int personalTravelTicks = DesertBatflyRefuge.EstimateTravelTicks(
-                        refuge.Route, capability);
-                    if (!DesertBatflyRefuge.CanLeaveBeforeDanger(hazard, personalTravelTicks))
+                        personalRefuge.Route, capability);
+                    if (creature.pos.room == home.index &&
+                        !DesertBatflyRefuge.CanLeaveBeforeDanger(hazard, personalTravelTicks))
                         continue;
 
                     int staggerSeed = BondDepartureSeed(creature.ID, state);
-                    int stagger = 20 + StableInt(staggerSeed ^ refuge.RoomIndex, 0, 220);
+                    int stagger = 20 + StableInt(staggerSeed ^ personalRefuge.RoomIndex, 0, 220);
+                    AbstractRoom refugeRoom = world.GetAbstractRoom(personalRefuge.RoomIndex);
+                    if (refugeRoom == null) continue;
                     intents[Key(creature.ID)] = new TravelIntent(
                         creature,
                         DesertBatflyTravelPurpose.EmergencyRefuge,
                         colony.RoomName,
                         refugeRoom.name,
-                        refuge.Route,
-                        stagger);
+                        personalRefuge.Route,
+                        stagger,
+                        hazard,
+                        personalRefuge.Score);
                     started++;
                 }
             }
@@ -385,7 +482,7 @@ internal static class DesertBatflyTravelNavigation
                 float failure = Mathf.Clamp01(
                     hazard.ShelterUrgency * (1f - homeQuality));
                 DesertBatflyColonyRuntime.ReportExternalRefuge(
-                    colony.RoomName, refugeRoom.name, failure);
+                    colony.RoomName, sharedRefugeRoom.name, failure);
             }
         }
     }
@@ -398,7 +495,6 @@ internal static class DesertBatflyTravelNavigation
         AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, homeColony);
         if (home == null) return;
 
-        // First convert live emergency intents into ordinary ReturnHome travel.
         List<string> keys = new(intents.Keys);
         for (int i = 0; i < keys.Count; i++)
         {
@@ -421,19 +517,16 @@ internal static class DesertBatflyTravelNavigation
             }
 
             if (!TryBuildReturnRoute(world, creature, home, template, out DesertBatflyWorldRoute route))
+            {
+                Suspend(intent, "return blocked: no safe route home");
                 continue;
+            }
 
-            intent.Purpose = DesertBatflyTravelPurpose.ReturnHome;
-            intent.DestinationRoom = home.name;
-            intent.Route = CopyRoute(route);
-            intent.RouteIndex = 0;
-            intent.DepartureDelay = 20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180);
-            intent.WaitingAtRefuge = false;
+            ConvertToReturnHome(intent, home, route);
         }
 
-        // A save/reload intentionally does not serialize temporary refuge intents. If an
-        // owned bat is physically outside its Home Colony after the hazard has ended,
-        // reconstruct ReturnHome from the actual current room rather than teleporting it.
+        // Temporary refuge intents are intentionally not serialized. Reconstruct a
+        // ReturnHome intent after reload from physical location + persistent ownership.
         for (int r = 0; r < world.abstractRooms.Length; r++)
         {
             AbstractRoom room = world.abstractRooms[r];
@@ -449,12 +542,10 @@ internal static class DesertBatflyTravelNavigation
                     !string.IsNullOrEmpty(record.PendingMigrationColony))
                     continue;
 
-                if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing))
-                {
-                    if (existing.Purpose is DesertBatflyTravelPurpose.ColonyMigration or
+                if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
+                    existing.Purpose is DesertBatflyTravelPurpose.ColonyMigration or
                         DesertBatflyTravelPurpose.ReturnHome)
-                        continue;
-                }
+                    continue;
 
                 if (!TryBuildReturnRoute(world, creature, home, template, out DesertBatflyWorldRoute route))
                     continue;
@@ -465,7 +556,8 @@ internal static class DesertBatflyTravelNavigation
                     homeColony,
                     home.name,
                     route,
-                    20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180));
+                    20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180),
+                    DesertBatflyWeatherEcologySample.None);
             }
         }
     }
@@ -529,8 +621,8 @@ internal static class DesertBatflyTravelNavigation
                         destination.index,
                         template,
                         DesertBatflyTravelPurpose.ColonyMigration,
-                        roomRisk: roomCandidate => CurrentRouteRisk(world, roomCandidate),
-                        maxHops: DesertBatflyWorldRoutePlanner.MigrationMaxHops,
+                        roomCandidate => CurrentRouteRisk(world, roomCandidate),
+                        DesertBatflyWorldRoutePlanner.MigrationMaxHops,
                         out DesertBatflyWorldRoute route))
                     continue;
 
@@ -540,9 +632,169 @@ internal static class DesertBatflyTravelNavigation
                     record.CurrentColony,
                     destination.name,
                     route,
-                    StableInt(creature.ID.RandomSeed ^ 0x6A09E667, 0, 180));
+                    StableInt(creature.ID.RandomSeed ^ 0x6A09E667, 0, 180),
+                    DesertBatflyWeatherEcologySample.None);
             }
         }
+    }
+
+    private static bool EnsureRouteSafety(
+        World world,
+        TravelIntent intent,
+        int currentRoom,
+        float physicalCapability)
+    {
+        if (world == null || intent == null || currentRoom < 0) return false;
+        if (!TrySynchronizeRouteIndex(intent, currentRoom) &&
+            !TryReplan(world, intent, currentRoom, "route desynchronized from physical room"))
+        {
+            Suspend(intent, "route blocked: unable to synchronize/replan");
+            return false;
+        }
+
+        if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge)
+        {
+            AbstractRoom refuge = DesertBatflyColonyRuntime.FindRoom(world, intent.DestinationRoom);
+            if (refuge == null || !DesertBatflyRefuge.RefugeStillSuitable(
+                    world, refuge, intent.Hazard.HazardKind, intent.Hazard.HazardId))
+            {
+                if (!TrySwitchEmergencyRefuge(world, intent, currentRoom, physicalCapability,
+                        "committed refuge became unsafe"))
+                {
+                    Suspend(intent, "refuge invalid and no safer alternative reachable");
+                    return false;
+                }
+            }
+        }
+
+        if (!intent.Route.Valid || intent.RouteIndex + 1 >= intent.Route.Rooms.Length)
+            return intent.Route.Valid;
+
+        AbstractRoom next = world.GetAbstractRoom(intent.Route.Rooms[intent.RouteIndex + 1]);
+        float risk = RouteRiskForIntent(world, intent, next);
+        if (!DesertBatflyWorldRoutePlanner.NeedsSafetyReplan(intent.Purpose, risk))
+        {
+            intent.Suspended = false;
+            if (intent.SameRoomTravelTicks < NativeExitTimeoutTicks)
+                return true;
+        }
+
+        string reason = intent.SameRoomTravelTicks >= NativeExitTimeoutTicks
+            ? "native FlyAI exit progress timeout"
+            : "next room became materially unsafe";
+        if (intent.ReplanCooldown <= 0 && TryReplan(world, intent, currentRoom, reason))
+        {
+            if (intent.RouteIndex + 1 >= intent.Route.Rooms.Length) return true;
+            AbstractRoom replannedNext = world.GetAbstractRoom(intent.Route.Rooms[intent.RouteIndex + 1]);
+            float replannedRisk = RouteRiskForIntent(world, intent, replannedNext);
+            if (!DesertBatflyWorldRoutePlanner.NeedsSafetyReplan(intent.Purpose, replannedRisk))
+                return true;
+        }
+
+        if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge &&
+            TrySwitchEmergencyRefuge(world, intent, currentRoom, physicalCapability, reason))
+            return true;
+
+        Suspend(intent, "suspended: " + reason + "; no safe replan");
+        return false;
+    }
+
+    private static bool TrySwitchEmergencyRefuge(
+        World world,
+        TravelIntent intent,
+        int currentRoom,
+        float physicalCapability,
+        string reason)
+    {
+        if (world == null || intent == null ||
+            intent.Purpose != DesertBatflyTravelPurpose.EmergencyRefuge)
+            return false;
+
+        AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, intent.HomeColony);
+        AbstractRoom current = world.GetAbstractRoom(currentRoom);
+        if (home == null || current == null) return false;
+
+        DesertBatflyWeatherEcologySample currentHazard =
+            DesertBatflyWeatherEcology.Sample(world, home);
+        float homeQuality = currentHazard.HasHazard
+            ? DesertBatflyRefuge.HomeHiveShelterQuality(
+                home, currentHazard.HazardKind, currentHazard.HazardId)
+            : 1f;
+
+        if (!currentHazard.HasHazard || currentHazard.ShelterUrgency < 0.50f ||
+            homeQuality >= Mathf.Max(0.72f, currentHazard.ShelterUrgency + 0.05f))
+        {
+            CreatureTemplate template = intent.Creature.creatureTemplate;
+            if (TryBuildReturnRoute(world, intent.Creature, home, template, out DesertBatflyWorldRoute homeRoute))
+            {
+                ConvertToReturnHome(intent, home, homeRoute);
+                intent.StatusReason = "hazard changed; returning home instead of switching refuge";
+                return true;
+            }
+        }
+
+        DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(intent.HomeColony);
+        AbstractRoom oldDestination = DesertBatflyColonyRuntime.FindRoom(world, intent.DestinationRoom);
+        if (!DesertBatflyRefuge.TryFindEmergencyRefugeFrom(
+                world,
+                current,
+                home,
+                intent.Creature.creatureTemplate,
+                currentHazard.HasHazard ? currentHazard : intent.Hazard,
+                physicalCapability,
+                colony?.LastSuccessfulRefuge,
+                DesertBatflyColonyRuntime.PredatorRisk,
+                DesertBatflyColonyRuntime.RefugeCrowding,
+                oldDestination?.index ?? -1,
+                true,
+                out DesertBatflyRefugeTarget replacement))
+            return false;
+
+        AbstractRoom replacementRoom = world.GetAbstractRoom(replacement.RoomIndex);
+        if (replacementRoom == null) return false;
+        intent.DestinationRoom = Normalize(replacementRoom.name);
+        intent.Route = CopyRoute(replacement.Route);
+        intent.RouteIndex = 0;
+        intent.Hazard = currentHazard.HasHazard ? currentHazard : intent.Hazard;
+        intent.RefugeScore = replacement.Score;
+        intent.WaitingAtRefuge = false;
+        intent.Suspended = false;
+        intent.ReplanCooldown = ReplanCooldownTicks;
+        intent.SameRoomTravelTicks = 0;
+        intent.LastObservedRoom = currentRoom;
+        intent.StatusReason = "replanned refuge: " + reason + " -> " + replacementRoom.name;
+        return true;
+    }
+
+    private static bool TryReplan(World world, TravelIntent intent, int currentRoom, string reason)
+    {
+        if (world == null || intent == null || currentRoom < 0) return false;
+        AbstractRoom destination = DesertBatflyColonyRuntime.FindRoom(
+            world, intent.DestinationRoom);
+        if (destination == null) return false;
+
+        int maxHops = intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge
+            ? DesertBatflyWorldRoutePlanner.RefugeMaxHops
+            : DesertBatflyWorldRoutePlanner.MigrationMaxHops;
+        if (!DesertBatflyWorldRoutePlanner.TryPlan(
+                world,
+                currentRoom,
+                destination.index,
+                intent.Creature.creatureTemplate,
+                intent.Purpose,
+                room => RouteRiskForIntent(world, intent, room),
+                maxHops,
+                out DesertBatflyWorldRoute route))
+            return false;
+
+        intent.Route = CopyRoute(route);
+        intent.RouteIndex = 0;
+        intent.ReplanCooldown = ReplanCooldownTicks;
+        intent.SameRoomTravelTicks = 0;
+        intent.LastObservedRoom = currentRoom;
+        intent.Suspended = false;
+        intent.StatusReason = "replanned: " + reason;
+        return true;
     }
 
     private static void HandleArrival(World world, TravelIntent intent)
@@ -566,6 +818,9 @@ internal static class DesertBatflyTravelNavigation
 
             case DesertBatflyTravelPurpose.EmergencyRefuge:
                 intent.WaitingAtRefuge = true;
+                intent.Suspended = false;
+                intent.SameRoomTravelTicks = 0;
+                intent.StatusReason = "arrived; holding emergency refuge";
                 break;
 
             default:
@@ -574,30 +829,73 @@ internal static class DesertBatflyTravelNavigation
         }
     }
 
-    private static bool TryReplan(World world, TravelIntent intent, int currentRoom)
+    private static bool HoldAtRefuge(DesertBatfly bat, TravelIntent intent)
     {
-        if (world == null || intent == null || currentRoom < 0) return false;
-        AbstractRoom destination = DesertBatflyColonyRuntime.FindRoom(
-            world, intent.DestinationRoom);
-        if (destination == null) return false;
+        if (bat?.room == null || intent == null) return false;
+        intent.Suspended = false;
+        intent.StatusReason = "holding emergency refuge";
+        bat.AI.afraid = Mathf.Max(bat.AI.afraid, 1.25f);
 
-        int maxHops = intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge
-            ? DesertBatflyWorldRoutePlanner.RefugeMaxHops
-            : DesertBatflyWorldRoutePlanner.MigrationMaxHops;
-        if (!DesertBatflyWorldRoutePlanner.TryPlan(
-                world,
-                currentRoom,
-                destination.index,
-                intent.Creature.creatureTemplate,
-                intent.Purpose,
-                room => CurrentRouteRisk(world, room),
-                maxHops,
-                out DesertBatflyWorldRoute route))
-            return false;
+        // Geometry-only refuges do not have a dedicated vanilla abstract node. Nudge the
+        // existing FlyAI localGoal at a low cadence toward the cached sheltered tile;
+        // velocity remains entirely vanilla and this is never a per-frame locomotion loop.
+        if (intent.RefugeGoalRefresh > 0) intent.RefugeGoalRefresh--;
+        if (intent.RefugeGoalRefresh <= 0 &&
+            DesertBatflyRefuge.TryGetKnownShelterPoint(bat.room, out Vector2 shelterPoint))
+        {
+            intent.RefugeGoalRefresh = RefugeGoalRefreshTicks;
+            if (Vector2.Distance(bat.mainBodyChunk.pos, shelterPoint) > 55f &&
+                Vector2.Distance(bat.AI.localGoal, shelterPoint) > 45f)
+                bat.AI.localGoal = shelterPoint;
+        }
+        return true;
+    }
 
+    private static void TryEmergeForTravel(DesertBatfly bat, TravelIntent intent)
+    {
+        if (bat?.room == null || intent == null || !bat.DesertState.InHive) return;
+        try
+        {
+            DesertSwarmRoom colony = DesertSwarmRoom.For(bat.room);
+            if (colony.Hive.inHive.Contains(bat))
+            {
+                colony.Hive.FlyEmergeFromHive(bat);
+                intent.StatusReason = "leaving hive for committed travel";
+            }
+        }
+        catch
+        {
+            // Compatibility mods can replace hive internals. Failing to emerge here must
+            // not corrupt the persistent TravelIntent; a later realized update retries.
+            intent.StatusReason = "waiting for compatible hive emergence";
+        }
+    }
+
+    private static void ConvertToReturnHome(
+        TravelIntent intent,
+        AbstractRoom home,
+        in DesertBatflyWorldRoute route)
+    {
+        intent.Purpose = DesertBatflyTravelPurpose.ReturnHome;
+        intent.DestinationRoom = Normalize(home.name);
         intent.Route = CopyRoute(route);
         intent.RouteIndex = 0;
-        return true;
+        intent.DepartureDelay = 20 + StableInt(intent.Creature.ID.RandomSeed ^ 0x4D31, 0, 180);
+        intent.WaitingAtRefuge = false;
+        intent.Suspended = false;
+        intent.ReplanCooldown = 0;
+        intent.SameRoomTravelTicks = 0;
+        intent.Hazard = DesertBatflyWeatherEcologySample.None;
+        intent.StatusReason = "weather safe; staggered return home";
+    }
+
+    private static float RouteRiskForIntent(World world, TravelIntent intent, AbstractRoom room)
+    {
+        if (intent != null && intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge &&
+            intent.Hazard.HasHazard)
+            return DesertBatflyRefuge.RouteRisk(
+                world, room, intent.Hazard, DesertBatflyColonyRuntime.PredatorRisk);
+        return CurrentRouteRisk(world, room);
     }
 
     private static float CurrentRouteRisk(World world, AbstractRoom room)
@@ -608,6 +906,38 @@ internal static class DesertBatflyTravelNavigation
         if (weather.LethalNow) return 8f;
         float predator = DesertBatflyColonyRuntime.PredatorRisk(room);
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + predator * 0.22f);
+    }
+
+    private static void TickRoomProgress(TravelIntent intent, int roomIndex, int ticks)
+    {
+        if (intent == null) return;
+        if (intent.LastObservedRoom != roomIndex)
+        {
+            intent.LastObservedRoom = roomIndex;
+            intent.SameRoomTravelTicks = 0;
+            return;
+        }
+        intent.SameRoomTravelTicks = Mathf.Min(NativeExitTimeoutTicks + 120, intent.SameRoomTravelTicks + ticks);
+    }
+
+    private static void TickRoomProgressRealized(TravelIntent intent, int roomIndex)
+    {
+        if (intent == null) return;
+        int frame = Time.frameCount;
+        if (intent.LastObservedFrame == frame) return;
+        intent.LastObservedFrame = frame;
+        TickRoomProgress(intent, roomIndex, 1);
+    }
+
+    private static void TickCooldownAbstract(TravelIntent intent)
+    {
+        if (intent?.ReplanCooldown > 0)
+            intent.ReplanCooldown = Mathf.Max(0, intent.ReplanCooldown - 120);
+    }
+
+    private static void TickCooldownRealized(TravelIntent intent)
+    {
+        if (intent?.ReplanCooldown > 0) intent.ReplanCooldown--;
     }
 
     private static bool TrySynchronizeRouteIndex(TravelIntent intent, int currentRoom)
@@ -678,6 +1008,13 @@ internal static class DesertBatflyTravelNavigation
             int hi = Mathf.Max(a, b);
             return lo * 486187739 ^ hi * 16777619;
         }
+    }
+
+    private static void Suspend(TravelIntent intent, string reason)
+    {
+        if (intent == null) return;
+        intent.Suspended = true;
+        intent.StatusReason = reason ?? "suspended";
     }
 
     private static bool ValidCreature(AbstractCreature creature) =>
