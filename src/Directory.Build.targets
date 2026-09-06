@@ -5,14 +5,14 @@
        longer instantiates the custom renderer. Keeping the files in-repo preserves them as
        migration reference without retaining an ImGui.NET assembly dependency in DryCycle. -->
   <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
-    <Compile Remove="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/**/*.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/Runtime/AIDebugDockingNative.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/Runtime/AIDebugImGuiBackend.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/Runtime/AIDebugImGuiIniIsolation.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/Runtime/AIDebugStyleController.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/UI/AIDebugAdvancedOverlay.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/UI/AIDebugWorldOverlay.cs" />
-    <Compile Remove="$(MSBuildProjectDirectory)/Debug/AIDebugger/UI/AIDebuggerWindowV3.cs" />
+    <Compile Remove="DryCycle.AIObservatory.RWImGui/**/*.cs" />
+    <Compile Remove="Debug/AIDebugger/Runtime/AIDebugDockingNative.cs" />
+    <Compile Remove="Debug/AIDebugger/Runtime/AIDebugImGuiBackend.cs" />
+    <Compile Remove="Debug/AIDebugger/Runtime/AIDebugImGuiIniIsolation.cs" />
+    <Compile Remove="Debug/AIDebugger/Runtime/AIDebugStyleController.cs" />
+    <Compile Remove="Debug/AIDebugger/UI/AIDebugAdvancedOverlay.cs" />
+    <Compile Remove="Debug/AIDebugger/UI/AIDebugWorldOverlay.cs" />
+    <Compile Remove="Debug/AIDebugger/UI/AIDebuggerWindowV3.cs" />
   </ItemGroup>
 
   <!-- Late-imported properties can safely use RainWorldDir from DryCycle.csproj. -->
