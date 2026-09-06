@@ -9,6 +9,7 @@ Desert Batfly 复杂机制讨论状态
 - 【采纳】= 用户已经同意该方向，可以进入后续设计与任务书。
 - 【采纳·待深入讨论】= 方向已经同意，但具体规则、参数、边界和实现方式还没有敲定，禁止直接按当前草案写最终实现。
 - 【采纳·部分已敲定】= 该大方向中已有一部分可以进入任务书，但仍有明确子项尚未进行额外深入讨论；Codex 只能实现已敲定部分。
+- 【采纳·代码已实现，待实机验收】= 设计与代码侧实现已完成，自动/静态回归已建立，但 Rain World 实机场景仍需开发者实际运行验收与调参，禁止写成“已实机通过”。
 - 【尚未进行额外深入讨论】= 已经列入正式讨论清单，但当前没有足够细节可直接实现，禁止 Codex 自行补完设计。
 - 【暂时否决】= 当前阶段暂不加入，不代表永久删除。后续讨论可以重新启用。
 - 【否决·已移除】= 已经过实现/实机观察后明确否决，并从当前运行时设计中移除；不得根据旧任务书自行恢复，只有用户重新明确提出并完成新讨论后才可重新设计。
@@ -342,13 +343,80 @@ F. 性能
 - 必须深度讨论后再写最终任务书。
 
 
+11. Neutral Social Life + Micro-Flock Interaction / 中性社会生活 + 微群体互动
+状态：【采纳·代码已实现，待实机验收】
+
+正式任务书：
+- Task_10_NeutralSocialLife_MicroFlockInteraction.txt
+
+问题来源：
+- 大量 Desert Batfly 在没有危险、攻击、迁徙、伤病、Roost 等更高层事件时，长期退化为 Idle / Swarm / BatFlight；
+- 原版 BatFlight 的自然拍翼使这种长期单一状态在视觉上表现为很多个体反复上下飞，群体容易像背景粒子；
+- 解决方式不是删除原版拍翼或强行锁定高度，而是增加“无事时也有生活”的中性社会行为层。
+
+已实现的短期互动：
+1) CompanionDrift：两只短暂结伴，Companion 保持 TemporaryAnchor 侧后方；
+2) PassBy：迎面/交叉个体使用稳定 Pair side 从相反方向擦身；
+3) SocialChase：1~3 秒同类短追逐，不进入正式攻击、抽水、Trauma 或 AttackSlot；
+4) GroupDrift：3~6 只临时 MicroFlock，使用弱 Alignment/Cohesion 和明显水平偏置的 Separation；
+5) RoostInvitation：已有倒挂者提高附近中性个体的合法 Roost 响应；
+6) PositionNegotiation：近距离冲突时优先左右分流，减少双方一起向上避让；
+7) ChainSocialization：优先接近并加入现有合法 Fly chain，链不可用时再回退至附近合法 Tile Roost。
+
+状态与调度：
+- SocialDrive 是 realized-only 0..1 临时驱动，长时间中性独飞后缓慢增加；
+- SocialCooldown、LastInteractionType、LastPartnerKey 和 repetition penalty 防止同一互动/同一 pair 连续刷屏；
+- TemporaryPartner、TemporaryAnchor、MicroFlock 均不写入 DesertBatflyState，不跨存档、不跨房、不跨 Cycle；
+- Personality 的 Temperament / Nerve / Conformity / RoostAffinity 直接形成连续行为差异；
+- SocialBond 只作为弱 partner / Roost bonus，不形成强制配对；
+- Sex 不形成固定社会职责。
+
+移动原则：
+- Task10 不建立第二套 tile pathfinder；
+- Task10 的 SocialSteer 只提交 localGoal、NominalFlightSpeed 和当前 BatFlight movement mode；
+- SocialSteer 不写 mainBodyChunk.vel，真正拍翼/加速度继续由原版 Fly.BatFlight 执行；
+- 社会障碍 fallback 优先横向，并使用 Rain World 原生 Tile/Solid + TerrainManager.ObstructsTile 检查；
+- Tile Roost 统一复用 FlyAI.ChainTile，因此 DesertBatflyPlatformRoostRuntime 的 TerrainType.Floor 平台底面能力自动生效。
+
+房间级性能/互斥：
+- 使用 room-scoped ConditionalWeakTable runtime；
+- active candidate 与 roosting bat 统一约 20 tick 刷新一次；
+- 不存在每帧每只 × 全房间的 O(N²) 社交扫描；
+- GroupDrift 每帧只读取自身最多 6 个成员；
+- Pair/Group/Invitation 使用 reservation，单只个体同一时刻最多参与一个 Task10 interaction；
+- Roost candidate 评分读取缓存的 roosting 列表，不再对每个候选 tile 重扫整群；
+- Group member 离开后立即释放其 reservation，群体低于 3 时同步解散剩余成员。
+
+优先级与清理：
+- death / unconscious / non-Fly grab / shortcut / emergence / Burrow / Rain / immediate danger 最高优先；
+- Task09 EmergencyRefuge / ReturnHome / ColonyMigration 绝对优先并立即取消 Task10；
+- Severe Injury / InjuryRecovery 优先；
+- 正式 Attack / Retaliation / Attach / Interfere 优先；
+- 已稳定 Chain / Hang / Roost 的个体不会为了普通 social 主动脱落；
+- 原版 Drop / Passive 不被 Task10 强制拉回 BatFlight；
+- Fly.Grabbed、Fly.NewRoom、death、Task09、room cache invalidation 等路径均会清理临时 reservation。
+
+Debug / 回归：
+- Observatory 已增加 SocialEligible、SocialDrive、SocialCooldown、SocialMode、Partner、Anchor、MicroFlock、RoostTarget、NegotiationSide、DecisionReason 等字段；
+- AIDebugTrace 能区分 Task10 control owner，并记录 interaction start/complete/cancel、MicroFlock create/join/left、Roost invitation 等；
+- tests/DesertBatfly/Program.Task10.cs 已接入正式测试入口；
+- 回归测试额外检查 SocialSteer 不写 BodyChunk.vel、room roost cache 存在、Task10 状态不进入持久 State、Task02 的 Role API/类型仍物理不存在。
+
+当前结论：
+- Task10 的代码侧 Phase A~G 与性能结构收尾已完成；
+- 不宣称 DLL 编译结果，编译由开发者本地完成；
+- 不宣称实机 Scenario A~M 已通过，仍需在 Rain World 中观察互动比例、群体横向感、平台倒挂聚集和 20~30 只个体性能后进行最终调参；
+- 实机发现的问题应在当前 Task10 架构内调参/修正，禁止为解决群体观感重新恢复 Task02 的 Sentinel / Bully / Opportunist / permanent Leader/Follower。
+
+
 后续深入讨论顺序
 ----------------
 1. 第 2 项已正式否决并完成运行时结构删除；Task_02 仅保留为否决记录，不再执行。
 2. 第 5A 已实现；第 5B 繁殖相关内容保留为【尚未进行额外深入讨论】。
-3. 第 8 项：Threat Style Memory（需要深度讨论）。
-4. 第 10 项：Corpse Ecology（需要深度讨论）。
-5. 第 9 项已有正式任务书；后续实现时再与第 3 / 7 项对接。
-6. 后续单独回到第 5B：Courtship / MateBond / Gravid / Reproduction / Population integration。
+3. Task10 中性社会生活代码侧已实现，当前进入实机验收与调参，不再进行结构性扩张。
+4. 第 8 项：Threat Style Memory（需要深度讨论）。
+5. 第 10 项：Corpse Ecology（需要深度讨论）。
+6. 第 9 项已有正式任务书；后续实机反馈时继续与第 3 / 7 / Task10 对接。
+7. 后续单独回到第 5B：Courtship / MateBond / Gravid / Reproduction / Population integration。
 
 暂时否决的第 1、6 项继续保留在本文件中；第 2 项作为【否决·已移除】的设计历史保留，不得从旧任务书恢复实现。
