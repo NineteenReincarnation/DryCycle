@@ -1,25 +1,15 @@
 <Project>
-  <!-- Rain World on Windows is a 64-bit Unity player. Pinning x64 also lets
-       ImGui.NET's net40 build target select and copy the matching cimgui.dll
-       beside DryCycle.dll in the configured plugin output directory. -->
   <PropertyGroup>
+    <!-- Rain World 1.10+ Windows builds are x64. Keep DryCycle aligned with the game and
+         with RWImGUI's supported backend architecture. -->
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <!-- ImGuiIO exposes IniFilename as a native pointer. The Observatory disables
-         Dear ImGui's default shared imgui.ini before first NewFrame and uses its own
-         explicit UTF-8 layout file instead. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- Keep ordinary project dependencies local where required. ImGui.NET itself is
-         now compile-only during the RWImGUI migration; its runtime DLL/native backend
-         must come from the dedicated RWImGUI mod, never from DryCycle. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <!-- Transitional compile reference for the legacy Observatory source that still lives
-       in DryCycle.dll. Exclude runtime assets so this project cannot overwrite RWImGUI's
-       modified ImGui.NET/cimguiaio runtime. This PackageReference will be removed entirely
-       once the ImGui views have moved into DryCycle.AIObservatory.RWImGui.dll. -->
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
-    <PackageReference Include="ImGui.NET" Version="1.91.6.1" PrivateAssets="all" ExcludeAssets="runtime" />
-  </ItemGroup>
+  <!-- IMPORTANT: DryCycle.dll intentionally has no ImGui.NET PackageReference anymore.
+       The optional DryCycle.AIObservatory.RWImGui project references the modified
+       ImGui.NET.dll shipped by Rawra's RWImGUI mod with Private=false. This prevents the
+       public NuGet runtime from replacing RWImGUI's fork in BepInEx/plugin probing. -->
 </Project>
