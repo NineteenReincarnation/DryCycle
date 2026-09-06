@@ -61,8 +61,6 @@ internal static class AIDebuggerRuntime
         };
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
 
-        // No Camera or DryCycle-owned ImGui renderer is created. RWImGUI owns Win32/DX11
-        // presentation; this object only captures/publishes simulation state.
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
@@ -114,6 +112,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private bool hasSelection;
     private bool presentationDirty = true;
     private DebugEntityKey selectedKey;
+    private AIDebugViewMode viewMode = AIDebugViewMode.Live;
+    private int cursorTick;
     private int nextEntityRefreshFrame;
     private float nextPresentationTime;
 
@@ -149,6 +149,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         {
             AIDebugRegistry.BindGame(game);
             AIDebugSimulationControl.Bind(game);
+            if (viewMode == AIDebugViewMode.Live) cursorTick = game.clock;
         }
 
         DrainUiCommands(game);
@@ -174,7 +175,6 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             }
         }
 
-        // Whole-session export remains available even when the frontend is hidden.
         if (Input.GetKeyDown(KeyCode.F8) &&
             (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
             (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
@@ -209,6 +209,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.SelectEntity:
                     selectedKey = command.Key;
                     hasSelection = true;
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? 0;
                     if (game != null)
                     {
                         if (!AIDebugRecorder.Select(game, command.Key))
@@ -226,6 +228,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.ClearSelection:
                     hasSelection = false;
                     selectedKey = default;
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? 0;
                     AIDebugRichRecorder.ClearSelection();
                     AIDebugRecorder.ClearSelection();
                     presentationDirty = true;
@@ -256,6 +260,25 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.Refresh:
                     nextEntityRefreshFrame = 0;
                     nextPresentationTime = 0f;
+                    presentationDirty = true;
+                    break;
+
+                case AIDebugUiCommandKind.SeekCursorTicks:
+                    if (game != null && hasSelection)
+                    {
+                        if (viewMode == AIDebugViewMode.Live) cursorTick = game.clock;
+                        long desired = (long)cursorTick + command.IntValue;
+                        if (desired < 0L) desired = 0L;
+                        if (desired > game.clock) desired = game.clock;
+                        cursorTick = (int)desired;
+                        viewMode = cursorTick >= game.clock ? AIDebugViewMode.Live : AIDebugViewMode.Historical;
+                        presentationDirty = true;
+                    }
+                    break;
+
+                case AIDebugUiCommandKind.ReturnLive:
+                    viewMode = AIDebugViewMode.Live;
+                    cursorTick = game?.clock ?? cursorTick;
                     presentationDirty = true;
                     break;
             }
@@ -314,13 +337,22 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 visibleRooms.Contains(creature.pos.room));
         }
 
+        int viewTick = viewMode == AIDebugViewMode.Historical ? Math.Min(cursorTick, game.clock) : game.clock;
+        if (viewMode == AIDebugViewMode.Live) cursorTick = viewTick;
+
         AIDebugPresentationCreature selectedPresentation = null;
-        if (hasSelection && AIDebugRichRecorder.TryGetLatest(out AIDebugResolvedSnapshot resolved) && resolved.HasValue)
+        AIDebugResolvedMotion cursorMotion = default;
+        AIDebugResolvedFastState cursorFastState = default;
+        if (hasSelection)
         {
-            // V5 Presentation no longer asks AIDebugRegistry to inspect the live creature.
-            // The only source here is a detached compatibility snapshot captured by the
-            // simulation-tick recorder. Raw/schema storage will replace this payload later.
-            selectedPresentation = CopySnapshot(resolved.Snapshot, resolved.AgeTicks);
+            AIDebugRecorderReadApi.TryResolveMotion(selectedKey, viewTick, out cursorMotion);
+            AIDebugRecorderReadApi.TryResolveFastState(selectedKey, viewTick, out cursorFastState);
+
+            bool hasRich = viewMode == AIDebugViewMode.Historical
+                ? AIDebugRichRecorder.TryResolve(viewTick, out AIDebugResolvedSnapshot resolvedHistorical)
+                : AIDebugRichRecorder.TryGetLatest(out AIDebugResolvedSnapshot resolvedHistorical);
+            if (hasRich && resolvedHistorical.HasValue)
+                selectedPresentation = CopySnapshot(resolvedHistorical.Snapshot, resolvedHistorical.AgeTicks);
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
@@ -337,7 +369,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugLocalization.Language,
             presentationEntities,
             selectedPresentation,
-            recorderStatus));
+            recorderStatus,
+            viewMode,
+            viewTick,
+            cursorMotion,
+            cursorFastState));
     }
 
     private void PublishHidden(RainWorldGame game)
@@ -350,7 +386,9 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugLocalization.Language,
             Array.Empty<AIDebugPresentationEntity>(),
             null,
-            string.Empty));
+            string.Empty,
+            viewMode,
+            cursorTick));
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
