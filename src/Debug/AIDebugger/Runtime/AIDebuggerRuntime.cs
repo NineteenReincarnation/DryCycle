@@ -162,6 +162,8 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             }
             window.Draw(game, overheadMs);
             if (!window.FullMode && game != null) KeepCompactOnScreen();
+            // EndFrame also rebuilds the camera-owned CommandBuffer. The camera executes
+            // it later in this same Unity frame at CameraEvent.AfterEverything.
             backend.EndFrame();
         }
         catch (Exception error)
@@ -194,21 +196,11 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private void OnPostRender()
     {
         if (!visible || backend == null || backendFailed) return;
-        if (!postRenderLogged)
-        {
-            postRenderLogged = true;
-            Rect rect = overlayCamera != null ? overlayCamera.rect : default;
-            string target = overlayCamera?.targetTexture != null ? overlayCamera.targetTexture.name : "backbuffer";
-            logger?.LogInfo($"DryCycle AI Observatory first OnPostRender: cameraId={(overlayCamera != null ? overlayCamera.GetInstanceID() : 0)}, cameraEnabled={overlayCamera?.enabled == true}, active={gameObject.activeInHierarchy}, screen={Screen.width}x{Screen.height}, rect={rect}, target={target}, cullingMask={(overlayCamera != null ? overlayCamera.cullingMask : 0)}.");
-        }
-        try
-        {
-            backend.Render();
-        }
-        catch (Exception error)
-        {
-            FailBackend("render", error);
-        }
+        if (postRenderLogged) return;
+        postRenderLogged = true;
+        Rect rect = overlayCamera != null ? overlayCamera.rect : default;
+        string target = overlayCamera?.targetTexture != null ? overlayCamera.targetTexture.name : "backbuffer";
+        logger?.LogInfo($"DryCycle AI Observatory first OnPostRender: cameraId={(overlayCamera != null ? overlayCamera.GetInstanceID() : 0)}, cameraEnabled={overlayCamera?.enabled == true}, active={gameObject.activeInHierarchy}, screen={Screen.width}x{Screen.height}, rect={rect}, target={target}, cullingMask={(overlayCamera != null ? overlayCamera.cullingMask : 0)}, commandBufferAttached={backend.CommandBufferAttached}, preparedDraws={backend.PreparedDrawCount}, shader={backend.ShaderName}.");
     }
 
     private bool EnsureBackend()
@@ -217,15 +209,17 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (backendFailed) return false;
         try
         {
+            if (overlayCamera == null)
+                throw new InvalidOperationException("DryCycle AI Observatory overlay camera is missing before backend initialization.");
             logger?.LogInfo("DryCycle AI Observatory backend initialization started.");
             AIDebugStyleController.Reset();
-            backend = new AIDebugImGuiBackend(logger);
+            backend = new AIDebugImGuiBackend(logger, overlayCamera);
             // The backend constructor creates and selects the ImGui context. Dear ImGui
             // requires DockingEnable before the first NewFrame(), so initialize immutable
             // context flags here, immediately after context creation and before BeginFrame.
             AIDebugStyleController.InitializeContext();
             ImGuiIOPtr io = ImGui.GetIO();
-            logger?.LogInfo($"DryCycle AI Observatory context flags configured before first NewFrame: ConfigFlags={io.ConfigFlags}, BackendFlags={io.BackendFlags}.");
+            logger?.LogInfo($"DryCycle AI Observatory context flags configured before first NewFrame: ConfigFlags={io.ConfigFlags}, BackendFlags={io.BackendFlags}, automaticIni=disabled.");
             logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, Ctrl+Shift+F8 session export, whole-world pause/step enabled.");
             return true;
         }
