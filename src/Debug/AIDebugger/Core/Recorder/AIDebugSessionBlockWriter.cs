@@ -51,6 +51,7 @@ internal static class AIDebugSessionBlockWriter
     internal static string ActiveSessionPath => activeSessionPath;
     internal static long BlocksWritten => Interlocked.Read(ref blocksWritten);
     internal static long BytesWritten => Interlocked.Read(ref bytesWritten);
+    internal static bool AutomaticSession => Volatile.Read(ref autoSession) != 0;
 
     internal static void Initialize(ManualLogSource log)
     {
@@ -65,7 +66,12 @@ internal static class AIDebugSessionBlockWriter
         lock (StateGate)
         {
             if (state == AIDebugSessionWriterState.Recording && !string.IsNullOrEmpty(activeSessionPath))
+            {
+                // A user-requested Recording mode promotes an automatic anomaly session
+                // instead of racing a second writer against the same recorder blocks.
+                if (!automatic && AutomaticSession) Interlocked.Exchange(ref autoSession, 0);
                 return activeSessionPath;
+            }
 
             string path = Path.Combine(SessionDirectory,
                 $"Recorder-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
@@ -114,10 +120,13 @@ internal static class AIDebugSessionBlockWriter
         worker = null;
     }
 
-    internal static void EnqueueMotion(DebugEntityKey key, AIDebugSealedBlockLease<AIDebugMotionSample> lease)
+    internal static void EnqueueMotion(
+        DebugEntityKey key,
+        AIDebugSealedBlockLease<AIDebugMotionSample> lease,
+        bool force = false)
     {
         if (lease == null) return;
-        if (state != AIDebugSessionWriterState.Recording)
+        if (state != AIDebugSessionWriterState.Recording || (AutomaticSession && !force))
         {
             lease.Release();
             return;
@@ -126,10 +135,13 @@ internal static class AIDebugSessionBlockWriter
         Wake.Set();
     }
 
-    internal static void EnqueueState(DebugEntityKey key, AIDebugSealedBlockLease<AIDebugFastStateSample> lease)
+    internal static void EnqueueState(
+        DebugEntityKey key,
+        AIDebugSealedBlockLease<AIDebugFastStateSample> lease,
+        bool force = false)
     {
         if (lease == null) return;
-        if (state != AIDebugSessionWriterState.Recording)
+        if (state != AIDebugSessionWriterState.Recording || (AutomaticSession && !force))
         {
             lease.Release();
             return;
@@ -139,8 +151,8 @@ internal static class AIDebugSessionBlockWriter
     }
 
     // Anomaly captures can create an automatic writer session without switching the
-    // recorder's Armed/Recording mode. Only explicitly leased pre/post-roll blocks are
-    // written in that case.
+    // recorder's Armed/Recording mode. Only explicitly forced pre/post-roll leases are
+    // accepted by an automatic session; ordinary sealed blocks are released immediately.
     internal static void EnsureAnomalySession()
     {
         if (state == AIDebugSessionWriterState.Recording) return;
@@ -167,7 +179,8 @@ internal static class AIDebugSessionBlockWriter
     {
         string result = state switch
         {
-            AIDebugSessionWriterState.Recording => $"recording {BlocksWritten} blocks / {BytesWritten / 1024.0:0.0} KiB",
+            AIDebugSessionWriterState.Recording =>
+                $"{(AutomaticSession ? "capture" : "recording")} {BlocksWritten} blocks / {BytesWritten / 1024.0:0.0} KiB",
             AIDebugSessionWriterState.Stopping => "writer stopping",
             AIDebugSessionWriterState.Faulted => "writer FAILED",
             _ => string.Empty
