@@ -5,6 +5,7 @@ using System.Security;
 using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.Debugging.AI;
 using ImGuiNET;
 using RWIMGUI;
 using Num = System.Numerics;
@@ -29,6 +30,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         Logger.LogInfo("DryCycle RWImGUI bridge loaded. Waiting for RainWorld.OnModsInit before registering the Present callback.");
     }
 
+    private void Update()
+    {
+        // Unity/Rain World state is sampled only on the Unity main thread. The Present
+        // callback consumes this copied bool and never calls UnityEngine.Input or touches
+        // RainWorld objects.
+        ProbeMenu.Visible = AIDebuggerRuntime.Visible;
+    }
+
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
@@ -36,6 +45,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // corresponding removal call. Keep the registered function pointer valid for the
         // process lifetime and make it a no-op when this plugin is disabled.
         ProbeMenu.Enabled = false;
+        ProbeMenu.Visible = false;
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -75,12 +85,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
             ImGUIAPI.AddMenuCallback(&ProbeMenu.MenuCallback);
             callbackRegistered = true;
             ProbeMenu.Enabled = true;
-            log?.LogInfo("DryCycle RWImGUI Present callback registered. Minimal proof window is enabled.");
+            log?.LogInfo("DryCycle RWImGUI Present callback registered. Press F7 to show the minimal proof window.");
         }
         catch (Exception error)
         {
             ProbeMenu.Enabled = false;
-            log?.LogError("DryCycle RWImGUI callback registration failed. The legacy DryCycle systems remain active. " + error);
+            log?.LogError("DryCycle RWImGUI callback registration failed. DryCycle gameplay systems remain active. " + error);
         }
     }
 }
@@ -89,9 +99,17 @@ public sealed class BridgePlugin : BaseUnityPlugin
 internal static unsafe class ProbeMenu
 {
     private static ManualLogSource log;
-    private static int firstDrawLogged;
+    private static int firstPresentLogged;
+    private static int firstVisibleDrawLogged;
+    private static int drawFailureLogged;
+    private static volatile bool visible;
 
     internal static bool Enabled { get; set; }
+    internal static bool Visible
+    {
+        get => visible;
+        set => visible = value;
+    }
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
@@ -101,29 +119,32 @@ internal static unsafe class ProbeMenu
 
         try
         {
-            if (Interlocked.Exchange(ref firstDrawLogged, 1) == 0)
+            if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
                 log?.LogInfo($"DryCycle RWImGUI callback reached Present. swapChain=0x{idxgiSwapChain:X}, syncInterval={syncInterval}, flags={flags}.");
+
+            if (!Visible) return;
+
+            if (Interlocked.Exchange(ref firstVisibleDrawLogged, 1) == 0)
+                log?.LogInfo("DryCycle RWImGUI F7-visible frame reached Present; drawing minimal proof window.");
 
             ImGui.SetNextWindowPos(new Num.Vector2(24f, 24f), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Num.Vector2(420f, 150f), ImGuiCond.FirstUseEver);
-            bool open = Enabled;
-            if (ImGui.Begin("DryCycle AI Observatory - RWImGUI Probe###DryCycleRWImGuiProbe", ref open,
-                    ImGuiWindowFlags.NoCollapse))
+            if (ImGui.Begin("DryCycle AI Observatory - RWImGUI Probe###DryCycleRWImGuiProbe",
+                    ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
             {
                 ImGui.TextColored(new Num.Vector4(0.35f, 0.9f, 0.48f, 1f), "RWImGUI backend connected");
                 ImGui.Separator();
+                ImGui.Text("F7 visibility state: ON");
                 ImGui.Text("Present callback: OK");
                 ImGui.Text("Renderer owner: RWImGUI Win32 + DX11");
-                ImGui.Text("DryCycle Unity/Futile renderer: not used by this probe");
+                ImGui.Text("Legacy DryCycle Unity/Futile renderer: DISABLED");
             }
             ImGui.End();
-            Enabled = open;
         }
         catch (Exception error)
         {
-            Enabled = false;
-            if (Interlocked.Exchange(ref firstDrawLogged, 2) != 2)
-                log?.LogError("DryCycle RWImGUI probe draw failed and was disabled for this session. " + error);
+            if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
+                log?.LogError("DryCycle RWImGUI probe draw failed. The callback will remain registered for diagnostics. " + error);
         }
     }
 }
