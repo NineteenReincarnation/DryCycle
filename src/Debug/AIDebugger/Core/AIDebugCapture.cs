@@ -213,11 +213,38 @@ internal sealed class AIDebugBreakpoint
     internal DebugEntityKey? Entity;
 }
 
+internal readonly struct AIDebugBreakpointStatus
+{
+    internal readonly bool Enabled;
+    internal readonly int Hits;
+    internal readonly int LastTick;
+    internal readonly DebugEntityKey LastKey;
+    internal readonly string LastReason;
+
+    internal AIDebugBreakpointStatus(bool enabled, int hits, int lastTick, DebugEntityKey lastKey, string lastReason)
+    {
+        Enabled = enabled;
+        Hits = hits;
+        LastTick = lastTick;
+        LastKey = lastKey;
+        LastReason = lastReason ?? string.Empty;
+    }
+}
+
+// One breakpoint manager owns both the legacy event-rule API and the V5 anomaly toggle.
+// Keeping them together prevents duplicate namespace types while preserving both behaviors.
 internal static class AIDebugBreakpointManager
 {
     private static readonly List<AIDebugBreakpoint> Rules = new(16);
+    private static bool anomalyEnabled;
+    private static int anomalyHits;
+    private static int lastAnomalyTick = int.MinValue;
+    private static DebugEntityKey lastAnomalyKey;
+    private static string lastAnomalyReason;
+
     internal static IReadOnlyList<AIDebugBreakpoint> Breakpoints => Rules;
     internal static string LastHit { get; private set; }
+    internal static bool Enabled => anomalyEnabled;
 
     internal static AIDebugBreakpoint Add(string nameContains, AIDebugEventCategory? category = null,
         DebugEntityKey? entity = null)
@@ -248,9 +275,34 @@ internal static class AIDebugBreakpointManager
         }
     }
 
+    internal static void Toggle() => anomalyEnabled = !anomalyEnabled;
+
+    internal static void SetEnabled(bool value) => anomalyEnabled = value;
+
+    internal static void OnAnomaly(DebugEntityKey key, int tick, string reason)
+    {
+        if (!anomalyEnabled) return;
+        if (tick == lastAnomalyTick && key == lastAnomalyKey &&
+            string.Equals(reason, lastAnomalyReason, StringComparison.Ordinal)) return;
+
+        anomalyHits++;
+        lastAnomalyTick = tick;
+        lastAnomalyKey = key;
+        lastAnomalyReason = reason ?? "anomaly";
+        AIDebugSimulationControl.PauseForBreakpoint();
+    }
+
+    internal static AIDebugBreakpointStatus GetStatus() =>
+        new(anomalyEnabled, anomalyHits, lastAnomalyTick, lastAnomalyKey, lastAnomalyReason);
+
     internal static void Reset()
     {
         Rules.Clear();
         LastHit = null;
+        anomalyEnabled = false;
+        anomalyHits = 0;
+        lastAnomalyTick = int.MinValue;
+        lastAnomalyKey = default;
+        lastAnomalyReason = null;
     }
 }
