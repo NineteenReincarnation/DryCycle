@@ -258,8 +258,13 @@ internal static class DesertBatflyColonyRuntime
             }
         }
 
+        // Snapshot first so EnsureIndividualOwnership cannot invalidate dictionary
+        // enumeration even on old Mono Dictionary implementations.
+        sourceMembersScratch.Clear();
         foreach (AbstractCreature creature in trackedBats.Values)
-            EnsureIndividualOwnership(creature);
+            sourceMembersScratch.Add(creature);
+        for (int i = 0; i < sourceMembersScratch.Count; i++)
+            EnsureIndividualOwnership(sourceMembersScratch[i]);
         RefreshPopulationCounts(world);
 
         // Restore persisted migration routes only after room and ownership indexes exist.
@@ -657,7 +662,13 @@ internal static class DesertBatflyColonyRuntime
     private static void TrackCreature(AbstractCreature creature)
     {
         if (!IsDesertBatfly(creature)) return;
-        trackedBats[IdentityKey(creature.ID)] = creature;
+        string key = IdentityKey(creature.ID);
+        // Assigning an existing Dictionary key can invalidate an active enumerator on
+        // older Mono runtimes. Do not write unless the tracked object truly changes.
+        if (trackedBats.TryGetValue(key, out AbstractCreature existing) &&
+            ReferenceEquals(existing, creature))
+            return;
+        trackedBats[key] = creature;
     }
 
     private static void PrepareSave(SaveState save)
