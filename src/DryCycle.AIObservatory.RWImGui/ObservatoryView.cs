@@ -92,7 +92,9 @@ internal static class ObservatoryView
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ExportSession));
 
         ImGui.SameLine();
-        if (ImGui.Button(snapshot.Language == AIDebugLanguage.Chinese ? "English" : "中文"))
+        // Keep the default-English UI entirely inside the Latin atlas. Once switched to
+        // Chinese, the bridge pushes RWImGUI's CJK-capable merged font for the whole frame.
+        if (ImGui.Button(snapshot.Language == AIDebugLanguage.Chinese ? "English" : "Chinese"))
             AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ToggleLanguage));
 
         ImGui.SameLine();
