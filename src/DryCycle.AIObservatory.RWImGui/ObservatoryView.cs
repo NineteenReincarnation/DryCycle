@@ -58,12 +58,12 @@ internal static class ObservatoryView
         }
 
         float browserWidth = fullMode ? 310f : 270f;
-        ImGui.BeginChild("##AIEntityBrowser", new Num.Vector2(browserWidth, 0f), true);
+        ImGui.BeginChild("##AIEntityBrowser", new Num.Vector2(browserWidth, 0f), ImGuiChildFlags.Borders);
         DrawEntityBrowser(snapshot);
         ImGui.EndChild();
 
         ImGui.SameLine();
-        ImGui.BeginChild("##AIInspector", new Num.Vector2(0f, 0f), true);
+        ImGui.BeginChild("##AIInspector", new Num.Vector2(0f, 0f), ImGuiChildFlags.Borders);
         DrawInspector(snapshot);
         ImGui.EndChild();
 
