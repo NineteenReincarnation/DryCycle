@@ -45,6 +45,30 @@ internal sealed class AIDebugPresentationTimeline
     }
 }
 
+internal sealed class AIDebugPresentationTrackedEntity
+{
+    internal readonly DebugEntityKey Key;
+    internal readonly string DisplayName;
+    internal readonly string Room;
+    internal readonly bool Selected;
+    internal readonly bool Pinned;
+    internal readonly AIDebugResolvedMotion Motion;
+    internal readonly AIDebugResolvedFastState FastState;
+
+    internal AIDebugPresentationTrackedEntity(
+        AIDebugPresentationEntity entity,
+        int cursorTick)
+    {
+        Key = entity.Key;
+        DisplayName = entity.DisplayName;
+        Room = entity.Room;
+        Selected = entity.Selected;
+        Pinned = entity.Pinned;
+        AIDebugRecorderReadApi.TryResolveMotion(Key, cursorTick, out Motion);
+        AIDebugRecorderReadApi.TryResolveFastState(Key, cursorTick, out FastState);
+    }
+}
+
 // Thread boundary between Rain World's Unity/main-thread AI capture and the RWImGUI
 // Present callback. Everything published here is detached from live Rain World / Unity
 // objects. The frontend may read it from the render/present thread without touching the
@@ -81,6 +105,7 @@ internal sealed class AIDebugPresentationSnapshot
     internal readonly AIDebugPresentationTimeline Timeline;
     internal readonly int PinnedCount;
     internal readonly bool SelectedPinned;
+    internal readonly AIDebugPresentationTrackedEntity[] Tracked;
 
     internal AIDebugPresentationSnapshot(
         bool visible,
@@ -110,14 +135,31 @@ internal sealed class AIDebugPresentationSnapshot
         CursorMotion = cursorMotion;
         CursorFastState = cursorFastState;
 
+        int effectiveCursor = cursorTick == 0 ? tick : cursorTick;
         int pinned = 0;
+        int trackedCount = 0;
         bool selectedPinned = false;
+        DebugEntityKey timelineKey = default;
+        bool hasTimelineKey = false;
+
         for (int i = 0; i < Entities.Length; i++)
         {
             AIDebugPresentationEntity entity = Entities[i];
-            if (entity == null || !entity.Pinned) continue;
-            pinned++;
-            if (selected != null && entity.Key == selected.Key) selectedPinned = true;
+            if (entity == null) continue;
+            if (entity.Pinned) pinned++;
+            if (entity.Selected || entity.Pinned) trackedCount++;
+            if (entity.Selected)
+            {
+                timelineKey = entity.Key;
+                hasTimelineKey = true;
+                if (entity.Pinned) selectedPinned = true;
+            }
+        }
+
+        if (!hasTimelineKey && selected != null)
+        {
+            timelineKey = selected.Key;
+            hasTimelineKey = true;
         }
 
         if (selected != null && !selectedPinned &&
@@ -129,12 +171,28 @@ internal sealed class AIDebugPresentationSnapshot
         PinnedCount = pinned;
         SelectedPinned = selectedPinned;
 
+        if (trackedCount <= 0)
+        {
+            Tracked = Array.Empty<AIDebugPresentationTrackedEntity>();
+        }
+        else
+        {
+            var tracked = new AIDebugPresentationTrackedEntity[trackedCount];
+            int write = 0;
+            for (int i = 0; i < Entities.Length && write < tracked.Length; i++)
+            {
+                AIDebugPresentationEntity entity = Entities[i];
+                if (entity == null || (!entity.Selected && !entity.Pinned)) continue;
+                tracked[write++] = new AIDebugPresentationTrackedEntity(entity, effectiveCursor);
+            }
+            Tracked = tracked;
+        }
+
         // This constructor is invoked by the Unity/main-thread host. Build only the small
         // visible recorder viewport here; RWImGUI receives detached arrays and never reads
         // live recorder blocks concurrently with the simulation writer.
-        int effectiveCursor = cursorTick == 0 ? tick : cursorTick;
-        Timeline = timeline ?? (selected != null && hasGame
-            ? AIDebugTimelinePresentationBuilder.Build(selected.Key, tick, effectiveCursor, viewMode)
+        Timeline = timeline ?? (hasGame && hasTimelineKey
+            ? AIDebugTimelinePresentationBuilder.Build(timelineKey, tick, effectiveCursor, viewMode)
             : AIDebugPresentationTimeline.Empty);
     }
 }
