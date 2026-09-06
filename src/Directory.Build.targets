@@ -46,10 +46,22 @@
        references the DryCycle.dll that has just been produced, so there is no recursive
        ProjectReference. Because the bridge is not a top-level solution project, Visual
        Studio will not restore it automatically. Explicitly restore it before Build so the
-       SDK can generate obj/project.assets.json on a clean checkout. -->
+       SDK can generate obj/project.assets.json on a clean checkout.
+
+       Delete any old bridge output before compiling. If compilation fails, an obsolete
+       bridge DLL must never survive next to a newly-built DryCycle.dll and get loaded by
+       BepInEx on the following game launch. -->
   <Target Name="BuildOptionalRWImGuiBridge"
           AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
+    <ItemGroup>
+      <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
+      <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.pdb" />
+    </ItemGroup>
+    <Delete Files="@(PreviousRWImGuiBridge)" />
+    <Message Importance="high"
+             Text="DryCycle RWImGUI migration: cleared stale optional bridge outputs before rebuild." />
+
     <Message Importance="high"
              Text="DryCycle RWImGUI migration: restoring optional bridge against $(ResolvedRWImGuiPluginDir)." />
     <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
@@ -62,6 +74,9 @@
              Targets="Build"
              BuildInParallel="false"
              Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
+    <Message Importance="high"
+             Condition="Exists('$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll')"
+             Text="DryCycle RWImGUI migration: optional bridge built successfully." />
   </Target>
 
   <Target Name="ReportMissingOptionalRWImGuiBridge"
