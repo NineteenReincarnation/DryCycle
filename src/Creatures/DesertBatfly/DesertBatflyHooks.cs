@@ -15,6 +15,7 @@ internal static class DesertBatflyHooks
         if (enabled) return;
         enabled = true;
         DesertBatflyIntimidation.Reset();
+        DesertBatflyRefuge.Reset();
         DesertBatflyColonyRuntime.Enable();
         if (!debugRegistered)
         {
@@ -54,6 +55,7 @@ internal static class DesertBatflyHooks
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DesertBatflyColonyRuntime.Disable();
+        DesertBatflyRefuge.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
@@ -107,9 +109,6 @@ internal static class DesertBatflyHooks
             !DesertBatflyIntimidation.IsSupportedLethalThreat(self.lizard))
             return;
 
-        // Only register the actual attach transition. The later Lizard.Grabbed path may
-        // report the same capture again, but BroadcastPredatorCapture already owns its
-        // event de-duplication and keeping BeginCapture alive across both phases.
         if (previousState == LizardTongue.State.AttachedInSmallObject && previousOwner == desert)
             return;
 
@@ -123,27 +122,44 @@ internal static class DesertBatflyHooks
             (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
         {
             suspended.DesertAI.Update();
+            TraceTravel(suspended);
             return;
         }
 
-        // Fly-on-Fly grabbedBy entries are the vanilla hanging-chain structure and
-        // must keep running the normal FlyAI chain update. Treat only non-Fly grabs
-        // (player/predator/etc.) as an AI suspension.
         orig(self);
         if (self.fly is not DesertBatfly desert) return;
 
-        // Task 09 owns only the cross-room destination. Immediate danger and severe
-        // injury cause TryDriveRealized to yield, after which DesertBatflyAI handles
-        // Escape / InjuryRecovery normally. When travel is active, LeaveRoom uses the
-        // native FlyAI/AImap/shortcut path and ordinary harass/roost logic must not
-        // overwrite that room exit intent in the same tick.
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
             desert.DesertAI.CancelAttack();
+            TraceTravel(desert);
             return;
         }
 
         desert.DesertAI.Update();
+        TraceTravel(desert);
+    }
+
+    private static void TraceTravel(DesertBatfly bat)
+    {
+        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
+        bool active = DesertBatflyTravelNavigation.TryGetDebugState(
+            bat.abstractCreature, out DesertBatflyTravelDebugState travel);
+        AIDebugTrace.RecordChange(
+            bat.abstractCreature,
+            AIDebugEventCategory.Path,
+            "Task09TravelPurpose",
+            active ? travel.Purpose.ToString() : "None");
+        AIDebugTrace.RecordChange(
+            bat.abstractCreature,
+            AIDebugEventCategory.Path,
+            "Task09TravelDestination",
+            active && !string.IsNullOrEmpty(travel.DestinationRoom) ? travel.DestinationRoom : "—");
+        AIDebugTrace.RecordChange(
+            bat.abstractCreature,
+            AIDebugEventCategory.Path,
+            "Task09TravelProgress",
+            active ? $"{travel.RouteIndex}/{Mathf.Max(0, travel.RouteRooms.Length - 1)} next={travel.NextRoom}" : "—");
     }
 
     private static bool RestrainedByNonFly(DesertBatfly fly)
@@ -159,7 +175,6 @@ internal static class DesertBatflyHooks
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
     {
         if (self.fly is not DesertBatfly) orig(self);
-        // Dedicated threat perception distinguishes casual passing from pursuit.
     }
 
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)
@@ -183,8 +198,6 @@ internal static class DesertBatflyHooks
             return;
         }
 
-        // A Task 09 refuge/return route always wins over the old one-hop desert-room
-        // fallback. The navigator only calls FlyAI.LeaveRoom and never controls velocity.
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
             return;
 
@@ -194,9 +207,6 @@ internal static class DesertBatflyHooks
             return;
         }
 
-        // No reachable Refuge is currently committed. Do not make a random permanent
-        // move merely because rain/danger exists; remain locally afraid and allow the
-        // next low-frequency weather evaluation to pick a survivable Refuge route.
         self.afraid = Mathf.Max(self.afraid, 2f);
     }
 
@@ -237,6 +247,8 @@ internal static class DesertBatflyHooks
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
     {
         orig(self);
+        if (self.readyForAI && self.aimap != null)
+            DesertBatflyRefuge.ObserveRoom(self);
         DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
     }
 
@@ -247,8 +259,6 @@ internal static class DesertBatflyHooks
     {
         int value = orig(name, edible);
         if (edible is not DesertBatfly || value <= 0) return value;
-        // Vanilla returns quarter-food units: reduced nutrition is the existing
-        // carnivorous diet rule. Preserve inedible diets and avoid character lists.
         return value < edible.FoodPoints * 4 ? 4 : 8;
     }
 }
