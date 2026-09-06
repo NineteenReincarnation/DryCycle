@@ -12,13 +12,17 @@ using Object = UnityEngine.Object;
 
 namespace DryCycle.Debugging.AI;
 
-// Minimal Dear ImGui backend for Rain World's Built-in render pipeline. It deliberately
-// does not depend on Unity Editor, UImGui, SRP or OS multi-viewports.
+// Dear ImGui backend for Rain World's Unity 2020 Built-in render pipeline. Draw commands
+// are prepared during Update and owned by the dedicated overlay camera at
+// CameraEvent.AfterEverything. This is more deterministic than executing a free-standing
+// Graphics.ExecuteCommandBuffer from OnPostRender, where the active render target is not
+// an explicit part of the command buffer contract.
 internal sealed class AIDebugImGuiBackend : IDisposable
 {
     private static readonly IntPtr FontTextureId = new(1);
 
     private readonly ManualLogSource logger;
+    private readonly Camera renderCamera;
     private readonly Mesh mesh;
     private readonly Material material;
     private readonly MaterialPropertyBlock properties = new();
@@ -31,67 +35,98 @@ internal sealed class AIDebugImGuiBackend : IDisposable
 
     private Texture2D fontTexture;
     private IntPtr context;
-    private bool frameReady;
+    private bool commandBufferAttached;
     private bool disposed;
     private bool beginFrameLogged;
     private bool drawDataLogged;
     private bool emptyDrawDataLogged;
     private bool meshLogged;
-    private bool renderLogged;
+    private bool renderPreparedLogged;
+    private bool unknownTextureLogged;
     private int previousSubMeshCount = -1;
+    private int preparedDrawCount;
+    private string shaderName = "?";
 
     private readonly struct DrawCommand
     {
         internal readonly Rect Clip;
         internal readonly int SubMesh;
+        internal readonly IntPtr TextureId;
 
-        internal DrawCommand(Rect clip, int subMesh)
+        internal DrawCommand(Rect clip, int subMesh, IntPtr textureId)
         {
             Clip = clip;
             SubMesh = subMesh;
+            TextureId = textureId;
         }
     }
 
-    internal AIDebugImGuiBackend(ManualLogSource log)
+    internal bool CommandBufferAttached => commandBufferAttached;
+    internal int PreparedDrawCount => preparedDrawCount;
+    internal string ShaderName => shaderName;
+
+    internal AIDebugImGuiBackend(ManualLogSource log, Camera camera)
     {
         logger = log;
-        AIDebugNativeBootstrap.Preload(logger);
+        renderCamera = camera ?? throw new ArgumentNullException(nameof(camera));
 
-        context = ImGui.CreateContext();
-        if (context == IntPtr.Zero)
-            throw new InvalidOperationException("DryCycle AI Observatory: ImGui.CreateContext returned null.");
-        ImGui.SetCurrentContext(context);
-        logger?.LogInfo("DryCycle AI Observatory ImGui context ready.");
-
-        ImGuiIOPtr io = ImGui.GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
-        io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-        io.DisplayFramebufferScale = Num.Vector2.One;
-        BuildFontAtlas(io);
-        ConfigureStyle();
-
-        // Keep the established shader order until live diagnostics prove a shader-specific
-        // failure. The runtime task explicitly requires DrawData/Mesh/Render evidence first.
-        Shader shader = Shader.Find("Futile/Basic") ?? Shader.Find("Sprites/Default") ?? Shader.Find("UI/Default");
-        if (shader == null) throw new InvalidOperationException("DryCycle AI Observatory: no compatible UI shader found.");
-        material = new Material(shader)
+        try
         {
-            name = "DryCycle AI Observatory Material",
-            hideFlags = HideFlags.HideAndDontSave
-        };
-        material.mainTexture = fontTexture;
-        if (material.HasProperty("_ZTest")) material.SetInt("_ZTest", (int)CompareFunction.Always);
-        if (material.HasProperty("_ZWrite")) material.SetInt("_ZWrite", 0);
-        if (material.HasProperty("_Cull")) material.SetInt("_Cull", (int)CullMode.Off);
+            AIDebugNativeBootstrap.Preload(logger);
 
-        mesh = new Mesh
+            context = ImGui.CreateContext();
+            if (context == IntPtr.Zero)
+                throw new InvalidOperationException("DryCycle AI Observatory: ImGui.CreateContext returned null.");
+            ImGui.SetCurrentContext(context);
+            logger?.LogInfo("DryCycle AI Observatory ImGui context ready.");
+
+            ImGuiIOPtr io = ImGui.GetIO();
+            io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+            io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
+            io.DisplayFramebufferScale = Num.Vector2.One;
+            BuildFontAtlas(io);
+            ConfigureStyle();
+
+            // UI/Default matches ImGui's straight-alpha RGBA atlas + vertex-colour model.
+            // Keep Unity's sprite shader and Rain World's Futile shader as fallbacks for
+            // stripped player builds.
+            Shader shader = Shader.Find("UI/Default") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Futile/Basic");
+            if (shader == null) throw new InvalidOperationException("DryCycle AI Observatory: no compatible UI shader found.");
+            shaderName = shader.name;
+            material = new Material(shader)
+            {
+                name = "DryCycle AI Observatory Material",
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            material.mainTexture = fontTexture;
+            if (material.HasProperty("unity_GUIZTestMode")) material.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
+            if (material.HasProperty("_ZTest")) material.SetInt("_ZTest", (int)CompareFunction.Always);
+            if (material.HasProperty("_ZWrite")) material.SetInt("_ZWrite", 0);
+            if (material.HasProperty("_Cull")) material.SetInt("_Cull", (int)CullMode.Off);
+            if (material.HasProperty("_TextureSampleAdd")) material.SetVector("_TextureSampleAdd", Vector4.zero);
+            if (material.HasProperty("_Color")) material.SetColor("_Color", Color.white);
+
+            mesh = new Mesh
+            {
+                name = "DryCycle AI Observatory Mesh",
+                hideFlags = HideFlags.HideAndDontSave,
+                indexFormat = IndexFormat.UInt32
+            };
+            mesh.MarkDynamic();
+            // Explicit command-buffer draws should not disappear because Unity evaluates
+            // the mesh against the camera's ordinary world-space frustum before our
+            // screen-space projection matrices are applied.
+            mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 100000f);
+
+            renderCamera.AddCommandBuffer(CameraEvent.AfterEverything, commands);
+            commandBufferAttached = true;
+            logger?.LogInfo($"DryCycle AI Observatory renderer ready: shader={shaderName}, meshIndexFormat={mesh.indexFormat}, cameraEvent={CameraEvent.AfterEverything}, cameraId={renderCamera.GetInstanceID()}.");
+        }
+        catch
         {
-            name = "DryCycle AI Observatory Mesh",
-            hideFlags = HideFlags.HideAndDontSave,
-            indexFormat = IndexFormat.UInt32
-        };
-        mesh.MarkDynamic();
-        logger?.LogInfo($"DryCycle AI Observatory renderer ready: shader={shader.name}, meshIndexFormat={mesh.indexFormat}.");
+            Dispose();
+            throw;
+        }
     }
 
     internal void MakeCurrent()
@@ -110,7 +145,6 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         FeedMouse(io);
         FeedKeyboard(io);
         ImGui.NewFrame();
-        frameReady = false;
 
         if (!beginFrameLogged)
         {
@@ -124,7 +158,6 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         if (disposed) return;
         MakeCurrent();
         ImGui.Render();
-        frameReady = true;
 
         ImDrawDataPtr data = ImGui.GetDrawData();
         if (!drawDataLogged && data.CmdListsCount > 0 && data.TotalVtxCount > 0 && data.TotalIdxCount > 0)
@@ -132,27 +165,21 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             drawDataLogged = true;
             logger?.LogInfo($"DryCycle AI Observatory first DrawData: cmdLists={data.CmdListsCount}, vertices={data.TotalVtxCount}, indices={data.TotalIdxCount}, displayPos={data.DisplayPos.X:0.###},{data.DisplayPos.Y:0.###}, displaySize={data.DisplaySize.X:0.###}x{data.DisplaySize.Y:0.###}, framebufferScale={data.FramebufferScale.X:0.###},{data.FramebufferScale.Y:0.###}.");
         }
-    }
 
-    internal void Render()
-    {
-        if (disposed || !frameReady || context == IntPtr.Zero) return;
-        MakeCurrent();
-        ImDrawDataPtr data = ImGui.GetDrawData();
         if (data.TotalVtxCount <= 0 || data.TotalIdxCount <= 0 || data.CmdListsCount <= 0)
         {
+            commands.Clear();
+            preparedDrawCount = 0;
             if (!emptyDrawDataLogged)
             {
                 emptyDrawDataLogged = true;
-                logger?.LogWarning($"DryCycle AI Observatory render reached with empty DrawData: cmdLists={data.CmdListsCount}, vertices={data.TotalVtxCount}, indices={data.TotalIdxCount}.");
+                logger?.LogWarning($"DryCycle AI Observatory frame produced empty DrawData: cmdLists={data.CmdListsCount}, vertices={data.TotalVtxCount}, indices={data.TotalIdxCount}.");
             }
-            frameReady = false;
             return;
         }
 
         BuildMesh(data);
-        ExecuteDrawCommands(data);
-        frameReady = false;
+        PrepareCameraCommands(data);
     }
 
     internal bool WantsMouse
@@ -370,7 +397,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
                     (clip.Y - displayPos.Y) * scaleY,
                     (clip.Z - displayPos.X) * scaleX,
                     (clip.W - displayPos.Y) * scaleY);
-                drawCommands.Add(new DrawCommand(transformedClip, subMesh));
+                drawCommands.Add(new DrawCommand(transformedClip, subMesh, cmd.TextureId));
                 if (!haveFirstClip && transformedClip.width > 0f && transformedClip.height > 0f)
                 {
                     firstClip = transformedClip;
@@ -396,9 +423,7 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         mesh.SetColors(colors);
         mesh.subMeshCount = drawCommands.Count;
         for (int i = 0; i < drawCommands.Count; i++) mesh.SetTriangles(indexBuffers[i], i, false);
-        float width = Mathf.Max(1f, data.DisplaySize.X * scaleX);
-        float height = Mathf.Max(1f, data.DisplaySize.Y * scaleY);
-        mesh.bounds = new Bounds(new Vector3(width * 0.5f, height * 0.5f, 0f), new Vector3(width, height, 1f));
+        mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 100000f);
 
         if (!meshLogged)
         {
@@ -409,21 +434,23 @@ internal sealed class AIDebugImGuiBackend : IDisposable
         }
     }
 
-    private void ExecuteDrawCommands(ImDrawDataPtr data)
+    private void PrepareCameraCommands(ImDrawDataPtr data)
     {
+        preparedDrawCount = 0;
+        commands.Clear();
         if (drawCommands.Count == 0) return;
+
         float scaleX = data.FramebufferScale.X > 0f ? data.FramebufferScale.X : 1f;
         float scaleY = data.FramebufferScale.Y > 0f ? data.FramebufferScale.Y : 1f;
         float width = Mathf.Max(1f, data.DisplaySize.X * scaleX);
         float height = Mathf.Max(1f, data.DisplaySize.Y * scaleY);
-        commands.Clear();
+
+        commands.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
         commands.SetViewport(new Rect(0f, 0f, width, height));
         commands.SetViewProjectionMatrices(
             Matrix4x4.identity,
             Matrix4x4.Ortho(0f, width, height, 0f, -1f, 1f));
-        properties.SetTexture("_MainTex", fontTexture);
 
-        int executed = 0;
         for (int i = 0; i < drawCommands.Count; i++)
         {
             DrawCommand draw = drawCommands[i];
@@ -432,17 +459,25 @@ internal sealed class AIDebugImGuiBackend : IDisposable
             float x2 = Mathf.Clamp(draw.Clip.xMax, 0f, width);
             float y2 = Mathf.Clamp(draw.Clip.yMax, 0f, height);
             if (x2 <= x1 || y2 <= y1) continue;
+
+            Texture texture = fontTexture;
+            if (draw.TextureId != IntPtr.Zero && draw.TextureId != FontTextureId && !unknownTextureLogged)
+            {
+                unknownTextureLogged = true;
+                logger?.LogWarning($"DryCycle AI Observatory encountered unsupported ImGui TextureId={draw.TextureId}; using the font atlas fallback for this session.");
+            }
+            properties.Clear();
+            properties.SetTexture("_MainTex", texture);
             commands.EnableScissorRect(new Rect(x1, height - y2, x2 - x1, y2 - y1));
-            commands.DrawMesh(mesh, Matrix4x4.identity, material, draw.SubMesh, -1, properties);
-            executed++;
+            commands.DrawMesh(mesh, Matrix4x4.identity, material, draw.SubMesh, 0, properties);
+            preparedDrawCount++;
         }
         commands.DisableScissorRect();
-        Graphics.ExecuteCommandBuffer(commands);
 
-        if (!renderLogged)
+        if (!renderPreparedLogged)
         {
-            renderLogged = true;
-            logger?.LogInfo($"DryCycle AI Observatory first render: drawCommands={executed}/{drawCommands.Count}, viewport={width:0}x{height:0}, ExecuteCommandBuffer completed.");
+            renderPreparedLogged = true;
+            logger?.LogInfo($"DryCycle AI Observatory first camera render buffer prepared: drawCommands={preparedDrawCount}/{drawCommands.Count}, viewport={width:0}x{height:0}, shader={shaderName}, cameraEvent={CameraEvent.AfterEverything}.");
         }
     }
 
@@ -450,7 +485,13 @@ internal sealed class AIDebugImGuiBackend : IDisposable
     {
         if (disposed) return;
         disposed = true;
-        frameReady = false;
+        if (commandBufferAttached && renderCamera != null)
+        {
+            try { renderCamera.RemoveCommandBuffer(CameraEvent.AfterEverything, commands); }
+            catch { }
+            commandBufferAttached = false;
+        }
+        commands.Clear();
         commands.Release();
         if (mesh != null) Object.Destroy(mesh);
         if (material != null) Object.Destroy(material);
