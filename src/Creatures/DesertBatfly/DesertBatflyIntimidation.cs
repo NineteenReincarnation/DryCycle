@@ -233,8 +233,8 @@ internal static class DesertBatflyIntimidation
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
-    // Read-only: role checks must never create a morale state, especially for corpses.
-    internal static bool BlocksSocialRoles(DesertBatfly bat)
+    // Read-only: fear checks must never create a morale state, especially for corpses.
+    internal static bool HasActiveFearSuppression(DesertBatfly bat)
     {
         if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active) return false;
         return state.PlayerFear.ShockTicks > 0 || state.PredatorFear.ShockTicks > 0 ||
