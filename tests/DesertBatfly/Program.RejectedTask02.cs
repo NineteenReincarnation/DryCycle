@@ -33,8 +33,11 @@ internal static partial class Program
     }
 
     // Program.cs historically ended by calling RunRoleIntegration from the removed
-    // Task-02 test file. Keep only a zero-behavior compatibility entry point so existing
-    // test layout compiles; it now runs the real Task-09 regression suite and contains no
-    // social-role implementation, enum, score or runtime dependency.
-    private static void RunRoleIntegration() => RunTask09();
+    // Task-02 test file. Keep the old entry-point name only as a neutral regression
+    // dispatcher; it runs current Task09/Task10 suites and contains no role implementation.
+    private static void RunRoleIntegration()
+    {
+        RunTask09();
+        RunTask10();
+    }
 }
