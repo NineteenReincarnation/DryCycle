@@ -56,18 +56,6 @@ internal sealed class DesertBatflyInjury
             return "BlocksCombat=false";
         }
     }
-    internal bool BlocksRole(ExpressedSocialRole role) => BlocksCombat ||
-        (role == ExpressedSocialRole.Bully && PhysicalCapability < 0.78f) ||
-        (role == ExpressedSocialRole.Sentinel && PhysicalCapability < 0.66f);
-    internal string RoleBlockReason(ExpressedSocialRole role)
-    {
-        if (BlocksCombat) return CombatBlockReason;
-        if (role == ExpressedSocialRole.Bully && PhysicalCapability < 0.78f)
-            return $"PhysicalCapability={PhysicalCapability:0.000} < Bully 0.780";
-        if (role == ExpressedSocialRole.Sentinel && PhysicalCapability < 0.66f)
-            return $"PhysicalCapability={PhysicalCapability:0.000} < Sentinel 0.660";
-        return $"BlocksRole({role})=false";
-    }
     internal float WingAmplitude(int side) => 1f - 0.48f * (side == 0 ? State.LeftWingInjury : State.RightWingInjury);
     internal float BodyTilt => WingBias * 9f;
 
@@ -180,7 +168,7 @@ internal sealed class DesertBatflyInjury
         recoverySample = 0;
         if (bat.room == null || !bat.Consious || bat.inShortcut || !DesertBatflySocialBond.CanRespond(bat) ||
             bat.DesertAI.HasImmediateDanger || bat.DesertAI.FormalAttack ||
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) || DesertBatflyIntimidation.BlocksSocialRoles(bat)) return;
+            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) || DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return;
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain;
         Recover(roost ? 0.004f : 0.0005f);
     }
