@@ -13,6 +13,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal readonly DesertBatflyEmergence Emergence;
     internal DesertBatflyState DesertState => (DesertBatflyState)State;
     internal DesertBatflyPersonality Personality => DesertState.Personality;
+    internal World world => abstractCreature?.world;
 
     private int mealFood = 2;
     private int socialSampleTicks;
