@@ -19,6 +19,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.FlyAI.FleeFromRainUpdate += Rain;
+        On.LizardTongue.Update += TongueUpdate;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
@@ -36,6 +37,7 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.FlyAI.FleeFromRainUpdate -= Rain;
+        On.LizardTongue.Update -= TongueUpdate;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
@@ -77,6 +79,29 @@ internal static class DesertBatflyHooks
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
+    }
+
+    private static void TongueUpdate(On.LizardTongue.orig_Update orig, LizardTongue self)
+    {
+        LizardTongue.State previousState = self.state;
+        PhysicalObject previousOwner = self.attached?.owner;
+        orig(self);
+
+        if (self?.lizard == null ||
+            self.state != LizardTongue.State.AttachedInSmallObject ||
+            self.attached?.owner is not DesertBatfly desert ||
+            desert.dead || desert.slatedForDeletetion ||
+            !DesertBatflyIntimidation.IsSupportedLethalThreat(self.lizard))
+            return;
+
+        // Only register the actual attach transition. The later Lizard.Grabbed path may
+        // report the same capture again, but BroadcastPredatorCapture already owns its
+        // event de-duplication and keeping BeginCapture alive across both phases.
+        if (previousState == LizardTongue.State.AttachedInSmallObject && previousOwner == desert)
+            return;
+
+        DesertBatflyIntimidation.BroadcastPredatorCapture(desert, self.lizard, self);
+        desert.DesertAI.Threatened(self.lizard, true);
     }
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
