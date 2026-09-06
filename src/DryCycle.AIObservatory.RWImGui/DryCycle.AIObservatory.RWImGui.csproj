@@ -58,12 +58,11 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- IMPORTANT: use the assemblies shipped by RWImGUI itself. Do not replace these
-         with the public ImGui.NET NuGet package; RWImGUI uses a modified fork. -->
-    <Reference Include="rain-world-imgui-api">
-      <HintPath>$(RWImGuiPluginDir)/rain-world-imgui-api.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <!-- IMPORTANT: compile ImGui widget calls against the modified ImGui.NET assembly
+         shipped by RWImGUI itself. The API assembly is intentionally NOT a compile-time
+         reference anymore: BridgePlugin discovers AddMenuCallback from the loaded
+         rain-world-imgui-api assembly at runtime, so namespace/type moves in RWImGUI do
+         not break DryCycle's build. -->
     <Reference Include="ImGui.NET">
       <HintPath>$(RWImGuiPluginDir)/ImGui.NET.dll</HintPath>
       <Private>false</Private>
