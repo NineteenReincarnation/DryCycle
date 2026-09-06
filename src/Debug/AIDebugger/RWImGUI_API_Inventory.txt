@@ -87,11 +87,13 @@ shipped with RWImGUI.
 Rawra confirmed that RWImGUI uses a modified ImGui.NET fork for performance and support
 for additional native ImGui libraries.
 
-DryCycle migration rule:
-- public NuGet ImGui.NET may temporarily remain compile-only for legacy source
-- public NuGet ImGui.NET runtime must NOT be copied into Ancient Site plugins
-- cimgui.dll from the retired DryCycle backend must NOT be copied there either
-- the bridge compiles against RWImGUI's own ImGui.NET.dll with Private=false
+Current DryCycle implementation:
+- DryCycle.dll has NO ImGui.NET PackageReference.
+- Retired ImGui-facing source files are excluded from DryCycle.dll compilation.
+- public NuGet ImGui.NET runtime is NOT copied into Ancient Site plugins.
+- cimgui.dll from the retired DryCycle backend is NOT copied there either.
+- the optional bridge compiles against RWImGUI's own ImGui.NET.dll with Private=false.
+- a normal DryCycle build removes stale ImGui.NET.dll/cimgui.dll left by older builds.
 
 ============================================================
 4. VERIFIED FONT / INPUT NOTES
@@ -118,19 +120,29 @@ These MUST be verified from the user's installed v1.10.x assemblies or from a co
 they are deliberately not guessed in the migration code:
 
 - exact BepInEx Plugin GUID of RWImGUI
-- exact BepInDependency string to use for the optional bridge
+- exact BepInDependency string to use for RWImGUI itself
 - whether AddMenuCallback has a public removal counterpart
 - whether the callback is guaranteed to run on the Unity main thread
 - full Context creation/current/destruction API names
 - managed DockBuilder availability in the modified ImGui.NET assembly
 - texture registration API, if any
-- exact plugin directory layout if the Workshop install differs from rwimgui/plugins
 
 Current safety policy while these remain unknown:
 - callback is treated as a render/present callback, not a Unity main-thread callback
 - callback must not touch RainWorld / Creature / AI / UnityEngine.Object live state
-- no guessed BepInDependency attribute is added
+- only the known DryCycle dependency GUID (Anno) is declared on the bridge
+- no guessed RWImGUI BepInDependency attribute is added
 - registered callback remains process-lifetime and becomes a no-op when bridge is disabled
+
+Local inventory helper:
+scripts/inspect_rwimgui_api.ps1
+
+The helper loads the user's exact installed rain-world-imgui-api.dll + modified ImGui.NET.dll
+and prints:
+- BepInPlugin attributes
+- ImGUIAPI candidate type/methods
+- context-related public types
+- Callback/Remove/Context/Font/Texture/Dock keyword methods
 
 ============================================================
 6. PHASE 1 IMPLEMENTATION NOW IN REPOSITORY
@@ -151,6 +163,15 @@ Proof behavior:
 - when visible, draws a small window containing:
   RWImGUI backend connected
 
+Build behavior:
+- normal DryCycle build looks for Workshop item 3417372413 in both common layouts:
+  workshop/content/312520/3417372413/plugins
+  workshop/content/312520/3417372413/rwimgui/plugins
+- local StreamingAssets/mods/rwimgui/plugins is also supported
+- -p:RWImGuiPluginDir=... overrides detection
+- if RWImGUI is found, the bridge is built automatically after DryCycle.dll
+- if it is absent, the bridge build is skipped and stale bridge DLL/PDB are removed
+
 Expected BepInEx diagnostics:
 - DryCycle RWImGUI bridge loaded...
 - DryCycle RWImGUI API inventory (runtime): api=..., imgui=...
@@ -170,7 +191,14 @@ AIDebuggerRuntime no longer creates the old Overlay Camera and no longer initial
 - Futile render-target presentation
 
 The old implementation files remain temporarily in source as migration reference, but are
-not instantiated by AIDebuggerRuntime.
+excluded from DryCycle.dll compilation:
+- Runtime/AIDebugDockingNative.cs
+- Runtime/AIDebugImGuiBackend.cs
+- Runtime/AIDebugImGuiIniIsolation.cs
+- Runtime/AIDebugStyleController.cs
+- UI/AIDebugAdvancedOverlay.cs
+- UI/AIDebugWorldOverlay.cs
+- UI/AIDebuggerWindowV3.cs
 
 DryCycle F7 remains the main-thread source of Observatory visibility.
 The optional RWImGUI bridge copies that bool and only renders it in Present.
