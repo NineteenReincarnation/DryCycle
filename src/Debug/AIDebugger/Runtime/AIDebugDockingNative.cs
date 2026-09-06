@@ -39,6 +39,12 @@ internal static class AIDebugDockingNative
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
     private static extern void igDockBuilderFinish(uint node_id);
 
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern void igSetWindowPos_Str(string name, Num.Vector2 pos, ImGuiCond cond);
+
+    [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern void igSetWindowSize_Str(string name, Num.Vector2 size, ImGuiCond cond);
+
     // Dear ImGui/cimgui uses size_t here. UIntPtr is required on Rain World's x64
     // process; using uint/out uint corrupts the native ABI because size_t is 8 bytes.
     [DllImport("cimgui", CallingConvention = CallingConvention.Cdecl)]
@@ -50,6 +56,13 @@ internal static class AIDebugDockingNative
     internal static void DockSpace(uint dockspaceId, Num.Vector2 size,
         ImGuiDockNodeFlags flags = ImGuiDockNodeFlags.None) =>
         igDockSpace(dockspaceId, size, flags, IntPtr.Zero);
+
+    internal static void KeepWindowInViewport(string name, Num.Vector2 pos, Num.Vector2 size)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        igSetWindowPos_Str(name, pos, ImGuiCond.Always);
+        igSetWindowSize_Str(name, size, ImGuiCond.Always);
+    }
 
     internal static void BuildDefault(uint dockspaceId, Num.Vector2 size)
     {
