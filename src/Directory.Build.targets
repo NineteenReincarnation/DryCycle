@@ -18,10 +18,12 @@
   <!-- Late-imported properties can safely use RainWorldDir from DryCycle.csproj. -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
     <BuildRWImGuiBridge Condition="'$(BuildRWImGuiBridge)' == ''">true</BuildRWImGuiBridge>
-    <RWImGuiWorkshopPluginDir Condition="'$(RWImGuiWorkshopPluginDir)' == ''">$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPluginDir>
+    <RWImGuiWorkshopRootPluginDir Condition="'$(RWImGuiWorkshopRootPluginDir)' == ''">$(RainWorldDir)/../../workshop/content/312520/3417372413/plugins</RWImGuiWorkshopRootPluginDir>
+    <RWImGuiWorkshopPackagePluginDir Condition="'$(RWImGuiWorkshopPackagePluginDir)' == ''">$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPackagePluginDir>
     <RWImGuiLocalPluginDir Condition="'$(RWImGuiLocalPluginDir)' == ''">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/rwimgui/plugins</RWImGuiLocalPluginDir>
     <ResolvedRWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' != '' and Exists('$(RWImGuiPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiPluginDir)</ResolvedRWImGuiPluginDir>
-    <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPluginDir)</ResolvedRWImGuiPluginDir>
+    <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopRootPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopRootPluginDir)</ResolvedRWImGuiPluginDir>
+    <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPackagePluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPackagePluginDir)</ResolvedRWImGuiPluginDir>
     <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</ResolvedRWImGuiPluginDir>
   </PropertyGroup>
 
