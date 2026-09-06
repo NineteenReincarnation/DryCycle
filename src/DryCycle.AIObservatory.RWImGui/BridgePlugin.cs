@@ -16,7 +16,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.AIObservatory.RWImGui";
     public const string PluginName = "DryCycle AI Observatory RWImGUI Bridge";
-    public const string PluginVersion = "0.2.1";
+    public const string PluginVersion = "0.2.2";
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
@@ -34,18 +34,16 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
-        // Only copy the visibility bit from Unity's main thread. All actual Observatory
-        // data reaches the Present callback through AIDebugPresentationHub's immutable
-        // presentation snapshot.
-        ObservatoryFrontend.Visible = AIDebuggerRuntime.Visible;
+        // Visibility and RWImGUI context ownership are changed only from Unity's main
+        // thread. Do not switch RWImGUI contexts from inside the Present callback.
+        ObservatoryFrontend.SetVisibleFromMainThread(AIDebuggerRuntime.Visible);
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         ObservatoryFrontend.Enabled = false;
-        ObservatoryFrontend.Visible = false;
-        ObservatoryFrontend.ReleaseInputContext();
+        ObservatoryFrontend.SetVisibleFromMainThread(false);
         AIDebugPresentationHub.SetCaptureState(false, false);
         TryUnregisterCallback();
         AIDebugPresentationBridgeStatus.MarkFailure("RWImGUI bridge disabled");
@@ -70,9 +68,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
             Version apiVersion = typeof(ImGUIAPI).Assembly.GetName().Version;
             Version imguiVersion = typeof(ImGui).Assembly.GetName().Version;
 
-            // Verified against RWImGUI 1.12.0: this callback is invoked after the backend
-            // NewFrame calls and before RWImGUI renders the frame, regardless of whether
-            // RWImGUI's own menu is visible.
+            // AddAlwaysCallback is now only a Present heartbeat. The actual Observatory UI
+            // is rendered by ObservatoryInputContext.Render(), which is RWImGUI's intended
+            // context lifecycle and receives the same Win32 input stream.
             ImGUIAPI.AddAlwaysCallback(&ObservatoryFrontend.FrameCallback);
 
             callbackRegistered = true;
@@ -84,7 +82,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             log?.LogInfo(
                 "DryCycle RWImGUI AddAlwaysCallback registered directly through RWIMGUI.API.ImGUIAPI. " +
                 $"api={apiVersion}, imgui={imguiVersion}, hasContext={ImGUIAPI.HasContext}. " +
-                "The Observatory frontend now consumes main-thread snapshots; press F7 directly.");
+                "Observatory drawing is owned by its RWImGUI context; press F7 directly.");
         }
         catch (Exception error)
         {
@@ -124,6 +122,7 @@ internal static class ObservatoryFrontend
     private static int firstVisibleDrawLogged;
     private static int drawFailureLogged;
     private static int inputContextLogged;
+    private static int contextBusyLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static volatile bool visible;
@@ -131,41 +130,103 @@ internal static class ObservatoryFrontend
     private static ImFontPtr cjkFont;
 
     internal static bool Enabled { get; set; }
-
-    internal static bool Visible
-    {
-        get => visible;
-        set => visible = value;
-    }
+    internal static bool Visible => visible;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
+    internal static void SetVisibleFromMainThread(bool value)
+    {
+        visible = value;
+
+        if (!Enabled || !value)
+        {
+            ReleaseInputContext();
+            AIDebugPresentationHub.SetCaptureState(false, false);
+            return;
+        }
+
+        EnsureInputContextFromMainThread();
+    }
+
+    // This callback deliberately performs no ImGui drawing and no context switching. The
+    // 0.2.1 build changed CurrentContext from inside UserAlwaysRendererDispatcher and then
+    // drew a second UI path in the same Present frame. The user's runtime log terminates
+    // immediately after that transition with no managed exception, which is consistent
+    // with a native ImGui/RWImGUI failure. Keep this callback as a minimal heartbeat only.
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         if (!Enabled)
             return;
 
+        AIDebugPresentationBridgeStatus.MarkPresentSeen();
+        if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
+        {
+            log?.LogInfo(
+                $"DryCycle RWImGUI AddAlwaysCallback reached Present. swapChain=0x{idxgiSwapChain:X}, " +
+                $"syncInterval={syncInterval}, flags={flags}.");
+        }
+    }
+
+    private static void EnsureInputContextFromMainThread()
+    {
         try
         {
-            AIDebugPresentationBridgeStatus.MarkPresentSeen();
-            if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
-            {
-                log?.LogInfo(
-                    $"DryCycle RWImGUI AddAlwaysCallback reached Present. swapChain=0x{idxgiSwapChain:X}, " +
-                    $"syncInterval={syncInterval}, flags={flags}.");
-            }
+            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
 
-            if (!Visible)
+            // Never steal another RWImGUI consumer's active context. Once that context is
+            // released, the next Unity Update will acquire ours automatically.
+            if (ImGUIAPI.HasContext)
             {
-                ReleaseInputContext();
                 AIDebugPresentationHub.SetCaptureState(false, false);
+                if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
+                    log?.LogWarning(
+                        "DryCycle AI Observatory is visible, but another RWImGUI context currently owns input. " +
+                        "Close that RWImGUI menu/window and the Observatory will acquire input on the next frame.");
                 return;
             }
 
-            EnsureInputContext();
+            ImGUIAPI.SwitchContext(InputContext);
+            Interlocked.Exchange(ref contextBusyLogged, 0);
+            if (Interlocked.Exchange(ref inputContextLogged, 1) == 0)
+                log?.LogInfo(
+                    "DryCycle RWImGUI Observatory input context activated on the Unity main thread. " +
+                    "RWImGUI will call ObservatoryInputContext.Render during Present.");
+        }
+        catch (Exception error)
+        {
+            AIDebugPresentationHub.SetCaptureState(false, false);
+            AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
+            if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
+                log?.LogError("DryCycle RWImGUI Observatory context activation failed: " + error);
+        }
+    }
 
+    internal static void ReleaseInputContext()
+    {
+        try
+        {
+            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
+                ImGUIAPI.SwitchContext(null);
+        }
+        catch (Exception error)
+        {
+            log?.LogWarning("DryCycle RWImGUI Observatory input context release failed: " + error.Message);
+        }
+    }
+
+    internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
+    {
+        if (!Enabled || !Visible)
+        {
+            AIDebugPresentationHub.SetCaptureState(false, false);
+            return;
+        }
+
+        try
+        {
             if (Interlocked.Exchange(ref firstVisibleDrawLogged, 1) == 0)
-                log?.LogInfo("DryCycle RWImGUI F7-visible frame reached Present; drawing functional snapshot/command-queue Observatory UI.");
+                log?.LogInfo(
+                    "DryCycle RWImGUI Observatory context Render reached Present; drawing functional snapshot/command-queue UI.");
 
             AIDebugPresentationSnapshot snapshot = AIDebugPresentationHub.Current;
             bool pushedLanguageFont = TryPushLanguageFont(snapshot.Language);
@@ -186,39 +247,8 @@ internal static class ObservatoryFrontend
             AIDebugPresentationHub.SetCaptureState(false, false);
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
-            {
                 log?.LogError(
-                    "DryCycle RWImGUI Observatory draw failed. The callback remains registered for diagnostics. " + error);
-            }
-        }
-    }
-
-    private static void EnsureInputContext()
-    {
-        // RWImGUI only feeds Win32 input into ImGui while an IMGUIContext exists. An
-        // AddAlwaysCallback without a context therefore renders perfectly but cannot be
-        // clicked. Install a tiny logical context while F7 is open. It intentionally does
-        // not block the game's WndProc; DryCycle's existing PlayerInput gate neutralizes
-        // gameplay commands when ImGui actually wants mouse/keyboard input, and F7 remains
-        // visible to Unity so the Observatory can always be closed.
-        if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
-        if (ImGUIAPI.HasContext) return; // Respect RWImGUI's own menu or another consumer.
-
-        ImGUIAPI.SwitchContext(InputContext);
-        if (Interlocked.Exchange(ref inputContextLogged, 1) == 0)
-            log?.LogInfo("DryCycle RWImGUI Observatory input context activated; widgets are now interactive without opening the RWImGUI menu.");
-    }
-
-    internal static void ReleaseInputContext()
-    {
-        try
-        {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
-                ImGUIAPI.SwitchContext(null);
-        }
-        catch (Exception error)
-        {
-            log?.LogWarning("DryCycle RWImGUI Observatory input context release failed: " + error.Message);
+                    "DryCycle RWImGUI Observatory context draw failed. The context remains installed for diagnostics. " + error);
         }
     }
 
@@ -249,8 +279,6 @@ internal static class ObservatoryFrontend
             ImFontPtr candidate = fonts[i];
             if (candidate.NativePtr == null) continue;
 
-            // RWImGUI 1.12 merges NotoSansSC into one of its heading fonts. The default
-            // FiraCode font has no CJK, which is why Chinese text previously became '?'.
             if (candidate.FindGlyphNoFallback((ushort)'中').NativePtr == null ||
                 candidate.FindGlyphNoFallback((ushort)'文').NativePtr == null ||
                 candidate.FindGlyphNoFallback((ushort)'实').NativePtr == null ||
@@ -267,7 +295,9 @@ internal static class ObservatoryFrontend
         if (cjkFont.NativePtr != null)
         {
             if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
-                log?.LogInfo($"DryCycle RWImGUI CJK font selected from RWImGUI atlas: index={bestIndex}, size={cjkFont.FontSize:0.##}. Chinese UI glyphs are available.");
+                log?.LogInfo(
+                    $"DryCycle RWImGUI CJK font selected from RWImGUI atlas: index={bestIndex}, " +
+                    $"size={cjkFont.FontSize:0.##}. Chinese UI glyphs are available.");
             return;
         }
 
@@ -279,16 +309,18 @@ internal static class ObservatoryFrontend
     }
 }
 
-// Logical RWImGUI input owner. Drawing stays in AddAlwaysCallback so it remains independent
-// from RWImGUI's menu lifecycle. Returning false from BlockWMEvent is deliberate: the Win32
-// backend still receives input, but Unity also receives F7 and DryCycle's main-thread input
-// gate decides whether gameplay commands are neutralized.
+// ObservatoryInputContext is the sole owner of interactive Observatory drawing. RWImGUI
+// invokes this method from its normal CurrentContext.Render slot after NewFrame. Keeping
+// the UI here ensures window rendering and Win32 input use one coherent context lifecycle.
 internal sealed class ObservatoryInputContext : IMGUIContext
 {
     public override void Render(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
+        ObservatoryFrontend.RenderFromContext(ref idxgiSwapChain, ref syncInterval, ref flags);
     }
 
+    // Keep Unity's WndProc alive so F7 can always close the Observatory. DryCycle's existing
+    // PlayerInput gate suppresses gameplay controls only when ImGui reports capture intent.
     public override bool BlockWMEvent() => false;
 
     public override void OnDestroyed()
