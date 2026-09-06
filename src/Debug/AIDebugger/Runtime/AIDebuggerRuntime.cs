@@ -1,31 +1,39 @@
 using System;
-using System.Diagnostics;
 using BepInEx.Logging;
-using ImGuiNET;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
 
+// Transitional main-thread host for the RWImGUI migration.
+//
+// The old DryCycle-owned ImGui renderer (Camera -> Mesh -> CommandBuffer -> Futile) is
+// intentionally not constructed anymore. F7 visibility, trace visibility, session export,
+// input-gate installation and world-step installation remain owned by DryCycle. The
+// optional DryCycle.AIObservatory.RWImGui bridge reads this state and presents the UI via
+// Rawra's Win32 + DX11 Present backend.
 internal static class AIDebuggerRuntime
 {
     private static GameObject hostObject;
     private static AIDebuggerHost host;
 
     internal static bool Visible => host?.Visible == true;
-    internal static bool WantsMouse => host?.WantsMouse == true;
-    internal static bool WantsKeyboard => host?.WantsKeyboard == true;
-    internal static bool BlocksPlayerInput => host?.BlocksPlayerInput == true;
+
+    // These stay false until the RWImGUI frontend publishes its capture state back to the
+    // main thread. Returning false is safer than letting the retired renderer steal input.
+    internal static bool WantsMouse => false;
+    internal static bool WantsKeyboard => false;
+    internal static bool BlocksPlayerInput => false;
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
-        // Load first so the install diagnostics report the actual persisted AutoOpen value.
         AIDebugSettings.Load(logger);
-        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}.");
+        logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}, renderer=RWImGUI-bridge.");
 
-        // Input isolation and world stepping are optional subsystems. Their failure must
-        // never prevent the renderer/host from being installed.
+        // These are independent main-thread systems. Their failure must not prevent the
+        // RWImGUI frontend from drawing.
         AIDebugInputGate.Install(logger);
         AIDebugSimulationControl.Install(logger);
+
         if (host != null)
         {
             host.Bind(rainWorld, logger);
@@ -34,35 +42,20 @@ internal static class AIDebuggerRuntime
         }
 
         AIDebugRegistry.Initialize(logger);
-        hostObject = new GameObject("DryCycle AI Observatory")
+        hostObject = new GameObject("DryCycle AI Observatory Controller")
         {
             hideFlags = HideFlags.HideAndDontSave
         };
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
 
-        Camera camera = hostObject.AddComponent<Camera>();
-        // Rain World does not present its game cameras directly to the backbuffer. Futile
-        // renders into FScreen.renderTexture and Unity UI presents that texture afterwards.
-        // Therefore this overlay camera must render into the same Futile target; drawing to
-        // the backbuffer can be covered by the presentation layer even when the camera and
-        // command buffer execute successfully.
-        camera.enabled = false;
-        camera.clearFlags = CameraClearFlags.Nothing;
-        camera.backgroundColor = Color.clear;
-        camera.cullingMask = 0;
-        camera.depth = 10000f;
-        camera.orthographic = true;
-        camera.allowHDR = false;
-        camera.allowMSAA = false;
-        camera.useOcclusionCulling = false;
-        camera.rect = new Rect(0f, 0f, 1f, 1f);
-        camera.targetTexture = null;
-        logger?.LogInfo($"DryCycle AI Observatory overlay camera created. id={camera.GetInstanceID()}, enabled={camera.enabled}, depth={camera.depth}, cullingMask={camera.cullingMask}, rect={camera.rect}, presentationTarget=pending-Futile.");
-
+        // Deliberately do not add a Camera. RWImGUI owns presentation through the game's
+        // DX11 swap-chain Present path. Keeping a second Unity/Futile renderer active would
+        // duplicate ImGui contexts and reintroduce the visibility problems this migration
+        // is designed to remove.
         host = hostObject.AddComponent<AIDebuggerHost>();
         host.Bind(rainWorld, logger);
         host.SetStartupVisible(AIDebugSettings.AutoOpen);
-        logger?.LogInfo($"DryCycle AI Observatory host created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, cameraEnabled={camera.enabled}.");
+        logger?.LogInfo($"DryCycle AI Observatory controller created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, legacyRenderer=disabled, overlayCamera=none.");
     }
 
     internal static void Uninstall()
@@ -81,40 +74,22 @@ internal sealed class AIDebuggerHost : MonoBehaviour
 {
     private RainWorld rainWorld;
     private ManualLogSource logger;
-    private Camera overlayCamera;
-    private AIDebugImGuiBackend backend;
-    private readonly AIDebuggerWindowV3 window = new();
     private bool visible;
-    private bool backendFailed;
     private bool lifecycleLogged;
-    private bool windowDrawLogged;
-    private bool postRenderLogged;
-    private bool missingFutileTargetLogged;
-    private RenderTexture boundFutileTarget;
-    private string lastUiFailureSignature;
-    private double overheadMs;
 
     internal bool Visible => visible;
-    internal bool WantsMouse => visible && backend?.WantsMouse == true;
-    internal bool WantsKeyboard => visible && (window.InteractMode || backend?.WantsKeyboard == true);
-    internal bool BlocksPlayerInput => visible &&
-        (window.InteractMode || backend?.WantsKeyboard == true || backend?.WantsMouse == true);
 
     internal void Bind(RainWorld rw, ManualLogSource log)
     {
         rainWorld = rw;
         logger = log;
-        overlayCamera = GetComponent<Camera>();
-        bool targetReady = SyncOverlayRenderTarget();
-        logger?.LogInfo($"DryCycle AI Observatory host Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, camera={(overlayCamera != null ? overlayCamera.GetInstanceID().ToString() : "missing")}, futileTarget={targetReady}.");
+        logger?.LogInfo($"DryCycle AI Observatory controller Bind completed. rainWorld={(rainWorld != null ? "yes" : "no")}, presentation=RWImGUI.");
     }
 
     internal void SetStartupVisible(bool value)
     {
         visible = value;
         AIDebugTrace.SetVisible(value);
-        bool targetReady = SyncOverlayRenderTarget();
-        if (overlayCamera != null) overlayCamera.enabled = value && targetReady;
     }
 
     private void Update()
@@ -122,204 +97,23 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         if (!lifecycleLogged)
         {
             lifecycleLogged = true;
-            logger?.LogInfo($"DryCycle AI Observatory host Update is running. visible={visible}, enabled={enabled}, active={gameObject.activeInHierarchy}.");
+            logger?.LogInfo($"DryCycle AI Observatory controller Update is running. visible={visible}, enabled={enabled}, active={gameObject.activeInHierarchy}, presentation=RWImGUI.");
         }
-
-        // Futile can replace FScreen.renderTexture when the internal game width changes.
-        // Rebind by reference instead of assuming the target created at startup survives.
-        bool targetReady = SyncOverlayRenderTarget();
-        if (visible && overlayCamera != null && overlayCamera.enabled != targetReady)
-            overlayCamera.enabled = targetReady;
 
         if (Input.GetKeyDown(KeyCode.F7))
         {
-            bool cameraBefore = overlayCamera?.enabled == true;
-            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visibleBefore={visible}, cameraBefore={cameraBefore}, backendFailed={backendFailed}, backendCreated={backend != null}, futileTargetReady={targetReady}.");
-            if (backendFailed)
-            {
-                logger?.LogWarning("DryCycle AI Observatory is disabled for this session because its ImGui backend previously failed. Check the earlier error and restart Rain World after fixing the runtime files.");
-                visible = false;
-                AIDebugTrace.SetVisible(false);
-                if (overlayCamera != null) overlayCamera.enabled = false;
-                return;
-            }
-
+            bool before = visible;
             visible = !visible;
             AIDebugTrace.SetVisible(visible);
-            targetReady = SyncOverlayRenderTarget();
-            if (overlayCamera != null) overlayCamera.enabled = visible && targetReady;
-            logger?.LogInfo($"DryCycle AI Observatory visibility toggled by F7. visibleNow={visible}, cameraEnabled={overlayCamera?.enabled == true} (was {cameraBefore}), presentation={(targetReady ? "Futile.renderTexture" : "waiting-for-Futile")}.");
+            logger?.LogInfo($"DryCycle AI Observatory F7 detected. visible {before} -> {visible}. Presentation owner=RWImGUI bridge; legacy Unity renderer is disabled.");
         }
 
-        // Whole-session export is intentionally independent of the Dock layout. It can
-        // still be used after closing F7 as long as the retained trace buffers exist.
+        // Whole-session export is intentionally independent of the presentation frontend.
         if (Input.GetKeyDown(KeyCode.F8) &&
             (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
             (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
         {
             TryExportSession();
-        }
-
-        if (!visible) return;
-        if (!targetReady) return;
-        if (Input.GetKeyDown(KeyCode.F6)) window.FullMode = !window.FullMode;
-        // Do not steal Tab from an active ImGui text/navigation widget.
-        if (Input.GetKeyDown(KeyCode.Tab) && backend?.WantsKeyboard != true) window.ToggleInteract();
-        if (!EnsureBackend()) return;
-
-        Stopwatch watch = Stopwatch.StartNew();
-        try
-        {
-            try
-            {
-                backend.BeginFrame();
-                AIDebugStyleController.Apply();
-            }
-            catch (Exception error)
-            {
-                FailBackend("begin frame", error);
-                return;
-            }
-
-            RainWorldGame game = rainWorld?.processManager?.currentMainLoop as RainWorldGame;
-            if (!windowDrawLogged)
-            {
-                windowDrawLogged = true;
-                logger?.LogInfo($"DryCycle AI Observatory Window.Draw entered. game={(game != null ? "RainWorldGame" : "none/menu")}, fullMode={window.FullMode}.");
-            }
-
-            bool uiFailed = false;
-            try
-            {
-                window.Draw(game, overheadMs);
-                if (!window.FullMode && game != null) KeepCompactOnScreen();
-                lastUiFailureSignature = null;
-            }
-            catch (Exception error)
-            {
-                uiFailed = true;
-                ReportUiFrameFailure(error);
-            }
-
-            try
-            {
-                // EndFrame rebuilds the camera-owned CommandBuffer. The dedicated camera
-                // executes it into Futile.screen.renderTexture after Rain World's own game
-                // cameras and before the game's presentation layer shows that texture.
-                backend.EndFrame();
-            }
-            catch (Exception error)
-            {
-                FailBackend(uiFailed ? "frame recovery" : "end frame", error);
-                return;
-            }
-        }
-        finally
-        {
-            watch.Stop();
-        }
-
-        overheadMs = overheadMs <= 0.0 ? watch.Elapsed.TotalMilliseconds
-            : overheadMs * 0.88 + watch.Elapsed.TotalMilliseconds * 0.12;
-    }
-
-    private bool SyncOverlayRenderTarget()
-    {
-        if (overlayCamera == null) return false;
-        RenderTexture target = Futile.screen?.renderTexture;
-        if (target == null)
-        {
-            overlayCamera.enabled = false;
-            overlayCamera.targetTexture = null;
-            boundFutileTarget = null;
-            if (!missingFutileTargetLogged)
-            {
-                missingFutileTargetLogged = true;
-                logger?.LogWarning("DryCycle AI Observatory is waiting for Futile.screen.renderTexture; backbuffer rendering is intentionally disabled because Rain World's presentation layer can cover it.");
-            }
-            return false;
-        }
-
-        missingFutileTargetLogged = false;
-        if (!ReferenceEquals(boundFutileTarget, target) || !ReferenceEquals(overlayCamera.targetTexture, target))
-        {
-            boundFutileTarget = target;
-            overlayCamera.targetTexture = target;
-            overlayCamera.clearFlags = CameraClearFlags.Nothing;
-            overlayCamera.rect = new Rect(0f, 0f, 1f, 1f);
-            postRenderLogged = false;
-            // Do not touch Futile.instance._cameraImage here. Its public field type is
-            // UnityEngine.UI.RawImage, which would force DryCycle to reference the separate
-            // UnityEngine.UI module just for a diagnostic. The render target itself is the
-            // only dependency needed by this backend.
-            logger?.LogInfo($"DryCycle AI Observatory presentation target bound to Futile.screen.renderTexture: targetId={target.GetInstanceID()}, texture={target.width}x{target.height}, logical={Futile.screen.pixelWidth}x{Futile.screen.pixelHeight}, renderScale={Futile.screen.renderScale}.");
-        }
-        return true;
-    }
-
-    private void ReportUiFrameFailure(Exception error)
-    {
-        string signature = error.GetType().FullName + "|" + error.Message + "|" + error.StackTrace;
-        if (string.Equals(signature, lastUiFailureSignature, StringComparison.Ordinal)) return;
-        lastUiFailureSignature = signature;
-        logger?.LogError("DryCycle AI Observatory UI/data frame failed. The ImGui renderer remains enabled; " +
-                         "only a renderer/NewFrame/Render failure disables the backend. " + error);
-    }
-
-    private void KeepCompactOnScreen()
-    {
-        float scale = Mathf.Clamp(AIDebugSettings.UiScale, 0.75f, 1.75f);
-        float width = Mathf.Min(405f * scale, Mathf.Max(1f, Screen.width - 16f));
-        float height = Mathf.Min(320f * scale, Mathf.Max(1f, Screen.height - 32f));
-        float x = Mathf.Max(8f, Screen.width - width - 16f);
-        const float y = 16f;
-        // Dear ImGui hashes the substring after ### as the stable window ID. Passing the
-        // ASCII-only ID here avoids any Win32 ANSI/UTF-8 mismatch when the visible title
-        // is Chinese.
-        AIDebugDockingNative.KeepWindowInViewport(
-            "###AICompact",
-            new System.Numerics.Vector2(x, y),
-            new System.Numerics.Vector2(width, height));
-    }
-
-    private void OnPostRender()
-    {
-        if (!visible || backend == null || backendFailed) return;
-        if (postRenderLogged) return;
-        postRenderLogged = true;
-        Rect rect = overlayCamera != null ? overlayCamera.rect : default;
-        RenderTexture targetTexture = overlayCamera?.targetTexture;
-        string target = targetTexture != null
-            ? $"FutileRT#{targetTexture.GetInstanceID()} {targetTexture.width}x{targetTexture.height}"
-            : "none";
-        logger?.LogInfo($"DryCycle AI Observatory first OnPostRender: cameraId={(overlayCamera != null ? overlayCamera.GetInstanceID() : 0)}, cameraEnabled={overlayCamera?.enabled == true}, active={gameObject.activeInHierarchy}, screen={Screen.width}x{Screen.height}, rect={rect}, target={target}, cullingMask={(overlayCamera != null ? overlayCamera.cullingMask : 0)}, commandBufferAttached={backend.CommandBufferAttached}, preparedDraws={backend.PreparedDrawCount}, shader={backend.ShaderName}, presentation=Futile-renderTexture.");
-    }
-
-    private bool EnsureBackend()
-    {
-        if (backend != null) return true;
-        if (backendFailed) return false;
-        try
-        {
-            if (overlayCamera == null)
-                throw new InvalidOperationException("DryCycle AI Observatory overlay camera is missing before backend initialization.");
-            if (!SyncOverlayRenderTarget()) return false;
-            logger?.LogInfo("DryCycle AI Observatory backend initialization started.");
-            AIDebugStyleController.Reset();
-            backend = new AIDebugImGuiBackend(logger, overlayCamera);
-            // The backend constructor creates and selects the ImGui context. Dear ImGui
-            // requires DockingEnable before the first NewFrame(), so initialize immutable
-            // context flags here, immediately after context creation and before BeginFrame.
-            AIDebugStyleController.InitializeContext();
-            ImGuiIOPtr io = ImGui.GetIO();
-            logger?.LogInfo($"DryCycle AI Observatory context flags configured before first NewFrame: ConfigFlags={io.ConfigFlags}, BackendFlags={io.BackendFlags}, automaticIni=disabled.");
-            logger?.LogInfo("DryCycle AI Observatory V3 initialized. F7 toggle, F6 compact/full, Tab live/interact, Alt+LMB world pick, Ctrl+Shift+F8 session export, whole-world pause/step enabled.");
-            return true;
-        }
-        catch (Exception error)
-        {
-            FailBackend("initialization", error);
-            return false;
         }
     }
 
@@ -336,48 +130,9 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         }
     }
 
-    private void FailBackend(string phase, Exception error)
-    {
-        backendFailed = true;
-        visible = false;
-        AIDebugTrace.SetVisible(false);
-        if (overlayCamera != null) overlayCamera.enabled = false;
-        logger?.LogError($"DryCycle AI Observatory {phase} failed: {error}");
-        try
-        {
-            backend?.Dispose();
-        }
-        catch (Exception disposeError)
-        {
-            logger?.LogWarning("DryCycle AI Observatory backend dispose after failure also failed: " + disposeError);
-        }
-        finally
-        {
-            backend = null;
-            AIDebugStyleController.Reset();
-        }
-    }
-
     private void OnDestroy()
     {
-        try
-        {
-            if (backend != null)
-            {
-                backend.MakeCurrent();
-                AIDebugDockingNative.SaveLayout();
-            }
-        }
-        catch (Exception error)
-        {
-            logger?.LogWarning("DryCycle AI Observatory layout save during shutdown failed: " + error.Message);
-        }
         AIDebugSettings.Save();
         AIDebugTrace.Reset();
-        try { backend?.Dispose(); }
-        catch (Exception error) { logger?.LogWarning("DryCycle AI Observatory backend dispose during shutdown failed: " + error.Message); }
-        backend = null;
-        boundFutileTarget = null;
-        AIDebugStyleController.Reset();
     }
 }
