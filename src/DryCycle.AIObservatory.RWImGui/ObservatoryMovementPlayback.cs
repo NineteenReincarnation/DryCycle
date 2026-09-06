@@ -32,8 +32,9 @@ internal static class ObservatoryMovementPlayback
         int cursorRoom = snapshot.CursorFastState.HasValue
             ? snapshot.CursorFastState.State.Room
             : int.MinValue;
+        AIDebugRoomGeometrySnapshot geometry = default;
         bool hasGeometry = cursorRoom != int.MinValue &&
-                           AIDebugRoomGeometryCache.TryGet(cursorRoom, out AIDebugRoomGeometrySnapshot geometry);
+                           AIDebugRoomGeometryCache.TryGet(cursorRoom, out geometry);
 
         float minX;
         float minY;
