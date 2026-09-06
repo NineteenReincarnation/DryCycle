@@ -107,7 +107,14 @@ internal sealed class AIDebugPresentationSnapshot
         CursorTick = cursorTick;
         CursorMotion = cursorMotion;
         CursorFastState = cursorFastState;
-        Timeline = timeline ?? AIDebugPresentationTimeline.Empty;
+
+        // This constructor is invoked by the Unity/main-thread host. Build only the small
+        // visible recorder viewport here; RWImGUI receives detached arrays and never reads
+        // live recorder blocks concurrently with the simulation writer.
+        int effectiveCursor = cursorTick == 0 ? tick : cursorTick;
+        Timeline = timeline ?? (selected != null && hasGame
+            ? AIDebugTimelinePresentationBuilder.Build(selected.Key, tick, effectiveCursor, viewMode)
+            : AIDebugPresentationTimeline.Empty);
     }
 }
 
