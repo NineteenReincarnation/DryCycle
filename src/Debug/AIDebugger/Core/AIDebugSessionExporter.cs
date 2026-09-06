@@ -119,6 +119,14 @@ internal static class AIDebugSessionExporter
         Property(b, "utility1", f.Utility1, true, indent + 1);
         Property(b, "utility2", f.Utility2, true, indent + 1);
         Property(b, "panic", f.Panic, true, indent + 1);
+        // Species-neutral frame slots stay present even for generic creatures. For a
+        // Desert Batfly these are the Task 04 injury timeline values; generic adapters
+        // leave them at zero without manufacturing gameplay state during export.
+        Property(b, "health", f.Health, true, indent + 1);
+        Property(b, "leftWingInjury", f.LeftWing, true, indent + 1);
+        Property(b, "rightWingInjury", f.RightWing, true, indent + 1);
+        Property(b, "postStunShock", f.PostStun, true, indent + 1);
+        Property(b, "physicalCapability", f.PhysicalCapability, true, indent + 1);
         Indent(b, indent + 1).Append("\"history\": ");
         WriteHistory(b, f.History, indent + 1);
         b.AppendLine();
