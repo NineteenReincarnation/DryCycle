@@ -73,6 +73,7 @@ internal static class AIDebuggerRuntime
     internal static void Uninstall()
     {
         AIDebugSettings.Save();
+        AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugSimulationControl.Uninstall();
         AIDebugInputGate.Uninstall();
@@ -207,12 +208,15 @@ internal sealed class AIDebuggerHost : MonoBehaviour
                 case AIDebugUiCommandKind.SelectEntity:
                     selectedKey = command.Key;
                     hasSelection = true;
+                    if (game != null && !AIDebugRecorder.Select(game, command.Key))
+                        logger?.LogWarning("DryCycle AI Observatory recorder could not bind selected entity " + command.Key + ".");
                     presentationDirty = true;
                     break;
 
                 case AIDebugUiCommandKind.ClearSelection:
                     hasSelection = false;
                     selectedKey = default;
+                    AIDebugRecorder.ClearSelection();
                     presentationDirty = true;
                     break;
 
@@ -305,10 +309,19 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AbstractCreature selected = AIDebugRegistry.Resolve(game, selectedKey);
             if (selected != null)
             {
+                // Transitional frontend path. V5's next migration step will resolve the
+                // Inspector from recorder data so Presentation no longer performs this
+                // second Capture. Keeping it here for now preserves all current UI fields.
                 AIDebugSnapshot captured = AIDebugRegistry.Capture(selected, game);
                 selectedPresentation = CopySnapshot(captured);
             }
         }
+
+        AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
+        string recorderStatus = recorder.ActiveTracked > 0
+            ? $"{presentationEntities.Length} entities · recorder {recorder.Mode} · tracked {recorder.ActiveTracked} · motion {recorder.MotionSamples} · changes {recorder.StateChanges}" +
+              (recorder.DroppedRecords > 0 ? $" · LOST {recorder.DroppedRecords}" : string.Empty)
+            : $"{presentationEntities.Length} entities · recorder {recorder.Mode}";
 
         AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
             true,
@@ -318,7 +331,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugLocalization.Language,
             presentationEntities,
             selectedPresentation,
-            $"{presentationEntities.Length} entities"));
+            recorderStatus));
     }
 
     private void PublishHidden(RainWorldGame game)
@@ -394,6 +407,7 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     private void OnDestroy()
     {
         AIDebugSettings.Save();
+        AIDebugRecorder.Reset();
         AIDebugTrace.Reset();
         AIDebugPresentationHub.Reset();
     }

@@ -34,7 +34,7 @@ internal static class AIDebugSimulationControl
                 null);
             if (method == null) throw new MissingMethodException(typeof(RainWorldGame).FullName, "Update()");
             updateHook = new Hook(method, (GameUpdateDetour)GameUpdateHook);
-            logger?.LogInfo("DryCycle AI Observatory world-step hook installed.");
+            logger?.LogInfo("DryCycle AI Observatory world-step/recorder tick hook installed.");
         }
         catch (Exception error)
         {
@@ -111,7 +111,7 @@ internal static class AIDebugSimulationControl
         currentGame = self;
         if (!debuggerPaused)
         {
-            orig(self);
+            RunOriginalAndRecord(orig, self);
             return;
         }
 
@@ -120,14 +120,14 @@ internal static class AIDebugSimulationControl
         if (self.pauseMenu != null)
         {
             self.paused = true;
-            orig(self);
+            RunOriginalAndRecord(orig, self);
             return;
         }
 
         if (!stepRequested)
         {
             self.paused = true;
-            orig(self); // Executes Rain World's PausedUpdate/HUD path only.
+            RunOriginalAndRecord(orig, self); // PausedUpdate/HUD path; clock does not advance.
             return;
         }
 
@@ -135,11 +135,23 @@ internal static class AIDebugSimulationControl
         self.paused = false;
         try
         {
-            orig(self); // Exactly one complete RainWorldGame.Update simulation tick.
+            RunOriginalAndRecord(orig, self); // Exactly one complete simulation tick.
         }
         finally
         {
             self.paused = true;
         }
+    }
+
+    private static void RunOriginalAndRecord(GameUpdateOrig orig, RainWorldGame self)
+    {
+        int beforeClock = self.clock;
+        orig(self);
+
+        // RainWorldGame.clock increments exactly when the normal simulation branch runs.
+        // This keeps the recorder on simulation time rather than MonoBehaviour/Present
+        // frames, and naturally ignores native paused updates while preserving Step 1 Tick.
+        if (self.clock != beforeClock)
+            AIDebugRecorder.OnSimulationTick(self);
     }
 }
