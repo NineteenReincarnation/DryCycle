@@ -370,10 +370,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
+        string exportStatus = AIDebugV5SessionExporter.Describe();
         string recorderStatus = recorder.ActiveTracked > 0
             ? $"{presentationEntities.Length} entities · recorder {recorder.Mode} · tracked {recorder.ActiveTracked} · pinned {recorder.PinnedEntities}/{AIDebugRecorder.MaxPinnedEntities} · motion {recorder.MotionSamples} · changes {recorder.StateChanges}" +
               (recorder.DroppedRecords > 0 ? $" · LOST {recorder.DroppedRecords}" : string.Empty)
             : $"{presentationEntities.Length} entities · recorder {recorder.Mode}";
+        if (!string.IsNullOrEmpty(exportStatus)) recorderStatus += " · export " + exportStatus;
 
         AIDebugPresentationHub.Publish(new AIDebugPresentationSnapshot(
             true,
@@ -489,8 +491,24 @@ internal sealed class AIDebuggerHost : MonoBehaviour
     {
         try
         {
-            string path = AIDebugSessionExporter.Export();
-            logger?.LogInfo("DryCycle AI Observatory session exported: " + path);
+            AIDebugPresentationSnapshot current = AIDebugPresentationHub.Current;
+            if (AIDebugV5SessionExporter.TryQueue(current, out string path, out string reason))
+            {
+                logger?.LogInfo("DryCycle AI Observatory V5 session export queued: " + path);
+                presentationDirty = true;
+                return;
+            }
+
+            if (AIDebugV5SessionExporter.State == AIDebugV5ExportState.Writing)
+            {
+                logger?.LogWarning("DryCycle AI Observatory export request ignored: " + reason);
+                return;
+            }
+
+            // Preserve the complete legacy exporter when there is no V5 tracked set yet.
+            string legacyPath = AIDebugSessionExporter.Export();
+            logger?.LogInfo("DryCycle AI Observatory legacy session exported: " + legacyPath +
+                            (string.IsNullOrEmpty(reason) ? string.Empty : " (V5: " + reason + ")"));
         }
         catch (Exception error)
         {
