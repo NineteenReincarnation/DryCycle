@@ -28,7 +28,7 @@ internal static class AIDebuggerRuntime
         bool bridgeAssemblyLoaded = IsAssemblyLoaded(BridgeAssemblyName);
         bool rwimguiAssemblyLoaded = IsAssemblyLoaded(RWImGuiAssemblyName);
         logger?.LogInfo($"DryCycle AI Observatory install requested. AutoOpen={AIDebugSettings.AutoOpen}, existingHost={host != null}, " +
-                        $"presentation=RWImGUI, bridgeAssemblyLoaded={bridgeAssemblyLoaded}, rwimguiApiLoaded={rwimguiAssemblyLoaded}.");
+                        $"presentation=RWIMGUI, bridgeAssemblyLoaded={bridgeAssemblyLoaded}, rwimguiApiLoaded={rwimguiAssemblyLoaded}.");
 
         if (!rwimguiAssemblyLoaded)
         {
@@ -348,11 +348,12 @@ internal sealed class AIDebuggerHost : MonoBehaviour
             AIDebugRecorderReadApi.TryResolveMotion(selectedKey, viewTick, out cursorMotion);
             AIDebugRecorderReadApi.TryResolveFastState(selectedKey, viewTick, out cursorFastState);
 
+            AIDebugResolvedSnapshot resolvedRich;
             bool hasRich = viewMode == AIDebugViewMode.Historical
-                ? AIDebugRichRecorder.TryResolve(viewTick, out AIDebugResolvedSnapshot resolvedHistorical)
-                : AIDebugRichRecorder.TryGetLatest(out AIDebugResolvedSnapshot resolvedHistorical);
-            if (hasRich && resolvedHistorical.HasValue)
-                selectedPresentation = CopySnapshot(resolvedHistorical.Snapshot, resolvedHistorical.AgeTicks);
+                ? AIDebugRichRecorder.TryResolve(viewTick, out resolvedRich)
+                : AIDebugRichRecorder.TryGetLatest(out resolvedRich);
+            if (hasRich && resolvedRich.HasValue)
+                selectedPresentation = CopySnapshot(resolvedRich.Snapshot, resolvedRich.AgeTicks);
         }
 
         AIDebugRecorderStatus recorder = AIDebugRecorder.GetStatus();
