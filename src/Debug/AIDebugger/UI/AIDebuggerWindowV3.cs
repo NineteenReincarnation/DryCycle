@@ -131,9 +131,7 @@ internal sealed class AIDebuggerWindowV3
 
         CompactRow(AIDebugLocalization.T("app.control_owner"), active.ControlOwner);
         CompactRaw(active, "DesertBatflyAI.Mode", AIDebugLocalization.T("field.mode"));
-        CompactRaw(active, "DesertBatflySocialRoles.Expressed", AIDebugLocalization.T("field.expressed_role"));
         CompactRaw(active, "DesertBatflyAI.Target", AIDebugLocalization.T("field.target"));
-        CompactRaw(active, "DesertBatflySocialRoles.Suppression", AIDebugLocalization.T("field.suppression"));
         CompactRaw(active, "DesertBatflyInjury.PhysicalCapability", AIDebugLocalization.T("field.physical_capability"));
 
         if (events.Count > 0)
@@ -396,7 +394,6 @@ internal sealed class AIDebuggerWindowV3
                     Row(AIDebugLocalization.T("app.control_owner"), f.ControlOwner);
                     Row(AIDebugLocalization.T("field.mode"), f.Mode);
                     Row(AIDebugLocalization.T("field.target"), f.Target);
-                    Row(AIDebugLocalization.T("field.expressed_role"), f.Role);
                     Row(AIDebugLocalization.T("field.suppression"), f.Suppression);
                     Row(AIDebugLocalization.T("field.position"), AIDebugFormat.Value(f.Position));
                     Row(AIDebugLocalization.T("field.velocity"), AIDebugFormat.Value(f.Velocity));
@@ -964,14 +961,8 @@ internal sealed class AIDebuggerWindowV3
     {
         if (!hasSelection || frames.Count < 3) return;
         string title = section.TitleKey;
-        if (title != "section.social_role" && title != "section.flock" && title != "section.movement" && title != "section.injury") return;
-        if (title == "section.social_role")
-        {
-            MiniGraph("Sentinel", frame => frame.Utility0);
-            MiniGraph("Bully", frame => frame.Utility1);
-            MiniGraph("Opportunist", frame => frame.Utility2);
-        }
-        else if (title == "section.flock") MiniGraph("Panic", frame => frame.Panic);
+        if (title != "section.flock" && title != "section.movement" && title != "section.injury") return;
+        if (title == "section.flock") MiniGraph("Panic", frame => frame.Panic);
         else if (title == "section.injury")
         {
             MiniGraph("Health", frame => frame.Health);
