@@ -1,3 +1,6 @@
+using DryCycle.Debugging.AI;
+using UnityEngine;
+
 namespace DryCycle.Creatures.DesertBatfly;
 
 // Only bridge nonvirtual vanilla entry points here. All species decisions live
@@ -5,6 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static class DesertBatflyHooks
 {
     private static bool enabled;
+    private static bool debugRegistered;
 
     internal static void Enable()
     {
@@ -12,6 +16,11 @@ internal static class DesertBatflyHooks
         enabled = true;
         DesertBatflyIntimidation.Reset();
         DesertBatflyColonyRuntime.Enable();
+        if (!debugRegistered)
+        {
+            AIDebugRegistry.Register(new DesertBatflyTask09DebugSource());
+            debugRegistered = true;
+        }
         On.Fly.ReportToFliesRoomAI += Report;
         On.Fly.Burrowed += Burrow;
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
