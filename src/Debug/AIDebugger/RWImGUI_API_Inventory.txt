@@ -1,0 +1,178 @@
+DryCycle AI Observatory
+RWImGUI API Inventory / Phase 0 Verification
+
+Date: 2026-09-06
+Migration task: Task_RWImGUI_Backend_Migration.txt
+Target: Rain World 1.11.8 / Windows x64 / DX11
+
+============================================================
+1. VERIFIED PUBLIC FACTS
+============================================================
+
+Official project:
+https://gitlab.com/rawra-rain-world-mods/rain-world-imgui-api
+
+Official release tags:
+https://gitlab.com/rawra-rain-world-mods/rain-world-imgui-api/-/tags
+
+Verified latest public tag at time of migration:
+- v1.10.10
+- release date: 2026-02-20
+
+Official advanced dependency example:
+https://gitlab.com/rawra-rain-world-mods/rain-world-template-advanced/-/blob/main/README.md
+
+Verified GitLab project ID used by Rawra's dependency example:
+- 57033035
+
+Verified Steam Workshop item used for Rain World ImGUI API:
+- Steam App ID: 312520
+- Workshop Item ID: 3417372413
+
+Verified release packaging convention from Rawra's template:
+- release is downloaded
+- rwimgui/plugins/* is copied as the compile/runtime reference set
+
+============================================================
+2. VERIFIED ASSEMBLY / CALLBACK SHAPE
+============================================================
+
+A public Steam support discussion contains an actual consumer project reference:
+
+<Reference Include="rain-world-imgui-api">
+  <Private>false</Private>
+  <HintPath>.../rain-world-imgui-api.dll</HintPath>
+</Reference>
+
+Therefore the API assembly filename is verified as:
+- rain-world-imgui-api.dll
+
+The same discussion confirms consumer mods must reference the ImGui.NET.dll shipped by
+RWImGUI itself rather than the official NuGet ImGui.NET package.
+
+Verified registration usage from the public consumer example:
+
+unsafe
+{
+    ImGUIAPI.AddMenuCallback(&MainImMenu.MenuCallback);
+}
+
+Verified callback shape:
+
+public static void MenuCallback(
+    ref nint idxgiSwapChain,
+    ref uint syncInterval,
+    ref uint flags)
+
+Verified behavior responsibility split:
+- consumer callback emits ImGui widgets
+- RWImGUI owns the ImGui backend / Present integration
+- consumer does not call ImGui.NewFrame()
+- consumer does not call ImGui.Render()
+- consumer does not own a Unity Camera renderer
+
+============================================================
+3. VERIFIED IMGUI.NET COMPATIBILITY CONSTRAINT
+============================================================
+
+A public user report reproduced this failure when the consumer mod deployed the ordinary
+NuGet ImGui.NET 1.91.6.1 beside RWImGUI:
+
+System.MissingMethodException:
+void ImGuiNET.ImGuiNative.LoadFunctionPointers(...)
+
+The user fixed it by removing the NuGet runtime DLL and referencing the ImGui.NET.dll
+shipped with RWImGUI.
+
+Rawra confirmed that RWImGUI uses a modified ImGui.NET fork for performance and support
+for additional native ImGui libraries.
+
+DryCycle migration rule:
+- public NuGet ImGui.NET may temporarily remain compile-only for legacy source
+- public NuGet ImGui.NET runtime must NOT be copied into Ancient Site plugins
+- cimgui.dll from the retired DryCycle backend must NOT be copied there either
+- the bridge compiles against RWImGUI's own ImGui.NET.dll with Private=false
+
+============================================================
+4. VERIFIED FONT / INPUT NOTES
+============================================================
+
+Rawra publicly stated an update added support for:
+- Cyrillic
+- Simplified Chinese
+- Japanese
+- configurable custom primary font
+
+Therefore DryCycle should not create its own separate CJK font texture in the final
+RWImGUI frontend unless a real missing-glyph test proves it is necessary.
+
+The same support thread contains reports about input capture / event pass-through.
+Therefore DryCycle must keep its own LIVE/INTERACT semantics and must test that player
+input is isolated only when the Observatory intentionally captures it.
+
+============================================================
+5. RUNTIME ITEMS STILL REQUIRING LOCAL VERIFICATION
+============================================================
+
+These MUST be verified from the user's installed v1.10.x assemblies or from a compile/run;
+they are deliberately not guessed in the migration code:
+
+- exact BepInEx Plugin GUID of RWImGUI
+- exact BepInDependency string to use for the optional bridge
+- whether AddMenuCallback has a public removal counterpart
+- whether the callback is guaranteed to run on the Unity main thread
+- full Context creation/current/destruction API names
+- managed DockBuilder availability in the modified ImGui.NET assembly
+- texture registration API, if any
+- exact plugin directory layout if the Workshop install differs from rwimgui/plugins
+
+Current safety policy while these remain unknown:
+- callback is treated as a render/present callback, not a Unity main-thread callback
+- callback must not touch RainWorld / Creature / AI / UnityEngine.Object live state
+- no guessed BepInDependency attribute is added
+- registered callback remains process-lifetime and becomes a no-op when bridge is disabled
+
+============================================================
+6. PHASE 1 IMPLEMENTATION NOW IN REPOSITORY
+============================================================
+
+Bridge project:
+src/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj
+
+Minimal proof:
+src/DryCycle.AIObservatory.RWImGui/BridgePlugin.cs
+
+Proof behavior:
+- waits for RainWorld.OnModsInit
+- verifies rain-world-imgui-api and ImGui.NET assemblies are loaded
+- registers ImGUIAPI.AddMenuCallback
+- Present callback does not touch Rain World live objects
+- F7 visibility is copied from DryCycle's Unity-main-thread controller
+- when visible, draws a small window containing:
+  RWImGUI backend connected
+
+Expected BepInEx diagnostics:
+- DryCycle RWImGUI bridge loaded...
+- DryCycle RWImGUI API inventory (runtime): api=..., imgui=...
+- DryCycle RWImGUI Present callback registered...
+- DryCycle RWImGUI callback reached Present...
+- after F7:
+  DryCycle RWImGUI F7-visible frame reached Present; drawing minimal proof window.
+
+============================================================
+7. LEGACY RENDERER TRANSITION STATE
+============================================================
+
+AIDebuggerRuntime no longer creates the old Overlay Camera and no longer initializes:
+- AIDebugImGuiBackend
+- Unity Mesh conversion
+- CommandBuffer ImGui draw path
+- Futile render-target presentation
+
+The old implementation files remain temporarily in source as migration reference, but are
+not instantiated by AIDebuggerRuntime.
+
+DryCycle F7 remains the main-thread source of Observatory visibility.
+The optional RWImGUI bridge copies that bool and only renders it in Present.
+
+This is an intentional transition checkpoint before Compact/Full Observatory UI migration.
