@@ -1,29 +1,26 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
 using System.Security;
 using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.Debugging.AI;
 using ImGuiNET;
+using RWIMGUI.API;
 using Num = System.Numerics;
 
 namespace DryCycle.AIObservatory.RWImGui;
 
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency("Anno", BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency("rwimgui", BepInDependency.DependencyFlags.HardDependency)]
 public sealed class BridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.AIObservatory.RWImGui";
     public const string PluginName = "DryCycle AI Observatory RWImGUI Bridge";
-    public const string PluginVersion = "0.1.2";
+    public const string PluginVersion = "0.1.3";
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
-    private static Delegate managedCallbackLifetime;
 
     private void OnEnable()
     {
@@ -31,25 +28,25 @@ public sealed class BridgePlugin : BaseUnityPlugin
         ProbeMenu.SetLogger(Logger);
         AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
-        Logger.LogInfo("DryCycle RWImGUI bridge loaded. Waiting for RainWorld.OnModsInit before registering the frame callback.");
+        Logger.LogInfo(
+            "DryCycle RWImGUI bridge loaded. RWImGUI is a hard dependency for this optional bridge; " +
+            "waiting for RainWorld.OnModsInit before registering AddAlwaysCallback.");
     }
 
     private void Update()
     {
-        // Unity/Rain World state is sampled only on the Unity main thread. The RWImGUI
-        // callback consumes this copied bool and never reads Unity input or Rain World
-        // live objects from the Present hook.
+        // Unity/Rain World state is copied only on the Unity main thread. The RWImGUI
+        // Present callback consumes this bool and never reads Unity input or live Rain
+        // World objects directly from the graphics hook.
         ProbeMenu.Visible = AIDebuggerRuntime.Visible;
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        // Keep the function pointer valid for process lifetime. The API does expose
-        // removal methods in current releases, but disabling the callback is safer than
-        // unregistering while the graphics hook may be active.
         ProbeMenu.Enabled = false;
         ProbeMenu.Visible = false;
+        TryUnregisterCallback();
         AIDebugPresentationBridgeStatus.MarkFailure("RWImGUI bridge disabled");
     }
 
@@ -59,7 +56,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         TryRegisterCallback();
     }
 
-    private static void TryRegisterCallback()
+    private static unsafe void TryRegisterCallback()
     {
         if (callbackRegistered)
         {
@@ -67,204 +64,53 @@ public sealed class BridgePlugin : BaseUnityPlugin
             return;
         }
 
-        Assembly apiAssembly = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => string.Equals(a.GetName().Name, "rain-world-imgui-api", StringComparison.OrdinalIgnoreCase));
-        Assembly imguiAssembly = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => string.Equals(a.GetName().Name, "ImGui.NET", StringComparison.OrdinalIgnoreCase));
-
-        if (apiAssembly == null || imguiAssembly == null)
-        {
-            string reason = "rain-world-imgui-api.dll and/or RWImGUI's ImGui.NET.dll is not loaded";
-            AIDebugPresentationBridgeStatus.MarkFailure(reason);
-            log?.LogWarning("DryCycle RWImGUI bridge did not register: " + reason + ". DryCycle itself remains unaffected.");
-            return;
-        }
-
         try
         {
-            Version apiVersion = apiAssembly.GetName().Version;
-            Version imguiVersion = imguiAssembly.GetName().Version;
-            log?.LogInfo($"DryCycle RWImGUI API inventory (runtime): api={apiAssembly.GetName().Name} {apiVersion}, imgui={imguiAssembly.GetName().Name} {imguiVersion}.");
-            LogInstalledApiInventory(apiAssembly);
+            Version apiVersion = typeof(ImGUIAPI).Assembly.GetName().Version;
+            Version imguiVersion = typeof(ImGui).Assembly.GetName().Version;
 
-            // A menu callback is intentionally NOT used here. AddMenuCallback is only
-            // dispatched while RWImGUI's own menu is open. AI Observatory must be able to
-            // open directly with F7, so prefer AddAlwaysCallback, which is dispatched on
-            // every RWImGUI frame regardless of menu visibility.
-            MethodInfo addFrameCallback = FindFrameCallback(apiAssembly);
-            RegisterCallback(addFrameCallback);
+            // Verified against the user's RWImGUI 1.12.0 assembly. AddAlwaysCallback takes
+            // delegate*<ref IntPtr, ref uint, ref uint, void> and is invoked unconditionally
+            // after ImGui.NewFrame in idxgiswapchain_present_hook_impl, before context Render.
+            ImGUIAPI.AddAlwaysCallback(&ProbeMenu.FrameCallback);
 
             callbackRegistered = true;
             ProbeMenu.Enabled = true;
-            AIDebugPresentationBridgeStatus.MarkCallbackRegistered(apiVersion?.ToString(), imguiVersion?.ToString());
+            AIDebugPresentationBridgeStatus.MarkCallbackRegistered(
+                apiVersion?.ToString(),
+                imguiVersion?.ToString());
 
-            ParameterInfo callbackParameter = addFrameCallback.GetParameters()[0];
             log?.LogInfo(
-                "DryCycle RWImGUI frame callback registered through " +
-                addFrameCallback.DeclaringType?.FullName + "." + addFrameCallback.Name +
-                "(" + DescribeType(callbackParameter.ParameterType) + "). Press F7 to show the minimal proof window.");
-
-            if (string.Equals(addFrameCallback.Name, "AddMenuCallback", StringComparison.OrdinalIgnoreCase))
-            {
-                log?.LogWarning(
-                    "DryCycle RWImGUI: this API revision has no AddAlwaysCallback; fell back to AddMenuCallback. " +
-                    "On that old API revision the RWImGUI menu may need to be open for the Observatory callback to run.");
-            }
+                "DryCycle RWImGUI AddAlwaysCallback registered directly through RWIMGUI.API.ImGUIAPI. " +
+                $"api={apiVersion}, imgui={imguiVersion}, hasContext={ImGUIAPI.HasContext}. " +
+                "The callback does not require the RWImGUI menu to be opened; press F7 directly.");
         }
         catch (Exception error)
         {
             ProbeMenu.Enabled = false;
-            Exception report = error is TargetInvocationException invocation && invocation.InnerException != null
-                ? invocation.InnerException
-                : error;
-            AIDebugPresentationBridgeStatus.MarkFailure(report.GetType().Name + ": " + report.Message);
-            log?.LogError("DryCycle RWImGUI callback registration failed. DryCycle gameplay systems remain active. " + report);
+            AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
+            log?.LogError(
+                "DryCycle RWImGUI AddAlwaysCallback registration failed. " +
+                "DryCycle gameplay systems remain active. " + error);
         }
     }
 
-    private static MethodInfo FindFrameCallback(Assembly apiAssembly)
+    private static unsafe void TryUnregisterCallback()
     {
-        MethodInfo[] methods = GetLoadableTypes(apiAssembly)
-            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
-            .Where(method => !method.ContainsGenericParameters && method.GetParameters().Length == 1)
-            .ToArray();
-
-        MethodInfo always = methods
-            .Where(method => string.Equals(method.Name, "AddAlwaysCallback", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(method => string.Equals(method.DeclaringType?.Name, "ImGUIAPI", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(method => method.IsPublic)
-            .FirstOrDefault();
-
-        if (always != null)
-            return always;
-
-        MethodInfo menuFallback = methods
-            .Where(method => string.Equals(method.Name, "AddMenuCallback", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(method => string.Equals(method.DeclaringType?.Name, "ImGUIAPI", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(method => method.IsPublic)
-            .FirstOrDefault();
-
-        if (menuFallback != null)
-            return menuFallback;
-
-        throw new MissingMethodException(
-            "The loaded rain-world-imgui-api assembly exposes neither AddAlwaysCallback nor AddMenuCallback with one parameter. " +
-            "RWImGUI may have changed its callback API; check the runtime API inventory log.");
-    }
-
-    private static void RegisterCallback(MethodInfo addCallback)
-    {
-        ParameterInfo parameter = addCallback.GetParameters()[0];
-        MethodInfo callbackMethod = typeof(ProbeMenu).GetMethod(
-            nameof(ProbeMenu.FrameCallback),
-            BindingFlags.Public | BindingFlags.Static);
-
-        if (callbackMethod == null)
-            throw new MissingMethodException(typeof(ProbeMenu).FullName, nameof(ProbeMenu.FrameCallback));
-
-        if (typeof(Delegate).IsAssignableFrom(parameter.ParameterType))
-        {
-            Delegate callback = Delegate.CreateDelegate(parameter.ParameterType, callbackMethod);
-            addCallback.Invoke(null, new object[] { callback });
-            managedCallbackLifetime = callback;
+        if (!callbackRegistered)
             return;
-        }
 
-        // Reflection cannot box a function-pointer parameter. Emit a tiny adapter that
-        // pushes the exact managed callback pointer and invokes the reflected API method.
-        DynamicMethod registerThunk = new(
-            "DryCycle_RWImGUI_RegisterFrameCallback",
-            typeof(void),
-            Type.EmptyTypes,
-            typeof(BridgePlugin),
-            true);
-
-        ILGenerator il = registerThunk.GetILGenerator();
-        il.Emit(OpCodes.Ldftn, callbackMethod);
-        il.Emit(OpCodes.Call, addCallback);
-        if (addCallback.ReturnType != typeof(void))
-            il.Emit(OpCodes.Pop);
-        il.Emit(OpCodes.Ret);
-
-        Action register = (Action)registerThunk.CreateDelegate(typeof(Action));
-        register();
-    }
-
-    private static Type[] GetLoadableTypes(Assembly assembly)
-    {
         try
         {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException partial)
-        {
-            return partial.Types.Where(type => type != null).ToArray();
-        }
-    }
-
-    private static string DescribeType(Type type)
-    {
-        return type.FullName ?? type.ToString();
-    }
-
-    private static void LogInstalledApiInventory(Assembly apiAssembly)
-    {
-        try
-        {
-            Type[] types;
-            try
-            {
-                types = apiAssembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException partial)
-            {
-                types = partial.Types.Where(t => t != null).ToArray();
-                string loaderErrors = string.Join(" | ", partial.LoaderExceptions
-                    .Where(e => e != null)
-                    .Select(e => e.GetType().Name + ": " + e.Message));
-                log?.LogWarning("DryCycle RWImGUI inventory loaded only part of the API assembly: " + loaderErrors);
-            }
-
-            List<string> pluginMetadata = new();
-            foreach (Type type in types)
-            {
-                foreach (CustomAttributeData attribute in CustomAttributeData.GetCustomAttributes(type))
-                {
-                    if (!string.Equals(attribute.AttributeType.FullName, "BepInEx.BepInPlugin", StringComparison.Ordinal))
-                        continue;
-
-                    string args = string.Join(", ", attribute.ConstructorArguments.Select(a => a.Value?.ToString() ?? "null"));
-                    pluginMetadata.Add(type.FullName + " => " + args);
-                }
-            }
-
-            if (pluginMetadata.Count > 0)
-                log?.LogInfo("DryCycle RWImGUI installed BepInPlugin metadata: " + string.Join(" || ", pluginMetadata));
-
-            Type[] apiCandidates = types
-                .Where(type =>
-                    string.Equals(type.Name, "ImGUIAPI", StringComparison.OrdinalIgnoreCase) ||
-                    type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-                        .Any(method => method.Name.IndexOf("Callback", StringComparison.OrdinalIgnoreCase) >= 0))
-                .ToArray();
-
-            foreach (Type type in apiCandidates)
-            {
-                string methods = string.Join(", ", type
-                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-                    .Where(m => m.Name.IndexOf("Callback", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                m.Name.IndexOf("Context", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                m.Name.IndexOf("Font", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                m.Name.IndexOf("Texture", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                m.Name.IndexOf("Dock", StringComparison.OrdinalIgnoreCase) >= 0)
-                    .Select(m => m.Name + "(" + string.Join(", ", m.GetParameters().Select(p => DescribeType(p.ParameterType))) + ")")
-                    .Distinct());
-                log?.LogInfo($"DryCycle RWImGUI API type discovered: {type.FullName}; relevantMethods=[{methods}].");
-            }
+            ImGUIAPI.RemoveAlwaysCallback(&ProbeMenu.FrameCallback);
+            callbackRegistered = false;
+            log?.LogInfo("DryCycle RWImGUI AddAlwaysCallback unregistered.");
         }
         catch (Exception error)
         {
-            log?.LogWarning("DryCycle RWImGUI runtime API inventory failed: " + error.Message);
+            // The callback itself is already disabled, so a removal failure is harmless at
+            // shutdown and must not interfere with the rest of DryCycle.
+            log?.LogWarning("DryCycle RWImGUI callback removal failed during shutdown: " + error.Message);
         }
     }
 }
@@ -299,7 +145,7 @@ internal static class ProbeMenu
             if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
             {
                 log?.LogInfo(
-                    $"DryCycle RWImGUI always callback reached Present. swapChain=0x{idxgiSwapChain:X}, " +
+                    $"DryCycle RWImGUI AddAlwaysCallback reached Present. swapChain=0x{idxgiSwapChain:X}, " +
                     $"syncInterval={syncInterval}, flags={flags}.");
             }
 
@@ -318,7 +164,7 @@ internal static class ProbeMenu
                 ImGui.TextColored(new Num.Vector4(0.35f, 0.9f, 0.48f, 1f), "RWImGUI backend connected");
                 ImGui.Separator();
                 ImGui.Text("F7 visibility state: ON");
-                ImGui.Text("Present callback: OK");
+                ImGui.Text("Present callback: OK (AddAlwaysCallback)");
                 ImGui.Text("Renderer owner: RWImGUI Win32 + DX11");
                 ImGui.Text("Legacy DryCycle Unity/Futile renderer: DISABLED");
             }
@@ -331,7 +177,7 @@ internal static class ProbeMenu
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
             {
                 log?.LogError(
-                    "DryCycle RWImGUI probe draw failed. The callback will remain registered for diagnostics. " + error);
+                    "DryCycle RWImGUI probe draw failed. The callback remains registered for diagnostics. " + error);
             }
         }
     }
