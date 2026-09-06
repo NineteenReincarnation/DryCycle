@@ -1,23 +1,28 @@
 using System;
 using System.Collections.Generic;
+using BepInEx.Logging;
 
 namespace DryCycle.Debugging.AI;
 
 internal static class AIDebugRegistry
 {
     private static readonly List<IAIDebugSource> Sources = new(6);
+    private static readonly GenericCreatureDebugSource GenericFallback = new();
+    private static readonly HashSet<string> CaptureFailuresLogged = new(StringComparer.Ordinal);
+    private static ManualLogSource logger;
     private static bool initialized;
 
     internal static RainWorldGame CurrentGame { get; private set; }
 
-    internal static void Initialize()
+    internal static void Initialize(ManualLogSource log = null)
     {
+        if (log != null) logger = log;
         if (initialized) return;
         initialized = true;
         Register(new DesertBatflyDebugSource());
         Register(new MossySpiderDebugSource());
         Register(new SpinebackLizardDebugSource());
-        Register(new GenericCreatureDebugSource());
+        Register(GenericFallback);
     }
 
     internal static void BindGame(RainWorldGame game) => CurrentGame = game;
@@ -39,9 +44,64 @@ internal static class AIDebugRegistry
 
     internal static AIDebugSnapshot Capture(AbstractCreature creature, RainWorldGame game)
     {
+        if (creature == null) return null;
         if (game != null) CurrentGame = game;
         IAIDebugSource source = SourceFor(creature);
-        return source?.Capture(creature, game ?? CurrentGame);
+        if (source == null) return null;
+
+        try
+        {
+            return source.Capture(creature, game ?? CurrentGame);
+        }
+        catch (Exception error)
+        {
+            LogCaptureFailure(source, creature, error);
+
+            // A species adapter is diagnostic code. One bad optional field must never
+            // take down the ImGui context or make F7 unusable for the rest of the session.
+            // Fall back to the generic read-only inspector for this capture instead.
+            if (!ReferenceEquals(source, GenericFallback))
+            {
+                try
+                {
+                    return GenericFallback.Capture(creature, game ?? CurrentGame);
+                }
+                catch (Exception fallbackError)
+                {
+                    LogCaptureFailure(GenericFallback, creature, fallbackError);
+                }
+            }
+
+            return MinimalFallback(creature, source, error);
+        }
+    }
+
+    private static void LogCaptureFailure(IAIDebugSource source, AbstractCreature creature, Exception error)
+    {
+        string sourceName = source?.GetType().Name ?? "<null>";
+        string key = sourceName + "|" + error.GetType().FullName + "|" + error.Message;
+        if (!CaptureFailuresLogged.Add(key)) return;
+        logger?.LogError($"DryCycle AI Observatory debug source '{sourceName}' failed for {DebugEntityKey.From(creature)}. " +
+                         "The UI will keep running with the generic inspector. " + error);
+    }
+
+    private static AIDebugSnapshot MinimalFallback(AbstractCreature creature, IAIDebugSource source, Exception error)
+    {
+        DebugEntityKey key = DebugEntityKey.From(creature);
+        string typeName = creature.creatureTemplate?.type?.value ?? creature.GetType().Name;
+        var snapshot = new AIDebugSnapshot(key, $"{typeName} #{creature.ID.number}",
+            EntityState(creature), "Debugger fallback");
+        snapshot.Sections.Add(new AIDebugSection("section.identity")
+            .Add("field.entity_id", "AbstractCreature.ID", creature.ID)
+            .Add("field.template", "CreatureTemplate.type", typeName)
+            .Add("field.room", "AbstractCreature.Room", creature.Room?.name ?? "—")
+            .Add("field.entity_state", "DebugEntityState", AIDebugLocalization.EntityState(snapshot.EntityState)));
+        snapshot.Sections.Add(new AIDebugSection("section.generic_ai")
+            .Add("field.abstract_ai", "Debugger.Source", source?.GetType().Name ?? "—")
+            .Add("field.real_ai", "Debugger.Error", error.GetType().Name + ": " + error.Message));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.availability", AIDebugDecisionState.Warning,
+            error.GetType().Name, source?.GetType().Name));
+        return snapshot;
     }
 
     // Called only while the Observatory is visible. The list is refreshed at a low rate,
