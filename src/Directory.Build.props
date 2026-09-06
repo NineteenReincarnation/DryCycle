@@ -8,6 +8,16 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <!-- Performance validation configuration for AI Observatory work. Profile keeps
+       Release-style optimization enabled while retaining portable symbols so Mono/BepInEx
+       stack traces and profiler captures remain useful. It intentionally does not define
+       a different feature set: Debug/Profile/Release execute the same recorder logic. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Profile'">
+    <Optimize>true</Optimize>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
   <!-- IMPORTANT: DryCycle.dll intentionally has no ImGui.NET PackageReference anymore.
        The optional DryCycle.AIObservatory.RWImGui project references the modified
        ImGui.NET.dll shipped by Rawra's RWImGUI mod with Private=false. This prevents the
