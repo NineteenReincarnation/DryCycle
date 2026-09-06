@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace DryCycle.Debugging.AI;
@@ -12,7 +13,9 @@ internal enum AIDebugRawValueKind : byte
     Vector2,
     EntityId,
     EnumToken,
-    Flags
+    Flags,
+    StringId,
+    Coordinate
 }
 
 [Flags]
@@ -51,6 +54,40 @@ internal readonly struct AIDebugFieldSchema
     }
 }
 
+internal readonly struct AIDebugDecisionSchema
+{
+    internal readonly string LabelKey;
+    internal readonly string RawName;
+    internal readonly int Depth;
+
+    internal AIDebugDecisionSchema(string labelKey, string rawName = null, int depth = 0)
+    {
+        LabelKey = labelKey ?? string.Empty;
+        RawName = rawName ?? string.Empty;
+        Depth = depth < 0 ? 0 : depth;
+    }
+}
+
+internal sealed class AIDebugRichSchema
+{
+    internal readonly string Id;
+    internal readonly string DisplayType;
+    internal readonly AIDebugFieldSchema[] Fields;
+    internal readonly AIDebugDecisionSchema[] Decisions;
+
+    internal AIDebugRichSchema(
+        string id,
+        string displayType,
+        AIDebugFieldSchema[] fields,
+        AIDebugDecisionSchema[] decisions)
+    {
+        Id = id ?? "generic";
+        DisplayType = displayType ?? "Creature";
+        Fields = fields ?? Array.Empty<AIDebugFieldSchema>();
+        Decisions = decisions ?? Array.Empty<AIDebugDecisionSchema>();
+    }
+}
+
 [StructLayout(LayoutKind.Explicit)]
 internal struct AIDebugFloatBits
 {
@@ -65,49 +102,65 @@ internal struct AIDebugFloatBits
     }
 }
 
-// Compact value union for recorder storage. No object, boxing, strings, collections, or
-// Unity references are permitted. The schema determines how these scalar slots are
-// interpreted at presentation/export time.
+// Compact raw-value union used only by lower-frequency Rich/Heavy capture. No object,
+// boxing, formatted string, collection, or Unity reference is retained in recorder data.
 internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
 {
     internal readonly AIDebugRawValueKind Kind;
     internal readonly int I0;
     internal readonly int I1;
+    internal readonly int I2;
+    internal readonly int I3;
     internal readonly float F0;
     internal readonly float F1;
 
-    private AIDebugRawValue(AIDebugRawValueKind kind, int i0, int i1, float f0, float f1)
+    private AIDebugRawValue(
+        AIDebugRawValueKind kind,
+        int i0,
+        int i1,
+        int i2,
+        int i3,
+        float f0,
+        float f1)
     {
         Kind = kind;
         I0 = i0;
         I1 = i1;
+        I2 = i2;
+        I3 = i3;
         F0 = f0;
         F1 = f1;
     }
 
     internal static AIDebugRawValue Bool(bool value) =>
-        new(AIDebugRawValueKind.Bool, value ? 1 : 0, 0, 0f, 0f);
+        new(AIDebugRawValueKind.Bool, value ? 1 : 0, 0, 0, 0, 0f, 0f);
 
     internal static AIDebugRawValue Int(int value) =>
-        new(AIDebugRawValueKind.Int, value, 0, 0f, 0f);
+        new(AIDebugRawValueKind.Int, value, 0, 0, 0, 0f, 0f);
 
     internal static AIDebugRawValue Float(float value) =>
-        new(AIDebugRawValueKind.Float, 0, 0, value, 0f);
+        new(AIDebugRawValueKind.Float, 0, 0, 0, 0, value, 0f);
 
     internal static AIDebugRawValue Vector2(float x, float y) =>
-        new(AIDebugRawValueKind.Vector2, 0, 0, x, y);
+        new(AIDebugRawValueKind.Vector2, 0, 0, 0, 0, x, y);
 
     internal static AIDebugRawValue EntityId(int spawner, int number) =>
-        new(AIDebugRawValueKind.EntityId, spawner, number, 0f, 0f);
+        new(AIDebugRawValueKind.EntityId, spawner, number, 0, 0, 0f, 0f);
 
     internal static AIDebugRawValue EnumToken(int value) =>
-        new(AIDebugRawValueKind.EnumToken, value, 0, 0f, 0f);
+        new(AIDebugRawValueKind.EnumToken, value, 0, 0, 0, 0f, 0f);
 
     internal static AIDebugRawValue Flags(int value) =>
-        new(AIDebugRawValueKind.Flags, value, 0, 0f, 0f);
+        new(AIDebugRawValueKind.Flags, value, 0, 0, 0, 0f, 0f);
+
+    internal static AIDebugRawValue StringId(int value) =>
+        new(AIDebugRawValueKind.StringId, value, 0, 0, 0, 0f, 0f);
+
+    internal static AIDebugRawValue Coordinate(int room, int x, int y, int node) =>
+        new(AIDebugRawValueKind.Coordinate, room, x, y, node, 0f, 0f);
 
     public bool Equals(AIDebugRawValue other) =>
-        Kind == other.Kind && I0 == other.I0 && I1 == other.I1 &&
+        Kind == other.Kind && I0 == other.I0 && I1 == other.I1 && I2 == other.I2 && I3 == other.I3 &&
         AIDebugFloatBits.Of(F0) == AIDebugFloatBits.Of(other.F0) &&
         AIDebugFloatBits.Of(F1) == AIDebugFloatBits.Of(other.F1);
 
@@ -120,6 +173,8 @@ internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
             int hash = (int)Kind;
             hash = hash * 397 ^ I0;
             hash = hash * 397 ^ I1;
+            hash = hash * 397 ^ I2;
+            hash = hash * 397 ^ I3;
             hash = hash * 397 ^ AIDebugFloatBits.Of(F0);
             hash = hash * 397 ^ AIDebugFloatBits.Of(F1);
             return hash;
@@ -128,6 +183,38 @@ internal readonly struct AIDebugRawValue : IEquatable<AIDebugRawValue>
 
     public static bool operator ==(AIDebugRawValue left, AIDebugRawValue right) => left.Equals(right);
     public static bool operator !=(AIDebugRawValue left, AIDebugRawValue right) => !left.Equals(right);
+}
+
+// Session-local-ish string interning for Rich/Heavy data. Capture stores integer ids;
+// formatting/localization occurs only when main-thread Presentation materializes a view.
+// All mutation is performed by the Unity/main-thread recorder.
+internal static class AIDebugRawStringTable
+{
+    private static readonly Dictionary<string, int> Ids = new(StringComparer.Ordinal);
+    private static readonly List<string> Values = new(128) { string.Empty };
+
+    internal static int Intern(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return 0;
+        if (Ids.TryGetValue(value, out int existing)) return existing;
+        int id = Values.Count;
+        Values.Add(value);
+        Ids[value] = id;
+        return id;
+    }
+
+    internal static string Resolve(int id)
+    {
+        if ((uint)id >= (uint)Values.Count) return string.Empty;
+        return Values[id] ?? string.Empty;
+    }
+
+    internal static void Reset()
+    {
+        Ids.Clear();
+        Values.Clear();
+        Values.Add(string.Empty);
+    }
 }
 
 internal sealed class AIDebugRawSnapshotBuffer
@@ -191,7 +278,73 @@ internal sealed class AIDebugRawSnapshotBuffer
             throw new ArgumentException("Incompatible raw snapshot buffer.", nameof(source));
         count = source.count;
         Array.Copy(source.values, values, count);
-        Array.Copy(source.validWords, validWords, validWords.Length);
+        Array.Clear(validWords, 0, validWords.Length);
+        int words = (count + 63) >> 6;
+        Array.Copy(source.validWords, validWords, words);
+    }
+}
+
+internal readonly struct AIDebugRawDecision : IEquatable<AIDebugRawDecision>
+{
+    internal readonly AIDebugDecisionState State;
+    internal readonly int DetailStringId;
+
+    internal AIDebugRawDecision(AIDebugDecisionState state, int detailStringId = 0)
+    {
+        State = state;
+        DetailStringId = detailStringId;
+    }
+
+    public bool Equals(AIDebugRawDecision other) =>
+        State == other.State && DetailStringId == other.DetailStringId;
+
+    public override bool Equals(object obj) => obj is AIDebugRawDecision other && Equals(other);
+    public override int GetHashCode() => ((int)State * 397) ^ DetailStringId;
+}
+
+internal sealed class AIDebugRawDecisionBuffer
+{
+    private readonly AIDebugRawDecision[] values;
+    private int count;
+
+    internal int Count => count;
+    internal int Capacity => values.Length;
+
+    internal AIDebugRawDecisionBuffer(int capacity)
+    {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        values = new AIDebugRawDecision[capacity];
+    }
+
+    internal void Begin(int decisionCount)
+    {
+        if ((uint)decisionCount > (uint)values.Length) throw new ArgumentOutOfRangeException(nameof(decisionCount));
+        count = decisionCount;
+    }
+
+    internal void Set(int index, AIDebugDecisionState state, int detailStringId = 0)
+    {
+        if ((uint)index >= (uint)count) throw new ArgumentOutOfRangeException(nameof(index));
+        values[index] = new AIDebugRawDecision(state, detailStringId);
+    }
+
+    internal AIDebugRawDecision Get(int index) =>
+        (uint)index < (uint)count ? values[index] : default;
+
+    internal bool ContentEquals(AIDebugRawDecisionBuffer other)
+    {
+        if (other == null || other.count != count) return false;
+        for (int i = 0; i < count; i++)
+            if (!values[i].Equals(other.values[i])) return false;
+        return true;
+    }
+
+    internal void CopyFrom(AIDebugRawDecisionBuffer source)
+    {
+        if (source == null || source.count > values.Length)
+            throw new ArgumentException("Incompatible decision buffer.", nameof(source));
+        count = source.count;
+        Array.Copy(source.values, values, count);
     }
 }
 
