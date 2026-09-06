@@ -19,16 +19,18 @@ internal static class DesertBatflyDebugTrace
             flockAge = colony.SnapshotAge;
         }
 
-        string suppression = Suppression(bat);
-        string modeReason = ModeReason(bat, suppression);
-        string controlOwner = ControlOwner(bat, suppression);
+        bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
+            bat.abstractCreature, out DesertBatflyTravelDebugState travel);
+        string suppression = Suppression(bat, hasTravel, travel);
+        string modeReason = ModeReason(bat, suppression, hasTravel, travel);
+        string controlOwner = ControlOwner(bat, suppression, hasTravel, travel);
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "Mode", bat.DesertAI.Mode, modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Decision,
             "ControlOwner", controlOwner, modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Suppression", suppression, SuppressionReason(bat, suppression));
+            "Suppression", suppression, SuppressionReason(bat, suppression, hasTravel, travel));
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Combat,
             "FormalAttack", bat.DesertAI.FormalAttack, bat.DesertAI.Target == null
                 ? "no target" : AIDebugFormat.Creature(bat.DesertAI.Target));
@@ -37,7 +39,20 @@ internal static class DesertBatflyDebugTrace
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
-        // Candidate instrumentation describes only active runtime choices.
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "Task09TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
+            hasTravel ? travel.StatusReason : "no active TravelIntent");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "Task09TravelDestination", hasTravel ? travel.DestinationRoom : "—",
+            hasTravel ? travel.StatusReason : "no active TravelIntent");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "Task09TravelProgress",
+            hasTravel ? $"{travel.RouteIndex}/{Mathf.Max(0, travel.RouteRooms.Length - 1)} next={travel.NextRoom}" : "—",
+            hasTravel ? travel.StatusReason : "no active TravelIntent");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "Task09TravelStatus", hasTravel ? travel.StatusReason : "—",
+            hasTravel && travel.Suspended ? "TravelSuspended" : "TravelActiveOrNone");
+
         AIDebugCandidateRegistry.Begin(bat.abstractCreature);
         if (bat.AI != null)
             AIDebugCandidateRegistry.Record(bat.abstractCreature, "Motor", "localGoal",
@@ -67,20 +82,24 @@ internal static class DesertBatflyDebugTrace
                 "StaleFlockSnapshot", flockAge, "FlockSnapshot age exceeded refresh period");
     }
 
-    private static string Suppression(DesertBatfly bat)
+    private static string Suppression(
+        DesertBatfly bat,
+        bool hasTravel,
+        in DesertBatflyTravelDebugState travel)
     {
         if (bat.dead || !bat.Consious || bat.room == null) return "Unavailable";
         if (bat.inShortcut) return "Shortcut";
         if (RestrainedByNonFly(bat)) return "Restrained";
         if (bat.Emergence?.Active == true) return "Emergence";
-        if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
-            bat.AI.luredCounter > 0 || bat.safariControlled)
-            return "VanillaPriority";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return "Danger";
         if (bat.Injury.BlocksCombat || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
             return "Injury";
+        if (hasTravel && !travel.Suspended) return "Task09Travel";
+        if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
+            bat.AI.luredCounter > 0 || bat.safariControlled)
+            return "VanillaPriority";
         if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
         if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
@@ -90,7 +109,11 @@ internal static class DesertBatflyDebugTrace
         return "None";
     }
 
-    private static string ModeReason(DesertBatfly bat, string suppression)
+    private static string ModeReason(
+        DesertBatfly bat,
+        string suppression,
+        bool hasTravel,
+        in DesertBatflyTravelDebugState travel)
     {
         switch (suppression)
         {
@@ -98,6 +121,7 @@ internal static class DesertBatflyDebugTrace
             case "Shortcut": return "shortcut owns movement";
             case "Restrained": return "non-fly grasp or restraint owns movement";
             case "Emergence": return "emergence animation owns behavior";
+            case "Task09Travel": return hasTravel ? travel.StatusReason : "Task 09 travel";
             case "VanillaPriority": return "vanilla FlyAI priority";
             case "Danger": return "danger / retreat owns movement";
             case "Injury": return bat.Injury.IsRecovering ? bat.Injury.RecoveryReason : "injury / shock limits behavior";
@@ -111,11 +135,16 @@ internal static class DesertBatflyDebugTrace
         return "DesertBatflyAI state machine";
     }
 
-    private static string SuppressionReason(DesertBatfly bat, string suppression)
+    private static string SuppressionReason(
+        DesertBatfly bat,
+        string suppression,
+        bool hasTravel,
+        in DesertBatflyTravelDebugState travel)
     {
         switch (suppression)
         {
             case "Injury": return bat.Injury.BlocksCombat ? bat.Injury.CombatBlockReason : bat.Injury.RecoveryReason;
+            case "Task09Travel": return hasTravel ? travel.StatusReason : "Task 09 travel";
             case "None": return "no higher-priority blocker";
             case "Unavailable": return "dead / unconscious / no room";
             case "Shortcut": return "shortcut lifecycle";
@@ -132,7 +161,11 @@ internal static class DesertBatflyDebugTrace
         }
     }
 
-    private static string ControlOwner(DesertBatfly bat, string suppression)
+    private static string ControlOwner(
+        DesertBatfly bat,
+        string suppression,
+        bool hasTravel,
+        in DesertBatflyTravelDebugState travel)
     {
         switch (suppression)
         {
@@ -140,6 +173,7 @@ internal static class DesertBatflyDebugTrace
             case "Shortcut": return "Shortcut";
             case "Restrained": return "Grasp / Restraint";
             case "Emergence": return "Emergence";
+            case "Task09Travel": return hasTravel ? "Task 09 / " + travel.Purpose : "Task 09 Travel";
             case "VanillaPriority": return "Vanilla FlyAI";
             case "Danger": return "Danger / Escape";
             case "Injury": return "Injury Recovery";
