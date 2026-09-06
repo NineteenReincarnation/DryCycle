@@ -15,6 +15,36 @@ internal static class ObservatoryTimeline
 
         ImGui.Text(snapshot.Language == AIDebugLanguage.Chinese ? "时间轴" : "Timeline");
         ImGui.SameLine();
+        if (snapshot.Selected != null)
+        {
+            string pinText;
+            if (snapshot.SelectedPinned)
+                pinText = snapshot.Language == AIDebugLanguage.Chinese ? "取消固定" : "Unpin";
+            else
+                pinText = (snapshot.Language == AIDebugLanguage.Chinese ? "固定" : "Pin") +
+                          $" {snapshot.PinnedCount}/{AIDebugRecorder.MaxPinnedEntities}";
+
+            bool canToggle = snapshot.SelectedPinned || snapshot.PinnedCount < AIDebugRecorder.MaxPinnedEntities;
+            if (canToggle)
+            {
+                if (ImGui.SmallButton(pinText + "##V5TimelinePin"))
+                    AIDebugRecorderControl.RequestTogglePin(snapshot.Selected.Key);
+            }
+            else
+            {
+                ImGui.TextDisabled(pinText);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(snapshot.Language == AIDebugLanguage.Chinese
+                        ? "最多同时固定 3 个生物。先取消一个固定项。"
+                        : "At most 3 creatures can be pinned. Unpin one first.");
+            }
+
+            ImGui.SameLine();
+            if (snapshot.SelectedPinned)
+                ImGui.TextDisabled(snapshot.Language == AIDebugLanguage.Chinese ? "[已固定并持续记录]" : "[PINNED · recording]");
+        }
+
+        ImGui.SameLine();
         if (timeline.EndTick > timeline.StartTick)
         {
             float duration = (timeline.EndTick - timeline.StartTick) / 40f;

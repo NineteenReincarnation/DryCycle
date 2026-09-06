@@ -79,6 +79,8 @@ internal sealed class AIDebugPresentationSnapshot
     internal readonly AIDebugResolvedMotion CursorMotion;
     internal readonly AIDebugResolvedFastState CursorFastState;
     internal readonly AIDebugPresentationTimeline Timeline;
+    internal readonly int PinnedCount;
+    internal readonly bool SelectedPinned;
 
     internal AIDebugPresentationSnapshot(
         bool visible,
@@ -108,6 +110,25 @@ internal sealed class AIDebugPresentationSnapshot
         CursorMotion = cursorMotion;
         CursorFastState = cursorFastState;
 
+        int pinned = 0;
+        bool selectedPinned = false;
+        for (int i = 0; i < Entities.Length; i++)
+        {
+            AIDebugPresentationEntity entity = Entities[i];
+            if (entity == null || !entity.Pinned) continue;
+            pinned++;
+            if (selected != null && entity.Key == selected.Key) selectedPinned = true;
+        }
+
+        if (selected != null && !selectedPinned &&
+            AIDebugRecorderReadApi.TryGetEntityStatus(selected.Key, out AIDebugRecorderEntityStatus selectedStatus))
+        {
+            selectedPinned = selectedStatus.Pinned;
+        }
+
+        PinnedCount = pinned;
+        SelectedPinned = selectedPinned;
+
         // This constructor is invoked by the Unity/main-thread host. Build only the small
         // visible recorder viewport here; RWImGUI receives detached arrays and never reads
         // live recorder blocks concurrently with the simulation writer.
@@ -126,6 +147,7 @@ internal sealed class AIDebugPresentationEntity
     internal readonly AIDebugEntityState State;
     internal readonly bool Selected;
     internal readonly bool VisibleRoom;
+    internal readonly bool Pinned;
 
     internal AIDebugPresentationEntity(
         DebugEntityKey key,
@@ -141,6 +163,7 @@ internal sealed class AIDebugPresentationEntity
         State = state;
         Selected = selected;
         VisibleRoom = visibleRoom;
+        Pinned = AIDebugRecorderReadApi.TryGetEntityStatus(key, out AIDebugRecorderEntityStatus status) && status.Pinned;
     }
 }
 

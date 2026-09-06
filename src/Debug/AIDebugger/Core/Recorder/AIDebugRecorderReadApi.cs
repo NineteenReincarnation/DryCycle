@@ -47,6 +47,7 @@ internal readonly struct AIDebugRecorderEntityStatus
     internal readonly bool Found;
     internal readonly DebugEntityKey Key;
     internal readonly AIDebugTrackedRole Role;
+    internal readonly bool Pinned;
     internal readonly int LastTouchedTick;
     internal readonly long MotionSamples;
     internal readonly long StateChanges;
@@ -55,6 +56,7 @@ internal readonly struct AIDebugRecorderEntityStatus
         bool found,
         DebugEntityKey key,
         AIDebugTrackedRole role,
+        bool pinned,
         int lastTouchedTick,
         long motionSamples,
         long stateChanges)
@@ -62,6 +64,7 @@ internal readonly struct AIDebugRecorderEntityStatus
         Found = found;
         Key = key;
         Role = role;
+        Pinned = pinned;
         LastTouchedTick = lastTouchedTick;
         MotionSamples = motionSamples;
         StateChanges = stateChanges;
