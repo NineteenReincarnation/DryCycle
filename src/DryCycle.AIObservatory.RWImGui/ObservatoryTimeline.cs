@@ -7,7 +7,7 @@ namespace DryCycle.AIObservatory.RWImGui;
 
 internal static class ObservatoryTimeline
 {
-    internal const float PreferredHeight = 378f;
+    internal const float PreferredHeight = 438f;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
@@ -60,6 +60,9 @@ internal static class ObservatoryTimeline
 
         ObservatoryTrackedCompare.Draw(snapshot);
         ObservatoryAdvancedPanels.Draw(snapshot);
+        ObservatoryTimelineTools.DrawControls(snapshot);
+        ObservatoryRangeAnalysis.Draw(snapshot);
+        ObservatoryTimelineTools.PrepareView(snapshot);
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         float width = Math.Max(120f, available.X);
@@ -81,6 +84,14 @@ internal static class ObservatoryTimeline
 
         if (timeline.EndTick <= timeline.StartTick) return;
 
+        int viewStart = ObservatoryTimelineTools.ViewStart;
+        int viewEnd = ObservatoryTimelineTools.ViewEnd;
+        if (viewEnd <= viewStart)
+        {
+            viewStart = timeline.StartTick;
+            viewEnd = timeline.EndTick;
+        }
+
         const float labelWidth = 68f;
         float x0 = min.X + labelWidth;
         float x1 = max.X - 6f;
@@ -100,35 +111,51 @@ internal static class ObservatoryTimeline
         draw.AddText(new Num.Vector2(min.X + 6f, eventTop + 5f), text,
             snapshot.Language == AIDebugLanguage.Chinese ? "状态" : "State");
 
-        DrawTimeGrid(draw, timeline, x0, x1, min.Y, max.Y, border, text);
-        DrawSpeed(draw, timeline, x0, x1, speedTop, speedBottom, plot);
-        DrawStates(draw, timeline, x0, x1, modeTop, modeBottom, eventTop, eventBottom, header, plotHover, text);
+        DrawTimeGrid(draw, viewStart, viewEnd, x0, x1, min.Y, max.Y, border, text);
+        DrawSpeed(draw, timeline, viewStart, viewEnd, x0, x1, speedTop, speedBottom, plot);
+        DrawStates(draw, timeline, viewStart, viewEnd, x0, x1, modeTop, modeBottom, eventTop, eventBottom, header, plotHover, text);
+        ObservatoryTimelineTools.DrawMarkers(snapshot, draw, x0, x1, min.Y + 1f, max.Y - 1f);
+        ObservatoryRangeAnalysis.DrawBoundaries(snapshot, draw, x0, x1, min.Y + 1f, max.Y - 1f);
 
-        float cursorX = TickToX(snapshot.CursorTick, timeline.StartTick, timeline.EndTick, x0, x1);
-        if (cursorX >= x0 && cursorX <= x1)
+        if (snapshot.CursorTick >= viewStart && snapshot.CursorTick <= viewEnd)
+        {
+            float cursorX = TickToX(snapshot.CursorTick, viewStart, viewEnd, x0, x1);
             draw.AddLine(new Num.Vector2(cursorX, min.Y + 2f), new Num.Vector2(cursorX, max.Y - 2f), plotHover, 2f);
+        }
 
+        ObservatoryTimelineTools.HandleMouseWheel(snapshot);
         if (ImGui.IsItemHovered())
         {
             Num.Vector2 mouse = ImGui.GetIO().MousePos;
-            int hoverTick = XToTick(mouse.X, timeline.StartTick, timeline.EndTick, x0, x1);
+            int hoverTick = XToTick(mouse.X, viewStart, viewEnd, x0, x1);
             float relativeSeconds = (hoverTick - snapshot.Tick) / 40f;
-            ImGui.SetTooltip($"tick {hoverTick}\n{relativeSeconds:+0.00;-0.00;0.00}s");
+            ImGui.SetTooltip($"tick {hoverTick}\n{relativeSeconds:+0.00;-0.00;0.00}s\n" +
+                             (snapshot.Language == AIDebugLanguage.Chinese
+                                 ? "单击移动游标 · Shift+单击选择分析范围 · 滚轮缩放"
+                                 : "click: cursor · Shift-click: range · wheel: zoom"));
 
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
-                int delta = hoverTick - snapshot.CursorTick;
-                if (delta != 0)
-                    AIDebugPresentationHub.Enqueue(AIDebugUiCommand.SeekTicks(delta));
-                else if (hoverTick >= snapshot.Tick)
-                    AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ReturnLive));
+                if (ImGui.GetIO().KeyShift)
+                {
+                    ObservatoryRangeAnalysis.HandleShiftClick(hoverTick);
+                }
+                else
+                {
+                    int delta = hoverTick - snapshot.CursorTick;
+                    if (delta != 0)
+                        AIDebugPresentationHub.Enqueue(AIDebugUiCommand.SetCursor(hoverTick));
+                    else if (hoverTick >= snapshot.Tick)
+                        AIDebugPresentationHub.Enqueue(AIDebugUiCommand.Simple(AIDebugUiCommandKind.ReturnLive));
+                }
             }
         }
     }
 
     private static void DrawTimeGrid(
         ImDrawListPtr draw,
-        AIDebugPresentationTimeline timeline,
+        int startTick,
+        int endTick,
         float x0,
         float x1,
         float y0,
@@ -136,10 +163,13 @@ internal static class ObservatoryTimeline
         uint color,
         uint textColor)
     {
-        int firstSecond = ((timeline.StartTick + 39) / 40) * 40;
-        for (int tick = firstSecond; tick <= timeline.EndTick; tick += 40)
+        if (endTick <= startTick) return;
+        int span = endTick - startTick;
+        int step = span <= 160 ? 20 : span <= 400 ? 40 : span <= 1200 ? 80 : 200;
+        int first = ((startTick + step - 1) / step) * step;
+        for (int tick = first; tick <= endTick; tick += step)
         {
-            float x = TickToX(tick, timeline.StartTick, timeline.EndTick, x0, x1);
+            float x = TickToX(tick, startTick, endTick, x0, x1);
             draw.AddLine(new Num.Vector2(x, y0 + 1f), new Num.Vector2(x, y1 - 1f), color, 1f);
             draw.AddText(new Num.Vector2(x + 2f, y0 + 2f), textColor, $"{tick / 40f:0.0}");
         }
@@ -148,6 +178,8 @@ internal static class ObservatoryTimeline
     private static void DrawSpeed(
         ImDrawListPtr draw,
         AIDebugPresentationTimeline timeline,
+        int viewStart,
+        int viewEnd,
         float x0,
         float x1,
         float y0,
@@ -160,6 +192,7 @@ internal static class ObservatoryTimeline
         double maxSpeed = 0.01;
         for (int i = 0; i < motion.Length; i++)
         {
+            if (motion[i].Tick < viewStart || motion[i].Tick > viewEnd) continue;
             double speed = Math.Sqrt(motion[i].VX * motion[i].VX + motion[i].VY * motion[i].VY);
             if (speed > maxSpeed) maxSpeed = speed;
         }
@@ -169,7 +202,8 @@ internal static class ObservatoryTimeline
         for (int i = 0; i < motion.Length; i++)
         {
             AIDebugMotionSample sample = motion[i];
-            float x = TickToX(sample.Tick, timeline.StartTick, timeline.EndTick, x0, x1);
+            if (sample.Tick < viewStart || sample.Tick > viewEnd) continue;
+            float x = TickToX(sample.Tick, viewStart, viewEnd, x0, x1);
             double speed = Math.Sqrt(sample.VX * sample.VX + sample.VY * sample.VY);
             float normalized = (float)(speed / maxSpeed);
             float y = y1 - normalized * (y1 - y0);
@@ -183,6 +217,8 @@ internal static class ObservatoryTimeline
     private static void DrawStates(
         ImDrawListPtr draw,
         AIDebugPresentationTimeline timeline,
+        int viewStart,
+        int viewEnd,
         float x0,
         float x1,
         float modeTop,
@@ -199,23 +235,23 @@ internal static class ObservatoryTimeline
         for (int i = 0; i < states.Length; i++)
         {
             AIDebugFastStateSample sample = states[i];
-            int segmentStartTick = Math.Max(timeline.StartTick, sample.Tick);
+            int segmentStartTick = Math.Max(viewStart, sample.Tick);
             int segmentEndTick = i + 1 < states.Length
-                ? Math.Min(timeline.EndTick, states[i + 1].Tick)
-                : timeline.EndTick;
-            if (segmentEndTick < timeline.StartTick || segmentStartTick > timeline.EndTick) continue;
+                ? Math.Min(viewEnd, states[i + 1].Tick)
+                : viewEnd;
+            if (segmentEndTick < viewStart || segmentStartTick > viewEnd) continue;
 
-            float sx = TickToX(segmentStartTick, timeline.StartTick, timeline.EndTick, x0, x1);
-            float ex = TickToX(segmentEndTick, timeline.StartTick, timeline.EndTick, x0, x1);
+            float sx = TickToX(segmentStartTick, viewStart, viewEnd, x0, x1);
+            float ex = TickToX(segmentEndTick, viewStart, viewEnd, x0, x1);
             if (ex < sx + 1f) ex = sx + 1f;
             draw.AddRectFilled(new Num.Vector2(sx, modeTop), new Num.Vector2(ex, modeBottom), stateColor);
 
             if (sample.State.ModeToken != AIDebugFastState.UnknownToken && ex - sx > 24f)
                 draw.AddText(new Num.Vector2(sx + 3f, modeTop + 4f), textColor, sample.State.ModeToken.ToString());
 
-            if (sample.Tick >= timeline.StartTick && sample.Tick <= timeline.EndTick)
+            if (sample.Tick >= viewStart && sample.Tick <= viewEnd)
             {
-                float exTick = TickToX(sample.Tick, timeline.StartTick, timeline.EndTick, x0, x1);
+                float exTick = TickToX(sample.Tick, viewStart, viewEnd, x0, x1);
                 draw.AddLine(new Num.Vector2(exTick, eventTop), new Num.Vector2(exTick, eventBottom), eventColor, 2f);
             }
         }
