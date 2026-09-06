@@ -93,7 +93,15 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
             .Add("Departure delay / 出发延迟", "DesertBatflyTravelNavigation.DepartureDelay",
                 hasTravel ? travel.DepartureDelay : 0)
             .Add("Waiting at refuge / 正在避难", "DesertBatflyTravelNavigation.WaitingAtRefuge",
-                hasTravel && travel.WaitingAtRefuge);
+                hasTravel && travel.WaitingAtRefuge)
+            .Add("Travel suspended / 旅行暂停", "DesertBatflyTravelNavigation.Suspended",
+                hasTravel && travel.Suspended)
+            .Add("Travel reason / 旅行原因", "DesertBatflyTravelNavigation.StatusReason",
+                hasTravel && !string.IsNullOrEmpty(travel.StatusReason) ? travel.StatusReason : "—")
+            .Add("Route cost / 路线代价", "DesertBatflyTravelNavigation.RouteCost",
+                hasTravel ? travel.RouteCost : 0f)
+            .Add("Route survivability / 路线生存性", "DesertBatflyTravelNavigation.RouteSurvivability",
+                hasTravel ? travel.RouteSurvivability : 0f);
 
         if (hasTravel)
         {
@@ -124,9 +132,11 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Task 09 travel / 跨房旅行",
-            hasTravel ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             hasTravel
-                ? $"{travel.Purpose} -> {travel.DestinationRoom}; routeIndex={travel.RouteIndex}"
+                ? (travel.Suspended ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Active)
+                : AIDebugDecisionState.Inactive,
+            hasTravel
+                ? $"{travel.Purpose} -> {travel.DestinationRoom}; routeIndex={travel.RouteIndex}; {travel.StatusReason}"
                 : "no active TravelIntent",
             "DesertBatflyTravelNavigation"));
 
