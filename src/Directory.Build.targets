@@ -1,4 +1,14 @@
 <Project>
+  <!-- Late-imported properties can safely use RainWorldDir from DryCycle.csproj. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
+    <BuildRWImGuiBridge Condition="'$(BuildRWImGuiBridge)' == ''">true</BuildRWImGuiBridge>
+    <RWImGuiWorkshopPluginDir Condition="'$(RWImGuiWorkshopPluginDir)' == ''">$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPluginDir>
+    <RWImGuiLocalPluginDir Condition="'$(RWImGuiLocalPluginDir)' == ''">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/rwimgui/plugins</RWImGuiLocalPluginDir>
+    <ResolvedRWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' != '' and Exists('$(RWImGuiPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiPluginDir)</ResolvedRWImGuiPluginDir>
+    <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPluginDir)</ResolvedRWImGuiPluginDir>
+    <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</ResolvedRWImGuiPluginDir>
+  </PropertyGroup>
+
   <!-- During the RWImGUI migration DryCycle must not leave a second ImGui.NET or
        cimgui runtime beside DryCycle.dll. RWImGUI ships a modified ImGui.NET/native
        stack and duplicate copies can break its startup with MissingMethodException. -->
@@ -12,5 +22,26 @@
     <Delete Files="@(LegacyDryCycleImGuiRuntime)" />
     <Message Importance="high"
              Text="DryCycle RWImGUI migration: removed stale local ImGui.NET/cimgui runtime copies from $(GameModOutputDir)." />
+  </Target>
+
+  <!-- Build the optional frontend automatically when RWImGUI is installed. The bridge
+       references the DryCycle.dll that has just been produced, so there is no recursive
+       ProjectReference. Users without RWImGUI can still build and run DryCycle normally. -->
+  <Target Name="BuildOptionalRWImGuiBridge"
+          AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
+          Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
+    <Message Importance="high"
+             Text="DryCycle RWImGUI migration: building optional bridge against $(ResolvedRWImGuiPluginDir)." />
+    <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
+             Targets="Build"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
+  </Target>
+
+  <Target Name="ReportMissingOptionalRWImGuiBridge"
+          AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
+          Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' == ''">
+    <Message Importance="high"
+             Text="DryCycle RWImGUI migration: RWImGUI not found; optional Observatory bridge was skipped. Install Workshop 3417372413 or pass -p:RWImGuiPluginDir=... to build it." />
   </Target>
 </Project>
