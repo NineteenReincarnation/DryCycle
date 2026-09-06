@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using RWCustom;
+using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
@@ -37,6 +39,7 @@ internal static class DesertBatflySocialRoomRuntime
         private const int RefreshInterval = 20;
         private readonly Room room;
         private readonly List<DesertBatfly> candidates = new(32);
+        private readonly List<DesertBatfly> roosting = new(16);
         private readonly Dictionary<long, Reservation> byMember = new();
         private readonly List<Reservation> reservations = new(16);
         private int lastRefreshTick = int.MinValue;
@@ -53,6 +56,15 @@ internal static class DesertBatflySocialRoomRuntime
             {
                 Refresh();
                 return candidates;
+            }
+        }
+
+        internal IReadOnlyList<DesertBatfly> Roosting
+        {
+            get
+            {
+                Refresh();
+                return roosting;
             }
         }
 
@@ -153,11 +165,15 @@ internal static class DesertBatflySocialRoomRuntime
             return count;
         }
 
-        internal void RemoveGroupMember(Reservation token, DesertBatfly member)
+        /// <summary>
+        /// Removes one member without scanning the room. Returns true only while the
+        /// microflock remains valid (three or more members and an active reservation).
+        /// </summary>
+        internal bool RemoveGroupMember(Reservation token, DesertBatfly member)
         {
             if (token == null || !token.Active || token.Owner != this ||
                 token.Mode != DesertBatflySocialMode.GroupDrift || member == null)
-                return;
+                return false;
 
             for (int i = token.Members.Count - 1; i >= 0; i--)
             {
@@ -168,7 +184,23 @@ internal static class DesertBatflySocialRoomRuntime
                     byMember.Remove(key);
                 break;
             }
-            if (token.Members.Count < 3) Release(token);
+
+            if (token.Members.Count >= 3) return true;
+            Release(token);
+            return false;
+        }
+
+        internal int CountRoostingNear(Vector2 point, float radius)
+        {
+            Refresh();
+            int count = 0;
+            for (int i = 0; i < roosting.Count; i++)
+            {
+                DesertBatfly bat = roosting[i];
+                if (bat?.mainBodyChunk != null && Custom.DistLess(bat.mainBodyChunk.pos, point, radius))
+                    count++;
+            }
+            return count;
         }
 
         internal void Release(Reservation token)
@@ -205,13 +237,19 @@ internal static class DesertBatflySocialRoomRuntime
             lastRefreshTick = tick;
 
             candidates.Clear();
+            roosting.Clear();
             if (room == null) return;
             if (DesertSwarmRoom.TryGet(room, out DesertSwarmRoom colony))
             {
                 List<Fly> flies = colony.Hive.flies;
                 for (int i = 0; i < flies.Count; i++)
-                    if (flies[i] is DesertBatfly bat && ValidMember(bat) && bat.room == room)
-                        candidates.Add(bat);
+                {
+                    if (flies[i] is not DesertBatfly bat || !ValidMember(bat) || bat.room != room)
+                        continue;
+                    candidates.Add(bat);
+                    if (bat.Consious && bat.AI?.behavior == FlyAI.Behavior.Chain)
+                        roosting.Add(bat);
+                }
             }
 
             for (int i = reservations.Count - 1; i >= 0; i--)
