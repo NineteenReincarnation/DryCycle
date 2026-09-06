@@ -46,9 +46,9 @@ internal readonly struct AIDebugRecorderStatus
     }
 }
 
-// V5 recorder kernel. The important contract is that the 40 Hz path owns only compact
-// value tracks. It does not build AIDebugSnapshot, format strings, sort perception rows,
-// touch ImGui, perform disk IO, or allocate after a slot has been created.
+// V5 recorder kernel. The 40 Hz path owns only compact value tracks. It does not build
+// AIDebugSnapshot, format strings, sort perception rows, touch ImGui, perform disk IO, or
+// allocate after a slot has been created.
 internal static class AIDebugRecorder
 {
     private const int MaxRetainedSlots = 12;
@@ -124,9 +124,6 @@ internal static class AIDebugRecorder
     {
         if (mode == AIDebugRecorderMode.Off || game == null) return;
         EnsureGame(game);
-
-        // ARMED + zero tracked entities is the common idle path. Keep it to two cheap
-        // branches: no slot scan, no world scan, no allocation, and no presentation work.
         if (activeCaptureCount <= 0) return;
 
         for (int i = 0; i < Slots.Length; i++)
@@ -236,6 +233,56 @@ internal static class AIDebugRecorder
         return true;
     }
 
+    internal static int CopyMotionRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        AIDebugMotionSample[] destination,
+        int destinationOffset = 0)
+    {
+        int index = FindSlot(key);
+        return index < 0
+            ? 0
+            : Slots[index].Motion.CopyRange(startTick, endTick, destination, destinationOffset);
+    }
+
+    internal static int CopyFastStateRange(
+        DebugEntityKey key,
+        int startTick,
+        int endTick,
+        AIDebugFastStateSample[] destination,
+        int destinationOffset = 0)
+    {
+        int index = FindSlot(key);
+        return index < 0
+            ? 0
+            : Slots[index].States.CopyRange(startTick, endTick, destination, destinationOffset);
+    }
+
+    internal static bool TryGetRetainedTickRange(DebugEntityKey key, out int oldestTick, out int newestTick)
+    {
+        int index = FindSlot(key);
+        if (index < 0)
+        {
+            oldestTick = 0;
+            newestTick = 0;
+            return false;
+        }
+
+        bool motion = Slots[index].Motion.TryGetRetainedTickRange(out int motionOldest, out int motionNewest);
+        bool states = Slots[index].States.TryGetRetainedTickRange(out int stateOldest, out int stateNewest);
+        if (!motion && !states)
+        {
+            oldestTick = 0;
+            newestTick = 0;
+            return false;
+        }
+
+        oldestTick = motion && states ? Math.Min(motionOldest, stateOldest) : (motion ? motionOldest : stateOldest);
+        newestTick = motion && states ? Math.Max(motionNewest, stateNewest) : (motion ? motionNewest : stateNewest);
+        return true;
+    }
+
     internal static void Reset()
     {
         ClearSlots();
@@ -256,10 +303,6 @@ internal static class AIDebugRecorder
     private static void EnsureGame(RainWorldGame game)
     {
         if (ReferenceEquals(boundGame, game)) return;
-
-        // AbstractCreature handles are only valid for the RainWorldGame/world that owns
-        // them. Never carry a tracked handle into a new session just because its numeric
-        // EntityID happens to match an entity from the previous world.
         ClearSlots();
         boundGame = game;
     }
@@ -370,9 +413,6 @@ internal static class AIDebugRecorder
             nextResolveTick = (game?.clock ?? 0) + ResolveRetryTicks;
         }
 
-        // Returns false only when this tracked entity has been explicitly deleted and the
-        // active role should be retired. A temporarily unavailable handle is resolved at a
-        // throttled cadence so an edge case cannot turn into a 40 Hz whole-world scan.
         internal bool CaptureTick(RainWorldGame game, int tick)
         {
             AbstractCreature creature = handle;
