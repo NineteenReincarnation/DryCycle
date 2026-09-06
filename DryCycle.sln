@@ -7,11 +7,14 @@ EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Profile|Any CPU = Profile|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Profile|Any CPU.ActiveCfg = Profile|Any CPU
+		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Profile|Any CPU.Build.0 = Profile|Any CPU
 		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F6596CBC-B547-4160-B87E-CEF65F3904FA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
