@@ -5,6 +5,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 internal sealed class DesertBatfly : Fly, IPlayerEdible
 {
+    private const float RockSurvivalHealthFloor = 0.01f;
+
     private DesertBatflyInjury injury;
     internal DesertBatflyInjury Injury => injury ??= new DesertBatflyInjury(this);
     internal readonly DesertBatflyAI DesertAI;
@@ -15,6 +17,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private int mealFood = 2;
     private int socialSampleTicks;
     private bool runningVanillaUpdate;
+    private bool resolvingRockViolence;
     private Player playerHolder;
 
     private Creature recentLethalDamager;
@@ -257,8 +260,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         if (!RippleViolenceCheck(source)) return;
         Creature attacker = source?.owner as Creature ?? (source?.owner as Weapon)?.thrownBy;
+        bool rockHit = source?.owner is Rock;
 
-        bool supportedLethalThreat = damage > 0f &&
+        // Rocks now deal their ordinary blunt health damage and therefore participate in
+        // Injury/Trauma. They are deliberately excluded from lethal attribution because
+        // a rock impact itself is never allowed to perform the live -> dead transition.
+        bool supportedLethalThreat = !rockHit && damage > 0f &&
             DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
 
         // Preserve an intact Fly chain until Die() has captured its witnesses. A hit
@@ -277,7 +284,21 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         }
 
         float healthBefore = DesertState.health;
-        base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
+        resolvingRockViolence = rockHit;
+        try
+        {
+            base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
+        }
+        finally
+        {
+            // Creature.Violence can call Die() both through quick-death rolls and the
+            // instant-death damage limit. Die() is suppressed only while this exact rock
+            // Violence call is resolving; afterwards the bat remains fully killable by
+            // spears, bites, drowning and every other ordinary cause.
+            if (rockHit && !dead && DesertState.health < RockSurvivalHealthFloor)
+                DesertState.health = RockSurvivalHealthFloor;
+            resolvingRockViolence = false;
+        }
 
         Injury.OnHealthLoss(healthBefore, type, source?.owner, attacker, momentum);
 
@@ -346,6 +367,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Die()
     {
+        // Rocks are allowed to injure and heavily stun Desert Batflies, but they can
+        // never be the direct finishing blow. Creature.Violence may ask for Die() while
+        // resolving a rock hit; keep the individual barely alive and let later non-rock
+        // damage or environmental hazards kill it normally.
+        if (resolvingRockViolence && !dead)
+        {
+            DesertState.health = Mathf.Max(DesertState.health, RockSurvivalHealthFloor);
+            return;
+        }
+
         if (runningVanillaUpdate && !dead && drown < 1f &&
             grabbedBy.Count > 0 && grabbedBy[0].grabber is Player)
             return;
