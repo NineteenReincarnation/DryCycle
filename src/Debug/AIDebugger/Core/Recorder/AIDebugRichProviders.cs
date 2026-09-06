@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using DryCycle.Creatures;
@@ -23,49 +22,97 @@ internal interface IAIDebugRecorderRichProvider
 internal static class AIDebugRecorderRichProviderRegistry
 {
     private static readonly IAIDebugRecorderRichProvider Generic = new GenericRichProvider();
-    private static readonly IAIDebugRecorderRichProvider DesertBatfly = new DesertBatflyRichProvider();
-    private static readonly IAIDebugRecorderRichProvider MossySpider = new MossySpiderRichProvider();
+    private static readonly IAIDebugRecorderRichProvider DesertBat = new DesertBatflyRichProvider();
+    private static readonly IAIDebugRecorderRichProvider Mossy = new MossySpiderRichProvider();
     private static readonly IAIDebugRecorderRichProvider Spineback = new SpinebackRichProvider();
 
     internal static IAIDebugRecorderRichProvider Resolve(AbstractCreature creature)
     {
-        if (creature?.realizedCreature is DesertBatfly) return DesertBatfly;
-        if (creature?.realizedCreature is MossySpider) return MossySpider;
+        if (creature?.realizedCreature is DesertBatfly) return DesertBat;
+        if (creature?.realizedCreature is MossySpider) return Mossy;
         if (creature?.realizedCreature is Lizard lizard &&
             SpinebackLizardEnums.Type != null && lizard.Template?.type == SpinebackLizardEnums.Type)
             return Spineback;
         return Generic;
     }
 
+    internal static AIDebugSnapshot Materialize(
+        DebugEntityKey key,
+        AIDebugEntityState entityState,
+        AIDebugRichSchema schema,
+        AIDebugRawSnapshotBuffer fields,
+        AIDebugRawDecisionBuffer decisions,
+        int controlOwnerStringId)
+    {
+        if (schema == null || fields == null) return null;
+        string display = schema.DisplayType + " #" + key.Number.ToString(CultureInfo.InvariantCulture);
+        string owner = AIDebugRawStringTable.Resolve(controlOwnerStringId);
+        var snapshot = new AIDebugSnapshot(key, display, entityState, string.IsNullOrEmpty(owner) ? "—" : owner);
+
+        string sectionKey = null;
+        AIDebugSection section = null;
+        int fieldCount = Math.Min(schema.Fields.Length, fields.Count);
+        for (int i = 0; i < fieldCount; i++)
+        {
+            if (!fields.IsValid(i)) continue;
+            AIDebugFieldSchema spec = schema.Fields[i];
+            if (section == null || !string.Equals(sectionKey, spec.SectionKey, StringComparison.Ordinal))
+            {
+                sectionKey = spec.SectionKey;
+                section = new AIDebugSection(sectionKey);
+                snapshot.Sections.Add(section);
+            }
+            section.Values.Add(new AIDebugValue(
+                spec.LabelKey,
+                spec.RawName,
+                Format(fields.Get(i), spec),
+                0,
+                (spec.Flags & AIDebugFieldFlags.Exact) != 0 ? "V5 Exact/Heavy" : "V5 Retained/Heavy"));
+        }
+
+        int decisionCount = Math.Min(schema.Decisions.Length, decisions?.Count ?? 0);
+        for (int i = 0; i < decisionCount; i++)
+        {
+            AIDebugDecisionSchema spec = schema.Decisions[i];
+            AIDebugRawDecision value = decisions.Get(i);
+            snapshot.Decisions.Add(new AIDebugDecisionNode(
+                spec.LabelKey,
+                value.State,
+                AIDebugRawStringTable.Resolve(value.DetailStringId),
+                spec.RawName,
+                spec.Depth));
+        }
+        return snapshot;
+    }
+
     private sealed class GenericRichProvider : IAIDebugRecorderRichProvider
     {
         private static readonly AIDebugRichSchema ProviderSchema = new(
-            "generic.v5",
-            "Creature",
+            "generic.v5", "Creature",
             new[]
             {
-                F(0, "section.identity", "field.entity_id", "AbstractCreature.ID", AIDebugRawValueKind.EntityId),
-                F(1, "section.identity", "field.template", "CreatureTemplate.type", AIDebugRawValueKind.StringId),
-                F(2, "section.identity", "field.room", "AbstractCreature.Room", AIDebugRawValueKind.StringId),
-                F(3, "section.identity", "field.coordinate", "AbstractCreature.pos", AIDebugRawValueKind.Coordinate),
-                F(4, "section.identity", "field.entity_state", "DebugEntityState", AIDebugRawValueKind.EnumToken),
-                F(5, "section.state", "field.dead", "Creature.dead", AIDebugRawValueKind.Bool),
-                F(6, "section.state", "field.conscious", "Creature.Consious", AIDebugRawValueKind.Bool),
-                F(7, "section.state", "field.in_shortcut", "Creature.inShortcut", AIDebugRawValueKind.Bool),
-                F(8, "section.state", "field.in_den", "AbstractCreature.InDen", AIDebugRawValueKind.Bool),
-                F(9, "section.movement", "field.position", "mainBodyChunk.pos", AIDebugRawValueKind.Vector2),
-                F(10, "section.movement", "field.velocity", "mainBodyChunk.vel", AIDebugRawValueKind.Vector2),
-                F(11, "section.ai", "field.abstract_ai", "AbstractCreature.abstractAI", AIDebugRawValueKind.StringId),
-                F(12, "section.ai", "field.real_ai", "ArtificialIntelligence", AIDebugRawValueKind.StringId),
-                F(13, "section.ai", "field.destination", "AbstractCreatureAI.destination", AIDebugRawValueKind.Coordinate),
-                F(14, "section.ai", "field.pathfinder", "ArtificialIntelligence.pathFinder", AIDebugRawValueKind.StringId),
-                F(15, "section.ai", "field.modules", "ArtificialIntelligence.modules.Count", AIDebugRawValueKind.Int)
+                F(0,"section.identity","field.entity_id","AbstractCreature.ID",AIDebugRawValueKind.EntityId),
+                F(1,"section.identity","field.template","CreatureTemplate.type",AIDebugRawValueKind.StringId),
+                F(2,"section.identity","field.room","AbstractCreature.Room",AIDebugRawValueKind.StringId),
+                F(3,"section.identity","field.coordinate","AbstractCreature.pos",AIDebugRawValueKind.Coordinate),
+                F(4,"section.identity","field.entity_state","DebugEntityState",AIDebugRawValueKind.EnumToken),
+                F(5,"section.state","field.dead","Creature.dead",AIDebugRawValueKind.Bool),
+                F(6,"section.state","field.conscious","Creature.Consious",AIDebugRawValueKind.Bool),
+                F(7,"section.state","field.in_shortcut","Creature.inShortcut",AIDebugRawValueKind.Bool),
+                F(8,"section.state","field.in_den","AbstractCreature.InDen",AIDebugRawValueKind.Bool),
+                F(9,"section.movement","field.position","mainBodyChunk.pos",AIDebugRawValueKind.Vector2),
+                F(10,"section.movement","field.velocity","mainBodyChunk.vel",AIDebugRawValueKind.Vector2),
+                F(11,"section.ai","field.abstract_ai","AbstractCreature.abstractAI",AIDebugRawValueKind.StringId),
+                F(12,"section.ai","field.real_ai","ArtificialIntelligence",AIDebugRawValueKind.StringId),
+                F(13,"section.ai","field.destination","AbstractCreatureAI.destination",AIDebugRawValueKind.Coordinate),
+                F(14,"section.ai","field.pathfinder","ArtificialIntelligence.pathFinder",AIDebugRawValueKind.StringId),
+                F(15,"section.ai","field.modules","ArtificialIntelligence.modules.Count",AIDebugRawValueKind.Int)
             },
             new[]
             {
-                D("decision.availability", "creature lifecycle"),
-                D("decision.conscious", "Creature.Consious", 1),
-                D("decision.shortcut", "Creature.inShortcut", 1)
+                D("decision.availability","creature lifecycle"),
+                D("decision.conscious","Creature.Consious",1),
+                D("decision.shortcut","Creature.inShortcut",1)
             });
 
         public AIDebugRichSchema Schema => ProviderSchema;
@@ -75,9 +122,24 @@ internal static class AIDebugRecorderRichProviderRegistry
         {
             fields.Begin(ProviderSchema.Fields.Length);
             decisions.Begin(ProviderSchema.Decisions.Length);
-            CaptureGenericFields(creature, fields);
-
+            SetIdentity(fields, creature);
             Creature realized = creature?.realizedCreature;
+            fields.Set(5, AIDebugRawValue.Bool(realized?.dead ?? creature?.state?.dead ?? false));
+            fields.Set(6, AIDebugRawValue.Bool(realized?.Consious == true));
+            fields.Set(7, AIDebugRawValue.Bool(realized?.inShortcut == true));
+            fields.Set(8, AIDebugRawValue.Bool(creature?.InDen == true));
+            if (realized?.mainBodyChunk != null)
+            {
+                fields.Set(9, Vec(realized.mainBodyChunk.pos));
+                fields.Set(10, Vec(realized.mainBodyChunk.vel));
+            }
+            ArtificialIntelligence ai = creature?.abstractAI?.RealAI;
+            fields.Set(11, Str(creature?.abstractAI?.GetType().Name));
+            fields.Set(12, Str(ai?.GetType().Name));
+            if (creature?.abstractAI != null) fields.Set(13, Coord(creature.abstractAI.destination));
+            fields.Set(14, Str(ai?.pathFinder?.GetType().Name));
+            fields.Set(15, AIDebugRawValue.Int(ai?.modules?.Count ?? 0));
+
             decisions.Set(0, AIDebugDecisionState.Active);
             decisions.Set(1, realized?.Consious == true ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked);
             decisions.Set(2, realized?.inShortcut == true ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive);
@@ -88,9 +150,8 @@ internal static class AIDebugRecorderRichProviderRegistry
     private sealed class DesertBatflyRichProvider : IAIDebugRecorderRichProvider
     {
         private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-        // These legacy private counters are sampled only on the 2 Hz Heavy path. The
-        // 40 Hz Fast path remains reflection-free; all other DesertBatfly fields are read
-        // directly. This keeps compatibility until those counters gain internal accessors.
+        // The 40 Hz Fast provider is reflection-free. These retained legacy counters are
+        // sampled only on the sparse Heavy path until the creature exposes direct accessors.
         private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);
         private static readonly FieldInfo MemoryField = typeof(DesertBatflyAI).GetField("memory", PrivateInstance);
         private static readonly FieldInfo InterestField = typeof(DesertBatflyAI).GetField("interest", PrivateInstance);
@@ -99,41 +160,35 @@ internal static class AIDebugRecorderRichProviderRegistry
         private static readonly FieldInfo HasSlotField = typeof(DesertBatflyAI).GetField("hasSlot", PrivateInstance);
         private static readonly FieldInfo EscapeFromField = typeof(DesertBatflyAI).GetField("escapeFrom", PrivateInstance);
 
-        private static readonly int[] ModeNameIds = EnumIds<DesertBatflyAI.Activity>();
-        private static readonly int[] RecoveryNameIds = EnumIds<InjuryRecoveryState>();
-        private static readonly int[] SexNameIds = EnumIds<DesertBatflySex>();
-
         private static readonly AIDebugRichSchema ProviderSchema = new(
-            "desert-batfly.v5",
-            "DesertBatfly",
-            BuildFields(),
+            "desert-batfly.v5", "DesertBatfly", BuildFields(),
             new[]
             {
-                D("decision.availability", "DesertBatfly lifecycle"),
-                D("decision.conscious", "Creature.Consious", 1),
-                D("decision.shortcut", "Creature.inShortcut", 1),
-                D("decision.restrained", "Creature.grabbedBy", 1),
-                D("decision.survival", "DesertBatfly survival"),
-                D("decision.danger", "DesertBatflyAI.HasImmediateDanger", 1),
-                D("decision.fear", "DesertBatflyIntimidation.BlocksSocialRoles", 1),
-                D("decision.trauma", "DesertBatflyState Trauma", 1),
-                D("decision.physical_condition", "DesertBatflyInjury.BlocksCombat"),
-                D("field.health", "DesertBatflyState.health", 1),
-                D("field.left_wing_injury", "DesertBatflyState.LeftWingInjury", 1),
-                D("field.right_wing_injury", "DesertBatflyState.RightWingInjury", 1),
-                D("field.post_stun_shock", "DesertBatflyInjury.PostStunShock", 1),
-                D("field.physical_capability", "DesertBatflyInjury.PhysicalCapability", 1),
-                D("decision.injury_recovery", "DesertBatflyInjury.RecoveryState"),
-                D("decision.special", "DesertBatfly special state"),
-                D("decision.injury", "DesertBatflyInjury.BlocksCombat", 1),
-                D("decision.grief", "DesertBatflyState.GriefStrength", 1),
-                D("decision.vengeance", "DesertBatflyIntimidation.IsExtremeVengeanceActive", 1),
-                D("decision.roost", "FlyAI.behavior / DesertBatflyAI.Mode", 1),
-                D("decision.retaliation_injury", "DesertBatflyInjury.BlocksCombat", 1),
-                D("decision.vengeance_injury", "DesertBatflyIntimidation.Update injury gate", 1),
-                D("decision.custom_ai", "DesertBatflyAI.Mode"),
-                D("decision.vanilla_ai", "FlyAI.behavior"),
-                D("decision.motor", "FlyAI.localGoal")
+                D("decision.availability","DesertBatfly lifecycle"),
+                D("decision.conscious","Creature.Consious",1),
+                D("decision.shortcut","Creature.inShortcut",1),
+                D("decision.restrained","Creature.grabbedBy",1),
+                D("decision.survival","DesertBatfly survival"),
+                D("decision.danger","DesertBatflyAI.HasImmediateDanger",1),
+                D("decision.fear","DesertBatflyIntimidation.BlocksSocialRoles",1),
+                D("decision.trauma","DesertBatflyState Trauma",1),
+                D("decision.physical_condition","DesertBatflyInjury.BlocksCombat"),
+                D("field.health","DesertBatflyState.health",1),
+                D("field.left_wing_injury","DesertBatflyState.LeftWingInjury",1),
+                D("field.right_wing_injury","DesertBatflyState.RightWingInjury",1),
+                D("field.post_stun_shock","DesertBatflyInjury.PostStunShock",1),
+                D("field.physical_capability","DesertBatflyInjury.PhysicalCapability",1),
+                D("decision.injury_recovery","DesertBatflyInjury.RecoveryState"),
+                D("decision.special","DesertBatfly special state"),
+                D("decision.injury","DesertBatflyInjury.BlocksCombat",1),
+                D("decision.grief","DesertBatflyState.GriefStrength",1),
+                D("decision.vengeance","DesertBatflyIntimidation.IsExtremeVengeanceActive",1),
+                D("decision.roost","FlyAI.behavior / DesertBatflyAI.Mode",1),
+                D("decision.retaliation_injury","DesertBatflyInjury.BlocksCombat",1),
+                D("decision.vengeance_injury","DesertBatflyIntimidation.Update injury gate",1),
+                D("decision.custom_ai","DesertBatflyAI.Mode"),
+                D("decision.vanilla_ai","FlyAI.behavior"),
+                D("decision.motor","FlyAI.localGoal")
             });
 
         public AIDebugRichSchema Schema => ProviderSchema;
@@ -153,8 +208,8 @@ internal static class AIDebugRecorderRichProviderRegistry
             DesertBatflyState state = bat.DesertState;
             DesertBatflyPersonality p = bat.Personality;
             DesertBatflyInjury injury = bat.Injury;
+            SetIdentity(fields, creature);
 
-            SetIdentity(fields, creature, 0);
             fields.Set(5, AIDebugRawValue.Bool(bat.dead));
             fields.Set(6, AIDebugRawValue.Bool(bat.Consious));
             fields.Set(7, AIDebugRawValue.Bool(bat.inShortcut));
@@ -173,14 +228,13 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(19, AIDebugRawValue.Float(injury.ForwardControl));
             fields.Set(20, AIDebugRawValue.Float(injury.TurnControl));
             fields.Set(21, AIDebugRawValue.Float(injury.LiftControl));
-            fields.Set(22, AIDebugRawValue.StringId(EnumId(RecoveryNameIds, (int)injury.RecoveryState)));
-            if (injury.RecoveryTarget.HasValue)
-                fields.Set(23, AIDebugRawValue.Vector2(injury.RecoveryTarget.Value.x, injury.RecoveryTarget.Value.y));
-            fields.Set(24, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(injury.LastInjurySource)));
-            fields.Set(25, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(injury.LastInjuryDamageType)));
+            fields.Set(22, Str(injury.RecoveryState.ToString()));
+            if (injury.RecoveryTarget.HasValue) fields.Set(23, Vec(injury.RecoveryTarget.Value));
+            fields.Set(24, Str(injury.LastInjurySource));
+            fields.Set(25, Str(injury.LastInjuryDamageType));
             fields.Set(26, AIDebugRawValue.Int(injury.LastInjuryTick));
 
-            fields.Set(27, AIDebugRawValue.StringId(EnumId(SexNameIds, (int)p.Sex)));
+            fields.Set(27, Str(p.Sex.ToString()));
             fields.Set(28, AIDebugRawValue.Float(p.Temperament));
             fields.Set(29, AIDebugRawValue.Float(p.Nerve));
             fields.Set(30, AIDebugRawValue.Float(p.Conformity));
@@ -189,9 +243,8 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(33, AIDebugRawValue.Float(p.SandSpitAffinity));
             fields.Set(34, AIDebugRawValue.Bool(p.Aggressive));
 
-            fields.Set(35, AIDebugRawValue.StringId(EnumId(ModeNameIds, (int)ai.Mode)));
-            if (ai.Target?.abstractCreature != null)
-                fields.Set(36, Entity(ai.Target.abstractCreature.ID));
+            fields.Set(35, Str(ai.Mode.ToString()));
+            if (ai.Target?.abstractCreature != null) fields.Set(36, Entity(ai.Target.abstractCreature.ID));
             fields.Set(37, AIDebugRawValue.Bool(ai.FormalAttack));
             fields.Set(38, AIDebugRawValue.Bool(ai.HasImmediateDanger));
             fields.Set(39, AIDebugRawValue.Int(Read<int>(RetreatField, ai)));
@@ -204,8 +257,8 @@ internal static class AIDebugRecorderRichProviderRegistry
             if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
             {
                 DesertBatflyFlockSnapshot flock = colony.Flock;
-                fields.Set(45, AIDebugRawValue.Vector2(flock.Center.x, flock.Center.y));
-                fields.Set(46, AIDebugRawValue.Vector2(flock.AverageVelocity.x, flock.AverageVelocity.y));
+                fields.Set(45, Vec(flock.Center));
+                fields.Set(46, Vec(flock.AverageVelocity));
                 fields.Set(47, AIDebugRawValue.Int(flock.ActiveCount));
                 fields.Set(48, AIDebugRawValue.Float(flock.PanicRatio));
                 fields.Set(49, AIDebugRawValue.Float(flock.PreviousPanicRatio));
@@ -221,15 +274,14 @@ internal static class AIDebugRecorderRichProviderRegistry
 
             if (bat.mainBodyChunk != null)
             {
-                fields.Set(57, AIDebugRawValue.Vector2(bat.mainBodyChunk.pos.x, bat.mainBodyChunk.pos.y));
-                fields.Set(58, AIDebugRawValue.Vector2(bat.mainBodyChunk.vel.x, bat.mainBodyChunk.vel.y));
+                fields.Set(57, Vec(bat.mainBodyChunk.pos));
+                fields.Set(58, Vec(bat.mainBodyChunk.vel));
             }
-            Vector2 escape = Read<Vector2>(EscapeFromField, ai);
-            fields.Set(59, AIDebugRawValue.Vector2(escape.x, escape.y));
+            fields.Set(59, Vec(Read<Vector2>(EscapeFromField, ai)));
             if (bat.AI != null)
             {
-                fields.Set(60, Coordinate(bat.AI.localGoal));
-                fields.Set(61, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(bat.AI.behavior?.value)));
+                fields.Set(60, Vec(bat.AI.localGoal));
+                fields.Set(61, Str(bat.AI.behavior?.value));
                 fields.Set(62, AIDebugRawValue.Bool(bat.AI.fleeFromRain));
                 fields.Set(63, AIDebugRawValue.Int(bat.AI.luredCounter));
             }
@@ -255,26 +307,30 @@ internal static class AIDebugRecorderRichProviderRegistry
                 traumatized ? AIDebugRawStringTable.Intern("trauma aggression gate") : 0);
             decisions.Set(8, injury.BlocksCombat ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
                 injury.BlocksCombat ? AIDebugRawStringTable.Intern("combat blocked by injury/shock") : 0);
-            decisions.Set(9, AIDebugDecisionState.Active);
-            decisions.Set(10, AIDebugDecisionState.Active);
-            decisions.Set(11, AIDebugDecisionState.Active);
-            decisions.Set(12, AIDebugDecisionState.Active);
-            decisions.Set(13, AIDebugDecisionState.Active);
+            decisions.Set(9, AIDebugDecisionState.Active, FloatDetail(state.health));
+            decisions.Set(10, AIDebugDecisionState.Active, FloatDetail(state.LeftWingInjury));
+            decisions.Set(11, AIDebugDecisionState.Active, FloatDetail(state.RightWingInjury));
+            decisions.Set(12, AIDebugDecisionState.Active, FloatDetail(injury.PostStunShock));
+            decisions.Set(13, AIDebugDecisionState.Active, FloatDetail(injury.PhysicalCapability));
             decisions.Set(14, injury.IsRecovering ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
                 injury.IsRecovering ? AIDebugRawStringTable.Intern(injury.RecoveryReason) : 0);
             decisions.Set(15, AIDebugDecisionState.Active);
             decisions.Set(16, injury.BlocksCombat ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive);
-            decisions.Set(17, state.GriefStrength >= 0.30f ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive);
+            decisions.Set(17, state.GriefStrength >= 0.30f ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+                state.GriefStrength >= 0.30f ? FloatDetail(state.GriefStrength) : 0);
             decisions.Set(18, vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
                 vengeance ? AIDebugRawStringTable.Intern("Extreme Vengeance active") : 0);
             decisions.Set(19, roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
                 roost ? AIDebugRawStringTable.Intern("FlyAI Chain / DesertBatflyAI Roost") : 0);
             decisions.Set(20, injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready);
             decisions.Set(21, injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready);
-            decisions.Set(22, AIDebugDecisionState.Active, EnumId(ModeNameIds, (int)ai.Mode));
+            decisions.Set(22, AIDebugDecisionState.Active, AIDebugRawStringTable.Intern(ai.Mode.ToString()));
             decisions.Set(23, AIDebugDecisionState.Ready,
                 bat.AI == null ? 0 : AIDebugRawStringTable.Intern(bat.AI.behavior?.value));
-            decisions.Set(24, AIDebugDecisionState.Active);
+            decisions.Set(24, AIDebugDecisionState.Active,
+                bat.AI == null ? 0 : AIDebugRawStringTable.Intern(
+                    "(" + bat.AI.localGoal.x.ToString("0.0", CultureInfo.InvariantCulture) + ", " +
+                    bat.AI.localGoal.y.ToString("0.0", CultureInfo.InvariantCulture) + ")"));
 
             controlOwnerStringId = ControlOwnerId(bat, restrained, fear, trauma, vengeance, roost);
         }
@@ -341,11 +397,14 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(57,"section.movement","field.position","mainBodyChunk.pos",AIDebugRawValueKind.Vector2,true),
             F(58,"section.movement","field.velocity","mainBodyChunk.vel",AIDebugRawValueKind.Vector2,true),
             F(59,"section.movement","field.escape_from","DesertBatflyAI.escapeFrom",AIDebugRawValueKind.Vector2,true),
-            F(60,"section.movement","field.local_goal","FlyAI.localGoal",AIDebugRawValueKind.Coordinate,true),
+            F(60,"section.movement","field.local_goal","FlyAI.localGoal",AIDebugRawValueKind.Vector2,true),
             F(61,"section.movement","field.behavior","FlyAI.behavior",AIDebugRawValueKind.StringId,true),
             F(62,"section.movement","field.flee_from_rain","FlyAI.fleeFromRain",AIDebugRawValueKind.Bool,true),
             F(63,"section.movement","field.lured_counter","FlyAI.luredCounter",AIDebugRawValueKind.Int,true)
         };
+
+        private static int FloatDetail(float value) =>
+            AIDebugRawStringTable.Intern(value.ToString("0.000", CultureInfo.InvariantCulture));
 
         private static int ControlOwnerId(DesertBatfly bat, bool restrained, bool fear, float trauma, bool vengeance, bool roost)
         {
@@ -392,10 +451,8 @@ internal static class AIDebugRecorderRichProviderRegistry
 
     private sealed class MossySpiderRichProvider : IAIDebugRecorderRichProvider
     {
-        private static readonly int[] BehaviorIds = EnumIds<MossySpiderAI.Behavior>();
         private static readonly AIDebugRichSchema ProviderSchema = new(
-            "mossy-spider.v5",
-            "MossySpider",
+            "mossy-spider.v5", "MossySpider",
             new[]
             {
                 F(0,"section.identity","field.entity_id","AbstractCreature.ID",AIDebugRawValueKind.EntityId),
@@ -440,28 +497,25 @@ internal static class AIDebugRecorderRichProviderRegistry
                 controlOwnerStringId = AIDebugRawStringTable.Intern("Unavailable");
                 return;
             }
-
             MossySpiderAI ai = spider.AI;
             MossySpiderAbstractAI abstractAI = creature.abstractAI as MossySpiderAbstractAI;
-            SetIdentity(fields, creature, 0);
+            SetIdentity(fields, creature);
             fields.Set(5, AIDebugRawValue.Bool(spider.dead));
             fields.Set(6, AIDebugRawValue.Bool(spider.Consious));
             fields.Set(7, AIDebugRawValue.Bool(spider.inShortcut));
-            Vector2 center = spider.BodyCenter;
-            fields.Set(8, AIDebugRawValue.Vector2(center.x, center.y));
-            if (spider.mainBodyChunk != null)
-                fields.Set(9, AIDebugRawValue.Vector2(spider.mainBodyChunk.vel.x, spider.mainBodyChunk.vel.y));
-            fields.Set(10, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(abstractAI?.GetType().Name)));
-            fields.Set(11, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.GetType().Name)));
+            fields.Set(8, Vec(spider.BodyCenter));
+            if (spider.mainBodyChunk != null) fields.Set(9, Vec(spider.mainBodyChunk.vel));
+            fields.Set(10, Str(abstractAI?.GetType().Name));
+            fields.Set(11, Str(ai?.GetType().Name));
             if (ai != null)
             {
-                fields.Set(12, AIDebugRawValue.StringId(EnumId(BehaviorIds, (int)ai.CurrentBehavior)));
-                fields.Set(14, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai.Pather?.GetType().Name)));
+                fields.Set(12, Str(ai.CurrentBehavior.ToString()));
+                fields.Set(14, Str(ai.Pather?.GetType().Name));
                 fields.Set(15, AIDebugRawValue.Int(ai.modules?.Count ?? 0));
-                fields.Set(16, Coordinate(ai.Pather.GetDestination));
+                fields.Set(16, Coord(ai.Pather.GetDestination));
             }
-            if (abstractAI?.RoamTarget.HasValue == true) fields.Set(13, Coordinate(abstractAI.RoamTarget.Value));
-            fields.Set(17, AIDebugRawValue.Vector2(spider.MoveDirection.x, spider.MoveDirection.y));
+            if (abstractAI?.RoamTarget.HasValue == true) fields.Set(13, Coord(abstractAI.RoamTarget.Value));
+            fields.Set(17, Vec(spider.MoveDirection));
             fields.Set(18, AIDebugRawValue.Float(spider.GaitCycle));
             fields.Set(19, AIDebugRawValue.Float(spider.GroundSupport));
             fields.Set(20, AIDebugRawValue.Float(spider.SwimFactor));
@@ -471,7 +525,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             decisions.Set(2, spider.inShortcut ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive);
             decisions.Set(3, ai?.CurrentBehavior == MossySpiderAI.Behavior.Roaming
                 ? AIDebugDecisionState.Active : AIDebugDecisionState.Ready,
-                ai == null ? 0 : EnumId(BehaviorIds, (int)ai.CurrentBehavior));
+                ai == null ? 0 : AIDebugRawStringTable.Intern(ai.CurrentBehavior.ToString()));
             controlOwnerStringId = AIDebugRawStringTable.Intern(ai != null
                 ? "MossySpiderAI / locomotion" : "MossySpiderAbstractAI");
         }
@@ -480,8 +534,7 @@ internal static class AIDebugRecorderRichProviderRegistry
     private sealed class SpinebackRichProvider : IAIDebugRecorderRichProvider
     {
         private static readonly AIDebugRichSchema ProviderSchema = new(
-            "spineback-lizard.v5",
-            "SpinebackLizard",
+            "spineback-lizard.v5", "SpinebackLizard",
             new[]
             {
                 F(0,"section.identity","field.entity_id","AbstractCreature.ID",AIDebugRawValueKind.EntityId),
@@ -524,26 +577,25 @@ internal static class AIDebugRecorderRichProviderRegistry
                 controlOwnerStringId = AIDebugRawStringTable.Intern("Unavailable");
                 return;
             }
-
             LizardAI ai = creature.abstractAI?.RealAI as LizardAI;
-            SetIdentity(fields, creature, 0);
+            SetIdentity(fields, creature);
             fields.Set(5, AIDebugRawValue.Bool(lizard.dead));
             fields.Set(6, AIDebugRawValue.Bool(lizard.Consious));
             fields.Set(7, AIDebugRawValue.Bool(lizard.inShortcut));
             if (lizard.mainBodyChunk != null)
             {
-                fields.Set(8, AIDebugRawValue.Vector2(lizard.mainBodyChunk.pos.x, lizard.mainBodyChunk.pos.y));
-                fields.Set(9, AIDebugRawValue.Vector2(lizard.mainBodyChunk.vel.x, lizard.mainBodyChunk.vel.y));
-                fields.Set(16, AIDebugRawValue.Vector2(lizard.mainBodyChunk.pos.x, lizard.mainBodyChunk.pos.y));
-                fields.Set(17, AIDebugRawValue.Vector2(lizard.mainBodyChunk.vel.x, lizard.mainBodyChunk.vel.y));
+                fields.Set(8, Vec(lizard.mainBodyChunk.pos));
+                fields.Set(9, Vec(lizard.mainBodyChunk.vel));
+                fields.Set(16, Vec(lizard.mainBodyChunk.pos));
+                fields.Set(17, Vec(lizard.mainBodyChunk.vel));
             }
-            fields.Set(10, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(creature.abstractAI?.GetType().Name)));
-            fields.Set(11, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.GetType().Name)));
-            fields.Set(12, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.behavior?.value)));
-            if (creature.abstractAI != null) fields.Set(13, Coordinate(creature.abstractAI.destination));
-            fields.Set(14, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.pathFinder?.GetType().Name)));
+            fields.Set(10, Str(creature.abstractAI?.GetType().Name));
+            fields.Set(11, Str(ai?.GetType().Name));
+            fields.Set(12, Str(ai?.behavior?.value));
+            if (creature.abstractAI != null) fields.Set(13, Coord(creature.abstractAI.destination));
+            fields.Set(14, Str(ai?.pathFinder?.GetType().Name));
             fields.Set(15, AIDebugRawValue.Int(ai?.modules?.Count ?? 0));
-            fields.Set(18, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern("Green Lizard AI baseline")));
+            fields.Set(18, Str("Green Lizard AI baseline"));
 
             decisions.Set(0, AIDebugDecisionState.Active);
             decisions.Set(1, lizard.Consious ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked);
@@ -554,114 +606,27 @@ internal static class AIDebugRecorderRichProviderRegistry
         }
     }
 
-    internal static AIDebugSnapshot Materialize(
-        DebugEntityKey key,
-        AIDebugEntityState entityState,
-        AIDebugRichSchema schema,
-        AIDebugRawSnapshotBuffer fields,
-        AIDebugRawDecisionBuffer decisions,
-        int controlOwnerStringId)
-    {
-        if (schema == null || fields == null) return null;
-        string display = schema.DisplayType + " #" + key.Number.ToString(CultureInfo.InvariantCulture);
-        string owner = AIDebugRawStringTable.Resolve(controlOwnerStringId);
-        var snapshot = new AIDebugSnapshot(key, display, entityState, string.IsNullOrEmpty(owner) ? "—" : owner);
-
-        AIDebugSection section = null;
-        string currentSection = null;
-        int fieldCount = Math.Min(schema.Fields.Length, fields.Count);
-        for (int i = 0; i < fieldCount; i++)
-        {
-            if (!fields.IsValid(i)) continue;
-            AIDebugFieldSchema spec = schema.Fields[i];
-            if (section == null || !string.Equals(currentSection, spec.SectionKey, StringComparison.Ordinal))
-            {
-                currentSection = spec.SectionKey;
-                section = new AIDebugSection(currentSection);
-                snapshot.Sections.Add(section);
-            }
-            section.Values.Add(new AIDebugValue(
-                spec.LabelKey,
-                spec.RawName,
-                Format(fields.Get(i), spec),
-                0,
-                (spec.Flags & AIDebugFieldFlags.Exact) != 0 ? "V5 Exact/Heavy" : "V5 Retained/Heavy"));
-        }
-
-        int decisionCount = Math.Min(schema.Decisions.Length, decisions?.Count ?? 0);
-        for (int i = 0; i < decisionCount; i++)
-        {
-            AIDebugDecisionSchema spec = schema.Decisions[i];
-            AIDebugRawDecision value = decisions.Get(i);
-            snapshot.Decisions.Add(new AIDebugDecisionNode(
-                spec.LabelKey,
-                value.State,
-                AIDebugRawStringTable.Resolve(value.DetailStringId),
-                spec.RawName,
-                spec.Depth));
-        }
-        return snapshot;
-    }
-
-    private static void CaptureGenericFields(AbstractCreature creature, AIDebugRawSnapshotBuffer fields)
-    {
-        SetIdentity(fields, creature, 0);
-        Creature realized = creature?.realizedCreature;
-        fields.Set(5, AIDebugRawValue.Bool(realized?.dead ?? creature?.state?.dead ?? false));
-        fields.Set(6, AIDebugRawValue.Bool(realized?.Consious == true));
-        fields.Set(7, AIDebugRawValue.Bool(realized?.inShortcut == true));
-        fields.Set(8, AIDebugRawValue.Bool(creature?.InDen == true));
-        if (realized?.mainBodyChunk != null)
-        {
-            fields.Set(9, AIDebugRawValue.Vector2(realized.mainBodyChunk.pos.x, realized.mainBodyChunk.pos.y));
-            fields.Set(10, AIDebugRawValue.Vector2(realized.mainBodyChunk.vel.x, realized.mainBodyChunk.vel.y));
-        }
-        fields.Set(11, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(creature?.abstractAI?.GetType().Name)));
-        ArtificialIntelligence ai = creature?.abstractAI?.RealAI;
-        fields.Set(12, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.GetType().Name)));
-        if (creature?.abstractAI != null) fields.Set(13, Coordinate(creature.abstractAI.destination));
-        fields.Set(14, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(ai?.pathFinder?.GetType().Name)));
-        fields.Set(15, AIDebugRawValue.Int(ai?.modules?.Count ?? 0));
-    }
-
-    private static void SetIdentity(AIDebugRawSnapshotBuffer fields, AbstractCreature creature, int start)
+    private static void SetIdentity(AIDebugRawSnapshotBuffer fields, AbstractCreature creature)
     {
         if (creature == null) return;
-        fields.Set(start, Entity(creature.ID));
-        fields.Set(start + 1, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(creature.creatureTemplate?.type?.value)));
-        fields.Set(start + 2, AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(creature.Room?.name)));
-        fields.Set(start + 3, Coordinate(creature.pos));
-        fields.Set(start + 4, AIDebugRawValue.EnumToken((int)AIDebugRegistry.EntityState(creature)));
+        fields.Set(0, Entity(creature.ID));
+        fields.Set(1, Str(creature.creatureTemplate?.type?.value));
+        fields.Set(2, Str(creature.Room?.name));
+        fields.Set(3, Coord(creature.pos));
+        fields.Set(4, AIDebugRawValue.EnumToken((int)AIDebugRegistry.EntityState(creature)));
     }
 
     private static AIDebugRawValue Entity(EntityID id) => AIDebugRawValue.EntityId(id.spawner, id.number);
+    private static AIDebugRawValue Coord(WorldCoordinate c) => AIDebugRawValue.Coordinate(c.room, c.x, c.y, c.abstractNode);
+    private static AIDebugRawValue Vec(Vector2 v) => AIDebugRawValue.Vector2(v.x, v.y);
+    private static AIDebugRawValue Str(string value) => AIDebugRawValue.StringId(AIDebugRawStringTable.Intern(value));
 
-    private static AIDebugRawValue Coordinate(WorldCoordinate c) =>
-        AIDebugRawValue.Coordinate(c.room, c.x, c.y, c.abstractNode);
-
-    private static AIDebugFieldSchema F(
-        int id,
-        string section,
-        string label,
-        string raw,
-        AIDebugRawValueKind kind,
-        bool species = false) =>
+    private static AIDebugFieldSchema F(int id, string section, string label, string raw,
+        AIDebugRawValueKind kind, bool species = false) =>
         new((ushort)id, section, label, raw, kind,
             species ? AIDebugFieldFlags.Retained | AIDebugFieldFlags.Species : AIDebugFieldFlags.Exact);
 
     private static AIDebugDecisionSchema D(string label, string raw = null, int depth = 0) => new(label, raw, depth);
-
-    private static int[] EnumIds<T>() where T : struct, Enum
-    {
-        Array values = Enum.GetValues(typeof(T));
-        var ids = new int[values.Length];
-        for (int i = 0; i < values.Length; i++)
-            ids[i] = AIDebugRawStringTable.Intern(values.GetValue(i).ToString());
-        return ids;
-    }
-
-    private static int EnumId(int[] ids, int value) =>
-        ids != null && (uint)value < (uint)ids.Length ? ids[value] : 0;
 
     private static string Format(AIDebugRawValue value, AIDebugFieldSchema schema)
     {
