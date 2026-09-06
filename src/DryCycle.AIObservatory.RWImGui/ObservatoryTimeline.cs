@@ -7,7 +7,7 @@ namespace DryCycle.AIObservatory.RWImGui;
 
 internal static class ObservatoryTimeline
 {
-    internal const float PreferredHeight = 178f;
+    internal const float PreferredHeight = 228f;
 
     internal static void Draw(AIDebugPresentationSnapshot snapshot)
     {
@@ -57,6 +57,8 @@ internal static class ObservatoryTimeline
                 ? "选择并跟踪一个生物后显示记录。"
                 : "Select and track a creature to populate the recorder timeline.");
         }
+
+        ObservatoryTrackedCompare.Draw(snapshot);
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         float width = Math.Max(120f, available.X);
