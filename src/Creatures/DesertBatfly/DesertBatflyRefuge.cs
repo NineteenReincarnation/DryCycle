@@ -34,6 +34,43 @@ internal static class DesertBatflyRefuge
     private const float MinimumImprovement = 0.12f;
     private const int SafetyMarginTicks = 600;
 
+    // Geometry is inspected only when a room is actually realized, then retained as a
+    // lightweight room-level memory. This avoids loading rooms or scanning tile grids
+    // during every weather evaluation while still allowing ordinary caves to become
+    // refuges without an authored tag.
+    private static Dictionary<string, float> autoShelterQuality =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, IntVector2> autoShelterTile =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal static void Reset()
+    {
+        autoShelterQuality = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        autoShelterTile = new Dictionary<string, IntVector2>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static void ObserveRoom(Room room)
+    {
+        if (room?.abstractRoom == null || room.world == null) return;
+        string key = RoomKey(room.abstractRoom);
+        if (autoShelterQuality.ContainsKey(key)) return;
+
+        float quality = AnalyzeRoomShelter(room, out IntVector2 bestTile);
+        autoShelterQuality[key] = quality;
+        if (quality >= 0.40f) autoShelterTile[key] = bestTile;
+    }
+
+    internal static bool TryGetKnownShelterPoint(Room room, out Vector2 point)
+    {
+        point = default;
+        if (room?.abstractRoom == null) return false;
+        ObserveRoom(room);
+        if (!autoShelterTile.TryGetValue(RoomKey(room.abstractRoom), out IntVector2 tile))
+            return false;
+        point = room.MiddleOfTile(tile);
+        return true;
+    }
+
     internal static float HomeHiveShelterQuality(
         AbstractRoom room,
         WeatherScheduleEventKind hazardKind,
@@ -44,8 +81,14 @@ internal static class DesertBatflyRefuge
         if (room.shelter) return 0.96f;
 
         float baseQuality = room.batHives > 0 ? 0.68f : 0.42f;
-        if (room.realizedRoom != null && room.realizedRoom.hives != null && room.realizedRoom.hives.Length > 0)
-            baseQuality = Mathf.Max(baseQuality, RealizedHiveCoverage(room.realizedRoom));
+        if (room.realizedRoom != null)
+        {
+            if (room.realizedRoom.hives != null && room.realizedRoom.hives.Length > 0)
+                baseQuality = Mathf.Max(baseQuality, RealizedHiveCoverage(room.realizedRoom));
+            ObserveRoom(room.realizedRoom);
+            if (autoShelterQuality.TryGetValue(RoomKey(room), out float terrain))
+                baseQuality = Mathf.Max(baseQuality, terrain * 0.92f);
+        }
 
         float demand = DesertBatflyWeatherEcology.HazardShelterDemand(hazardKind, hazardId);
         // Heat exposure cares strongly about roof; violent sand/rain also benefits from
@@ -64,6 +107,19 @@ internal static class DesertBatflyRefuge
         if (room.shelter) return 0.96f;
         if (room.batHives > 0)
             return Mathf.Clamp01(HomeHiveShelterQuality(room, hazardKind, hazardId) - 0.03f);
+
+        if (room.realizedRoom != null) ObserveRoom(room.realizedRoom);
+        if (autoShelterQuality.TryGetValue(RoomKey(room), out float automatic))
+            return automatic;
+
+        // An abstract Den is a useful conservative fallback for an unloaded room. It is
+        // weaker than observed terrain or an explicit author tag because we do not load
+        // geometry merely to search for Refuge candidates.
+        if (room.nodes != null)
+            for (int i = 0; i < room.nodes.Length; i++)
+                if (room.nodes[i].type == AbstractRoomNode.Type.Den)
+                    return 0.72f;
+
         return 0.20f;
     }
 
@@ -214,6 +270,62 @@ internal static class DesertBatflyRefuge
         return Mathf.Lerp(0.50f, 0.92f, covered / (float)samples);
     }
 
+    private static float AnalyzeRoomShelter(Room room, out IntVector2 bestTile)
+    {
+        bestTile = new IntVector2(Mathf.Max(1, room.TileWidth / 2), Mathf.Max(1, room.TileHeight / 3));
+        if (room.TileWidth < 4 || room.TileHeight < 4) return 0.20f;
+
+        int stepX = Mathf.Max(1, room.TileWidth / 14);
+        int stepY = Mathf.Max(1, room.TileHeight / 10);
+        int samples = 0, safeSamples = 0;
+        float best = 0f;
+
+        for (int y = 2; y < room.TileHeight - 2; y += stepY)
+        for (int x = 2; x < room.TileWidth - 2; x += stepX)
+        {
+            IntVector2 tile = new IntVector2(x, y);
+            if (room.GetTile(tile).Solid) continue;
+            float point = ShelterPointScore(room, tile);
+            samples++;
+            if (point >= 0.62f) safeSamples++;
+            if (point <= best) continue;
+            best = point;
+            bestTile = tile;
+        }
+
+        if (samples == 0) return 0.20f;
+        float safeRatio = safeSamples / (float)samples;
+        float quality = best * 0.72f + Mathf.Sqrt(safeRatio) * 0.28f;
+        return Mathf.Clamp(quality, 0.20f, 0.93f);
+    }
+
+    private static float ShelterPointScore(Room room, IntVector2 tile)
+    {
+        int roofDistance = -1;
+        for (int y = 1; y <= 9 && tile.y + y < room.TileHeight; y++)
+        {
+            if (!room.GetTile(new IntVector2(tile.x, tile.y + y)).Solid) continue;
+            roofDistance = y;
+            break;
+        }
+        if (roofDistance < 0) return 0.08f;
+
+        float score = 0.52f + Mathf.InverseLerp(9f, 1f, roofDistance) * 0.18f;
+        bool left = false, right = false;
+        for (int x = 1; x <= 6; x++)
+        {
+            if (!left && tile.x - x >= 0 && room.GetTile(new IntVector2(tile.x - x, tile.y)).Solid)
+                left = true;
+            if (!right && tile.x + x < room.TileWidth && room.GetTile(new IntVector2(tile.x + x, tile.y)).Solid)
+                right = true;
+            if (left && right) break;
+        }
+        if (left) score += 0.09f;
+        if (right) score += 0.09f;
+        if (tile.y < room.TileHeight * 0.45f) score += 0.05f;
+        return Mathf.Clamp01(score);
+    }
+
     private static bool HasTag(AbstractRoom room, string exact)
     {
         if (room?.roomTags == null) return false;
@@ -242,4 +354,8 @@ internal static class DesertBatflyRefuge
         }
         return false;
     }
+
+    private static string RoomKey(AbstractRoom room) =>
+        ((room?.world?.region?.name ?? room?.world?.name ?? string.Empty).Trim().ToUpperInvariant()) + "|" +
+        ((room?.name ?? string.Empty).Trim().ToUpperInvariant());
 }
