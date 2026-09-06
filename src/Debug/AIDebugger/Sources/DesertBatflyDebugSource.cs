@@ -1,13 +1,13 @@
-using System;
 using System.Reflection;
 using DryCycle.Creatures.DesertBatfly;
 using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
 
-// First full species adapter. Private DesertAI counters are reflected through cached
-// FieldInfo only for the selected bat while the Observatory is visible. No world-wide
-// per-frame reflection is performed.
+// Desert Batfly Observatory adapter.  Social Roles were rejected and therefore
+// are deliberately absent from this diagnostic surface: the debugger reports
+// real gameplay state (personality, injury, social memory, AI and movement)
+// rather than keeping a dead Task 02 concept visually alive.
 internal sealed class DesertBatflyDebugSource : IAIDebugSource
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -27,14 +27,16 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         if (creature?.realizedCreature is not DesertBatfly bat) return null;
 
         DesertBatflyAI ai = bat.DesertAI;
-        DesertBatflySocialRoles roles = ai.Roles;
         DesertBatflyState state = bat.DesertState;
         DesertBatflyPersonality p = bat.Personality;
         DesertBatflyInjury injury = bat.Injury;
-        SocialRoleSuppression suppression = roles.Suppression;
-        string controlOwner = ControlOwner(bat, suppression);
-        var snapshot = new AIDebugSnapshot(DebugEntityKey.From(creature),
-            $"DesertBatfly #{creature.ID.number}", AIDebugRegistry.EntityState(creature), controlOwner);
+        string controlOwner = ControlOwner(bat);
+
+        var snapshot = new AIDebugSnapshot(
+            DebugEntityKey.From(creature),
+            $"DesertBatfly #{creature.ID.number}",
+            AIDebugRegistry.EntityState(creature),
+            controlOwner);
 
         snapshot.Sections.Add(new AIDebugSection("section.identity")
             .Add("field.entity_id", "AbstractCreature.ID", creature.ID)
@@ -92,24 +94,8 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.unseen", "DesertBatflyAI.unseen", Read<int>(UnseenField, ai))
             .Add("field.has_slot", "DesertBatflyAI.hasSlot", Read<bool>(HasSlotField, ai)));
 
-        // EvaluationTicks is time until the next role evaluation, not the age of Scores.
-        // Do not present it as data age; the separate field below reports that timer honestly.
-        snapshot.Sections.Add(new AIDebugSection("section.social_role")
-            .Add("field.role", "DesertBatflySocialRoles.Role", roles.Role)
-            .Add("field.expressed_role", "DesertBatflySocialRoles.Expressed", roles.Expressed)
-            .Add("field.suppression", "DesertBatflySocialRoles.Suppression", suppression)
-            .Add("field.sentinel_score", "DesertBatflyRoleScores.Sentinel", roles.Scores.Sentinel, 0, "RoleEvaluation")
-            .Add("field.bully_score", "DesertBatflyRoleScores.Bully", roles.Scores.Bully, 0, "RoleEvaluation")
-            .Add("field.opportunist_score", "DesertBatflyRoleScores.Opportunist", roles.Scores.Opportunist, 0, "RoleEvaluation")
-            .Add("field.commitment", "DesertBatflySocialRoles.Commitment", roles.Commitment)
-            .Add("field.role_cooldown", "DesertBatflySocialRoles.Cooldown", roles.Cooldown)
-            .Add("field.role_evaluation", "DesertBatflySocialRoles.EvaluationTicks", roles.EvaluationTicks)
-            .Add("field.alert_confidence", "DesertBatflySocialRoles.SentinelAlertConfidence", roles.SentinelAlertConfidence)
-            .Add("field.opportunity_ticks", "DesertBatflySocialRoles.OpportunityTicks", roles.OpportunityTicks)
-            .Add("field.opportunist_recovery", "DesertBatflySocialRoles.OpportunistRecoveryActive", roles.OpportunistRecoveryActive));
-
-        // A debugger must not create gameplay state just by looking at it. Read an existing
-        // swarm snapshot only; DesertSwarmRoom.For(...) is reserved for gameplay code.
+        // Read-only room snapshot.  The rejected Task 02 role population field is
+        // intentionally not displayed and Capture no longer reads role state.
         if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
         {
             DesertBatflyFlockSnapshot flock = colony.Flock;
@@ -118,7 +104,6 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
                 .Add("field.flock_center", "DesertBatflyFlockSnapshot.Center", flock.Center, age, "FlockSnapshot")
                 .Add("field.flock_velocity", "DesertBatflyFlockSnapshot.AverageVelocity", flock.AverageVelocity, age, "FlockSnapshot")
                 .Add("field.flock_active", "DesertBatflyFlockSnapshot.ActiveCount", flock.ActiveCount, age, "FlockSnapshot")
-                .Add("field.flock_roles", "DesertBatflyFlockSnapshot.ExpressedRoleCount", flock.ExpressedRoleCount, age, "FlockSnapshot")
                 .Add("field.panic_ratio", "DesertBatflyFlockSnapshot.PanicRatio", flock.PanicRatio, age, "FlockSnapshot")
                 .Add("field.previous_panic", "DesertBatflyFlockSnapshot.PreviousPanicRatio", flock.PreviousPanicRatio, age, "FlockSnapshot")
                 .Add("field.roost_ratio", "DesertBatflyFlockSnapshot.RoostRatio", flock.RoostRatio, age, "FlockSnapshot"));
@@ -127,10 +112,13 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         snapshot.Sections.Add(new AIDebugSection("section.social")
             .Add("field.grab_memory", "DesertBatflyState.GrabMemoryStrength", state.GrabMemoryStrength)
             .Add("field.grief", "DesertBatflyState.GriefStrength", state.GriefStrength)
-            .Add("field.player_trauma", "DesertBatflyState.PlayerTraumaStrength", state.PlayerTraumaTicks > 0 ? state.PlayerTraumaStrength : 0f)
-            .Add("field.predator_trauma", "DesertBatflyState.PredatorTraumaStrength", state.PredatorTraumaTicks > 0 ? state.PredatorTraumaStrength : 0f)
+            .Add("field.player_trauma", "DesertBatflyState.PlayerTraumaStrength",
+                state.PlayerTraumaTicks > 0 ? state.PlayerTraumaStrength : 0f)
+            .Add("field.predator_trauma", "DesertBatflyState.PredatorTraumaStrength",
+                state.PredatorTraumaTicks > 0 ? state.PredatorTraumaStrength : 0f)
             .Add("field.social_bond", "DesertBatflyState.SocialBondStrength", state.SocialBondStrength)
-            .Add("field.social_bond_target", "DesertBatflyState.SocialBondTarget", state.SocialBondTarget.HasValue ? state.SocialBondTarget.Value.ToString() : "—"));
+            .Add("field.social_bond_target", "DesertBatflyState.SocialBondTarget",
+                state.SocialBondTarget.HasValue ? state.SocialBondTarget.Value.ToString() : "—"));
 
         snapshot.Sections.Add(new AIDebugSection("section.movement")
             .Add("field.position", "mainBodyChunk.pos", bat.mainBodyChunk?.pos)
@@ -141,36 +129,51 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.flee_from_rain", "FlyAI.fleeFromRain", bat.AI?.fleeFromRain ?? false)
             .Add("field.lured_counter", "FlyAI.luredCounter", bat.AI?.luredCounter ?? 0));
 
-        BuildDecisionStack(snapshot, bat, suppression);
+        BuildDecisionStack(snapshot, bat);
         return snapshot;
     }
 
-    private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat, SocialRoleSuppression suppression)
+    private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat)
     {
-        DesertBatflySocialRoles roles = bat.DesertAI.Roles;
         DesertBatflyInjury injury = bat.Injury;
+        bool restrained = RestrainedByNonFly(bat);
+        bool fear = DesertBatflyIntimidation.BlocksSocialRoles(bat);
+        float trauma = ActiveTrauma(bat);
+        bool traumatized = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
+        bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
+        bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain ||
+                     bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost;
+
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.availability", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.conscious",
-            bat.Consious ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked, null, "Creature.Consious", 1));
+            bat.Consious ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked,
+            null, "Creature.Consious", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.shortcut",
-            bat.inShortcut ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive, null, "Creature.inShortcut", 1));
+            bat.inShortcut ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            null, "Creature.inShortcut", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.restrained",
-            suppression == SocialRoleSuppression.Restrained ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            null, "SocialRoleSuppression.Restrained", 1));
+            restrained ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            restrained ? "held by non-Fly creature" : null,
+            "Creature.grabbedBy", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.survival", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.danger",
             bat.DesertAI.HasImmediateDanger ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             bat.DesertAI.HasImmediateDanger ? "DesertBatflyAI.HasImmediateDanger=true" : null,
             "DesertBatflyAI.HasImmediateDanger", 1));
-        AddSuppression(snapshot, "decision.fear", SocialRoleSuppression.Fear, suppression, 1);
-        AddSuppression(snapshot, "decision.trauma", SocialRoleSuppression.Trauma, suppression, 1);
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.fear",
+            fear ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            fear ? "DesertBatflyIntimidation fear gate" : null,
+            "DesertBatflyIntimidation.BlocksSocialRoles", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.trauma",
+            traumatized ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            traumatized ? $"active trauma={trauma:0.000}" : null,
+            "DesertBatflyState Trauma", 1));
 
-        // Task 04 requires these to be observation values, not UI-created thresholds.
-        // The only warning on the group itself comes from the real runtime BlocksCombat gate.
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.physical_condition",
             injury.BlocksCombat ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
-            injury.CombatBlockReason, "DesertBatflyInjury.BlocksCombat"));
+            injury.CombatBlockReason,
+            "DesertBatflyInjury.BlocksCombat"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.health", AIDebugDecisionState.Active,
             $"{bat.DesertState.health:0.000}", "DesertBatflyState.health", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.left_wing_injury", AIDebugDecisionState.Active,
@@ -182,28 +185,29 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.physical_capability", AIDebugDecisionState.Active,
             $"{injury.PhysicalCapability:0.000}", "DesertBatflyInjury.PhysicalCapability", 1));
 
-        // Recovery is its own Task 04 priority layer. The UI only reports the state
-        // written by DesertBatflyAI; it does not invent a third READY state.
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_recovery",
             injury.IsRecovering ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            injury.RecoveryReason, "DesertBatflyInjury.RecoveryState"));
+            injury.RecoveryReason,
+            "DesertBatflyInjury.RecoveryState"));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.special", AIDebugDecisionState.Active));
-        AddSuppression(snapshot, "decision.injury", SocialRoleSuppression.Injury, suppression, 1);
-        AddSuppression(snapshot, "decision.grief", SocialRoleSuppression.Grief, suppression, 1);
-        AddSuppression(snapshot, "decision.vengeance", SocialRoleSuppression.Vengeance, suppression, 1);
-        AddSuppression(snapshot, "decision.roost", SocialRoleSuppression.Roost, suppression, 1);
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury",
+            injury.BlocksCombat ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            injury.BlocksCombat ? injury.CombatBlockReason : null,
+            "DesertBatflyInjury.BlocksCombat", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.grief",
+            bat.DesertState.GriefStrength >= 0.30f ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            bat.DesertState.GriefStrength >= 0.30f ? $"grief={bat.DesertState.GriefStrength:0.000}" : null,
+            "DesertBatflyState.GriefStrength", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance",
+            vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            vengeance ? "Extreme Vengeance active" : null,
+            "DesertBatflyIntimidation.IsExtremeVengeanceActive", 1));
+        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.roost",
+            roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
+            roost ? "FlyAI Chain / DesertBatflyAI Roost" : null,
+            "FlyAI.behavior / DesertBatflyAI.Mode", 1));
 
-        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_overrides",
-            injury.BlocksCombat || injury.BlocksRole(ExpressedSocialRole.Bully)
-                ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            injury.BlocksCombat ? injury.CombatBlockReason : injury.RoleBlockReason(ExpressedSocialRole.Bully),
-            "DesertBatflyInjury"));
-        bool bullyBlocked = injury.BlocksRole(ExpressedSocialRole.Bully);
-        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.bully_injury",
-            bullyBlocked ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
-            bullyBlocked ? injury.RoleBlockReason(ExpressedSocialRole.Bully) : null,
-            "DesertBatflyInjury.BlocksRole(Bully)", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.retaliation_injury",
             injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
             injury.BlocksCombat ? injury.CombatBlockReason : null,
@@ -213,13 +217,6 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             injury.BlocksCombat ? injury.CombatBlockReason : null,
             "DesertBatflyIntimidation.Update injury gate", 1));
 
-        snapshot.Decisions.Add(new AIDebugDecisionNode("decision.social_role",
-            suppression == SocialRoleSuppression.None ? AIDebugDecisionState.Active : AIDebugDecisionState.Blocked,
-            suppression == SocialRoleSuppression.None ? null : suppression.ToString()));
-        AddRole(snapshot, "decision.sentinel", ExpressedSocialRole.Sentinel, roles, 1);
-        AddRole(snapshot, "decision.bully", ExpressedSocialRole.Bully, roles, 1);
-        AddRole(snapshot, "decision.opportunist", ExpressedSocialRole.Opportunist, roles, 1);
-
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.custom_ai", AIDebugDecisionState.Active,
             bat.DesertAI.Mode.ToString(), "DesertBatflyAI.Mode"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vanilla_ai", AIDebugDecisionState.Ready,
@@ -228,46 +225,42 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             AIDebugFormat.Value(bat.AI?.localGoal), "FlyAI.localGoal"));
     }
 
-    private static void AddSuppression(AIDebugSnapshot snapshot, string key, SocialRoleSuppression value,
-        SocialRoleSuppression current, int depth)
+    private static bool RestrainedByNonFly(DesertBatfly bat)
     {
-        snapshot.Decisions.Add(new AIDebugDecisionNode(key,
-            current == value ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            current == value ? current.ToString() : null, value.ToString(), depth));
+        if (bat?.grabbedBy == null) return false;
+        for (int i = 0; i < bat.grabbedBy.Count; i++)
+        {
+            Creature.Grasp grasp = bat.grabbedBy[i];
+            if (grasp?.grabber != null && grasp.grabber is not Fly)
+                return true;
+        }
+        return false;
     }
 
-    private static void AddRole(AIDebugSnapshot snapshot, string key, ExpressedSocialRole value,
-        DesertBatflySocialRoles roles, int depth)
-    {
-        AIDebugDecisionState roleState = roles.Expressed == value
-            ? AIDebugDecisionState.Active
-            : roles.Role == value && roles.Expressed == ExpressedSocialRole.None
-                ? AIDebugDecisionState.Blocked
-                : AIDebugDecisionState.Inactive;
-        snapshot.Decisions.Add(new AIDebugDecisionNode(key, roleState, null, value.ToString(), depth));
-    }
+    private static float ActiveTrauma(DesertBatfly bat) => Mathf.Max(
+        bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
+        bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
 
-    private static string ControlOwner(DesertBatfly bat, SocialRoleSuppression suppression)
+    private static string ControlOwner(DesertBatfly bat)
     {
         if (bat.dead || !bat.Consious) return "Creature / Physics";
         if (bat.inShortcut) return "Shortcut";
-        if (suppression == SocialRoleSuppression.Restrained) return "Grasp / Restraint";
-        if (suppression == SocialRoleSuppression.Emergence) return "Emergence";
-        if (suppression == SocialRoleSuppression.VanillaPriority) return "Vanilla FlyAI";
+        if (RestrainedByNonFly(bat)) return "Grasp / Restraint";
+        if (bat.Emergence?.Active == true) return "Emergence";
+        if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
+            bat.AI.luredCounter > 0 || bat.safariControlled)
+            return "Vanilla FlyAI";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return "Danger / Escape";
         if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
             return "Injury Recovery";
-        return suppression switch
-        {
-            SocialRoleSuppression.Fear => "Fear / Intimidation",
-            SocialRoleSuppression.Trauma => "Trauma",
-            SocialRoleSuppression.Grief => "Grief",
-            SocialRoleSuppression.Vengeance => "Vengeance",
-            SocialRoleSuppression.Roost => "Roost / Chain",
-            SocialRoleSuppression.Unavailable => "Creature lifecycle",
-            _ => "DesertBatflyAI"
-        };
+        if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
+        if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
+        if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
+        if (DesertBatflyIntimidation.BlocksSocialRoles(bat)) return "Fear / Intimidation";
+        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
+            return "Roost / Chain";
+        return "DesertBatflyAI";
     }
 
     private static T Read<T>(FieldInfo field, object instance)
