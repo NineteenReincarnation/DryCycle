@@ -104,9 +104,15 @@ internal static class DesertBatflyWorldRoutePlanner
             {
                 int next = room.connections[connection];
                 if (next < 0 || next >= count) continue;
-                // If Fly's creature-specific node mapping cannot use this connection,
-                // the graph edge is not traversable for Desert Batfly.
-                if (room.CommonToCreatureSpecificNodeIndex(connection, template) < 0) continue;
+
+                // Match vanilla FlyAI.LeaveRoom exactly: the creature-specific path map
+                // is keyed by the real common abstract node that leads from current to
+                // next, not by the position of that connection in room.connections[].
+                WorldCoordinate exit = world.NodeInALeadingToB(currentRoom, next);
+                if (exit.abstractNode < 0 ||
+                    room.CommonToCreatureSpecificNodeIndex(exit.abstractNode, template) < 0)
+                    continue;
+
                 AbstractRoom nextRoom = world.GetAbstractRoom(next);
                 if (nextRoom == null) continue;
 
