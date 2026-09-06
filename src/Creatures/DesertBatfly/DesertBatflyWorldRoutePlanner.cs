@@ -103,23 +103,12 @@ internal static class DesertBatflyWorldRoutePlanner
             for (int connection = 0; connection < room.connections.Length; connection++)
             {
                 int next = room.connections[connection];
-                if (next < 0 || next >= count) continue;
-
-                // Match vanilla FlyAI.LeaveRoom exactly: the creature-specific path map
-                // is keyed by the real common abstract node that leads from current to
-                // next, not by the position of that connection in room.connections[].
-                WorldCoordinate exit = world.NodeInALeadingToB(currentRoom, next);
-                if (exit.abstractNode < 0 ||
-                    room.CommonToCreatureSpecificNodeIndex(exit.abstractNode, template) < 0)
-                    continue;
-
+                if (!CanTraverse(world, currentRoom, next, template)) continue;
                 AbstractRoom nextRoom = world.GetAbstractRoom(next);
                 if (nextRoom == null) continue;
 
-                float rawRisk = roomRisk?.Invoke(nextRoom) ?? 0f;
-                if (float.IsNaN(rawRisk) || float.IsPositiveInfinity(rawRisk) || rawRisk >= 8f)
-                    continue;
-                rawRisk = Mathf.Max(0f, rawRisk);
+                float rawRisk = SanitizeRisk(roomRisk?.Invoke(nextRoom) ?? 0f);
+                if (rawRisk >= 8f) continue;
                 float edge = EdgeCost(purpose, rawRisk);
                 int nextHop = currentHop + 1;
                 float candidate = currentCost + edge;
@@ -139,8 +128,8 @@ internal static class DesertBatflyWorldRoutePlanner
         {
             reversed.Add(roomCursor);
             AbstractRoom r = world.GetAbstractRoom(roomCursor);
-            float risk = roomRisk?.Invoke(r) ?? 0f;
-            if (!float.IsNaN(risk) && !float.IsInfinity(risk)) worstRisk = Mathf.Max(worstRisk, risk);
+            float risk = SanitizeRisk(roomRisk?.Invoke(r) ?? 0f);
+            if (risk < 8f) worstRisk = Mathf.Max(worstRisk, risk);
             if (roomCursor == startRoom && hopCursor == 0) break;
             int previousRoom = parentRoom[roomCursor, hopCursor];
             int previousHop = parentHop[roomCursor, hopCursor];
@@ -154,9 +143,56 @@ internal static class DesertBatflyWorldRoutePlanner
         return true;
     }
 
+    /// <summary>
+    /// Cheap bounded BFS used to discover candidate rooms before weighted planning.
+    /// This avoids invoking Dijkstra once for every room in a region when Refuge range
+    /// is only a few hops. The returned list includes startRoom as the first entry.
+    /// </summary>
+    internal static void CollectReachableRooms(
+        World world,
+        int startRoom,
+        CreatureTemplate template,
+        int maxHops,
+        List<int> output)
+    {
+        output?.Clear();
+        if (output == null || world?.abstractRooms == null || template == null ||
+            startRoom < 0 || startRoom >= world.abstractRooms.Length)
+            return;
+
+        maxHops = Mathf.Clamp(maxHops, 0, 12);
+        bool[] visited = new bool[world.abstractRooms.Length];
+        Queue<int> rooms = new();
+        Queue<int> hops = new();
+        visited[startRoom] = true;
+        rooms.Enqueue(startRoom);
+        hops.Enqueue(0);
+
+        while (rooms.Count > 0)
+        {
+            int current = rooms.Dequeue();
+            int hop = hops.Dequeue();
+            output.Add(current);
+            if (hop >= maxHops) continue;
+
+            AbstractRoom room = world.GetAbstractRoom(current);
+            if (room?.connections == null) continue;
+            for (int i = 0; i < room.connections.Length; i++)
+            {
+                int next = room.connections[i];
+                if (next < 0 || next >= visited.Length || visited[next] ||
+                    !CanTraverse(world, current, next, template))
+                    continue;
+                visited[next] = true;
+                rooms.Enqueue(next);
+                hops.Enqueue(hop + 1);
+            }
+        }
+    }
+
     internal static float EdgeCost(DesertBatflyTravelPurpose purpose, float roomRisk)
     {
-        roomRisk = Mathf.Max(0f, roomRisk);
+        roomRisk = Mathf.Max(0f, SanitizeRisk(roomRisk));
         float riskWeight = purpose switch
         {
             DesertBatflyTravelPurpose.EmergencyRefuge => 2.60f,
@@ -168,9 +204,50 @@ internal static class DesertBatflyWorldRoutePlanner
         return distanceWeight + roomRisk * riskWeight;
     }
 
+    /// <summary>
+    /// Runtime route commitment is kept until a room becomes materially dangerous.
+    /// Small risk-score changes never cause A/B route oscillation.
+    /// </summary>
+    internal static bool NeedsSafetyReplan(DesertBatflyTravelPurpose purpose, float nextRoomRisk)
+    {
+        nextRoomRisk = SanitizeRisk(nextRoomRisk);
+        if (nextRoomRisk >= 8f) return true;
+        float threshold = purpose switch
+        {
+            DesertBatflyTravelPurpose.EmergencyRefuge => 0.76f,
+            DesertBatflyTravelPurpose.ReturnHome => 0.84f,
+            DesertBatflyTravelPurpose.ColonyMigration => 0.90f,
+            _ => 0.84f
+        };
+        return nextRoomRisk >= threshold;
+    }
+
     internal static float NormalizedTravelCost(in DesertBatflyWorldRoute route, int maxHops)
     {
         if (!route.Valid || float.IsNaN(route.Cost) || float.IsInfinity(route.Cost)) return 1f;
         return Mathf.Clamp01(route.Cost / Mathf.Max(1f, maxHops * 2.5f));
+    }
+
+    private static bool CanTraverse(World world, int currentRoom, int nextRoom, CreatureTemplate template)
+    {
+        if (world?.abstractRooms == null || template == null ||
+            currentRoom < 0 || nextRoom < 0 ||
+            currentRoom >= world.abstractRooms.Length || nextRoom >= world.abstractRooms.Length)
+            return false;
+
+        AbstractRoom current = world.GetAbstractRoom(currentRoom);
+        AbstractRoom next = world.GetAbstractRoom(nextRoom);
+        if (current == null || next == null) return false;
+
+        WorldCoordinate exit = world.NodeInALeadingToB(currentRoom, nextRoom);
+        return exit.abstractNode >= 0 &&
+               current.CommonToCreatureSpecificNodeIndex(exit.abstractNode, template) >= 0;
+    }
+
+    private static float SanitizeRisk(float value)
+    {
+        if (float.IsNaN(value) || float.IsPositiveInfinity(value)) return 8f;
+        if (float.IsNegativeInfinity(value)) return 0f;
+        return Mathf.Max(0f, value);
     }
 }
