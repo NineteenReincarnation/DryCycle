@@ -182,11 +182,10 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.physical_capability", AIDebugDecisionState.Active,
             $"{injury.PhysicalCapability:0.000}", "DesertBatflyInjury.PhysicalCapability", 1));
 
-        // Recovery is a separate priority layer in the task book, not a child threshold
-        // invented by the UI. RecoveryReason is written by DesertBatflyAI.SetRecovery.
+        // Recovery is its own Task 04 priority layer. The UI only reports the state
+        // written by DesertBatflyAI; it does not invent a third READY state.
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_recovery",
-            injury.IsRecovering ? AIDebugDecisionState.Active :
-                injury.IsSeverelyInjured ? AIDebugDecisionState.Ready : AIDebugDecisionState.Inactive,
+            injury.IsRecovering ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             injury.RecoveryReason, "DesertBatflyInjury.RecoveryState"));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.special", AIDebugDecisionState.Active));
@@ -261,7 +260,6 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             return "Injury Recovery";
         return suppression switch
         {
-            SocialRoleSuppression.Injury => "Physical Condition",
             SocialRoleSuppression.Fear => "Fear / Intimidation",
             SocialRoleSuppression.Trauma => "Trauma",
             SocialRoleSuppression.Grief => "Grief",
