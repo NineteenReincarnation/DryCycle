@@ -28,6 +28,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Build against the same DryCycle source. Private=false prevents the bridge build
+         from treating DryCycle.dll as a bridge-owned redistributable dependency. -->
+    <ProjectReference Include="../DryCycle.csproj" Private="false" />
+
     <Reference Include="BepInEx">
       <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
       <Private>false</Private>
