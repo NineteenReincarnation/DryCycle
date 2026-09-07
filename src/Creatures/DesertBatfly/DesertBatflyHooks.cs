@@ -174,36 +174,56 @@ internal static class DesertBatflyHooks
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
     {
-        if (self.fly is DesertBatfly suspended &&
-            (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
+        if (self.fly is not DesertBatfly desert)
         {
-            DB_BehaviorArbiter.ResolveFrame(suspended);
-            DesertBatflySocialLife.CancelForPriority(suspended, "unavailable / restraint / emergence");
-            suspended.DesertAI.Update();
-            DesertBatflySocialLife.SampleTrace(suspended);
-            DesertBatflyDebugTrace.Sample(suspended);
+            orig(self);
             return;
         }
 
-        orig(self);
-        if (self.fly is not DesertBatfly desert) return;
+        // R3 order is deliberate: refresh state/facts first, resolve one owner, then execute.
+        // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
         DesertBatflyEnvironmentalIntegration.Register(desert);
         DesertBatflyEnvironmentalBehavior.RefreshInfluence(desert);
+        desert.DesertAI.RefreshDecisionState();
+        DesertBatflyThreatRuntime.RefreshState(desert);
         DesertBatflySocialLife.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+
+        if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or
+            DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
+        {
+            DesertBatflySocialLife.CancelForPriority(desert, $"R3 PrimaryOwner={ownership.PrimaryOwner}");
+            CompleteR3Frame(desert, ownership);
+            return;
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.NativeSpecial &&
+            ExecuteNativeOwned(orig, self, desert, ownership))
+        {
+            CompleteR3Frame(desert, ownership);
+            return;
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.ImmediateDanger)
+        {
+            if (DB_ImmediateDangerExecutor.TryExecute(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.ImmediateDanger,
+                "ImmediateDanger executor yielded after current danger recheck");
+        }
+
         if (ownership.PrimaryOwner == DB_BehaviorOwner.InjuryRecovery)
         {
             if (DB_InjuryRecoveryExecutor.TryExecute(desert, ownership))
             {
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
-                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
             ownership = DB_BehaviorArbiter.ResolveFrame(
                 desert, DB_BehaviorOwner.InjuryRecovery,
                 "InjuryRecovery executor yielded after current physical recheck");
@@ -215,104 +235,157 @@ internal static class DesertBatflyHooks
             {
                 DesertBatflySocialLife.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
                 desert.DesertAI.CancelAttack();
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(
-                        desert.abstractCreature,
-                        AIDebugEventCategory.Decision,
-                        "PrimaryOwner",
-                        ownership.PrimaryOwner,
-                        ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
-            // Route validation/replanning can still refuse after a side-effect-free preflight.
-            // Re-resolve this exact frame with Travel explicitly rejected so Observatory and
-            // later Vengeance priority never report a movement owner that did not execute.
             ownership = DB_BehaviorArbiter.ResolveFrame(
-                desert,
-                DB_BehaviorOwner.Travel,
+                desert, DB_BehaviorOwner.Travel,
                 "Travel executor yielded after preflight / route validation");
         }
 
-        if (ownership.PrimaryOwner is DB_BehaviorOwner.EnvironmentHardSurvival or
-            DB_BehaviorOwner.EnvironmentLocalSurvival)
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.EnvironmentHardSurvival)
         {
             if (DB_EnvironmentExecutor.TryExecute(desert, ownership))
             {
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
-                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
             ownership = DB_BehaviorArbiter.ResolveFrame(
-                desert, ownership.PrimaryOwner,
-                "Environment executor yielded after current state recheck");
+                desert, DB_BehaviorOwner.EnvironmentHardSurvival,
+                "HardSurvival executor yielded after current state recheck");
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.FearResponse)
+        {
+            if (DB_FearExecutor.TryExecute(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.FearResponse,
+                "Fear executor yielded after current state recheck");
         }
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Vengeance)
         {
             if (DB_VengeanceExecutor.TryExecute(desert, ownership))
             {
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
-                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
             ownership = DB_BehaviorArbiter.ResolveFrame(
                 desert, DB_BehaviorOwner.Vengeance,
                 "Vengeance executor yielded after current state recheck");
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.EnvironmentLocalSurvival)
+        {
+            if (DB_EnvironmentExecutor.TryExecute(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.EnvironmentLocalSurvival,
+                "Environment executor yielded after current state recheck");
         }
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade)
         {
             if (DB_ProjectileEvadeExecutor.TryExecute(desert, ownership))
             {
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
-                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
             ownership = DB_BehaviorArbiter.ResolveFrame(
                 desert, DB_BehaviorOwner.ImmediateProjectileEvade,
                 "Projectile evade executor yielded after current projectile recheck");
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Combat)
+        {
+            if (DB_CombatExecutor.TryExecute(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.Combat,
+                "Combat executor yielded after target/state recheck");
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Roost)
+        {
+            if (DB_RoostExecutor.TryExecute(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.Roost,
+                "Roost executor yielded after chain/roost recheck");
         }
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Social)
         {
             if (DB_SocialExecutor.TryExecute(desert, ownership))
             {
-                if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
-                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
-                DesertBatflySocialLife.SampleTrace(desert);
-                DesertBatflyDebugTrace.Sample(desert);
+                CompleteR3Frame(desert, ownership);
                 return;
             }
-
             ownership = DB_BehaviorArbiter.ResolveFrame(
                 desert, DB_BehaviorOwner.Social,
                 "Social executor yielded after reservation/state recheck");
         }
 
-        // R3 owner-gated executors now cover InjuryRecovery, Travel, Environment,
-        // Vengeance, ImmediateProjectileEvade and Social. Combat/ordinary remain.
-        desert.DesertAI.Update();
-        DesertBatflyThreatRuntime.Update(desert);
+        if (ExecuteNativeOwned(orig, self, desert, ownership))
+        {
+            CompleteR3Frame(desert, ownership);
+            return;
+        }
+
+        // Defensive fallback only; record the actual fallback owner rather than executing an
+        // unowned second controller.
+        ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        if (ownership.PrimaryOwner is DB_BehaviorOwner.Ordinary or DB_BehaviorOwner.VanillaFallback)
+            ExecuteNativeOwned(orig, self, desert, ownership);
+        CompleteR3Frame(desert, ownership);
+    }
+
+    private static bool ExecuteNativeOwned(
+        On.FlyAI.orig_Update orig,
+        FlyAI self,
+        DesertBatfly desert,
+        in DB_BehaviorResolution ownership)
+    {
+        if (orig == null || self == null || desert == null) return false;
+        DB_BehaviorOwner owner = ownership.PrimaryOwner;
+        if (owner is not (DB_BehaviorOwner.NativeSpecial or DB_BehaviorOwner.Ordinary or
+            DB_BehaviorOwner.VanillaFallback))
+            return false;
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(desert, owner)) return false;
+        orig(self);
+        return true;
+    }
+
+    private static void CompleteR3Frame(
+        DesertBatfly desert,
+        in DB_BehaviorResolution ownership)
+    {
+        if (desert == null) return;
+        DesertBatflyThreatRuntime.CommitFrame(desert);
         DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySignalRuntime.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
+        if (desert.abstractCreature != null && AIDebugTrace.IsWatched(desert.abstractCreature))
+            AIDebugTrace.RecordChange(
+                desert.abstractCreature,
+                AIDebugEventCategory.Decision,
+                "PrimaryOwner",
+                ownership.PrimaryOwner,
+                ownership.Reason);
     }
 
     private static bool RestrainedByNonFly(DesertBatfly fly)

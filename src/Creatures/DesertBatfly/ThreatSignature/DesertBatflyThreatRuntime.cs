@@ -229,7 +229,7 @@ internal static class DesertBatflyThreatRuntime
         if (bat != null) states.Remove(bat);
     }
 
-    internal static void Update(DesertBatfly bat)
+    internal static void RefreshState(DesertBatfly bat)
     {
         if (bat == null || bat.room == null || bat.dead || bat.slatedForDeletetion) return;
         RuntimeState state = StateFor(bat);
@@ -241,8 +241,23 @@ internal static class DesertBatflyThreatRuntime
         ExtendLearnedDisengage(bat, state);
         TrackPursuit(bat, state);
         TrackEncounter(bat, state);
+    }
+
+    // Compatibility state-only surface. R3 hooks call RefreshState before arbitration.
+    internal static void Update(DesertBatfly bat) => RefreshState(bat);
+
+    internal static void ApplyOwnedTacticalModifier(DesertBatfly bat)
+    {
+        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat) ||
+            !states.TryGetValue(bat, out RuntimeState state))
+            return;
         ApplyTacticalAdjustment(bat, state);
-        state.PreviousMode = bat.DesertAI.Mode;
+    }
+
+    internal static void CommitFrame(DesertBatfly bat)
+    {
+        if (bat != null && states.TryGetValue(bat, out RuntimeState state))
+            state.PreviousMode = bat.DesertAI.Mode;
     }
 
     internal static bool TryGetDebugState(DesertBatfly bat, out DesertBatflyThreatDebugState debug)
@@ -698,9 +713,10 @@ internal static class DesertBatflyThreatRuntime
         state.Cue = cue;
         if (cue.ProjectileThreat)
         {
+            // Real trajectory is a current-frame Arbiter fact. Do not pre-promote it into
+            // DesertAI Escape here or ImmediateDanger would starve ProjectileEvade.
             DesertBatflySocialLife.CancelForPriority(bat, "Task11 incoming projectile");
-            if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
-                bat.DesertAI.Threatened(player, false);
+            state.ModifierReason = "real incoming projectile queued for R3 arbitration";
         }
     }
 
@@ -734,8 +750,9 @@ internal static class DesertBatflyThreatRuntime
             !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) &&
             bat.DesertAI.Target == null)
         {
-            bat.DesertAI.Threatened(player, false);
-            state.ModifierReason = "recognized currently held threat";
+            // Learned Threat memory may suppress/reshape aggression, but it never creates a
+            // locomotion owner by itself. Direct real danger uses the ordinary danger/fear path.
+            state.ModifierReason = "recognized held threat; learned caution remains a modifier";
         }
     }
 
@@ -938,6 +955,8 @@ internal static class DesertBatflyThreatRuntime
 
     private static void ApplyTacticalAdjustment(DesertBatfly bat, RuntimeState state)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat)) return;
+
         state.ModifierReason = string.Empty;
         state.AttackGeometryAdjustment = string.Empty;
         state.AttachSuppression = 0f;
@@ -945,24 +964,6 @@ internal static class DesertBatflyThreatRuntime
         if (bat.room == null || bat.dead || !bat.Consious || bat.inShortcut ||
             bat.Injury.IsSeverelyInjured || bat.AI.fleeFromRain)
             return;
-
-        if (state.HazardTimer > 0 && state.HazardCenter.HasValue)
-        {
-            Vector2 center = state.HazardCenter.Value;
-            float distance = Vector2.Distance(center, bat.mainBodyChunk.pos);
-            if (distance < 230f)
-            {
-                Vector2 away = Custom.DirVec(center, bat.mainBodyChunk.pos);
-                Vector2 evade = bat.mainBodyChunk.pos +
-                    away * Mathf.Lerp(130f, 70f, Mathf.InverseLerp(0f, 230f, distance));
-                bat.AI.localGoal = evade;
-                bat.Injury.NominalFlightSpeed = Mathf.Max(bat.Injury.NominalFlightSpeed, 7f);
-                state.EvadeTarget = evade;
-                state.ModifierReason = "acute hazard avoidance";
-                state.AttackGeometryAdjustment = "move away from recent hazard center";
-                return;
-            }
-        }
 
         if (bat.DesertAI.Target is not Player player || player.room != bat.room) return;
         int slot = PlayerSlot(player);

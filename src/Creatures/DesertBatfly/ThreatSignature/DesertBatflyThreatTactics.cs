@@ -130,6 +130,12 @@ internal static class DesertBatflyThreatTactics
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
 
+        bat.LoseAllGrasps();
+        bat.burrowOrHangSpot = null;
+        if (bat.AI.behavior != FlyAI.Behavior.Idle)
+            bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+        bat.AI.followingDijkstraMap = -1;
+        bat.movMode = Fly.MovementMode.BatFlight;
         bat.AI.localGoal = evade;
         bat.Injury.NominalFlightSpeed = Mathf.Max(bat.Injury.NominalFlightSpeed, 9f);
         DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateProjectileEvade");

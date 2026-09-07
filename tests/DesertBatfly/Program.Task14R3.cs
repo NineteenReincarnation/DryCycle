@@ -19,6 +19,11 @@ internal static partial class Program
         Type environmentExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExecutor", true);
         Type socialExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialExecutor", true);
         Type projectileExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ProjectileEvadeExecutor", true);
+        Type immediateDangerExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ImmediateDangerExecutor", true);
+        Type fearExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearExecutor", true);
+        Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
+        Type roostExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostExecutor", true);
+        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTactics", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
         Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
@@ -137,6 +142,24 @@ internal static partial class Program
         Check(threatTactics.GetMethod("ApplyProjectileEvadeOwned", Flags) != null &&
               MethodCallOffset(threatTactics.GetMethod("ApplyProjectileEvadeOwned", Flags), arbiter, "IsPrimaryOwner") >= 0,
             "Task14 R3 real projectile dodge has an owner-gated apply surface while Threat memory remains a modifier");
+        Check(threatRuntime.GetMethod("RefreshState", Flags) != null &&
+              threatRuntime.GetMethod("ApplyOwnedTacticalModifier", Flags) != null &&
+              threatRuntime.GetMethod("CommitFrame", Flags) != null &&
+              MethodCallOffset(threatRuntime.GetMethod("ApplyTacticalAdjustment", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 Threat refresh is pre-arbiter and tactical localGoal adjustment is Combat-owner-only");
+        Check(desertAI.GetMethod("RefreshDecisionState", Flags) != null &&
+              desertAI.GetMethod("ExecuteImmediateDangerOwned", Flags) != null &&
+              desertAI.GetMethod("ExecuteFearOwned", Flags) != null &&
+              desertAI.GetMethod("ExecuteCombatOwned", Flags) != null &&
+              desertAI.GetMethod("ExecuteRoostOwned", Flags) != null &&
+              desertAI.GetMethod("ScanWeapons", Flags) == null,
+            "Task14 R3 DesertBatflyAI separates decision refresh from owner executors and removes duplicate weapon scan");
+        foreach (string methodName in new[]
+                 { "ExecuteImmediateDangerOwned", "ExecuteFearOwned", "ExecuteCombatOwned", "ExecuteRoostOwned", "SteerOwned" })
+            Check(MethodCallOffset(desertAI.GetMethod(methodName, Flags), arbiter, "IsPrimaryOwner") >= 0,
+                "Task14 R3 " + methodName + " requires same-tick PrimaryOwner");
+        Check(MethodCallOffset(desertAI.GetMethod("AfterPhysics", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 Attach/Interfere AfterPhysics cannot run after another locomotion owner won");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -149,16 +172,26 @@ internal static partial class Program
             "Task14 R3 FrameContext/Arbiter cache follows Desert Batfly lifecycle");
         Check(MethodCallOffset(updateAI, arbiter, "ResolveFrame") >= 0 &&
               MethodCallOffset(updateAI, environmentBehavior, "RefreshInfluence") >= 0 &&
+              MethodCallOffset(updateAI, desertAI, "RefreshDecisionState") >= 0 &&
+              MethodCallOffset(updateAI, threatRuntime, "RefreshState") >= 0 &&
+              MethodCallOffset(updateAI, immediateDangerExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, fearExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, injuryExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0 &&
               MethodCallOffset(updateAI, environmentExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, vengeanceExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, socialLife, "RefreshState") >= 0 &&
               MethodCallOffset(updateAI, projectileExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, combatExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, roostExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, socialExecutor, "TryExecute") >= 0,
-            "Task14 R3 migrated owner executors enter through central owner resolution");
-        Check(MethodCallOffset(updateAI, threatTactics, "TryApplyOrdinaryProjectileEvade") < 0,
-            "Task14 R3 legacy pipeline no longer applies projectile dodge outside PrimaryOwner");
+            "Task14 R3 all ordinary locomotion domains enter through central owner resolution");
+        Check(MethodCallOffset(updateAI, threatTactics, "TryApplyOrdinaryProjectileEvade") < 0 &&
+              MethodCallOffset(updateAI, desertAI, "Update") < 0,
+            "Task14 R3 hook has no legacy projectile or monolithic DesertBatflyAI executor pipeline");
+        MethodInfo executeNativeOwned = hooks.GetMethod("ExecuteNativeOwned", Flags);
+        Check(executeNativeOwned != null && MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 vanilla FlyAI.Update is itself restricted to an accepted NativeSpecial/Ordinary/Fallback owner");
         Check(injuryExecutor.GetMethod("TryExecute", Flags) != null &&
               desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
               desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
@@ -176,6 +209,6 @@ internal static partial class Program
             "Task14 R3 architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Task14 R3: InjuryRecovery, Travel, Vengeance, Environment, ProjectileEvade and Social are owner-gated. Combat/ordinary migration remains open.");
+            "Task14 R3: ordinary locomotion domains are owner-gated; Rain World live validation and rejected-proposal Observatory presentation remain.");
     }
 }

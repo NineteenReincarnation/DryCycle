@@ -258,18 +258,11 @@ internal sealed class DesertBatflyAI
 
     private void DisturbedByApproach(Creature source)
     {
+        // Perception only: record an escape fact. R3 ImmediateDanger owns the actual chain
+        // release/steering later in the same FlyAI frame.
         escapeFrom = source?.mainBodyChunk.pos ??
                      fly.mainBodyChunk.pos - Vector2.up * 20f;
-
-        if (IsInFlyChain(fly))
-        {
-            BreakHangChain(source, DesertBatflyTuning.ApproachRetreatTicks);
-            return;
-        }
-
         retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
-        CancelAttack();
-        SetMode(Activity.Escape);
     }
 
     internal void CancelPhysicalAttack()
@@ -328,7 +321,7 @@ internal sealed class DesertBatflyAI
             }
             else
             {
-                Steer(target, 4.2f);
+                SteerOwned(target, 4.2f, DB_BehaviorOwner.InjuryRecovery);
                 SetMode(Activity.InjuryRecovery);
                 injury.SetRecovery(InjuryRecoveryState.Roost, target, "severe injury; approaching legal local roost");
             }
@@ -346,7 +339,7 @@ internal sealed class DesertBatflyAI
         if (safeGoal == Vector2.zero || fly.room.GetTile(safeGoal).Solid ||
             !fly.room.VisualContact(fly.mainBodyChunk.pos, safeGoal))
             safeGoal = fly.mainBodyChunk.pos + Vector2.up * 60f;
-        Steer(safeGoal, 3.8f);
+        SteerOwned(safeGoal, 3.8f, DB_BehaviorOwner.InjuryRecovery);
         SetMode(Activity.InjuryRecovery);
         injury.SetRecovery(InjuryRecoveryState.SafeFlight, safeGoal, "severe injury; no reachable local roost or hive; low-risk flight");
         return true;
@@ -405,6 +398,8 @@ internal sealed class DesertBatflyAI
     private bool TryDriveRecoveryHive(out Vector2 target)
     {
         target = default;
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery))
+            return false;
         if (fly.room?.aimap == null || fly.room.hives == null || fly.room.hives.Length == 0)
             return false;
 
@@ -473,6 +468,7 @@ internal sealed class DesertBatflyAI
 
     private void BeginRecoveryRoost(Vector2 spot)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery)) return;
         recoveryRoostTarget = spot;
         roost = spot;
         hasRoost = true;
@@ -491,6 +487,7 @@ internal sealed class DesertBatflyAI
         Target = null;
         drainedWater = 0f;
         interest = 0;
+        unseen = 0;
         SetMode(Activity.Flight);
     }
 
@@ -524,19 +521,27 @@ internal sealed class DesertBatflyAI
         ticks = 0;
     }
 
-    internal void Update()
+    internal void RefreshDecisionState()
     {
         if (fly.room == null) return;
-        ticks++;
 
+        // This phase may refresh species state and perception, but it must not steer ordinary
+        // locomotion. All localGoal/velocity writes live behind the selected R3 owner below.
         if (fly.Emergence.Active || RestrainedByNonFly() ||
             !fly.Consious || fly.inShortcut)
         {
-            if (Mode == Activity.Roost) StopRoost(true);
-            ClearRecoveryNavigation();
+            if (Mode == Activity.Roost)
+            {
+                hasRoost = false;
+                SetMode(Activity.Flight);
+            }
+            if (Mode == Activity.InjuryRecovery)
+            {
+                recoveryRoostTarget = null;
+                recoverySearchCooldown = 0;
+                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "unavailable / restraint / shortcut");
+            }
             CancelAttack();
-            fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "unavailable / restraint / shortcut");
-            fly.movMode = Fly.MovementMode.Passive;
             return;
         }
 
@@ -544,7 +549,6 @@ internal sealed class DesertBatflyAI
         {
             scan = 0;
             ScanCreatures();
-            ScanWeapons();
         }
 
         bool recoveryBurrow = fly.AI.behavior == FlyAI.Behavior.Burrow &&
@@ -552,33 +556,38 @@ internal sealed class DesertBatflyAI
         if (fly.AI.fleeFromRain || (!recoveryBurrow && fly.AI.behavior == FlyAI.Behavior.Burrow) ||
             fly.AI.luredCounter > 0 || fly.safariControlled)
         {
-            if (Mode == Activity.Roost) StopRoost(true);
+            if (Mode == Activity.Roost)
+            {
+                hasRoost = false;
+                SetMode(Activity.Flight);
+            }
             if (Mode == Activity.InjuryRecovery)
             {
-                ClearRecoveryNavigation();
-                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "vanilla priority owns behavior");
+                recoveryRoostTarget = null;
+                recoverySearchCooldown = 0;
+                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "native special behavior owns frame");
             }
             CancelAttack();
             return;
         }
 
         if (danger != null && retreat <= 0)
-            DisturbedByApproach(danger);
+        {
+            escapeFrom = danger.mainBodyChunk.pos;
+            retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
+        }
 
         if (danger != null || retreat > 0)
         {
-            ClearRecoveryNavigation();
+            recoveryRoostTarget = null;
+            recoverySearchCooldown = 0;
             fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "danger / escape");
+            hasRoost = false;
             hasSlot = false;
             attachedChunk = null;
             Target = null;
             SetMode(Activity.Escape);
             if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
-            Steer(
-                fly.mainBodyChunk.pos +
-                Custom.DirVec(escapeFrom, fly.mainBodyChunk.pos) * 160f +
-                Vector2.up * 50f,
-                8f);
             return;
         }
 
@@ -601,12 +610,14 @@ internal sealed class DesertBatflyAI
         }
 
         if (Mode == Activity.Escape) SetMode(Activity.Flight);
-        // R3: severe InjuryRecovery movement is owner-gated outside this legacy pipeline.
+
+        // Severe recovery itself is executed only by DB_InjuryRecoveryExecutor. A milder
+        // injury may still suppress combat and allow a normal roost proposal.
         if (fly.Injury.BlocksCombat)
         {
             CancelPhysicalAttack();
             if (Mode != Activity.Roost) CancelAttack();
-            UpdateRoost();
+            TryPlanRoost();
             return;
         }
 
@@ -623,7 +634,7 @@ internal sealed class DesertBatflyAI
         if (!fly.Personality.Aggressive || !GriefAllowsHarass())
         {
             if (Mode != Activity.Roost) CancelAttack();
-            UpdateRoost();
+            TryPlanRoost();
             return;
         }
 
@@ -634,12 +645,82 @@ internal sealed class DesertBatflyAI
                 Target = attacker;
             if (Target == null)
             {
-                UpdateRoost();
+                TryPlanRoost();
                 return;
             }
             SetMode(Activity.Observe);
         }
 
+        // Choosing a combat mode is state/proposal preparation only. The actual roost release,
+        // steering, contact and attack timers are frozen until PrimaryOwner=Combat executes.
+        if (Mode is Activity.Flight or Activity.Cooldown or Activity.Roost)
+        {
+            hasRoost = false;
+            SetMode(Activity.Observe);
+        }
+    }
+
+    // Compatibility surface for old callers/tests. R3 hooks use RefreshDecisionState directly;
+    // this alias never executes locomotion.
+    internal void Update() => RefreshDecisionState();
+
+    internal bool ExecuteImmediateDangerOwned()
+    {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.ImmediateDanger) ||
+            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            return false;
+        if (danger == null && retreat <= 0 && Mode != Activity.Escape)
+            return false;
+
+        ClearRecoveryNavigation();
+        fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
+        hasRoost = false;
+        hasSlot = false;
+        attachedChunk = null;
+        Target = null;
+        SetMode(Activity.Escape);
+        if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
+
+        Vector2 goal = fly.mainBodyChunk.pos +
+                       Custom.DirVec(escapeFrom, fly.mainBodyChunk.pos) * 160f +
+                       Vector2.up * 50f;
+        return SteerOwned(goal, 8f, DB_BehaviorOwner.ImmediateDanger);
+    }
+
+    internal bool ExecuteFearOwned(in DB_BehaviorResolution resolution)
+    {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.FearResponse) ||
+            resolution.PrimaryOwner != DB_BehaviorOwner.FearResponse || fly.room == null ||
+            fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            return false;
+
+        CancelPhysicalAttack();
+        if (resolution.WinningProposal.PreserveGoal || !resolution.FinalGoal.HasValue)
+            return true;
+
+        Vector2 goal = resolution.FinalGoal.Value;
+        Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, goal);
+        if (direction == Vector2.zero) return true;
+        escapeFrom = fly.mainBodyChunk.pos - direction * 80f;
+        retreat = Mathf.Max(retreat, 60);
+        SetMode(Activity.Escape);
+        return SteerOwned(
+            goal,
+            Mathf.Max(6f, resolution.WinningProposal.NominalSpeed),
+            DB_BehaviorOwner.FearResponse);
+    }
+
+    internal bool ExecuteCombatOwned()
+    {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat) ||
+            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() ||
+            fly.inShortcut || fly.Injury.BlocksCombat || !Valid(Target) ||
+            Mode is not (Activity.Observe or Activity.Approach or Activity.Circle or
+                Activity.FakeDive or Activity.Dive or Activity.Attach or
+                Activity.RetaliationCharge or Activity.Interfere))
+            return false;
+
+        ticks++;
         DB_VisibilityChannel targetChannel = Target is Player
             ? DB_VisibilityChannel.Player
             : DB_VisibilityChannel.Creature;
@@ -653,28 +734,19 @@ internal sealed class DesertBatflyAI
             unseen = 0;
 
         if (++interest > DesertBatflyTuning.InterestTicks || unseen > 35 ||
-            !Custom.DistLess(
-                fly.mainBodyChunk.pos,
-                Target.mainBodyChunk.pos,
-                430f))
+            !Custom.DistLess(fly.mainBodyChunk.pos, Target.mainBodyChunk.pos, 430f))
         {
             Finish(false);
-            return;
+            return true;
         }
 
         Vector2 center = Target.mainBodyChunk.pos;
         float distance = Vector2.Distance(fly.mainBodyChunk.pos, center);
 
-        if (Mode is Activity.Flight or Activity.Cooldown or Activity.Roost)
-        {
-            if (Mode == Activity.Roost) StopRoost(true);
-            SetMode(Activity.Observe);
-        }
-
         switch (Mode)
         {
             case Activity.Observe:
-                Steer(center + Orbit(150f, 90f), 4.5f);
+                SteerOwned(center + Orbit(150f, 90f), 4.5f, DB_BehaviorOwner.Combat);
                 if (ticks > fly.Personality.ObserveDuration)
                 {
                     bool counter = Target == attacker && memory > 0;
@@ -707,22 +779,16 @@ internal sealed class DesertBatflyAI
                         DesertBatflyTuning.ObserveThirst,
                         fly.Personality.AggressionDrive * 0.35f);
                     bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale * fly.Injury.AggressionScale > effectiveAttackThirst;
-                    bool revengeDrink = grudge &&
-                                        fly.DesertState.GrabMemoryStrength > 0.12f;
+                    bool revengeDrink = grudge && fly.DesertState.GrabMemoryStrength > 0.12f;
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
 
                     float fakeChance = Mathf.Clamp01(fly.Personality.FakeDiveChance);
                     if (grudge)
-                        fakeChance *= Mathf.Lerp(
-                            0.8f,
-                            0.48f,
-                            fly.DesertState.GrabMemoryStrength);
+                        fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
                     if (counter) fakeChance *= 0.82f;
                     if (Target is Player learnedTarget)
                         fakeChance = DesertBatflyThreatTactics.AdjustFakeDiveChance(
-                            fly,
-                            learnedTarget,
-                            fakeChance);
+                            fly, learnedTarget, fakeChance);
 
                     if (!wantsRealAttack || Random.value < fakeChance)
                         SetMode(Activity.FakeDive);
@@ -734,47 +800,47 @@ internal sealed class DesertBatflyAI
                 break;
 
             case Activity.Approach:
-                Steer(
+                SteerOwned(
                     center + Vector2.up * 100f,
-                    6f + fly.Personality.AggressionDrive * 1.2f);
+                    6f + fly.Personality.AggressionDrive * 1.2f,
+                    DB_BehaviorOwner.Combat);
                 if (ticks > DesertBatflyTuning.ApproachTicks || distance < 110f)
                     SetMode(Activity.Circle);
                 break;
 
             case Activity.Circle:
-                Steer(
+                SteerOwned(
                     center + Orbit(95f, 65f),
-                    6.5f + fly.Personality.AggressionDrive);
+                    6.5f + fly.Personality.AggressionDrive,
+                    DB_BehaviorOwner.Combat);
                 if (ticks > DesertBatflyTuning.CircleTicks)
                     SetMode(Activity.Dive);
                 break;
 
             case Activity.FakeDive:
                 if (distance < 52f || ticks > DesertBatflyTuning.FakeDivePullUpTicks)
-                    ticks = Mathf.Max(
-                        DesertBatflyTuning.FakeDivePullUpTicks + 1,
-                        ticks);
-                Steer(
+                    ticks = Mathf.Max(DesertBatflyTuning.FakeDivePullUpTicks + 1, ticks);
+                SteerOwned(
                     PullingUp
                         ? center + Vector2.up * 160f +
                           Custom.DirVec(center, fly.mainBodyChunk.pos) * 80f
                         : center,
-                    PullingUp ? 10f : 12f);
+                    PullingUp ? 10f : 12f,
+                    DB_BehaviorOwner.Combat);
                 if (ticks > DesertBatflyTuning.FakeDiveTicks)
                     SetMode(Activity.Observe);
                 break;
 
             case Activity.Dive:
-                Steer(
+                SteerOwned(
                     center + Target.mainBodyChunk.vel * 1.5f,
-                    12f + fly.Personality.AggressionDrive * 1.5f);
+                    12f + fly.Personality.AggressionDrive * 1.5f,
+                    DB_BehaviorOwner.Combat);
                 BodyChunk contact = FindContact();
                 if (contact != null && unseen == 0)
                 {
                     attachedChunk = contact;
-                    attachOffset = Custom.DirVec(
-                            contact.pos,
-                            fly.mainBodyChunk.pos) *
+                    attachOffset = Custom.DirVec(contact.pos, fly.mainBodyChunk.pos) *
                         (contact.rad + fly.mainBodyChunk.rad * 0.5f);
                     drainedWater = 0f;
                     SetMode(Activity.Attach);
@@ -792,8 +858,7 @@ internal sealed class DesertBatflyAI
                 break;
 
             case Activity.RetaliationCharge:
-                if (Target is not Player chargeTarget ||
-                    IsTraumatizedPlayer(chargeTarget))
+                if (Target is not Player chargeTarget || IsTraumatizedPlayer(chargeTarget))
                 {
                     FinishRetaliation(false);
                     break;
@@ -801,19 +866,15 @@ internal sealed class DesertBatflyAI
 
                 Vector2 predicted = chargeTarget.mainBodyChunk.pos +
                                     chargeTarget.mainBodyChunk.vel * 1.15f;
-                Steer(predicted, fly.Personality.RetaliationSpeed);
+                SteerOwned(predicted, fly.Personality.RetaliationSpeed, DB_BehaviorOwner.Combat);
                 BodyChunk retaliationContact = FindContact();
                 if (retaliationContact != null && unseen == 0)
                 {
                     attachedChunk = retaliationContact;
                     retaliationDirection = fly.mainBodyChunk.vel.sqrMagnitude > 0.5f
                         ? fly.mainBodyChunk.vel.normalized
-                        : Custom.DirVec(
-                            fly.mainBodyChunk.pos,
-                            retaliationContact.pos);
-                    attachOffset = Custom.DirVec(
-                            retaliationContact.pos,
-                            fly.mainBodyChunk.pos) *
+                        : Custom.DirVec(fly.mainBodyChunk.pos, retaliationContact.pos);
+                    attachOffset = Custom.DirVec(retaliationContact.pos, fly.mainBodyChunk.pos) *
                         (retaliationContact.rad + fly.mainBodyChunk.rad * 0.45f);
                     ApplyInitialRetaliationImpact(chargeTarget);
                     SetMode(Activity.Interfere);
@@ -830,6 +891,43 @@ internal sealed class DesertBatflyAI
                     FinishRetaliation(true);
                 break;
         }
+        return true;
+    }
+
+    internal bool ExecuteRoostOwned()
+    {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Roost) ||
+            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            return false;
+
+        if (Mode == Activity.Roost)
+        {
+            ticks++;
+            if (!hasRoost || ticks > fly.Personality.RoostDuration || fly.AI.fleeFromRain)
+            {
+                StopRoost(true);
+                return true;
+            }
+
+            if (fly.AI.behavior != FlyAI.Behavior.Chain)
+                fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
+            fly.burrowOrHangSpot = roost;
+            fly.movMode = Fly.MovementMode.Hang;
+            fly.mainBodyChunk.vel *= 0.5f;
+            fly.AI.HangInChainUpdate();
+            return true;
+        }
+
+        // A native/social Fly chain is still a Roost owner. Preserve vanilla chain physics
+        // without running the rest of FlyAI.Update, which could choose an unrelated goal.
+        if (fly.AI.behavior == FlyAI.Behavior.Chain)
+        {
+            fly.movMode = Fly.MovementMode.Hang;
+            fly.AI.HangInChainUpdate();
+            return true;
+        }
+
+        return false;
     }
 
     private BodyChunk FindContact()
@@ -848,6 +946,8 @@ internal sealed class DesertBatflyAI
 
     internal void AfterPhysics(bool eu)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
+
         if (Mode == Activity.Interfere)
         {
             UpdateInterference(eu);
@@ -959,6 +1059,7 @@ internal sealed class DesertBatflyAI
 
     private void FinishRetaliation(bool success)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
         Vector2 from = Target?.mainBodyChunk.pos ??
                        fly.mainBodyChunk.pos - Vector2.up;
         CancelAttack();
@@ -975,6 +1076,7 @@ internal sealed class DesertBatflyAI
 
     private void Finish(bool success)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
         Vector2 from = Target?.mainBodyChunk.pos ??
                        fly.mainBodyChunk.pos - Vector2.up;
         CancelAttack();
@@ -1274,16 +1376,7 @@ internal sealed class DesertBatflyAI
         return best;
     }
 
-    private void ScanWeapons()
-    {
-        if (!DB_WeaponPerception.TryFindImmediateThreat(
-                fly,
-                out DB_WeaponObservation observation))
-            return;
 
-        if (observation.Instigator != null)
-            Threatened(observation.Instigator, false);
-    }
 
     private bool IsRememberedPlayer(Player player)
     {
@@ -1324,8 +1417,11 @@ internal sealed class DesertBatflyAI
             55f + Mathf.Sin(angle) * height * 0.45f);
     }
 
-    private void Steer(Vector2 goal, float speed)
+    private bool SteerOwned(Vector2 goal, float speed, DB_BehaviorOwner owner)
     {
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, owner) || fly?.room == null || fly.AI == null)
+            return false;
+
         fly.Injury.NominalFlightSpeed = speed;
         fly.LoseAllGrasps();
         fly.burrowOrHangSpot = null;
@@ -1338,11 +1434,9 @@ internal sealed class DesertBatflyAI
         hasRoost = false;
 
         Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, goal);
-        if (fly.room.GetTile(
-                fly.mainBodyChunk.pos + direction * 25f).Solid ||
+        if (fly.room.GetTile(fly.mainBodyChunk.pos + direction * 25f).Solid ||
             (fly.room.terrain != null &&
-             fly.room.terrain.Contains(
-                 fly.mainBodyChunk.pos + direction * 25f)))
+             fly.room.terrain.Contains(fly.mainBodyChunk.pos + direction * 25f)))
         {
             goal = fly.mainBodyChunk.pos + Vector2.up * 70f;
             speed = 4f;
@@ -1353,36 +1447,21 @@ internal sealed class DesertBatflyAI
             fly.mainBodyChunk.vel,
             Custom.DirVec(fly.mainBodyChunk.pos, goal) * speed,
             0.22f);
+        return true;
     }
 
-    private void UpdateRoost(bool recovery = false)
+    private void TryPlanRoost()
     {
-        if (Mode == Activity.Roost || (Mode == Activity.InjuryRecovery && hasRoost))
-        {
-            if (!hasRoost || (!recovery && ticks > fly.Personality.RoostDuration) ||
-                fly.AI.fleeFromRain)
-            {
-                StopRoost(true);
-                return;
-            }
-
-            if (fly.AI.behavior != FlyAI.Behavior.Chain)
-                fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
-            fly.burrowOrHangSpot = roost;
-            fly.movMode = Fly.MovementMode.Hang;
-            fly.mainBodyChunk.vel *= 0.5f;
+        if (Mode == Activity.Roost || hasRoost || fly.AI.behavior == FlyAI.Behavior.Chain)
             return;
-        }
-
-        if (fly.AI.behavior == FlyAI.Behavior.Chain) return;
-        if (scan != 0 || (!recovery && Random.value > fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)) return;
+        if (scan != 0 || Random.value >
+            fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)
+            return;
         if (!TryFindRoost(out Vector2 spot)) return;
 
+        // State/proposal preparation only. DB_RoostExecutor performs the Chain/Hang writes.
         roost = spot;
         hasRoost = true;
-        fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
-        fly.burrowOrHangSpot = roost;
-        fly.movMode = Fly.MovementMode.Hang;
         SetMode(Activity.Roost);
     }
 

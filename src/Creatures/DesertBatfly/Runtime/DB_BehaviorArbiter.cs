@@ -278,17 +278,35 @@ internal static class DB_BehaviorArbiter
                 suppressSocial: true,
                 commitment: 1f));
 
-        if (frame.FearSuppressed || frame.Trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+        if (frame.FearSuppressed || frame.Threat.AcuteThreat ||
+            frame.Trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+        {
+            Vector2? fearGoal = frame.CurrentGoal;
+            bool preserveFearGoal = true;
+            if (frame.Threat.AcuteThreat && frame.Threat.HazardCenter.HasValue)
+            {
+                Vector2 away = frame.Position - frame.Threat.HazardCenter.Value;
+                if (away.sqrMagnitude < 0.01f) away = Vector2.up;
+                fearGoal = frame.Position + away.normalized * 135f + Vector2.up * 28f;
+                preserveFearGoal = false;
+            }
+
+            string fearReason = frame.Threat.AcuteThreat
+                ? "acute current threat response"
+                : frame.FearSuppressed
+                    ? "active fear/intimidation response"
+                    : "persistent PTSD response";
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.FearResponse,
                 DB_BehaviorKind.FearRetreat,
-                frame.FearSuppressed ? "active fear/intimidation response" : "persistent PTSD response",
-                frame.CurrentGoal,
+                fearReason,
+                fearGoal,
                 nominalSpeed: 8f,
                 suppressCombat: true,
                 suppressSocial: true,
-                preserveGoal: true,
-                commitment: Mathf.Max(frame.Trauma, 0.55f)));
+                preserveGoal: preserveFearGoal,
+                commitment: Mathf.Max(frame.Trauma, frame.Threat.AcuteThreat ? 0.82f : 0.55f)));
+        }
 
         if (frame.VengeanceActive)
         {

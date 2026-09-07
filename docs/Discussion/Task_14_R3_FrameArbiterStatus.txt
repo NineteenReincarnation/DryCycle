@@ -3,7 +3,7 @@ Status record
 Date: 2026-09-07
 
 Current status:
-【R3 已启动 / FrameContext + Arbiter foundation 已实现 / ordinary single-owner migration 尚未完成】
+【R3 代码侧 ordinary single-owner 已收敛 / managed guard 已更新 / Rain World 实机验收尚未完成】
 
 ======================================================================
 1. R3 目标边界
@@ -240,24 +240,40 @@ PrimaryOwner / BehaviorKind
 3. 当前明确仍 OPEN
 ======================================================================
 
-R3-OPEN-01 — DesertBatflyAI decision / execution split
------------------------------------------------------
+R3-CLOSED-01 — DesertBatflyAI decision / execution split（代码侧已收敛）
+-----------------------------------------------------------------------
 
-当前 DesertBatflyAI.Update 仍同时包含：
+当前 FlyAI hook 顺序已经改为：
 
-- danger Escape；
-- InjuryRecovery；
-- roost；
-- observe / approach / circle / dive；
-- retaliation；
-- ordinary fallback；
-- direct Steer/localGoal writes。
+Refresh facts/state
+    -> DB_BehaviorArbiter.ResolveFrame
+    -> exactly one owner executor
 
-必须继续拆成：
+而不是先执行 vanilla FlyAI.Update 再覆盖 localGoal。
 
-Read facts -> Proposal -> Arbiter -> selected executor
+DesertBatflyAI 当前 R3 边界：
 
-否则 R3 不能宣称 ordinary single writer。
+- `RefreshDecisionState` 只刷新 perception / danger / target / roost intent；
+- `ExecuteImmediateDangerOwned` 只接受 `PrimaryOwner=ImmediateDanger`；
+- `ExecuteFearOwned` 只接受 `PrimaryOwner=FearResponse`；
+- `ExecuteCombatOwned` 只接受 `PrimaryOwner=Combat`；
+- `ExecuteRoostOwned` 只接受 `PrimaryOwner=Roost`；
+- `SteerOwned` 自身再次校验 same-tick PrimaryOwner；
+- Combat timers 在被高优先级 owner 抢占时冻结；
+- duplicate `DesertBatflyAI.ScanWeapons` 已删除，real projectile 使用统一 WeaponPerception/FrameContext；
+- `AfterPhysics` Attach/Interfere 只允许 Combat owner 同 tick 执行。
+
+vanilla FlyAI.Update 现在仅通过 `ExecuteNativeOwned` 进入，并只允许：
+
+- NativeSpecial；
+- Ordinary；
+- VanillaFallback。
+
+因此 custom owner 不再发生“vanilla 先写一次 localGoal，再被 custom 覆盖”的双 writer。
+
+这仍不是 R4：Combat 责任尚未迁出 DesertBatflyAI，也没有引入 DB_FlightMotor。
+
+仍需 Rain World 实机验证 Combat/Roost/Ordinary 切换、Attach/Interfere 和 vanilla swarm parity。
 
 R3-CLOSED-02 — Injury proposal executor（代码侧已收敛）
 --------------------------------------------------------
@@ -402,5 +418,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment / ImmediateProjectileEvade / Social 已进入 owner-gated executor。】
-【R3 尚未完成；下一阶段集中处理 Combat/Ordinary 的 DesertBatflyAI split、Threat tactical apply 与 ordinary localGoal 单 writer。】
+【R3 代码侧单 owner 已收敛：ImmediateDanger / InjuryRecovery / Travel / HardSurvival / Fear / Vengeance / Environment / ProjectileEvade / Combat / Roost / Social / Ordinary 均通过 Arbiter 进入。】
+【R3 尚不标记最终完成：仍需 Observatory rejected proposal 正式展示，以及 Rain World live scenarios 验收。】
