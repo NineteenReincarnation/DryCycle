@@ -78,26 +78,10 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
     }
 
     internal static bool ShouldSeekHome(in DesertBatflyEnvironmentalInfluence influence)
-    {
-        if (influence.HardSurvival && influence.HomeReturnDrive >= 0.35f) return true;
-        if (influence.HomeReturnDrive < 0.58f) return false;
-
-        // Heat may temporarily make active aggression stronger than withdrawal. Only let
-        // Home return win once shelter/exhaustion materially overtakes agitation.
-        if (influence.Weather is DesertBatflyEnvironmentalWeather.HeatWave or
-            DesertBatflyEnvironmentalWeather.IntenseHeat)
-        {
-            float retreat = Mathf.Max(influence.HeatShelterDrive, influence.ThermalExhaustion);
-            return retreat + 0.10f >= influence.HeatAgitation;
-        }
-        return true;
-    }
+        => DB_EnvironmentalPolicy.ShouldSeekHome(influence);
 
     internal static bool ShouldBurrow(in DesertBatflyEnvironmentalInfluence influence)
-    {
-        if (influence.HardSurvival && influence.BurrowDrive >= 0.30f) return true;
-        return influence.BurrowDrive >= 0.68f;
-    }
+        => DB_EnvironmentalPolicy.ShouldBurrow(influence);
 
     private static void ApplySecondaryLightRainMoisture(DesertBatfly bat)
     {

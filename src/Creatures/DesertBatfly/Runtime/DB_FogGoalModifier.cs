@@ -41,14 +41,19 @@ internal static class DB_FogGoalModifier
         if (tick >= state.OffsetUntil || state.WeatherOrdinal != weatherOrdinal)
         {
             float angle = Stable01(bat.Personality.VisualSeed ^ tick / 120) * Mathf.PI * 2f;
-            float radius = Mathf.Lerp(8f, 70f, influence.NavigationUncertainty);
+            float familiarity = DB_EnvironmentalPolicy.FogNavigationFamiliarityScale(bat, influence.Weather);
+            float uncertainty = Mathf.Clamp01(influence.NavigationUncertainty * familiarity);
+            float radius = Mathf.Lerp(5f, 62f, uncertainty);
             state.Offset = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
             state.OffsetUntil = tick + 90 + StableBucket(bat.Personality.VisualSeed, 70);
             state.WeatherOrdinal = weatherOrdinal;
         }
 
         float distance = Vector2.Distance(bat.mainBodyChunk.pos, goal);
-        float fade = Mathf.InverseLerp(70f, 320f, distance);
+        float anticipation = Mathf.Clamp(influence.ObstacleAnticipationScale, 0.30f, 1f);
+        float correctionStart = Mathf.Lerp(22f, 65f, anticipation);
+        float correctionFull = Mathf.Lerp(175f, 300f, anticipation);
+        float fade = Mathf.InverseLerp(correctionStart, correctionFull, distance);
         return goal + state.Offset * fade;
     }
 

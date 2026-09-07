@@ -183,7 +183,8 @@ internal static class DesertBatflySocialLife
             1f,
             0.58f,
             Mathf.InverseLerp(0.18f, DesertBatflyTuning.TraumaSevere, ActiveTrauma(bat)));
-        state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality) * traumaScale);
+        state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality) * traumaScale *
+            DB_EnvironmentalPolicy.SocialDriveScale(bat));
 
         DesertBatflySocialRoomRuntime.RoomState roomState = DesertBatflySocialRoomRuntime.For(bat.room);
         if (roomState == null) return;
@@ -378,6 +379,7 @@ internal static class DesertBatflySocialLife
         if (RestrainedByNonFly(bat)) return "restrained by non-Fly";
         if (bat.Emergence?.Active == true) return "emergence";
         if (bat.DesertAI == null || bat.AI == null) return "AI unavailable";
+        if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return "immediate danger";
         if (DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature)) return "Task09 travel priority";
@@ -468,7 +470,9 @@ internal static class DesertBatflySocialLife
             if (distance <= 220f && state.GroupScratch.Count < GroupMax && !roomState.IsReserved(other))
             {
                 State otherState = states.GetValue(other, CreateState);
-                float joinPreference = GroupJoinPreference(other.Personality.Conformity, otherState.Drive);
+                float joinPreference = Mathf.Clamp01(
+                    GroupJoinPreference(other.Personality.Conformity, otherState.Drive) *
+                    DB_EnvironmentalPolicy.GroupCohesionScale(bat));
                 float joinGate = 0.20f + Stable01(
                     other.Personality.VisualSeed,
                     state.ScanSerial * 97 + bat.Personality.VisualSeed) * 0.55f;
@@ -1250,6 +1254,8 @@ internal static class DesertBatflySocialLife
         if (states.TryGetValue(candidate, out State candidateState) &&
             (candidateState.Mode != DesertBatflySocialMode.None || candidateState.Cooldown > 0))
             return false;
+        if (!DB_EnvironmentalPolicy.WithinActivityRange(source, candidate, SocialRange))
+            return false;
         return SameRipple(source, candidate);
     }
 
@@ -1277,7 +1283,8 @@ internal static class DesertBatflySocialLife
 
     private static bool CanPlayChase(DesertBatfly bat)
         => bat != null && !bat.Injury.IsSeverelyInjured && !bat.Injury.IsRecovering &&
-           bat.Injury.PostStunShock < 0.28f && bat.Injury.PhysicalCapability >= 0.72f;
+           bat.Injury.PostStunShock < 0.28f && bat.Injury.PhysicalCapability >= 0.72f &&
+           DB_EnvironmentalPolicy.AllowsPlayChase(bat);
 
     private static bool ValidSocialPeer(DesertBatfly peer, DesertBatfly observer)
         => peer != null && observer != null && peer.room == observer.room &&

@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R5 Internal Bridge / Detour Debt Status
-Revision: R5-B1 / 2026-09-07
+Revision: R5-B2 / 2026-09-07
 Branch: task14-r5-bridge-debt
 Base: R4 code-side complete at a461631633360fff30c721fb774acec99fc23889
-Status: 【R5 已正式启动 / B1 obsolete bridge removal implemented】
+Status: 【R5 进行中 / B2 Environmental detour debt removed】
 
 ======================================================================
 1. R5 objective
@@ -67,3 +67,24 @@ decision. Fog SteerHook must also disappear because DB_FogGoalModifier is author
 
 Live Rain World validation remains deferred to the final Task14 validation stage by project
 decision.
+
+
+======================================================================
+5. R5-B2 closed
+======================================================================
+
+- DesertBatflyEnvironmentalIntegration.cs DELETED.
+- DesertBatflyEnvironmentalSocialBridge.cs DELETED.
+- Added DB_EnvironmentalPolicy as an explicit read-only cross-domain policy surface.
+- Combat uses explicit AggressionAuthorized / CombatMotivation / AllowsHarassCandidate.
+- HB-06 CLOSED code-side: no temporary DesertBatflyState.Thirst mutation is used to spoof
+  combat motivation.
+- AI Roost chance/duration directly consumes environmental scale.
+- Social drive, Group cohesion, Play chase and activity radius directly consume Task13.
+- Fog Home/Hive familiarity mitigation moved into DB_FogGoalModifier through policy; no
+  environmental Steer RuntimeDetour remains.
+- Task13 tests now protect policy behavior and physical absence of deleted bridges rather
+  than old Architecture Locks.
+
+Remaining R5 bridge debt is Task09/Survival and Signal bridge families plus RuntimePatch
+classification.

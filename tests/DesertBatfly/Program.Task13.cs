@@ -105,14 +105,9 @@ internal static partial class Program
         Check(resolvedFogPhase.ToString() == "Advisory",
             "ordinary Fog has a hard Advisory ceiling; DenseFog owns shelter/displacement escalation");
 
-        Type denseFogBridge = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalDenseFogBridge", true);
-        Check((float)denseFogBridge.GetField("DenseFogShelterDemand", Flags).GetRawConstantValue() >= 0.50f &&
-              (float)denseFogBridge.GetField("DenseFogDisplacementStartIntensity", Flags).GetRawConstantValue() >= 0.80f,
-            "Task13 DenseFog only hands severe realized fog to Task09 temporary refuge semantics");
-        Check(denseFogBridge.GetMethod("SampleHook", Flags) != null &&
-              denseFogBridge.GetMethod("ShelterDemandHook", Flags) != null,
-            "Task13 DenseFog bridge modifies temporary shelter semantics without editing persistent migration memory");
+        Check(mod.GetType(
+                "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalDenseFogBridge", false) == null,
+            "Task13 DenseFog behavior-neutral RuntimeDetour shim is retired in R5");
 
         Type task09Bridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", true);
         Check(task09Bridge.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
@@ -139,8 +134,7 @@ internal static partial class Program
               survivalBridge.GetMethod("HigherPriorityOwnsLocalGoal", Flags) != null,
             "Task13 HomeReturn/Burrow uses native FlyAI while preserving higher-priority local goals");
 
-        Type socialBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", true);
-        Type vengeanceBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalVengeanceBridge", true);
+        Type environmentalPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
         Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
         Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", false) == null &&
@@ -149,27 +143,27 @@ internal static partial class Program
         Check(visibilityPolicy.GetMethod("CanObserve", Flags) != null &&
               weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null,
             "Task13 Fog/DenseFog visibility and close projectile recognition now use shared R2 perception policy");
-        Check(vengeanceBridge.GetMethod("UpdateHook", Flags) != null,
-            "Task13 hard survival suspends rather than clears Vengeance");
-
-        Type integration = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalIntegration", true);
-        Check(integration.GetMethod("CanHarassHook", Flags) != null &&
-              integration.GetMethod("SteerHook", Flags) != null,
-            "Task13 integrates environmental aggression and Fog navigation through existing DesertBatflyAI gates");
-        Check(integration.GetMethod("FogNavigationFamiliarityScale", Flags) != null,
-            "Task13 DenseFog navigation has an explicit Home/Hive familiarity mitigation path");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalVengeanceBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalIntegration", false) == null,
+            "Task13 R5 retires internal Environment RuntimeDetour integration layers");
+        Check(environmentalPolicy.GetMethod("AggressionAuthorized", Flags) != null &&
+              environmentalPolicy.GetMethod("CombatMotivation", Flags) != null &&
+              environmentalPolicy.GetMethod("AllowsHarassCandidate", Flags) != null &&
+              environmentalPolicy.GetMethod("AdjustRoostDuration", Flags) != null &&
+              environmentalPolicy.GetMethod("BlocksNeutralSocial", Flags) != null &&
+              environmentalPolicy.GetMethod("FogNavigationFamiliarityScale", Flags) != null,
+            "Task13 environmental effects are consumed through an explicit cross-domain policy API");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
         MethodInfo hooksDisable = hooks.GetMethod("Disable", Flags);
-        Check(MethodCallOffset(hooksEnable, denseFogBridge, "Enable") >= 0 &&
-              MethodCallOffset(hooksEnable, task09Bridge, "Enable") >= 0 &&
+        Check(MethodCallOffset(hooksEnable, task09Bridge, "Enable") >= 0 &&
               MethodCallOffset(hooksEnable, survivalBridge, "Enable") >= 0,
-            "Task13 DenseFog, Task09 and native survival bridges are wired into DesertBatfly lifecycle");
-        Check(MethodCallOffset(hooksDisable, denseFogBridge, "Disable") >= 0 &&
-              MethodCallOffset(hooksDisable, task09Bridge, "Disable") >= 0 &&
+            "Task13 remaining Task09/native-survival adapters are wired into DesertBatfly lifecycle");
+        Check(MethodCallOffset(hooksDisable, task09Bridge, "Disable") >= 0 &&
               MethodCallOffset(hooksDisable, survivalBridge, "Disable") >= 0,
-            "Task13 auxiliary bridges are removed with DesertBatfly lifecycle");
+            "Task13 remaining auxiliary adapters are removed with DesertBatfly lifecycle");
 
         Type signalKind = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalKind", true);
         Check(Enum.GetNames(signalKind).Length == 6,
@@ -196,9 +190,8 @@ internal static partial class Program
 
         foreach (Type type in new[]
                  {
-                     behavior, roomRuntime, profile, integration, socialBridge,
-                     vengeanceBridge, visibilityPolicy, weaponPerception, denseFogBridge,
-                     task09Bridge, survivalBridge,
+                     behavior, roomRuntime, profile, environmentalPolicy,
+                     visibilityPolicy, weaponPerception, task09Bridge, survivalBridge,
                      mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalExposure", true)
                  })
             Check(!TypeCallsTask13Forbidden(type),

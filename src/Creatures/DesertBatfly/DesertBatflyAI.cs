@@ -664,7 +664,8 @@ internal sealed class DesertBatflyAI
         if (Mode == Activity.Roost)
         {
             ticks++;
-            if (!hasRoost || ticks > fly.Personality.RoostDuration || fly.AI.fleeFromRain)
+            int roostDuration = DB_EnvironmentalPolicy.AdjustRoostDuration(fly, fly.Personality.RoostDuration);
+            if (!hasRoost || ticks > roostDuration || fly.AI.fleeFromRain)
             {
                 StopRoost(true);
                 return true;
@@ -761,7 +762,7 @@ internal sealed class DesertBatflyAI
                 float reactionDistance = Mathf.Lerp(125f, 78f, fly.Personality.Nerve);
                 float closingThreshold = Mathf.Lerp(2.1f, 4.4f, fly.Personality.Nerve);
                 int pursuitThreshold = Mathf.RoundToInt(Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
-                if (remembered && fly.Personality.Aggressive)
+                if (remembered && DB_EnvironmentalPolicy.AggressionAuthorized(fly))
                 {
                     reactionDistance *= 0.72f;
                     closingThreshold *= 1.25f;
@@ -835,7 +836,8 @@ internal sealed class DesertBatflyAI
         if (Mode == Activity.Roost || hasRoost || fly.AI.behavior == FlyAI.Behavior.Chain)
             return;
         if (scan != 0 || Random.value >
-            fly.Personality.RoostChance * DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)
+            fly.Personality.RoostChance * DB_EnvironmentalPolicy.RoostChanceScale(fly) *
+            DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)
             return;
         if (!TryFindRoost(out Vector2 spot)) return;
 

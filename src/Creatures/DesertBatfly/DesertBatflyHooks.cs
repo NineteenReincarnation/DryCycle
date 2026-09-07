@@ -29,7 +29,6 @@ internal static class DesertBatflyHooks
         DB_EventConsumers.Enable();
         DesertBatflyEnvironmentalTask09Bridge.Enable();
         DesertBatflyEnvironmentalSurvivalBridge.Enable();
-        DesertBatflyEnvironmentalIntegration.Enable();
         DesertBatflySignalIntegration.Enable();
         DesertBatflySignalVengeanceBridge.Enable();
         DesertBatflyThreatRuntime.Enable();
@@ -77,7 +76,6 @@ internal static class DesertBatflyHooks
         DesertBatflyThreatRuntime.Disable();
         DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
-        DesertBatflyEnvironmentalIntegration.Disable();
         DesertBatflyEnvironmentalSurvivalBridge.Disable();
         DesertBatflyEnvironmentalTask09Bridge.Disable();
         DesertBatflySignalRuntime.Reset();
@@ -181,7 +179,6 @@ internal static class DesertBatflyHooks
 
         // R3 order is deliberate: refresh state/facts first, resolve one owner, then execute.
         // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
-        DesertBatflyEnvironmentalIntegration.Register(desert);
         DesertBatflyEnvironmentalBehavior.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DesertBatflyThreatRuntime.RefreshState(desert);

@@ -139,7 +139,7 @@ internal sealed class DB_CombatRuntime
 
     internal void ArmRetaliation(Player player, float strength)
     {
-        if (fly.Injury.BlocksCombat || !fly.Personality.Aggressive || player == null ||
+        if (fly.Injury.BlocksCombat || !DB_EnvironmentalPolicy.AggressionAuthorized(fly) || player == null ||
             ai.IsTraumatizedPlayer(player))
             return;
 
@@ -205,7 +205,7 @@ internal sealed class DB_CombatRuntime
     internal void ConsiderCandidate(Creature creature, float distance)
     {
         if (!ai.Valid(creature)) return;
-        if (creature is Player player && fly.Personality.Aggressive &&
+        if (creature is Player player && DB_EnvironmentalPolicy.AggressionAuthorized(fly) &&
             ai.IsRememberedPlayer(player) && !ai.IsTraumatizedPlayer(player))
             rememberedCandidate = player;
 
@@ -218,7 +218,7 @@ internal sealed class DB_CombatRuntime
 
     internal void CompleteCandidateScan(bool retreatActive)
     {
-        if (target != null || !fly.Personality.Aggressive || retreatActive) return;
+        if (target != null || !DB_EnvironmentalPolicy.AggressionAuthorized(fly) || retreatActive) return;
 
         bool retaliationPending = retaliationCharges > 0 && retaliationRecovery <= 0;
         if (fly.DesertState.Cooldown > 0 && !retaliationPending) return;
@@ -232,7 +232,8 @@ internal sealed class DB_CombatRuntime
         float socialMotivationScale = socialCandidate != null
             ? Mathf.Lerp(1f, 0.72f, fly.Personality.Conformity)
             : 1f;
-        bool motivated = fly.DesertState.Thirst > observeThreshold * socialMotivationScale ||
+        float combatMotivation = DB_EnvironmentalPolicy.CombatMotivation(fly);
+        bool motivated = combatMotivation > observeThreshold * socialMotivationScale ||
                          memory > 0 || rememberedCandidate != null;
         if (!motivated) return;
 
@@ -251,7 +252,7 @@ internal sealed class DB_CombatRuntime
 
     internal SelectionResult PrepareSelection()
     {
-        bool retaliationReady = fly.Personality.Aggressive &&
+        bool retaliationReady = DB_EnvironmentalPolicy.AggressionAuthorized(fly) &&
             retaliationCharges > 0 && retaliationRecovery <= 0;
         if (fly.DesertState.Cooldown > 0 && ai.Mode != DesertBatflyAI.Activity.Attach &&
             ai.Mode != DesertBatflyAI.Activity.Interfere && !retaliationReady)
@@ -262,7 +263,7 @@ internal sealed class DB_CombatRuntime
             return SelectionResult.Cooldown;
         }
 
-        if (!fly.Personality.Aggressive || !GriefAllowsHarass())
+        if (!DB_EnvironmentalPolicy.AggressionAuthorized(fly) || !GriefAllowsHarass())
         {
             if (ai.Mode != DesertBatflyAI.Activity.Roost)
             {
@@ -291,24 +292,31 @@ internal sealed class DB_CombatRuntime
         return SelectionResult.Ready;
     }
 
-    private bool GriefAllowsHarass() => !fly.Injury.BlocksCombat &&
-        (fly.DesertState.GriefStrength <= 0f ||
-         fly.DesertState.Thirst * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst) &&
-        (fly.Injury.AggressionScale >= 0.99f ||
-         fly.DesertState.Thirst * fly.Injury.AggressionScale >= DesertBatflyTuning.ObserveThirst);
+    private bool GriefAllowsHarass()
+    {
+        float motivation = DB_EnvironmentalPolicy.CombatMotivation(fly);
+        return !fly.Injury.BlocksCombat &&
+            (fly.DesertState.GriefStrength <= 0f ||
+             motivation * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst) &&
+            (fly.Injury.AggressionScale >= 0.99f ||
+             motivation * fly.Injury.AggressionScale >= DesertBatflyTuning.ObserveThirst);
+    }
 
     private bool CanHarass(Creature creature)
     {
         if (creature == fly || creature is DesertBatfly || !ai.Valid(creature)) return false;
         if (!GriefAllowsHarass()) return false;
-        if (creature is Player player) return !ai.IsTraumatizedPlayer(player);
+        if (creature is Player player)
+            return !ai.IsTraumatizedPlayer(player) &&
+                   DB_EnvironmentalPolicy.AllowsHarassCandidate(fly, player);
 
         CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
         CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(fly.Template);
-        return creature.TotalMass <= DesertBatflyTuning.LightTargetMass &&
-               relation.type != CreatureTemplate.Relationship.Type.Afraid &&
-               reverse.type != CreatureTemplate.Relationship.Type.Eats &&
-               reverse.type != CreatureTemplate.Relationship.Type.Attacks;
+        bool legal = creature.TotalMass <= DesertBatflyTuning.LightTargetMass &&
+                     relation.type != CreatureTemplate.Relationship.Type.Afraid &&
+                     reverse.type != CreatureTemplate.Relationship.Type.Eats &&
+                     reverse.type != CreatureTemplate.Relationship.Type.Attacks;
+        return legal && DB_EnvironmentalPolicy.AllowsHarassCandidate(fly, creature);
     }
 
     private Player FindSocialHarassTarget()
@@ -415,7 +423,8 @@ internal sealed class DB_CombatRuntime
                         DesertBatflyTuning.AttackThirst,
                         DesertBatflyTuning.ObserveThirst,
                         fly.Personality.AggressionDrive * 0.35f);
-                    bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale *
+                    float combatMotivation = DB_EnvironmentalPolicy.CombatMotivation(fly);
+                    bool thirsty = combatMotivation * fly.DesertState.GriefAttackScale *
                                    fly.Injury.AggressionScale > effectiveAttackThirst;
                     bool revengeDrink = grudge && fly.DesertState.GrabMemoryStrength > 0.12f;
                     bool wantsRealAttack = thirsty || counter || revengeDrink;
