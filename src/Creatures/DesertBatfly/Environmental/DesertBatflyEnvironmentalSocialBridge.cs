@@ -12,6 +12,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal static class DesertBatflyEnvironmentalSocialBridge
 {
+    private const float Task10BaseSocialRange = 240f;
+    private const float MinimumActivityRangeScale = 0.28f;
+
     private delegate void SocialUpdateOrig(DesertBatfly bat);
     private delegate void SocialUpdateDetour(SocialUpdateOrig orig, DesertBatfly bat);
     private delegate float SocialDriveOrig(DesertBatflyPersonality personality);
@@ -20,6 +23,15 @@ internal static class DesertBatflyEnvironmentalSocialBridge
     private delegate float GroupJoinDetour(GroupJoinOrig orig, float conformity, float socialDrive);
     private delegate bool CanPlayChaseOrig(DesertBatfly bat);
     private delegate bool CanPlayChaseDetour(CanPlayChaseOrig orig, DesertBatfly bat);
+    private delegate bool CanBePartnerOrig(
+        DesertBatfly source,
+        DesertBatfly candidate,
+        DesertBatflySocialRoomRuntime.RoomState roomState);
+    private delegate bool CanBePartnerDetour(
+        CanBePartnerOrig orig,
+        DesertBatfly source,
+        DesertBatfly candidate,
+        DesertBatflySocialRoomRuntime.RoomState roomState);
 
     [ThreadStatic]
     private static DesertBatfly currentBat;
@@ -28,6 +40,7 @@ internal static class DesertBatflyEnvironmentalSocialBridge
     private static Hook driveHook;
     private static Hook groupJoinHook;
     private static Hook chaseHook;
+    private static Hook partnerHook;
 
     internal static bool Installed => updateHook != null;
 
@@ -51,12 +64,22 @@ internal static class DesertBatflyEnvironmentalSocialBridge
                 "GroupJoinPreference", flags, null, new[] { typeof(float), typeof(float) }, null);
             MethodInfo chase = typeof(DesertBatflySocialLife).GetMethod(
                 "CanPlayChase", flags, null, new[] { typeof(DesertBatfly) }, null);
-            if (update == null || drive == null || groupJoin == null || chase == null) return;
+            MethodInfo partner = typeof(DesertBatflySocialLife).GetMethod(
+                "CanBePartner", flags, null,
+                new[]
+                {
+                    typeof(DesertBatfly), typeof(DesertBatfly),
+                    typeof(DesertBatflySocialRoomRuntime.RoomState)
+                },
+                null);
+            if (update == null || drive == null || groupJoin == null || chase == null || partner == null)
+                return;
 
             updateHook = new Hook(update, (SocialUpdateDetour)UpdateHook);
             driveHook = new Hook(drive, (SocialDriveDetour)DriveHook);
             groupJoinHook = new Hook(groupJoin, (GroupJoinDetour)GroupJoinHook);
             chaseHook = new Hook(chase, (CanPlayChaseDetour)ChaseHook);
+            partnerHook = new Hook(partner, (CanBePartnerDetour)CanBePartnerHook);
         }
         catch
         {
@@ -74,10 +97,12 @@ internal static class DesertBatflyEnvironmentalSocialBridge
 
     private static void DisposeTask10Hooks()
     {
+        try { partnerHook?.Dispose(); } catch { }
         try { chaseHook?.Dispose(); } catch { }
         try { groupJoinHook?.Dispose(); } catch { }
         try { driveHook?.Dispose(); } catch { }
         try { updateHook?.Dispose(); } catch { }
+        partnerHook = null;
         chaseHook = null;
         groupJoinHook = null;
         driveHook = null;
@@ -136,6 +161,30 @@ internal static class DesertBatflyEnvironmentalSocialBridge
         if (scale <= 0.001f) return false;
         int bucket = (bat.room?.game?.clock ?? 0) / 90;
         return Stable01(bat.Personality.VisualSeed ^ bucket * 0x632BE5AB) <= scale;
+    }
+
+    private static bool CanBePartnerHook(
+        CanBePartnerOrig orig,
+        DesertBatfly source,
+        DesertBatfly candidate,
+        DesertBatflySocialRoomRuntime.RoomState roomState)
+    {
+        if (!orig(source, candidate, roomState)) return false;
+        if (source?.mainBodyChunk == null || candidate?.mainBodyChunk == null) return false;
+        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
+                source, out DesertBatflyEnvironmentalInfluence influence))
+            return true;
+
+        float scale = UnityEngine.Mathf.Clamp(
+            influence.ActivityRadiusMultiplier,
+            MinimumActivityRangeScale,
+            1f);
+        if (scale >= 0.999f) return true;
+
+        float effectiveRange = Task10BaseSocialRange * scale;
+        return UnityEngine.Vector2.Distance(
+            source.mainBodyChunk.pos,
+            candidate.mainBodyChunk.pos) <= effectiveRange;
     }
 
     private static float Stable01(int seed)
