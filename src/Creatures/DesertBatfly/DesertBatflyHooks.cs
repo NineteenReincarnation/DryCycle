@@ -18,6 +18,7 @@ internal static class DesertBatflyHooks
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
         DesertBatflyThreatRuntime.Enable();
+        DesertBatflyThreatVengeanceBridge.Enable();
         DesertBatflyColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
@@ -61,6 +62,7 @@ internal static class DesertBatflyHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyThreatVengeanceBridge.Disable();
         DesertBatflyThreatRuntime.Disable();
         DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
@@ -177,6 +179,13 @@ internal static class DesertBatflyHooks
         {
             DesertBatflySocialLife.CancelForPriority(desert, "Task09 travel priority");
             desert.DesertAI.CancelAttack();
+            if (AIDebugTrace.IsWatched(desert.abstractCreature))
+                AIDebugTrace.RecordChange(
+                    desert.abstractCreature,
+                    AIDebugEventCategory.Decision,
+                    "ThreatMemoryIgnoredDueToPriority",
+                    "Task09 travel",
+                    "EmergencyRefuge / ReturnHome / ColonyMigration owns this frame");
             DesertBatflySocialLife.SampleTrace(desert);
             DesertBatflyDebugTrace.Sample(desert);
             return;
@@ -187,6 +196,7 @@ internal static class DesertBatflyHooks
         // combat geometry. Task 10 runs last and can only shape a remaining neutral frame.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
+        DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySocialLife.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
@@ -212,10 +222,6 @@ internal static class DesertBatflyHooks
         orig(self);
         if (self.fly is not DesertBatfly desert) return;
 
-        // Task 10 may put an active neutral interaction into Idle while still using
-        // vanilla BatFlight. Do not immediately force it back to Swarm on the next
-        // FlyAI tick; the reservation ends with the interaction and normal fallback
-        // resumes automatically afterwards.
         DesertBatflySocialRoomRuntime.RoomState socialRoom =
             DesertBatflySocialRoomRuntime.For(self.room);
         if (socialRoom?.IsReserved(desert) == true)
@@ -251,8 +257,6 @@ internal static class DesertBatflyHooks
             return;
         }
 
-        // No committed cross-room refuge route: remain locally afraid rather than
-        // inventing an unplanned one-hop permanent move.
         self.afraid = Mathf.Max(self.afraid, 2f);
     }
 
