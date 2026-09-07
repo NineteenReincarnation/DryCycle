@@ -1,12 +1,17 @@
 Desert Batfly Task 14 — R6 Domain / Physical Migration Status
-Revision: R6-B1 / 2026-09-07
+Revision: R6-B2 / 2026-09-08
 Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
-Status: 【R6 进行中 / B1 Integration + Observatory identity migration complete code-side】
+Current verified R6 implementation HEAD before this status update: 9ec4b103c307cc6fa8271562870159d8e3fe40f9
+Status: 【R6 进行中 / B1 Integration+Observatory 与 B2 Colony migration code-side complete】
 
 R6 changes physical ownership/file/type identity without changing gameplay semantics.
 Historical R0-R5 documents retain their historical names; executable guards follow R6 names.
 
-B1 moved Integration to:
+======================================================================
+B1 — Integration + Observatory identity migration
+======================================================================
+
+Integration moved to:
 - Integration/RainWorld/DB_RainWorldHooks.cs
 - Integration/RainWorld/DB_RuntimePatch.cs
 - Integration/Sandbox/DB_Sandbox.cs
@@ -20,8 +25,53 @@ Retention guarantees:
 - Plugin still enters the species hook lifecycle.
 - full Environment source remains species-registered; base source remains registry-registered.
 - Sandbox/Warp still use the same optional RuntimePatch mechanism and unchanged Harmony IDs.
-- R5 bridge/detour retention guard still passes under the R6 paths.
+- R5 bridge/detour retention guard passes under the R6 paths.
 - stable creature/save/world IDs are untouched.
 
-B1 does not claim all production TaskXX text is gone. That is a later R6 naming sweep.
-No Rain World live-play validation is claimed here.
+Validation:
+- Task14 R6 B1 clean finalizer run 34143572208: SUCCESS.
+
+======================================================================
+B2 — Colony domain identity migration
+======================================================================
+
+Moved and renamed without changing migration/persistence algorithms:
+- DesertBatflyColonyState.cs -> Colony/DB_ColonyState.cs
+- DesertBatflyColonyRuntime.cs -> Colony/DB_ColonyRuntime.cs
+- DesertBatflyColonyMigration.cs -> Colony/DB_MigrationPolicy.cs
+
+Production type identities migrated accordingly:
+- DesertBatflyColonyState -> DB_ColonyState
+- DesertBatflyColonyRuntime -> DB_ColonyRuntime
+- DesertBatflyColonyMigration -> DB_MigrationPolicy
+
+Hard compatibility preserved:
+- Colony save prefix remains "DCBATCOLONY09<svB>".
+- Colony payload version remains "V1".
+- Task09-approved migration semantics and Environment/Travel ownership boundaries are unchanged.
+
+Validation:
+- Task14 R6 B2 Colony migration run 34143783596: SUCCESS.
+- R5 retention audit passed after the Colony physical move.
+- R6 B1 retention audit passed after the Colony physical move.
+- stale production Colony type names were checked absent.
+- stable save prefix/payload version were checked present.
+- git diff --check passed before the verified B2 commit.
+
+======================================================================
+Remaining R6 scope
+======================================================================
+
+Still open:
+- production-wide Task09-Task13 identifier/text cleanup;
+- remaining Travel domain migration, with TravelNavigation requiring responsibility review rather than mechanical rename;
+- Threat domain migration;
+- Signals domain migration;
+- Environment domain migration;
+- Social/Roost migration;
+- Injury/Fear/Vengeance/Core/Presentation remaining identities;
+- final old-root-file and dead-code cleanup;
+- final R6 production naming/path guard.
+
+R6 does not claim full build, managed integration, or Rain World live validation.
+Those validations remain deferred to the final acceptance stage as requested.
