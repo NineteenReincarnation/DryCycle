@@ -1,0 +1,56 @@
+name: Task14 R4 B5 closeout
+
+on:
+  push:
+    branches:
+      - task14-r4-b5-observatory-working
+
+permissions:
+  contents: write
+
+jobs:
+  close-r4:
+    if: github.event.head_commit.message == 'Trigger R4 B5 closeout'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r4-b5-observatory-working
+          fetch-depth: 0
+
+      - name: Apply guarded R4 closeout
+        run: python scripts/task14_r4_b5_closeout.py
+
+      - name: Validate R4 source contracts
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r4_b5_closeout.py
+          test ! -e .github/workflows/task14-r4-b5-closeout.yml
+          grep -q 'DB_FlightMotorDebugState' src/Creatures/DesertBatfly/Runtime/DB_FlightMotor.cs
+          grep -q 'BuildFlightMotorSection' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+          grep -q 'DB_CombatRuntime.InterestTicks' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+          grep -q 'section.flight_motor' src/Debug/AIDebugger/AIDebugLocalization.cs
+          grep -q 'Status: 【R4 代码侧完成 / 实机验收统一延后】' docs/Discussion/Task_14_R4_FlightMotorStatus.txt
+          ! grep -q 'typeof(DesertBatflyAI).GetField("memory"' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+          ! grep -q 'typeof(DesertBatflyAI).GetField("interest"' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+          ! grep -q 'typeof(DesertBatflyAI).GetField("unseen"' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+          ! grep -q 'typeof(DesertBatflyAI).GetField("hasSlot"' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+
+      - name: Final writer audit
+        run: |
+          echo '--- localGoal assignments ---'
+          grep -RIn --include='*.cs' -E 'localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly || true
+          echo '--- direct velocity assignments ---'
+          grep -RIn --include='*.cs' -E 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly || true
+          offenders=$(grep -RIl --include='*.cs' -E 'localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly | grep -v 'Runtime/DB_FlightMotor.cs' | grep -v 'DesertBatflyEmergence.cs' || true)
+          test -z "$offenders"
+          vel_offenders=$(grep -RIl --include='*.cs' -E 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly | grep -v 'Runtime/DB_FlightMotor.cs' | grep -v 'DesertBatflyEmergence.cs' | grep -v 'Combat/DB_CombatRuntime.cs' || true)
+          test -z "$vel_offenders"
+
+      - name: Commit R4 closeout
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          git add -A
+          git commit -m 'Close Task14 R4 FlightMotor responsibilities'
+          git push origin HEAD:task14-r4-b5-observatory-working
