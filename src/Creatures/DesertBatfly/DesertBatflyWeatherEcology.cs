@@ -47,6 +47,32 @@ internal readonly struct DesertBatflyWeatherEcologySample
 }
 
 /// <summary>
+/// Active DryCycle weather axes that Task13 is allowed to compose with the dominant
+/// ecological hazard. These values are sourced from the same schedule/spatial registry
+/// as Sample(); RoomSettings/default Effects can never populate them.
+/// </summary>
+internal readonly struct DesertBatflyTask13WeatherAxesSample
+{
+    internal readonly float LightRainIntensity;
+    internal readonly float FogIntensity;
+    internal readonly float DenseFogIntensity;
+
+    internal DesertBatflyTask13WeatherAxesSample(
+        float lightRainIntensity,
+        float fogIntensity,
+        float denseFogIntensity)
+    {
+        LightRainIntensity = Mathf.Clamp01(lightRainIntensity);
+        FogIntensity = Mathf.Clamp01(fogIntensity);
+        DenseFogIntensity = Mathf.Clamp01(denseFogIntensity);
+    }
+
+    internal bool HasLightRain => LightRainIntensity > 0f;
+    internal bool HasFog => FogIntensity > 0f || DenseFogIntensity > 0f;
+    internal static DesertBatflyTask13WeatherAxesSample None => new(0f, 0f, 0f);
+}
+
+/// <summary>
 /// Single semantic bridge between DryCycle weather and Desert Batfly ecology.
 /// Future schedule information is exposed only as TimeUntilDanger/ShelterUrgency;
 /// MigrationStress is accumulated only from an event that is actually active and
@@ -162,6 +188,53 @@ internal static class DesertBatflyWeatherEcology
 
         return new DesertBatflyWeatherEcologySample(
             hazardKind, hazardId, active, immediate, shelter, migration, travel, nearestDanger);
+    }
+
+    /// <summary>
+    /// Samples only compatible active Task13 axes. This intentionally does not expose new
+    /// forecast information: Fog is reactive, and LightRain's moisture/cooling benefit
+    /// exists only while rain is actually present in the authorized room.
+    /// </summary>
+    internal static DesertBatflyTask13WeatherAxesSample SampleTask13Axes(World world, AbstractRoom room)
+    {
+        if (world == null || room == null || world.region == null ||
+            !WorldClockHooks.TryGetClock(world, out WorldClock clock) ||
+            !WeatherScheduleRuntime.TryGetCurrentSchedule(world, out WeatherPhaseSchedule schedule) ||
+            schedule == null)
+            return DesertBatflyTask13WeatherAxesSample.None;
+
+        long phaseTicks = CurrentPhaseTicks(clock);
+        string region = world.region.name;
+        float lightRain = 0f;
+        float fog = 0f;
+        float denseFog = 0f;
+
+        for (int i = 0; i < schedule.Events.Count; i++)
+        {
+            ScheduledWeatherEvent scheduled = schedule.Events[i];
+            if (scheduled?.Candidate == null ||
+                scheduled.Candidate.Kind != WeatherScheduleEventKind.Weather ||
+                !WeatherSpatialRegistry.IsAllowed(
+                    region, room.name, scheduled.Candidate.Kind, scheduled.Candidate.Id))
+                continue;
+
+            float intensity = EventEnvelope(scheduled, phaseTicks);
+            if (intensity <= 0f) continue;
+            switch (WeatherSpatialCatalog.NormalizeId(scheduled.Candidate.Id))
+            {
+                case "LIGHTRAIN":
+                    lightRain = Mathf.Max(lightRain, intensity);
+                    break;
+                case "FOG":
+                    fog = Mathf.Max(fog, intensity);
+                    break;
+                case "DENSEFOG":
+                    denseFog = Mathf.Max(denseFog, intensity);
+                    break;
+            }
+        }
+
+        return new DesertBatflyTask13WeatherAxesSample(lightRain, fog, denseFog);
     }
 
     internal static float RegionalStress(World world,
