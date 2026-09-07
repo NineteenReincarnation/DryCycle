@@ -15,7 +15,7 @@ internal static partial class Program
             "Task14 R0 freezes CreatureTemplate.Type value DesertBatfly");
 
         Type sandboxType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySandbox", true);
+            "DryCycle.Creatures.DesertBatfly.DB_Sandbox", true);
         Check((string)sandboxType.GetField("UnlockValue", Flags).GetRawConstantValue() == "DesertBatfly",
             "Task14 R0 freezes sandbox unlock value DesertBatfly");
 

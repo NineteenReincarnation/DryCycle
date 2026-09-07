@@ -3,13 +3,13 @@ using DryCycle.Creatures.DesertBatfly;
 namespace DryCycle.Debugging.AI;
 
 /// <summary>
-/// Task 11 Observatory enrichment. Task 10 remains the inner source so colony, travel
+/// Threat Observatory enrichment. Social remains the inner source so colony, travel
 /// and neutral social diagnostics stay visible while this layer explains learned threat
 /// signatures, current observable cues and short-lived acute events.
 /// </summary>
-internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
+internal sealed class DB_ThreatDebugSource : IAIDebugSource
 {
-    private readonly DesertBatflyTask10DebugSource inner = new();
+    private readonly DB_SocialDebugSource inner = new();
 
     public int Priority => 1300;
     public bool CanInspect(AbstractCreature creature) => inner.CanInspect(creature);
@@ -23,7 +23,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
         bool hasThreat = DesertBatflyThreatRuntime.TryGetDebugState(
             bat, out DesertBatflyThreatDebugState threat);
 
-        var memory = new AIDebugSection("Task 11 Threat Signature Memory / 威胁特征记忆")
+        var memory = new AIDebugSection("Threat Threat Signature Memory / 威胁特征记忆")
             .Add("Target player slot / 玩家槽", "ThreatMemory.PlayerSlot",
                 hasThreat ? threat.PlayerSlot : -1)
             .Add("Confidence / 置信度", "ThreatMemory.Confidence",
@@ -58,7 +58,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
         snapshot.Sections.Add(memory);
 
         DesertBatflyThreatCue cue = hasThreat ? threat.Cue : default;
-        var current = new AIDebugSection("Task 11 Current Threat Cue / 当前威胁线索")
+        var current = new AIDebugSection("Threat Current Threat Cue / 当前威胁线索")
             .Add("Visible spear / 可见矛", "ThreatCue.VisibleSpear", cue.VisibleSpear)
             .Add("Visible rock / 可见石头", "ThreatCue.VisibleRock", cue.VisibleRock)
             .Add("Visible explosive / 可见爆炸物", "ThreatCue.VisibleExplosive", cue.VisibleExplosive)
@@ -76,7 +76,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
                 cue.CurrentHazardCenter.HasValue ? cue.CurrentHazardCenter.Value.ToString() : "—");
         snapshot.Sections.Add(current);
 
-        var acute = new AIDebugSection("Task 11 Acute Event State / 急性事件")
+        var acute = new AIDebugSection("Threat Acute Event State / 急性事件")
             .Add("Explosion timer / 爆炸", "ThreatAcute.ExplosionTimer",
                 hasThreat ? threat.AcuteExplosionTimer : 0)
             .Add("Startle timer / 惊吓", "ThreatAcute.StartleTimer",
@@ -91,7 +91,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
                 hasThreat && threat.HazardCenter.HasValue ? threat.HazardCenter.Value.ToString() : "—");
         snapshot.Sections.Add(acute);
 
-        var decision = new AIDebugSection("Task 11 Tactical Adaptation / 战术修正")
+        var decision = new AIDebugSection("Threat Tactical Adaptation / 战术修正")
             .Add("Modifier reason / 修正原因", "ThreatDecision.ModifierReason",
                 hasThreat && !string.IsNullOrEmpty(threat.ModifierReason) ? threat.ModifierReason : "—")
             .Add("Geometry / 攻击几何", "ThreatDecision.AttackGeometryAdjustment",
@@ -116,7 +116,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
              threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||
              threat.AcuteShockTimer > 0 || cue.ProjectileThreat);
         snapshot.Decisions.Add(new AIDebugDecisionNode(
-            "Task 11 learned threat / 威胁学习",
+            "Threat learned threat / 威胁学习",
             acuteActive || (hasThreat && !string.IsNullOrEmpty(threat.ModifierReason))
                 ? AIDebugDecisionState.Active
                 : hasThreat && threat.Confidence > 0.02f
@@ -124,7 +124,7 @@ internal sealed class DesertBatflyTask11DebugSource : IAIDebugSource
                     : AIDebugDecisionState.Blocked,
             hasThreat
                 ? $"slot={threat.PlayerSlot}; {threat.DominantSignature}; confidence={threat.Confidence:0.00}; {threat.ModifierReason}"
-                : "no realized Task 11 state",
+                : "no realized Threat state",
             "DesertBatflyThreatRuntime"));
 
         return snapshot;

@@ -19,7 +19,7 @@ internal static partial class Program
         Type aiType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type hooksType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+            "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
 
         MethodInfo learnedFakeDive = tacticsType.GetMethod("LearnedFakeDiveChance", Flags);
         Check(learnedFakeDive != null,

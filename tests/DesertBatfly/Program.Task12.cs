@@ -29,7 +29,7 @@ internal static partial class Program
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyGraphics", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
@@ -114,7 +114,7 @@ internal static partial class Program
         Check(MethodCallsTask12(draw, runtime, "TryGetDisplay"),
             "Task12 signal display is visible through DesertBatflyGraphics without a new movement controller");
 
-        Type debug = mod.GetType("DryCycle.Debugging.AI.DesertBatflyTask12DebugSource", true);
+        Type debug = mod.GetType("DryCycle.Debugging.AI.DB_SignalDebugSource", true);
         Check(debug != null,
             "Task12 Observatory source exists for generation/hop/perception/influence inspection");
 

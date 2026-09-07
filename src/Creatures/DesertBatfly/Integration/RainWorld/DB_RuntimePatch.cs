@@ -6,9 +6,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 // R5-B5 classification: RETAIN as integration-only infrastructure. This is not an
 // internal Desert Batfly behavior bridge. Its only production consumers are Sandbox
-// symbol integration and optional Warp compatibility; Task09-13 domains must not use it.
+// symbol integration and optional Warp compatibility; internal behavior domains must not use it.
 // BepInEx already ships Harmony, so resolve it reflectively to avoid hard dependencies.
-internal static class DesertBatflyRuntimePatch
+internal static class DB_RuntimePatch
 {
     private static Type HarmonyType => FindType("HarmonyLib.Harmony");
     private static Type HarmonyMethodType => FindType("HarmonyLib.HarmonyMethod");

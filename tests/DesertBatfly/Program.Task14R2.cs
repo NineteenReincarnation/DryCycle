@@ -30,7 +30,7 @@ internal static partial class Program
         Type swarmRoom = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertSwarmRoom", true);
         Type hooks = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+            "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
 
         Check(roomContext.Name == "DB_RoomContext" &&
               roomContext.GetMethod("For", Flags) != null &&

@@ -2,9 +2,9 @@ using DryCycle.Creatures.DesertBatfly;
 
 namespace DryCycle.Debugging.AI;
 
-internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
+internal sealed class DB_SignalDebugSource : IAIDebugSource
 {
-    private readonly DesertBatflyTask11DebugSource inner = new();
+    private readonly DB_ThreatDebugSource inner = new();
 
     public int Priority => 1400;
     public bool CanInspect(AbstractCreature creature) => inner.CanInspect(creature);
@@ -22,7 +22,7 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
             ? FindSignalPacket(bat, signal.LastGeneration)
             : null;
 
-        var section = new AIDebugSection("Task 12 Social Signal Network / 社会信号")
+        var section = new AIDebugSection("Signal Social Signal Network / 社会信号")
             .Add("Active room signals / 房间信号", "Signal.ActiveRoomSignals",
                 hasSignal ? signal.ActiveRoomSignals : 0)
             .Add("Last generation / 最近代号", "Signal.LastGeneration",
@@ -63,14 +63,14 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
 
         bool display = DesertBatflySignalRuntime.TryGetDisplay(
             bat, out DesertBatflySignalDisplayState visual);
-        snapshot.Sections.Add(new AIDebugSection("Task 12 Signal Display / 信号视觉")
+        snapshot.Sections.Add(new AIDebugSection("Signal Signal Display / 信号视觉")
             .Add("Displaying / 正在表现", "SignalDisplay.Active", display)
             .Add("Kind / 类型", "SignalDisplay.Kind", display ? visual.Kind.ToString() : "None")
             .Add("Intensity / 强度", "SignalDisplay.Intensity", display ? visual.Intensity : 0f)
             .Add("Ticks / 剩余", "SignalDisplay.Ticks", display ? visual.TicksRemaining : 0));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
-            "Task 12 signal influence / 社会信号影响",
+            "Signal signal influence / 社会信号影响",
             hasSignal && (influence.AlarmPressure > 0.02f || influence.DistressInterest > 0.02f ||
                           influence.RallyInterest > 0.02f || influence.RoostInterest > 0.02f ||
                           influence.HarassInterest > 0.02f || influence.SafeConfidence > 0.02f)
@@ -78,7 +78,7 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
                 : hasSignal ? AIDebugDecisionState.Inactive : AIDebugDecisionState.Blocked,
             hasSignal
                 ? $"{signal.LastKind}; gen={signal.LastGeneration}; hop={signal.LastHop}; consumer={ConsumerFor(signal.LastKind)}; {signal.LastDecision}"
-                : "no realized Task12 state",
+                : "no realized Signal state",
             "DesertBatflySignalRuntime"));
 
         return snapshot;
@@ -105,7 +105,7 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
         DesertBatflySignalKind.RallySignal => "Intimidation supporter candidacy",
         DesertBatflySignalKind.RoostCall => "Task10 RoostInvitation / ChainSocialization",
         DesertBatflySignalKind.HarassSignal => "DesertBatflyAI social harass target interest",
-        DesertBatflySignalKind.SafeSignal => "Task12 signal concern recovery",
+        DesertBatflySignalKind.SafeSignal => "Signal signal concern recovery",
         _ => "None"
     };
 

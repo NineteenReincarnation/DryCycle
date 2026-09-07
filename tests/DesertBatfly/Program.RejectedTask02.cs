@@ -53,5 +53,6 @@ internal static partial class Program
         RunTask14R4();
         RunTask14R5();
         RunTask14R5Retention();
+        RunTask14R6();
     }
 }

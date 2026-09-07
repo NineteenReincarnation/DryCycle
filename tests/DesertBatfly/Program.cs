@@ -213,7 +213,7 @@ internal static partial class Program
         Set(bat, "mealFood", 2);
         var edible = (IPlayerEdible)bat;
         Check(edible.FoodPoints == 2, "derived interface food dispatch");
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         var nourishment = hooks.GetMethod("Nourishment", Flags);
         On.SlugcatStats.orig_NourishmentOfObjectEaten original = SlugcatStats.NourishmentOfObjectEaten;
         Check((int)nourishment.Invoke(null, new object[] { original, SlugcatStats.Name.White, edible }) == 8, "Survivor 2 food");

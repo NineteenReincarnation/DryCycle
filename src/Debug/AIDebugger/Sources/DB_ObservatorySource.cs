@@ -6,7 +6,7 @@ namespace DryCycle.Debugging.AI;
 
 // Desert Batfly Observatory adapter for current gameplay state: personality,
 // injury, social memory, AI and movement.
-internal sealed class DesertBatflyDebugSource : IAIDebugSource
+internal sealed class DB_ObservatorySource : IAIDebugSource
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);

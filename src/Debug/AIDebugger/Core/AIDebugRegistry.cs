@@ -19,7 +19,7 @@ internal static class AIDebugRegistry
         if (log != null) logger = log;
         if (initialized) return;
         initialized = true;
-        Register(new DesertBatflyDebugSource());
+        Register(new DB_ObservatorySource());
         Register(new MossySpiderDebugSource());
         Register(new SpinebackLizardDebugSource());
         Register(GenericFallback);

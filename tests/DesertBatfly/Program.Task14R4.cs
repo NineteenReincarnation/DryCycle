@@ -21,11 +21,11 @@ internal static partial class Program
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
         Type frame = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
         Type motorDebug = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotorDebugState", true);
-        Type debugSource = mod.GetType("DryCycle.Debugging.AI.DesertBatflyDebugSource", true);
+        Type debugSource = mod.GetType("DryCycle.Debugging.AI.DB_ObservatorySource", true);
 
         Check(motor.GetMethod("Reset", Flags) != null &&
               motor.GetMethod("Forget", Flags) != null &&

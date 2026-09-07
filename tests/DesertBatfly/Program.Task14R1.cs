@@ -95,7 +95,7 @@ internal static partial class Program
             "Task14 R1 mortality attribution window is bounded and monotonic");
 
         Type hooks = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+            "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
         MethodInfo hooksDisable = hooks.GetMethod("Disable", Flags);
         Check(MethodCallOffset(hooksEnable, hub, "Enable") >= 0 &&

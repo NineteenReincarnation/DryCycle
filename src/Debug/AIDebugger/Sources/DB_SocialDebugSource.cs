@@ -3,12 +3,12 @@ using DryCycle.Creatures.DesertBatfly;
 namespace DryCycle.Debugging.AI;
 
 /// <summary>
-/// Task 10 Observatory enrichment. Task 09 remains the inner source so colony/travel
+/// Social Observatory enrichment. Travel / Colony remains the inner source so colony/travel
 /// diagnostics are preserved while this layer appends realized-only neutral social life.
 /// </summary>
-internal sealed class DesertBatflyTask10DebugSource : IAIDebugSource
+internal sealed class DB_SocialDebugSource : IAIDebugSource
 {
-    private readonly DesertBatflyTask09DebugSource inner = new();
+    private readonly DB_TravelDebugSource inner = new();
 
     public int Priority => 1200;
     public bool CanInspect(AbstractCreature creature) => inner.CanInspect(creature);
@@ -22,7 +22,7 @@ internal sealed class DesertBatflyTask10DebugSource : IAIDebugSource
         bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
             bat, out DesertBatflySocialDebugState social);
 
-        var section = new AIDebugSection("Task 10 Neutral Social Life / 中性社会生活")
+        var section = new AIDebugSection("Social Neutral Social Life / 中性社会生活")
             .Add("Social eligible / 可社交", "DesertBatflySocialLife.Eligible",
                 hasSocial && social.Eligible)
             .Add("Social drive / 社交驱动", "DesertBatflySocialLife.SocialDrive",
@@ -54,7 +54,7 @@ internal sealed class DesertBatflyTask10DebugSource : IAIDebugSource
         snapshot.Sections.Add(section);
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
-            "Task 10 social / 中性社会互动",
+            "Social social / 中性社会互动",
             hasSocial && social.Mode != DesertBatflySocialMode.None
                 ? AIDebugDecisionState.Active
                 : hasSocial && !social.Eligible
@@ -62,7 +62,7 @@ internal sealed class DesertBatflyTask10DebugSource : IAIDebugSource
                     : AIDebugDecisionState.Inactive,
             hasSocial
                 ? $"{social.Mode}; drive={social.SocialDrive:0.00}; cooldown={social.SocialCooldown}; {social.DecisionReason}"
-                : "no realized Task 10 state",
+                : "no realized Social state",
             "DesertBatflySocialLife"));
 
         return snapshot;

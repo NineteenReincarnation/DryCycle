@@ -3,9 +3,9 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-// Only bridge nonvirtual vanilla entry points here. All species decisions live
+// Only adapt nonvirtual vanilla entry points here. All species decisions live
 // in its Creature, AI, Graphics, State or domain runtime classes.
-internal static class DesertBatflyHooks
+internal static class DB_RainWorldHooks
 {
     private static bool enabled;
     private static bool debugRegistered;
@@ -32,7 +32,7 @@ internal static class DesertBatflyHooks
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
-            AIDebugRegistry.Register(new DesertBatflyTask13DebugSource());
+            AIDebugRegistry.Register(new DB_EnvironmentDebugSource());
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
@@ -83,16 +83,16 @@ internal static class DesertBatflyHooks
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();
         DesertBatflyIntimidation.Reset();
-        DesertBatflyWarpCompatibility.Disable();
-        DesertBatflySandbox.Disable();
+        DB_WarpCompatibility.Disable();
+        DB_Sandbox.Disable();
         DesertSwarmRoom.Reset();
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         orig(self);
-        DesertBatflySandbox.Enable();
-        DesertBatflyWarpCompatibility.Enable();
+        DB_Sandbox.Enable();
+        DB_WarpCompatibility.Enable();
     }
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)

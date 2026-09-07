@@ -152,7 +152,7 @@ internal static partial class Program
               environmentalPolicy.GetMethod("FogNavigationFamiliarityScale", Flags) != null,
             "Task13 environmental effects are consumed through an explicit cross-domain policy API");
 
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
         MethodInfo hooksDisable = hooks.GetMethod("Disable", Flags);
         Check(MethodCallOffset(hooksEnable, behavior, "Reset") >= 0 &&
@@ -193,7 +193,7 @@ internal static partial class Program
             Check(!TypeCallsTask13Forbidden(type),
                 "Task13 type " + type.Name + " has no RoomSettings/Input/BodyChunk.vel or cross-room LeaveRoom ownership");
 
-        Type debug = mod.GetType("DryCycle.Debugging.AI.DesertBatflyTask13DebugSource", true);
+        Type debug = mod.GetType("DryCycle.Debugging.AI.DB_EnvironmentDebugSource", true);
         Check(debug != null,
             "Task13 Observatory source exists for weather/phase/anchor/heat/failure inspection");
 

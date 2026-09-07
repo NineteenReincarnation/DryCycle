@@ -1,0 +1,27 @@
+Desert Batfly Task 14 — R6 Domain / Physical Migration Status
+Revision: R6-B1 / 2026-09-07
+Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
+Status: 【R6 进行中 / B1 Integration + Observatory identity migration complete code-side】
+
+R6 changes physical ownership/file/type identity without changing gameplay semantics.
+Historical R0-R5 documents retain their historical names; executable guards follow R6 names.
+
+B1 moved Integration to:
+- Integration/RainWorld/DB_RainWorldHooks.cs
+- Integration/RainWorld/DB_RuntimePatch.cs
+- Integration/Sandbox/DB_Sandbox.cs
+- Integration/Warp/DB_WarpCompatibility.cs
+
+Observatory identity chain is now:
+DB_ObservatorySource -> DB_TravelDebugSource -> DB_SocialDebugSource ->
+DB_ThreatDebugSource -> DB_SignalDebugSource -> DB_EnvironmentDebugSource.
+
+Retention guarantees:
+- Plugin still enters the species hook lifecycle.
+- full Environment source remains species-registered; base source remains registry-registered.
+- Sandbox/Warp still use the same optional RuntimePatch mechanism and unchanged Harmony IDs.
+- R5 bridge/detour retention guard still passes under the R6 paths.
+- stable creature/save/world IDs are untouched.
+
+B1 does not claim all production TaskXX text is gone. That is a later R6 naming sweep.
+No Rain World live-play validation is claimed here.

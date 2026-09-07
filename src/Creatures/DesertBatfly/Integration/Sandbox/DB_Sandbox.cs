@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflySandbox
+internal static class DB_Sandbox
 {
     internal const string UnlockValue = "DesertBatfly";
     internal static MultiplayerUnlocks.SandboxUnlockID UnlockID { get; private set; }
@@ -23,20 +23,20 @@ internal static class DesertBatflySandbox
         if (enabled) return;
         enabled = true;
 
-        harmony = DesertBatflyRuntimePatch.Create("Anno.DesertBatfly.Sandbox");
+        harmony = DB_RuntimePatch.Create("Anno.DesertBatfly.Sandbox");
         MethodInfo sprite = typeof(CreatureSymbol).GetMethod(
             nameof(CreatureSymbol.SpriteNameOfCreature),
             BindingFlags.Public | BindingFlags.Static);
         MethodInfo color = typeof(CreatureSymbol).GetMethod(
             nameof(CreatureSymbol.ColorOfCreature),
             BindingFlags.Public | BindingFlags.Static);
-        MethodInfo spritePrefix = typeof(DesertBatflySandbox).GetMethod(
+        MethodInfo spritePrefix = typeof(DB_Sandbox).GetMethod(
             nameof(SpriteNamePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo colorPrefix = typeof(DesertBatflySandbox).GetMethod(
+        MethodInfo colorPrefix = typeof(DB_Sandbox).GetMethod(
             nameof(ColorPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
-        DesertBatflyRuntimePatch.Patch(harmony, sprite, spritePrefix);
-        DesertBatflyRuntimePatch.Patch(harmony, color, colorPrefix);
+        DB_RuntimePatch.Patch(harmony, sprite, spritePrefix);
+        DB_RuntimePatch.Patch(harmony, color, colorPrefix);
     }
 
     internal static void Disable()
@@ -44,7 +44,7 @@ internal static class DesertBatflySandbox
         if (!enabled && UnlockID == null) return;
         enabled = false;
 
-        DesertBatflyRuntimePatch.UnpatchSelf(harmony);
+        DB_RuntimePatch.UnpatchSelf(harmony);
         harmony = null;
 
         if (MultiplayerUnlocks.CreatureUnlockList != null)

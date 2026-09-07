@@ -11,7 +11,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 // fall back to Room, and simply assigning a new numeric enum value would make its
 // color/name arrays index out of range. This soft integration adds one runtime
 // category without taking a compile-time dependency on Warp.
-internal static class DesertBatflyWarpCompatibility
+internal static class DB_WarpCompatibility
 {
     private const int DesertRoomTypeValue = 6;
     private static bool enabled;
@@ -29,57 +29,57 @@ internal static class DesertBatflyWarpCompatibility
             return;
         }
 
-        Type roomFinderType = DesertBatflyRuntimePatch.FindType("RoomFinder");
-        roomInfoType = DesertBatflyRuntimePatch.FindType("RoomInfo");
-        colorInfoType = DesertBatflyRuntimePatch.FindType("ColorInfo");
-        warpMenuType = DesertBatflyRuntimePatch.FindType("WarpModMenu");
+        Type roomFinderType = DB_RuntimePatch.FindType("RoomFinder");
+        roomInfoType = DB_RuntimePatch.FindType("RoomInfo");
+        colorInfoType = DB_RuntimePatch.FindType("ColorInfo");
+        warpMenuType = DB_RuntimePatch.FindType("WarpModMenu");
         roomTypeEnum = roomInfoType?.GetNestedType("RoomType", BindingFlags.Public | BindingFlags.NonPublic);
         if (roomFinderType == null || roomInfoType == null || colorInfoType == null || warpMenuType == null || roomTypeEnum == null)
             return; // Warp is not installed (or is an incompatible future rewrite).
 
-        harmony = DesertBatflyRuntimePatch.Create("Anno.DesertBatfly.Warp");
+        harmony = DB_RuntimePatch.Create("Anno.DesertBatfly.Warp");
         if (harmony == null || !EnsureWarpTypeColors()) return;
 
         MethodInfo enumGetNames = typeof(Enum).GetMethod(
             nameof(Enum.GetNames), BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(Type) }, null);
-        MethodInfo enumPrefix = typeof(DesertBatflyWarpCompatibility).GetMethod(
+        MethodInfo enumPrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(EnumGetNamesPrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (!DesertBatflyRuntimePatch.Patch(harmony, enumGetNames, enumPrefix))
+        if (!DB_RuntimePatch.Patch(harmony, enumGetNames, enumPrefix))
         {
             ShrinkWarpTypeColors();
-            DesertBatflyRuntimePatch.UnpatchSelf(harmony);
+            DB_RuntimePatch.UnpatchSelf(harmony);
             harmony = null;
             return;
         }
 
         MethodInfo parse = roomFinderType.GetMethod(
             "ParseWorldFile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        MethodInfo parsePostfix = typeof(DesertBatflyWarpCompatibility).GetMethod(
+        MethodInfo parsePostfix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(ParseWorldFilePostfix), BindingFlags.NonPublic | BindingFlags.Static);
-        if (!DesertBatflyRuntimePatch.Patch(harmony, parse, null, parsePostfix))
+        if (!DB_RuntimePatch.Patch(harmony, parse, null, parsePostfix))
         {
             ShrinkWarpTypeColors();
-            DesertBatflyRuntimePatch.UnpatchSelf(harmony);
+            DB_RuntimePatch.UnpatchSelf(harmony);
             harmony = null;
             return;
         }
 
         MethodInfo colorLoad = colorInfoType.GetMethod(
             "Load", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        MethodInfo colorPrefix = typeof(DesertBatflyWarpCompatibility).GetMethod(
+        MethodInfo colorPrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(ColorLoadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
         // WarpContainer is a top-level class in Warp 1.9.x, not a nested type of
         // WarpModMenu. This prefix is only a safety net; colors are already expanded
         // during Enable and before ColorInfo.Load.
-        Type warpContainerType = DesertBatflyRuntimePatch.FindType("WarpContainer");
+        Type warpContainerType = DB_RuntimePatch.FindType("WarpContainer");
         MethodInfo generate = warpContainerType?.GetMethod(
             "GenerateRoomButtons", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        MethodInfo generatePrefix = typeof(DesertBatflyWarpCompatibility).GetMethod(
+        MethodInfo generatePrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(GenerateRoomButtonsPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
-        DesertBatflyRuntimePatch.Patch(harmony, colorLoad, colorPrefix);
-        DesertBatflyRuntimePatch.Patch(harmony, generate, generatePrefix);
+        DB_RuntimePatch.Patch(harmony, colorLoad, colorPrefix);
+        DB_RuntimePatch.Patch(harmony, generate, generatePrefix);
         enabled = true;
     }
 
@@ -91,7 +91,7 @@ internal static class DesertBatflyWarpCompatibility
         // them back into Warp's ordinary Room bucket before removing the Enum patch.
         NormalizeCachedRooms();
         ShrinkWarpTypeColors();
-        DesertBatflyRuntimePatch.UnpatchSelf(harmony);
+        DB_RuntimePatch.UnpatchSelf(harmony);
 
         harmony = null;
         enabled = false;

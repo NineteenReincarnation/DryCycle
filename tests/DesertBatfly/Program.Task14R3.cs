@@ -161,7 +161,7 @@ internal static partial class Program
         Check(MethodCallOffset(desertAI.GetMethod("AfterPhysics", Flags), arbiter, "IsPrimaryOwner") >= 0,
             "Task14 R3 Attach/Interfere AfterPhysics cannot run after another locomotion owner won");
 
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
         MethodInfo hooksDisable = hooks.GetMethod("Disable", Flags);
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
@@ -199,7 +199,7 @@ internal static partial class Program
         Check(MethodCallOffset(desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags), arbiter, "IsPrimaryOwner") >= 0,
             "Task14 R3 InjuryRecovery executor requires same-tick PrimaryOwner");
 
-        Type observatory = mod.GetType("DryCycle.Debugging.AI.DesertBatflyDebugSource", true);
+        Type observatory = mod.GetType("DryCycle.Debugging.AI.DB_ObservatorySource", true);
         Check(MethodCallOffset(observatory.GetMethod("ControlOwner", Flags), arbiter, "TryGetResolution") >= 0,
             "Task14 R3 Observatory ControlOwner reads the actual arbiter resolution instead of post-hoc guessing");
         Check(observatory.GetMethod("BuildArbiterSection", Flags) != null &&

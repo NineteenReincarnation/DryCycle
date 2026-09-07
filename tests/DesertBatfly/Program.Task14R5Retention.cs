@@ -5,7 +5,7 @@ internal static partial class Program
 {
     private static void RunTask14R5Retention()
     {
-        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTactics", true);
         Type policy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
@@ -21,9 +21,9 @@ internal static partial class Program
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type consumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
         Type bond = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
-        Type runtimePatch = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRuntimePatch", true);
-        Type sandbox = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySandbox", true);
-        Type warp = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWarpCompatibility", true);
+        Type runtimePatch = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RuntimePatch", true);
+        Type sandbox = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Sandbox", true);
+        Type warp = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WarpCompatibility", true);
 
         foreach (string removed in new[]
                  {

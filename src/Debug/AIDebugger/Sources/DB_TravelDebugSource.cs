@@ -5,13 +5,13 @@ using DryCycle.Creatures.DesertBatfly;
 namespace DryCycle.Debugging.AI;
 
 /// <summary>
-/// Observatory enrichment for Task 09. It delegates all existing Desert Batfly
+/// Observatory enrichment for Travel / Colony. It delegates all existing Desert Batfly
 /// inspection to the normal source, then appends read-only ecology/travel state.
 /// No debug read creates a colony, individual record or travel intent.
 /// </summary>
-internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
+internal sealed class DB_TravelDebugSource : IAIDebugSource
 {
-    private readonly DesertBatflyDebugSource inner = new();
+    private readonly DB_ObservatorySource inner = new();
 
     public int Priority => 1100;
     public bool CanInspect(AbstractCreature creature) => inner.CanInspect(creature);
@@ -28,7 +28,7 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
         string currentColony = record?.CurrentColony ?? string.Empty;
         DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(currentColony);
 
-        var ecology = new AIDebugSection("Task 09 Colony Ecology / 群落生态");
+        var ecology = new AIDebugSection("Travel / Colony Colony Ecology / 群落生态");
         ecology.Add("Current colony / 当前群落", "DesertBatflyColonyRuntime.CurrentColony",
             string.IsNullOrEmpty(currentColony) ? "—" : currentColony);
         ecology.Add("Previous colony / 上一群落", "DesertBatflyColonyRuntime.PreviousColony",
@@ -68,7 +68,7 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
             float shelter = weather.HasHazard
                 ? DesertBatflyRefuge.HomeHiveShelterQuality(home, weather.HazardKind, weather.HazardId)
                 : 0f;
-            snapshot.Sections.Add(new AIDebugSection("Task 09 Weather Refuge / 天气避难")
+            snapshot.Sections.Add(new AIDebugSection("Travel / Colony Weather Refuge / 天气避难")
                 .Add("Hazard / 危险天气", "DesertBatflyWeatherEcology.HazardId",
                     string.IsNullOrEmpty(weather.HazardId) ? "—" : weather.HazardId)
                 .Add("Active intensity / 当前强度", "DesertBatflyWeatherEcology.ActiveIntensity", weather.ActiveIntensity)
@@ -83,7 +83,7 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
 
         bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
             creature, out DesertBatflyTravelDebugState travel);
-        var travelSection = new AIDebugSection("Task 09 Travel / 跨房旅行")
+        var travelSection = new AIDebugSection("Travel / Colony Travel / 跨房旅行")
             .Add("Travel purpose / 旅行目的", "DesertBatflyTravelPurpose",
                 hasTravel ? travel.Purpose.ToString() : "None")
             .Add("Destination / 目的房间", "DesertBatflyTravelNavigation.DestinationRoom",
@@ -131,7 +131,7 @@ internal sealed class DesertBatflyTask09DebugSource : IAIDebugSource
             "DesertBatflyColonyMigration.IndividualPropensity", propensity);
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
-            "Task 09 travel / 跨房旅行",
+            "Travel / Colony travel / 跨房旅行",
             hasTravel
                 ? (travel.Suspended ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Active)
                 : AIDebugDecisionState.Inactive,

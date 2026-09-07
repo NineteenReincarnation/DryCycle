@@ -3,9 +3,9 @@ using UnityEngine;
 
 namespace DryCycle.Debugging.AI;
 
-internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
+internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
 {
-    private readonly DesertBatflyTask12DebugSource inner = new();
+    private readonly DB_SignalDebugSource inner = new();
 
     public int Priority => 1500;
     public bool CanInspect(AbstractCreature creature) => inner.CanInspect(creature);
@@ -51,7 +51,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
             out string failureReason);
         bool task09Owns = DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature);
 
-        snapshot.Sections.Add(new AIDebugSection("Task 13 Environment / 环境活动")
+        snapshot.Sections.Add(new AIDebugSection("Environment Environment / 环境活动")
             .Add("Weather source valid / 天气源有效", "Environment.WeatherSourceValid",
                 context.WeatherSourceValid)
             .Add("Weather / 天气", "Environment.Weather", context.Weather.ToString())
@@ -63,7 +63,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
                 context.ForecastTicks == int.MaxValue ? -1 : context.ForecastTicks)
             .Add("Room phase / 房间阶段", "Environment.Phase", context.Phase.ToString())
             .Add("Phase reason / 阶段原因", "Environment.PhaseReason", context.PhaseReason)
-            .Add("Task09 intent / Task09跨房意图", "Environment.Task09OwnsControl", task09Owns)
+            .Add("Travel intent / Travel跨房意图", "Environment.TravelOwnsControl", task09Owns)
             .Add("Commitment / 环境承诺ticks", "Environment.CommitmentTicks",
                 influence.CommitmentTicks)
             .Add("Shelter drive / 避险驱动", "Environment.ShelterDrive",
@@ -83,7 +83,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
             .Add("Activity radius / 活动半径倍率", "Environment.ActivityRadiusMultiplier",
                 influence.ActivityRadiusMultiplier));
 
-        snapshot.Sections.Add(new AIDebugSection("Task 13 Visibility & Heat / 视野与热")
+        snapshot.Sections.Add(new AIDebugSection("Environment Visibility & Heat / 视野与热")
             .Add("Visibility confidence / 视野信心", "Environment.VisibilityConfidence",
                 influence.VisibilityConfidence)
             .Add("Navigation uncertainty / 导航不确定", "Environment.NavigationUncertainty",
@@ -109,7 +109,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
             .Add("Recovery progress / 恢复进度", "Environment.RecoveryProgress",
                 influence.RecoveryProgress));
 
-        snapshot.Sections.Add(new AIDebugSection("Task 13 Shelter / 局部避险")
+        snapshot.Sections.Add(new AIDebugSection("Environment Shelter / 局部避险")
             .Add("Anchor count / 避险点数量", "Environment.AnchorCount",
                 roomState?.Anchors.Count ?? 0)
             .Add("Preferred anchor / 当前避险点", "Environment.PreferredAnchorId", anchorId)
@@ -134,7 +134,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
                 influence.DecisionReason));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
-            "Task 13 environmental behavior / 环境行为",
+            "Environment environmental behavior / 环境行为",
             context.Phase == DesertBatflyEnvironmentalPhase.Calm
                 ? AIDebugDecisionState.Inactive
                 : influence.HardSurvival || influence.ShelterDrive > 0.25f ||
