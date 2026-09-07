@@ -15,6 +15,15 @@ internal sealed class DB_CombatRuntime
     private readonly DesertBatflyAI ai;
     private readonly DesertBatfly fly;
 
+    private Creature target;
+    private Creature attacker;
+    private int memory;
+    private int retaliationCharges;
+    private int retaliationRecovery;
+    private Creature scanCandidate;
+    private Player rememberedCandidate;
+    private float closestCandidate = float.MaxValue;
+
     private int ticks;
     private int unseen;
     private int interest;
@@ -30,6 +39,18 @@ internal sealed class DB_CombatRuntime
         this.fly = fly;
     }
 
+    internal enum SelectionResult
+    {
+        Ready,
+        NoTarget,
+        Cooldown
+    }
+
+    internal Creature Target => target;
+    internal Creature Attacker => attacker;
+    internal int Memory => memory;
+    internal int RetaliationCharges => retaliationCharges;
+    internal int RetaliationRecovery => retaliationRecovery;
     internal bool HasSlot => hasSlot;
     internal bool PullingUp => ai.Mode == DesertBatflyAI.Activity.FakeDive &&
                                ticks > DesertBatflyTuning.FakeDivePullUpTicks;
@@ -40,6 +61,14 @@ internal sealed class DB_CombatRuntime
 
     internal void Reset()
     {
+        target = null;
+        attacker = null;
+        memory = 0;
+        retaliationCharges = 0;
+        retaliationRecovery = 0;
+        scanCandidate = null;
+        rememberedCandidate = null;
+        closestCandidate = float.MaxValue;
         ticks = 0;
         unseen = 0;
         interest = 0;
@@ -83,11 +112,248 @@ internal sealed class DB_CombatRuntime
 
     internal void ClearVisibilityTracking() => unseen = 0;
 
+    internal void TickMemory()
+    {
+        if (memory > 0 && --memory == 0) attacker = null;
+        if (retaliationRecovery > 0) retaliationRecovery--;
+    }
+
+    internal void RecordAttacker(Creature source, float retaliationStrength = 0f)
+    {
+        if (source == null || source == fly || source is DesertBatfly) return;
+        attacker = source;
+        memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
+        if (retaliationStrength > 0f && source is Player player)
+            ArmRetaliation(player, retaliationStrength);
+    }
+
+    internal void RecordGrabber(Player player)
+    {
+        if (player == null) return;
+        attacker = player;
+        memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
+    }
+
+    internal void ArmRetaliation(Player player, float strength)
+    {
+        if (fly.Injury.BlocksCombat || !fly.Personality.Aggressive || player == null ||
+            ai.IsTraumatizedPlayer(player))
+            return;
+
+        float drive = fly.Personality.AggressionDrive;
+        float secondPassChance = Mathf.Clamp01((drive - 0.62f) / 0.38f) *
+            Mathf.Lerp(0.25f, 0.65f, Mathf.Clamp01(strength));
+        int passes = Random.value < secondPassChance ? 2 : 1;
+        retaliationCharges = Mathf.Max(retaliationCharges, passes);
+        retaliationRecovery = 0;
+    }
+
+    internal void ClearRetaliation()
+    {
+        retaliationCharges = 0;
+        retaliationRecovery = 0;
+    }
+
+    internal void ClearMemoryAndRetaliation()
+    {
+        attacker = null;
+        memory = 0;
+        ClearRetaliation();
+    }
+
+    internal void SuppressHostility(Creature source)
+    {
+        if (source == null) return;
+        if (target == source)
+        {
+            ClearAttackState();
+            target = null;
+            if (ai.Mode is DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
+                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
+                DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
+                DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere)
+                ai.SetMode(DesertBatflyAI.Activity.Flight);
+        }
+        if (attacker == source)
+        {
+            attacker = null;
+            memory = 0;
+            ClearRetaliation();
+        }
+        ClearVisibilityTracking();
+    }
+
+    internal void SetTarget(Creature value) => target = value;
+
+    internal void ClearTarget()
+    {
+        target = null;
+        scanCandidate = null;
+        rememberedCandidate = null;
+    }
+
+    internal void BeginCandidateScan()
+    {
+        scanCandidate = null;
+        rememberedCandidate = null;
+        closestCandidate = DesertBatflyTuning.SightRange;
+    }
+
+    internal void ConsiderCandidate(Creature creature, float distance)
+    {
+        if (!ai.Valid(creature)) return;
+        if (creature is Player player && fly.Personality.Aggressive &&
+            ai.IsRememberedPlayer(player) && !ai.IsTraumatizedPlayer(player))
+            rememberedCandidate = player;
+
+        if (distance < closestCandidate && CanHarass(creature))
+        {
+            closestCandidate = distance;
+            scanCandidate = creature;
+        }
+    }
+
+    internal void CompleteCandidateScan(bool retreatActive)
+    {
+        if (target != null || !fly.Personality.Aggressive || retreatActive) return;
+
+        bool retaliationPending = retaliationCharges > 0 && retaliationRecovery <= 0;
+        if (fly.DesertState.Cooldown > 0 && !retaliationPending) return;
+        if (!GriefAllowsHarass()) return;
+
+        Player socialCandidate = FindSocialHarassTarget();
+        float observeThreshold = Mathf.Lerp(
+            DesertBatflyTuning.ObserveThirst,
+            0.18f,
+            fly.Personality.AggressionDrive * 0.45f);
+        float socialMotivationScale = socialCandidate != null
+            ? Mathf.Lerp(1f, 0.72f, fly.Personality.Conformity)
+            : 1f;
+        bool motivated = fly.DesertState.Thirst > observeThreshold * socialMotivationScale ||
+                         memory > 0 || rememberedCandidate != null;
+        if (!motivated) return;
+
+        if (ai.Valid(attacker) && CanHarass(attacker))
+            target = attacker;
+        else if (rememberedCandidate != null)
+            target = rememberedCandidate;
+        else if (socialCandidate != null)
+            target = socialCandidate;
+        else
+            target = scanCandidate;
+
+        if (target != null)
+            ai.SetMode(DesertBatflyAI.Activity.Observe);
+    }
+
+    internal SelectionResult PrepareSelection()
+    {
+        bool retaliationReady = fly.Personality.Aggressive &&
+            retaliationCharges > 0 && retaliationRecovery <= 0;
+        if (fly.DesertState.Cooldown > 0 && ai.Mode != DesertBatflyAI.Activity.Attach &&
+            ai.Mode != DesertBatflyAI.Activity.Interfere && !retaliationReady)
+        {
+            ClearAttackState();
+            target = null;
+            ai.SetMode(DesertBatflyAI.Activity.Cooldown);
+            return SelectionResult.Cooldown;
+        }
+
+        if (!fly.Personality.Aggressive || !GriefAllowsHarass())
+        {
+            if (ai.Mode != DesertBatflyAI.Activity.Roost)
+            {
+                ClearAttackState();
+                target = null;
+                ai.SetMode(DesertBatflyAI.Activity.Flight);
+            }
+            return SelectionResult.NoTarget;
+        }
+
+        if (!ai.Valid(target))
+        {
+            ClearAttackState();
+            target = null;
+            ai.SetMode(DesertBatflyAI.Activity.Flight);
+            if (memory > 0 && ai.Valid(attacker) && CanHarass(attacker))
+                target = attacker;
+            if (target == null)
+                return SelectionResult.NoTarget;
+            ai.SetMode(DesertBatflyAI.Activity.Observe);
+        }
+
+        if (ai.Mode is DesertBatflyAI.Activity.Flight or DesertBatflyAI.Activity.Cooldown or
+            DesertBatflyAI.Activity.Roost)
+            ai.SetMode(DesertBatflyAI.Activity.Observe);
+        return SelectionResult.Ready;
+    }
+
+    private bool GriefAllowsHarass() => !fly.Injury.BlocksCombat &&
+        (fly.DesertState.GriefStrength <= 0f ||
+         fly.DesertState.Thirst * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst) &&
+        (fly.Injury.AggressionScale >= 0.99f ||
+         fly.DesertState.Thirst * fly.Injury.AggressionScale >= DesertBatflyTuning.ObserveThirst);
+
+    private bool CanHarass(Creature creature)
+    {
+        if (creature == fly || creature is DesertBatfly || !ai.Valid(creature)) return false;
+        if (!GriefAllowsHarass()) return false;
+        if (creature is Player player) return !ai.IsTraumatizedPlayer(player);
+
+        CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
+        CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(fly.Template);
+        return creature.TotalMass <= DesertBatflyTuning.LightTargetMass &&
+               relation.type != CreatureTemplate.Relationship.Type.Afraid &&
+               reverse.type != CreatureTemplate.Relationship.Type.Eats &&
+               reverse.type != CreatureTemplate.Relationship.Type.Attacks;
+    }
+
+    private Player FindSocialHarassTarget()
+    {
+        if (fly.Personality.Conformity < 0.42f || fly.room == null) return null;
+        float socialDrive = fly.Personality.Conformity * 0.55f +
+                            fly.Personality.AggressionDrive * 0.25f +
+                            fly.Personality.Nerve * 0.20f;
+        if (socialDrive < 0.52f) return null;
+
+        DB_RoomContext context = DB_RoomContext.For(fly.room);
+        var bats = context?.Bats;
+        if (bats == null) return null;
+
+        Player best = null;
+        float bestScore = float.MinValue;
+        for (int i = 0; i < bats.Count; i++)
+        {
+            DesertBatfly bat = bats[i];
+            if (bat == null || bat == fly || !bat.Consious ||
+                bat.DesertAI.Target is not Player otherTarget || !CanHarass(otherTarget))
+                continue;
+            if (bat.DesertAI.Mode is not (
+                DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
+                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
+                DesertBatflyAI.Activity.Dive))
+                continue;
+
+            float neighbourDistance = Vector2.Distance(fly.mainBodyChunk.pos, bat.mainBodyChunk.pos);
+            if (neighbourDistance > 210f ||
+                (neighbourDistance > 95f && !DB_VisibilityPolicy.CanObserve(
+                    fly, bat.mainBodyChunk.pos, 210f, DB_VisibilityChannel.Social)))
+                continue;
+
+            float score = socialDrive * 1.2f - neighbourDistance / 420f +
+                          bat.Personality.AggressionDrive * 0.18f;
+            if (score <= bestScore) continue;
+            bestScore = score;
+            best = otherTarget;
+        }
+        return best;
+    }
+
     internal bool TryExecuteOwned()
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat) ||
             fly.room == null || fly.dead || !fly.Consious || ai.RestrainedByNonFly() ||
-            fly.inShortcut || fly.Injury.BlocksCombat || !ai.Valid(ai.Target) ||
+            fly.inShortcut || fly.Injury.BlocksCombat || !ai.Valid(target) ||
             ai.Mode is not (DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
                 DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
                 DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
@@ -95,22 +361,22 @@ internal sealed class DB_CombatRuntime
             return false;
 
         ticks++;
-        DB_VisibilityChannel targetChannel = ai.Target is Player
+        DB_VisibilityChannel targetChannel = target is Player
             ? DB_VisibilityChannel.Player
             : DB_VisibilityChannel.Creature;
-        if (!DB_VisibilityPolicy.CanObserve(fly, ai.Target.mainBodyChunk.pos, 430f, targetChannel))
+        if (!DB_VisibilityPolicy.CanObserve(fly, target.mainBodyChunk.pos, 430f, targetChannel))
             unseen++;
         else
             unseen = 0;
 
         if (++interest > DesertBatflyTuning.InterestTicks || unseen > 35 ||
-            !Custom.DistLess(fly.mainBodyChunk.pos, ai.Target.mainBodyChunk.pos, 430f))
+            !Custom.DistLess(fly.mainBodyChunk.pos, target.mainBodyChunk.pos, 430f))
         {
             Finish(false);
             return true;
         }
 
-        Vector2 center = ai.Target.mainBodyChunk.pos;
+        Vector2 center = target.mainBodyChunk.pos;
         float distance = Vector2.Distance(fly.mainBodyChunk.pos, center);
 
         switch (ai.Mode)
@@ -119,21 +385,21 @@ internal sealed class DB_CombatRuntime
                 ai.SteerOwned(center + Orbit(150f, 90f), 4.5f, DB_BehaviorOwner.Combat);
                 if (ticks > fly.Personality.ObserveDuration)
                 {
-                    bool counter = ai.Target == ai.CombatAttacker && ai.CombatMemory > 0;
-                    bool grudge = ai.Target is Player targetPlayer &&
+                    bool counter = target == attacker && memory > 0;
+                    bool grudge = target is Player targetPlayer &&
                                   ai.IsRememberedPlayer(targetPlayer) &&
                                   !ai.IsTraumatizedPlayer(targetPlayer);
 
-                    if ((counter || grudge) && ai.Target is Player retaliationTarget &&
+                    if ((counter || grudge) && target is Player retaliationTarget &&
                         !ai.IsTraumatizedPlayer(retaliationTarget) &&
-                        ai.CombatRetaliationCharges > 0 && ai.CombatRetaliationRecovery <= 0)
+                        retaliationCharges > 0 && retaliationRecovery <= 0)
                     {
                         float memoryBoost = grudge ? fly.DesertState.GrabMemoryStrength * 0.18f : 0f;
                         if (Random.value < Mathf.Clamp01(
                                 fly.Personality.RetaliationChance * fly.Injury.AggressionScale + memoryBoost) &&
                             AcquireSlot())
                         {
-                            ai.CombatRetaliationCharges--;
+                            retaliationCharges--;
                             retaliationDirection = Custom.DirVec(
                                 fly.mainBodyChunk.pos,
                                 retaliationTarget.mainBodyChunk.pos);
@@ -155,7 +421,7 @@ internal sealed class DB_CombatRuntime
                     if (grudge)
                         fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
                     if (counter) fakeChance *= 0.82f;
-                    if (ai.Target is Player learnedTarget)
+                    if (target is Player learnedTarget)
                         fakeChance = DesertBatflyThreatTactics.AdjustFakeDiveChance(
                             fly, learnedTarget, fakeChance);
 
@@ -201,7 +467,7 @@ internal sealed class DB_CombatRuntime
 
             case DesertBatflyAI.Activity.Dive:
                 ai.SteerOwned(
-                    center + ai.Target.mainBodyChunk.vel * 1.5f,
+                    center + target.mainBodyChunk.vel * 1.5f,
                     12f + fly.Personality.AggressionDrive * 1.5f,
                     DB_BehaviorOwner.Combat);
                 BodyChunk contact = FindContact();
@@ -224,7 +490,7 @@ internal sealed class DB_CombatRuntime
                 break;
 
             case DesertBatflyAI.Activity.RetaliationCharge:
-                if (ai.Target is not Player chargeTarget || ai.IsTraumatizedPlayer(chargeTarget))
+                if (target is not Player chargeTarget || ai.IsTraumatizedPlayer(chargeTarget))
                 {
                     FinishRetaliation(false);
                     break;
@@ -268,15 +534,15 @@ internal sealed class DB_CombatRuntime
         }
 
         if (ai.Mode != DesertBatflyAI.Activity.Attach) return;
-        if (!ai.Valid(ai.Target) || attachedChunk == null || !fly.Consious ||
-            ai.RestrainedByNonFly() || fly.inShortcut || ai.Target.inShortcut || !hasSlot ||
+        if (!ai.Valid(target) || attachedChunk == null || !fly.Consious ||
+            ai.RestrainedByNonFly() || fly.inShortcut || target.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
         {
             Finish(drainedWater > 0.001f);
             return;
         }
 
-        if (ai.Target is Player attachedPlayer && ai.IsTraumatizedPlayer(attachedPlayer))
+        if (target is Player attachedPlayer && ai.IsTraumatizedPlayer(attachedPlayer))
         {
             ai.SuppressHostility(attachedPlayer);
             ai.BeginCombatEscape(attachedPlayer.mainBodyChunk.pos, 80);
@@ -297,7 +563,7 @@ internal sealed class DB_CombatRuntime
         {
             float amount = DesertBatflyTuning.AttackWaterPerSecond / ThirstConstants.SimulationTicksPerSecond;
             bool transferred = true;
-            if (ai.Target is Player player)
+            if (target is Player player)
             {
                 transferred = ThirstStore.RemoveRuntime(
                     player,
@@ -324,8 +590,8 @@ internal sealed class DB_CombatRuntime
 
     private BodyChunk FindContact()
     {
-        if (ai.Target?.bodyChunks == null) return null;
-        foreach (BodyChunk chunk in ai.Target.bodyChunks)
+        if (target?.bodyChunks == null) return null;
+        foreach (BodyChunk chunk in target.bodyChunks)
             if (Custom.DistLess(
                     chunk.pos,
                     fly.mainBodyChunk.pos,
@@ -344,7 +610,7 @@ internal sealed class DB_CombatRuntime
 
     private void UpdateInterference(bool eu)
     {
-        if (ai.Target is not Player player || ai.IsTraumatizedPlayer(player) ||
+        if (target is not Player player || ai.IsTraumatizedPlayer(player) ||
             !ai.Valid(player) || attachedChunk == null || !fly.Consious ||
             ai.RestrainedByNonFly() || fly.inShortcut || player.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 75f))
@@ -376,11 +642,11 @@ internal sealed class DB_CombatRuntime
     private void FinishRetaliation(bool success)
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
-        Vector2 from = ai.Target?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up;
+        Vector2 from = target?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up;
         ClearAttackState();
-        ai.ClearCombatTarget();
+        ClearTarget();
         fly.DesertState.Cooldown = Mathf.Max(fly.DesertState.Cooldown, DesertBatflyTuning.RetaliationCooldown);
-        ai.CombatRetaliationRecovery = success ? 120 : 75;
+        retaliationRecovery = success ? 120 : 75;
         ai.BeginCombatEscape(from, success ? 55 : 40);
         fly.mainBodyChunk.vel +=
             Custom.DirVec(from, fly.mainBodyChunk.pos) * 5.5f + Vector2.up * 2.5f;
@@ -389,9 +655,9 @@ internal sealed class DB_CombatRuntime
     private void Finish(bool success)
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
-        Vector2 from = ai.Target?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up;
+        Vector2 from = target?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up;
         ClearAttackState();
-        ai.ClearCombatTarget();
+        ClearTarget();
         fly.DesertState.Cooldown = Mathf.Max(
             fly.DesertState.Cooldown,
             success ? DesertBatflyTuning.Cooldown : DesertBatflyTuning.FailedCooldown);
@@ -403,7 +669,7 @@ internal sealed class DB_CombatRuntime
     private bool AcquireSlot()
     {
         if (fly.Injury.BlocksCombat) { hasSlot = false; return false; }
-        if (ai.Target is Player player && ai.IsTraumatizedPlayer(player))
+        if (target is Player player && ai.IsTraumatizedPlayer(player))
         {
             hasSlot = false;
             return false;
@@ -418,7 +684,7 @@ internal sealed class DB_CombatRuntime
             {
                 DesertBatfly other = bats[i];
                 if (other == null || other == fly || !other.Consious ||
-                    other.grabbedBy.Count != 0 || other.DesertAI.Target != ai.Target ||
+                    other.grabbedBy.Count != 0 || other.DesertAI.Target != target ||
                     !other.DesertAI.FormalAttack)
                     continue;
                 count++;

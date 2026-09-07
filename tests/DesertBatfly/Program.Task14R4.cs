@@ -65,6 +65,17 @@ internal static partial class Program
             "same-room environmental Home retreat uses FlightMotor while native Burrow stays special physics");
         Check(Enum.IsDefined(special, "NativeBurrow") && Enum.IsDefined(special, "NativeChain"),
             "Task14 R4 explicitly classifies native Burrow and Chain as special-physics owners");
+        Check(combatRuntime.GetProperty("Target", Flags) != null &&
+              combatRuntime.GetMethod("BeginCandidateScan", Flags) != null &&
+              combatRuntime.GetMethod("ConsiderCandidate", Flags) != null &&
+              combatRuntime.GetMethod("CompleteCandidateScan", Flags) != null &&
+              combatRuntime.GetMethod("PrepareSelection", Flags) != null &&
+              combatRuntime.GetMethod("ArmRetaliation", Flags) != null,
+            "Task14 R4 Combat runtime owns target scan/motivation and retaliation preparation");
+        Check(ai.GetMethod("CanHarass", Flags) == null &&
+              ai.GetMethod("FindSocialHarassTarget", Flags) == null &&
+              ai.GetMethod("ArmRetaliation", Flags) == null,
+            "Task14 R4 old AI shell no longer owns Harass target selection or retaliation preparation");
         Check(combatRuntime.GetMethod("TryExecuteOwned", Flags) != null &&
               combatRuntime.GetMethod("AfterPhysics", Flags) != null &&
               combatRuntime.GetProperty("FormalAttack", Flags) != null,
@@ -81,6 +92,6 @@ internal static partial class Program
               MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
             "FlightMotor/Fog transient state follows species lifecycle");
 
-        Console.WriteLine("Task14 R4 B3: FlightMotor boundary is centralized and formal Combat execution/contact/AttackSlot responsibility is extracted from the AI shell; target selection/motivation remains for B4.");
+        Console.WriteLine("Task14 R4 B4: Combat execution, target selection, Harass motivation and retaliation preparation are all owned by DB_CombatRuntime; final Observatory/audit closeout remains.");
     }
 }
