@@ -8,7 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 // This avoids spawning a manager or one UpdatableAndDeletable per grain. The HUD2
 // marks are intentionally sparse and capped per room so the effect obstructs rather
 // than blinds the player.
-internal sealed class DesertBatflySandBurst : CosmeticSprite
+internal sealed class DB_SandBurst : CosmeticSprite
 {
     private sealed class WorldGrain
     {
@@ -63,7 +63,7 @@ internal sealed class DesertBatflySandBurst : CosmeticSprite
 
     private int GrainCount => grains.Length;
 
-    private DesertBatflySandBurst(Room room, DesertBatfly bat, Player holder,
+    private DB_SandBurst(Room room, DesertBatfly bat, Player holder,
         float intensity, int seed, bool screenOverlayEnabled)
     {
         this.room = room;
@@ -150,14 +150,14 @@ internal sealed class DesertBatflySandBurst : CosmeticSprite
         {
             for (int i = 0; i < room.updateList.Count; i++)
             {
-                if (room.updateList[i] is DesertBatflySandBurst burst &&
+                if (room.updateList[i] is DB_SandBurst burst &&
                     !burst.slatedForDeletetion && burst.screenOverlayEnabled)
                     activeScreenBursts++;
             }
         }
 
         bool allowScreen = activeScreenBursts < DesertBatflyTuning.SandScreenMaxConcurrentBursts;
-        room.AddObject(new DesertBatflySandBurst(
+        room.AddObject(new DB_SandBurst(
             room,
             bat,
             holder,

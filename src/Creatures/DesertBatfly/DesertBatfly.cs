@@ -156,7 +156,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             !Personality.CanSandSpit) return;
 
         int seed = unchecked(Personality.VisualSeed ^ (sandSpitCycle * 1103515245));
-        DesertBatflySandBurst.Emit(
+        DB_SandBurst.Emit(
             room,
             this,
             playerHolder,
