@@ -54,6 +54,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          rm -f .github/task14-r5-b3-trigger
           git add -A
           git commit -m 'Remove Task09 and survival environment bridges'
           git push origin HEAD:task14-r5-b3-working
