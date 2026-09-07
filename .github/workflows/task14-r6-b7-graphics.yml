@@ -1,0 +1,89 @@
+name: Task14 R6 B7 Graphics migration
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: contains(github.event.head_commit.message, '[r6-b7-graphics]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+
+      - name: Capture baseline source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/Creatures/DesertBatfly/DesertBatflyGraphics.cs /tmp/DesertBatflyGraphics.before.cs
+
+      - name: Migrate Graphics identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/Creatures/DesertBatfly/Presentation
+          git mv src/Creatures/DesertBatfly/DesertBatflyGraphics.cs src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          old='DesertBatflyGraphics'
+          new='DB_Graphics'
+          for base in (Path('src'), Path('tests'), Path('scripts')):
+              if not base.exists():
+                  continue
+              for p in base.rglob('*'):
+                  if not p.is_file() or p.suffix not in {'.cs','.sh'}:
+                      continue
+                  text=p.read_text(encoding='utf-8')
+                  changed=text.replace(old,new)
+                  if changed != text:
+                      p.write_text(changed,encoding='utf-8')
+          PY
+
+      - name: Validate behavior-preserving source equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/DesertBatflyGraphics.before.cs').read_text(encoding='utf-8').replace('DesertBatflyGraphics','DB_Graphics')
+          after=Path('src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs').read_text(encoding='utf-8')
+          if before != after:
+              raise SystemExit('DB_Graphics differs from legacy source beyond identity substitution')
+          PY
+          test -f src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          ! test -e src/Creatures/DesertBatfly/DesertBatflyGraphics.cs
+          ! grep -RIn --include='*.cs' 'DesertBatflyGraphics' src tests
+          grep -q 'internal sealed class DB_Graphics : FlyGraphics' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'base.Update();' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'base.InitiateSprites' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'base.ApplyPalette' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'base.DrawSprites' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'DesertBatflySignalRuntime.TryGetDisplay' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+          grep -q 'desert.Injury.WingMean' src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
+
+      - name: Run existing retention audits
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+
+      - name: Commit migration and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'R6 B7 migrate Graphics presentation identity'
+          git rm .github/workflows/task14-r6-b7-graphics.yml
+          git commit -m 'Remove temporary R6 B7 migration workflow'
+          git push origin HEAD:task14-r6-b1-final
