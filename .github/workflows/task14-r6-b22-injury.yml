@@ -1,0 +1,79 @@
+name: Task14 R6 B22 Injury identity
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b22-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move and rename Injury domain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/Creatures/DesertBatfly/Injury
+          git mv src/Creatures/DesertBatfly/DesertBatflyInjury.cs src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'DesertBatflyInjury': 'DB_Injury',
+              'InjuryRecoveryState': 'DB_InjuryRecoveryState',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  new = text
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != text:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate Injury behavior contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          test ! -e src/Creatures/DesertBatfly/DesertBatflyInjury.cs
+          if git grep -n -E 'DesertBatflyInjury|\bInjuryRecoveryState\b' -- src tests scripts; then
+            echo 'Old Injury identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'class DB_Injury' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'enum DB_InjuryRecoveryState' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'internal Vector2 ModifyFlight' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'internal void OnHealthLoss' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'internal void BeginCapture' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'internal void Recover(float amount)' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          grep -q 'internal bool IsSeverelyInjured' src/Creatures/DesertBatfly/Injury/DB_Injury.cs
+          # R4 single-motor contract: Injury remains a modifier, not a direct velocity writer.
+          if grep -n -E 'mainBodyChunk\.vel\s*=|\.localGoal\s*=' src/Creatures/DesertBatfly/Injury/DB_Injury.cs; then
+            echo 'Injury regained locomotion writer authority.' >&2
+            exit 1
+          fi
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b22-injury.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B22 migrate Injury domain identity [r6-b22-done]'
+          git push origin HEAD:task14-r6-b1-final
