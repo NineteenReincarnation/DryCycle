@@ -43,5 +43,6 @@ internal static partial class Program
         RunTask11();
         RunTask11Final();
         RunTask11EventSemantics();
+        RunTask12();
     }
 }
