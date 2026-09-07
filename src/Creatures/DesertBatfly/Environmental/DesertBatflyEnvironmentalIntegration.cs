@@ -12,6 +12,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal static class DesertBatflyEnvironmentalIntegration
 {
+    private const float SandstormBlockerRadius = 120f;
+    private const float SandstormReturningBatRadius = 340f;
+
     private delegate bool AggressiveOrig(DesertBatflyPersonality self);
     private delegate bool AggressiveDetour(AggressiveOrig orig, DesertBatflyPersonality self);
     private delegate float RoostChanceOrig(DesertBatflyPersonality self);
@@ -153,6 +156,8 @@ internal static class DesertBatflyEnvironmentalIntegration
 
     private static bool CanHarassHook(CanHarassOrig orig, DesertBatflyAI ai, Creature creature)
     {
+        // Preserve all existing grief/injury/PTSD/target-validity gates first. Task13 may
+        // only weight an already-legal target; it never resurrects a target rejected here.
         if (!orig(ai, creature)) return false;
         DesertBatfly bat = Resolve(ai);
         if (bat == null || !DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out var influence))
@@ -160,12 +165,58 @@ internal static class DesertBatflyEnvironmentalIntegration
         if (influence.HardSurvival) return false;
 
         float scale = influence.HarassMultiplier;
+
+        // Sandstorm normally suppresses roaming aggression. The narrow exception is a
+        // Player physically occupying the Home/Hive access zone while this bat is already
+        // trying to return or burrow. This only raises the probability floor for bats that
+        // are already legal/aggressive under the existing AI; AttackSlots and PTSD remain.
+        if (creature is Player player && IsSandstormHomeAccessBlocker(bat, player, influence))
+        {
+            float defensiveDrive = Mathf.Clamp01(
+                bat.Personality.Temperament * 0.55f +
+                bat.Personality.Nerve * 0.25f +
+                Mathf.Max(influence.HomeReturnDrive, influence.BurrowDrive) * 0.20f);
+            scale = Mathf.Max(scale, Mathf.Lerp(0.62f, 0.86f, defensiveDrive));
+        }
+
         if (scale >= 0.999f) return true;
         if (scale <= 0.001f) return false;
 
         int clockBucket = (bat.room?.game?.clock ?? 0) / 80;
         int targetKey = creature?.abstractCreature?.ID.number ?? 0;
         return Stable01(bat.Personality.VisualSeed ^ targetKey * 397 ^ clockBucket * 7919) <= scale;
+    }
+
+    internal static bool IsSandstormHomeAccessBlocker(
+        DesertBatfly bat,
+        Player player,
+        in DesertBatflyEnvironmentalInfluence influence)
+    {
+        if (bat?.room == null || player?.mainBodyChunk == null || player.room != bat.room ||
+            influence.HardSurvival ||
+            influence.Weather is not (DesertBatflyEnvironmentalWeather.Sandstorm or
+                DesertBatflyEnvironmentalWeather.DeathSandstorm) ||
+            (influence.HomeReturnDrive < 0.45f && influence.BurrowDrive < 0.45f) ||
+            bat.room.hives == null || bat.room.hives.Length == 0)
+            return false;
+
+        float playerRadiusSq = SandstormBlockerRadius * SandstormBlockerRadius;
+        float batRadiusSq = SandstormReturningBatRadius * SandstormReturningBatRadius;
+        Vector2 playerPos = player.mainBodyChunk.pos;
+        Vector2 batPos = bat.mainBodyChunk.pos;
+
+        for (int h = 0; h < bat.room.hives.Length; h++)
+        {
+            IntVector2[] hive = bat.room.hives[h];
+            if (hive == null || hive.Length == 0) continue;
+            for (int i = 0; i < hive.Length; i++)
+            {
+                Vector2 point = bat.room.MiddleOfTile(hive[i]);
+                if ((playerPos - point).sqrMagnitude > playerRadiusSq) continue;
+                if ((batPos - point).sqrMagnitude <= batRadiusSq) return true;
+            }
+        }
+        return false;
     }
 
     private static void ScanCreaturesHook(ScanCreaturesOrig orig, DesertBatflyAI ai)
