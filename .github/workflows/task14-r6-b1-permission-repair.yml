@@ -1,0 +1,29 @@
+name: Task14 R6 B1 permission repair
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-clean
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ contains(github.event.head_commit.message, '[r6-b1-permission-repair]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-clean
+          fetch-depth: 0
+      - name: Restore retention guard executable bit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git update-index --chmod=+x scripts/check-desertbatfly-r5-retention.sh
+          git rm .github/workflows/task14-r6-b1-permission-repair.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Restore R5 guard executable mode for R6 B1'
+          git push origin HEAD:task14-r6-b1-clean
