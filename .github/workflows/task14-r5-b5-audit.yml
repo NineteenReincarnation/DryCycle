@@ -28,8 +28,9 @@ jobs:
 
           mapfile -t reflection < <(grep -RIl --include='*.cs' 'System.Reflection' src/Creatures/DesertBatfly | sort || true)
           printf 'Reflection files:\n%s\n' "${reflection[*]}"
-          test "${#reflection[@]}" -eq 2
+          test "${#reflection[@]}" -eq 3
           printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs'
+          printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflySandbox.cs'
           printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
 
       - name: Verify B1-B4 deleted types stay absent from production
@@ -92,17 +93,20 @@ jobs:
           ! grep -RIn --include='*.cs' 'DesertBatflyThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Signals
           ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Signals
 
-      - name: Verify RuntimePatch is Warp-only compatibility infrastructure
+      - name: Verify RuntimePatch is integration-only infrastructure
         run: |
           mapfile -t callers < <(grep -RIl --include='*.cs' 'DesertBatflyRuntimePatch' src/Creatures/DesertBatfly | sort)
           printf '%s\n' "${callers[@]}"
-          test "${#callers[@]}" -eq 2
+          test "${#callers[@]}" -eq 3
           printf '%s\n' "${callers[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs'
+          printf '%s\n' "${callers[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflySandbox.cs'
           printf '%s\n' "${callers[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
           grep -q 'DesertBatflyWarpCompatibility.Enable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
           grep -q 'DesertBatflyWarpCompatibility.Disable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'DesertBatflySandbox.Enable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'DesertBatflySandbox.Disable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
           grep -q 'RoomFinder' src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs
-          grep -q 'RoomInfo' src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs
+          grep -q 'CreatureSymbol.SpriteNameOfCreature' src/Creatures/DesertBatfly/DesertBatflySandbox.cs
           grep -q 'HarmonyLib.Harmony' src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs
 
       - name: Diff hygiene
