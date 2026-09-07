@@ -84,7 +84,7 @@ internal static partial class Program
             return true;
 
         string ownerName = owner?.FullName ?? string.Empty;
-        return ownerName.Contains("DryCycle.Thirst.ThirstStore", StringComparison.Ordinal) ||
-               ownerName.Contains("DesertBatflyAttack", StringComparison.Ordinal);
+        return ownerName.IndexOf("DryCycle.Thirst.ThirstStore", StringComparison.Ordinal) >= 0 ||
+               ownerName.IndexOf("DesertBatflyAttack", StringComparison.Ordinal) >= 0;
     }
 }
