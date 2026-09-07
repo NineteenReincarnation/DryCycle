@@ -1,0 +1,56 @@
+name: Task14 R5 B5 finalize
+
+on:
+  push:
+    branches:
+      - task14-r5-b5-working
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message == 'Trigger R5 B5 finalize'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r5-b5-working
+          fetch-depth: 0
+
+      - name: Apply guarded retention finalization
+        run: python scripts/task14_r5_b5_finalize.py
+
+      - name: Run permanent R5 source retention audit
+        run: bash scripts/check-desertbatfly-r5-retention.sh
+
+      - name: Validate retained semantics and ownership
+        run: |
+          git diff --check
+          test -f tests/DesertBatfly/Program.Task14R5Retention.cs
+          grep -q 'RunTask14R5Retention();' tests/DesertBatfly/Program.RejectedTask02.cs
+          grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
+          grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs').read_text()
+          fear = text.index('DesertBatflyIntimidation.BroadcastPredatorCapture')
+          distress = text.index('DesertBatflySignalRuntime.EmitDistress')
+          alarm = text.index('DesertBatflySignalRuntime.EmitAlarm')
+          assert fear < distress and fear < alarm
+          PY
+          grep -q 'R5-B5 classification: RETAIN' src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs
+          grep -q 'R5 代码侧完成' docs/Discussion/Task_14_R5_BridgeDebtStatus.txt
+          test -f docs/Discussion/Task_14_R5_FunctionRetentionLedger.txt
+          test ! -e .github/workflows/task14-r5-b5-audit.yml
+          test ! -e .github/workflows/task14-r5-b5-finalize.yml
+          test ! -e scripts/task14_r5_b5_finalize.py
+          test ! -e scripts/.task14-r5-b5-trigger
+
+      - name: Commit B5 closure
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          git add -A
+          git commit -m 'Close R5 bridge debt with retention guards'
+          git push origin HEAD:task14-r5-b5-working
