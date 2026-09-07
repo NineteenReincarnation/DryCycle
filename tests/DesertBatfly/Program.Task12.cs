@@ -102,8 +102,13 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "Task12 does not restore rejected Task02 social role runtime");
 
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Check(intimidation.GetNestedType("SocialRole", Flags) == null &&
+              intimidation.GetNestedType("VengeanceParticipation", Flags) != null,
+            "Task12 terminology keeps vengeance participation separate from rejected Task02 SocialRole");
+
         Console.WriteLine(
-            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, integration migration, Task11 read-only boundary, lifecycle, pipeline, graphics and anti-role guards verified.");
+            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, integration migration, Task11 read-only boundary, lifecycle, pipeline, graphics, vengeance terminology and anti-role guards verified.");
     }
 
     private static bool MethodCallsTask12(MethodInfo caller, Type targetType, string targetName) =>
