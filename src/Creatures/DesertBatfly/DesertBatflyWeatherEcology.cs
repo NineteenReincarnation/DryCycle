@@ -100,7 +100,8 @@ internal static class DesertBatflyWeatherEcology
                     scheduled.Candidate.Kind, scheduled.Candidate.Id))
                 continue;
 
-            Profile profile = ProfileFor(scheduled.Candidate.Kind, scheduled.Candidate.Id);
+            string normalizedId = WeatherSpatialCatalog.NormalizeId(scheduled.Candidate.Id);
+            Profile profile = ProfileFor(scheduled.Candidate.Kind, normalizedId);
             float intensity = EventEnvelope(scheduled, phaseTicks);
             if (intensity > 0f)
             {
@@ -126,9 +127,13 @@ internal static class DesertBatflyWeatherEcology
 
             // Forecast only hazards that materially require shelter. Forecasts may raise
             // shelter urgency, but never MigrationStress: permanent migration still needs
-            // weather that actually happened in this room. The bounded planning horizon
-            // prevents animals from reacting to schedule information far in the future.
-            if (profile.Shelter >= 0.50f)
+            // weather that actually happened in this room. DenseFog is deliberately NOT
+            // forecast here: its outward displacement is a reaction to actual severe loss
+            // of visibility, while Sandstorm is the species-specific early-warning weather.
+            bool reactiveDenseFog =
+                scheduled.Candidate.Kind == WeatherScheduleEventKind.Weather &&
+                normalizedId == "DENSEFOG";
+            if (profile.Shelter >= 0.50f && !reactiveDenseFog)
             {
                 long start = EffectStart(scheduled);
                 if (phaseTicks < start)
@@ -200,9 +205,10 @@ internal static class DesertBatflyWeatherEcology
             "LIGHTRAIN" => new Profile(0.04f, 0.10f, 0f, 0.06f),
             "FOG" => new Profile(0.02f, 0.05f, 0f, 0.05f),
             // DenseFog is a temporary usability/shelter problem, not a permanent-habitat
-            // migration signal. High Shelter lets Task09 consider a nearby clearer Refuge;
-            // near-zero Migration prevents one fog event from becoming a ColonyMigration.
-            "DENSEFOG" => new Profile(0.06f, 0.62f, 0.01f, 0.12f),
+            // migration signal. High active Shelter lets Task09 consider a nearby clearer
+            // Refuge once the fog is materially present; near-zero Migration prevents one
+            // fog event from becoming a ColonyMigration.
+            "DENSEFOG" => new Profile(0.06f, 0.90f, 0.01f, 0.12f),
             "HEAVYRAIN" => new Profile(0.24f, 0.66f, 0.15f, 0.42f),
             "HEATWAVE" => new Profile(0.28f, 0.55f, 0.55f, 0.44f),
             "SANDSTORM" => new Profile(0.62f, 0.88f, 0.72f, 0.82f),
