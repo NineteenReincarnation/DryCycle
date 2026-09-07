@@ -94,12 +94,12 @@ internal static class DesertBatflyEnvironmentalProfile
             }
             if (active >= 0.30f || forecast <= DeathRainShelterLeadTicks)
             {
-                reason = "DeathRain local sheltering while Task09 owns cross-room safety";
+                reason = "DeathRain local sheltering while Travel owns cross-room safety";
                 return DesertBatflyEnvironmentalPhase.Sheltering;
             }
             if (active > 0f || forecast <= DeathRainPreparationLeadTicks)
             {
-                reason = "DeathRain pre-onset local preparation; Task09 retains travel ownership";
+                reason = "DeathRain pre-onset local preparation; Travel retains cross-room ownership";
                 return DesertBatflyEnvironmentalPhase.Preparation;
             }
             reason = "DeathRain bounded forecast advisory";
@@ -149,7 +149,7 @@ internal static class DesertBatflyEnvironmentalProfile
                 return DesertBatflyEnvironmentalPhase.Advisory;
 
             case DesertBatflyEnvironmentalWeather.HeavyRain:
-                // HeavyRain is deliberately non-lethal Task13 shelter ecology.  It may
+                // HeavyRain is deliberately non-lethal Environment shelter ecology. It may
                 // contract the room strongly, but it never escalates itself into Acute.
                 if (active >= EnterThreshold(previous, DesertBatflyEnvironmentalPhase.Sheltering, 0.58f, 0.44f))
                 {
@@ -201,9 +201,9 @@ internal static class DesertBatflyEnvironmentalProfile
     }
 
     /// <summary>
-    /// Local realized HeavyRain burden.  Roof shelter matters more than side walls;
+    /// Local realized HeavyRain burden. Roof shelter matters more than side walls;
     /// injury/shock make exposed travel costly, while personality never turns rain into
-    /// a lethal profile.  The result is realized-only and is not persistent memory.
+    /// a lethal profile. The result is realized-only and is not persistent memory.
     /// </summary>
     internal static float HeavyRainBurden(
         float activeIntensity,
