@@ -105,7 +105,8 @@ internal static class DesertBatflyThreatTactics
     internal static bool TryApplyOrdinaryProjectileEvade(DesertBatfly bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
 
         if (!DesertBatflyThreatRuntime.TryGetDebugState(
@@ -120,8 +121,18 @@ internal static class DesertBatflyThreatTactics
         if (player == null || !TryIncomingProjectileEvade(bat, player, out Vector2 evade))
             return false;
 
+        return ApplyProjectileEvadeOwned(bat, evade);
+    }
+
+    internal static bool ApplyProjectileEvadeOwned(DesertBatfly bat, Vector2 evade)
+    {
+        if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
+            return false;
+
         bat.AI.localGoal = evade;
-        DesertBatflySocialLife.CancelForPriority(bat, "Task11 real incoming projectile evade");
+        bat.Injury.NominalFlightSpeed = Mathf.Max(bat.Injury.NominalFlightSpeed, 9f);
+        DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateProjectileEvade");
         TraceAdjustment(
             bat,
             "ThreatEvadeStarted",

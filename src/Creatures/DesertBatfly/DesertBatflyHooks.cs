@@ -271,6 +271,23 @@ internal static class DesertBatflyHooks
                 "Vengeance executor yielded after current state recheck");
         }
 
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade)
+        {
+            if (DB_ProjectileEvadeExecutor.TryExecute(desert, ownership))
+            {
+                if (AIDebugTrace.IsWatched(desert.abstractCreature))
+                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
+                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
+                DesertBatflySocialLife.SampleTrace(desert);
+                DesertBatflyDebugTrace.Sample(desert);
+                return;
+            }
+
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.ImmediateProjectileEvade,
+                "Projectile evade executor yielded after current projectile recheck");
+        }
+
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Social)
         {
             if (DB_SocialExecutor.TryExecute(desert, ownership))
@@ -289,10 +306,9 @@ internal static class DesertBatflyHooks
         }
 
         // R3 owner-gated executors now cover InjuryRecovery, Travel, Environment,
-        // Vengeance and Social. Combat/projectile/ordinary movement remain to migrate.
+        // Vengeance, ImmediateProjectileEvade and Social. Combat/ordinary remain.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
-        DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
         DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySignalRuntime.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);

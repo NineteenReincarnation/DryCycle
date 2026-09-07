@@ -324,16 +324,16 @@ Task10 已拆为：
 
 仍需 Rain World 实机验证 pair/group reservation 在抢占、房间切换和 chain join 时的释放/恢复。
 
-R3-OPEN-06 — projectile modifier migration
--------------------------------------------
+R3-CLOSED-06 — projectile modifier migration（代码侧已收敛）
+--------------------------------------------------------------
 
-当前 ImmediateProjectileEvade 已进入 proposal priority model，
-但旧 DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade 仍在 pipeline 直接调用。
+- real incoming projectile 继续由 current-frame projectile fact 产生 `ImmediateProjectileEvade` proposal；
+- `DB_ProjectileEvadeExecutor` 只在该 owner 获胜时消费 Arbiter resolved goal；
+- `ApplyProjectileEvadeOwned` 与旧 compatibility surface 都有 same-tick owner guard；
+- Hooks 已删除无条件 `TryApplyOrdinaryProjectileEvade` 调用；
+- learned Threat Signature memory 仍只参与风险/几何，不进入 `DB_BehaviorOwner`。
 
-后续要决定：
-
-- real incoming projectile 作为短时 movement proposal；
-- learned Threat memory 仍只改变几何/风险，不成为 owner。
+仍需实机验证 spear/rock near-miss 与 Vengeance geometry override 的连续性。
 
 R3-OPEN-07 — Observatory rejected proposal presentation
 ------------------------------------------------------
@@ -402,5 +402,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment / Social 都已进入 owner-gated executor。】
-【R3 尚未完成；下一阶段处理 projectile、Combat/Ordinary 的 DesertBatflyAI split，并最终证明 ordinary localGoal 单 writer。】
+【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment / ImmediateProjectileEvade / Social 已进入 owner-gated executor。】
+【R3 尚未完成；下一阶段集中处理 Combat/Ordinary 的 DesertBatflyAI split、Threat tactical apply 与 ordinary localGoal 单 writer。】
