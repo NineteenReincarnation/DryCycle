@@ -223,8 +223,6 @@ internal static class PeachLizardDesertBatflyPredation
         // corpses, allowing vanilla ReturnPrey to carry the resulting grasp to the den.
         TryTransferTongueCatchToBite(self);
 
-        LizardTongue.State previousState = self.state;
-        BodyChunk previousAttached = self.attached;
         orig(self);
 
         if (self.state != LizardTongue.State.AttachedInSmallObject ||
@@ -237,22 +235,10 @@ internal static class PeachLizardDesertBatflyPredation
         // carcass. This also closes the small race where the player grabs the corpse after
         // Peach has already committed to ShootTongue but before the tongue actually lands.
         if (!HasEdibleRemains(caught) || IsHeldByPlayer(caught))
-        {
             self.Retract();
-            return;
-        }
 
-        if (!caught.dead &&
-            (previousState != LizardTongue.State.AttachedInSmallObject ||
-             previousAttached?.owner != caught))
-        {
-            // Only a LIVE capture is a predator event. Picking up an existing corpse is
-            // scavenging and must not generate a second Peach mortality/fear event.
-            // Broadcast BEFORE Threatened() dismantles a hanging Fly Chain so the morale
-            // layer can snapshot FirstInChain() and mark every chain-mate as a witness.
-            DesertBatflyIntimidation.BroadcastPredatorCapture(caught, self.lizard, self);
-            caught.DesertAI.Threatened(self.lizard, true);
-        }
+        // Live-capture fear/signals are semantic facts owned by DB_EventHub. This Watcher
+        // adapter now owns only Peach prey/path/tongue mechanics and corpse validity.
     }
 
     private static void TryTransferTongueCatchToBite(LizardTongue tongue)
@@ -278,8 +264,8 @@ internal static class PeachLizardDesertBatflyPredation
 
         // Lizard.Bite accepts dead Eats-relationship creatures as a normal grasp. Once
         // grasp[0] contains this bat, vanilla LizardAI immediately selects ReturnPrey with
-        // utility 1 and routes to den. For live prey, DesertBatfly.Grabbed reports capture;
-        // for a corpse, Grabbed intentionally stays silent so scavenging is not a kill event.
+        // utility 1 and routes to den. Live capture semantics are emitted once by
+        // DB_EventHub across tongue -> grasp transfer; corpse scavenging remains silent.
         if (lizard.grasps[0] != null && lizard.grasps[0].grabbed == bat)
             tongue.Retract();
     }
