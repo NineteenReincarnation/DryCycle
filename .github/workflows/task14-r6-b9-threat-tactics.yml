@@ -1,0 +1,90 @@
+name: Task14 R6 B9 Threat tactics migration
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: contains(github.event.head_commit.message, '[r6-b9-threat-tactics]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+
+      - name: Capture baseline source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs /tmp/ThreatTactics.before.cs
+
+      - name: Migrate Threat tactics identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/Creatures/DesertBatfly/Threat
+          git mv src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          mappings = [
+              ('DesertBatflyThreatTacticalProfile','DB_ThreatTacticalProfile'),
+              ('DesertBatflyThreatTactics','DB_ThreatTactics'),
+          ]
+          for base in (Path('src'), Path('tests'), Path('scripts')):
+              if not base.exists(): continue
+              for p in base.rglob('*'):
+                  if not p.is_file() or p.suffix not in {'.cs','.sh'}: continue
+                  text=p.read_text(encoding='utf-8')
+                  changed=text
+                  for old,new in mappings: changed=changed.replace(old,new)
+                  if changed != text: p.write_text(changed,encoding='utf-8')
+          PY
+
+      - name: Validate behavior-preserving source equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          before=Path('/tmp/ThreatTactics.before.cs').read_text(encoding='utf-8')
+          for old,new in [
+              ('DesertBatflyThreatTacticalProfile','DB_ThreatTacticalProfile'),
+              ('DesertBatflyThreatTactics','DB_ThreatTactics'),
+          ]: before=before.replace(old,new)
+          after=Path('src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs').read_text(encoding='utf-8')
+          if before != after:
+              raise SystemExit('DB_ThreatTactics differs from legacy source beyond identity substitution')
+          PY
+          test -f src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+          ! test -e src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs
+          ! grep -RIn --include='*.cs' -E 'DesertBatflyThreat(Tactics|TacticalProfile)' src tests
+          grep -q 'DB_WeaponPerception.TryObserveHeldThreats' src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+          grep -q 'DB_BehaviorOwner.ImmediateProjectileEvade' src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+          grep -q 'DB_FlightMotor.TryGuideNative' src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+          grep -q 'never trains' src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
+
+      - name: Run existing retention audits
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+
+      - name: Commit migration and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'R6 B9 migrate Threat tactics identity'
+          git rm .github/workflows/task14-r6-b9-threat-tactics.yml
+          git commit -m 'Remove temporary R6 B9 migration workflow'
+          git push origin HEAD:task14-r6-b1-final
