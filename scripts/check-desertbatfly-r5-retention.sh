@@ -12,9 +12,9 @@ test "${#detours[@]}" -eq 0
 
 mapfile -t reflection < <(grep -RIl --include='*.cs' 'System.Reflection' src/Creatures/DesertBatfly | sort || true)
 test "${#reflection[@]}" -eq 3
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs'
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflySandbox.cs'
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs'
 
 for name in \
   DesertBatflyEnvironmentalDenseFogBridge \
@@ -52,10 +52,10 @@ grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBat
 ! grep -RIn --include='*.cs' 'DesertBatflyThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Signals
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Signals
 
-mapfile -t runtime_patch_users < <(grep -RIl --include='*.cs' 'DesertBatflyRuntimePatch' src/Creatures/DesertBatfly | sort)
+mapfile -t runtime_patch_users < <(grep -RIl --include='*.cs' 'DB_RuntimePatch' src/Creatures/DesertBatfly | sort)
 test "${#runtime_patch_users[@]}" -eq 3
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs'
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflySandbox.cs'
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs'
 
 echo 'R5 retention audit passed: no internal Bridge/RuntimeDetour debt; reflection is limited to Sandbox/Warp integration.'
