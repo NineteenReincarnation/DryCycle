@@ -59,6 +59,11 @@ internal static class DB_EventConsumers
         DesertBatfly victim = mortality.Victim;
         if (victim == null || !victim.dead) return;
 
+        // Intimidation may add a finite CorpseWarning while reacting to this mortality.
+        // Remember only the Room weakly so full Reset/Disable can actively destroy any
+        // warning that has not naturally expired yet.
+        DB_CorpseWarningRuntime.TrackRoom(victim.room);
+
         // Generic lifecycle consumers share the canonical killer. ThreatRuntime deliberately
         // clears its own realized state only after it has processed this same MortalityEvent,
         // so subscriber order cannot erase counter-kill / kill evidence prematurely.
