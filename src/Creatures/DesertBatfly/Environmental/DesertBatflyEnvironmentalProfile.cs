@@ -105,12 +105,9 @@ internal static class DesertBatflyEnvironmentalProfile
         switch (weather)
         {
             case DesertBatflyEnvironmentalWeather.Fog:
-                if (active >= EnterThreshold(previous, DesertBatflyEnvironmentalPhase.Preparation, 0.78f, 0.66f))
-                {
-                    reason = "Fog high-opacity activity contraction";
-                    return DesertBatflyEnvironmentalPhase.Preparation;
-                }
-                reason = "Fog lowers visual confidence without shelter emergency";
+                // Ordinary Fog is intentionally an activity/visibility modifier only.
+                // DenseFog owns the qualitative transition into Home/Roost/refuge behavior.
+                reason = "Fog phase ceiling = Advisory; visual confidence/activity only";
                 return DesertBatflyEnvironmentalPhase.Advisory;
 
             case DesertBatflyEnvironmentalWeather.DenseFog:
