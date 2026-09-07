@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R6 Domain / Physical Migration Status
-Revision: R6-B4 / 2026-09-08
+Revision: R6-B11 / 2026-09-08
 Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
-Current verified R6 implementation HEAD before this status update: d81bfc7987e430f12326fa80e9f5d88ed89a37c8
-Status: 【R6 进行中 / B1 Integration+Observatory、B2 Colony、B3 Travel support、B4 Platform Roost code-side complete】
+Current verified R6 implementation HEAD before this status update: f93ad003ef44a16c1a6f13d36dfa54270a771992
+Status: 【R6 进行中 / B1-B11 source-level migration progressing】
 
 R6 changes physical ownership/file/type identity without changing gameplay semantics.
 Historical R0-R5 documents retain their historical names; executable guards follow R6 names and paths.
@@ -41,7 +41,6 @@ Hard compatibility preserved:
 Validation:
 - Task14 R6 B2 Colony migration run 34143783596: SUCCESS.
 - R5 and R6 retention audits passed.
-- stable save prefix/payload version were checked present.
 
 ======================================================================
 B3 — Travel support identity migration
@@ -51,81 +50,90 @@ Moved and renamed without changing route/refuge algorithms:
 - DesertBatflyRefuge.cs -> Travel/DB_RefugePolicy.cs
 - DesertBatflyWorldRoutePlanner.cs -> Travel/DB_WorldRoutePlanner.cs
 
-Supporting Travel identities were migrated in the same cohesive batch:
+Supporting Travel identities:
 - DesertBatflyRefugeTarget -> DB_RefugeTarget
 - DesertBatflyWorldRoute -> DB_WorldRoute
 - DesertBatflyTravelPurpose -> DB_TravelPurpose
 
-Behavior/algorithm retention:
-- weighted bounded world-route planning remains unchanged;
-- RefugeMaxHops remains 3;
-- MigrationMaxHops remains 5;
-- MinimumRefugeQuality remains 0.62f;
-- refuge safety margin remains 600 ticks;
-- Environment may evaluate/suppress Travel through formal policy but does not gain cross-room destination ownership.
-
-Self-review fix:
-- first B3 run exposed an R5 guard path that still pointed to the old root refuge file after physical migration;
-- the executable guard was updated to Travel/DB_RefugePolicy.cs and re-run without weakening its checks.
-
 Validation:
 - Task14 R6 B3 Travel support migration run 34147710304: SUCCESS.
-- R5 retention audit passed after the Travel move.
-- R6 B1 retention audit passed after the Travel move.
-- stale production Travel support identities were checked absent.
-- git diff --check passed before the verified B3 commit.
+- R5/R6 retention audits passed after guard path update.
 
 ======================================================================
 B4 — Platform Roost identity migration
 ======================================================================
 
-Moved and renamed:
 - DesertBatflyPlatformRoostRuntime.cs -> Roost/DB_PlatformRoostRuntime.cs
 - DesertBatflyPlatformRoostRuntime -> DB_PlatformRoostRuntime
 
-Behavior retention:
-- vanilla FlyAI.ChainTile result remains authoritative first;
-- only Desert Batflies receive the additional one-way Floor hanging rule;
-- five-tile solid/water clearance rule is retained;
-- Enable/Disable still attach/detach the same On.FlyAI.ChainTile hook;
-- RainWorld hook lifecycle still enables/disables this runtime.
-
 Validation:
 - Task14 R6 B4 Roost migration run 34147755095: SUCCESS.
-- R5 retention audit passed.
-- R6 B1 retention audit passed.
-- old PlatformRoost production identity was checked absent.
-- Roost lifecycle and platform-hang contract checks passed.
-- git diff --check passed before the verified B4 commit.
+
+======================================================================
+B5-B6 — Presentation SandBurst + SocialBond
+======================================================================
+
+- DesertBatflySandBurst.cs -> Presentation/DB_SandBurst.cs
+- DesertBatflySocialBond.cs -> Social/DB_SocialBond.cs
+- Existing R5/R6 retention guards passed after the successful migrations.
+
+======================================================================
+B7-B9 — Presentation Graphics + Threat leaves
+======================================================================
+
+- B7: DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs; validation run 34155488424 SUCCESS.
+- B8: ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs; `DCDesertBatflyThreatV1` and serialized version 1 retained; run 34155529191 SUCCESS.
+- B9: ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs; no input cheating/no held-item memory training/Arbiter+FlightMotor contracts retained; run 34155584734 SUCCESS.
+
+======================================================================
+B10 — Historical production/debug wording cleanup
+======================================================================
+
+- ThreatTrace historical `Task11` reason text changed to domain wording `Threat Signature`.
+- EnvironmentProfile historical `Task09` / `Task13` comments/reasons changed to Travel/Environment domain wording.
+- No algorithms, thresholds, save identity, event ownership, or control flow changed.
+
+======================================================================
+B11 — Environment Exposure/Profile physical migration
+======================================================================
+
+Physical domain paths now:
+- `Environment/DB_EnvironmentExposure.cs`
+- `Environment/DB_EnvironmentProfile.cs`
+
+Important scope distinction:
+- B11 moved the physical files and DB_ filenames only.
+- Internal C# types remain `DesertBatflyEnvironmentalExposure` and `DesertBatflyEnvironmentalProfile` for now because all-caller type replacement could not be validated repository-locally in the current execution environment.
+- This is intentionally recorded as partial identity migration rather than falsely claiming type migration complete.
+
+Behavior-preserving proof:
+- Exposure moved with identical blob SHA `2910ad2ebbcb0ee0651ee2e11a6a35021cfcfcae`.
+- Profile moved with identical blob SHA `c36a390ca4842d9a0e819de873b7123ad98156c3`.
+- Git compare reports both as renames with 0 additions / 0 deletions.
+- R5 retention guard was extended so Environment cross-room-ownership prohibitions inspect both `Environmental/` and `Environment/`; no guard was removed or weakened.
+
+Implementation commit:
+- `f93ad003ef44a16c1a6f13d36dfa54270a771992`.
+
+Validation limitation:
+- actual shell execution of R5/R6 guards was not available in B11;
+- no managed build or Rain World live validation is claimed.
 
 ======================================================================
 Remaining R6 scope
 ======================================================================
 
 Still open:
+- finish B11 Environment leaf C# type identity rename when all callers can be safely replaced and validated;
+- Environment Runtime/RoomState/Core responsibility migration;
 - production-wide Task09-Task13 identifier/text cleanup;
 - TravelNavigation responsibility-aware split/rename;
-- Threat domain migration;
+- Threat runtime/event responsibility-aware migration;
 - Signals domain migration;
-- Environment domain migration;
 - remaining Social/Roost identities and policies;
 - Injury/Fear/Vengeance/Core/Presentation remaining identities;
 - final old-root-file and dead-code cleanup;
 - final R6 production naming/path guard.
 
 R6 does not claim full build, managed integration, or Rain World live validation.
-Those validations remain deferred to the final acceptance stage because this environment lacks the developer-local Rain World/BepInEx assemblies and game runtime.
-
-R6-B5/B6 update:
-- Presentation/DB_SandBurst.cs migrated from DesertBatflySandBurst with identity-only behavior-preserving changes.
-- Social/DB_SocialBond.cs migrated from DesertBatflySocialBond with identity-only behavior-preserving changes.
-- Existing R5/R6 retention guards passed after the successful migrations.
-- R6 remains in progress; no live Rain World acceptance is claimed.
-
-======================================================================
-B7-B9 — Presentation Graphics + Threat leaves
-======================================================================
-- B7: DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs; validation run 34155488424 SUCCESS.
-- B8: ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs; DCDesertBatflyThreatV1 and serialized version 1 retained; run 34155529191 SUCCESS.
-- B9: ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs; no input cheating/no held-item memory training/Arbiter+FlightMotor contracts retained; run 34155584734 SUCCESS.
-- R6 remains in progress; Threat runtime/event, Signals, Environment, remaining domains, naming cleanup and final guard remain open.
+Those validations remain deferred to final acceptance because this environment lacks the developer-local Rain World/BepInEx assemblies and game runtime.
