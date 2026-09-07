@@ -1,0 +1,41 @@
+name: Task14 R3 projectile owner one-shot
+
+on:
+  push:
+    branches:
+      - task14-r3-arbiter
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r3-projectile-owner:
+    if: github.event.head_commit.message == 'Trigger R3 projectile owner migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r3-arbiter
+          fetch-depth: 0
+
+      - name: Apply guarded R3 projectile migration
+        run: python scripts/task14_r3_projectile_owner_apply.py
+
+      - name: Validate projectile ownership
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r3_projectile_owner_apply.py
+          test ! -e .github/workflows/task14-r3-projectile-owner-one-shot.yml
+          grep -q 'ApplyProjectileEvadeOwned' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs
+          grep -q 'DB_BehaviorOwner.ImmediateProjectileEvade' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs
+          grep -q 'DB_ProjectileEvadeExecutor.TryExecute' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'TryApplyOrdinaryProjectileEvade(desert)' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'R3-CLOSED-06' docs/Discussion/Task_14_R3_FrameArbiterStatus.txt
+
+      - name: Commit R3 projectile migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Gate projectile evade behind R3 arbiter'
+          git push origin HEAD:task14-r3-arbiter
