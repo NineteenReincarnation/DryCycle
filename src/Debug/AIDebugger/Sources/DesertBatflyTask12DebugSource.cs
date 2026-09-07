@@ -18,6 +18,9 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
         bool hasSignal = DesertBatflySignalRuntime.TryGetDebugState(
             bat, out DesertBatflySignalDebugState signal);
         DesertBatflySignalInfluence influence = hasSignal ? signal.Influence : default;
+        DesertBatflySignalPacket lastPacket = hasSignal
+            ? FindSignalPacket(bat, signal.LastGeneration)
+            : null;
 
         var section = new AIDebugSection("Task 12 Social Signal Network / 社会信号")
             .Add("Active room signals / 房间信号", "Signal.ActiveRoomSignals",
@@ -26,10 +29,20 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
                 hasSignal ? signal.LastGeneration : 0)
             .Add("Last kind / 最近类型", "Signal.LastKind",
                 hasSignal ? signal.LastKind.ToString() : "None")
+            .Add("Emitter / 发送者", "Signal.Emitter",
+                EntityLabel(lastPacket?.Emitter))
+            .Add("Subject / 信号主体", "Signal.Subject",
+                EntityLabel(lastPacket?.Subject))
+            .Add("Threat / 指向威胁", "Signal.Threat",
+                CreatureLabel(lastPacket?.Threat))
+            .Add("Receiver / 接收者", "Signal.Receiver",
+                EntityLabel(bat))
             .Add("Perception / 感知通道", "Signal.LastPerception",
                 hasSignal ? signal.LastPerception.ToString() : "None")
             .Add("Hop / 跳数", "Signal.LastHop",
                 hasSignal ? signal.LastHop : 0)
+            .Add("Final consumer / 最终消费系统", "Signal.Consumer",
+                hasSignal ? ConsumerFor(signal.LastKind) : "None")
             .Add("Alarm pressure / 警报压力", "Signal.AlarmPressure",
                 influence.AlarmPressure)
             .Add("Alarm origin / 警报来源位置", "Signal.AlarmOrigin",
@@ -64,10 +77,47 @@ internal sealed class DesertBatflyTask12DebugSource : IAIDebugSource
                 ? AIDebugDecisionState.Active
                 : hasSignal ? AIDebugDecisionState.Inactive : AIDebugDecisionState.Blocked,
             hasSignal
-                ? $"{signal.LastKind}; gen={signal.LastGeneration}; hop={signal.LastHop}; {signal.LastDecision}"
+                ? $"{signal.LastKind}; gen={signal.LastGeneration}; hop={signal.LastHop}; consumer={ConsumerFor(signal.LastKind)}; {signal.LastDecision}"
                 : "no realized Task12 state",
             "DesertBatflySignalRuntime"));
 
         return snapshot;
+    }
+
+    private static DesertBatflySignalPacket FindSignalPacket(DesertBatfly bat, int generation)
+    {
+        DesertBatflySignalRoomRuntime.RoomState room =
+            DesertBatflySignalRoomRuntime.For(bat?.room);
+        if (room == null) return null;
+        for (int i = 0; i < room.ActiveSignals.Count; i++)
+        {
+            DesertBatflySignalPacket packet = room.ActiveSignals[i];
+            if (packet != null && packet.Generation == generation)
+                return packet;
+        }
+        return null;
+    }
+
+    private static string ConsumerFor(DesertBatflySignalKind kind) => kind switch
+    {
+        DesertBatflySignalKind.AlarmFlutter => "DesertBatflyAI danger / Task10 cancel",
+        DesertBatflySignalKind.DistressCall => "SocialBond + Intimidation rescue/support motivation",
+        DesertBatflySignalKind.RallySignal => "Intimidation supporter candidacy",
+        DesertBatflySignalKind.RoostCall => "Task10 RoostInvitation / ChainSocialization",
+        DesertBatflySignalKind.HarassSignal => "DesertBatflyAI social harass target interest",
+        DesertBatflySignalKind.SafeSignal => "Task12 signal concern recovery",
+        _ => "None"
+    };
+
+    private static string EntityLabel(DesertBatfly bat)
+    {
+        if (bat?.abstractCreature == null) return "— / expired";
+        return bat.abstractCreature.ID.ToString();
+    }
+
+    private static string CreatureLabel(Creature creature)
+    {
+        if (creature?.abstractCreature == null) return "—";
+        return creature.abstractCreature.ID.ToString();
     }
 }
