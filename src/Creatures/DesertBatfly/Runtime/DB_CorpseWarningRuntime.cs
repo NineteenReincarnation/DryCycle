@@ -1,43 +1,60 @@
+using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Owns the realized death-site warning objects created by fear/mortality reactions.
-/// Room ownership still drives ordinary Update/Destroy, while this registry guarantees
-/// Disable/Reset can actively destroy every surviving transient object instead of merely
-/// forgetting how to reach it.
+/// Lifecycle owner for realized death-site warning objects created by Intimidation.
+///
+/// Intimidation still owns warning behavior. This registry owns only teardown: mortality
+/// consumers weakly remember rooms that may receive a warning, and Reset/Disable destroys
+/// any surviving CorpseWarning already inserted into those Room update lists. No Room is
+/// kept alive solely by this cleanup registry.
 /// </summary>
 internal static class DB_CorpseWarningRuntime
 {
-    private static readonly HashSet<UpdatableAndDeletable> active = new();
+    private sealed class RoomStamp { }
 
-    internal static int ActiveCount => active.Count;
+    private static ConditionalWeakTable<Room, RoomStamp> knownRooms = new();
+    private static readonly List<WeakReference> rooms = new(8);
 
-    internal static void Register(UpdatableAndDeletable warning)
+    internal static int TrackedRoomCount => rooms.Count;
+
+    internal static void TrackRoom(Room room)
     {
-        if (warning != null)
-            active.Add(warning);
-    }
-
-    internal static void Unregister(UpdatableAndDeletable warning)
-    {
-        if (warning != null)
-            active.Remove(warning);
+        if (room == null || knownRooms.TryGetValue(room, out _)) return;
+        knownRooms.Add(room, new RoomStamp());
+        rooms.Add(new WeakReference(room));
     }
 
     internal static void Reset()
     {
-        if (active.Count == 0) return;
-
-        UpdatableAndDeletable[] snapshot = new UpdatableAndDeletable[active.Count];
-        active.CopyTo(snapshot);
-        active.Clear();
-
-        for (int i = 0; i < snapshot.Length; i++)
+        for (int i = rooms.Count - 1; i >= 0; i--)
         {
-            try { snapshot[i]?.Destroy(); }
-            catch { }
+            Room room = rooms[i].Target as Room;
+            if (room?.updateList == null) continue;
+
+            // Snapshot the current list because Room removes slated objects during its own
+            // update pass. Destroy() only marks them, preserving Rain World's normal removal.
+            for (int j = room.updateList.Count - 1; j >= 0; j--)
+            {
+                UpdatableAndDeletable item = room.updateList[j];
+                if (!IsCorpseWarning(item) || item.slatedForDeletetion) continue;
+                try { item.Destroy(); }
+                catch { }
+            }
         }
+
+        rooms.Clear();
+        knownRooms = new ConditionalWeakTable<Room, RoomStamp>();
+    }
+
+    internal static bool IsCorpseWarning(UpdatableAndDeletable item)
+    {
+        Type type = item?.GetType();
+        return type != null &&
+               type.DeclaringType == typeof(DesertBatflyIntimidation) &&
+               type.Name == "CorpseWarning";
     }
 }
