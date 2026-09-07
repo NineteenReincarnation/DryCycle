@@ -10,7 +10,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Applies Task13 same-room Home/Hive/Burrow drives through native FlyAI Dijkstra and
 /// Burrow behavior. It never owns cross-room travel and never writes body velocity.
 /// Also preserves compatible secondary LightRain moisture when Fog/Heat/etc. owns the
-/// dominant environmental profile.
+/// dominant environmental profile. HeavyRain moisture is handled by Behavior directly
+/// so HeavyRain + LightRain family overlap cannot double-count relief.
 /// </summary>
 internal static class DesertBatflyEnvironmentalSurvivalBridge
 {
@@ -77,7 +78,7 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
 
         // Moisture is physiological bookkeeping rather than movement ownership, so a
         // higher-priority threat/travel frame does not erase rain that is physically
-        // touching the bat. Primary LightRain is already handled inside Behavior;
+        // touching the bat. Primary LightRain and HeavyRain are handled inside Behavior;
         // this path exists only when another compatible weather owns the room profile.
         ApplySecondaryLightRainMoisture(bat);
 
@@ -134,7 +135,7 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
         DesertBatflyEnvironmentalRoomRuntime.RoomState roomState =
             DesertBatflyEnvironmentalRoomRuntime.For(bat.room);
         if (roomState == null ||
-            roomState.Context.Weather == DesertBatflyEnvironmentalWeather.LightRain ||
+            roomState.Context.Weather is DesertBatflyEnvironmentalWeather.LightRain or DesertBatflyEnvironmentalWeather.HeavyRain ||
             roomState.WeatherAxes.LightRainIntensity <= 0f)
             return;
 
