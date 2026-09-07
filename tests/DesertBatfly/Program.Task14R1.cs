@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 
 internal static partial class Program
@@ -15,6 +16,12 @@ internal static partial class Program
             "DryCycle.Creatures.DesertBatfly.DB_CaptureKind", true);
         Type mortalityAttribution = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_MortalityAttribution", true);
+        Type damageEventType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_DamageEvent", true);
+        Type captureEventType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_CaptureEvent", true);
+        Type mortalityEventType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_MortalityEvent", true);
 
         Check(Enum.GetNames(eventKind).Length == 3 &&
               Enum.IsDefined(eventKind, "Damage") &&
@@ -28,8 +35,9 @@ internal static partial class Program
         Check(Enum.GetNames(mortalityAttribution).Length == 3 &&
               Enum.IsDefined(mortalityAttribution, "Unattributed") &&
               Enum.IsDefined(mortalityAttribution, "RecentDamage") &&
-              Enum.IsDefined(mortalityAttribution, "ActiveCapture"),
-            "Task14 R1 mortality attribution has explicit bounded sources");
+              Enum.IsDefined(mortalityAttribution, "ExplicitConsumption") &&
+              !Enum.IsDefined(mortalityAttribution, "ActiveCapture"),
+            "Task14 R1 mortality attribution uses real damage/consume facts and never equates an active grasp with a kill");
 
         Check(hub.GetEvent("Damage", Flags) != null &&
               hub.GetEvent("Capture", Flags) != null &&
@@ -39,7 +47,20 @@ internal static partial class Program
               hub.GetMethod("CreatureDie", Flags) != null &&
               hub.GetMethod("FlyGrabbed", Flags) != null &&
               hub.GetMethod("TongueUpdate", Flags) != null,
-            "Task14 R1 EventHub is the new Rain World fact observer for damage/capture/mortality");
+            "Task14 R1 EventHub is the sole new Rain World fact observer for damage/capture/mortality");
+        Check(hub.GetMethod("RecordConsumptionAttribution", Flags) != null,
+            "Task14 R1 exposes an explicit vanilla-eating attribution fact instead of inferring killer from a grasp");
+
+        foreach (Type semanticType in new[] { damageEventType, captureEventType, mortalityEventType })
+            Check(semanticType.GetField("Sequence", Flags) != null,
+                "Task14 R1 semantic event has a unique sequence: " + semanticType.Name);
+        Check(damageEventType.GetField("Lethal", Flags) != null,
+            "Task14 R1 DamageEvent records the confirmed post-vanilla lethal result");
+        Check(mortalityEventType.GetField("DamageType", Flags) != null &&
+              mortalityEventType.GetField("Damage", Flags) != null &&
+              mortalityEventType.GetField("Stun", Flags) != null &&
+              mortalityEventType.GetField("WasConsumed", Flags) != null,
+            "Task14 R1 MortalityEvent carries the canonical causal facts needed by downstream domains");
 
         Type captureSession = hub.GetNestedType("CaptureSession", Flags);
         object session = Activator.CreateInstance(captureSession, true);
@@ -60,12 +81,16 @@ internal static partial class Program
         bool duplicateDeath = (bool)markMortality.Invoke(mortalityState, Array.Empty<object>());
         Check(firstDeath && !duplicateDeath,
             "Task14 R1 mortality semantic event can publish only once per victim runtime state");
+        Check(victimState.GetField("PendingMortality", Flags) != null &&
+              victimState.GetField("ViolenceDepth", Flags) != null,
+            "Task14 R1 buffers re-entrant death so lethal damage is delivered Damage -> Mortality rather than double-interpreted");
 
         MethodInfo recent = hub.GetMethod("WithinAttributionWindow", Flags);
-        bool atBoundary = (bool)recent.Invoke(null, new object[] { 360, 100, 260 });
-        bool expired = (bool)recent.Invoke(null, new object[] { 361, 100, 260 });
-        bool timeReversed = (bool)recent.Invoke(null, new object[] { 99, 100, 260 });
-        bool unavailable = (bool)recent.Invoke(null, new object[] { int.MinValue, 100, 260 });
+        int mortalityWindow = (int)hub.GetField("MortalityAttributionTicks", Flags).GetRawConstantValue();
+        bool atBoundary = (bool)recent.Invoke(null, new object[] { 100 + mortalityWindow, 100, mortalityWindow });
+        bool expired = (bool)recent.Invoke(null, new object[] { 101 + mortalityWindow, 100, mortalityWindow });
+        bool timeReversed = (bool)recent.Invoke(null, new object[] { 99, 100, mortalityWindow });
+        bool unavailable = (bool)recent.Invoke(null, new object[] { int.MinValue, 100, mortalityWindow });
         Check(atBoundary && !expired && !timeReversed && !unavailable,
             "Task14 R1 mortality attribution window is bounded and monotonic");
 
@@ -95,6 +120,15 @@ internal static partial class Program
               MethodCallOffset(creature.GetMethod("Grabbed", Flags), intimidation, "BroadcastPredatorCapture") < 0,
             "Task14 R1 Creature no longer publishes mortality/predator-capture semantics directly");
 
+        InterfaceMapping edible = creature.GetInterfaceMap(typeof(IPlayerEdible));
+        MethodInfo bitByPlayer = null;
+        for (int i = 0; i < edible.InterfaceMethods.Length; i++)
+            if (edible.InterfaceMethods[i].Name == "BitByPlayer")
+                bitByPlayer = edible.TargetMethods[i];
+        Check(bitByPlayer != null &&
+              MethodCallOffset(bitByPlayer, hub, "RecordConsumptionAttribution") >= 0,
+            "Task14 R1 player eating reports its explicit lethal action to the canonical mortality authority");
+
         Type peach = mod.GetType(
             "DryCycle.WatcherExts.PeachLizard.PeachLizardDesertBatflyPredation", true);
         Check(MethodCallOffset(peach.GetMethod("LizardTongue_Update", Flags), intimidation, "BroadcastPredatorCapture") < 0,
@@ -111,6 +145,27 @@ internal static partial class Program
               MethodCallOffset(mortalityConsumer, intimidation, "BroadcastPredatorKill") >= 0,
             "Task14 R1 Colony and Intimidation consume the same canonical MortalityEvent killer");
 
+        Type threatRuntime = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type threatState = threatRuntime.GetNestedType("RuntimeState", Flags);
+        Check(threatRuntime.GetMethod("DamageEvent", Flags) != null &&
+              threatRuntime.GetMethod("CaptureEvent", Flags) != null &&
+              threatRuntime.GetMethod("MortalityEvent", Flags) != null,
+            "Task14 R1 ThreatRuntime consumes canonical damage/capture/mortality facts");
+        Check(threatRuntime.GetMethod("CreatureViolence", Flags) == null &&
+              threatRuntime.GetMethod("CreatureDie", Flags) == null &&
+              threatRuntime.GetMethod("FlyGrabbed", Flags) == null,
+            "Task14 R1 ThreatRuntime no longer owns duplicate raw damage/death/grasp hooks");
+        Check(threatState.GetField("RecentDamagePlayer", Flags) == null &&
+              threatState.GetField("RecentDamageSourceObject", Flags) == null &&
+              threatState.GetField("RecentDamagePlayerSlot", Flags) != null &&
+              threatState.GetField("RecentDamageTick", Flags) != null,
+            "Task14 R1 ThreatRuntime keeps only short-lived learning context, not an independent killer attribution cache");
+        Check((int)threatRuntime.GetField("RecentDamageMemoryTicks", Flags).GetRawConstantValue() == mortalityWindow,
+            "Task14 R1 Threat kill-evidence window shares the EventHub mortality attribution duration");
+        Check(MethodCallOffset(threatRuntime.GetMethod("MortalityEvent", Flags), threatRuntime, "Forget") >= 0,
+            "Task14 R1 ThreatRuntime clears its own transient state only after consuming canonical mortality");
+
         Type signalIntegration = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", true);
         MethodInfo signalEnable = signalIntegration.GetMethod("Enable", Flags);
@@ -123,11 +178,26 @@ internal static partial class Program
               MethodCallOffset(signalDisable, hub, "remove_Capture") >= 0,
             "Task14 R1 Task12 capture signals subscribe to the canonical CaptureEvent lifecycle");
 
+        Type corpseWarnings = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_CorpseWarningRuntime", true);
+        Check(corpseWarnings.GetMethod("TrackRoom", Flags) != null &&
+              corpseWarnings.GetMethod("Reset", Flags) != null &&
+              corpseWarnings.GetMethod("IsCorpseWarning", Flags) != null,
+            "Task14 R1 has a dedicated transient CorpseWarning teardown owner");
+        Check(MethodCallOffset(mortalityConsumer, corpseWarnings, "TrackRoom") >= 0 &&
+              MethodCallOffset(hooksEnable, corpseWarnings, "Reset") >= 0 &&
+              MethodCallOffset(hooksDisable, corpseWarnings, "Reset") >= 0,
+            "Task14 R1 mortality rooms are weakly tracked and CorpseWarning teardown runs on enable/disable lifecycle boundaries");
+        Check(corpseWarnings.GetField("active", Flags) == null,
+            "Task14 R1 CorpseWarning cleanup does not strongly retain transient warning objects or their Rooms");
+
         Check(hub.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              hub.Name.IndexOf("Task", StringComparison.OrdinalIgnoreCase) < 0,
-            "Task14 R1 new production authority follows DB_ domain naming without TaskXX architecture");
+              corpseWarnings.Name.StartsWith("DB_", StringComparison.Ordinal) &&
+              new[] { hub.Name, corpseWarnings.Name }.All(n =>
+                  n.IndexOf("Task", StringComparison.OrdinalIgnoreCase) < 0),
+            "Task14 R1 new production authorities follow DB_ domain naming without TaskXX architecture");
 
         Console.WriteLine(
-            "Task14 R1: EventHub roots, capture-session exactly-once, canonical mortality attribution, Creature/Watcher root removal, Colony/Fear/Signal consumers and DB_ naming verified.");
+            "Task14 R1: sequenced EventHub roots, causal Damage->Mortality ordering, explicit consumption attribution, exactly-once capture, Threat/Colony/Fear/Signal consumers, and bounded CorpseWarning teardown verified.");
     }
 }
