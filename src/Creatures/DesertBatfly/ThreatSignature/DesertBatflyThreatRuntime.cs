@@ -67,7 +67,7 @@ internal static class DesertBatflyThreatRuntime
     internal const int ExplosionCueTicks = 150;
     internal const int GrabCueTicks = 100;
     internal const int FormalAggressionMemoryTicks = 220;
-    internal const int RecentDamageMemoryTicks = 260;
+    internal const int RecentDamageMemoryTicks = DB_EventHub.MortalityAttributionTicks;
     internal const int PursuitMinimumTicks = 48;
     internal const int RetreatMinimumTicks = 64;
     internal const int NonAggressionEncounterTicks = 260;
@@ -82,9 +82,9 @@ internal static class DesertBatflyThreatRuntime
         internal int CueRefresh;
         internal DesertBatflyThreatCue Cue;
 
+        // Short-lived Threat evidence cache only. Mortality attribution belongs exclusively
+        // to DB_EventHub and is never reconstructed from these fields.
         internal int RecentDamagePlayerSlot = -1;
-        internal Player RecentDamagePlayer;
-        internal PhysicalObject RecentDamageSourceObject;
         internal int RecentDamageTick = int.MinValue;
         internal DesertBatflyThreatEvidence RecentDamageEvidence;
 
@@ -231,9 +231,9 @@ internal static class DesertBatflyThreatRuntime
         if (enabled) return;
         enabled = true;
         Reset();
-        On.Creature.Violence += CreatureViolence;
-        On.Creature.Die += CreatureDie;
-        On.Fly.Grabbed += FlyGrabbed;
+        DB_EventHub.Damage += DamageEvent;
+        DB_EventHub.Capture += CaptureEvent;
+        DB_EventHub.Mortality += MortalityEvent;
         On.Weapon.Thrown += WeaponThrown;
         On.Explosion.Update += ExplosionUpdate;
         On.FirecrackerPlant.PopLump += FirecrackerPopLump;
@@ -243,9 +243,9 @@ internal static class DesertBatflyThreatRuntime
     {
         if (!enabled) return;
         enabled = false;
-        On.Creature.Violence -= CreatureViolence;
-        On.Creature.Die -= CreatureDie;
-        On.Fly.Grabbed -= FlyGrabbed;
+        DB_EventHub.Damage -= DamageEvent;
+        DB_EventHub.Capture -= CaptureEvent;
+        DB_EventHub.Mortality -= MortalityEvent;
         On.Weapon.Thrown -= WeaponThrown;
         On.Explosion.Update -= ExplosionUpdate;
         On.FirecrackerPlant.PopLump -= FirecrackerPopLump;
@@ -327,131 +327,140 @@ internal static class DesertBatflyThreatRuntime
         return true;
     }
 
-    private static void CreatureViolence(
-        On.Creature.orig_Violence orig,
-        Creature self,
-        BodyChunk source,
-        Vector2? momentum,
-        BodyChunk hitChunk,
-        Appendage.Pos appendage,
-        Creature.DamageType type,
-        float damage,
-        float stunBonus)
+    private static void DamageEvent(DB_DamageEvent damageEvent)
     {
-        if (self is not DesertBatfly bat)
-        {
-            orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
-            return;
-        }
+        DesertBatfly bat = damageEvent.Victim;
+        if (bat == null) return;
 
-        PhysicalObject sourceObject = source?.owner;
-        Player player = ResolvePlayer(sourceObject, null);
-        DesertBatflyThreatEvidence evidence = default;
+        Player player = damageEvent.Instigator as Player ??
+                        ResolvePlayer(damageEvent.SourceObject, null);
+        if (player == null) return;
+
+        bool projectile = damageEvent.SourceObject is Weapon weapon &&
+                          ResolvePlayer(weapon, null) == player;
+        DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.Classify(
+            damageEvent.SourceObject,
+            damageEvent.DamageType,
+            damageEvent.Damage,
+            damageEvent.Stun,
+            projectile);
+        if (!evidence.Any) return;
+
+        AddEvidence(bat, player, evidence, 1f, "direct hit", false);
         RuntimeState state = StateFor(bat);
-        int clock = bat.room?.game?.clock ?? int.MinValue;
+        state.RecentDamagePlayerSlot = PlayerSlot(player);
+        state.RecentDamageTick = damageEvent.Clock;
+        state.RecentDamageEvidence = evidence;
 
-        if (player != null)
+        if (damageEvent.DamageType == Creature.DamageType.Electric)
         {
-            bool projectile = sourceObject is Weapon weapon && ResolvePlayer(weapon, null) == player;
-            evidence = DesertBatflyThreatAdapterRegistry.Classify(
-                sourceObject, type, damage, stunBonus, projectile);
-            if (evidence.Any)
-            {
-                AddEvidence(bat, player, evidence, 1f, "direct hit", false);
-                state.RecentDamagePlayer = player;
-                state.RecentDamagePlayerSlot = PlayerSlot(player);
-                state.RecentDamageSourceObject = sourceObject;
-                state.RecentDamageTick = clock;
-                state.RecentDamageEvidence = evidence;
-                if (type == Creature.DamageType.Electric)
-                {
-                    state.AcuteShockTimer = Mathf.Max(state.AcuteShockTimer, 150);
-                    state.AcuteInstigator = player;
-                }
-            }
-        }
-
-        bool wasDead = bat.dead;
-        orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
-
-        if (!wasDead && !bat.dead && player != null && evidence.Any)
-        {
-            var threatEvent = new DesertBatflyThreatEvent(
-                player,
-                sourceObject,
-                bat,
-                bat.mainBodyChunk?.pos ?? Vector2.zero,
-                evidence,
-                true,
-                false,
-                stunBonus,
-                "witnessed hit");
-            BroadcastWitnessEvidence(threatEvent, 0.48f);
-        }
-    }
-
-    private static void CreatureDie(On.Creature.orig_Die orig, Creature self)
-    {
-        if (self is not DesertBatfly bat)
-        {
-            orig(self);
-            return;
-        }
-
-        bool wasDead = bat.dead;
-        RuntimeState state = StateFor(bat);
-        Room room = bat.room;
-        int clock = room?.game?.clock ?? int.MinValue;
-        Player killer = state.RecentDamagePlayer;
-        bool attributed = killer != null && state.RecentDamagePlayerSlot == PlayerSlot(killer) &&
-            state.RecentDamageTick != int.MinValue && clock != int.MinValue &&
-            clock >= state.RecentDamageTick && clock - state.RecentDamageTick <= RecentDamageMemoryTicks;
-        bool counterKill = attributed &&
-            state.FormalAggressionPlayerSlot == state.RecentDamagePlayerSlot &&
-            state.FormalAggressionTick != int.MinValue && clock >= state.FormalAggressionTick &&
-            clock - state.FormalAggressionTick <= FormalAggressionMemoryTicks;
-        Vector2 deathPosition = bat.mainBodyChunk?.pos ?? Vector2.zero;
-        DesertBatflyThreatEvidence killEvidence = state.RecentDamageEvidence;
-        if (counterKill)
-            killEvidence.Merge(DesertBatflyThreatAdapterRegistry.CounterKillEvidence());
-
-        orig(self);
-
-        if (wasDead || !bat.dead || !attributed || killer == null) return;
-        var threatEvent = new DesertBatflyThreatEvent(
-            killer,
-            state.RecentDamageSourceObject,
-            bat,
-            deathPosition,
-            killEvidence,
-            true,
-            true,
-            0f,
-            counterKill ? "counter kill" : "player kill");
-        BroadcastWitnessEvidence(threatEvent, 0.72f);
-
-        if (room != null && RoomFor(room).RecordCasualty(killer, clock))
-            BroadcastMassCasualty(room, killer, deathPosition);
-    }
-
-    private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
-    {
-        if (self is DesertBatfly bat && grasp?.grabber is Player player && !bat.dead)
-        {
-            AddEvidence(
-                bat,
-                player,
-                DesertBatflyThreatAdapterRegistry.GrabEvidence(),
-                1f,
-                "player grab",
-                false);
-            RuntimeState state = StateFor(bat);
-            state.AcuteCaptureTimer = Mathf.Max(state.AcuteCaptureTimer, 150);
+            state.AcuteShockTimer = Mathf.Max(state.AcuteShockTimer, 150);
             state.AcuteInstigator = player;
-            if (bat.room?.game != null)
-                RoomFor(bat.room).RecordGrab(player, bat.room.game.clock);
         }
-        orig(self, grasp);
+
+        // A lethal hit is followed by the canonical MortalityEvent. Broadcasting a second
+        // generic witnessed-hit event here would train the same fact twice.
+        if (damageEvent.Lethal || bat.dead || bat.slatedForDeletetion) return;
+
+        var threatEvent = new DesertBatflyThreatEvent(
+            player,
+            damageEvent.SourceObject,
+            bat,
+            damageEvent.Position,
+            evidence,
+            true,
+            false,
+            damageEvent.Stun,
+            "witnessed hit");
+        BroadcastWitnessEvidence(threatEvent, 0.48f);
+    }
+
+    private static void CaptureEvent(DB_CaptureEvent captureEvent)
+    {
+        DesertBatfly bat = captureEvent.Victim;
+        if (bat == null || bat.dead || captureEvent.Captor is not Player player)
+            return;
+
+        AddEvidence(
+            bat,
+            player,
+            DesertBatflyThreatAdapterRegistry.GrabEvidence(),
+            1f,
+            "player capture",
+            false);
+        RuntimeState state = StateFor(bat);
+        state.AcuteCaptureTimer = Mathf.Max(state.AcuteCaptureTimer, 150);
+        state.AcuteInstigator = player;
+        if (bat.room != null && captureEvent.Clock != int.MinValue)
+            RoomFor(bat.room).RecordGrab(player, captureEvent.Clock);
+    }
+
+    private static void MortalityEvent(DB_MortalityEvent mortalityEvent)
+    {
+        DesertBatfly bat = mortalityEvent.Victim;
+        if (bat == null) return;
+
+        RuntimeState state = StateFor(bat);
+        try
+        {
+            if (mortalityEvent.Killer is not Player killer)
+                return;
+
+            int slot = PlayerSlot(killer);
+            if (!ValidSlot(slot)) return;
+
+            bool counterKill =
+                state.FormalAggressionPlayerSlot == slot &&
+                Recent(state.FormalAggressionTick, mortalityEvent.Clock, FormalAggressionMemoryTicks);
+
+            DesertBatflyThreatEvidence killEvidence = default;
+            if (state.RecentDamagePlayerSlot == slot &&
+                Recent(state.RecentDamageTick, mortalityEvent.Clock, RecentDamageMemoryTicks))
+            {
+                killEvidence = state.RecentDamageEvidence;
+            }
+
+            if (!killEvidence.Any && mortalityEvent.WasConsumed)
+                killEvidence = DesertBatflyThreatAdapterRegistry.GrabEvidence();
+
+            if (!killEvidence.Any && mortalityEvent.SourceObject != null)
+            {
+                bool projectile = mortalityEvent.SourceObject is Weapon weapon &&
+                                  ResolvePlayer(weapon, null) == killer;
+                killEvidence = DesertBatflyThreatAdapterRegistry.Classify(
+                    mortalityEvent.SourceObject,
+                    mortalityEvent.DamageType,
+                    mortalityEvent.Damage,
+                    mortalityEvent.Stun,
+                    projectile);
+            }
+
+            if (counterKill)
+                killEvidence.Merge(DesertBatflyThreatAdapterRegistry.CounterKillEvidence());
+
+            var threatEvent = new DesertBatflyThreatEvent(
+                killer,
+                mortalityEvent.SourceObject,
+                bat,
+                mortalityEvent.Position,
+                killEvidence,
+                true,
+                true,
+                0f,
+                counterKill ? "counter kill" :
+                    mortalityEvent.WasConsumed ? "player consumption kill" : "player kill");
+            BroadcastWitnessEvidence(threatEvent, 0.72f);
+
+            Room room = bat.room;
+            if (room != null && RoomFor(room).RecordCasualty(killer, mortalityEvent.Clock))
+                BroadcastMassCasualty(room, killer, mortalityEvent.Position);
+        }
+        finally
+        {
+            // This domain owns its realized state cleanup. Generic mortality consumers do
+            // not clear it before the canonical kill evidence has been processed.
+            Forget(bat);
+        }
     }
 
     private static void WeaponThrown(
