@@ -30,7 +30,7 @@ internal static partial class Program
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
-        Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyGraphics", true);
+        Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Graphics", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
@@ -112,7 +112,7 @@ internal static partial class Program
 
         MethodInfo draw = graphics.GetMethod("DrawSprites", Flags);
         Check(MethodCallsTask12(draw, runtime, "TryGetDisplay"),
-            "Task12 signal display is visible through DesertBatflyGraphics without a new movement controller");
+            "Task12 signal display is visible through DB_Graphics without a new movement controller");
 
         Type debug = mod.GetType("DryCycle.Debugging.AI.DB_SignalDebugSource", true);
         Check(debug != null,

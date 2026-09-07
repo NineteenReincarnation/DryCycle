@@ -43,7 +43,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void InitiateGraphicsModule()
     {
-        if (graphicsModule == null) graphicsModule = new DesertBatflyGraphics(this);
+        if (graphicsModule == null) graphicsModule = new DB_Graphics(this);
     }
 
     public override void NewRoom(Room newRoom)

@@ -6,7 +6,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 // Keep the complete vanilla Batfly animation/pose pipeline. Desert Batfly only
 // changes scale, palette and adds lightweight markings/spikes on top of it.
-internal sealed class DesertBatflyGraphics : FlyGraphics
+internal sealed class DB_Graphics : FlyGraphics
 {
     private readonly struct PatternMark
     {
@@ -38,7 +38,7 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
     private int PatternStart => VanillaSpriteCount;
     private int SpikeStart => PatternStart + patterns.Length;
 
-    internal DesertBatflyGraphics(DesertBatfly owner) : base(owner)
+    internal DB_Graphics(DesertBatfly owner) : base(owner)
     {
         desert = owner;
 
