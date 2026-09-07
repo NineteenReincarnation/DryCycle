@@ -21,10 +21,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private bool resolvingRockViolence;
     private Player playerHolder;
 
-    private Creature recentLethalDamager;
-    private int recentLethalDamageTicks;
-    private float recentLethalThreatScale;
-
     private float sandStruggleMeter, sandSpitThreshold;
     private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
 
@@ -71,11 +67,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         Vector2 previousFlightVelocity = mainBodyChunk?.vel ?? Vector2.zero;
         TrackPlayerRelease();
         if (sandSpitCooldown > 0) sandSpitCooldown--;
-        if (recentLethalDamageTicks > 0 && --recentLethalDamageTicks == 0)
-        {
-            recentLethalDamager = null;
-            recentLethalThreatScale = 0f;
-        }
         if (!dead)
         {
             DesertState.TickTrauma();
@@ -116,9 +107,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        // Die() owns the one-shot mortality broadcast and Forget(). Corpses must not
-        // recreate a runtime morale state merely because persistent Trauma remains in
-        // CreatureState; doing so would keep activeStates non-zero until corpse cleanup.
+        // DB_EventHub owns one-shot mortality facts. Corpses must not recreate a runtime
+        // morale state merely because persistent Trauma remains in CreatureState.
         bool extremeVengeance = false;
         if (!dead)
         {
@@ -269,18 +259,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         // Preserve an intact Fly chain until Die() has captured its witnesses. A hit
         // that does not kill receives the ordinary Threatened transition afterwards.
-        if (supportedLethalThreat)
-        {
-            recentLethalDamager = attacker;
-            recentLethalDamageTicks = 240;
-            recentLethalThreatScale = attacker is Player
-                ? (source?.owner is Spear ? 1f : 0.82f)
-                : 1.05f;
-        }
-        else
-        {
+        if (!supportedLethalThreat)
             DesertAI.Threatened(attacker, true);
-        }
 
         float healthBefore = DesertState.health;
         resolvingRockViolence = rockHit;
@@ -315,20 +295,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
                 DesertAI.PlayerGrabbed(player);
             }
         }
-        else if (grasp?.grabber is Lizard lizard &&
-                 DesertBatflyIntimidation.IsSupportedLethalThreat(lizard))
-        {
-            if (!dead)
-            {
-                // A living Peach capture is a real predator event. Picking up an already
-                // dead Desert Batfly is scavenging: it should enter the lizard's ordinary
-                // ReturnPrey pipeline without manufacturing a second predator fear event.
-                DesertBatflyIntimidation.BroadcastPredatorCapture(this, lizard, null);
-                DesertAI.Threatened(lizard, true);
-            }
-        }
         else if (grasp?.grabber != null && grasp.grabber is not Fly)
         {
+            // Capture fear/signals are semantic-event consumers. Creature retains only its
+            // immediate native danger response; DB_EventHub dedupes tongue -> grasp transfer.
             DesertAI.Threatened(grasp.grabber, true);
         }
 
@@ -342,16 +312,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (DesertState.MealConsumed || bites <= 0 || grasp?.grabber is not Player player) return;
         if (SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) < 0) return;
 
-        // Vanilla Fly.BitByPlayer calls Die() on the first bite. Attribute that live
-        // consumption before entering vanilla so nearby bats treat visibly eating a
-        // flockmate as a genuine player kill rather than an unexplained death.
-        if (!dead)
-        {
-            recentLethalDamager = player;
-            recentLethalDamageTicks = 2;
-            recentLethalThreatScale = 0.90f;
-        }
-
+        // The active player capture is already known by DB_EventHub. If vanilla Fly eating
+        // performs the live -> dead transition, MortalityEvent attributes it to that hold.
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
         base.BitByPlayer(grasp, eu);
         mealFood = 2;
@@ -381,19 +343,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
 
         bool wasDead = dead;
-        Creature killer = !wasDead && recentLethalDamageTicks > 0
-            ? recentLethalDamager
-            : null;
-        float threatScale = recentLethalThreatScale > 0f
-            ? recentLethalThreatScale
-            : 0.82f;
-        Vector2 deathPosition = mainBodyChunk?.pos ?? Vector2.zero;
-        DesertBatfly[] chainWitnesses = !wasDead
-            ? DesertBatflyIntimidation.SnapshotChainWitnesses(this)
-            : System.Array.Empty<DesertBatfly>();
-        bool revengeFailed = !wasDead &&
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
-
         playerHolder = null;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
@@ -401,58 +350,16 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         Emergence?.Cancel();
         base.Die();
 
-        // Broadcast only after the live -> dead transition is confirmed. The chain
-        // snapshot above preserves exact eyewitnesses without creating a false death
-        // event if an external compatibility hook unexpectedly prevents death.
-        if (!wasDead && dead && killer != null)
-        {
-            if (killer is Player playerKiller)
-            {
-                DesertBatflyIntimidation.BroadcastPlayerKill(
-                    this,
-                    playerKiller,
-                    deathPosition,
-                    chainWitnesses,
-                    threatScale,
-                    revengeFailed);
-            }
-            else if (killer is Lizard lizardKiller)
-            {
-                DesertBatflyIntimidation.BroadcastPredatorKill(
-                    this,
-                    lizardKiller,
-                    deathPosition,
-                    chainWitnesses,
-                    threatScale,
-                    revengeFailed);
-            }
-        }
-
+        // DB_EventHub observes the confirmed live -> dead transition inside base.Die(),
+        // owns killer attribution and dispatches all mortality-domain reactions once.
         if (!wasDead && dead)
-        {
             injury?.ClearTransient();
-            if (!DesertBatflyIntimidation.IsSupportedLethalThreat(killer) && room != null)
-                foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
-                    if (member is DesertBatfly observer && observer != this &&
-                        (System.Array.IndexOf(chainWitnesses, observer) >= 0 ||
-                         (Vector2.Distance(observer.mainBodyChunk.pos, deathPosition) <= 180f &&
-                          room.VisualContact(observer.mainBodyChunk.pos, deathPosition))))
-                        DesertBatflySocialBond.OnBondPartnerDeath(observer, this, killer);
-            DesertBatflyIntimidation.Forget(this);
-        }
-
-        recentLethalDamager = null;
-        recentLethalDamageTicks = 0;
-        recentLethalThreatScale = 0f;
     }
 
     public override void Destroy()
     {
         injury?.ClearTransient();
         playerHolder = null;
-        recentLethalDamager = null;
-        recentLethalDamageTicks = 0;
-        recentLethalThreatScale = 0f;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
         DesertAI?.CancelAttack();
