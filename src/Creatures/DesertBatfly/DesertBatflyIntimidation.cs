@@ -233,6 +233,13 @@ internal static class DesertBatflyIntimidation
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
+    internal static bool IsVengeanceAvenger(DesertBatfly bat)
+    {
+        return bat != null && states.TryGetValue(bat, out State state) && state.Active &&
+               state.Vengeance != VengeanceMode.None &&
+               state.Role == VengeanceParticipation.Avenger;
+    }
+
     /// <summary>
     /// Read-only R3 query for current Vengeance facts. It never creates State and never
     /// changes Vengeance commitment; consumers no longer reflect into this runtime.
@@ -576,6 +583,12 @@ internal static class DesertBatflyIntimidation
         float threatScale,
         EventKind kind)
     {
+        if (tier != 0)
+        {
+            TraceIndirectFearSuppressed(bat, tier);
+            return;
+        }
+
         State state = StateFor(bat);
         FearMemory memory = threat is Player ? state.PlayerFear : state.PredatorFear;
         int identity = ThreatIdentity(threat);
@@ -667,7 +680,27 @@ internal static class DesertBatflyIntimidation
             ClearVengeance(state);
         }
 
-        bat.DesertAI.Threatened(threat, false);
+        bat.DesertAI.ThreatenedAt(threat, eventPosition, false, false);
+        DesertBatflySignalRuntime.EmitAlarm(
+            bat,
+            threat,
+            eventPosition,
+            Custom.DirVec(bat.mainBodyChunk.pos, eventPosition),
+            Mathf.Clamp01(0.62f + Mathf.Clamp(threatScale, 0f, 1.5f) * 0.20f),
+            "direct Intimidation witness emits sole indirect Task12 Alarm generation");
+    }
+
+    private static void TraceIndirectFearSuppressed(DesertBatfly bat, int tier)
+    {
+        if (bat?.abstractCreature == null ||
+            !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(bat.abstractCreature))
+            return;
+        DryCycle.Debugging.AI.AIDebugTrace.Record(
+            bat.abstractCreature,
+            DryCycle.Debugging.AI.AIDebugEventCategory.Social,
+            "Task12LegacyIndirectFearSuppressed",
+            $"tier={tier}",
+            "Secondary/Chain fear no longer applies Trauma/Fear directly; Task12 Alarm perception owns indirect propagation");
     }
 
     private static void ReceiveCorpseReminder(
@@ -892,9 +925,13 @@ internal static class DesertBatflyIntimidation
         {
             state.Rage = Mathf.Max(state.Rage, rage);
             if (state.Role == VengeanceParticipation.Avenger)
+            {
                 state.PassesRemaining = Mathf.Max(
                     state.PassesRemaining,
                     drive > 0.70f ? 2 : 1);
+                DesertBatflySignalRuntime.EmitRally(
+                    bat, threat, drive, "existing Avenger refreshes RallySignal");
+            }
             return;
         }
 
@@ -924,6 +961,12 @@ internal static class DesertBatflyIntimidation
             : Mathf.RoundToInt(Mathf.Lerp(26f, 8f, bat.Personality.Conformity));
         state.VengeanceTimer = Mathf.RoundToInt(
             Mathf.Lerp(maxDelay, minDelay, drive)) + socialDelay;
+
+        // Deliver synchronously before ArmVengeanceGroup scores followers so Task12 Rally
+        // interest can participate in SocialBond.Motivation without a detour around this method.
+        if (state.Role == VengeanceParticipation.Avenger && !supportOnly && leader == null)
+            DesertBatflySignalRuntime.EmitRally(
+                bat, threat, drive, "new Avenger armed -> immediate Task12 RallySignal");
     }
 
     private static void UpdateVengeance(DesertBatfly bat, State state)

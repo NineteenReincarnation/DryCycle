@@ -40,6 +40,12 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", false) == null,
             "R5 B3 physically removes Task09 and Survival RuntimeDetour bridges");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalVengeanceBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalThreatBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalAcuteBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", false) == null,
+            "R5 B4 physically removes the Task12 internal detour hub and four signal bridges");
 
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
         Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
@@ -47,6 +53,11 @@ internal static partial class Program
               behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
             "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Task13 owners");
 
-        Console.WriteLine("Task14 R5 B3: Task09 and same-room survival consume explicit Environment policy/behavior; both RuntimeDetour bridges are removed.");
+        Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+        Check(signalRuntime.GetMethod("EmitAcuteAlarm", Flags) != null &&
+              signalRuntime.GetMethod("EmitRally", Flags) != null,
+            "R5 B4 replaces signal detours with direct domain APIs");
+
+        Console.WriteLine("Task14 R5 B4: Environment and Signal internal detours are retired; direct domain APIs preserve cross-domain behavior.");
     }
 }

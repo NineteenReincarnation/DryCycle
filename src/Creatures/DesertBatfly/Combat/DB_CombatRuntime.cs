@@ -321,43 +321,30 @@ internal sealed class DB_CombatRuntime
 
     private Player FindSocialHarassTarget()
     {
-        if (fly.Personality.Conformity < 0.42f || fly.room == null) return null;
-        float socialDrive = fly.Personality.Conformity * 0.55f +
-                            fly.Personality.AggressionDrive * 0.25f +
-                            fly.Personality.Nerve * 0.20f;
-        if (socialDrive < 0.52f) return null;
+        if (fly.room == null || fly.Injury.BlocksCombat ||
+            DesertBatflyIntimidation.HasActiveFearSuppression(fly) ||
+            !DesertBatflySignalRuntime.TryGetInfluence(fly, out DesertBatflySignalInfluence influence) ||
+            influence.HarassInterest < 0.20f)
+            return null;
 
-        DB_RoomContext context = DB_RoomContext.For(fly.room);
-        var bats = context?.Bats;
-        if (bats == null) return null;
+        Player target = influence.HarassTarget;
+        if (target == null || target.dead || target.room != fly.room || !CanHarass(target) ||
+            !DB_VisibilityPolicy.CanObserve(
+                fly, target.mainBodyChunk.pos, DesertBatflyTuning.SightRange, DB_VisibilityChannel.Player))
+            return null;
 
-        Player best = null;
-        float bestScore = float.MinValue;
-        for (int i = 0; i < bats.Count; i++)
+        if (DesertBatflyThreatRuntime.TryGetDebugState(fly, out DesertBatflyThreatDebugState threat))
         {
-            DesertBatfly bat = bats[i];
-            if (bat == null || bat == fly || !bat.Consious ||
-                bat.DesertAI.Target is not Player otherTarget || !CanHarass(otherTarget))
-                continue;
-            if (bat.DesertAI.Mode is not (
-                DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-                DesertBatflyAI.Activity.Dive))
-                continue;
-
-            float neighbourDistance = Vector2.Distance(fly.mainBodyChunk.pos, bat.mainBodyChunk.pos);
-            if (neighbourDistance > 210f ||
-                (neighbourDistance > 95f && !DB_VisibilityPolicy.CanObserve(
-                    fly, bat.mainBodyChunk.pos, 210f, DB_VisibilityChannel.Social)))
-                continue;
-
-            float score = socialDrive * 1.2f - neighbourDistance / 420f +
-                          bat.Personality.AggressionDrive * 0.18f;
-            if (score <= bestScore) continue;
-            bestScore = score;
-            best = otherTarget;
+            float caution = threat.CounterKillPressure * 0.55f +
+                            threat.PiercingPressure * 0.30f +
+                            threat.GrabCapturePressure * 0.15f;
+            float courage = fly.Personality.Nerve * 0.55f +
+                            fly.Personality.Temperament * 0.45f;
+            if (caution * threat.Confidence > courage + 0.18f)
+                return null;
         }
-        return best;
+
+        return target;
     }
 
     internal bool TryExecuteOwned()

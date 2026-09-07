@@ -27,14 +27,15 @@ internal static partial class Program
 
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
-        Type integration = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", true);
-        Type vengeanceBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalVengeanceBridge", true);
-        Type threatBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalThreatBridge", true);
-        Type acuteBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalAcuteBridge", true);
-        Type directWitnessBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyGraphics", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type eventConsumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
 
         Check((int)runtime.GetField("MaxAlarmHop", Flags).GetRawConstantValue() == 2,
             "Task12 Alarm relay is capped at two hops");
@@ -63,41 +64,46 @@ internal static partial class Program
         Check(response != null && receive != null && perceive != null && safe != null,
             "Task12 has explicit response, perception and Safe acceptance gates");
 
-        Check(integration.GetMethod("ApplyAlarm", Flags) != null &&
-              integration.GetMethod("FindSocialHarassTargetHook", Flags) != null &&
-              integration.GetMethod("FindRoostSourceHook", Flags) != null &&
-              integration.GetMethod("HandleIndirectFear", Flags) != null,
-            "Task12 integration replaces legacy alarm/indirect fear and routes Harass/Roost through signals");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalVengeanceBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalThreatBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalAcuteBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", false) == null,
+            "Task12 R5 retires all internal Reflection/RuntimeDetour signal integration layers");
 
-        MethodInfo vengeanceEnable = vengeanceBridge.GetMethod("Enable", Flags);
-        MethodInfo vengeanceDisable = vengeanceBridge.GetMethod("Disable", Flags);
-        Check(MethodCallsTask12(vengeanceEnable, threatBridge, "Enable") &&
-              MethodCallsTask12(vengeanceDisable, threatBridge, "Disable") &&
-              MethodCallsTask12(vengeanceEnable, acuteBridge, "Enable") &&
-              MethodCallsTask12(vengeanceDisable, acuteBridge, "Disable") &&
-              MethodCallsTask12(vengeanceEnable, directWitnessBridge, "Enable") &&
-              MethodCallsTask12(vengeanceDisable, directWitnessBridge, "Disable"),
-            "Task12 Task11-response, acute-event and direct-witness bridges share the signal lifecycle");
+        Check(runtime.GetMethod("ApplyAlarm", Flags) != null &&
+              runtime.GetMethod("EmitAcuteAlarm", Flags) != null &&
+              runtime.GetMethod("EmitRally", Flags) != null &&
+              ai.GetMethod("ThreatenedAt", Flags) != null &&
+              socialBond.GetMethod("IsDirectDeathWitness", Flags) != null,
+            "Task12 direct APIs own anonymous alarm escape, acute roots, Rally and grief witness boundaries");
+        Check(combat.GetMethod("FindSocialHarassTarget", Flags) != null &&
+              social.GetMethod("FindRoostSource", Flags) != null,
+            "Task12 Harass/Roost influence is consumed directly by Combat and Social owners");
 
-        Check(acuteBridge.GetMethod("ExplosionHook", Flags) != null &&
-              acuteBridge.GetMethod("StartleHook", Flags) != null &&
-              acuteBridge.GetMethod("MassCasualtyHook", Flags) != null &&
-              acuteBridge.GetMethod("EmitAcuteAlarm", Flags) != null,
-            "Task12 acute bridge converts real Task11 explosion/startle/casualty positions into Alarm roots");
-        Check(directWitnessBridge.GetMethod("IsDirectWitness", Flags) != null,
-            "Task12 has an explicit direct-witness gate for persistent Bond-death Grief/Trauma");
+        MethodInfo reportExplosion = threatRuntime.GetMethod("ReportExplosion", Flags);
+        MethodInfo startle = threatRuntime.GetMethod("BroadcastStartle", Flags);
+        MethodInfo mass = threatRuntime.GetMethod("BroadcastMassCasualty", Flags);
+        MethodInfo receiveFear = intimidation.GetMethod("ReceiveFear", Flags);
+        MethodInfo armVengeance = intimidation.GetMethod("ArmVengeance", Flags);
+        MethodInfo captureConsumer = eventConsumers.GetMethod("OnCapture", Flags);
+        Check(MethodCallOffset(reportExplosion, runtime, "EmitAcuteAlarm") >= 0 &&
+              MethodCallOffset(startle, runtime, "EmitAcuteAlarm") >= 0 &&
+              MethodCallOffset(mass, runtime, "EmitAcuteAlarm") >= 0,
+            "Task11 acute events explicitly emit one Task12 root at the real event position");
+        Check(MethodCallOffset(receiveFear, runtime, "EmitAlarm") >= 0 &&
+              MethodCallOffset(armVengeance, runtime, "EmitRally") >= 0 &&
+              MethodCallOffset(captureConsumer, runtime, "EmitDistress") >= 0,
+            "fear, Vengeance and capture semantics publish through direct Task12 APIs");
 
-        Check(!TypeCallsTask12Forbidden(threatBridge) && !TypeCallsTask12Forbidden(acuteBridge) &&
-              !TypeCallsTask12Forbidden(directWitnessBridge) && !TypeCallsTask12Forbidden(runtime) &&
-              !TypeCallsTask12Forbidden(integration),
-            "Task12 signal layer never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
+        Check(!TypeCallsTask12Forbidden(runtime) && !TypeCallsTask12Forbidden(socialBond),
+            "Task12 signal data path never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
 
         Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
         Check(state.GetFields(Flags).All(f => f.Name.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) < 0),
             "Task12 realized signal state is not persisted in DesertBatflyState");
 
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
-        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         int task11 = MethodCallOffset(updateAI, threatRuntime, "Update");
         int task12 = MethodCallOffset(updateAI, runtime, "Update");
         int task10 = MethodCallOffset(updateAI, social, "Update");
@@ -117,13 +123,12 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "Task12 does not restore rejected Task02 social role runtime");
 
-        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
         Check(intimidation.GetNestedType("SocialRole", Flags) == null &&
               intimidation.GetNestedType("VengeanceParticipation", Flags) != null,
             "Task12 terminology keeps vengeance participation separate from rejected Task02 SocialRole");
 
         Console.WriteLine(
-            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, indirect-fear migration, accurate acute roots, direct-witness grief boundary, Task11 read-only boundary, lifecycle, pipeline, graphics, vengeance terminology and anti-role guards verified.");
+            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Task11 read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");
     }
 
     private static bool MethodCallsTask12(MethodInfo caller, Type targetType, string targetName) =>

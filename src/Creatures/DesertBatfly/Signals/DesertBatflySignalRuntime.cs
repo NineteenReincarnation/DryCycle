@@ -61,7 +61,6 @@ internal static class DesertBatflySignalRuntime
     {
         states = new ConditionalWeakTable<DesertBatfly, ReceiverState>();
         DesertBatflySignalRoomRuntime.Reset();
-        DesertBatflySignalIntegration.Reset();
     }
 
     internal static void Forget(DesertBatfly bat)
@@ -130,6 +129,51 @@ internal static class DesertBatflySignalRuntime
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
+    }
+
+
+    internal static DesertBatflySignalPacket EmitRally(
+        DesertBatfly emitter,
+        Creature threat,
+        float drive,
+        string reason)
+    {
+        if (!Available(emitter) || threat == null) return null;
+        Vector2 origin = emitter.mainBodyChunk.pos;
+        Vector2 direction = threat.mainBodyChunk != null
+            ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
+            : Vector2.zero;
+        DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
+        DesertBatflySignalPacket packet = room?.AddOrRefresh(
+            emitter.room,
+            DesertBatflySignalKind.RallySignal,
+            emitter,
+            emitter,
+            threat,
+            threat as Player,
+            origin,
+            direction,
+            Mathf.Clamp01(0.55f + Mathf.Clamp01(drive) * 0.30f),
+            84);
+        if (packet == null) return null;
+
+        SetDisplay(emitter, DesertBatflySignalKind.RallySignal, packet.Intensity, 42, direction);
+        room.DeliverUrgent(emitter.room, packet);
+        TraceEmit(emitter, packet, reason);
+        return packet;
+    }
+
+    internal static DesertBatflySignalPacket EmitAcuteAlarm(
+        Room room,
+        Creature threat,
+        Vector2 position,
+        float intensity,
+        string reason)
+    {
+        DesertBatfly emitter = FindAcuteEmitter(room, position);
+        if (emitter == null) return null;
+        Vector2 direction = Custom.DirVec(emitter.mainBodyChunk.pos, position);
+        return EmitAlarm(emitter, threat, position, direction, intensity, reason);
     }
 
     internal static DesertBatflySignalPacket EmitDistress(
@@ -210,7 +254,7 @@ internal static class DesertBatflySignalRuntime
                 state.LastAlarmTick = receiver.room.game?.clock ?? 0;
                 state.LastDecision = "accepted AlarmFlutter as short-term danger context";
                 DesertBatflySocialLife.CancelForPriority(receiver, "Task12 AlarmFlutter");
-                DesertBatflySignalIntegration.ApplyAlarm(receiver, packet, response);
+                ApplyAlarm(receiver, packet, response);
                 relayAlarm = packet.Hop < MaxAlarmHop && ShouldRelayAlarm(receiver, packet, response);
                 break;
 
@@ -258,6 +302,49 @@ internal static class DesertBatflySignalRuntime
 
         TraceReceive(receiver, packet, perception, response, state.LastDecision);
         return true;
+    }
+
+
+    private static void ApplyAlarm(
+        DesertBatfly receiver,
+        DesertBatflySignalPacket packet,
+        float response)
+    {
+        if (receiver == null || packet == null || response < 0.30f || receiver.dead ||
+            !receiver.Consious || receiver.room == null || receiver.inShortcut ||
+            receiver.Injury.IsSeverelyInjured ||
+            DesertBatflyTravelNavigation.HasIntent(receiver.abstractCreature))
+            return;
+
+        Creature threat = packet.Threat;
+        if (threat != null && (threat.dead || threat.room != receiver.room))
+            return;
+
+        // Signal perception may create a short Escape fact, but it never rebroadcasts a new
+        // root from ThreatenedAt. Relays remain owned solely by SignalRoomRuntime.
+        receiver.DesertAI.ThreatenedAt(threat, packet.Origin, false, false);
+    }
+
+    private static DesertBatfly FindAcuteEmitter(Room room, Vector2 position)
+    {
+        if (room == null) return null;
+        DesertBatfly best = null;
+        float bestScore = float.MaxValue;
+        foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
+        {
+            if (member is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion ||
+                !bat.Consious || bat.room != room || bat.inShortcut)
+                continue;
+
+            float distance = Vector2.Distance(bat.mainBodyChunk.pos, position);
+            if (distance > 480f) continue;
+            bool visual = room.VisualContact(bat.mainBodyChunk.pos, position);
+            float score = distance + (visual ? 0f : 95f);
+            if (score >= bestScore) continue;
+            bestScore = score;
+            best = bat;
+        }
+        return best;
     }
 
     internal static bool TryGetInfluence(DesertBatfly bat, out DesertBatflySignalInfluence influence)
@@ -319,9 +406,9 @@ internal static class DesertBatflySignalRuntime
         if (state.LastNeutralEmitTick != int.MinValue && clock - state.LastNeutralEmitTick < 18)
             return;
 
-        if (DesertBatflySignalIntegration.IsVengeanceAvenger(bat))
+        if (DesertBatflyIntimidation.IsVengeanceAvenger(bat))
         {
-            Creature target = DesertBatflySignalIntegration.VengeanceTarget(bat);
+            DesertBatflyIntimidation.TryGetVengeanceTarget(bat, out Creature target);
             EmitNeutral(
                 bat,
                 DesertBatflySignalKind.RallySignal,
@@ -502,7 +589,40 @@ internal static class DesertBatflySignalRuntime
                 0.38f + n * 0.34f + c * 0.28f,
             _ => 1f
         };
-        return Mathf.Clamp01(packet.Intensity * attenuation * scale);
+        float response = Mathf.Clamp01(packet.Intensity * attenuation * scale);
+
+        // Task11 memory stays private to the receiver. Task12 reads it only to modulate the
+        // receiver's own willingness; no emitter memory/evidence is copied through a signal.
+        Player player = packet.PlayerTarget ?? packet.Threat as Player;
+        if (player != null)
+        {
+            int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
+            if (DesertBatflyThreatRuntime.ValidSlot(slot))
+            {
+                DesertBatflyPlayerThreatMemory memory =
+                    DesertBatflyThreatMemoryStore.For(receiver.DesertState, slot);
+                if (memory != null && memory.Confidence >= 0.04f)
+                {
+                    float lethalCaution = Mathf.Clamp01(
+                        memory.PiercingPressure * 0.30f +
+                        memory.CounterKillPressure * 0.34f +
+                        memory.ExplosionPressure * 0.17f +
+                        memory.GrabCapturePressure * 0.10f +
+                        memory.PursuitPressure * 0.09f);
+                    float caution = lethalCaution * memory.Confidence;
+                    response *= packet.Kind switch
+                    {
+                        DesertBatflySignalKind.AlarmFlutter => 1f + caution * 0.24f,
+                        DesertBatflySignalKind.DistressCall => 1f - caution * 0.22f,
+                        DesertBatflySignalKind.RallySignal => 1f - caution * 0.52f,
+                        DesertBatflySignalKind.HarassSignal => 1f - caution * 0.62f,
+                        _ => 1f
+                    };
+                }
+            }
+        }
+
+        return Mathf.Clamp01(response);
     }
 
     private static bool ShouldRelayAlarm(

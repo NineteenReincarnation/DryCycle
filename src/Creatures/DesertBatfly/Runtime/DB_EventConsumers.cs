@@ -1,3 +1,4 @@
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -35,6 +36,29 @@ internal static class DB_EventConsumers
 
         DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
 
+        Creature signalThreat = capture.Captor;
+        if (signalThreat != null && signalThreat.room == victim.room)
+        {
+            bool tongueSignal = capture.CaptureKind == DB_CaptureKind.Tongue;
+            DesertBatflySignalRuntime.EmitDistress(
+                victim,
+                signalThreat,
+                tongueSignal ? 0.94f : 0.88f,
+                tongueSignal
+                    ? "semantic tongue capture emits one DistressCall"
+                    : "semantic non-Fly grasp emits one DistressCall");
+            Vector2 signalOrigin = signalThreat.mainBodyChunk?.pos ?? capture.Position;
+            DesertBatflySignalRuntime.EmitAlarm(
+                victim,
+                signalThreat,
+                signalOrigin,
+                Custom.DirVec(victim.mainBodyChunk.pos, signalOrigin),
+                tongueSignal ? 0.90f : 0.82f,
+                tongueSignal
+                    ? "semantic tongue capture emits one AlarmFlutter"
+                    : "semantic grasp emits one AlarmFlutter alongside DistressCall");
+        }
+
         if (capture.Captor is Lizard predator &&
             DesertBatflyIntimidation.IsSupportedLethalThreat(predator))
         {
@@ -50,7 +74,7 @@ internal static class DB_EventConsumers
             // response that the old tongue hooks supplied. Grasp capture already passes
             // through DesertBatfly.Grabbed and therefore does not need this second call.
             if (capture.CaptureKind == DB_CaptureKind.Tongue)
-                victim.DesertAI.Threatened(predator, true);
+                victim.DesertAI.Threatened(predator, true, false);
         }
     }
 

@@ -5,6 +5,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 // No runtime table or relationship graph: all persistent data occupies one state slot.
 internal static class DesertBatflySocialBond
 {
+    internal const float DirectDeathWitnessRadius = 340f;
     internal static bool Available(DesertBatfly bat) => bat != null && !bat.dead &&
         !bat.slatedForDeletetion && bat.room != null && !bat.inShortcut;
 
@@ -89,12 +90,53 @@ internal static class DesertBatflySocialBond
         return GetBondStrength(source, victim) * 0.18f + grief + signal;
     }
 
+    internal static bool IsDirectDeathWitness(
+        DesertBatfly observer,
+        DesertBatfly victim,
+        Creature killer)
+    {
+        if (!Available(observer) || !observer.Consious || victim == null || observer == victim ||
+            observer.room == null || victim.room != observer.room)
+            return false;
+
+        float distance = Vector2.Distance(observer.mainBodyChunk.pos, victim.mainBodyChunk.pos);
+        if (distance <= DirectDeathWitnessRadius &&
+            (observer.room.VisualContact(observer.mainBodyChunk.pos, victim.mainBodyChunk.pos) ||
+             (killer?.mainBodyChunk != null && killer.room == observer.room &&
+              observer.room.VisualContact(observer.mainBodyChunk.pos, killer.mainBodyChunk.pos))))
+            return true;
+
+        return SamePhysicalChain(observer, victim);
+    }
+
     internal static void OnBondPartnerDeath(DesertBatfly observer, DesertBatfly victim, Creature killer)
     {
-        if (!Available(observer) || !observer.Consious || victim == null || !victim.dead || observer.room != victim.room) return;
+        if (victim == null || !victim.dead || !IsDirectDeathWitness(observer, victim, killer)) return;
         float gain = observer.DesertState.BeginGrief(victim.abstractCreature.ID, killer?.abstractCreature?.ID);
         if (gain <= 0f) return;
         DesertBatflyIntimidation.AddTrauma(observer, killer, gain);
         observer.DesertAI.BeginGriefResponse();
+    }
+
+    private static bool SamePhysicalChain(Fly a, Fly b)
+    {
+        if (a == null || b == null || a.room == null || a.room != b.room) return false;
+
+        Fly member = a.FirstInChain();
+        int guard = 0;
+        while (member != null && guard++ < 32)
+        {
+            if (member == b) return true;
+            member = member.NextInChain();
+        }
+
+        member = b.FirstInChain();
+        guard = 0;
+        while (member != null && guard++ < 32)
+        {
+            if (member == a) return true;
+            member = member.NextInChain();
+        }
+        return false;
     }
 }

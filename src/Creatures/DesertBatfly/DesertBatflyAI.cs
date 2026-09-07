@@ -102,19 +102,28 @@ internal sealed class DesertBatflyAI
         hasRoost = false;
     }
 
-    internal void Threatened(Creature source, bool directAttack = false)
+    internal void Threatened(
+        Creature source,
+        bool directAttack = false,
+        bool emitAlarm = true)
+    {
+        Vector2 origin = source?.mainBodyChunk != null
+            ? source.mainBodyChunk.pos
+            : fly.mainBodyChunk.pos - Vector2.up * 20f;
+        ThreatenedAt(source, origin, directAttack, emitAlarm);
+    }
+
+    internal void ThreatenedAt(
+        Creature source,
+        Vector2 origin,
+        bool directAttack = false,
+        bool emitAlarm = true)
     {
         ClearRecoveryNavigation();
         fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "immediate threat / escape");
         if (source != null && source != fly && source is not DesertBatfly)
-        {
             combat.RecordAttacker(source, directAttack ? 1f : 0f);
-            escapeFrom = source.mainBodyChunk.pos;
-        }
-        else
-        {
-            escapeFrom = fly.mainBodyChunk.pos - Vector2.up * 20f;
-        }
+        escapeFrom = origin;
 
         if (IsInFlyChain(fly))
             BreakHangChain(source, DesertBatflyTuning.RetreatTicks);
@@ -124,7 +133,11 @@ internal sealed class DesertBatflyAI
             CancelAttack();
             SetMode(Activity.Escape);
         }
-        RaiseLocalAlarm();
+
+        if (emitAlarm)
+            RaiseLocalAlarm(source, origin,
+                source == null ? "direct anonymous danger -> Task12 AlarmFlutter" :
+                    "direct threat -> Task12 AlarmFlutter");
     }
 
     internal void PlayerGrabbed(Player player)
@@ -142,7 +155,8 @@ internal sealed class DesertBatflyAI
             CancelAttack();
             SetMode(Activity.Escape);
         }
-        RaiseLocalAlarm();
+        RaiseLocalAlarm(player, player.mainBodyChunk.pos,
+            "direct player grab -> Task12 AlarmFlutter");
     }
 
     internal void PlayerReleased(Player player, float releaseSpeed)
@@ -206,22 +220,17 @@ internal sealed class DesertBatflyAI
             DesertBatflyTuning.GrabMemoryMaxTicks);
     }
 
-    private void RaiseLocalAlarm()
+    private void RaiseLocalAlarm(Creature threat, Vector2 origin, string reason)
     {
         if (fly.room == null) return;
-        foreach (Fly other in DesertSwarmRoom.For(fly.room).Hive.flies)
-        {
-            if (other is not DesertBatfly bat || bat == fly || bat.dead || bat.slatedForDeletetion ||
-                bat.room != fly.room || bat.inShortcut ||
-                !Custom.DistLess(
-                    fly.mainBodyChunk.pos,
-                    bat.mainBodyChunk.pos,
-                    DesertBatflyTuning.AlarmRadius))
-                continue;
-
-            bat.DesertAI.escapeFrom = escapeFrom;
-            bat.DesertAI.retreat = Mathf.Max(bat.DesertAI.retreat, 25);
-        }
+        Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, origin);
+        DesertBatflySignalRuntime.EmitAlarm(
+            fly,
+            threat,
+            origin,
+            direction,
+            Mathf.Lerp(0.58f, 0.92f, 1f - fly.Personality.Nerve),
+            reason);
     }
 
     private void DisturbedByApproach(Creature source)

@@ -1211,31 +1211,21 @@ internal static class DesertBatflySocialLife
     {
         chainSize = 0;
         bond = 0f;
-        DesertBatfly best = null;
-        float bestScore = float.MinValue;
-        for (int i = 0; i < roosting.Count; i++)
-        {
-            DesertBatfly other = roosting[i];
-            if (other == bat || !ValidRoostSource(other, bat)) continue;
-            float distance = Vector2.Distance(bat.mainBodyChunk.pos, other.mainBodyChunk.pos);
-            if (distance > 190f ||
-                (distance > 75f && !bat.room.VisualContact(bat.mainBodyChunk.pos, other.mainBodyChunk.pos)))
-                continue;
-            int size = ChainLength(other);
-            float pairBond = Mathf.Max(
-                DesertBatflySocialBond.GetBondStrength(bat, other),
-                DesertBatflySocialBond.GetBondStrength(other, bat));
-            float score =
-                (1f - distance / 190f) * 0.55f +
-                Mathf.Clamp01(size / 4f) * 0.25f +
-                pairBond * 0.20f;
-            if (score <= bestScore) continue;
-            bestScore = score;
-            best = other;
-            chainSize = size;
-            bond = pairBond;
-        }
-        return best;
+        if (bat == null || bat.room == null ||
+            !DesertBatflySignalRuntime.TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
+            influence.RoostInterest < 0.16f)
+            return null;
+
+        DesertBatfly source = influence.RoostSource;
+        if (!ValidRoostSource(source, bat) ||
+            Vector2.Distance(bat.mainBodyChunk.pos, source.mainBodyChunk.pos) > 230f)
+            return null;
+
+        chainSize = ChainLength(source);
+        bond = Mathf.Max(
+            DesertBatflySocialBond.GetBondStrength(bat, source),
+            DesertBatflySocialBond.GetBondStrength(source, bat));
+        return source;
     }
 
     private static bool ValidRoostSource(DesertBatfly source, DesertBatfly observer)

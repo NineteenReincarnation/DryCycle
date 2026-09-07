@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R5 Internal Bridge / Detour Debt Status
-Revision: R5-B3 / 2026-09-07
+Revision: R5-B4 / 2026-09-07
 Branch: task14-r5-bridge-debt
 Base: R4 code-side complete at a461631633360fff30c721fb774acec99fc23889
-Status: 【R5 进行中 / B3 Task09 + same-room survival bridges removed】
+Status: 【R5 进行中 / B4 Signal detour family removed】
 
 ======================================================================
 1. R5 objective
@@ -109,3 +109,29 @@ classification.
 
 Remaining R5 bridge debt is the Signal bridge family plus DesertBatflyRuntimePatch
 classification.
+
+
+======================================================================
+7. R5-B4 closed
+======================================================================
+
+- DesertBatflySignalIntegration.cs DELETED.
+- DesertBatflySignalAcuteBridge.cs DELETED.
+- DesertBatflySignalDirectWitnessBridge.cs DELETED.
+- DesertBatflySignalThreatBridge.cs DELETED.
+- DesertBatflySignalVengeanceBridge.cs DELETED.
+- DesertBatflyAI now exposes exact-origin ThreatenedAt and emits AlarmFlutter directly;
+  signal-received escape uses emitAlarm=false, so relay ownership stays in SignalRoomRuntime.
+- Task11 Explosion/Startle/MassCasualty explicitly publish one acute Alarm root at the real
+  event position after updating directly affected bats.
+- SignalRuntime reads only the receiver's own Task11 memory to modulate response strength.
+- DB_CombatRuntime consumes HarassSignal target interest directly; Task10 Social consumes
+  RoostCall source interest directly. No private-AI spying detour remains.
+- SocialBond owns the direct-death-witness invariant for persistent Grief/Trauma.
+- Intimidation suppresses legacy tier-1+/chain persistent fear directly and publishes the
+  bounded Alarm from a direct witness; Vengeance leader arming publishes Rally synchronously
+  before follower scoring.
+- DB_EventConsumers publishes capture Distress/Alarm directly from the canonical Capture event.
+
+Remaining R5 work is DesertBatflyRuntimePatch classification plus a final repository-wide
+Bridge/Reflection/RuntimeDetour audit before R5 closure.

@@ -514,7 +514,7 @@ internal static class DesertBatflyThreatRuntime
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute explosion");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
-                bat.DesertAI.Threatened(player, false);
+                bat.DesertAI.ThreatenedAt(player, explosion.pos, false, false);
 
             if (player != null && evidence.Any &&
                 DB_VisibilityPolicy.CanObserve(
@@ -524,6 +524,16 @@ internal static class DesertBatflyThreatRuntime
                 AddEvidence(bat, player, evidence, witness, "witnessed explosion", true);
             }
         }
+
+        float alarmIntensity = Mathf.Clamp01(
+            0.60f + Mathf.Clamp01(explosion.damage) * 0.16f +
+            Mathf.InverseLerp(80f, 360f, explosion.rad) * 0.16f);
+        DesertBatflySignalRuntime.EmitAcuteAlarm(
+            room,
+            explosion.killTagHolder,
+            explosion.pos,
+            Mathf.Max(0.62f, alarmIntensity),
+            "Task11 acute explosion -> Task12 AlarmFlutter at real explosion center");
     }
 
     private static void BroadcastStartle(
@@ -554,7 +564,7 @@ internal static class DesertBatflyThreatRuntime
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute startle");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
-                bat.DesertAI.Threatened(player, false);
+                bat.DesertAI.ThreatenedAt(player, position, false, false);
 
             if (player != null && DB_VisibilityPolicy.CanObserve(
                     bat, position, acuteRadius, DB_VisibilityChannel.Signal))
@@ -563,6 +573,10 @@ internal static class DesertBatflyThreatRuntime
                 AddEvidence(bat, player, evidence, multiplier, "firecracker startle", true);
             }
         }
+
+        DesertBatflySignalRuntime.EmitAcuteAlarm(
+            room, player, position, 0.82f,
+            "Task11 firecracker/startle -> Task12 AlarmFlutter at real startle center");
     }
 
     private static void BroadcastMassCasualty(Room room, Player player, Vector2 position)
@@ -581,8 +595,12 @@ internal static class DesertBatflyThreatRuntime
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute mass casualty");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
-                bat.DesertAI.Threatened(player, false);
+                bat.DesertAI.ThreatenedAt(player, position, false, false);
         }
+
+        DesertBatflySignalRuntime.EmitAcuteAlarm(
+            room, player, position, 0.96f,
+            "Task11 mass casualty -> high urgency Task12 AlarmFlutter");
     }
 
     private static void BroadcastWitnessEvidence(
