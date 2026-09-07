@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   migrate:
-    if: github.event.head_commit.message == 'Trigger corrected R6 B6 SocialBond migration'
+    if: github.event.head_commit.message == 'Trigger repaired R6 B6 SocialBond migration'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +34,10 @@ jobs:
                   out=text.replace('DesertBatflySocialBond','DB_SocialBond')
                   if out != text:
                       p.write_text(out,encoding='utf-8')
+          p=Path('scripts/check-desertbatfly-r5-retention.sh')
+          text=p.read_text(encoding='utf-8')
+          text=text.replace('src/Creatures/DesertBatfly/DB_SocialBond.cs','src/Creatures/DesertBatfly/Social/DB_SocialBond.cs')
+          p.write_text(text,encoding='utf-8')
           PY
           cmp -s /tmp/expected.cs "$new"
           test ! -e "$old"
@@ -43,6 +47,7 @@ jobs:
           grep -q 'StrengthenBond(target.abstractCreature.ID, gain)' "$new"
           grep -q 'BeginGrief(victim.abstractCreature.ID' "$new"
           grep -q 'guard++ < 32' "$new"
+          grep -q 'src/Creatures/DesertBatfly/Social/DB_SocialBond.cs' scripts/check-desertbatfly-r5-retention.sh
           bash scripts/check-desertbatfly-r5-retention.sh
           bash scripts/check-desertbatfly-r6-b1.sh
           git diff --check
