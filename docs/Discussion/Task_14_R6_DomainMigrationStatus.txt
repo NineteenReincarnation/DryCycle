@@ -115,3 +115,9 @@ Still open:
 
 R6 does not claim full build, managed integration, or Rain World live validation.
 Those validations remain deferred to the final acceptance stage because this environment lacks the developer-local Rain World/BepInEx assemblies and game runtime.
+
+R6-B5/B6 update:
+- Presentation/DB_SandBurst.cs migrated from DesertBatflySandBurst with identity-only behavior-preserving changes.
+- Social/DB_SocialBond.cs migrated from DesertBatflySocialBond with identity-only behavior-preserving changes.
+- Existing R5/R6 retention guards passed after the successful migrations.
+- R6 remains in progress; no live Rain World acceptance is claimed.

@@ -158,3 +158,46 @@ Recommended next low-risk batch is Presentation support:
 2. separately review `DesertBatflyGraphics.cs` before renaming because it owns a larger Rain World graphics surface;
 3. alternatively, if Presentation coupling is larger than expected, migrate another manifest KEEP/RENAME leaf such as `DesertBatflySocialBond.cs` only after checking save/state identity implications;
 4. after each batch run the R5 retention audit, the R6 retention audit, a domain-specific absence/contract guard, and `git diff --check`.
+
+## Continuation run — R6 B5/B6
+
+### Start state
+- Began from verified R6-B4 progress HEAD 30b5d9f4667397bdb20d81cd50c97f290a32384d.
+- R6 was still incomplete; Presentation and Social leaf identities remained on legacy DesertBatfly names.
+
+### Completed
+- R6-B5: moved DesertBatflySandBurst.cs to Presentation/DB_SandBurst.cs and renamed the production type to DB_SandBurst.
+- R6-B6: moved DesertBatflySocialBond.cs to Social/DB_SocialBond.cs and renamed production references to DB_SocialBond.
+
+### Important files
+- src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
+- src/Creatures/DesertBatfly/Social/DB_SocialBond.cs
+- src/Creatures/DesertBatfly/DesertBatfly.cs
+- scripts/check-desertbatfly-r5-retention.sh
+
+### Validation
+- B5 behavior-preserving guard verified the new SandBurst implementation equals the old source after only identity substitution.
+- B6 behavior-preserving guard verified the new SocialBond implementation equals the old source after only identity substitution.
+- R5 retention audit passed after both successful batches.
+- R6 B1 retention audit passed after both successful batches.
+- B6 final GitHub Actions run 34151969749 succeeded.
+- git diff --check passed in successful migration runs.
+- Full Rain World/.NET Framework managed build and live-play validation remain unavailable here and are not claimed as passing.
+
+### Self-review findings and fixes
+- First B6 attempt failed before job creation because the temporary workflow YAML contained an invalid embedded heredoc; no production code changed.
+- Second B6 attempt performed the migration but exposed R5 guard path drift: DB_SocialBond was checked at the root instead of Social/DB_SocialBond.cs.
+- The guard path was corrected without removing or weakening assertions; the full migration and retention checks then passed.
+
+### Remaining Task14 requirements
+- R6 still needs TravelNavigation responsibility-aware migration; remaining Graphics/Core/Injury/Fear/Vengeance/Social/Roost identities; Threat/Signals/Environment domain migration; production Task09-Task13 naming cleanup; old-root/dead-code cleanup; and final R6 naming/path guard.
+- R7 performance/debug/full regression/final acceptance remains pending.
+
+### Blockers
+- Full managed build/tests require developer-local Rain World/BepInEx assemblies.
+- Final live behavior/performance acceptance requires Rain World.
+- These blockers do not prevent further source-level R6 work.
+
+### Recommended next hour
+- Inspect DesertBatflyGraphics.cs before any rename. If it remains a cohesive Presentation owner, migrate it with behavior-preserving source equivalence guards; otherwise choose a smaller KEEP/RENAME Injury/Threat/Signal leaf.
+- Do not mechanically rename/split DesertBatflyTravelNavigation.cs without responsibility review.
