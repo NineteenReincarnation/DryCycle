@@ -102,8 +102,7 @@ internal static class DesertBatflySignalIntegration
             }
 
             CacheVengeanceReflection();
-            On.Fly.Grabbed += FlyGrabbed;
-            On.LizardTongue.Update += TongueUpdate;
+            DB_EventHub.Capture += CaptureEvent;
         }
         catch
         {
@@ -113,8 +112,7 @@ internal static class DesertBatflySignalIntegration
 
     internal static void Disable()
     {
-        try { On.Fly.Grabbed -= FlyGrabbed; } catch { }
-        try { On.LizardTongue.Update -= TongueUpdate; } catch { }
+        try { DB_EventHub.Capture -= CaptureEvent; } catch { }
         try { receiveFearHook?.Dispose(); } catch { }
         try { roostHook?.Dispose(); } catch { }
         try { harassHook?.Dispose(); } catch { }
@@ -277,47 +275,30 @@ internal static class DesertBatflySignalIntegration
         return count;
     }
 
-    private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
+    private static void CaptureEvent(DB_CaptureEvent capture)
     {
-        orig(self, grasp);
-        if (self is not DesertBatfly bat || grasp?.grabber == null || grasp.grabber is Fly ||
-            bat.dead || bat.room == null)
+        DesertBatfly bat = capture.Victim;
+        Creature threat = capture.Captor;
+        if (bat == null || threat == null || bat.dead || bat.room == null || threat.room != bat.room)
             return;
 
-        Creature threat = grasp.grabber;
+        bool tongue = capture.CaptureKind == DB_CaptureKind.Tongue;
         DesertBatflySignalRuntime.EmitDistress(
             bat,
             threat,
-            0.88f,
-            "non-Fly grasp emits DistressCall");
+            tongue ? 0.94f : 0.88f,
+            tongue
+                ? "semantic tongue capture emits one DistressCall"
+                : "semantic non-Fly grasp emits one DistressCall");
         DesertBatflySignalRuntime.EmitAlarm(
             bat,
             threat,
             threat.mainBodyChunk.pos,
             RWCustom.Custom.DirVec(bat.mainBodyChunk.pos, threat.mainBodyChunk.pos),
-            0.82f,
-            "capture emits AlarmFlutter alongside DistressCall");
-    }
-
-    private static void TongueUpdate(On.LizardTongue.orig_Update orig, LizardTongue self)
-    {
-        orig(self);
-        if (self?.lizard == null || self.attached?.owner is not DesertBatfly bat ||
-            bat.dead || bat.room == null)
-            return;
-
-        DesertBatflySignalRuntime.EmitDistress(
-            bat,
-            self.lizard,
-            0.94f,
-            "tongue capture emits DistressCall");
-        DesertBatflySignalRuntime.EmitAlarm(
-            bat,
-            self.lizard,
-            self.lizard.mainBodyChunk.pos,
-            RWCustom.Custom.DirVec(bat.mainBodyChunk.pos, self.lizard.mainBodyChunk.pos),
-            0.90f,
-            "tongue capture emits AlarmFlutter");
+            tongue ? 0.90f : 0.82f,
+            tongue
+                ? "semantic tongue capture emits one AlarmFlutter"
+                : "semantic grasp emits one AlarmFlutter alongside DistressCall");
     }
 
     private static bool InstallReceiveFearHook()
