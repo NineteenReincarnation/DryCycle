@@ -7,6 +7,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static class DesertBatflySignalRoomRuntime
 {
     internal const int ActiveSignalCap = 24;
+    internal const int AlarmRootMergeTicks = 14;
+    internal const float AlarmRootMergeRadius = 58f;
 
     internal sealed class RoomState
     {
@@ -60,8 +62,29 @@ internal static class DesertBatflySignalRoomRuntime
             int clock = room.game?.clock ?? 0;
             Prune(room);
 
+            // Several directly affected bats may react to the same explosion/death/grab
+            // in one frame. Collapse nearby same-threat root alarms into one generation;
+            // later emitters can still display AlarmFlutter, but receivers do not process
+            // five equivalent roots and create a room-wide signal storm.
+            if (kind == DesertBatflySignalKind.AlarmFlutter && hop == 0 && generation == 0)
+            {
+                float radiusSq = AlarmRootMergeRadius * AlarmRootMergeRadius;
+                for (int i = 0; i < ActiveSignals.Count; i++)
+                {
+                    DesertBatflySignalPacket existing = ActiveSignals[i];
+                    if (existing == null || existing.Kind != DesertBatflySignalKind.AlarmFlutter ||
+                        existing.Hop != 0 || existing.Threat != threat ||
+                        clock - existing.CreatedTick < 0 || clock - existing.CreatedTick > AlarmRootMergeTicks ||
+                        (existing.Origin - origin).sqrMagnitude > radiusSq)
+                        continue;
+                    existing.Intensity = Mathf.Max(existing.Intensity, Mathf.Clamp01(intensity));
+                    existing.ExpiresTick = Mathf.Max(existing.ExpiresTick, clock + Mathf.Max(1, ttl));
+                    return existing;
+                }
+            }
+
             // Neutral/display signals from the same emitter are refreshed rather than
-            // allocating a new generation every scan. Urgent relays carry the supplied
+            // allocating a new generation every scan. Urgent relays carry their original
             // generation and therefore bypass this merge when hop > 0.
             if (hop == 0 && generation == 0)
             {
@@ -106,18 +129,18 @@ internal static class DesertBatflySignalRoomRuntime
         private int OldestReplaceableIndex()
         {
             int best = -1;
-            int bestExpiry = int.MaxValue;
+            int bestScore = int.MaxValue;
             for (int i = 0; i < ActiveSignals.Count; i++)
             {
                 DesertBatflySignalPacket signal = ActiveSignals[i];
                 if (signal == null) return i;
-                // Prefer replacing neutral/low-urgency packets before active Alarm/Distress.
-                int urgencyBias = signal.Kind is DesertBatflySignalKind.AlarmFlutter or DesertBatflySignalKind.DistressCall
+                int urgencyBias = signal.Kind is
+                    DesertBatflySignalKind.AlarmFlutter or DesertBatflySignalKind.DistressCall
                     ? 1000000
                     : 0;
                 int score = signal.ExpiresTick + urgencyBias;
-                if (score >= bestExpiry) continue;
-                bestExpiry = score;
+                if (score >= bestScore) continue;
+                bestScore = score;
                 best = i;
             }
             return best;
@@ -149,7 +172,9 @@ internal static class DesertBatflySignalRoomRuntime
                         continue;
 
                     float relayIntensity = packet.Intensity *
-                        (packet.Hop == 0 ? DesertBatflySignalRuntime.AlarmHop1Scale : DesertBatflySignalRuntime.AlarmHop2Scale);
+                        (packet.Hop == 0
+                            ? DesertBatflySignalRuntime.AlarmHop1Scale
+                            : DesertBatflySignalRuntime.AlarmHop2Scale);
                     if (relayIntensity < 0.08f) continue;
 
                     DesertBatflySignalPacket relayed = AddOrRefresh(
