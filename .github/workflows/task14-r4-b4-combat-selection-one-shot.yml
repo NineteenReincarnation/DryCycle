@@ -19,12 +19,13 @@ jobs:
           fetch-depth: 0
 
       - name: Apply guarded R4 B4 migration
-        run: python scripts/task14_r4_b4_combat_selection_apply.py
+        run: python scripts/task14_r4_b4_combat_selection_apply_v2.py
 
       - name: Validate R4 B4 contracts
         run: |
           git diff --check
           test ! -e scripts/task14_r4_b4_combat_selection_apply.py
+          test ! -e scripts/task14_r4_b4_combat_selection_apply_v2.py
           test ! -e .github/workflows/task14-r4-b4-combat-selection-one-shot.yml
           grep -q 'internal Creature Target => combat.Target;' src/Creatures/DesertBatfly/DesertBatflyAI.cs
           ! grep -q 'private bool CanHarass(Creature creature)' src/Creatures/DesertBatfly/DesertBatflyAI.cs
@@ -54,4 +55,4 @@ jobs:
           git commit -m 'Move R4 combat selection into DB_CombatRuntime'
           git push origin HEAD:task14-r4-b4-combat-selection
 
-# trigger
+# trigger v2
