@@ -41,5 +41,6 @@ internal static partial class Program
         RunTask10();
         RunTask10Guards();
         RunTask11();
+        RunTask11Final();
     }
 }
