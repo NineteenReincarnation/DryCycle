@@ -84,7 +84,7 @@ internal static class AIDebugWorldOverlay
                 if (drawLabels) draw.AddText(localGoal + new Num.Vector2(6f, -7f), cyan, "localGoal");
             }
 
-            if (DesertSwarmRoom.TryGet(camera.room, out DesertSwarmRoom colony))
+            if (DB_SwarmRoom.TryGet(camera.room, out DB_SwarmRoom colony))
             {
                 Num.Vector2 center = AIDebugCameraUtil.WorldToImGui(camera, colony.Flock.Center);
                 draw.AddCircle(center, 13f, green, 24, 1.5f);

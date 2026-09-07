@@ -189,7 +189,7 @@ internal static class DesertBatflyIntimidation
 
             if (age % CorpseSampleTicks != 0) return;
 
-            foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+            foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
             {
                 if (other is not DesertBatfly bat || bat == victim || bat.dead ||
                     bat.room != room || !bat.Consious ||
@@ -445,7 +445,7 @@ internal static class DesertBatflyIntimidation
 
         List<DesertBatfly> bats = new(
             DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation);
-        foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is DesertBatfly bat && bat != victim && !bat.dead &&
                 bat.room == room && bat.Consious)

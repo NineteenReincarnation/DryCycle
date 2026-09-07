@@ -336,7 +336,7 @@ internal static class DB_SignalRuntime
         if (room == null) return null;
         DesertBatfly best = null;
         float bestScore = float.MaxValue;
-        foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly member in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (member is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion ||
                 !bat.Consious || bat.room != room || bat.inShortcut)

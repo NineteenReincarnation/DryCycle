@@ -497,7 +497,7 @@ internal static class DesertBatflyThreatRuntime
             DesertBatflyThreatAdapterRegistry.ExplosionEvidence(explosion);
         float acuteRadius = Mathf.Max(190f, explosion.rad * 1.55f);
 
-        foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
@@ -547,7 +547,7 @@ internal static class DesertBatflyThreatRuntime
             DesertBatflyThreatAdapterRegistry.FirecrackerStartleEvidence();
         const float acuteRadius = 270f;
 
-        foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
@@ -582,7 +582,7 @@ internal static class DesertBatflyThreatRuntime
     private static void BroadcastMassCasualty(Room room, Player player, Vector2 position)
     {
         if (room == null || player == null) return;
-        foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
@@ -612,7 +612,7 @@ internal static class DesertBatflyThreatRuntime
         if (room == null || player == null || player.room != room || !threatEvent.Evidence.Any)
             return;
 
-        foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
+        foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is not DesertBatfly witness || witness == threatEvent.Victim || witness.dead ||
                 witness.room != room || !witness.Consious)

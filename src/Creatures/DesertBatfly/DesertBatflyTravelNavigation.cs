@@ -543,7 +543,7 @@ internal static class DesertBatflyTravelNavigation
                 DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
                 if (record == null || string.IsNullOrWhiteSpace(record.PendingMigrationColony)) continue;
                 AbstractRoom destination = DB_ColonyRuntime.FindRoom(world, record.PendingMigrationColony);
-                if (destination == null || !DesertSwarmRoom.IsDesertSwarmRoom(destination)) continue;
+                if (destination == null || !DB_SwarmRoom.IsDB_SwarmRoom(destination)) continue;
                 if (creature.pos.room == destination.index)
                 {
                     DB_ColonyRuntime.CompletePermanentMigration(
@@ -763,7 +763,7 @@ internal static class DesertBatflyTravelNavigation
         if (bat?.room == null || intent == null || !bat.DesertState.InHive) return;
         try
         {
-            DesertSwarmRoom colony = DesertSwarmRoom.For(bat.room);
+            DB_SwarmRoom colony = DB_SwarmRoom.For(bat.room);
             if (colony.Hive.inHive.Contains(bat))
             {
                 colony.Hive.FlyEmergeFromHive(bat);

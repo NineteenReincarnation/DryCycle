@@ -166,9 +166,9 @@ internal static class AIDebugAdvancedOverlay
     private static void DrawDesertSocial(ImDrawListPtr draw, RoomCamera camera, DesertBatfly bat)
     {
         if (bat.room == null || bat.mainBodyChunk == null ||
-            !DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony)) return;
+            !DB_SwarmRoom.TryGet(bat.room, out DB_SwarmRoom colony)) return;
 
-        DesertBatflyFlockSnapshot flock = colony.Flock;
+        DB_FlockSnapshot flock = colony.Flock;
         Num.Vector2 center = World(camera, flock.Center);
         uint social = Col(0.46f, 0.88f, 0.62f, 0.88f);
         uint bond = Col(0.72f, 0.56f, 0.96f, 0.92f);

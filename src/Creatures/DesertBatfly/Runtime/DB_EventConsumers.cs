@@ -124,7 +124,7 @@ internal static class DB_EventConsumers
             // Unsupported/environmental deaths keep the old direct-experience grief rule:
             // chain witnesses or very close line-of-sight observers may learn the bond loss,
             // but no synthetic predator/player fear wave is invented.
-            foreach (Fly member in DesertSwarmRoom.For(victim.room).Hive.flies)
+            foreach (Fly member in DB_SwarmRoom.For(victim.room).Hive.flies)
             {
                 if (member is not DesertBatfly observer || observer == victim) continue;
                 if (System.Array.IndexOf(mortality.ChainWitnesses, observer) < 0 &&

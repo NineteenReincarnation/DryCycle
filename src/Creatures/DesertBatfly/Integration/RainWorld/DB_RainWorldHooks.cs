@@ -85,7 +85,7 @@ internal static class DB_RainWorldHooks
         DesertBatflyIntimidation.Reset();
         DB_WarpCompatibility.Disable();
         DB_Sandbox.Disable();
-        DesertSwarmRoom.Reset();
+        DB_SwarmRoom.Reset();
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -104,7 +104,7 @@ internal static class DB_RainWorldHooks
                 DB_ColonyRuntime.EnsureWorld(room.world);
                 DB_ColonyRuntime.EnsureIndividualOwnership(desert.abstractCreature);
             }
-            DesertSwarmRoom.For(room).Hive.AddFly(self);
+            DB_SwarmRoom.For(room).Hive.AddFly(self);
         }
         else
         {
@@ -401,7 +401,7 @@ internal static class DB_RainWorldHooks
         if (socialRoom?.IsReserved(desert) == true)
             return;
 
-        if (!DesertSwarmRoom.IsDesertSwarmRoom(self.room.abstractRoom))
+        if (!DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom))
         {
             if (self.behavior == FlyAI.Behavior.Swarm) self.ChangeBehavior(FlyAI.Behavior.Idle);
             return;
@@ -440,7 +440,7 @@ internal static class DB_RainWorldHooks
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
     {
         if (self.fly is not DesertBatfly ||
-            !DesertSwarmRoom.IsDesertSwarmRoom(self.room.abstractRoom) ||
+            !DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom) ||
             self.room.hives.Length == 0)
         {
             orig(self);
@@ -454,10 +454,10 @@ internal static class DB_RainWorldHooks
     {
         orig(self);
 
-        // DesertSwarmRoom still owns room-tag/hive spawning semantics and is intentionally
+        // DB_SwarmRoom still owns room-tag/hive spawning semantics and is intentionally
         // not gated by realized bats. The remaining systems are DesertBatfly-only and must
         // not allocate/scan ordinary rooms that never activated DB_RoomContext.
-        DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
+        DB_SwarmRoom.UpdateRoom(self, self.game.evenUpdate);
         if (!DB_RoomContext.TryGetExisting(self, out DB_RoomContext context) ||
             context.Bats.Count == 0)
             return;

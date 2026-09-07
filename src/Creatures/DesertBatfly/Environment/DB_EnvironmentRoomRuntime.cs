@@ -511,7 +511,7 @@ internal static class DB_EnvironmentRoomRuntime
         if (state.Anchors.Count == 0) return;
 
         Room room = state.Room;
-        var flies = DesertSwarmRoom.For(room).Hive.flies;
+        var flies = DB_SwarmRoom.For(room).Hive.flies;
         for (int i = 0; i < flies.Count; i++)
         {
             if (flies[i] is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion || bat.room != room)

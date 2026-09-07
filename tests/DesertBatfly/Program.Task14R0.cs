@@ -36,7 +36,7 @@ internal static partial class Program
             "Task14 R0 freezes colony ledger prefix/version even though its historical 09 remains external data");
 
         Type swarmRoomType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertSwarmRoom", true);
+            "DryCycle.Creatures.DesertBatfly.DB_SwarmRoom", true);
         Check(TypeLoadsStringR0(swarmRoomType, "DESERTSWARMROOM"),
             "Task14 R0 freezes authored room tag DESERTSWARMROOM");
 

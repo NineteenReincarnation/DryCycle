@@ -36,7 +36,7 @@ internal static class DB_SocialBond
     {
         partner = null;
         if (!Available(source) || !source.DesertState.SocialBondTarget.HasValue) return false;
-        foreach (Fly member in DesertSwarmRoom.For(source.room).Hive.flies)
+        foreach (Fly member in DB_SwarmRoom.For(source.room).Hive.flies)
             if (member is DesertBatfly candidate && candidate != source && Available(candidate) &&
                 candidate.room == source.room && GetBondStrength(source, candidate) > 0f)
             { partner = candidate; return true; }

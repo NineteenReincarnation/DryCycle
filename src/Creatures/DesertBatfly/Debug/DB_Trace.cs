@@ -11,9 +11,9 @@ internal static class DB_Trace
     {
         if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
 
-        DesertBatflyFlockSnapshot flock = default;
+        DB_FlockSnapshot flock = default;
         int flockAge = 0;
-        if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
+        if (bat.room != null && DB_SwarmRoom.TryGet(bat.room, out DB_SwarmRoom colony))
         {
             flock = colony.Flock;
             flockAge = colony.SnapshotAge;

@@ -128,7 +128,7 @@ internal static class DB_ColonyRuntime
         IndividualRecord record = RecordFor(creature);
         if (!string.IsNullOrEmpty(record.CurrentColony)) return;
         AbstractRoom physical = creature.Room;
-        if (DesertSwarmRoom.IsDesertSwarmRoom(physical))
+        if (DB_SwarmRoom.IsDB_SwarmRoom(physical))
             record.CurrentColony = physical.name.Trim().ToUpperInvariant();
     }
 
@@ -173,7 +173,7 @@ internal static class DB_ColonyRuntime
 
         IndividualRecord record = RecordFor(victim.abstractCreature, false);
         DB_ColonyState colony = TryGetColony(record?.CurrentColony);
-        if (colony == null && DesertSwarmRoom.IsDesertSwarmRoom(victim.abstractCreature.Room))
+        if (colony == null && DB_SwarmRoom.IsDB_SwarmRoom(victim.abstractCreature.Room))
             colony = TryGetColony(victim.abstractCreature.Room);
         colony?.RecordDeath(IsPeach(killer));
     }
@@ -460,7 +460,7 @@ internal static class DB_ColonyRuntime
             DB_ColonyState candidate = regional[i];
             if (candidate == source) continue;
             AbstractRoom targetRoom = FindRoom(world, candidate.RoomName);
-            if (targetRoom == null || !DesertSwarmRoom.IsDesertSwarmRoom(targetRoom)) continue;
+            if (targetRoom == null || !DB_SwarmRoom.IsDB_SwarmRoom(targetRoom)) continue;
 
             if (!DB_WorldRoutePlanner.TryPlan(
                     world, sourceRoom.index, targetRoom.index, template,
@@ -654,7 +654,7 @@ internal static class DB_ColonyRuntime
             AbstractRoom room = world.abstractRooms[r];
             if (room == null) continue;
             roomLookup[room.name.Trim().ToUpperInvariant()] = room;
-            if (DesertSwarmRoom.IsDesertSwarmRoom(room)) colonyRooms.Add(room);
+            if (DB_SwarmRoom.IsDB_SwarmRoom(room)) colonyRooms.Add(room);
             if (room.creatures == null) continue;
             for (int i = 0; i < room.creatures.Count; i++)
                 TrackCreature(room.creatures[i]);

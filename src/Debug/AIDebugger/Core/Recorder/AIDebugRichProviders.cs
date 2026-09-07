@@ -249,9 +249,9 @@ internal static class AIDebugRecorderRichProviderRegistry
             fields.Set(43, AIDebugRawValue.Int(Read<int>(UnseenField, ai)));
             fields.Set(44, AIDebugRawValue.Bool(Read<bool>(HasSlotField, ai)));
 
-            if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
+            if (bat.room != null && DB_SwarmRoom.TryGet(bat.room, out DB_SwarmRoom colony))
             {
-                DesertBatflyFlockSnapshot flock = colony.Flock;
+                DB_FlockSnapshot flock = colony.Flock;
                 fields.Set(45, Vec(flock.Center));
                 fields.Set(46, Vec(flock.AverageVelocity));
                 fields.Set(47, AIDebugRawValue.Int(flock.ActiveCount));
@@ -377,12 +377,12 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(42,"section.ai","field.pursuit","DesertBatflyAI.pursuit",AIDebugRawValueKind.Int,true),
             F(43,"section.ai","field.unseen","DesertBatflyAI.unseen",AIDebugRawValueKind.Int,true),
             F(44,"section.ai","field.has_slot","DesertBatflyAI.hasSlot",AIDebugRawValueKind.Bool,true),
-            F(45,"section.flock","field.flock_center","DesertBatflyFlockSnapshot.Center",AIDebugRawValueKind.Vector2,true),
-            F(46,"section.flock","field.flock_velocity","DesertBatflyFlockSnapshot.AverageVelocity",AIDebugRawValueKind.Vector2,true),
-            F(47,"section.flock","field.flock_active","DesertBatflyFlockSnapshot.ActiveCount",AIDebugRawValueKind.Int,true),
-            F(48,"section.flock","field.panic_ratio","DesertBatflyFlockSnapshot.PanicRatio",AIDebugRawValueKind.Float,true),
-            F(49,"section.flock","field.previous_panic","DesertBatflyFlockSnapshot.PreviousPanicRatio",AIDebugRawValueKind.Float,true),
-            F(50,"section.flock","field.roost_ratio","DesertBatflyFlockSnapshot.RoostRatio",AIDebugRawValueKind.Float,true),
+            F(45,"section.flock","field.flock_center","DB_FlockSnapshot.Center",AIDebugRawValueKind.Vector2,true),
+            F(46,"section.flock","field.flock_velocity","DB_FlockSnapshot.AverageVelocity",AIDebugRawValueKind.Vector2,true),
+            F(47,"section.flock","field.flock_active","DB_FlockSnapshot.ActiveCount",AIDebugRawValueKind.Int,true),
+            F(48,"section.flock","field.panic_ratio","DB_FlockSnapshot.PanicRatio",AIDebugRawValueKind.Float,true),
+            F(49,"section.flock","field.previous_panic","DB_FlockSnapshot.PreviousPanicRatio",AIDebugRawValueKind.Float,true),
+            F(50,"section.flock","field.roost_ratio","DB_FlockSnapshot.RoostRatio",AIDebugRawValueKind.Float,true),
             F(51,"section.social","field.grab_memory","DesertBatflyState.GrabMemoryStrength",AIDebugRawValueKind.Float,true),
             F(52,"section.social","field.grief","DesertBatflyState.GriefStrength",AIDebugRawValueKind.Float,true),
             F(53,"section.social","field.player_trauma","DesertBatflyState.PlayerTraumaStrength",AIDebugRawValueKind.Float,true),

@@ -57,7 +57,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         base.PlaceInRoom(placeRoom);
         if (!DesertState.InHive || dead || placeRoom.hives.Length == 0) return;
-        var hive = DesertSwarmRoom.For(placeRoom).Hive;
+        var hive = DB_SwarmRoom.For(placeRoom).Hive;
         if (!hive.inHive.Contains(this)) hive.MoveFlyToHive(this);
     }
 
@@ -95,7 +95,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         Room currentRoom = room;
         FliesRoomAI original = currentRoom.fliesRoomAi;
-        var colony = DesertSwarmRoom.For(currentRoom);
+        var colony = DB_SwarmRoom.For(currentRoom);
         currentRoom.fliesRoomAi = colony.Hive;
         colony.Hive.AddFly(this);
         runningVanillaUpdate = true;

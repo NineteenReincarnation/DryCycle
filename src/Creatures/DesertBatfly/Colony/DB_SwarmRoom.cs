@@ -3,29 +3,29 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertSwarmRoom
+internal sealed class DB_SwarmRoom
 {
-    private static ConditionalWeakTable<Room, DesertSwarmRoom> rooms = new();
+    private static ConditionalWeakTable<Room, DB_SwarmRoom> rooms = new();
     internal readonly FliesRoomAI Hive;
     private readonly Room room;
     private bool ecologyInitialized;
     private int ecologySampleTimer;
     private int flockRefresh;
-    internal DesertBatflyFlockSnapshot Flock { get; private set; }
+    internal DB_FlockSnapshot Flock { get; private set; }
     internal int SnapshotAge => 30 - flockRefresh;
 
-    private DesertSwarmRoom(Room room)
+    private DB_SwarmRoom(Room room)
     {
         this.room = room;
         Hive = new FliesRoomAI(room);
         ecologySampleTimer = 1;
     }
 
-    internal static bool IsDesertSwarmRoom(AbstractRoom room) => room?.roomTags?.Contains("DESERTSWARMROOM") == true;
-    internal static DesertSwarmRoom For(Room room) => rooms.GetValue(room, value => new DesertSwarmRoom(value));
+    internal static bool IsDB_SwarmRoom(AbstractRoom room) => room?.roomTags?.Contains("DESERTSWARMROOM") == true;
+    internal static DB_SwarmRoom For(Room room) => rooms.GetValue(room, value => new DB_SwarmRoom(value));
 
     // Debug/read-only callers must not create a colony merely by inspecting it.
-    internal static bool TryGet(Room room, out DesertSwarmRoom colony)
+    internal static bool TryGet(Room room, out DB_SwarmRoom colony)
     {
         colony = null;
         return room != null && rooms.TryGetValue(room, out colony);
@@ -39,16 +39,16 @@ internal sealed class DesertSwarmRoom
     internal static void UpdateRoom(Room room, bool eu)
     {
         if (!room.readyForAI || room.aimap == null) return;
-        if (IsDesertSwarmRoom(room.abstractRoom)) For(room).Update(eu);
+        if (IsDB_SwarmRoom(room.abstractRoom)) For(room).Update(eu);
         else if (rooms.TryGetValue(room, out var colony)) colony.Update(eu);
     }
 
     private void Update(bool eu)
     {
-        bool authoredColony = IsDesertSwarmRoom(room.abstractRoom);
+        bool authoredColony = IsDB_SwarmRoom(room.abstractRoom);
         if (authoredColony)
         {
-            // Task 09 owns population bootstrap, recovery and migration. Realizing a room
+            // Colony/Travel own population bootstrap, recovery and migration. Realizing a room
             // must never recreate the old HivePopulation + CurvePopulation refill because
             // that would erase cross-cycle mortality and migration history.
             if (!ecologyInitialized)
@@ -81,20 +81,20 @@ internal sealed class DesertSwarmRoom
 
         if (--flockRefresh <= 0)
         {
-            Flock = DesertBatflyFlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
+            Flock = DB_FlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
             flockRefresh = 30;
         }
     }
 }
 
 // Value-only room snapshot for ordinary flock/environment state.
-internal readonly struct DesertBatflyFlockSnapshot
+internal readonly struct DB_FlockSnapshot
 {
     internal readonly Vector2 Center, AverageVelocity;
     internal readonly int ActiveCount;
     internal readonly float PanicRatio, PreviousPanicRatio, RoostRatio;
 
-    internal DesertBatflyFlockSnapshot(
+    internal DB_FlockSnapshot(
         Vector2 center,
         Vector2 velocity,
         int active,
@@ -114,7 +114,7 @@ internal readonly struct DesertBatflyFlockSnapshot
         !float.IsNaN(value.x) && !float.IsNaN(value.y) &&
         !float.IsInfinity(value.x) && !float.IsInfinity(value.y);
 
-    internal static DesertBatflyFlockSnapshot Capture(
+    internal static DB_FlockSnapshot Capture(
         Room room,
         System.Collections.Generic.IEnumerable<Fly> flies,
         float previousPanic)
@@ -142,7 +142,7 @@ internal readonly struct DesertBatflyFlockSnapshot
                 roost++;
         }
 
-        return new DesertBatflyFlockSnapshot(
+        return new DB_FlockSnapshot(
             center,
             velocity,
             count,

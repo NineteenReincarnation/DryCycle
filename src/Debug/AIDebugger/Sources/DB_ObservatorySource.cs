@@ -88,17 +88,17 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.unseen", "DB_CombatRuntime.UnseenTicks", ai.Combat.UnseenTicks)
             .Add("field.has_slot", "DB_CombatRuntime.HasSlot", ai.Combat.HasSlot));
 
-        if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
+        if (bat.room != null && DB_SwarmRoom.TryGet(bat.room, out DB_SwarmRoom colony))
         {
-            DesertBatflyFlockSnapshot flock = colony.Flock;
+            DB_FlockSnapshot flock = colony.Flock;
             int age = colony.SnapshotAge;
             snapshot.Sections.Add(new AIDebugSection("section.flock")
-                .Add("field.flock_center", "DesertBatflyFlockSnapshot.Center", flock.Center, age, "FlockSnapshot")
-                .Add("field.flock_velocity", "DesertBatflyFlockSnapshot.AverageVelocity", flock.AverageVelocity, age, "FlockSnapshot")
-                .Add("field.flock_active", "DesertBatflyFlockSnapshot.ActiveCount", flock.ActiveCount, age, "FlockSnapshot")
-                .Add("field.panic_ratio", "DesertBatflyFlockSnapshot.PanicRatio", flock.PanicRatio, age, "FlockSnapshot")
-                .Add("field.previous_panic", "DesertBatflyFlockSnapshot.PreviousPanicRatio", flock.PreviousPanicRatio, age, "FlockSnapshot")
-                .Add("field.roost_ratio", "DesertBatflyFlockSnapshot.RoostRatio", flock.RoostRatio, age, "FlockSnapshot"));
+                .Add("field.flock_center", "DB_FlockSnapshot.Center", flock.Center, age, "FlockSnapshot")
+                .Add("field.flock_velocity", "DB_FlockSnapshot.AverageVelocity", flock.AverageVelocity, age, "FlockSnapshot")
+                .Add("field.flock_active", "DB_FlockSnapshot.ActiveCount", flock.ActiveCount, age, "FlockSnapshot")
+                .Add("field.panic_ratio", "DB_FlockSnapshot.PanicRatio", flock.PanicRatio, age, "FlockSnapshot")
+                .Add("field.previous_panic", "DB_FlockSnapshot.PreviousPanicRatio", flock.PreviousPanicRatio, age, "FlockSnapshot")
+                .Add("field.roost_ratio", "DB_FlockSnapshot.RoostRatio", flock.RoostRatio, age, "FlockSnapshot"));
         }
 
         snapshot.Sections.Add(new AIDebugSection("section.social")

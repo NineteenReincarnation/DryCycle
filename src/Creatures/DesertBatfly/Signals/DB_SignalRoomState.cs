@@ -163,7 +163,7 @@ internal static class DesertBatflySignalRoomRuntime
                 DB_SignalPacket packet = urgentQueue.Dequeue();
                 if (packet == null || packet.Emitter?.room != room) continue;
 
-                foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
+                foreach (Fly member in DB_SwarmRoom.For(room).Hive.flies)
                 {
                     if (member is not DesertBatfly receiver || receiver == packet.Emitter ||
                         receiver.dead || receiver.slatedForDeletetion || !receiver.Consious ||

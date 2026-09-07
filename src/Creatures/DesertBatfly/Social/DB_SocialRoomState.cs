@@ -239,7 +239,7 @@ internal static class DesertBatflySocialRoomRuntime
             candidates.Clear();
             roosting.Clear();
             if (room == null) return;
-            if (DesertSwarmRoom.TryGet(room, out DesertSwarmRoom colony))
+            if (DB_SwarmRoom.TryGet(room, out DB_SwarmRoom colony))
             {
                 List<Fly> flies = colony.Hive.flies;
                 for (int i = 0; i < flies.Count; i++)
