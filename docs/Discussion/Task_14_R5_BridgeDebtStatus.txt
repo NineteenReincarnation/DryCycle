@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R5 Internal Bridge / Detour Debt Status
-Revision: R5-B4 / 2026-09-07
+Revision: R5-B5 / 2026-09-07
 Branch: task14-r5-bridge-debt
 Base: R4 code-side complete at a461631633360fff30c721fb774acec99fc23889
-Status: 【R5 进行中 / B4 Signal detour family removed】
+Status: 【R5 代码侧完成 / Bridge debt closed，待实机总验收】
 
 ======================================================================
 1. R5 objective
@@ -135,3 +135,24 @@ classification.
 
 Remaining R5 work is DesertBatflyRuntimePatch classification plus a final repository-wide
 Bridge/Reflection/RuntimeDetour audit before R5 closure.
+
+
+======================================================================
+8. R5-B5 final audit and retention closure
+======================================================================
+
+- B1-B4 deleted-file behavior was re-audited against current live owners, not only against
+  file/type absence. Permanent mapping is recorded in Task_14_R5_FunctionRetentionLedger.txt.
+- Two subtle B4 semantic drifts were found and corrected: anonymous Alarm Escape restores
+  the historical 0.34 threshold (concrete threat remains 0.30), and Capture restores the
+  historical ordering where direct Intimidation experience commits before Distress/Alarm
+  social publication.
+- DesertBatflyRuntimePatch is RETAINED. It is integration-only infrastructure required by
+  DesertBatflySandbox symbol patches and optional Warp compatibility. Deleting it would be
+  a functional regression, not debt cleanup.
+- Final source audit: zero *Bridge.cs files, zero MonoMod.RuntimeDetour imports, and exactly
+  three Reflection files: RuntimePatch, Sandbox and WarpCompatibility.
+- Added permanent managed retention tests plus scripts/check-desertbatfly-r5-retention.sh.
+
+R5 internal bridge/detour debt is code-side closed. Rain World live validation remains
+deferred to the final Task14 validation stage; no live-play pass is claimed here.

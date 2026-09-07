@@ -16,6 +16,11 @@ internal static class DesertBatflySignalRuntime
     private const int NeutralScanMaxTicks = 24;
     private const int SafeDelayTicks = 210;
     private const int NeutralSignalTtl = 90;
+    // Retained from the retired SignalIntegration/SignalThreatBridge split:
+    // a concrete Creature alarm may trigger Escape at 0.30, while an anonymous
+    // hazard needs the old stricter 0.34 confidence before creating Escape.
+    private const float ThreatAlarmEscapeThreshold = 0.30f;
+    private const float AnonymousAlarmEscapeThreshold = 0.34f;
 
     private sealed class ReceiverState
     {
@@ -310,13 +315,14 @@ internal static class DesertBatflySignalRuntime
         DesertBatflySignalPacket packet,
         float response)
     {
-        if (receiver == null || packet == null || response < 0.30f || receiver.dead ||
+        if (receiver == null || packet == null || response < ThreatAlarmEscapeThreshold || receiver.dead ||
             !receiver.Consious || receiver.room == null || receiver.inShortcut ||
             receiver.Injury.IsSeverelyInjured ||
             DesertBatflyTravelNavigation.HasIntent(receiver.abstractCreature))
             return;
 
         Creature threat = packet.Threat;
+        if (threat == null && response < AnonymousAlarmEscapeThreshold) return;
         if (threat != null && (threat.dead || threat.room != receiver.room))
             return;
 

@@ -36,6 +36,25 @@ internal static class DB_EventConsumers
 
         DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
 
+        if (capture.Captor is Lizard predator &&
+            DesertBatflyIntimidation.IsSupportedLethalThreat(predator))
+        {
+            // Preserve the historical subscriber order from before R5-B4: direct
+            // Intimidation/fear/vengeance processing commits first. Capture Distress/Alarm
+            // is published below, so it cannot retroactively boost the initial vengeance
+            // candidate score for the same capture event.
+            DesertBatflyIntimidation.BroadcastPredatorCapture(
+                victim,
+                predator,
+                capture.Tongue);
+
+            // A tongue capture precedes Fly.Grabbed; preserve the immediate native danger
+            // response that the old tongue hooks supplied. The later explicit capture
+            // Alarm is the sole root, so this direct danger fact does not rebroadcast.
+            if (capture.CaptureKind == DB_CaptureKind.Tongue)
+                victim.DesertAI.Threatened(predator, true, false);
+        }
+
         Creature signalThreat = capture.Captor;
         if (signalThreat != null && signalThreat.room == victim.room)
         {
@@ -57,24 +76,6 @@ internal static class DB_EventConsumers
                 tongueSignal
                     ? "semantic tongue capture emits one AlarmFlutter"
                     : "semantic grasp emits one AlarmFlutter alongside DistressCall");
-        }
-
-        if (capture.Captor is Lizard predator &&
-            DesertBatflyIntimidation.IsSupportedLethalThreat(predator))
-        {
-            // One capture session produces one fear event. Tongue -> ordinary lizard grasp
-            // transfer is suppressed by DB_EventHub, so Intimidation no longer needs to be
-            // called independently by every Watcher/Core tongue observer.
-            DesertBatflyIntimidation.BroadcastPredatorCapture(
-                victim,
-                predator,
-                capture.Tongue);
-
-            // A tongue capture precedes Fly.Grabbed; preserve the immediate native danger
-            // response that the old tongue hooks supplied. Grasp capture already passes
-            // through DesertBatfly.Grabbed and therefore does not need this second call.
-            if (capture.CaptureKind == DB_CaptureKind.Tongue)
-                victim.DesertAI.Threatened(predator, true, false);
         }
     }
 
