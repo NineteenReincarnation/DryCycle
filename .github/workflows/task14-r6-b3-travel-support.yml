@@ -54,6 +54,14 @@ jobs:
                       new = new.replace(old, replacement)
                   if new != text:
                       p.write_text(new, encoding='utf-8')
+
+          # Executable architecture guards must follow the new physical ownership.
+          p = Path('scripts/check-desertbatfly-r5-retention.sh')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'src/Creatures/DesertBatfly/DB_RefugePolicy.cs',
+              'src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs')
+          p.write_text(text, encoding='utf-8')
           PY
 
       - name: Validate existing architecture guards
@@ -83,6 +91,7 @@ jobs:
           grep -q 'SafetyMarginTicks = 600' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
           grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
           grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
+          grep -q 'Travel/DB_RefugePolicy.cs' scripts/check-desertbatfly-r5-retention.sh
           git diff --check
 
       - name: Commit migration and retire workflow
