@@ -1,22 +1,43 @@
 name: R6 B5
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - task14-r6-b1-final
 permissions:
   contents: write
 jobs:
   migrate:
+    if: github.event.head_commit.message == 'Trigger guarded R6 B5 migration'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: task14-r6-b1-final
-      - run: |
+          fetch-depth: 0
+      - name: Migrate and validate
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p src/Creatures/DesertBatfly/Presentation
-          git mv src/Creatures/DesertBatfly/DesertBatflySandBurst.cs src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
-          sed -i 's/DesertBatflySandBurst/DB_SandBurst/g' src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs src/Creatures/DesertBatfly/DesertBatfly.cs
+          old=src/Creatures/DesertBatfly/DesertBatflySandBurst.cs
+          new=src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
+          test -f "$old"
+          git show HEAD^:"$old" | sed 's/DesertBatflySandBurst/DB_SandBurst/g' > /tmp/expected.cs
+          git mv "$old" "$new"
+          sed -i 's/DesertBatflySandBurst/DB_SandBurst/g' "$new" src/Creatures/DesertBatfly/DesertBatfly.cs
+          cmp -s /tmp/expected.cs "$new"
+          ! grep -RIn --include='*.cs' 'DesertBatflySandBurst' src
+          grep -q 'internal sealed class DB_SandBurst : CosmeticSprite' "$new"
+          grep -q 'DB_SandBurst.Emit(' src/Creatures/DesertBatfly/DesertBatfly.cs
+          grep -q 'SandScreenMaxConcurrentBursts' "$new"
+          grep -q 'ReturnFContainer("Foreground")' "$new"
+          grep -q 'ReturnFContainer("HUD2")' "$new"
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
           git diff --check
           git config user.name github-actions-bot
           git config user.email actions@github.com
           git add -A
+          git diff --cached --check
           git commit -m 'R6 B5 migrate SandBurst presentation identity'
           git push
