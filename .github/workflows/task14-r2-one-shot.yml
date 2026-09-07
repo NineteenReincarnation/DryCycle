@@ -18,6 +18,19 @@ jobs:
           ref: task14-r2-roomcontext
           fetch-depth: 0
 
+      - name: Normalize guarded patch markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/task14_r2_apply.py')
+          s = p.read_text(encoding='utf-8')
+          old = '"    private sealed class ProcessedExplosion\\n",'
+          new = '"    private sealed class ProcessedExplosion { }\\n",'
+          if old not in s:
+              raise SystemExit('expected ProcessedExplosion marker not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+          PY
+
       - name: Apply guarded R2 migration
         run: python scripts/task14_r2_apply.py
 
