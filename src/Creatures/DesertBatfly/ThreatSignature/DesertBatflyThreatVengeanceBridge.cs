@@ -6,24 +6,19 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Narrow Task11 tactical bridge into the existing Vengeance runtime.
+/// Task11 tactical modifier for the R3-owned Vengeance executor.
 ///
-/// ForceFlight remains owned by Intimidation. Task11 may only alter its requested goal/speed.
-/// R3 no longer keeps a parallel Travel frame stamp or reflects into Intimidation private
-/// state: the actual DB_BehaviorArbiter PrimaryOwner enforces Travel priority, and the
-/// Vengeance target is read through an explicit Intimidation query API.
+/// Intimidation state/fear ticking is no longer intercepted here. R3 owns that lifecycle
+/// explicitly; this bridge only adjusts the already-authorized Vengeance flight request.
 /// </summary>
 internal static class DesertBatflyThreatVengeanceBridge
 {
     private delegate void ForceFlightOrig(DesertBatfly bat, Vector2 goal, float speed);
     private delegate void ForceFlightDetour(ForceFlightOrig orig, DesertBatfly bat, Vector2 goal, float speed);
-    private delegate void IntimidationUpdateOrig(DesertBatfly bat);
-    private delegate void IntimidationUpdateDetour(IntimidationUpdateOrig orig, DesertBatfly bat);
 
     private static Hook forceFlightHook;
-    private static Hook intimidationUpdateHook;
 
-    internal static bool Installed => forceFlightHook != null && intimidationUpdateHook != null;
+    internal static bool Installed => forceFlightHook != null;
 
     internal static void Enable()
     {
@@ -31,23 +26,14 @@ internal static class DesertBatflyThreatVengeanceBridge
         Disable();
         try
         {
-            Type intimidation = typeof(DesertBatflyIntimidation);
-            MethodInfo forceFlight = intimidation.GetMethod(
+            MethodInfo forceFlight = typeof(DesertBatflyIntimidation).GetMethod(
                 "ForceFlight",
                 BindingFlags.NonPublic | BindingFlags.Static,
                 null,
                 new[] { typeof(DesertBatfly), typeof(Vector2), typeof(float) },
                 null);
-            MethodInfo update = intimidation.GetMethod(
-                "Update",
-                BindingFlags.NonPublic | BindingFlags.Static,
-                null,
-                new[] { typeof(DesertBatfly) },
-                null);
-            if (forceFlight == null || update == null) return;
-
+            if (forceFlight == null) return;
             forceFlightHook = new Hook(forceFlight, (ForceFlightDetour)ForceFlightHook);
-            intimidationUpdateHook = new Hook(update, (IntimidationUpdateDetour)IntimidationUpdateHook);
         }
         catch
         {
@@ -57,22 +43,8 @@ internal static class DesertBatflyThreatVengeanceBridge
 
     internal static void Disable()
     {
-        try { intimidationUpdateHook?.Dispose(); } catch { }
         try { forceFlightHook?.Dispose(); } catch { }
-        intimidationUpdateHook = null;
         forceFlightHook = null;
-    }
-
-    private static void IntimidationUpdateHook(
-        IntimidationUpdateOrig orig,
-        DesertBatfly bat)
-    {
-        // Travel wins only when the R3 arbiter selected it for this exact game tick.
-        // Merely having a TravelIntent, including a currently suspended one, never freezes
-        // Vengeance. The state is paused, not cleared, while Travel owns the frame.
-        if (DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Travel))
-            return;
-        orig(bat);
     }
 
     private static void ForceFlightHook(
