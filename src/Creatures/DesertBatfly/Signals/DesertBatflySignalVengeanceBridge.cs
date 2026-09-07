@@ -23,12 +23,9 @@ internal static class DesertBatflySignalVengeanceBridge
 
     internal static void Enable()
     {
-        if (Installed)
-        {
-            DesertBatflySignalThreatBridge.Enable();
-            return;
-        }
-        Disable();
+        DesertBatflySignalThreatBridge.Enable();
+        if (Installed) return;
+
         try
         {
             MethodInfo arm = typeof(DesertBatflyIntimidation).GetMethod(
@@ -84,11 +81,12 @@ internal static class DesertBatflySignalVengeanceBridge
 
             detour = dm.CreateDelegate(detourType);
             armHook = new Hook(arm, detour);
-            DesertBatflySignalThreatBridge.Enable();
         }
         catch
         {
-            Disable();
+            try { armHook?.Dispose(); } catch { }
+            armHook = null;
+            detour = null;
         }
     }
 
