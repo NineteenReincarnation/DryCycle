@@ -177,6 +177,7 @@ internal static class DesertBatflyHooks
 
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
+            DesertBatflyThreatVengeanceBridge.MarkTravelOwnedFrame(desert);
             DesertBatflySocialLife.CancelForPriority(desert, "Task09 travel priority");
             desert.DesertAI.CancelAttack();
             if (AIDebugTrace.IsWatched(desert.abstractCreature))
@@ -246,6 +247,7 @@ internal static class DesertBatflyHooks
 
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
+            DesertBatflyThreatVengeanceBridge.MarkTravelOwnedFrame(desert);
             DesertBatflySocialLife.CancelForPriority(desert, "Task09 weather travel priority");
             return;
         }
