@@ -269,7 +269,7 @@ internal static class DB_FrameContextRuntime
     private static DB_FrameContext Capture(DesertBatfly bat, int clock)
     {
         Room room = bat.room;
-        DesertBatflyInjury injury = bat.Injury;
+        DB_Injury injury = bat.Injury;
         DesertBatflyAI ai = bat.DesertAI;
         DesertBatflyState persistent = bat.DesertState;
         DB_RoomContext roomContext = DB_RoomContext.For(room);

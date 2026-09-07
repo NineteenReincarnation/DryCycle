@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum InjuryRecoveryState { None, Roost, Hive, SafeFlight }
+internal enum DB_InjuryRecoveryState { None, Roost, Hive, SafeFlight }
 
 // Four separate layers: native health, two persisted wings, temporary shock, existing trauma.
-internal sealed class DesertBatflyInjury
+internal sealed class DB_Injury
 {
     private readonly DesertBatfly bat;
     private int eventSerial, shockTicks, recoverySample, impulseGrace;
@@ -16,7 +16,7 @@ internal sealed class DesertBatflyInjury
     private float recoveredSinceEvent;
     internal float PostStunShock { get; private set; }
     internal int MotionTick { get; private set; }
-    internal InjuryRecoveryState RecoveryState { get; private set; }
+    internal DB_InjuryRecoveryState RecoveryState { get; private set; }
     internal Vector2? RecoveryTarget { get; private set; }
     internal string RecoveryReason { get; private set; } = "no recovery requested";
     internal string LastInjurySource { get; private set; } = "none";
@@ -43,7 +43,7 @@ internal sealed class DesertBatflyInjury
     internal bool IsSeverelyInjured => WingMean >= 0.60f || Mathf.Max(State.LeftWingInjury, State.RightWingInjury) >= 0.82f ||
         (WingMean > 0.1f && PhysicalCapability < 0.48f);
     internal bool BlocksCombat => IsSeverelyInjured || PostStunShock >= 0.55f;
-    internal bool IsRecovering => RecoveryState != InjuryRecoveryState.None;
+    internal bool IsRecovering => RecoveryState != DB_InjuryRecoveryState.None;
     internal string CombatBlockReason
     {
         get
@@ -58,7 +58,7 @@ internal sealed class DesertBatflyInjury
     internal float WingAmplitude(int side) => 1f - 0.48f * (side == 0 ? State.LeftWingInjury : State.RightWingInjury);
     internal float BodyTilt => WingBias * 9f;
 
-    internal DesertBatflyInjury(DesertBatfly bat) { this.bat = bat; }
+    internal DB_Injury(DesertBatfly bat) { this.bat = bat; }
 
     internal void ApplyShock(float gain)
     {
@@ -185,11 +185,11 @@ internal sealed class DesertBatflyInjury
         }
     }
 
-    internal void SetRecovery(InjuryRecoveryState state, Vector2? target, string reason)
+    internal void SetRecovery(DB_InjuryRecoveryState state, Vector2? target, string reason)
     {
         if (RecoveryState != state && AIDebugTrace.IsWatched(bat.abstractCreature))
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State,
-                state == InjuryRecoveryState.None ? "InjuryRecoveryExited" : "InjuryRecoveryEntered", state, reason);
+                state == DB_InjuryRecoveryState.None ? "InjuryRecoveryExited" : "InjuryRecoveryEntered", state, reason);
         RecoveryState = state;
         RecoveryTarget = target;
         RecoveryReason = reason;
@@ -204,7 +204,7 @@ internal sealed class DesertBatflyInjury
         impulseGrace = 0;
         recoverySample = 0;
         recoveredSinceEvent = 0f;
-        SetRecovery(InjuryRecoveryState.None, null, "creature lifecycle");
+        SetRecovery(DB_InjuryRecoveryState.None, null, "creature lifecycle");
     }
 
     internal Vector2 ModifyFlight(Vector2 previous, Vector2 requested, float nominalSpeed)

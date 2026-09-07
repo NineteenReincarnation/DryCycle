@@ -23,7 +23,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         DesertBatflyAI ai = bat.DesertAI;
         DesertBatflyState state = bat.DesertState;
         DesertBatflyPersonality p = bat.Personality;
-        DesertBatflyInjury injury = bat.Injury;
+        DB_Injury injury = bat.Injury;
         string controlOwner = ControlOwner(bat);
 
         var snapshot = new AIDebugSnapshot(
@@ -51,20 +51,20 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.health", "DesertBatflyState.health", state.health)
             .Add("field.left_wing_injury", "DesertBatflyState.LeftWingInjury", state.LeftWingInjury)
             .Add("field.right_wing_injury", "DesertBatflyState.RightWingInjury", state.RightWingInjury)
-            .Add("field.wing_mean", "DesertBatflyInjury.WingMean", injury.WingMean)
-            .Add("field.wing_asymmetry", "DesertBatflyInjury.WingAsymmetry", injury.WingAsymmetry)
-            .Add("field.wing_bias", "DesertBatflyInjury.WingBias", injury.WingBias)
-            .Add("field.post_stun_shock", "DesertBatflyInjury.PostStunShock", injury.PostStunShock)
-            .Add("field.physical_capability", "DesertBatflyInjury.PhysicalCapability", injury.PhysicalCapability)
-            .Add("field.forward_control", "DesertBatflyInjury.ForwardControl", injury.ForwardControl)
-            .Add("field.turn_control", "DesertBatflyInjury.TurnControl", injury.TurnControl)
-            .Add("field.lift_control", "DesertBatflyInjury.LiftControl", injury.LiftControl)
-            .Add("field.recovery_state", "DesertBatflyInjury.RecoveryState", injury.RecoveryState)
-            .Add("field.recovery_target", "DesertBatflyInjury.RecoveryTarget",
+            .Add("field.wing_mean", "DB_Injury.WingMean", injury.WingMean)
+            .Add("field.wing_asymmetry", "DB_Injury.WingAsymmetry", injury.WingAsymmetry)
+            .Add("field.wing_bias", "DB_Injury.WingBias", injury.WingBias)
+            .Add("field.post_stun_shock", "DB_Injury.PostStunShock", injury.PostStunShock)
+            .Add("field.physical_capability", "DB_Injury.PhysicalCapability", injury.PhysicalCapability)
+            .Add("field.forward_control", "DB_Injury.ForwardControl", injury.ForwardControl)
+            .Add("field.turn_control", "DB_Injury.TurnControl", injury.TurnControl)
+            .Add("field.lift_control", "DB_Injury.LiftControl", injury.LiftControl)
+            .Add("field.recovery_state", "DB_Injury.RecoveryState", injury.RecoveryState)
+            .Add("field.recovery_target", "DB_Injury.RecoveryTarget",
                 injury.RecoveryTarget.HasValue ? injury.RecoveryTarget.Value.ToString() : "—")
-            .Add("field.last_injury_source", "DesertBatflyInjury.LastInjurySource", injury.LastInjurySource)
-            .Add("field.last_injury_damage_type", "DesertBatflyInjury.LastInjuryDamageType", injury.LastInjuryDamageType)
-            .Add("field.last_injury_tick", "DesertBatflyInjury.LastInjuryTick", injury.LastInjuryTick));
+            .Add("field.last_injury_source", "DB_Injury.LastInjurySource", injury.LastInjurySource)
+            .Add("field.last_injury_damage_type", "DB_Injury.LastInjuryDamageType", injury.LastInjuryDamageType)
+            .Add("field.last_injury_tick", "DB_Injury.LastInjuryTick", injury.LastInjuryTick));
 
         snapshot.Sections.Add(new AIDebugSection("section.personality")
             .Add("field.sex", "DesertBatflyPersonality.Sex", p.Sex)
@@ -201,7 +201,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
 
     private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat)
     {
-        DesertBatflyInjury injury = bat.Injury;
+        DB_Injury injury = bat.Injury;
         bool restrained = RestrainedByNonFly(bat);
         bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
@@ -239,7 +239,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.physical_condition",
             injury.BlocksCombat ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
             injury.CombatBlockReason,
-            "DesertBatflyInjury.BlocksCombat"));
+            "DB_Injury.BlocksCombat"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.health", AIDebugDecisionState.Active,
             $"{bat.DesertState.health:0.000}", "DesertBatflyState.health", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.left_wing_injury", AIDebugDecisionState.Active,
@@ -247,20 +247,20 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.right_wing_injury", AIDebugDecisionState.Active,
             $"{bat.DesertState.RightWingInjury:0.000}", "DesertBatflyState.RightWingInjury", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.post_stun_shock", AIDebugDecisionState.Active,
-            $"{injury.PostStunShock:0.000}", "DesertBatflyInjury.PostStunShock", 1));
+            $"{injury.PostStunShock:0.000}", "DB_Injury.PostStunShock", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.physical_capability", AIDebugDecisionState.Active,
-            $"{injury.PhysicalCapability:0.000}", "DesertBatflyInjury.PhysicalCapability", 1));
+            $"{injury.PhysicalCapability:0.000}", "DB_Injury.PhysicalCapability", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury_recovery",
             injury.IsRecovering ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             injury.RecoveryReason,
-            "DesertBatflyInjury.RecoveryState"));
+            "DB_Injury.RecoveryState"));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.special", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.injury",
             injury.BlocksCombat ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             injury.BlocksCombat ? injury.CombatBlockReason : null,
-            "DesertBatflyInjury.BlocksCombat", 1));
+            "DB_Injury.BlocksCombat", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.grief",
             bat.DesertState.GriefStrength >= 0.30f ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             bat.DesertState.GriefStrength >= 0.30f ? $"grief={bat.DesertState.GriefStrength:0.000}" : null,
@@ -277,7 +277,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.retaliation_injury",
             injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
             injury.BlocksCombat ? injury.CombatBlockReason : null,
-            "DesertBatflyInjury.BlocksCombat", 1));
+            "DB_Injury.BlocksCombat", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance_injury",
             injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
             injury.BlocksCombat ? injury.CombatBlockReason : null,

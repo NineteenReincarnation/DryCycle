@@ -132,7 +132,7 @@ internal sealed class AIDebuggerWindowV3
         CompactRow(AIDebugLocalization.T("app.control_owner"), active.ControlOwner);
         CompactRaw(active, "DesertBatflyAI.Mode", AIDebugLocalization.T("field.mode"));
         CompactRaw(active, "DesertBatflyAI.Target", AIDebugLocalization.T("field.target"));
-        CompactRaw(active, "DesertBatflyInjury.PhysicalCapability", AIDebugLocalization.T("field.physical_capability"));
+        CompactRaw(active, "DB_Injury.PhysicalCapability", AIDebugLocalization.T("field.physical_capability"));
 
         if (events.Count > 0)
         {

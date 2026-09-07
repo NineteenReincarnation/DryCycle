@@ -7,8 +7,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 {
     private const float RockSurvivalHealthFloor = 0.01f;
 
-    private DesertBatflyInjury injury;
-    internal DesertBatflyInjury Injury => injury ??= new DesertBatflyInjury(this);
+    private DB_Injury injury;
+    internal DB_Injury Injury => injury ??= new DB_Injury(this);
     internal readonly DesertBatflyAI DesertAI;
     internal readonly DB_Emergence Emergence;
     internal DesertBatflyState DesertState => (DesertBatflyState)State;

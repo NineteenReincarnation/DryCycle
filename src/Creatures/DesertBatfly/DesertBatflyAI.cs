@@ -120,7 +120,7 @@ internal sealed class DesertBatflyAI
         bool emitAlarm = true)
     {
         ClearRecoveryNavigation();
-        fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "immediate threat / escape");
+        fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "immediate threat / escape");
         if (source != null && source != fly && source is not DesertBatfly)
             combat.RecordAttacker(source, directAttack ? 1f : 0f);
         escapeFrom = origin;
@@ -250,14 +250,14 @@ internal sealed class DesertBatflyAI
 
     internal bool ExecuteInjuryRecoveryOwned()
     {
-        DesertBatflyInjury injury = fly.Injury;
+        DB_Injury injury = fly.Injury;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery))
             return false;
 
         if (!injury.IsSeverelyInjured)
         {
             ClearRecoveryNavigation();
-            injury.SetRecovery(InjuryRecoveryState.None, null, "recovered below severe threshold");
+            injury.SetRecovery(DB_InjuryRecoveryState.None, null, "recovered below severe threshold");
             if (Mode == Activity.InjuryRecovery) SetMode(Activity.Flight);
             return false;
         }
@@ -273,7 +273,7 @@ internal sealed class DesertBatflyAI
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
         {
             Vector2 target = fly.burrowOrHangSpot ?? fly.mainBodyChunk.pos;
-            injury.SetRecovery(InjuryRecoveryState.Roost, target, "severe injury; resting in existing legal chain/roost");
+            injury.SetRecovery(DB_InjuryRecoveryState.Roost, target, "severe injury; resting in existing legal chain/roost");
             return true;
         }
 
@@ -294,13 +294,13 @@ internal sealed class DesertBatflyAI
             if (Custom.DistLess(fly.mainBodyChunk.pos, target, 26f))
             {
                 BeginRecoveryRoost(target);
-                injury.SetRecovery(InjuryRecoveryState.Roost, target, "severe injury; reached legal local roost");
+                injury.SetRecovery(DB_InjuryRecoveryState.Roost, target, "severe injury; reached legal local roost");
             }
             else
             {
                 SteerOwned(target, 4.2f, DB_BehaviorOwner.InjuryRecovery);
                 SetMode(Activity.InjuryRecovery);
-                injury.SetRecovery(InjuryRecoveryState.Roost, target, "severe injury; approaching legal local roost");
+                injury.SetRecovery(DB_InjuryRecoveryState.Roost, target, "severe injury; approaching legal local roost");
             }
             return true;
         }
@@ -308,7 +308,7 @@ internal sealed class DesertBatflyAI
         if (TryDriveRecoveryHive(out Vector2 hiveTarget))
         {
             SetMode(Activity.InjuryRecovery);
-            injury.SetRecovery(InjuryRecoveryState.Hive, hiveTarget, "severe injury; native hive dijkstra recovery route");
+            injury.SetRecovery(DB_InjuryRecoveryState.Hive, hiveTarget, "severe injury; native hive dijkstra recovery route");
             return true;
         }
 
@@ -318,7 +318,7 @@ internal sealed class DesertBatflyAI
             safeGoal = fly.mainBodyChunk.pos + Vector2.up * 60f;
         SteerOwned(safeGoal, 3.8f, DB_BehaviorOwner.InjuryRecovery);
         SetMode(Activity.InjuryRecovery);
-        injury.SetRecovery(InjuryRecoveryState.SafeFlight, safeGoal, "severe injury; no reachable local roost or hive; low-risk flight");
+        injury.SetRecovery(DB_InjuryRecoveryState.SafeFlight, safeGoal, "severe injury; no reachable local roost or hive; low-risk flight");
         return true;
     }
 
@@ -326,7 +326,7 @@ internal sealed class DesertBatflyAI
     {
         recoveryRoostTarget = null;
         recoverySearchCooldown = 0;
-        if (fly?.AI != null && fly.Injury.RecoveryState == InjuryRecoveryState.Hive &&
+        if (fly?.AI != null && fly.Injury.RecoveryState == DB_InjuryRecoveryState.Hive &&
             !fly.AI.fleeFromRain && fly.AI.behavior != FlyAI.Behavior.Burrow)
             fly.AI.followingDijkstraMap = -1;
     }
@@ -517,7 +517,7 @@ internal sealed class DesertBatflyAI
             {
                 recoveryRoostTarget = null;
                 recoverySearchCooldown = 0;
-                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "unavailable / restraint / shortcut");
+                fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "unavailable / restraint / shortcut");
             }
             CancelAttack();
             return;
@@ -530,7 +530,7 @@ internal sealed class DesertBatflyAI
         }
 
         bool recoveryBurrow = fly.AI.behavior == FlyAI.Behavior.Burrow &&
-                              fly.Injury.RecoveryState == InjuryRecoveryState.Hive;
+                              fly.Injury.RecoveryState == DB_InjuryRecoveryState.Hive;
         if (fly.AI.fleeFromRain || (!recoveryBurrow && fly.AI.behavior == FlyAI.Behavior.Burrow) ||
             fly.AI.luredCounter > 0 || fly.safariControlled)
         {
@@ -543,7 +543,7 @@ internal sealed class DesertBatflyAI
             {
                 recoveryRoostTarget = null;
                 recoverySearchCooldown = 0;
-                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "native special behavior owns frame");
+                fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "native special behavior owns frame");
             }
             CancelAttack();
             return;
@@ -559,7 +559,7 @@ internal sealed class DesertBatflyAI
         {
             recoveryRoostTarget = null;
             recoverySearchCooldown = 0;
-            fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "danger / escape");
+            fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "danger / escape");
             hasRoost = false;
             combat.ClearAttackState();
             combat.ClearTarget();
@@ -573,7 +573,7 @@ internal sealed class DesertBatflyAI
             if (!fly.Injury.IsSeverelyInjured)
             {
                 ClearRecoveryNavigation();
-                fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "recovered below severe threshold while entering hive");
+                fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "recovered below severe threshold while entering hive");
                 fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
                 fly.burrowOrHangSpot = null;
                 fly.movMode = Fly.MovementMode.BatFlight;
@@ -625,7 +625,7 @@ internal sealed class DesertBatflyAI
             return false;
 
         ClearRecoveryNavigation();
-        fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
+        fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
         hasRoost = false;
         combat.ClearAttackState();
         Target = null;
