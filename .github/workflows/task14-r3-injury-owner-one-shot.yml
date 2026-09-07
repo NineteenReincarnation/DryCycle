@@ -1,0 +1,41 @@
+name: Task14 R3 injury owner one-shot
+
+on:
+  push:
+    branches:
+      - task14-r3-arbiter
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r3-injury-owner:
+    if: github.event.head_commit.message == 'Trigger R3 InjuryRecovery owner migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r3-arbiter
+          fetch-depth: 0
+
+      - name: Apply guarded InjuryRecovery owner migration
+        run: python scripts/task14_r3_injury_owner_apply.py
+
+      - name: Validate R3 InjuryRecovery ownership
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r3_injury_owner_apply.py
+          test ! -e .github/workflows/task14-r3-injury-owner-one-shot.yml
+          grep -q 'ExecuteInjuryRecoveryOwned' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          ! grep -q 'TryInjuryRecovery' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'DB_InjuryRecoveryExecutor.TryExecute' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'PrimaryOwner == DB_BehaviorOwner.InjuryRecovery' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'R3-CLOSED-02' docs/Discussion/Task_14_R3_FrameArbiterStatus.txt
+
+      - name: Commit InjuryRecovery owner migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Gate InjuryRecovery execution behind R3 arbiter'
+          git push origin HEAD:task14-r3-arbiter
