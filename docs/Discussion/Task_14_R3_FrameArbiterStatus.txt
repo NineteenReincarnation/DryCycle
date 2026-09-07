@@ -309,17 +309,20 @@ Task13 边界不变：
 
 仍需 Rain World 实机验证 HeavyRain/DeathRain/DenseFog/Heat/Sandstorm 的 owner 切换。
 
-R3-OPEN-05 — Social decision / apply split
-------------------------------------------
+R3-CLOSED-05 — Social decision / apply split（代码侧已收敛）
+----------------------------------------------------------------
 
-DesertBatflySocialLife.Update 仍然同时：
+Task10 已拆为：
 
-- 更新 Drive / reservation；
-- 启动 interaction；
-- 执行 SocialSteer/localGoal。
+- `RefreshState`：更新 Drive/cooldown、检查 priority block、创建 reservation/interaction；
+- active interaction 的 timer/movement 不在 refresh 阶段推进；
+- `ApplyOwnedBehavior`：仅 `PrimaryOwner=Social` 时推进 active interaction；
+- `DB_SocialExecutor`：唯一 R3 Social 执行入口；
+- `SocialSteer` 自身增加 same-tick Social owner guard。
 
-需要拆成状态推进与 movement executor。
-Social 必须始终低于 Combat / Roost / Environment survival / Travel / Injury。
+因此 Companion/PassBy/Chase/Group/RoostInvitation 不再能在 Combat/Roost/Environment/Travel/Injury 等更高 owner 下后台写 localGoal。
+
+仍需 Rain World 实机验证 pair/group reservation 在抢占、房间切换和 chain join 时的释放/恢复。
 
 R3-OPEN-06 — projectile modifier migration
 -------------------------------------------
@@ -399,5 +402,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment 都已进入 owner-gated executor。】
-【R3 尚未完成；下一阶段继续拆 Social、projectile/combat/ordinary，并最终消除 ordinary localGoal 多 writer。】
+【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment / Social 都已进入 owner-gated executor。】
+【R3 尚未完成；下一阶段处理 projectile、Combat/Ordinary 的 DesertBatflyAI split，并最终证明 ordinary localGoal 单 writer。】

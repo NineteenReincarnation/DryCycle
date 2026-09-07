@@ -17,7 +17,9 @@ internal static partial class Program
         Type injuryExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecoveryExecutor", true);
         Type vengeanceExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceExecutor", true);
         Type environmentExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExecutor", true);
+        Type socialExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialExecutor", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
 
@@ -125,6 +127,11 @@ internal static partial class Program
               environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags) != null &&
               MethodCallOffset(environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0,
             "Task14 R3 Environment influence refresh is split from owner-gated local apply");
+        Check(socialLife.GetMethod("RefreshState", Flags) != null &&
+              socialLife.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              MethodCallOffset(socialLife.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
+              MethodCallOffset(socialLife.GetMethod("SocialSteer", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 Social scheduling/state refresh is split from owner-gated movement");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -140,7 +147,9 @@ internal static partial class Program
               MethodCallOffset(updateAI, injuryExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0 &&
               MethodCallOffset(updateAI, environmentExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, vengeanceExecutor, "TryExecute") >= 0,
+              MethodCallOffset(updateAI, vengeanceExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, socialLife, "RefreshState") >= 0 &&
+              MethodCallOffset(updateAI, socialExecutor, "TryExecute") >= 0,
             "Task14 R3 migrated owner executors enter through central owner resolution");
         Check(injuryExecutor.GetMethod("TryExecute", Flags) != null &&
               desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
@@ -159,6 +168,6 @@ internal static partial class Program
             "Task14 R3 architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Task14 R3: InjuryRecovery, Travel, Vengeance and Environment now have owner-gated execution. Social/combat/projectile/ordinary migration remains open.");
+            "Task14 R3: InjuryRecovery, Travel, Vengeance, Environment and Social now have owner-gated execution. Combat/projectile/ordinary migration remains open.");
     }
 }

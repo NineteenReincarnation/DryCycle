@@ -189,6 +189,7 @@ internal static class DesertBatflyHooks
         if (self.fly is not DesertBatfly desert) return;
         DesertBatflyEnvironmentalIntegration.Register(desert);
         DesertBatflyEnvironmentalBehavior.RefreshInfluence(desert);
+        DesertBatflySocialLife.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
         if (ownership.PrimaryOwner == DB_BehaviorOwner.InjuryRecovery)
@@ -270,14 +271,30 @@ internal static class DesertBatflyHooks
                 "Vengeance executor yielded after current state recheck");
         }
 
-        // R3 owner-gated executors now cover InjuryRecovery, Travel, Environment and
-        // Vengeance. Social/combat/projectile/ordinary movement remain to be migrated.
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Social)
+        {
+            if (DB_SocialExecutor.TryExecute(desert, ownership))
+            {
+                if (AIDebugTrace.IsWatched(desert.abstractCreature))
+                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
+                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
+                DesertBatflySocialLife.SampleTrace(desert);
+                DesertBatflyDebugTrace.Sample(desert);
+                return;
+            }
+
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.Social,
+                "Social executor yielded after reservation/state recheck");
+        }
+
+        // R3 owner-gated executors now cover InjuryRecovery, Travel, Environment,
+        // Vengeance and Social. Combat/projectile/ordinary movement remain to migrate.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
         DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
         DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySignalRuntime.Update(desert);
-        DesertBatflySocialLife.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
     }

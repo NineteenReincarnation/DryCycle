@@ -150,6 +150,12 @@ internal static class DesertBatflySocialLife
 
     internal static void Update(DesertBatfly bat)
     {
+        RefreshState(bat);
+        ApplyOwnedBehavior(bat);
+    }
+
+    internal static void RefreshState(DesertBatfly bat)
+    {
         if (bat == null) return;
         State state = states.GetValue(bat, CreateState);
         if (state.Cooldown > 0) state.Cooldown--;
@@ -168,11 +174,10 @@ internal static class DesertBatflySocialLife
             return;
         }
 
-        if (state.Mode != DesertBatflySocialMode.None)
-        {
-            UpdateActive(bat, state);
-            return;
-        }
+        // Active interaction timers and all SocialSteer/roost-join writes are advanced only
+        // by ApplyOwnedBehavior after Arbiter selected Social. Preemption therefore cannot
+        // progress a social interaction in the background.
+        if (state.Mode != DesertBatflySocialMode.None) return;
 
         float traumaScale = Mathf.Lerp(
             1f,
@@ -226,6 +231,15 @@ internal static class DesertBatflySocialLife
         }
 
         TryScheduleInteraction(bat, state, roomState, candidates, activeRatio);
+    }
+
+    internal static bool ApplyOwnedBehavior(DesertBatfly bat)
+    {
+        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social) ||
+            !states.TryGetValue(bat, out State state) || state.Mode == DesertBatflySocialMode.None)
+            return false;
+        UpdateActive(bat, state);
+        return true;
     }
 
     internal static void CancelForPriority(DesertBatfly bat, string reason)
@@ -1023,7 +1037,9 @@ internal static class DesertBatflySocialLife
     /// </summary>
     private static bool SocialSteer(DesertBatfly bat, Vector2 goal, float speed, int preferredSide)
     {
-        if (bat?.room == null || bat.AI == null || bat.mainBodyChunk == null) return false;
+        if (bat?.room == null || bat.AI == null || bat.mainBodyChunk == null ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
+            return false;
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
         if (direction == Vector2.zero) return true;
 
