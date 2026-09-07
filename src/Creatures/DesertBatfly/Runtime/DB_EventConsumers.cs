@@ -95,7 +95,7 @@ internal static class DB_EventConsumers
         DesertBatflySocialLife.CancelForPriority(victim, "death");
         DB_SignalRuntime.Forget(victim);
         DB_ColonyRuntime.ReportDeath(victim, mortality.Killer);
-        DesertBatflyEnvironmentalBehavior.Forget(victim);
+        DB_EnvironmentRuntime.Forget(victim);
 
         Creature killer = mortality.Killer;
         if (killer is Player playerKiller)

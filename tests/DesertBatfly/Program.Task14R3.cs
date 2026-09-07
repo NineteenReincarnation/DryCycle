@@ -25,7 +25,7 @@ internal static partial class Program
         Type roostExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostExecutor", true);
         Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
-        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);

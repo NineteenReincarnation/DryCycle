@@ -7,13 +7,13 @@ internal static partial class Program
 {
     private static void RunTask13()
     {
-        Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalPhase", true);
+        Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentPhase", true);
         string[] phases = Enum.GetNames(phase);
         string[] expectedPhases = { "Calm", "Advisory", "Preparation", "Sheltering", "Acute", "Recovery" };
         Check(phases.Length == 6 && expectedPhases.All(phases.Contains),
             "Task13 environmental context exposes exactly six approved phases");
 
-        Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalWeather", true);
+        Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentWeather", true);
         foreach (string name in new[]
                  {
                      "None", "LightRain", "Fog", "DenseFog", "HeavyRain", "HeatWave",
@@ -21,7 +21,7 @@ internal static partial class Program
                  })
             Check(Enum.GetNames(weather).Contains(name), "Task13 weather profile includes " + name);
 
-        Type context = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomContext", true);
+        Type context = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentContext", true);
         foreach (string name in new[]
                  {
                      "WeatherSourceValid", "Weather", "WeatherId", "ActiveIntensity",
@@ -30,7 +30,7 @@ internal static partial class Program
                  })
             Check(context.GetField(name, Flags) != null, "Task13 room context contains " + name);
 
-        Type influence = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalInfluence", true);
+        Type influence = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentInfluence", true);
         foreach (string name in new[]
                  {
                      "ShelterDrive", "OpenExposureAversion", "RoostMultiplier", "HarassMultiplier",
@@ -44,13 +44,13 @@ internal static partial class Program
                  })
             Check(influence.GetField(name, Flags) != null, "Task13 influence contains " + name);
 
-        Type anchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyShelterAnchor", true);
+        Type anchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ShelterAnchor", true);
         Check(anchor.GetField("Exposure", Flags) != null &&
               anchor.GetField("RoostCompatible", Flags) != null &&
               anchor.GetField("Crowding", Flags) != null,
             "Task13 keeps shelter quality, Roost compatibility and crowding as separate anchor data");
 
-        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Check((int)roomRuntime.GetField("WeatherSampleInterval", Flags).GetRawConstantValue() == 20,
             "Task13 room weather sample is low-frequency");
         Check((int)roomRuntime.GetField("CrowdingSampleInterval", Flags).GetRawConstantValue() == 20,
@@ -61,7 +61,7 @@ internal static partial class Program
               roomRuntime.GetMethod("WeatherQuality", Flags) != null,
             "Task13 room runtime owns multi-anchor selection and weather-specific shelter quality");
 
-        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Check((int)behavior.GetField("DecisionBaseInterval", Flags).GetRawConstantValue() >= 8,
             "Task13 individual environmental decisions are staggered/low-frequency");
         Check((float)behavior.GetField("AnchorSwitchMargin", Flags).GetRawConstantValue() >= 0.10f,

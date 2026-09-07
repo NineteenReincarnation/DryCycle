@@ -380,7 +380,7 @@ internal static class DesertBatflyTravelNavigation
             AbstractRoom home = DB_ColonyRuntime.FindRoom(world, colony.RoomName);
             if (home == null) continue;
             DesertBatflyWeatherEcologySample hazard = DesertBatflyWeatherEcology.Sample(world, home);
-            DesertBatflyEnvironmentalWeather environmentalWeather =
+            DB_EnvironmentWeather environmentalWeather =
                 DB_EnvironmentProfile.Classify(hazard);
             if (DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm(environmentalWeather, hazard))
                 EndEvacuationAndReturn(world, colony.RoomName, template);

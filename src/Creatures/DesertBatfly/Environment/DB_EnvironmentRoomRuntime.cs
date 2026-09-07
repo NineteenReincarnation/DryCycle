@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflyEnvironmentalRoomRuntime
+internal static class DB_EnvironmentRoomRuntime
 {
     internal const int WeatherSampleInterval = 20;
     internal const int CrowdingSampleInterval = 20;
@@ -23,11 +23,11 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     internal sealed class RoomState
     {
         internal readonly Room Room;
-        internal readonly List<DesertBatflyShelterAnchor> Anchors = new(MaxAnchors);
-        internal DesertBatflyEnvironmentalRoomContext Context = DesertBatflyEnvironmentalRoomContext.Calm;
+        internal readonly List<DB_ShelterAnchor> Anchors = new(MaxAnchors);
+        internal DB_EnvironmentContext Context = DB_EnvironmentContext.Calm;
         internal DesertBatflyWeatherEcologySample WeatherSample = DesertBatflyWeatherEcologySample.None;
-        internal DesertBatflyTask13WeatherAxesSample WeatherAxes = DesertBatflyTask13WeatherAxesSample.None;
-        internal DesertBatflyEnvironmentalWeather LastWeather = DesertBatflyEnvironmentalWeather.None;
+        internal DB_WeatherAxesSample WeatherAxes = DB_WeatherAxesSample.None;
+        internal DB_EnvironmentWeather LastWeather = DB_EnvironmentWeather.None;
         internal int RecoveryStartTick = -1;
         internal int RecoveryDurationTicks;
         internal int LastWeatherSampleTick = int.MinValue;
@@ -81,12 +81,12 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         ObserveLocalShelterFailure(state);
     }
 
-    internal static bool TryGetContext(Room room, out DesertBatflyEnvironmentalRoomContext context)
+    internal static bool TryGetContext(Room room, out DB_EnvironmentContext context)
     {
         RoomState state = For(room);
         if (state == null)
         {
-            context = DesertBatflyEnvironmentalRoomContext.Calm;
+            context = DB_EnvironmentContext.Calm;
             return false;
         }
         context = state.Context;
@@ -111,9 +111,9 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
 
     internal static bool TryChooseAnchor(
         DesertBatfly bat,
-        DesertBatflyEnvironmentalWeather weather,
+        DB_EnvironmentWeather weather,
         float roostPreference,
-        out DesertBatflyShelterAnchor anchor,
+        out DB_ShelterAnchor anchor,
         out float score)
     {
         anchor = null;
@@ -129,7 +129,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
 
         for (int i = 0; i < state.Anchors.Count; i++)
         {
-            DesertBatflyShelterAnchor candidate = state.Anchors[i];
+            DB_ShelterAnchor candidate = state.Anchors[i];
             float quality = WeatherQuality(candidate, weather);
             float distance01 = Mathf.Clamp01(Vector2.Distance(
                 bat.mainBodyChunk.pos,
@@ -151,22 +151,22 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     }
 
     internal static float WeatherQuality(
-        DesertBatflyShelterAnchor anchor,
-        DesertBatflyEnvironmentalWeather weather)
+        DB_ShelterAnchor anchor,
+        DB_EnvironmentWeather weather)
     {
         if (anchor == null) return 0f;
         DB_EnvironmentExposureSample e = anchor.Exposure;
         return weather switch
         {
-            DesertBatflyEnvironmentalWeather.LightRain => e.RoofShielding * 0.75f + e.Enclosure * 0.25f,
-            DesertBatflyEnvironmentalWeather.HeavyRain or DesertBatflyEnvironmentalWeather.DeathRain =>
+            DB_EnvironmentWeather.LightRain => e.RoofShielding * 0.75f + e.Enclosure * 0.25f,
+            DB_EnvironmentWeather.HeavyRain or DB_EnvironmentWeather.DeathRain =>
                 e.RoofShielding * 0.72f + e.Enclosure * 0.28f,
-            DesertBatflyEnvironmentalWeather.Fog => e.Enclosure * 0.52f + (1f - e.Exposure) * 0.20f,
-            DesertBatflyEnvironmentalWeather.DenseFog =>
+            DB_EnvironmentWeather.Fog => e.Enclosure * 0.52f + (1f - e.Exposure) * 0.20f,
+            DB_EnvironmentWeather.DenseFog =>
                 e.Enclosure * 0.58f + e.RoofShielding * 0.17f + (anchor.NearHive ? 0.18f : 0f),
-            DesertBatflyEnvironmentalWeather.HeatWave or DesertBatflyEnvironmentalWeather.IntenseHeat =>
+            DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat =>
                 e.Shade * 0.68f + e.Enclosure * 0.32f,
-            DesertBatflyEnvironmentalWeather.Sandstorm or DesertBatflyEnvironmentalWeather.DeathSandstorm =>
+            DB_EnvironmentWeather.Sandstorm or DB_EnvironmentWeather.DeathSandstorm =>
                 e.RoofShielding * 0.34f + e.SideShielding * 0.34f + e.Enclosure * 0.32f,
             _ => 1f - e.Exposure
         };
@@ -190,7 +190,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             : Mathf.Clamp(tick - state.ShelterFailureLastTick, 1, 60);
         state.ShelterFailureLastTick = tick;
 
-        DesertBatflyEnvironmentalRoomContext context = state.Context;
+        DB_EnvironmentContext context = state.Context;
         if (!SeriousShelterFailureWeather(context))
         {
             state.ShelterFailureAccumulatedTicks = Mathf.Max(
@@ -205,7 +205,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         bool allCrowded = state.Anchors.Count > 0;
         for (int i = 0; i < state.Anchors.Count; i++)
         {
-            DesertBatflyShelterAnchor anchor = state.Anchors[i];
+            DB_ShelterAnchor anchor = state.Anchors[i];
             float quality = WeatherQuality(anchor, context.Weather);
             bestQuality = Mathf.Max(bestQuality, quality);
             if (quality >= MinimumUsableAnchorQuality && anchor.Crowding < SevereCrowdingPerAnchor)
@@ -261,15 +261,15 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     }
 
     private static bool SeriousShelterFailureWeather(
-        in DesertBatflyEnvironmentalRoomContext context)
+        in DB_EnvironmentContext context)
     {
         if (!context.WeatherSourceValid) return false;
-        if (context.Weather is DesertBatflyEnvironmentalWeather.LightRain or
-            DesertBatflyEnvironmentalWeather.Fog)
+        if (context.Weather is DB_EnvironmentWeather.LightRain or
+            DB_EnvironmentWeather.Fog)
             return false;
-        return context.Phase is DesertBatflyEnvironmentalPhase.Sheltering or
-                   DesertBatflyEnvironmentalPhase.Acute ||
-               (context.Phase == DesertBatflyEnvironmentalPhase.Preparation &&
+        return context.Phase is DB_EnvironmentPhase.Sheltering or
+                   DB_EnvironmentPhase.Acute ||
+               (context.Phase == DB_EnvironmentPhase.Preparation &&
                 context.ShelterUrgency >= 0.68f);
     }
 
@@ -304,33 +304,33 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         state.WeatherSample = sample;
         state.WeatherAxes = room.world != null && room.abstractRoom != null
             ? DesertBatflyWeatherEcology.SampleTask13Axes(room.world, room.abstractRoom)
-            : DesertBatflyTask13WeatherAxesSample.None;
+            : DB_WeatherAxesSample.None;
 
-        DesertBatflyEnvironmentalWeather weather = DB_EnvironmentProfile.Classify(sample);
+        DB_EnvironmentWeather weather = DB_EnvironmentProfile.Classify(sample);
         DesertBatflyWeatherEcologySample phaseSample = sample;
 
-        if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
+        if (weather == DB_EnvironmentWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
         {
-            weather = DesertBatflyEnvironmentalWeather.DenseFog;
+            weather = DB_EnvironmentWeather.DenseFog;
             phaseSample = Reprofile(sample, "DENSEFOG", state.WeatherAxes.DenseFogIntensity);
         }
-        else if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.FogIntensity > 0f)
+        else if (weather == DB_EnvironmentWeather.LightRain && state.WeatherAxes.FogIntensity > 0f)
         {
-            weather = DesertBatflyEnvironmentalWeather.Fog;
+            weather = DB_EnvironmentWeather.Fog;
             phaseSample = Reprofile(sample, "FOG", state.WeatherAxes.FogIntensity);
         }
 
-        DesertBatflyEnvironmentalPhase previous = state.Context.Phase;
+        DB_EnvironmentPhase previous = state.Context.Phase;
 
-        if (weather != DesertBatflyEnvironmentalWeather.None)
+        if (weather != DB_EnvironmentWeather.None)
         {
             state.LastWeather = weather;
             state.RecoveryStartTick = -1;
             state.RecoveryDurationTicks = 0;
-            DesertBatflyEnvironmentalPhase candidate = DB_EnvironmentProfile.ResolvePhase(
+            DB_EnvironmentPhase candidate = DB_EnvironmentProfile.ResolvePhase(
                 weather, phaseSample, previous, out string reason);
-            DesertBatflyEnvironmentalPhase phase = ApplyPhaseHold(state, candidate, tick, ref reason);
-            SetContext(state, new DesertBatflyEnvironmentalRoomContext(
+            DB_EnvironmentPhase phase = ApplyPhaseHold(state, candidate, tick, ref reason);
+            SetContext(state, new DB_EnvironmentContext(
                 true,
                 weather,
                 phaseSample.HazardKind,
@@ -345,9 +345,9 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             return;
         }
 
-        if (previous != DesertBatflyEnvironmentalPhase.Calm &&
-            previous != DesertBatflyEnvironmentalPhase.Recovery &&
-            state.LastWeather != DesertBatflyEnvironmentalWeather.None)
+        if (previous != DB_EnvironmentPhase.Calm &&
+            previous != DB_EnvironmentPhase.Recovery &&
+            state.LastWeather != DB_EnvironmentWeather.None)
         {
             state.RecoveryStartTick = tick;
             state.RecoveryDurationTicks = RecoveryDuration(state.LastWeather);
@@ -356,35 +356,35 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         if (state.RecoveryStartTick >= 0 &&
             tick - state.RecoveryStartTick < state.RecoveryDurationTicks)
         {
-            SetContext(state, new DesertBatflyEnvironmentalRoomContext(
+            SetContext(state, new DB_EnvironmentContext(
                 false,
                 state.LastWeather,
                 sample.HazardKind,
                 string.Empty,
                 0f, 0f, 0f, 0f, int.MaxValue,
-                DesertBatflyEnvironmentalPhase.Recovery,
+                DB_EnvironmentPhase.Recovery,
                 "staggered recovery from last authorized DryCycle weather"), tick);
             return;
         }
 
         state.RecoveryStartTick = -1;
         state.RecoveryDurationTicks = 0;
-        state.LastWeather = DesertBatflyEnvironmentalWeather.None;
-        SetContext(state, DesertBatflyEnvironmentalRoomContext.Calm, tick);
+        state.LastWeather = DB_EnvironmentWeather.None;
+        SetContext(state, DB_EnvironmentContext.Calm, tick);
     }
 
-    private static DesertBatflyEnvironmentalPhase ApplyPhaseHold(
+    private static DB_EnvironmentPhase ApplyPhaseHold(
         RoomState state,
-        DesertBatflyEnvironmentalPhase candidate,
+        DB_EnvironmentPhase candidate,
         int tick,
         ref string reason)
     {
-        DesertBatflyEnvironmentalPhase current = state.Context.Phase;
+        DB_EnvironmentPhase current = state.Context.Phase;
         if (candidate == current) return current;
-        if (candidate == DesertBatflyEnvironmentalPhase.Acute ||
+        if (candidate == DB_EnvironmentPhase.Acute ||
             PhaseRank(candidate) > PhaseRank(current))
             return candidate;
-        if (current is DesertBatflyEnvironmentalPhase.Calm or DesertBatflyEnvironmentalPhase.Recovery)
+        if (current is DB_EnvironmentPhase.Calm or DB_EnvironmentPhase.Recovery)
             return candidate;
 
         int hold = MinimumHoldTicks(current);
@@ -396,7 +396,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
 
     private static void SetContext(
         RoomState state,
-        in DesertBatflyEnvironmentalRoomContext context,
+        in DB_EnvironmentContext context,
         int tick)
     {
         if (state.Context.Phase != context.Phase || state.PhaseStartTick == int.MinValue)
@@ -404,25 +404,25 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         state.Context = context;
     }
 
-    private static int MinimumHoldTicks(DesertBatflyEnvironmentalPhase phase)
+    private static int MinimumHoldTicks(DB_EnvironmentPhase phase)
         => phase switch
         {
-            DesertBatflyEnvironmentalPhase.Advisory => AdvisoryMinimumHoldTicks,
-            DesertBatflyEnvironmentalPhase.Preparation => PreparationMinimumHoldTicks,
-            DesertBatflyEnvironmentalPhase.Sheltering => ShelteringMinimumHoldTicks,
-            DesertBatflyEnvironmentalPhase.Acute => AcuteMinimumHoldTicks,
+            DB_EnvironmentPhase.Advisory => AdvisoryMinimumHoldTicks,
+            DB_EnvironmentPhase.Preparation => PreparationMinimumHoldTicks,
+            DB_EnvironmentPhase.Sheltering => ShelteringMinimumHoldTicks,
+            DB_EnvironmentPhase.Acute => AcuteMinimumHoldTicks,
             _ => 0
         };
 
-    private static int PhaseRank(DesertBatflyEnvironmentalPhase phase)
+    private static int PhaseRank(DB_EnvironmentPhase phase)
         => phase switch
         {
-            DesertBatflyEnvironmentalPhase.Calm => 0,
-            DesertBatflyEnvironmentalPhase.Recovery => 0,
-            DesertBatflyEnvironmentalPhase.Advisory => 1,
-            DesertBatflyEnvironmentalPhase.Preparation => 2,
-            DesertBatflyEnvironmentalPhase.Sheltering => 3,
-            DesertBatflyEnvironmentalPhase.Acute => 4,
+            DB_EnvironmentPhase.Calm => 0,
+            DB_EnvironmentPhase.Recovery => 0,
+            DB_EnvironmentPhase.Advisory => 1,
+            DB_EnvironmentPhase.Preparation => 2,
+            DB_EnvironmentPhase.Sheltering => 3,
+            DB_EnvironmentPhase.Acute => 4,
             _ => 0
         };
 
@@ -495,7 +495,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             }
             if (tooClose) continue;
 
-            state.Anchors.Add(new DesertBatflyShelterAnchor(
+            state.Anchors.Add(new DB_ShelterAnchor(
                 state.Anchors.Count + 1,
                 candidate.Tile,
                 room.MiddleOfTile(candidate.Tile),
@@ -524,18 +524,18 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         }
     }
 
-    private static int RecoveryDuration(DesertBatflyEnvironmentalWeather weather)
+    private static int RecoveryDuration(DB_EnvironmentWeather weather)
         => weather switch
         {
-            DesertBatflyEnvironmentalWeather.LightRain => 140,
-            DesertBatflyEnvironmentalWeather.Fog => 240,
-            DesertBatflyEnvironmentalWeather.DenseFog => 440,
-            DesertBatflyEnvironmentalWeather.HeatWave => 360,
-            DesertBatflyEnvironmentalWeather.IntenseHeat => 680,
-            DesertBatflyEnvironmentalWeather.Sandstorm => 520,
-            DesertBatflyEnvironmentalWeather.DeathSandstorm => 760,
-            DesertBatflyEnvironmentalWeather.HeavyRain => 420,
-            DesertBatflyEnvironmentalWeather.DeathRain => 720,
+            DB_EnvironmentWeather.LightRain => 140,
+            DB_EnvironmentWeather.Fog => 240,
+            DB_EnvironmentWeather.DenseFog => 440,
+            DB_EnvironmentWeather.HeatWave => 360,
+            DB_EnvironmentWeather.IntenseHeat => 680,
+            DB_EnvironmentWeather.Sandstorm => 520,
+            DB_EnvironmentWeather.DeathSandstorm => 760,
+            DB_EnvironmentWeather.HeavyRain => 420,
+            DB_EnvironmentWeather.DeathRain => 720,
             _ => 260
         };
 

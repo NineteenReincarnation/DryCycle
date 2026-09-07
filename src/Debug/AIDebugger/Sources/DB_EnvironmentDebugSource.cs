@@ -16,13 +16,13 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
         if (snapshot == null || creature?.realizedCreature is not DesertBatfly bat || bat.room == null)
             return snapshot;
 
-        DesertBatflyEnvironmentalRoomRuntime.RoomState roomState =
-            DesertBatflyEnvironmentalRoomRuntime.For(bat.room);
-        DesertBatflyEnvironmentalRoomContext context = roomState?.Context ??
-            DesertBatflyEnvironmentalRoomContext.Calm;
-        bool hasInfluence = DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-            bat, out DesertBatflyEnvironmentalInfluence influence);
-        if (!hasInfluence) influence = DesertBatflyEnvironmentalInfluence.Neutral;
+        DB_EnvironmentRoomRuntime.RoomState roomState =
+            DB_EnvironmentRoomRuntime.For(bat.room);
+        DB_EnvironmentContext context = roomState?.Context ??
+            DB_EnvironmentContext.Calm;
+        bool hasInfluence = DB_EnvironmentRuntime.TryGetInfluence(
+            bat, out DB_EnvironmentInfluence influence);
+        if (!hasInfluence) influence = DB_EnvironmentInfluence.Neutral;
 
         int anchorId = 0;
         float anchorCrowding = 0f;
@@ -33,18 +33,18 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             float best = float.MaxValue;
             for (int i = 0; i < roomState.Anchors.Count; i++)
             {
-                DesertBatflyShelterAnchor anchor = roomState.Anchors[i];
+                DB_ShelterAnchor anchor = roomState.Anchors[i];
                 float dist = (anchor.Position - preferred).sqrMagnitude;
                 if (dist >= best) continue;
                 best = dist;
                 anchorId = anchor.Id;
                 anchorCrowding = anchor.Crowding;
-                anchorWeatherQuality = DesertBatflyEnvironmentalRoomRuntime.WeatherQuality(
+                anchorWeatherQuality = DB_EnvironmentRoomRuntime.WeatherQuality(
                     anchor, context.Weather);
             }
         }
 
-        bool hasFailure = DesertBatflyEnvironmentalRoomRuntime.TryGetShelterFailureDebug(
+        bool hasFailure = DB_EnvironmentRoomRuntime.TryGetShelterFailureDebug(
             bat.room,
             out int failureTicks,
             out float failureSeverity,
@@ -135,7 +135,7 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Environment environmental behavior / 环境行为",
-            context.Phase == DesertBatflyEnvironmentalPhase.Calm
+            context.Phase == DB_EnvironmentPhase.Calm
                 ? AIDebugDecisionState.Inactive
                 : influence.HardSurvival || influence.ShelterDrive > 0.25f ||
                   influence.HeatAgitation > 0.20f || influence.NavigationUncertainty > 0.15f
@@ -145,7 +145,7 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             $"heat={influence.HeatAgitation:0.00}/{influence.ThermalExhaustion:0.00}; " +
             $"home={influence.HomeReturnDrive:0.00}; burrow={influence.BurrowDrive:0.00}; " +
             influence.DecisionReason,
-            "DesertBatflyEnvironmentalBehavior"));
+            "DB_EnvironmentRuntime"));
 
         return snapshot;
     }

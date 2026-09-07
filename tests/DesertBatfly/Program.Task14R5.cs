@@ -47,8 +47,8 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", false) == null,
             "R5 B4 physically removes the Task12 internal detour hub and four signal bridges");
 
-        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
-        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null &&
               behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
             "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Task13 owners");

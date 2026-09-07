@@ -13,7 +13,7 @@ internal static partial class Program
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type injury = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyInjury", true);
         Type creature = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
-        Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type survival = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);

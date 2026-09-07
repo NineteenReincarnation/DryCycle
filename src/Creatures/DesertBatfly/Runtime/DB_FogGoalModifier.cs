@@ -29,10 +29,10 @@ internal static class DB_FogGoalModifier
     {
         if (bat?.room == null || owner is not (
                 DB_BehaviorOwner.EnvironmentHardSurvival or DB_BehaviorOwner.EnvironmentLocalSurvival) ||
-            !DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out DesertBatflyEnvironmentalInfluence influence) ||
+            !DB_EnvironmentRuntime.TryGetInfluence(bat, out DB_EnvironmentInfluence influence) ||
             influence.NavigationUncertainty <= 0.05f ||
             influence.Weather is not (
-                DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog))
+                DB_EnvironmentWeather.Fog or DB_EnvironmentWeather.DenseFog))
             return goal;
 
         State state = states.GetOrCreateValue(bat);

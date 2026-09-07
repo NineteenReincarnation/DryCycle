@@ -266,7 +266,7 @@ internal static class DB_BehaviorArbiter
                 suppressSocial: true,
                 commitment: frame.Travel.Suspended ? 0.65f : 0.90f));
 
-        if (frame.HardSurvival && frame.EnvironmentInfluence.Phase == DesertBatflyEnvironmentalPhase.Acute)
+        if (frame.HardSurvival && frame.EnvironmentInfluence.Phase == DB_EnvironmentPhase.Acute)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.EnvironmentHardSurvival,
                 DB_BehaviorKind.Shelter,
@@ -324,8 +324,8 @@ internal static class DB_BehaviorArbiter
         }
 
         if (!frame.HardSurvival && frame.HasEnvironmentInfluence &&
-            frame.EnvironmentInfluence.Phase is DesertBatflyEnvironmentalPhase.Preparation or
-                DesertBatflyEnvironmentalPhase.Sheltering or DesertBatflyEnvironmentalPhase.Acute)
+            frame.EnvironmentInfluence.Phase is DB_EnvironmentPhase.Preparation or
+                DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.EnvironmentLocalSurvival,
                 DB_BehaviorKind.Shelter,

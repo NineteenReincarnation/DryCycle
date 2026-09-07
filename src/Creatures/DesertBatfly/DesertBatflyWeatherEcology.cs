@@ -51,13 +51,13 @@ internal readonly struct DesertBatflyWeatherEcologySample
 /// ecological hazard. These values are sourced from the same schedule/spatial registry
 /// as Sample(); RoomSettings/default Effects can never populate them.
 /// </summary>
-internal readonly struct DesertBatflyTask13WeatherAxesSample
+internal readonly struct DB_WeatherAxesSample
 {
     internal readonly float LightRainIntensity;
     internal readonly float FogIntensity;
     internal readonly float DenseFogIntensity;
 
-    internal DesertBatflyTask13WeatherAxesSample(
+    internal DB_WeatherAxesSample(
         float lightRainIntensity,
         float fogIntensity,
         float denseFogIntensity)
@@ -69,7 +69,7 @@ internal readonly struct DesertBatflyTask13WeatherAxesSample
 
     internal bool HasLightRain => LightRainIntensity > 0f;
     internal bool HasFog => FogIntensity > 0f || DenseFogIntensity > 0f;
-    internal static DesertBatflyTask13WeatherAxesSample None => new(0f, 0f, 0f);
+    internal static DB_WeatherAxesSample None => new(0f, 0f, 0f);
 }
 
 /// <summary>
@@ -195,13 +195,13 @@ internal static class DesertBatflyWeatherEcology
     /// forecast information: Fog is reactive, and LightRain's moisture/cooling benefit
     /// exists only while rain is actually present in the authorized room.
     /// </summary>
-    internal static DesertBatflyTask13WeatherAxesSample SampleTask13Axes(World world, AbstractRoom room)
+    internal static DB_WeatherAxesSample SampleTask13Axes(World world, AbstractRoom room)
     {
         if (world == null || room == null || world.region == null ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock) ||
             !WeatherScheduleRuntime.TryGetCurrentSchedule(world, out WeatherPhaseSchedule schedule) ||
             schedule == null)
-            return DesertBatflyTask13WeatherAxesSample.None;
+            return DB_WeatherAxesSample.None;
 
         long phaseTicks = CurrentPhaseTicks(clock);
         string region = world.region.name;
@@ -234,7 +234,7 @@ internal static class DesertBatflyWeatherEcology
             }
         }
 
-        return new DesertBatflyTask13WeatherAxesSample(lightRain, fog, denseFog);
+        return new DB_WeatherAxesSample(lightRain, fog, denseFog);
     }
 
     internal static float RegionalStress(World world,

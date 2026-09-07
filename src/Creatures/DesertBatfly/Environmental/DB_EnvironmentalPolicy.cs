@@ -23,14 +23,14 @@ internal static class DB_EnvironmentalPolicy
 
     internal static bool AggressionAuthorized(DesertBatfly bat)
         => bat != null && (bat.Personality.Aggressive ||
-            DesertBatflyEnvironmentalBehavior.AllowsEnvironmentalDamageAttack(bat));
+            DB_EnvironmentRuntime.AllowsEnvironmentalDamageAttack(bat));
 
     internal static float CombatMotivation(DesertBatfly bat)
     {
         if (bat == null) return 0f;
         float value = Mathf.Clamp01(bat.DesertState.Thirst);
-        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-                bat, out DesertBatflyEnvironmentalInfluence influence))
+        if (!DB_EnvironmentRuntime.TryGetInfluence(
+                bat, out DB_EnvironmentInfluence influence))
             return value;
 
         if (influence.HarassMultiplier < 1f)
@@ -47,8 +47,8 @@ internal static class DB_EnvironmentalPolicy
     internal static bool AllowsHarassCandidate(DesertBatfly bat, Creature creature)
     {
         if (bat == null || creature == null) return false;
-        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-                bat, out DesertBatflyEnvironmentalInfluence influence))
+        if (!DB_EnvironmentRuntime.TryGetInfluence(
+                bat, out DB_EnvironmentInfluence influence))
             return true;
         if (influence.HardSurvival) return false;
 
@@ -70,17 +70,17 @@ internal static class DB_EnvironmentalPolicy
     }
 
     internal static float RoostChanceScale(DesertBatfly bat)
-        => DesertBatflyEnvironmentalBehavior.RoostScale(bat);
+        => DB_EnvironmentRuntime.RoostScale(bat);
 
     internal static int AdjustRoostDuration(DesertBatfly bat, int baseDuration)
     {
         if (bat == null || baseDuration <= 0 ||
-            !DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-                bat, out DesertBatflyEnvironmentalInfluence influence))
+            !DB_EnvironmentRuntime.TryGetInfluence(
+                bat, out DB_EnvironmentInfluence influence))
             return baseDuration;
         float scale = Mathf.Clamp(influence.RoostMultiplier, 1f, 4.5f);
         int adjusted = Mathf.RoundToInt(baseDuration * scale);
-        if (DesertBatflyEnvironmentalBehavior.ShouldHoldEnvironmentalRoost(bat))
+        if (DB_EnvironmentRuntime.ShouldHoldEnvironmentalRoost(bat))
             adjusted = Mathf.Max(adjusted, influence.HardSurvival ? 2400 : 1200);
         return Mathf.Clamp(adjusted, baseDuration, 4200);
     }
@@ -88,23 +88,23 @@ internal static class DB_EnvironmentalPolicy
     internal static bool BlocksNeutralSocial(DesertBatfly bat)
     {
         if (bat == null) return true;
-        if (DesertBatflyEnvironmentalBehavior.SuppressNeutralSocial(bat)) return true;
-        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-                bat, out DesertBatflyEnvironmentalInfluence influence))
+        if (DB_EnvironmentRuntime.SuppressNeutralSocial(bat)) return true;
+        if (!DB_EnvironmentRuntime.TryGetInfluence(
+                bat, out DB_EnvironmentInfluence influence))
             return false;
         return ShouldSeekHome(influence) || ShouldBurrow(influence);
     }
 
     internal static float SocialDriveScale(DesertBatfly bat)
-        => DesertBatflyEnvironmentalBehavior.SocialScale(bat);
+        => DB_EnvironmentRuntime.SocialScale(bat);
 
     internal static float GroupCohesionScale(DesertBatfly bat)
-        => DesertBatflyEnvironmentalBehavior.GroupCohesionScale(bat);
+        => DB_EnvironmentRuntime.GroupCohesionScale(bat);
 
     internal static bool AllowsPlayChase(DesertBatfly bat)
     {
         if (bat == null) return false;
-        float scale = DesertBatflyEnvironmentalBehavior.PlayScale(bat);
+        float scale = DB_EnvironmentRuntime.PlayScale(bat);
         if (scale >= 0.999f) return true;
         if (scale <= 0.001f) return false;
         int bucket = (bat.room?.game?.clock ?? 0) / 90;
@@ -114,19 +114,19 @@ internal static class DB_EnvironmentalPolicy
     internal static bool WithinActivityRange(DesertBatfly source, DesertBatfly candidate, float baseRange)
     {
         if (source?.mainBodyChunk == null || candidate?.mainBodyChunk == null) return false;
-        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-                source, out DesertBatflyEnvironmentalInfluence influence))
+        if (!DB_EnvironmentRuntime.TryGetInfluence(
+                source, out DB_EnvironmentInfluence influence))
             return Vector2.Distance(source.mainBodyChunk.pos, candidate.mainBodyChunk.pos) <= baseRange;
         float scale = Mathf.Clamp(influence.ActivityRadiusMultiplier, MinimumActivityRangeScale, 1f);
         return Vector2.Distance(source.mainBodyChunk.pos, candidate.mainBodyChunk.pos) <= baseRange * scale;
     }
 
-    internal static bool ShouldSeekHome(in DesertBatflyEnvironmentalInfluence influence)
+    internal static bool ShouldSeekHome(in DB_EnvironmentInfluence influence)
     {
         if (influence.HardSurvival && influence.HomeReturnDrive >= 0.35f) return true;
         if (influence.HomeReturnDrive < 0.58f) return false;
-        if (influence.Weather is DesertBatflyEnvironmentalWeather.HeatWave or
-            DesertBatflyEnvironmentalWeather.IntenseHeat)
+        if (influence.Weather is DB_EnvironmentWeather.HeatWave or
+            DB_EnvironmentWeather.IntenseHeat)
         {
             float retreat = Mathf.Max(influence.HeatShelterDrive, influence.ThermalExhaustion);
             return retreat + 0.10f >= influence.HeatAgitation;
@@ -134,7 +134,7 @@ internal static class DB_EnvironmentalPolicy
         return true;
     }
 
-    internal static bool ShouldBurrow(in DesertBatflyEnvironmentalInfluence influence)
+    internal static bool ShouldBurrow(in DB_EnvironmentInfluence influence)
     {
         if (influence.HardSurvival && influence.BurrowDrive >= 0.30f) return true;
         return influence.BurrowDrive >= 0.68f;
@@ -148,7 +148,7 @@ internal static class DB_EnvironmentalPolicy
         if (room == null) return false;
 
         DesertBatflyWeatherEcologySample sample = DesertBatflyWeatherEcology.Sample(world, room);
-        DesertBatflyEnvironmentalWeather weather = DB_EnvironmentProfile.Classify(sample);
+        DB_EnvironmentWeather weather = DB_EnvironmentProfile.Classify(sample);
         if (!IsSandstorm(weather)) return false;
 
         float suppression = DB_EnvironmentProfile.SandstormMigrationSuppression(weather, sample);
@@ -156,7 +156,7 @@ internal static class DB_EnvironmentalPolicy
     }
 
     internal static bool ShouldRecallHomeForSandstorm(
-        DesertBatflyEnvironmentalWeather weather,
+        DB_EnvironmentWeather weather,
         in DesertBatflyWeatherEcologySample sample)
     {
         if (!IsSandstorm(weather) || !sample.HasHazard || !sample.ForecastDanger)
@@ -164,7 +164,7 @@ internal static class DB_EnvironmentalPolicy
         if (sample.ActiveIntensity > 0.08f || sample.ImmediateDanger >= 0.48f)
             return false;
 
-        int minimumLead = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        int minimumLead = weather == DB_EnvironmentWeather.DeathSandstorm
             ? DeathSandstormHomeRecallMinimumLeadTicks
             : SandstormHomeRecallMinimumLeadTicks;
         return sample.TimeUntilDangerTicks >= minimumLead &&
@@ -173,7 +173,7 @@ internal static class DB_EnvironmentalPolicy
 
     internal static bool CanConsiderSandstormOutwardRefuge(
         AbstractRoom home,
-        DesertBatflyEnvironmentalWeather weather,
+        DB_EnvironmentWeather weather,
         in DesertBatflyWeatherEcologySample sample,
         out float homeQuality)
     {
@@ -183,33 +183,33 @@ internal static class DB_EnvironmentalPolicy
         if (sample.ActiveIntensity > 0.04f || sample.ImmediateDanger >= 0.38f)
             return false;
 
-        int minimumLead = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        int minimumLead = weather == DB_EnvironmentWeather.DeathSandstorm
             ? DeathSandstormEmergencyMinimumLeadTicks
             : SandstormEmergencyMinimumLeadTicks;
         if (sample.TimeUntilDangerTicks < minimumLead) return false;
 
         homeQuality = DB_RefugePolicy.HomeHiveShelterQuality(
             home, sample.HazardKind, sample.HazardId);
-        float maximumAcceptableHome = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        float maximumAcceptableHome = weather == DB_EnvironmentWeather.DeathSandstorm
             ? 0.24f
             : 0.30f;
         return homeQuality < maximumAcceptableHome;
     }
 
     internal static bool AcceptSandstormEmergencyRefuge(
-        DesertBatflyEnvironmentalWeather weather,
+        DB_EnvironmentWeather weather,
         in DesertBatflyWeatherEcologySample sample,
         float homeQuality,
         in DB_RefugeTarget target)
     {
         if (!target.Valid || !IsSandstorm(weather)) return false;
-        int maxHops = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        int maxHops = weather == DB_EnvironmentWeather.DeathSandstorm
             ? DeathSandstormEmergencyMaxHops
             : SandstormEmergencyMaxHops;
-        float minimumImprovement = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        float minimumImprovement = weather == DB_EnvironmentWeather.DeathSandstorm
             ? 0.24f
             : 0.18f;
-        int extraMargin = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+        int extraMargin = weather == DB_EnvironmentWeather.DeathSandstorm
             ? 1300
             : 900;
 
@@ -224,10 +224,10 @@ internal static class DB_EnvironmentalPolicy
 
     internal static float FogNavigationFamiliarityScale(
         DesertBatfly bat,
-        DesertBatflyEnvironmentalWeather weather)
+        DB_EnvironmentWeather weather)
     {
         if (bat?.room?.abstractRoom == null ||
-            weather is not (DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog))
+            weather is not (DB_EnvironmentWeather.Fog or DB_EnvironmentWeather.DenseFog))
             return 1f;
 
         DB_ColonyRuntime.IndividualRecord record =
@@ -238,7 +238,7 @@ internal static class DB_EnvironmentalPolicy
 
         bool nearHive = DB_EnvironmentExposure.NearHive(
             bat.room, bat.room.GetTilePosition(bat.mainBodyChunk.pos), 10);
-        if (weather == DesertBatflyEnvironmentalWeather.DenseFog)
+        if (weather == DB_EnvironmentWeather.DenseFog)
             return nearHive ? 0.52f : 0.66f;
         return nearHive ? 0.72f : 0.82f;
     }
@@ -246,12 +246,12 @@ internal static class DB_EnvironmentalPolicy
     internal static bool IsSandstormHomeAccessBlocker(
         DesertBatfly bat,
         Player player,
-        in DesertBatflyEnvironmentalInfluence influence)
+        in DB_EnvironmentInfluence influence)
     {
         if (bat?.room == null || player?.mainBodyChunk == null || player.room != bat.room ||
             influence.HardSurvival ||
-            influence.Weather is not (DesertBatflyEnvironmentalWeather.Sandstorm or
-                DesertBatflyEnvironmentalWeather.DeathSandstorm) ||
+            influence.Weather is not (DB_EnvironmentWeather.Sandstorm or
+                DB_EnvironmentWeather.DeathSandstorm) ||
             (influence.HomeReturnDrive < 0.45f && influence.BurrowDrive < 0.45f) ||
             bat.room.hives == null || bat.room.hives.Length == 0)
             return false;
@@ -274,9 +274,9 @@ internal static class DB_EnvironmentalPolicy
         return false;
     }
 
-    private static bool IsSandstorm(DesertBatflyEnvironmentalWeather weather)
-        => weather is DesertBatflyEnvironmentalWeather.Sandstorm or
-                      DesertBatflyEnvironmentalWeather.DeathSandstorm;
+    private static bool IsSandstorm(DB_EnvironmentWeather weather)
+        => weather is DB_EnvironmentWeather.Sandstorm or
+                      DB_EnvironmentWeather.DeathSandstorm;
 
     private static float Stable01(int seed)
     {

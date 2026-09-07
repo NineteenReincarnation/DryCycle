@@ -12,8 +12,8 @@ internal static partial class Program
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
-        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
-        Type roomEnvironment = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
+        Type roomEnvironment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Type colony = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ColonyRuntime", true);
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
         Type refuge = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RefugePolicy", true);

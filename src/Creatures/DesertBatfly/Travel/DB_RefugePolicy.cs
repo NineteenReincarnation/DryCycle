@@ -127,9 +127,9 @@ internal static class DB_RefugePolicy
         Func<AbstractRoom, float> crowding,
         out DB_RefugeTarget target)
     {
-        DesertBatflyEnvironmentalWeather weather = DB_EnvironmentProfile.Classify(hazard);
-        bool sandstorm = weather is DesertBatflyEnvironmentalWeather.Sandstorm or
-                         DesertBatflyEnvironmentalWeather.DeathSandstorm;
+        DB_EnvironmentWeather weather = DB_EnvironmentProfile.Classify(hazard);
+        bool sandstorm = weather is DB_EnvironmentWeather.Sandstorm or
+                         DB_EnvironmentWeather.DeathSandstorm;
         if (!sandstorm)
             return TryFindEmergencyRefugeFrom(
                 world, home, home, template, hazard, physicalCapability, knownRefuge,

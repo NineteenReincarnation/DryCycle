@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DesertBatflyEnvironmentalPhase
+internal enum DB_EnvironmentPhase
 {
     Calm,
     Advisory,
@@ -13,7 +13,7 @@ internal enum DesertBatflyEnvironmentalPhase
     Recovery
 }
 
-internal enum DesertBatflyEnvironmentalWeather
+internal enum DB_EnvironmentWeather
 {
     None,
     LightRain,
@@ -28,10 +28,10 @@ internal enum DesertBatflyEnvironmentalWeather
     Other
 }
 
-internal readonly struct DesertBatflyEnvironmentalRoomContext
+internal readonly struct DB_EnvironmentContext
 {
     internal readonly bool WeatherSourceValid;
-    internal readonly DesertBatflyEnvironmentalWeather Weather;
+    internal readonly DB_EnvironmentWeather Weather;
     internal readonly WeatherScheduleEventKind WeatherKind;
     internal readonly string WeatherId;
     internal readonly float ActiveIntensity;
@@ -39,14 +39,14 @@ internal readonly struct DesertBatflyEnvironmentalRoomContext
     internal readonly float ShelterUrgency;
     internal readonly float TravelExposure;
     internal readonly int ForecastTicks;
-    internal readonly DesertBatflyEnvironmentalPhase Phase;
+    internal readonly DB_EnvironmentPhase Phase;
     internal readonly string PhaseReason;
 
-    internal bool ActiveOrForecast => WeatherSourceValid && Weather != DesertBatflyEnvironmentalWeather.None;
+    internal bool ActiveOrForecast => WeatherSourceValid && Weather != DB_EnvironmentWeather.None;
 
-    internal DesertBatflyEnvironmentalRoomContext(
+    internal DB_EnvironmentContext(
         bool weatherSourceValid,
-        DesertBatflyEnvironmentalWeather weather,
+        DB_EnvironmentWeather weather,
         WeatherScheduleEventKind weatherKind,
         string weatherId,
         float activeIntensity,
@@ -54,7 +54,7 @@ internal readonly struct DesertBatflyEnvironmentalRoomContext
         float shelterUrgency,
         float travelExposure,
         int forecastTicks,
-        DesertBatflyEnvironmentalPhase phase,
+        DB_EnvironmentPhase phase,
         string phaseReason)
     {
         WeatherSourceValid = weatherSourceValid;
@@ -70,9 +70,9 @@ internal readonly struct DesertBatflyEnvironmentalRoomContext
         PhaseReason = phaseReason ?? string.Empty;
     }
 
-    internal static DesertBatflyEnvironmentalRoomContext Calm => new(
+    internal static DB_EnvironmentContext Calm => new(
         false,
-        DesertBatflyEnvironmentalWeather.None,
+        DB_EnvironmentWeather.None,
         WeatherScheduleEventKind.Weather,
         string.Empty,
         0f,
@@ -80,14 +80,14 @@ internal readonly struct DesertBatflyEnvironmentalRoomContext
         0f,
         0f,
         int.MaxValue,
-        DesertBatflyEnvironmentalPhase.Calm,
+        DB_EnvironmentPhase.Calm,
         "no authorized DryCycle environmental weather");
 }
 
-internal readonly struct DesertBatflyEnvironmentalInfluence
+internal readonly struct DB_EnvironmentInfluence
 {
-    internal readonly DesertBatflyEnvironmentalPhase Phase;
-    internal readonly DesertBatflyEnvironmentalWeather Weather;
+    internal readonly DB_EnvironmentPhase Phase;
+    internal readonly DB_EnvironmentWeather Weather;
     internal readonly float ShelterDrive;
     internal readonly float OpenExposureAversion;
     internal readonly float RoostMultiplier;
@@ -115,9 +115,9 @@ internal readonly struct DesertBatflyEnvironmentalInfluence
 
     internal bool SuppressesNeutralSocial => HardSurvival || SocialMultiplier <= 0.20f || PlayMultiplier <= 0.12f;
 
-    internal DesertBatflyEnvironmentalInfluence(
-        DesertBatflyEnvironmentalPhase phase,
-        DesertBatflyEnvironmentalWeather weather,
+    internal DB_EnvironmentInfluence(
+        DB_EnvironmentPhase phase,
+        DB_EnvironmentWeather weather,
         float shelterDrive,
         float openExposureAversion,
         float roostMultiplier,
@@ -171,9 +171,9 @@ internal readonly struct DesertBatflyEnvironmentalInfluence
         DecisionReason = decisionReason ?? string.Empty;
     }
 
-    internal static DesertBatflyEnvironmentalInfluence Neutral => new(
-        DesertBatflyEnvironmentalPhase.Calm,
-        DesertBatflyEnvironmentalWeather.None,
+    internal static DB_EnvironmentInfluence Neutral => new(
+        DB_EnvironmentPhase.Calm,
+        DB_EnvironmentWeather.None,
         0f, 0f, 1f, 1f, 1f, 1f, 1f, 1f,
         1f, 0f, 1f, 0f, 0f, 0f,
         0f, 0f, 0f,
@@ -181,58 +181,3 @@ internal readonly struct DesertBatflyEnvironmentalInfluence
         "calm / no Task13 influence");
 }
 
-internal readonly struct DB_EnvironmentExposureSample
-{
-    internal readonly float Exposure;
-    internal readonly float RoofShielding;
-    internal readonly float SideShielding;
-    internal readonly float Enclosure;
-    internal readonly float Shade;
-    internal readonly float RainExposure;
-    internal readonly float VisibilityConfidence;
-
-    internal DB_EnvironmentExposureSample(
-        float exposure,
-        float roofShielding,
-        float sideShielding,
-        float enclosure,
-        float shade,
-        float rainExposure,
-        float visibilityConfidence)
-    {
-        Exposure = Mathf.Clamp01(exposure);
-        RoofShielding = Mathf.Clamp01(roofShielding);
-        SideShielding = Mathf.Clamp01(sideShielding);
-        Enclosure = Mathf.Clamp01(enclosure);
-        Shade = Mathf.Clamp01(shade);
-        RainExposure = Mathf.Clamp01(rainExposure);
-        VisibilityConfidence = Mathf.Clamp01(visibilityConfidence);
-    }
-}
-
-internal sealed class DesertBatflyShelterAnchor
-{
-    internal readonly int Id;
-    internal readonly IntVector2 Tile;
-    internal readonly Vector2 Position;
-    internal readonly DB_EnvironmentExposureSample Exposure;
-    internal readonly bool RoostCompatible;
-    internal readonly bool NearHive;
-    internal float Crowding;
-
-    internal DesertBatflyShelterAnchor(
-        int id,
-        IntVector2 tile,
-        Vector2 position,
-        DB_EnvironmentExposureSample exposure,
-        bool roostCompatible,
-        bool nearHive)
-    {
-        Id = id;
-        Tile = tile;
-        Position = position;
-        Exposure = exposure;
-        RoostCompatible = roostCompatible;
-        NearHive = nearHive;
-    }
-}

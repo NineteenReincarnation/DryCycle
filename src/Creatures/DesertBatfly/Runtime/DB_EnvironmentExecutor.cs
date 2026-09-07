@@ -18,6 +18,6 @@ internal static class DB_EnvironmentExecutor
             DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=" + resolution.PrimaryOwner);
         if (resolution.WinningProposal.SuppressCombat)
             bat.DesertAI.CancelPhysicalAttack();
-        return DesertBatflyEnvironmentalBehavior.ApplyOwnedBehavior(bat);
+        return DB_EnvironmentRuntime.ApplyOwnedBehavior(bat);
     }
 }

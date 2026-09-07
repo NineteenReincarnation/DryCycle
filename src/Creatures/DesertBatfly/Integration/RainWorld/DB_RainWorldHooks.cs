@@ -23,8 +23,8 @@ internal static class DB_RainWorldHooks
         DB_RefugePolicy.Reset();
         DesertBatflySocialLife.Reset();
         DB_SignalRuntime.Reset();
-        DesertBatflyEnvironmentalRoomRuntime.Reset();
-        DesertBatflyEnvironmentalBehavior.Reset();
+        DB_EnvironmentRoomRuntime.Reset();
+        DB_EnvironmentRuntime.Reset();
         DB_EventHub.Enable();
         DB_EventConsumers.Enable();
         DesertBatflyThreatRuntime.Enable();
@@ -71,8 +71,8 @@ internal static class DB_RainWorldHooks
         DB_EventHub.Disable();
         DesertBatflyThreatRuntime.Disable();
         DB_SignalRuntime.Reset();
-        DesertBatflyEnvironmentalBehavior.Reset();
-        DesertBatflyEnvironmentalRoomRuntime.Reset();
+        DB_EnvironmentRuntime.Reset();
+        DB_EnvironmentRoomRuntime.Reset();
         DesertBatflySocialLife.Reset();
         DB_PlatformRoostRuntime.Disable();
         DB_ColonyRuntime.Disable();
@@ -119,7 +119,7 @@ internal static class DB_RainWorldHooks
             DesertBatflySocialLife.CancelForPriority(desert, "room transition");
             DB_SignalRuntime.Forget(desert);
             DesertBatflyThreatRuntime.Forget(desert);
-            DesertBatflyEnvironmentalBehavior.Forget(desert);
+            DB_EnvironmentRuntime.Forget(desert);
             DB_FrameContextRuntime.Forget(desert);
             DB_BehaviorArbiter.Forget(desert);
             DB_FlightMotor.Forget(desert);
@@ -155,7 +155,7 @@ internal static class DB_RainWorldHooks
 
         DesertBatflySocialLife.CancelForPriority(desert, "emergence priority");
         DB_SignalRuntime.Forget(desert);
-        DesertBatflyEnvironmentalBehavior.Forget(desert);
+        DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
@@ -171,7 +171,7 @@ internal static class DB_RainWorldHooks
 
         // R3 order is deliberate: refresh state/facts first, resolve one owner, then execute.
         // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
-        DesertBatflyEnvironmentalBehavior.RefreshInfluence(desert);
+        DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DesertBatflyThreatRuntime.RefreshState(desert);
         DesertBatflySocialLife.RefreshState(desert);
@@ -465,7 +465,7 @@ internal static class DB_RainWorldHooks
         if (self.readyForAI && self.aimap != null)
             DB_RefugePolicy.ObserveRoom(self);
         DesertBatflySignalRoomRuntime.For(self)?.Prune(self);
-        DesertBatflyEnvironmentalRoomRuntime.Update(self);
+        DB_EnvironmentRoomRuntime.Update(self);
     }
 
     private static int Nourishment(

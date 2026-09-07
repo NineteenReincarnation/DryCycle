@@ -26,7 +26,7 @@ internal static partial class Program
         Type signalRoomRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
         Type environmentRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Type swarmRoom = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertSwarmRoom", true);
         Type hooks = mod.GetType(

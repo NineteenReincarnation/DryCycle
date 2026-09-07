@@ -38,7 +38,7 @@ internal static class DB_VisibilityPolicy
             return false;
 
         float confidence = Mathf.Clamp01(
-            DesertBatflyEnvironmentalBehavior.VisibilityScale(observer));
+            DB_EnvironmentRuntime.VisibilityScale(observer));
         float range = EffectiveRange(baseRange, confidence, channel, realProjectile);
         return (targetPosition - origin).sqrMagnitude <= range * range;
     }

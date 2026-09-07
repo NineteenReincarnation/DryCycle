@@ -5,8 +5,8 @@ internal static partial class Program
 {
     private static void RunTask13Rain()
     {
-        Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalPhase", true);
-        Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalWeather", true);
+        Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentPhase", true);
+        Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentWeather", true);
         Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentProfile", true);
         Type ecologySample = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcologySample", true);
         Type eventKind = mod.GetType("DryCycle.Weather.Scheduling.WeatherScheduleEventKind", true);
@@ -63,7 +63,7 @@ internal static partial class Program
               Math.Abs((float)uncertainty.Invoke(null, new object[] { heavyRainWeather, 1f })) < 0.0001f,
             "Task13 HeavyRain does not steal Fog visibility/navigation semantics");
 
-        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         MethodInfo applyWeather = behavior.GetMethod("ApplyWeatherProfile", Flags);
         Check(MethodCallOffset(applyWeather, profile, "HeavyRainBurden") >= 0,
             "Task13 HeavyRain behavior consumes the local burden model instead of intensity-only sheltering");
@@ -84,7 +84,7 @@ internal static partial class Program
               survivalBridge.GetMethod("ShouldBurrow", Flags) != null,
             "Task13 DeathRain local Home/Burrow pressure feeds the existing native FlyAI survival bridge");
 
-        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         MethodInfo weatherQuality = roomRuntime.GetMethod("WeatherQuality", Flags);
         Check(weatherQuality != null,
             "Task13 rain shelter selection remains on the shared bounded multi-anchor scorer");

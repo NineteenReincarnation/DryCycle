@@ -528,7 +528,7 @@ internal static class DB_SignalRuntime
         attenuation = 0f;
         float distance = Vector2.Distance(receiver.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
         float baseVisualRadius = VisualRadius(packet.Kind);
-        float visibility = DesertBatflyEnvironmentalBehavior.VisibilityScale(receiver);
+        float visibility = DB_EnvironmentRuntime.VisibilityScale(receiver);
         float visualRadius = DB_VisibilityPolicy.EffectiveRange(
             baseVisualRadius, visibility, DB_VisibilityChannel.Signal);
 

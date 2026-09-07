@@ -116,7 +116,7 @@ internal readonly struct DB_FrameContext
     internal readonly bool HasSignalInfluence;
     internal readonly DB_SignalInfluence SignalInfluence;
     internal readonly bool HasEnvironmentInfluence;
-    internal readonly DesertBatflyEnvironmentalInfluence EnvironmentInfluence;
+    internal readonly DB_EnvironmentInfluence EnvironmentInfluence;
     internal readonly DB_ThreatFrameSummary Threat;
     internal readonly bool HasSocialState;
     internal readonly DesertBatflySocialDebugState Social;
@@ -168,7 +168,7 @@ internal readonly struct DB_FrameContext
         bool hasSignalInfluence,
         in DB_SignalInfluence signalInfluence,
         bool hasEnvironmentInfluence,
-        in DesertBatflyEnvironmentalInfluence environmentInfluence,
+        in DB_EnvironmentInfluence environmentInfluence,
         in DB_ThreatFrameSummary threat,
         bool hasSocialState,
         in DesertBatflySocialDebugState social,
@@ -328,9 +328,9 @@ internal static class DB_FrameContextRuntime
         bool incomingProjectile = DB_WeaponPerception.TryFindIncomingProjectile(
             bat, 230f, 42f, 16f, out DB_WeaponObservation projectile);
 
-        bool hasEnvironment = DesertBatflyEnvironmentalBehavior.TryGetInfluence(
-            bat, out DesertBatflyEnvironmentalInfluence environment);
-        if (!hasEnvironment) environment = DesertBatflyEnvironmentalInfluence.Neutral;
+        bool hasEnvironment = DB_EnvironmentRuntime.TryGetInfluence(
+            bat, out DB_EnvironmentInfluence environment);
+        if (!hasEnvironment) environment = DB_EnvironmentInfluence.Neutral;
         bool hasSignal = DB_SignalRuntime.TryGetInfluence(
             bat, out DB_SignalInfluence signal);
 
