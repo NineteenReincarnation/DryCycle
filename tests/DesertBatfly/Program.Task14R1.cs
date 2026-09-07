@@ -82,17 +82,52 @@ internal static partial class Program
               hooks.GetMethod("TongueUpdate", Flags) == null,
             "Task14 R1 removes Core Hooks duplicate mortality and tongue semantic roots");
 
+        Type creature = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
+        Type intimidation = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Check(creature.GetField("recentLethalDamager", Flags) == null &&
+              creature.GetField("recentLethalDamageTicks", Flags) == null &&
+              creature.GetField("recentLethalThreatScale", Flags) == null,
+            "Task14 R1 removes Creature-local mortality attribution cache");
+        Check(MethodCallOffset(creature.GetMethod("Die", Flags), intimidation, "BroadcastPlayerKill") < 0 &&
+              MethodCallOffset(creature.GetMethod("Die", Flags), intimidation, "BroadcastPredatorKill") < 0 &&
+              MethodCallOffset(creature.GetMethod("Grabbed", Flags), intimidation, "BroadcastPredatorCapture") < 0,
+            "Task14 R1 Creature no longer publishes mortality/predator-capture semantics directly");
+
+        Type peach = mod.GetType(
+            "DryCycle.WatcherExts.PeachLizard.PeachLizardDesertBatflyPredation", true);
+        Check(MethodCallOffset(peach.GetMethod("LizardTongue_Update", Flags), intimidation, "BroadcastPredatorCapture") < 0,
+            "Task14 R1 Watcher Peach adapter owns tongue mechanics but no longer publishes fear semantics");
+
+        MethodInfo captureConsumer = consumers.GetMethod("OnCapture", Flags);
+        MethodInfo mortalityConsumer = consumers.GetMethod("OnMortality", Flags);
         Type colony = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyColonyRuntime", true);
-        MethodInfo mortalityConsumer = consumers.GetMethod("OnMortality", Flags);
-        Check(MethodCallOffset(mortalityConsumer, colony, "ReportDeath") >= 0,
-            "Task14 R1 colony death accounting consumes canonical MortalityEvent attribution");
+        Check(MethodCallOffset(captureConsumer, intimidation, "BroadcastPredatorCapture") >= 0,
+            "Task14 R1 Peach fear consumes canonical CaptureEvent");
+        Check(MethodCallOffset(mortalityConsumer, colony, "ReportDeath") >= 0 &&
+              MethodCallOffset(mortalityConsumer, intimidation, "BroadcastPlayerKill") >= 0 &&
+              MethodCallOffset(mortalityConsumer, intimidation, "BroadcastPredatorKill") >= 0,
+            "Task14 R1 Colony and Intimidation consume the same canonical MortalityEvent killer");
+
+        Type signalIntegration = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", true);
+        MethodInfo signalEnable = signalIntegration.GetMethod("Enable", Flags);
+        MethodInfo signalDisable = signalIntegration.GetMethod("Disable", Flags);
+        Check(signalIntegration.GetMethod("FlyGrabbed", Flags) == null &&
+              signalIntegration.GetMethod("TongueUpdate", Flags) == null &&
+              signalIntegration.GetMethod("CaptureEvent", Flags) != null,
+            "Task14 R1 Task12 signals no longer observe raw grasp/tongue roots independently");
+        Check(MethodCallOffset(signalEnable, hub, "add_Capture") >= 0 &&
+              MethodCallOffset(signalDisable, hub, "remove_Capture") >= 0,
+            "Task14 R1 Task12 capture signals subscribe to the canonical CaptureEvent lifecycle");
 
         Check(hub.Name.StartsWith("DB_", StringComparison.Ordinal) &&
               hub.Name.IndexOf("Task", StringComparison.OrdinalIgnoreCase) < 0,
             "Task14 R1 new production authority follows DB_ domain naming without TaskXX architecture");
 
         Console.WriteLine(
-            "Task14 R1: semantic EventHub, capture-session exactly-once, mortality one-shot/attribution window, Core Hook root removal and colony mortality consumer verified.");
+            "Task14 R1: EventHub roots, capture-session exactly-once, canonical mortality attribution, Creature/Watcher root removal, Colony/Fear/Signal consumers and DB_ naming verified.");
     }
 }
