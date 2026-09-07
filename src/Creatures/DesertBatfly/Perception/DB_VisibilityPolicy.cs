@@ -7,6 +7,7 @@ internal enum DB_VisibilityChannel
     Creature,
     Player,
     Social,
+    Signal,
     HeldItem,
     Projectile
 }
@@ -56,6 +57,7 @@ internal static class DB_VisibilityPolicy
         {
             DB_VisibilityChannel.Projectile => realProjectile ? 0.38f : 0.28f,
             DB_VisibilityChannel.HeldItem => 0.34f,
+            DB_VisibilityChannel.Signal => 0.34f,
             DB_VisibilityChannel.Social => 0.42f,
             DB_VisibilityChannel.Player => 0.32f,
             _ => 0.30f
