@@ -65,7 +65,7 @@ internal static class DesertBatflyThreatTactics
         if (!TryProfile(bat, player, out DesertBatflyThreatTacticalProfile profile))
             return baseChance;
 
-        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(
+        DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(
             bat.DesertState, profile.PlayerSlot);
         return LearnedFakeDiveChance(
             baseChance,
@@ -256,7 +256,7 @@ internal static class DesertBatflyThreatTactics
 
         int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
         if (!DesertBatflyThreatRuntime.ValidSlot(slot)) return false;
-        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
+        DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.001f) return false;
 
         DB_WeaponPerception.TryObserveHeldThreats(

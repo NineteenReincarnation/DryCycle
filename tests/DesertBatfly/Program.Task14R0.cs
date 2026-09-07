@@ -25,7 +25,7 @@ internal static partial class Program
             "Task14 R0 freezes primary Desert Batfly save key");
 
         Type threatStoreType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatMemoryStore", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Check((string)threatStoreType.GetField("SaveKey", Flags).GetRawConstantValue() == "DCDesertBatflyThreatV1",
             "Task14 R0 freezes Threat Signature save key");
 

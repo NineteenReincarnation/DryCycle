@@ -98,7 +98,7 @@ internal static partial class Program
               Math.Abs(Convert.ToSingle(signal.GetField("AnonymousAlarmEscapeThreshold", Flags)
                           .GetRawConstantValue()) - 0.34f) < 0.0001f,
             "R5 retention B4: concrete/anonymous Alarm escape thresholds remain 0.30/0.34");
-        Type threatMemory = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatMemoryStore", true);
+        Type threatMemory = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Check(MethodCallOffset(signal.GetMethod("ResponseStrength", Flags), threatMemory, "For") >= 0,
             "R5 retention B4: Signal response still reads only receiver-owned Task11 memory");
         Check(MethodCallOffset(threat.GetMethod("ReportExplosion", Flags), signal, "EmitAcuteAlarm") >= 0 &&

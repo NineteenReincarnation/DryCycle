@@ -185,7 +185,7 @@ internal static partial class Program
         if (called == null) return false;
         string owner = called.DeclaringType?.FullName ?? string.Empty;
         if (owner == "UnityEngine.Input") return true;
-        if (owner.IndexOf("DesertBatflyThreatMemoryStore", StringComparison.Ordinal) >= 0 &&
+        if (owner.IndexOf("DB_ThreatMemoryStore", StringComparison.Ordinal) >= 0 &&
             called.Name == "AddEvidence") return true;
         return false;
     }

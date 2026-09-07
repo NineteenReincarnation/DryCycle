@@ -221,7 +221,7 @@ internal static class DesertBatflyThreatRuntime
         roomStates = new ConditionalWeakTable<Room, RoomState>();
         processedExplosions = new ConditionalWeakTable<Explosion, ProcessedExplosion>();
         sourceOwners = new ConditionalWeakTable<PhysicalObject, SourceOwner>();
-        DesertBatflyThreatMemoryStore.ResetRuntime();
+        DB_ThreatMemoryStore.ResetRuntime();
     }
 
     internal static void Forget(DesertBatfly bat)
@@ -233,7 +233,7 @@ internal static class DesertBatflyThreatRuntime
     {
         if (bat == null || bat.room == null || bat.dead || bat.slatedForDeletetion) return;
         RuntimeState state = StateFor(bat);
-        DesertBatflyThreatMemoryStore.DecayToCycle(bat.DesertState, CurrentCycle(bat));
+        DB_ThreatMemoryStore.DecayToCycle(bat.DesertState, CurrentCycle(bat));
         TickAcute(state);
         TrackFormalAggression(bat, state);
         UpdateCue(bat, state);
@@ -266,7 +266,7 @@ internal static class DesertBatflyThreatRuntime
         if (bat == null) return false;
         RuntimeState state = StateFor(bat);
         int slot = state.Cue.PlayerSlot;
-        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
+        DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(bat.DesertState, slot);
         debug.PlayerSlot = slot;
         if (memory != null)
         {
@@ -283,7 +283,7 @@ internal static class DesertBatflyThreatRuntime
             debug.CounterKillPressure = memory.CounterKillPressure;
             debug.RetreatTendency = memory.RetreatTendency;
             debug.NonAggressionConfidence = memory.NonAggressionConfidence;
-            debug.DominantSignature = DesertBatflyThreatMemoryStore.DominantSignature(memory);
+            debug.DominantSignature = DB_ThreatMemoryStore.DominantSignature(memory);
         }
         else debug.DominantSignature = "None";
 
@@ -652,7 +652,7 @@ internal static class DesertBatflyThreatRuntime
         int slot = PlayerSlot(player);
         if (!ValidSlot(slot)) return;
 
-        DesertBatflyThreatMemoryStore.AddEvidence(
+        DB_ThreatMemoryStore.AddEvidence(
             bat.DesertState,
             slot,
             evidence,
@@ -742,8 +742,8 @@ internal static class DesertBatflyThreatRuntime
     {
         DesertBatflyThreatCue cue = state.Cue;
         if (!ValidSlot(cue.PlayerSlot) || bat.room == null) return;
-        DesertBatflyPlayerThreatMemory memory =
-            DesertBatflyThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
+        DB_PlayerThreatMemory memory =
+            DB_ThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
         if (memory == null || memory.Confidence < 0.08f) return;
 
         Player player = DB_RoomContext.For(bat.room)?.PlayerBySlot(cue.PlayerSlot);
@@ -866,7 +866,7 @@ internal static class DesertBatflyThreatRuntime
             state.PursuitDisengageExtended || !ValidSlot(state.EscapeThreatPlayerSlot))
             return;
 
-        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(
+        DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(
             bat.DesertState, state.EscapeThreatPlayerSlot);
         if (memory == null || memory.PursuitPressure < 0.26f) return;
 
@@ -985,8 +985,8 @@ internal static class DesertBatflyThreatRuntime
 
         if (bat.DesertAI.Target is not Player player || player.room != bat.room) return;
         int slot = PlayerSlot(player);
-        DesertBatflyPlayerThreatMemory memory =
-            DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
+        DB_PlayerThreatMemory memory =
+            DB_ThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.02f) return;
 
         DesertBatflyThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;
@@ -1144,7 +1144,7 @@ internal static class DesertBatflyThreatRuntime
     private static bool ShouldAbandonFreshHarass(
         DesertBatfly bat,
         int slot,
-        DesertBatflyPlayerThreatMemory memory,
+        DB_PlayerThreatMemory memory,
         float caution)
     {
         float chance =
@@ -1248,7 +1248,7 @@ internal static class DesertBatflyThreatRuntime
 
     internal static int PlayerSlot(Player player) => player?.playerState?.playerNumber ?? -1;
     internal static bool ValidSlot(int slot) =>
-        slot >= 0 && slot < DesertBatflyThreatMemorySet.PlayerSlots;
+        slot >= 0 && slot < DB_ThreatMemorySet.PlayerSlots;
 
     private static bool Recent(int stamp, int clock, int window) =>
         stamp != int.MinValue && clock >= stamp && clock - stamp <= window;

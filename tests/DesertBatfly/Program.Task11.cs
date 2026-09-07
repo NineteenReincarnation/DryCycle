@@ -9,13 +9,13 @@ internal static partial class Program
     private static void RunTask11()
     {
         Type dimensionType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatDimension", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatDimension", true);
         Type memoryType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyPlayerThreatMemory", true);
+            "DryCycle.Creatures.DesertBatfly.DB_PlayerThreatMemory", true);
         Type setType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatMemorySet", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatMemorySet", true);
         Type storeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatMemoryStore", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Type evidenceType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatEvidence", true);
         Type tagType = mod.GetType(

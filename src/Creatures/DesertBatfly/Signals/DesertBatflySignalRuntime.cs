@@ -605,8 +605,8 @@ internal static class DesertBatflySignalRuntime
             int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
             if (DesertBatflyThreatRuntime.ValidSlot(slot))
             {
-                DesertBatflyPlayerThreatMemory memory =
-                    DesertBatflyThreatMemoryStore.For(receiver.DesertState, slot);
+                DB_PlayerThreatMemory memory =
+                    DB_ThreatMemoryStore.For(receiver.DesertState, slot);
                 if (memory != null && memory.Confidence >= 0.04f)
                 {
                     float lethalCaution = Mathf.Clamp01(

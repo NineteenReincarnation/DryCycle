@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DesertBatflyThreatDimension
+internal enum DB_ThreatDimension
 {
     Projectile,
     Piercing,
@@ -21,7 +21,7 @@ internal enum DesertBatflyThreatDimension
     NonAggressionConfidence
 }
 
-internal sealed class DesertBatflyPlayerThreatMemory
+internal sealed class DB_PlayerThreatMemory
 {
     internal float ProjectilePressure;
     internal float PiercingPressure;
@@ -39,66 +39,66 @@ internal sealed class DesertBatflyPlayerThreatMemory
     internal int LastMeaningfulEncounterCycle = -1;
     internal int LastDecayCycle = -1;
 
-    internal float Get(DesertBatflyThreatDimension dimension)
+    internal float Get(DB_ThreatDimension dimension)
     {
         return dimension switch
         {
-            DesertBatflyThreatDimension.Projectile => ProjectilePressure,
-            DesertBatflyThreatDimension.Piercing => PiercingPressure,
-            DesertBatflyThreatDimension.BluntStun => BluntStunPressure,
-            DesertBatflyThreatDimension.Explosion => ExplosionPressure,
-            DesertBatflyThreatDimension.Startle => StartlePressure,
-            DesertBatflyThreatDimension.Shock => ShockPressure,
-            DesertBatflyThreatDimension.AreaDenial => AreaDenialPressure,
-            DesertBatflyThreatDimension.GrabCapture => GrabCapturePressure,
-            DesertBatflyThreatDimension.Pursuit => PursuitPressure,
-            DesertBatflyThreatDimension.CounterKill => CounterKillPressure,
-            DesertBatflyThreatDimension.RetreatTendency => RetreatTendency,
-            DesertBatflyThreatDimension.NonAggressionConfidence => NonAggressionConfidence,
+            DB_ThreatDimension.Projectile => ProjectilePressure,
+            DB_ThreatDimension.Piercing => PiercingPressure,
+            DB_ThreatDimension.BluntStun => BluntStunPressure,
+            DB_ThreatDimension.Explosion => ExplosionPressure,
+            DB_ThreatDimension.Startle => StartlePressure,
+            DB_ThreatDimension.Shock => ShockPressure,
+            DB_ThreatDimension.AreaDenial => AreaDenialPressure,
+            DB_ThreatDimension.GrabCapture => GrabCapturePressure,
+            DB_ThreatDimension.Pursuit => PursuitPressure,
+            DB_ThreatDimension.CounterKill => CounterKillPressure,
+            DB_ThreatDimension.RetreatTendency => RetreatTendency,
+            DB_ThreatDimension.NonAggressionConfidence => NonAggressionConfidence,
             _ => 0f
         };
     }
 
-    internal void Add(DesertBatflyThreatDimension dimension, float evidence)
+    internal void Add(DB_ThreatDimension dimension, float evidence)
     {
         if (!FinitePositive(evidence)) return;
         evidence = Mathf.Clamp01(evidence);
         switch (dimension)
         {
-            case DesertBatflyThreatDimension.Projectile:
+            case DB_ThreatDimension.Projectile:
                 ProjectilePressure = Saturating(ProjectilePressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.Piercing:
+            case DB_ThreatDimension.Piercing:
                 PiercingPressure = Saturating(PiercingPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.BluntStun:
+            case DB_ThreatDimension.BluntStun:
                 BluntStunPressure = Saturating(BluntStunPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.Explosion:
+            case DB_ThreatDimension.Explosion:
                 ExplosionPressure = Saturating(ExplosionPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.Startle:
+            case DB_ThreatDimension.Startle:
                 StartlePressure = Saturating(StartlePressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.Shock:
+            case DB_ThreatDimension.Shock:
                 ShockPressure = Saturating(ShockPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.AreaDenial:
+            case DB_ThreatDimension.AreaDenial:
                 AreaDenialPressure = Saturating(AreaDenialPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.GrabCapture:
+            case DB_ThreatDimension.GrabCapture:
                 GrabCapturePressure = Saturating(GrabCapturePressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.Pursuit:
+            case DB_ThreatDimension.Pursuit:
                 PursuitPressure = Saturating(PursuitPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.CounterKill:
+            case DB_ThreatDimension.CounterKill:
                 CounterKillPressure = Saturating(CounterKillPressure, evidence);
                 break;
-            case DesertBatflyThreatDimension.RetreatTendency:
+            case DB_ThreatDimension.RetreatTendency:
                 RetreatTendency = Saturating(RetreatTendency, evidence);
                 break;
-            case DesertBatflyThreatDimension.NonAggressionConfidence:
+            case DB_ThreatDimension.NonAggressionConfidence:
                 NonAggressionConfidence = Saturating(NonAggressionConfidence, evidence);
                 break;
         }
@@ -107,8 +107,8 @@ internal sealed class DesertBatflyPlayerThreatMemory
     internal void ApplyDecay(int cycles)
     {
         if (cycles <= 0) return;
-        float signatureFactor = Mathf.Pow(DesertBatflyThreatMemoryStore.SignatureDecayPerCycle, cycles);
-        float confidenceFactor = Mathf.Pow(DesertBatflyThreatMemoryStore.ConfidenceDecayPerCycle, cycles);
+        float signatureFactor = Mathf.Pow(DB_ThreatMemoryStore.SignatureDecayPerCycle, cycles);
+        float confidenceFactor = Mathf.Pow(DB_ThreatMemoryStore.ConfidenceDecayPerCycle, cycles);
         ProjectilePressure *= signatureFactor;
         PiercingPressure *= signatureFactor;
         BluntStunPressure *= signatureFactor;
@@ -156,42 +156,42 @@ internal sealed class DesertBatflyPlayerThreatMemory
         !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f;
 }
 
-internal sealed class DesertBatflyThreatMemorySet
+internal sealed class DB_ThreatMemorySet
 {
     internal const int PlayerSlots = 4;
-    internal readonly DesertBatflyPlayerThreatMemory[] Players =
+    internal readonly DB_PlayerThreatMemory[] Players =
     {
         new(), new(), new(), new()
     };
 }
 
-internal static class DesertBatflyThreatMemoryStore
+internal static class DB_ThreatMemoryStore
 {
     internal const string SaveKey = "DCDesertBatflyThreatV1";
     internal const float SignatureDecayPerCycle = 0.80f;
     internal const float ConfidenceDecayPerCycle = 0.86f;
 
-    private static ConditionalWeakTable<DesertBatflyState, DesertBatflyThreatMemorySet> memories = new();
+    private static ConditionalWeakTable<DesertBatflyState, DB_ThreatMemorySet> memories = new();
 
     internal static void ResetRuntime()
     {
-        memories = new ConditionalWeakTable<DesertBatflyState, DesertBatflyThreatMemorySet>();
+        memories = new ConditionalWeakTable<DesertBatflyState, DB_ThreatMemorySet>();
     }
 
-    internal static DesertBatflyPlayerThreatMemory For(DesertBatflyState state, int playerSlot)
+    internal static DB_PlayerThreatMemory For(DesertBatflyState state, int playerSlot)
     {
-        if (state == null || playerSlot < 0 || playerSlot >= DesertBatflyThreatMemorySet.PlayerSlots)
+        if (state == null || playerSlot < 0 || playerSlot >= DB_ThreatMemorySet.PlayerSlots)
             return null;
         return SetFor(state).Players[playerSlot];
     }
 
-    internal static DesertBatflyThreatMemorySet SetFor(DesertBatflyState state)
+    internal static DB_ThreatMemorySet SetFor(DesertBatflyState state)
     {
         if (state == null) return null;
-        if (memories.TryGetValue(state, out DesertBatflyThreatMemorySet existing))
+        if (memories.TryGetValue(state, out DB_ThreatMemorySet existing))
             return existing;
 
-        var created = new DesertBatflyThreatMemorySet();
+        var created = new DB_ThreatMemorySet();
         Load(state, created);
         memories.Add(state, created);
         return created;
@@ -204,27 +204,27 @@ internal static class DesertBatflyThreatMemoryStore
         float multiplier,
         int cycle)
     {
-        DesertBatflyPlayerThreatMemory memory = For(state, playerSlot);
+        DB_PlayerThreatMemory memory = For(state, playerSlot);
         if (memory == null || float.IsNaN(multiplier) || float.IsInfinity(multiplier) || multiplier <= 0f)
             return;
 
         multiplier = Mathf.Clamp(multiplier, 0f, 1.5f);
-        memory.Add(DesertBatflyThreatDimension.Projectile, evidence.Projectile * multiplier);
-        memory.Add(DesertBatflyThreatDimension.Piercing, evidence.Piercing * multiplier);
-        memory.Add(DesertBatflyThreatDimension.BluntStun, evidence.BluntStun * multiplier);
-        memory.Add(DesertBatflyThreatDimension.Explosion, evidence.Explosion * multiplier);
-        memory.Add(DesertBatflyThreatDimension.Startle, evidence.Startle * multiplier);
-        memory.Add(DesertBatflyThreatDimension.Shock, evidence.Shock * multiplier);
-        memory.Add(DesertBatflyThreatDimension.AreaDenial, evidence.AreaDenial * multiplier);
-        memory.Add(DesertBatflyThreatDimension.GrabCapture, evidence.GrabCapture * multiplier);
-        memory.Add(DesertBatflyThreatDimension.Pursuit, evidence.Pursuit * multiplier);
-        memory.Add(DesertBatflyThreatDimension.CounterKill, evidence.CounterKill * multiplier);
-        memory.Add(DesertBatflyThreatDimension.RetreatTendency, evidence.RetreatTendency * multiplier);
-        memory.Add(DesertBatflyThreatDimension.NonAggressionConfidence, evidence.NonAggressionConfidence * multiplier);
+        memory.Add(DB_ThreatDimension.Projectile, evidence.Projectile * multiplier);
+        memory.Add(DB_ThreatDimension.Piercing, evidence.Piercing * multiplier);
+        memory.Add(DB_ThreatDimension.BluntStun, evidence.BluntStun * multiplier);
+        memory.Add(DB_ThreatDimension.Explosion, evidence.Explosion * multiplier);
+        memory.Add(DB_ThreatDimension.Startle, evidence.Startle * multiplier);
+        memory.Add(DB_ThreatDimension.Shock, evidence.Shock * multiplier);
+        memory.Add(DB_ThreatDimension.AreaDenial, evidence.AreaDenial * multiplier);
+        memory.Add(DB_ThreatDimension.GrabCapture, evidence.GrabCapture * multiplier);
+        memory.Add(DB_ThreatDimension.Pursuit, evidence.Pursuit * multiplier);
+        memory.Add(DB_ThreatDimension.CounterKill, evidence.CounterKill * multiplier);
+        memory.Add(DB_ThreatDimension.RetreatTendency, evidence.RetreatTendency * multiplier);
+        memory.Add(DB_ThreatDimension.NonAggressionConfidence, evidence.NonAggressionConfidence * multiplier);
 
         float strongest = evidence.Strongest * multiplier;
         if (strongest > 0f)
-            memory.Confidence = DesertBatflyPlayerThreatMemory.Saturating(
+            memory.Confidence = DB_PlayerThreatMemory.Saturating(
                 memory.Confidence,
                 Mathf.Clamp01(strongest * 0.55f));
         if (cycle >= 0)
@@ -239,11 +239,11 @@ internal static class DesertBatflyThreatMemoryStore
     internal static void DecayToCycle(DesertBatflyState state, int currentCycle)
     {
         if (state == null || currentCycle < 0) return;
-        DesertBatflyThreatMemorySet set = SetFor(state);
+        DB_ThreatMemorySet set = SetFor(state);
         bool changed = false;
         for (int i = 0; i < set.Players.Length; i++)
         {
-            DesertBatflyPlayerThreatMemory memory = set.Players[i];
+            DB_PlayerThreatMemory memory = set.Players[i];
             if (memory.LastDecayCycle < 0)
             {
                 memory.LastDecayCycle = currentCycle;
@@ -259,12 +259,12 @@ internal static class DesertBatflyThreatMemoryStore
         if (changed) Sync(state);
     }
 
-    internal static string DominantSignature(DesertBatflyPlayerThreatMemory memory)
+    internal static string DominantSignature(DB_PlayerThreatMemory memory)
     {
         if (memory == null || memory.Confidence < 0.04f) return "None";
         float best = 0f;
-        DesertBatflyThreatDimension bestDimension = DesertBatflyThreatDimension.Projectile;
-        foreach (DesertBatflyThreatDimension dimension in Enum.GetValues(typeof(DesertBatflyThreatDimension)))
+        DB_ThreatDimension bestDimension = DB_ThreatDimension.Projectile;
+        foreach (DB_ThreatDimension dimension in Enum.GetValues(typeof(DB_ThreatDimension)))
         {
             float value = memory.Get(dimension);
             if (value <= best) continue;
@@ -276,17 +276,17 @@ internal static class DesertBatflyThreatMemoryStore
 
     internal static void Sync(DesertBatflyState state)
     {
-        if (state == null || !memories.TryGetValue(state, out DesertBatflyThreatMemorySet set)) return;
+        if (state == null || !memories.TryGetValue(state, out DB_ThreatMemorySet set)) return;
         state.unrecognizedSaveStrings[SaveKey] = Serialize(set);
     }
 
-    private static string Serialize(DesertBatflyThreatMemorySet set)
+    private static string Serialize(DB_ThreatMemorySet set)
     {
-        string[] slots = new string[DesertBatflyThreatMemorySet.PlayerSlots + 1];
+        string[] slots = new string[DB_ThreatMemorySet.PlayerSlots + 1];
         slots[0] = "1";
-        for (int i = 0; i < DesertBatflyThreatMemorySet.PlayerSlots; i++)
+        for (int i = 0; i < DB_ThreatMemorySet.PlayerSlots; i++)
         {
-            DesertBatflyPlayerThreatMemory m = set.Players[i];
+            DB_PlayerThreatMemory m = set.Players[i];
             m.Sanitize();
             slots[i + 1] = string.Join("|", new[]
             {
@@ -301,18 +301,18 @@ internal static class DesertBatflyThreatMemoryStore
         return string.Join("/", slots);
     }
 
-    private static void Load(DesertBatflyState state, DesertBatflyThreatMemorySet set)
+    private static void Load(DesertBatflyState state, DB_ThreatMemorySet set)
     {
         if (!state.unrecognizedSaveStrings.TryGetValue(SaveKey, out string raw) || string.IsNullOrEmpty(raw))
             return;
         string[] slots = raw.Split('/');
         if (slots.Length < 2 || slots[0] != "1") return;
-        int count = Mathf.Min(DesertBatflyThreatMemorySet.PlayerSlots, slots.Length - 1);
+        int count = Mathf.Min(DB_ThreatMemorySet.PlayerSlots, slots.Length - 1);
         for (int i = 0; i < count; i++)
         {
             string[] values = slots[i + 1].Split('|');
             if (values.Length < 13) continue;
-            DesertBatflyPlayerThreatMemory m = set.Players[i];
+            DB_PlayerThreatMemory m = set.Players[i];
             m.ProjectilePressure = P(values, 0);
             m.PiercingPressure = P(values, 1);
             m.BluntStunPressure = P(values, 2);
