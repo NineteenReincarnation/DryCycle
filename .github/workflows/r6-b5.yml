@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   migrate:
-    if: github.event.head_commit.message == 'Trigger guarded R6 B6 SocialBond migration'
+    if: github.event.head_commit.message == 'Trigger corrected R6 B6 SocialBond migration'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
           new=src/Creatures/DesertBatfly/Social/DB_SocialBond.cs
           test -f "$old"
           mkdir -p "$(dirname "$new")"
-          git show HEAD^:"$old" | sed 's/DesertBatflySocialBond/DB_SocialBond/g' > /tmp/expected.cs
+          git show 0ff6c632c214c2cc46267b3a3dfb9ee27d82ba69:"$old" | sed 's/DesertBatflySocialBond/DB_SocialBond/g' > /tmp/expected.cs
           git mv "$old" "$new"
           python3 - <<'PY'
           from pathlib import Path
@@ -46,47 +46,9 @@ jobs:
           bash scripts/check-desertbatfly-r5-retention.sh
           bash scripts/check-desertbatfly-r6-b1.sh
           git diff --check
-          cat >> PROGRESS.md <<'EOF'
-
-## Continuation run — R6 B5/B6
-
-### Completed
-
-- R6-B5 Presentation leaf migration: `DesertBatflySandBurst.cs` moved to `Presentation/DB_SandBurst.cs`; production type became `DB_SandBurst`. The migration was guarded so the new file equals the prior implementation with only the type identity substituted; sand particle/HUD parameters and split-screen behavior were unchanged.
-- R6-B6 SocialBond migration: `DesertBatflySocialBond.cs` moved to `Social/DB_SocialBond.cs`; production references were renamed to `DB_SocialBond`. The source was likewise verified byte-for-byte against the prior implementation after only the type identity substitution.
-
-### Validation and self-review
-
-- Existing R5 retention audit passed after B5 and again after B6.
-- Existing R6 B1 retention audit passed after B5 and again after B6.
-- B5 retained `SandScreenMaxConcurrentBursts`, Foreground/HUD2 container ownership and split-screen holder gating.
-- B6 retained the one-slot persistent bond model through `DesertState`, direct-death witness radius 340, grief handoff, and bounded physical-chain traversal.
-- `git diff --check` passed for both batches.
-- No full Rain World/.NET Framework build or live-play result is claimed in this environment.
-
-### Remaining Task14 work
-
-R6 remains in progress. TravelNavigation responsibility-aware migration, Graphics/Core/Injury/Fear/Vengeance, remaining Social/Roost, Threat, Signals, Environment, production Task09-Task13 naming cleanup, old-root/dead-code cleanup and final R6 naming/path guard remain outstanding. R7 final performance/debug/regression acceptance is not yet complete.
-
-### Blockers
-
-Full managed build/tests still require the developer-local Rain World/BepInEx assemblies; live behavior/performance acceptance requires Rain World. These do not block further source-level R6 migration.
-
-### Recommended next hour
-
-Continue with another manifest KEEP/RENAME leaf after inspecting coupling. Prefer `DesertBatflyGraphics.cs` only if its Rain World graphics surface can be migrated without semantic edits; otherwise select a smaller Injury/Threat/Signal leaf. Do not mechanically rename or split `DesertBatflyTravelNavigation.cs` without a responsibility review.
-EOF
-          cat >> docs/Discussion/Task_14_R6_DomainMigrationStatus.txt <<'EOF'
-
-R6-B5/B6 update:
-- Presentation/DB_SandBurst.cs migrated from DesertBatflySandBurst with behavior-preserving identity-only changes.
-- Social/DB_SocialBond.cs migrated from DesertBatflySocialBond with behavior-preserving identity-only changes.
-- Existing R5/R6 retention guards and diff hygiene passed for both batches.
-- R6 remains in progress; no live Rain World acceptance is claimed.
-EOF
           git config user.name github-actions-bot
           git config user.email actions@github.com
           git add -A
           git diff --cached --check
-          git commit -m 'R6 B6 migrate SocialBond identity and update progress'
+          git commit -m 'R6 B6 migrate SocialBond identity'
           git push
