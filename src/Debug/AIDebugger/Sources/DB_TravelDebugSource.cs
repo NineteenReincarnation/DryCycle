@@ -66,7 +66,7 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
         {
             DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, home);
             float shelter = weather.HasHazard
-                ? DesertBatflyRefuge.HomeHiveShelterQuality(home, weather.HazardKind, weather.HazardId)
+                ? DB_RefugePolicy.HomeHiveShelterQuality(home, weather.HazardKind, weather.HazardId)
                 : 0f;
             snapshot.Sections.Add(new AIDebugSection("Travel / Colony Weather Refuge / 天气避难")
                 .Add("Hazard / 危险天气", "DesertBatflyWeatherEcology.HazardId",
@@ -78,13 +78,13 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
                 .Add("Travel exposure / 路线暴露", "DesertBatflyWeatherEcology.TravelExposure", weather.TravelExposure)
                 .Add("Time until danger / 距危险", "DesertBatflyWeatherEcology.TimeUntilDangerTicks",
                     weather.TimeUntilDangerTicks == int.MaxValue ? "—" : weather.TimeUntilDangerTicks)
-                .Add("Home shelter quality / 本巢庇护质量", "DesertBatflyRefuge.HomeHiveShelterQuality", shelter));
+                .Add("Home shelter quality / 本巢庇护质量", "DB_RefugePolicy.HomeHiveShelterQuality", shelter));
         }
 
         bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
             creature, out DesertBatflyTravelDebugState travel);
         var travelSection = new AIDebugSection("Travel / Colony Travel / 跨房旅行")
-            .Add("Travel purpose / 旅行目的", "DesertBatflyTravelPurpose",
+            .Add("Travel purpose / 旅行目的", "DB_TravelPurpose",
                 hasTravel ? travel.Purpose.ToString() : "None")
             .Add("Destination / 目的房间", "DesertBatflyTravelNavigation.DestinationRoom",
                 hasTravel && !string.IsNullOrEmpty(travel.DestinationRoom) ? travel.DestinationRoom : "—")

@@ -5,19 +5,19 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal readonly struct DesertBatflyRefugeTarget
+internal readonly struct DB_RefugeTarget
 {
     internal readonly int RoomIndex;
     internal readonly int AbstractNode;
     internal readonly float ShelterQuality;
     internal readonly float Score;
     internal readonly int EstimatedTravelTicks;
-    internal readonly DesertBatflyWorldRoute Route;
+    internal readonly DB_WorldRoute Route;
 
     internal bool Valid => RoomIndex >= 0 && Route.Valid;
 
-    internal DesertBatflyRefugeTarget(int roomIndex, int abstractNode, float quality,
-        float score, int estimatedTravelTicks, DesertBatflyWorldRoute route)
+    internal DB_RefugeTarget(int roomIndex, int abstractNode, float quality,
+        float score, int estimatedTravelTicks, DB_WorldRoute route)
     {
         RoomIndex = roomIndex;
         AbstractNode = abstractNode;
@@ -28,7 +28,7 @@ internal readonly struct DesertBatflyRefugeTarget
     }
 }
 
-internal static class DesertBatflyRefuge
+internal static class DB_RefugePolicy
 {
     internal const float MinimumRefugeQuality = 0.62f;
     private const float MinimumImprovement = 0.12f;
@@ -125,7 +125,7 @@ internal static class DesertBatflyRefuge
         string knownRefuge,
         Func<AbstractRoom, float> predatorRisk,
         Func<AbstractRoom, float> crowding,
-        out DesertBatflyRefugeTarget target)
+        out DB_RefugeTarget target)
     {
         DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(hazard);
         bool sandstorm = weather is DesertBatflyEnvironmentalWeather.Sandstorm or
@@ -141,7 +141,7 @@ internal static class DesertBatflyRefuge
             return false;
         if (!TryFindEmergencyRefugeFrom(
                 world, home, home, template, hazard, physicalCapability, knownRefuge,
-                predatorRisk, crowding, -1, false, out DesertBatflyRefugeTarget candidate))
+                predatorRisk, crowding, -1, false, out DB_RefugeTarget candidate))
             return false;
         if (!DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge(
                 weather, hazard, homeQuality, candidate))
@@ -168,7 +168,7 @@ internal static class DesertBatflyRefuge
         Func<AbstractRoom, float> crowding,
         int excludedRoom,
         bool alreadyEvacuating,
-        out DesertBatflyRefugeTarget target)
+        out DB_RefugeTarget target)
     {
         target = default;
         if (world?.abstractRooms == null || start == null || home == null ||
@@ -180,8 +180,8 @@ internal static class DesertBatflyRefuge
             homeQuality >= Mathf.Max(0.72f, hazard.ShelterUrgency + 0.05f))
             return false;
 
-        DesertBatflyWorldRoutePlanner.CollectReachableRooms(
-            world, start.index, template, DesertBatflyWorldRoutePlanner.RefugeMaxHops,
+        DB_WorldRoutePlanner.CollectReachableRooms(
+            world, start.index, template, DB_WorldRoutePlanner.RefugeMaxHops,
             candidateScratch);
 
         float bestScore = float.NegativeInfinity;
@@ -198,22 +198,22 @@ internal static class DesertBatflyRefuge
                 : Mathf.Max(MinimumRefugeQuality, homeQuality + MinimumImprovement);
             if (quality < requiredQuality) continue;
 
-            if (!DesertBatflyWorldRoutePlanner.TryPlan(
+            if (!DB_WorldRoutePlanner.TryPlan(
                     world,
                     start.index,
                     candidate.index,
                     template,
-                    DesertBatflyTravelPurpose.EmergencyRefuge,
+                    DB_TravelPurpose.EmergencyRefuge,
                     room => RouteRisk(world, room, hazard, predatorRisk),
-                    DesertBatflyWorldRoutePlanner.RefugeMaxHops,
-                    out DesertBatflyWorldRoute route))
+                    DB_WorldRoutePlanner.RefugeMaxHops,
+                    out DB_WorldRoute route))
                 continue;
 
             int travelTicks = EstimateTravelTicks(route, physicalCapability);
             if (!CanReachRefuge(hazard, travelTicks, route, alreadyEvacuating)) continue;
 
-            float routeCost = DesertBatflyWorldRoutePlanner.NormalizedTravelCost(
-                route, DesertBatflyWorldRoutePlanner.RefugeMaxHops);
+            float routeCost = DB_WorldRoutePlanner.NormalizedTravelCost(
+                route, DB_WorldRoutePlanner.RefugeMaxHops);
             float pred = Mathf.Clamp01(predatorRisk?.Invoke(candidate) ?? 0f);
             float crowd = Mathf.Clamp01(crowding?.Invoke(candidate) ?? 0f);
             float familiarity = string.Equals(candidate.name, knownRefuge,
@@ -222,7 +222,7 @@ internal static class DesertBatflyRefuge
             if (score <= bestScore) continue;
 
             bestScore = score;
-            target = new DesertBatflyRefugeTarget(
+            target = new DB_RefugeTarget(
                 candidate.index,
                 ChooseRefugeNode(candidate, template),
                 quality,
@@ -233,7 +233,7 @@ internal static class DesertBatflyRefuge
         return target.Valid;
     }
 
-    internal static int EstimateTravelTicks(in DesertBatflyWorldRoute route, float physicalCapability)
+    internal static int EstimateTravelTicks(in DB_WorldRoute route, float physicalCapability)
     {
         if (!route.Valid) return int.MaxValue;
         physicalCapability = Mathf.Clamp(physicalCapability, 0.25f, 1f);
@@ -312,7 +312,7 @@ internal static class DesertBatflyRefuge
     private static bool CanReachRefuge(
         in DesertBatflyWeatherEcologySample hazard,
         int estimatedTravelTicks,
-        in DesertBatflyWorldRoute route,
+        in DB_WorldRoute route,
         bool alreadyEvacuating)
     {
         if (!alreadyEvacuating) return CanLeaveBeforeDanger(hazard, estimatedTravelTicks);

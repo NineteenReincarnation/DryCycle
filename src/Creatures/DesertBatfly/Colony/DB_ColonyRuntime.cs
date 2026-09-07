@@ -90,7 +90,7 @@ internal static class DB_ColonyRuntime
         sourceMembersScratch.Clear();
         activeWorld = null;
         abstractTick = 0;
-        DesertBatflyRefuge.Reset();
+        DB_RefugePolicy.Reset();
         DesertBatflyTravelNavigation.Reset();
     }
 
@@ -223,7 +223,7 @@ internal static class DB_ColonyRuntime
         activeWorld = new WeakReference(world);
         deathsThisCycle.Clear();
         RebuildWorldIndex(world);
-        DesertBatflyRefuge.Reset();
+        DB_RefugePolicy.Reset();
 
         CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
         for (int i = 0; i < colonyRooms.Count; i++)
@@ -387,7 +387,7 @@ internal static class DB_ColonyRuntime
         CollectOwnedBats(source.RoomName, sourceMembersScratch);
         if (sourceMembersScratch.Count == 0 ||
             !TryChooseMigrationDestination(world, source, sourceMembersScratch,
-                out DB_ColonyState destination, out DesertBatflyWorldRoute sharedRoute))
+                out DB_ColonyState destination, out DB_WorldRoute sharedRoute))
             return;
 
         int wanted = source.RecommendedBatchSize();
@@ -445,7 +445,7 @@ internal static class DB_ColonyRuntime
         DB_ColonyState source,
         List<AbstractCreature> sourceMembers,
         out DB_ColonyState destination,
-        out DesertBatflyWorldRoute route)
+        out DB_WorldRoute route)
     {
         destination = null;
         route = default;
@@ -462,16 +462,16 @@ internal static class DB_ColonyRuntime
             AbstractRoom targetRoom = FindRoom(world, candidate.RoomName);
             if (targetRoom == null || !DesertSwarmRoom.IsDesertSwarmRoom(targetRoom)) continue;
 
-            if (!DesertBatflyWorldRoutePlanner.TryPlan(
+            if (!DB_WorldRoutePlanner.TryPlan(
                     world, sourceRoom.index, targetRoom.index, template,
-                    DesertBatflyTravelPurpose.ColonyMigration,
+                    DB_TravelPurpose.ColonyMigration,
                     r => PermanentTravelRisk(world, r),
-                    DesertBatflyWorldRoutePlanner.MigrationMaxHops,
-                    out DesertBatflyWorldRoute candidateRoute))
+                    DB_WorldRoutePlanner.MigrationMaxHops,
+                    out DB_WorldRoute candidateRoute))
                 continue;
 
-            float travel = DesertBatflyWorldRoutePlanner.NormalizedTravelCost(
-                candidateRoute, DesertBatflyWorldRoutePlanner.MigrationMaxHops);
+            float travel = DB_WorldRoutePlanner.NormalizedTravelCost(
+                candidateRoute, DB_WorldRoutePlanner.MigrationMaxHops);
             float habitat = Mathf.Clamp01(1f -
                 candidate.EnvironmentalPressure * 0.50f -
                 candidate.PredatorPressure * 0.20f -
@@ -714,7 +714,7 @@ internal static class DB_ColonyRuntime
         colonyRooms.Clear();
         trackedBats.Clear();
         activeWorld = null;
-        DesertBatflyRefuge.Reset();
+        DB_RefugePolicy.Reset();
         DesertBatflyTravelNavigation.Reset();
         if (save?.unrecognizedSaveStrings == null) return;
 

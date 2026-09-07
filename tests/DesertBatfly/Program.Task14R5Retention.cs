@@ -16,7 +16,7 @@ internal static partial class Program
         Type roomEnvironment = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
         Type colony = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ColonyRuntime", true);
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
-        Type refuge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRefuge", true);
+        Type refuge = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RefugePolicy", true);
         Type signal = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type consumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);

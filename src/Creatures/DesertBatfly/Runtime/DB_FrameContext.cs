@@ -8,7 +8,7 @@ internal readonly struct DB_TravelFrameSummary
 {
     internal readonly bool HasIntent;
     internal readonly bool CanOwnRealizedFrame;
-    internal readonly DesertBatflyTravelPurpose Purpose;
+    internal readonly DB_TravelPurpose Purpose;
     internal readonly string DestinationRoom;
     internal readonly bool Suspended;
     internal readonly string Reason;
@@ -16,7 +16,7 @@ internal readonly struct DB_TravelFrameSummary
     internal DB_TravelFrameSummary(
         bool hasIntent,
         bool canOwnRealizedFrame,
-        DesertBatflyTravelPurpose purpose,
+        DB_TravelPurpose purpose,
         string destinationRoom,
         bool suspended,
         string reason)

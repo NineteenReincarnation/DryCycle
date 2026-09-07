@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DesertBatflyTravelPurpose
+internal enum DB_TravelPurpose
 {
     None,
     EmergencyRefuge,
@@ -12,7 +12,7 @@ internal enum DesertBatflyTravelPurpose
     ColonyMigration
 }
 
-internal readonly struct DesertBatflyWorldRoute
+internal readonly struct DB_WorldRoute
 {
     internal readonly int[] Rooms;
     internal readonly float Cost;
@@ -21,7 +21,7 @@ internal readonly struct DesertBatflyWorldRoute
     internal bool Valid => Rooms != null && Rooms.Length > 0;
     internal int HopCount => Valid ? Mathf.Max(0, Rooms.Length - 1) : int.MaxValue;
 
-    internal DesertBatflyWorldRoute(int[] rooms, float cost, float survivability)
+    internal DB_WorldRoute(int[] rooms, float cost, float survivability)
     {
         Rooms = rooms ?? Array.Empty<int>();
         Cost = cost;
@@ -33,7 +33,7 @@ internal readonly struct DesertBatflyWorldRoute
 /// Room-graph weighted Dijkstra. This planner never sees room tiles; it chooses only
 /// which connected rooms to traverse. Realized movement remains FlyAI/AImap/shortcut work.
 /// </summary>
-internal static class DesertBatflyWorldRoutePlanner
+internal static class DB_WorldRoutePlanner
 {
     internal const int RefugeMaxHops = 3;
     internal const int MigrationMaxHops = 5;
@@ -43,10 +43,10 @@ internal static class DesertBatflyWorldRoutePlanner
         int startRoom,
         int destinationRoom,
         CreatureTemplate template,
-        DesertBatflyTravelPurpose purpose,
+        DB_TravelPurpose purpose,
         Func<AbstractRoom, float> roomRisk,
         int maxHops,
-        out DesertBatflyWorldRoute route)
+        out DB_WorldRoute route)
     {
         route = default;
         if (world?.abstractRooms == null || template == null ||
@@ -54,7 +54,7 @@ internal static class DesertBatflyWorldRoutePlanner
             startRoom == destinationRoom)
         {
             if (startRoom == destinationRoom && startRoom >= 0)
-                route = new DesertBatflyWorldRoute(new[] { startRoom }, 0f, 1f);
+                route = new DB_WorldRoute(new[] { startRoom }, 0f, 1f);
             return route.Valid;
         }
 
@@ -138,7 +138,7 @@ internal static class DesertBatflyWorldRoutePlanner
         }
         if (reversed.Count == 0 || reversed[reversed.Count - 1] != startRoom) return false;
         reversed.Reverse();
-        route = new DesertBatflyWorldRoute(
+        route = new DB_WorldRoute(
             reversed.ToArray(), best[destinationRoom, goalHop], Mathf.Clamp01(1f - worstRisk));
         return true;
     }
@@ -190,17 +190,17 @@ internal static class DesertBatflyWorldRoutePlanner
         }
     }
 
-    internal static float EdgeCost(DesertBatflyTravelPurpose purpose, float roomRisk)
+    internal static float EdgeCost(DB_TravelPurpose purpose, float roomRisk)
     {
         roomRisk = Mathf.Max(0f, SanitizeRisk(roomRisk));
         float riskWeight = purpose switch
         {
-            DesertBatflyTravelPurpose.EmergencyRefuge => 2.60f,
-            DesertBatflyTravelPurpose.ReturnHome => 1.90f,
-            DesertBatflyTravelPurpose.ColonyMigration => 1.55f,
+            DB_TravelPurpose.EmergencyRefuge => 2.60f,
+            DB_TravelPurpose.ReturnHome => 1.90f,
+            DB_TravelPurpose.ColonyMigration => 1.55f,
             _ => 1.70f
         };
-        float distanceWeight = purpose == DesertBatflyTravelPurpose.EmergencyRefuge ? 0.82f : 1f;
+        float distanceWeight = purpose == DB_TravelPurpose.EmergencyRefuge ? 0.82f : 1f;
         return distanceWeight + roomRisk * riskWeight;
     }
 
@@ -208,21 +208,21 @@ internal static class DesertBatflyWorldRoutePlanner
     /// Runtime route commitment is kept until a room becomes materially dangerous.
     /// Small risk-score changes never cause A/B route oscillation.
     /// </summary>
-    internal static bool NeedsSafetyReplan(DesertBatflyTravelPurpose purpose, float nextRoomRisk)
+    internal static bool NeedsSafetyReplan(DB_TravelPurpose purpose, float nextRoomRisk)
     {
         nextRoomRisk = SanitizeRisk(nextRoomRisk);
         if (nextRoomRisk >= 8f) return true;
         float threshold = purpose switch
         {
-            DesertBatflyTravelPurpose.EmergencyRefuge => 0.76f,
-            DesertBatflyTravelPurpose.ReturnHome => 0.84f,
-            DesertBatflyTravelPurpose.ColonyMigration => 0.90f,
+            DB_TravelPurpose.EmergencyRefuge => 0.76f,
+            DB_TravelPurpose.ReturnHome => 0.84f,
+            DB_TravelPurpose.ColonyMigration => 0.90f,
             _ => 0.84f
         };
         return nextRoomRisk >= threshold;
     }
 
-    internal static float NormalizedTravelCost(in DesertBatflyWorldRoute route, int maxHops)
+    internal static float NormalizedTravelCost(in DB_WorldRoute route, int maxHops)
     {
         if (!route.Valid || float.IsNaN(route.Cost) || float.IsInfinity(route.Cost)) return 1f;
         return Mathf.Clamp01(route.Cost / Mathf.Max(1f, maxHops * 2.5f));

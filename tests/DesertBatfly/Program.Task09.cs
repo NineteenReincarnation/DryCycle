@@ -7,11 +7,11 @@ internal static partial class Program
     {
         Type colonyType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ColonyState", true);
         Type migrationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_MigrationPolicy", true);
-        Type routePlannerType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWorldRoutePlanner", true);
-        Type travelPurposeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelPurpose", true);
+        Type routePlannerType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WorldRoutePlanner", true);
+        Type travelPurposeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelPurpose", true);
         Type travelNavigationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
         Type travelDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelDebugState", true);
-        Type refugeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRefuge", true);
+        Type refugeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RefugePolicy", true);
 
         object colony = Activator.CreateInstance(
             colonyType, Flags, null, new object[] { "SU", "SU_TASK09_TEST", 14 }, null);

@@ -20,7 +20,7 @@ internal static class DB_RainWorldHooks
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();
         DesertBatflyIntimidation.Reset();
-        DesertBatflyRefuge.Reset();
+        DB_RefugePolicy.Reset();
         DesertBatflySocialLife.Reset();
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
@@ -76,7 +76,7 @@ internal static class DB_RainWorldHooks
         DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
         DB_ColonyRuntime.Disable();
-        DesertBatflyRefuge.Reset();
+        DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
         DB_FrameContextRuntime.Reset();
@@ -463,7 +463,7 @@ internal static class DB_RainWorldHooks
             return;
 
         if (self.readyForAI && self.aimap != null)
-            DesertBatflyRefuge.ObserveRoom(self);
+            DB_RefugePolicy.ObserveRoom(self);
         DesertBatflySignalRoomRuntime.For(self)?.Prune(self);
         DesertBatflyEnvironmentalRoomRuntime.Update(self);
     }

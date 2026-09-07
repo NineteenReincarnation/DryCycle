@@ -188,7 +188,7 @@ internal static class DB_EnvironmentalPolicy
             : SandstormEmergencyMinimumLeadTicks;
         if (sample.TimeUntilDangerTicks < minimumLead) return false;
 
-        homeQuality = DesertBatflyRefuge.HomeHiveShelterQuality(
+        homeQuality = DB_RefugePolicy.HomeHiveShelterQuality(
             home, sample.HazardKind, sample.HazardId);
         float maximumAcceptableHome = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
             ? 0.24f
@@ -200,7 +200,7 @@ internal static class DB_EnvironmentalPolicy
         DesertBatflyEnvironmentalWeather weather,
         in DesertBatflyWeatherEcologySample sample,
         float homeQuality,
-        in DesertBatflyRefugeTarget target)
+        in DB_RefugeTarget target)
     {
         if (!target.Valid || !IsSandstorm(weather)) return false;
         int maxHops = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
