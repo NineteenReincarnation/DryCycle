@@ -19,13 +19,14 @@ internal static class DesertBatflyHooks
         DesertBatflySocialLife.Reset();
         DesertBatflySignalRuntime.Reset();
         DesertBatflySignalIntegration.Enable();
+        DesertBatflySignalVengeanceBridge.Enable();
         DesertBatflyThreatRuntime.Enable();
         DesertBatflyThreatVengeanceBridge.Enable();
         DesertBatflyColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
-            AIDebugRegistry.Register(new DesertBatflyTask11DebugSource());
+            AIDebugRegistry.Register(new DesertBatflyTask12DebugSource());
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
@@ -66,6 +67,7 @@ internal static class DesertBatflyHooks
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DesertBatflyThreatVengeanceBridge.Disable();
         DesertBatflyThreatRuntime.Disable();
+        DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
         DesertBatflySignalRuntime.Reset();
         DesertBatflySocialLife.Reset();
