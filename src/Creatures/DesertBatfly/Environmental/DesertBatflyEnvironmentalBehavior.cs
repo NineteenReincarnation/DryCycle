@@ -376,16 +376,47 @@ internal static class DesertBatflyEnvironmentalBehavior
                 break;
 
             case DesertBatflyEnvironmentalWeather.HeavyRain:
-                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.42f, 0.94f, i));
-                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.45f, 0.95f, i));
-                roostMultiplier = Mathf.Lerp(1.35f, 2.45f, i);
-                harassMultiplier = Mathf.Lerp(0.72f, 0.08f, i);
-                socialMultiplier = Mathf.Lerp(0.72f, 0.22f, i);
-                playMultiplier = Mathf.Lerp(0.58f, 0.06f, i);
-                groupCohesion = Mathf.Lerp(1.04f, 0.70f, i);
-                radiusMultiplier = Mathf.Lerp(0.62f, 0.24f, i);
-                reason = "HeavyRain: covered-space shelter baseline";
+            {
+                float rainBurden = DesertBatflyEnvironmentalProfile.HeavyRainBurden(
+                    i,
+                    exposure.RainExposure,
+                    exposure.RoofShielding,
+                    context.ShelterUrgency,
+                    capability,
+                    bat.Injury.PostStunShock,
+                    nerve);
+                float injury = 1f - capability;
+                float covered = Mathf.Clamp01(exposure.RoofShielding * 0.82f + exposure.Enclosure * 0.18f);
+                float shelterPressure = Mathf.Clamp01(Mathf.Max(rainBurden, context.ShelterUrgency * 0.72f));
+
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.16f, 0.94f, shelterPressure));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.22f, 0.96f, rainBurden));
+                roostMultiplier = Mathf.Lerp(1.08f, 2.30f, shelterPressure);
+                harassMultiplier = Mathf.Lerp(0.92f, 0.20f, shelterPressure);
+                socialMultiplier = Mathf.Lerp(0.96f, 0.48f, shelterPressure);
+                playMultiplier = Mathf.Lerp(0.90f, 0.12f, shelterPressure);
+                groupCohesion = Mathf.Lerp(1.02f, 0.78f, shelterPressure);
+                radiusMultiplier = Mathf.Lerp(0.88f, 0.34f, shelterPressure);
+
+                // HeavyRain prefers nearby covered pockets over a blanket Hive recall.
+                // Home becomes attractive mainly when exposure is high and the individual
+                // is cautious/injured; Burrow is a late fallback, not the default answer.
+                float homePressure = Mathf.Clamp01(
+                    Mathf.InverseLerp(0.48f, 0.92f, rainBurden) *
+                    (0.42f + injury * 0.30f + (1f - nerve) * 0.18f));
+                float burrowPressure = Mathf.Clamp01(
+                    Mathf.InverseLerp(0.68f, 1f, rainBurden) *
+                    (0.28f + injury * 0.32f + (1f - covered) * 0.16f));
+                homeReturn = Mathf.Max(homeReturn, homePressure);
+                burrow = Mathf.Max(burrow, burrowPressure);
+
+                damagePermission = false;
+                hardSurvival = false;
+                reason = covered >= 0.62f
+                    ? "HeavyRain: covered pocket preserves local colony life"
+                    : "HeavyRain: RainExposure drives shelter; Home/Burrow only when local cover is poor";
                 break;
+            }
 
             case DesertBatflyEnvironmentalWeather.HeatWave:
             {
@@ -479,17 +510,44 @@ internal static class DesertBatflyEnvironmentalBehavior
                 break;
 
             case DesertBatflyEnvironmentalWeather.DeathRain:
-                shelterDrive = Mathf.Max(shelterDrive, 1f);
-                openAversion = 1f;
-                roostMultiplier = 3.2f;
-                harassMultiplier = 0f;
-                socialMultiplier = 0.04f;
+            {
+                float phaseSeverity = context.Phase switch
+                {
+                    DesertBatflyEnvironmentalPhase.Advisory => 0.34f,
+                    DesertBatflyEnvironmentalPhase.Preparation => 0.62f,
+                    DesertBatflyEnvironmentalPhase.Sheltering => 0.92f,
+                    DesertBatflyEnvironmentalPhase.Acute => 1f,
+                    _ => Mathf.Clamp01(i)
+                };
+                float injury = 1f - capability;
+                float rainExposure = Mathf.Clamp01(exposure.RainExposure);
+
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.58f, 1f, phaseSeverity));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.72f, 1f, phaseSeverity));
+                homeReturn = Mathf.Max(homeReturn, Mathf.Clamp01(0.54f + phaseSeverity * 0.44f + injury * 0.12f));
+                burrow = Mathf.Max(burrow, Mathf.Clamp01(0.40f + phaseSeverity * 0.52f + injury * 0.10f));
+                roostMultiplier = Mathf.Lerp(1.85f, 3.25f, phaseSeverity);
+                harassMultiplier = Mathf.Lerp(0.20f, 0f, phaseSeverity);
+                socialMultiplier = Mathf.Lerp(0.24f, 0.03f, phaseSeverity);
                 playMultiplier = 0f;
-                groupCohesion = 0.30f;
-                radiusMultiplier = 0.16f;
+                groupCohesion = Mathf.Lerp(0.55f, 0.28f, phaseSeverity);
+                radiusMultiplier = Mathf.Lerp(0.34f, 0.14f, phaseSeverity);
+                damagePermission = false;
+
+                // Task09 owns pre-onset cross-room safety. Once this room is the accepted
+                // survival room, Task13 must actually drive native Home/Hive/Burrow instead
+                // of merely setting HardSurvival with zero Home/Burrow pressure.
                 hardSurvival = context.Phase is DesertBatflyEnvironmentalPhase.Sheltering or DesertBatflyEnvironmentalPhase.Acute;
-                reason = "DeathRain: hard local shelter survival";
+                if (hardSurvival && rainExposure > 0.55f)
+                {
+                    homeReturn = Mathf.Max(homeReturn, 0.92f);
+                    burrow = Mathf.Max(burrow, 0.82f);
+                }
+                reason = hardSurvival
+                    ? "DeathRain: hard local Home/Roost/Burrow survival; Task09 retains cross-room ownership"
+                    : "DeathRain: pre-onset local contraction while Task09 handles refuge travel";
                 break;
+            }
         }
 
         shelterDrive = Mathf.Clamp01(shelterDrive);
@@ -611,11 +669,16 @@ internal static class DesertBatflyEnvironmentalBehavior
         in DesertBatflyEnvironmentalRoomContext context,
         in DesertBatflyEnvironmentalExposureSample exposure)
     {
-        if (context.Weather != DesertBatflyEnvironmentalWeather.LightRain ||
+        bool lightRain = context.Weather == DesertBatflyEnvironmentalWeather.LightRain;
+        bool tolerableHeavyRain = context.Weather == DesertBatflyEnvironmentalWeather.HeavyRain &&
+                                  context.Phase is DesertBatflyEnvironmentalPhase.Advisory or DesertBatflyEnvironmentalPhase.Preparation &&
+                                  context.ActiveIntensity < 0.58f;
+        if ((!lightRain && !tolerableHeavyRain) ||
             context.ActiveIntensity <= 0f || exposure.RainExposure < 0.55f || bat.DesertState.Thirst <= 0f)
             return;
 
-        float relief = DesertBatflyTuning.ThirstPerTick * 2.15f * context.ActiveIntensity * exposure.RainExposure;
+        float rainFactor = lightRain ? 1f : 0.52f;
+        float relief = DesertBatflyTuning.ThirstPerTick * 2.15f * rainFactor * context.ActiveIntensity * exposure.RainExposure;
         bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
     }
 
