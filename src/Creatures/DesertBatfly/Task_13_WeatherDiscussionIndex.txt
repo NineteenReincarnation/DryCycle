@@ -1,5 +1,5 @@
-Task 13 weather-by-weather discussion order
-==========================================
+Task 13 weather-by-weather discussion / specification index
+============================================================
 
 1. LIGHTRAIN
 2. FOG
@@ -11,4 +11,22 @@ Task 13 weather-by-weather discussion order
 8. DEATHRAIN
 9. DEATHSANDSTORM
 
-The detailed design is discussed one weather at a time before the final Task13 specification is written.
+Canonical Task13 base specification:
+- Task_13_EnvironmentalActivity_ShelterBehavior.txt (V2)
+
+Rain-profile completion:
+- Task_13_RainProfiles_Completion.txt (V2.1 addendum)
+
+IMPORTANT:
+The V2.1 rain addendum formally supersedes the old "baseline only" wording in
+base-spec Section 26 (HeavyRain) and Section 33 (DeathRain). Do not revert
+HeavyRain or DeathRain to their earlier baseline implementations when reading
+the V2 historical text.
+
+Current implementation classification:
+- Task_13_ImplementationStatus.txt
+- 【采纳·代码已实现，待实机验收】
+
+The remaining Task13 work is developer-local compile, live acceptance and
+behavior/performance tuning; it is not permission to invent another structural
+weather subsystem.
