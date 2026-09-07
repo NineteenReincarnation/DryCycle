@@ -1,0 +1,1593 @@
+Desert Batfly Task 12
+Observable Social Signal Network
+可观察社会信号网络 / 局部社会信息传播层
+Codex Execution Specification
+============================================================
+
+0. 任务性质
+============================================================
+
+这是 Desert Batfly 第 12 项正式可执行任务书。
+
+Task 12 的目标不是继续给 Desert Batfly 增加一套新的行为状态机，也不是增加一个新的“群体 AI 控制器”。
+
+当前项目已经具有：
+- Task04 Injury / 伤病与恢复；
+- Task05A Sex + SocialBond + Grief；
+- Intimidation / Trauma / PTSD；
+- Extreme Vengeance / 支援者；
+- Task09 Colony Migration / Weather Refuge / ReturnHome；
+- Task10 Neutral Social Life / MicroFlock / RoostInvitation；
+- Task11 Threat Signature Memory / Current Cue / Acute Event；
+- 原有 DesertBatflyAI 的 Escape / Harass / FakeDive / Dive / Attach / Roost；
+- 多处历史遗留的局部群体传播逻辑，例如 RaiseLocalAlarm、Secondary Fear、Chain Fear、通过读取同伴 AI 状态形成的 Social Harass、Roost 邀请等。
+
+随着项目推进，这些系统已经开始分别承担“附近同类如何知道发生了什么”的职责。如果继续让每个系统独立传播信息，会产生：
+- 同一事件被多个系统重复广播；
+- 一次死亡/抓捕同时叠加 Fear、Alarm、Task11 Acute、Harass contagion 等多层传播；
+- 整房个体突然同步改变行为；
+- 不同系统分别扫描整群；
+- Debug 难以解释“这只蝠蝇为什么知道”；
+- 未来 Corpse Ecology / Environmental Group Behavior 再次重复造传播层。
+
+因此 Task12 的核心目标是：
+
+【建立一个统一、局部、短时、可观察、可解释、realized-only 的 Social Signal Network。现有系统继续负责“做什么”，Task12 只负责“附近同类能否知道某个事件/意图，以及这个信息对接收者形成多大短时影响”。】
+
+Task12 必须解决的核心问题：
+1) 统一现有散落的局部社会传播；
+2) 区分“亲眼看到真实事件”和“看到/听到同伴发出信号”；
+3) 禁止将详细 Task11 Threat Signature 复制给同伴；
+4) 保留 Personality / SocialBond / Trauma / Task11 Memory 对响应的个体差异；
+5) 让玩家可以从蝠蝇动作/图形状态看出信号正在发生，而不是纯后台数值；
+6) 防止全房心灵感应、无限 relay、信号循环、全群同步；
+7) 不建立新的 locomotion controller；
+8) 为未来 Corpse Ecology / Environmental Group Behavior 提供统一扩展接口。
+
+Task12 V1 正式包含六种 Signal：
+1) AlarmFlutter
+2) DistressCall
+3) RallySignal
+4) RoostCall
+5) HarassSignal
+6) SafeSignal
+
+【绝对禁止】
+- 不恢复 Task02 Sentinel / Bully / Opportunist；
+- 不新增永久 Leader / Scout / SignalOfficer / Caller 等社会职业；
+- 不让 Signal 自己决定 Attack / Escape / Roost / Vengeance / Migration；
+- 不让 Signal 写 mainBodyChunk.vel；
+- 不让 Signal 自己做跨房寻路；
+- 不把 Task11 的 12 维 Threat Signature、Confidence 或武器画像广播给同伴；
+- 不把 PTSD / Trauma / Grief / SocialBond 存进 Signal；
+- 不让 SafeSignal 清除真实 PTSD / Trauma / ThreatMemory；
+- 不允许无限 relay；
+- 不允许同一 Signal generation 在个体之间反复回弹；
+- 不为每只个体建立无限增长的 Dictionary<SignalID,...>；
+- 不允许一次真实事件同时保留旧隐式传播和新 Signal 传播，形成双重效果。
+
+【执行前必须】重新读取 main 当前：
+- DesertBatflyAI.cs
+- DesertBatflyIntimidation.cs
+- DesertBatflySocialBond.cs
+- Social/DesertBatflySocialLife.cs
+- Social/DesertBatflySocialRoomRuntime.cs
+- DesertBatflyWeatherEcology.cs
+- DesertBatflyTravelNavigation.cs
+- ThreatSignature/*
+- DesertBatflyHooks.cs
+- DesertBatflyGraphics.cs
+- Debug / Observatory / AIDebugTrace
+以及当前 Rain World Fly / FlyAI / Creature 事件接口。
+
+
+============================================================
+1. Task12 的架构定位：信息层，不是行为层
+============================================================
+
+统一流程：
+
+Real Event / Existing Behavior
+        ↓
+Emit Social Signal
+        ↓
+Room Signal Runtime
+        ↓
+距离 + LOS / Close Acoustic
+        ↓
+Receiver Personality / Bond / Trauma / Task11 context
+        ↓
+短时 Signal Influence
+        ↓
+Existing AI System decides what to do
+
+Task12 只输出短时 Influence，不自己拥有行为结果。
+
+建议的接收影响结构：
+- AlarmPressure 0..1
+- AlarmDirection / AlarmOrigin
+- AlarmThreatReference（可选，realized-only）
+- DistressInterest 0..1
+- DistressSource / DistressVictim
+- RallyInterest 0..1
+- RallySource / RallyTarget
+- RoostInterest 0..1
+- RoostSource / RoostOrigin
+- HarassInterest 0..1
+- HarassSource / HarassTarget
+- SafeConfidence 0..1
+- LastSignalReason
+
+这些值全部 realized-only，不进入 DesertBatflyState。
+
+各后端仍由现有系统负责：
+- AlarmPressure → DesertBatflyAI / Intimidation 的 Escape / concern；
+- DistressInterest → 现有 Peach rescue / SocialBond / Vengeance rescue；
+- RallyInterest → Intimidation 现有支援者候选；
+- RoostInterest → Task10 RoostInvitation / ChainSocialization；
+- HarassInterest → DesertBatflyAI 的目标关注/普通骚扰候选；
+- SafeConfidence → 只加速 SignalConcern 恢复和 Task10 中性恢复。
+
+Task12 不新增：
+- SignalAttack mode；
+- SignalEscape mode；
+- SignalRoost mode；
+- SignalPathfinder；
+- Signal专属速度控制。
+
+
+============================================================
+2. 现有系统迁移要求：禁止双重传播
+============================================================
+
+Task12 不是“在旧逻辑上再叠一层”。实现时必须逐项迁移现有隐式传播。
+
+2.1 DesertBatflyAI.RaiseLocalAlarm
+------------------------------------------------------------
+当前语义：
+- 一只蝠蝇受威胁后直接遍历附近同类；
+- 直接写其他个体 escapeFrom / retreat。
+
+Task12 后：
+- Threatened / Disturbed 等真实危险产生 AlarmFlutter；
+- 接收者通过 Signal runtime 形成 AlarmPressure；
+- 再由现有 AI 根据响应门槛决定是否 Escape；
+- RaiseLocalAlarm 不再直接写附近个体状态，避免隐藏强制同步。
+
+2.2 Intimidation Secondary Fear / Chain Fear
+------------------------------------------------------------
+必须区分：
+
+Direct Witness：保留。
+例如 A 亲眼看到 B 被 Player 杀死：
+- A 自己仍直接进入 Intimidation / Trauma；
+- A 自己仍可通过 Task11 Witness Learning 学到真实 Threat evidence；
+- 这是 A 的真实经历，不属于 Social Signal。
+
+Secondary / Chain propagation：迁移到 AlarmFlutter。
+- 当前 SecondaryAlarmRadius / ChainFearHop 等“没直接看到死亡但被同伴恐慌影响”的逻辑不应再独立叠加；
+- Task12 Alarm relay 成为唯一标准二级传播入口；
+- 旧 Secondary/Chain 传播必须删除、收敛或改成调用 Task12，不得双算 Fear Gain。
+
+2.3 Task10 Harass contagion
+------------------------------------------------------------
+当前 FindSocialHarassTarget 会读取附近同伴 DesertAI.Target / Mode。
+Task12 后：
+- 正在 Observe / Circle / FakeDive 等合适阶段的个体可发 HarassSignal；
+- Task10/AI 消费 HarassInterest；
+- 不再把“扫描别人的内部 AI state”作为主要群体骚扰传播方式。
+
+2.4 Task10 RoostInvitation
+------------------------------------------------------------
+Task10 现有 Roost/Chain 行为后端保留。
+Task12 只统一“为什么 B 知道 A 正在形成 Roost”。
+- A 准备进入稳定 Roost 或已成功 Chain/Hang → RoostCall；
+- B 接收后提高 Task10 RoostInvitation 权重；
+- 合法挂点、reservation、ChainTile、Platform underside 继续全部由 Task10/现有 Roost 系统负责。
+
+2.5 Task11 Acute Event
+------------------------------------------------------------
+Task11 的 AcuteExplosion / AcuteStartle / AcuteMassCasualty 仍表示“我亲身/直接处于急性事件范围”。
+Task12 可允许受到 Acute Event 的个体发 AlarmFlutter。
+但：
+- 接收者只能得到 Alarm 的粗粒度 danger context；
+- 不能因此增加 ExplosionPressure / StartlePressure / CounterKillPressure 等长期 Threat Signature；
+- 只有自己亲历/目击真实事件才允许 Task11 学习。
+
+
+============================================================
+3. Signal Packet 数据模型
+============================================================
+
+建议建立 realized-only Signal packet：
+
+SignalKind Kind
+DesertBatfly Emitter
+EntityID EmitterID
+Vector2 Origin
+Vector2 Direction
+float Intensity
+float Radius
+int CreatedTick
+int ExpireTick
+int GenerationID
+int Hop
+
+可选运行时上下文：
+Creature ThreatReference
+Player PlayerReference
+int PlayerSlot
+DesertBatfly SubjectBat
+Vector2? HazardOrigin
+string Reason（仅调试/低频，不在热路径频繁创建）
+
+规则：
+- 所有对象引用只在当前 realized Room 有效；
+- room transition 后不保留；
+- shortcut / death / deletion 后 packet 自动失效；
+- 不跨房传播；
+- 不跨 Cycle；
+- 不写 SaveState；
+- Signal packet 不拥有行为状态。
+
+3.1 GenerationID
+------------------------------------------------------------
+每个原始 signal event 必须有 GenerationID。
+
+目的：防止：
+A → B → A → B 无限 Alarm 回弹。
+
+同一 Generation：
+- 每个个体最多接收/响应一次；
+- Alarm 最多允许到 Hop 2；
+- 其它 V1 Signal Hop 必须为 0，不 relay。
+
+GenerationID 可以由 Room runtime 单调计数 + clock/seed 组合产生；不需要全球唯一，只需要当前 room 活跃窗口内稳定不冲突。
+
+
+============================================================
+4. Room Signal Runtime
+============================================================
+
+建议：
+ConditionalWeakTable<Room, DesertBatflySignalRoomState>
+
+RoomState 负责：
+- ActiveSignals 固定小容量列表；
+- Generation counter；
+- 过期清理；
+- 同类型/同 generation 合并；
+- 低频 neutral signal sampling；
+- Debug snapshot；
+- room unload 自动释放。
+
+ActiveSignals 建议软上限：16~24。
+硬上限必须存在，避免极端情况下无限增长。
+
+合并规则建议：
+- 同 Generation + Kind 不重复新增；
+- 新 packet intensity 更强时刷新强度/TTL；
+- Origin 不要每帧漂移，保留真实发出位置或有限更新；
+- 不合并不同 threat subject 的 Distress/Rally/Harass。
+
+紧急 Signal：
+- Alarm / Distress 采用事件驱动即时广播；
+- 允许一次性遍历当前 Desert Batfly（事件低频）；
+- 不依赖 20-tick cache 才反应。
+
+非紧急 Signal：
+- Rally / Roost / Harass / Safe 使用约 12~24 tick 的低频发出/采样；
+- 不每帧扫描全群。
+
+
+============================================================
+5. Receiver Runtime / 去重
+============================================================
+
+每只 realized Desert Batfly 只保存固定小状态，不建立无限 Dictionary。
+
+建议：
+- LastAlarmGeneration / fixed ring buffer of recent generations（4~8 个）
+- LastAlarmTick
+- LastDistressTick
+- LastRallyTick
+- LastRoostTick
+- LastHarassTick
+- LastSafeTick
+- AlarmPressure
+- AlarmDecay
+- LastSignalOrigin
+- LastSignalKind
+- LastSignalEmitter
+
+如果需要多 generation 去重，使用固定长度 ring buffer，不使用 Dictionary<int,...> 无限增长。
+
+Room change / death / shortcut / unrealize：
+- realized signal state 清理；
+- 不影响持久 Personality / Bond / Trauma / ThreatMemory。
+
+
+============================================================
+6. 感知模型：Visual + Close Acoustic / Flutter
+============================================================
+
+Task12 禁止全房心灵感应。
+
+V1 使用两种感知通道。
+
+6.1 Visual perception
+------------------------------------------------------------
+适用于全部 Signal。
+
+建议初始视觉范围：
+- AlarmFlutter：260 px
+- DistressCall：280 px
+- RallySignal：240 px
+- RoostCall：180 px
+- HarassSignal：220 px
+- SafeSignal：180 px
+
+要求：
+- receiver 与 emitter 同 room；
+- receiver 有意识；
+- emitter 有效；
+- 正常情况下要求 room.VisualContact(receiver, emitter/origin)。
+
+范围是初始 tuning，可实机调，但不应无限扩大。
+
+6.2 Close acoustic / wing-flutter perception
+------------------------------------------------------------
+仅允许：
+- AlarmFlutter
+- DistressCall
+
+用于非常近的墙后/遮挡情况。
+
+建议：
+- Alarm acoustic radius：85 px
+- Distress acoustic radius：100 px
+
+无 LOS 时：
+- 接收强度乘 0.45~0.60；
+- 只知道大致 Origin / Direction；
+- 不获得 ThreatReference 的精确信息（除非 receiver 自己也看到 threat）；
+- 不获得 Task11 item cue。
+
+Rally / Roost / Harass / Safe 不使用穿墙 acoustic V1。
+
+
+============================================================
+7. Signal 1 — AlarmFlutter
+============================================================
+
+语义：
+“这里/这个方向存在即时危险。”
+
+Alarm 是 Task12 最重要的 signal。
+
+7.1 合法发出来源
+------------------------------------------------------------
+可由以下真实事件触发：
+- DesertBatflyAI.Threatened；
+- 被 Player/Predator 主动逼近并进入 Escape；
+- 真实 projectile danger；
+- Direct Witness 到 Player Kill / Predator Kill；
+- Task11 AcuteExplosion / AcuteStartle / AcuteMassCasualty；
+- DistressCall 同时伴随一个较强 Alarm；
+- 未来 Corpse Ecology 的“真实发现危险尸体”可通过正式 API 接入。
+
+禁止：
+- 普通 Idle 随机发 Alarm；
+- 仅因为长期 Task11 ThreatMemory 高就凭空发 Alarm；
+- 仅因为 schedule 知道未来天气就发 Alarm。
+
+7.2 Alarm packet 信息
+------------------------------------------------------------
+允许：
+- Origin
+- Approx Direction
+- Intensity
+- ThreatCategory（Player / Predator / Hazard，建议 enum）
+- realized ThreatReference（可选）
+- PlayerSlot（可选，用于同 room 粗粒度关联）
+
+禁止：
+- PiercingPressure=0.82 等 Task11 详细数据；
+- 武器种类记忆；
+- PTSD 强度；
+- VengeanceAffinity；
+- SocialBond。
+
+7.3 Alarm relay
+------------------------------------------------------------
+Alarm 是 V1 唯一允许普通 relay 的 signal。
+
+Hop 规则：
+- Hop0：原始 emitter；
+- Hop1：接收者可根据响应意愿 relay；
+- Hop2：最后一级；
+- Hop2 不再 relay。
+
+初始强度建议：
+- Hop0 = 1.00 × event intensity
+- Hop1 = previous × 0.55
+- Hop2 = previous × 0.50（总计约原始 0.27）
+
+relay 需要：
+- Conformity / AlarmPressure 足够；
+- 当前个体没有更高 survival priority；
+- 当前 generation 未 relay 过；
+- 使用稳定 gating，不每帧 Random.value 重抽。
+
+7.4 Receiver response
+------------------------------------------------------------
+AlarmPressure 建议综合：
+SignalIntensity
+× Conformity response
+× Nerve response
+× direct/acoustic perception multiplier
+× current threat context
+
+大体倾向：
+- 高 Conformity：更容易相信/relay；
+- 低 Nerve：更容易撤离；
+- 高 Nerve：可能只提高警觉，不立刻 Escape；
+- Task11 对同一 Player 已有高危险记忆：如果 receiver 自己能识别该 Player，可加强实际危险判断；
+- 如果 receiver 根本看不到 Player，只能响应 Alarm，不可凭空读取 Task11 当前武器 Cue。
+
+Alarm 不能直接：
+- 清/写 PTSD；
+- 增加长期 Threat Signature；
+- 强制 Extreme Vengeance 取消；
+- 强制 Task09 改路线。
+
+7.5 行为后端
+------------------------------------------------------------
+AlarmPressure 达到门槛后由现有 AI 选择：
+- 短 Escape；
+- 停止 Task10 social；
+- 离开 Roost/Chain（强 Alarm）；
+- 提高警觉但不移动（较弱 Alarm / 高 Nerve）。
+
+真正 Escape geometry 仍由 DesertBatflyAI / vanilla locomotion 执行。
+
+
+============================================================
+8. Signal 2 — DistressCall
+============================================================
+
+语义：
+“我正在被抓、被捕食、被控制，我本人出事了。”
+
+Distress 与 Alarm 必须分开。
+
+Alarm = 附近有危险。
+Distress = 发送者本人处于急性困境。
+
+8.1 合法发出来源
+------------------------------------------------------------
+- Peach/Lizard Tongue 抓住 Desert Batfly；
+- 被支持的 Predator 抓住；
+- 被 Player 抓住；
+- 非 Fly grasp 且满足急性 restraint；
+- 未来其它明确 Capture 状态。
+
+不应由普通轻微受击发 Distress。
+
+8.2 Distress 特性
+------------------------------------------------------------
+- 不 relay；
+- 允许视觉 + 近距离 acoustic；
+- TTL 较短，建议 60~140 tick；
+- 被持续抓住时可低频刷新，但不能每帧创建新 Generation；
+- 同一次 capture 使用同一 generation 或 capture token。
+
+8.3 Receiver response
+------------------------------------------------------------
+DistressInterest 主要由：
+- SocialBond(receiver → victim)
+- Temperament
+- Nerve
+- Conformity（弱）
+- 当前 Trauma / Injury
+- threat danger
+决定。
+
+典型分化：
+- 低 Nerve / 无 Bond → 主要响应 Alarm，逃跑；
+- 高 Bond + 高 Nerve → Existing RescueInterest 大幅增加；
+- 高 Temperament / VengeanceAffinity → 可能进入现有 Intimidation/Vengeance 的救援/反击候选；
+- Severe Injury / PTSD 仍可拒绝救援。
+
+8.4 与 SocialBond
+------------------------------------------------------------
+成功救援继续由现有 SocialBond.OnSuccessfulRescue 增 Bond。
+Distress 本身不直接增加 Bond。
+
+8.5 与 Vengeance
+------------------------------------------------------------
+Distress 不能直接创建 True Avenger。
+它只提供真实 capture context。
+True Avenger / rescue charge 是否产生仍由 Intimidation 决定。
+
+
+============================================================
+9. Signal 3 — RallySignal
+============================================================
+
+语义：
+“已经存在的 True Avenger 正在请求/吸引附近高意愿个体支援。”
+
+硬规则：
+【Vengeance 创建 Rally；Rally 绝不创建 Vengeance。】
+
+9.1 发出条件
+------------------------------------------------------------
+只有 Intimidation 已经确定：
+- Vengeance participation = Avenger / TrueAvenger；
+- 有有效 VengeanceTarget；
+- 处于 Waiting / Observe / Circle / Feint 等合适阶段；
+才允许 Rally。
+
+一个 vengeance generation 应限制 Rally 频率。
+建议：
+- 进入 active Vengeance 时发一次强 Rally；
+- 后续每 40~80 tick 最多弱刷新一次；
+- Charge 命中过程中不刷 signal。
+
+9.2 Rally response
+------------------------------------------------------------
+RallyInterest 进入现有 supporter/follower candidacy。
+主要受：
+- Temperament
+- Nerve
+- Conformity
+- SocialBond(receiver → avenger/victim)
+- Grief
+- Injury
+- PTSD
+- Task11 learned danger
+影响。
+
+Task11 交互：
+- 高 Piercing / CounterKill / Explosion caution 可以降低普通 supporter 加入概率；
+- 但不能取消 True Avenger 自己的 Vengeance；
+- 高 Temperament / Nerve 个体仍可能顶着已知风险加入。
+
+9.3 不 relay
+------------------------------------------------------------
+Rally V1 只靠直接视觉感知 emitter。
+不允许 A Rally → B 再替 A Rally → 全房扩散。
+
+9.4 术语清理
+------------------------------------------------------------
+当前 DesertBatflyIntimidation 内部私有 enum SocialRole：
+- None
+- TrueAvenger
+- Follower
+
+Task12 实现时建议重命名为：
+VengeanceParticipation
+- None
+- Avenger
+- Supporter
+
+功能语义保持，不恢复 Task02 Role。
+Debug 也使用 VengeanceParticipation / Supporter，不再出现 SocialRole 术语。
+
+
+============================================================
+10. Signal 4 — RoostCall
+============================================================
+
+语义：
+“这里正在形成一个稳定、安全、可加入的休息/倒挂点。”
+
+10.1 发出来源
+------------------------------------------------------------
+- 个体已经成功进入稳定 Roost / Chain；
+- 或 Task10 正在合法 RoostInvitation commit 阶段；
+- 不应在还没有合法 Roost target 时随机发出。
+
+10.2 接收效果
+------------------------------------------------------------
+只提高 Task10：
+- RoostInvitation candidate weight；
+- ChainSocialization preference；
+- 对 emitter / nearby chain 的兴趣。
+
+响应受：
+- RoostAffinity
+- Conformity
+- SocialBond
+- 当前 SocialDrive
+- Trauma / AlarmPressure
+影响。
+
+10.3 硬边界
+------------------------------------------------------------
+Task12 不重新实现：
+- TryFindRoost；
+- TryGetRoostSpot；
+- ChainTile；
+- Platform underside；
+- reservation；
+- Grab/Chain physical attachment。
+
+所有合法性继续由 Task10 + FlyAI.ChainTile + DesertBatflyPlatformRoostRuntime 决定。
+
+10.4 不 relay
+------------------------------------------------------------
+只允许 receiver 直接看到 emitter / roost cluster。
+
+
+============================================================
+11. Signal 5 — HarassSignal
+============================================================
+
+语义：
+“我正在关注/试探/骚扰这个目标，这个目标值得你注意。”
+
+不是：
+“所有人跟我攻击。”
+
+11.1 合法发出阶段
+------------------------------------------------------------
+建议只在：
+- Observe
+- Circle
+- FakeDive
+- Approach（较弱）
+发出。
+
+不建议：
+- Attach 期间持续发；
+- Dive 每帧发；
+- Retaliation / Extreme Vengeance 使用 HarassSignal（应走 Rally）；
+- Task10 SocialChase 发 HarassSignal。
+
+11.2 接收要求
+------------------------------------------------------------
+receiver 首先必须能看到 emitter。
+收到 HarassTarget reference 后：
+- 可以形成 target interest；
+- 在 receiver 自己看不到/无法验证目标时，不直接进入 Dive/Attach；
+- 必须继续通过 CanHarass / GriefAllowsHarass / PTSD / Injury / Cooldown / AttackSlots。
+
+11.3 Task11 调制
+------------------------------------------------------------
+如果 HarassTarget 是 Player：
+- receiver 自己的 Threat Signature 决定是否愿意响应；
+- 高 CounterKill / Piercing / Explosion caution → 降低响应；
+- RetreatTendency / NonAggressionConfidence 可弱提高高 Temperament 个体的试探意愿；
+- 不复制 emitter 的 ThreatMemory。
+
+11.4 与 Task10
+------------------------------------------------------------
+当前 FindSocialHarassTarget 的“扫描同伴 AI state”应逐步改为消费 HarassSignal。
+Task10 SocialDrive 可以影响“是否愿意关注同伴活动”，但 SocialChase 不等于 Harass。
+
+11.5 不 relay
+------------------------------------------------------------
+HarassSignal 不允许多跳。
+
+
+============================================================
+12. Signal 6 — SafeSignal
+============================================================
+
+语义：
+“之前的局部警报似乎已经解除，可以逐渐恢复正常活动。”
+
+Safe 是最严格、最弱的 Signal。
+
+12.1 前置条件
+------------------------------------------------------------
+发送者必须具有 RecentAlarmContext。
+正常平静状态不允许周期性刷 Safe。
+
+建议至少满足：
+- 最近约 150~300 tick 内接收/发出过 Alarm；
+- 当前没有 Direct Threat；
+- 当前没有 AcuteExplosion / AcuteStartle / AcuteMassCasualty；
+- 当前没有强 Intimidation Shock；
+- 当前看不到对应 threat；
+- 没有真实 incoming projectile；
+- Task09 没有 survival travel priority。
+
+12.2 发送倾向
+------------------------------------------------------------
+较高：
+- Nerve
+- Conformity
+的个体可以稍早发 Safe。
+但不形成永久“安全领袖”。
+
+12.3 接收效果
+------------------------------------------------------------
+Safe 只能：
+- 加速 AlarmPressure decay；
+- 缩短 signal-induced concern；
+- 允许 Task10 SocialDrive 更快恢复正常增长；
+- 降低因 Alarm 引起的临时 social suppression。
+
+Safe 绝对不能：
+- `afraid = 0` 粗暴清零；
+- 清 PlayerTrauma / PredatorTrauma；
+- 清 PTSD；
+- 清 Task11 Threat Signature；
+- 清 GrabMemory；
+- 清 Grief；
+- 覆盖自己正在看到的 predator/player/projectile；
+- 取消 Task09 travel。
+
+接收者自己仍看到即时危险时必须拒绝 Safe。
+
+12.4 不 relay
+------------------------------------------------------------
+Safe 不 relay。
+
+
+============================================================
+13. Personality / SocialBond 对 Signal 的响应矩阵
+============================================================
+
+Task12 不建立职业。
+所有差异来自连续 Personality + 现有经历。
+
+建议主轴：
+
+AlarmFlutter：
+- Conformity ↑ → 更容易相信/relay；
+- Nerve ↓ → 更容易 Escape；
+- Nerve ↑ → 更可能警觉而不是立即逃。
+
+DistressCall：
+- SocialBond ↑↑ → RescueInterest 明显增加；
+- Nerve ↑ → 更可能靠近救援；
+- Temperament ↑ → 更可能干预；
+- Severe Trauma / Injury → 明显抑制。
+
+RallySignal：
+- Temperament ↑
+- Nerve ↑
+- Conformity ↑（中等）
+- Bond / Grief ↑
+→ supporter candidacy 增加。
+
+RoostCall：
+- RoostAffinity ↑↑
+- Conformity ↑
+- Bond ↑
+→ 响应增加。
+
+HarassSignal：
+- Temperament ↑
+- Nerve ↑
+- Conformity ↑（弱到中等）
+→ 关注/试探意愿增加。
+
+SafeSignal：
+- Nerve ↑
+- Conformity ↑
+→ 更容易接受社会性“恢复正常”线索；
+但必须自己没有直接危险。
+
+Sex：
+- 不承担固定 Signal 职责；
+- 不允许 Male = Rally / Female = Roost 等规则。
+
+
+============================================================
+14. Signal 冲突、优先级与多信号并存
+============================================================
+
+信息 urgency 大致：
+Immediate Physical Danger
+↓
+Distress / Alarm
+↓
+Rally
+↓
+Harass
+↓
+Roost
+↓
+Safe
+
+但这不是强制行为优先级。
+
+个体可以同时知道：
+- Alarm：危险；
+- Rally：Avenger 请求支援。
+
+然后自己根据 Personality / Trauma / Task11 Memory 决定：
+- 逃；
+- 不加入；
+- supporter；
+- 继续观察。
+
+硬规则：
+- Immediate Danger / Severe Injury / Task09 Travel 永远高于 Signal；
+- Distress 不能让重伤个体无条件救援；
+- Rally 不能覆盖 PTSD；
+- Roost/Safe 不能覆盖 Alarm；
+- Harass 不能覆盖 current projectile danger；
+- Task10 neutral social 必须在强 Alarm/Distress 下取消。
+
+
+============================================================
+15. 与 Task04 Injury 的边界
+============================================================
+
+Signal 不修改伤病。
+
+Severe Injury：
+- 可以接收到 Signal；
+- Debug 可以显示“received but blocked by injury”；
+- 不因 Rally/Distress 被强制进入危险动作。
+
+PostStunShock：
+- 可提高 Alarm response；
+- 可降低 Rally/Harass response；
+- 具体公式可低强度接入，但 Injury 仍拥有最终 combat gate。
+
+
+============================================================
+16. 与 Task05A SocialBond / Grief 的边界
+============================================================
+
+SocialBond：
+- 不通过 Signal 创建；
+- 不通过 Signal 自动复制；
+- 只调整 Distress/Rally/Roost 对特定 emitter/victim 的响应权重。
+
+Grief：
+- 仍由真实死亡/重要同伴死亡形成；
+- Alarm/Rally 可以作为 Grief 后续行为输入；
+- 仅“听到警报”不能产生 Bond Partner Death grief。
+
+
+============================================================
+17. 与 Intimidation / Trauma / Vengeance 的边界
+============================================================
+
+Direct witness：
+- 真实事件 → Intimidation/Trauma 正常执行。
+
+Indirect signal receiver：
+- 只获得短时 AlarmPressure；
+- 不自动获得 direct Trauma gain；
+- 极强 Alarm 可以触发短时 fear/escape，但不能伪装成“亲眼看到死亡”。
+
+Vengeance：
+- Intimidation 决定 True Avenger；
+- Task12 只让 True Avenger 发 Rally；
+- Rally 影响 supporter 候选；
+- follower/supporter 的 Charge/Feint 等动作仍由 Intimidation。
+
+术语迁移：
+- 私有 `SocialRole` → `VengeanceParticipation`；
+- `TrueAvenger` → `Avenger`（或保持显示 True Avenger，但类型名不得叫 SocialRole）；
+- `Follower` → `Supporter`。
+
+
+============================================================
+18. 与 Task09 Travel / Weather 的边界
+============================================================
+
+Task09 EmergencyRefuge / ReturnHome / ColonyMigration：绝对优先。
+
+Task09 不依赖 Signal 才能生存。
+即使房间只剩一只 Desert Batfly：
+- 它仍然必须能根据 WeatherEcology / Refuge / route 正常撤离。
+
+Task12 V1 不实现 ShelterCall / EvacuationCall。
+原因：
+- Environmental Group Behavior 尚有独立任务；
+- Task09 已经有 ImmediateDanger / ShelterUrgency / TravelExposure / forecast；
+- 先稳定六种社会 Signal，避免天气和社会层一次性耦合过重。
+
+未来允许新增：
+- ShelterCall
+但只能作为视觉/社会协调 bonus，不能成为 Task09 必须依赖的信息源。
+
+
+============================================================
+19. 与 Task10 SocialLife 的边界
+============================================================
+
+Task10 保留：
+- SocialDrive
+- SocialCooldown
+- CompanionDrift
+- PassBy
+- SocialChase
+- GroupDrift
+- RoostInvitation
+- PositionNegotiation
+- ChainSocialization
+- reservation / MicroFlock
+
+Task12 不复制任何这些行为。
+
+Signal 对 Task10 的主要接口：
+- strong Alarm/Distress → CancelForPriority；
+- RoostCall → RoostInvitation weight；
+- HarassSignal → 不是 SocialChase，而是正式 Harass candidate context；
+- SafeSignal → 恢复 signal-induced social suppression；
+- Rally 不进入 Task10。
+
+GroupDrift 不自动 relay Alarm 给每个成员；每个成员仍必须实际感知 signal 或通过合法 hop 接收。
+
+
+============================================================
+20. 与 Task11 Threat Signature 的边界
+============================================================
+
+最重要规则：
+【Task11 detailed player profile 永远私有。】
+
+可以传播：
+- “有危险”；
+- “危险来自 Player 0”；
+- “危险大致在右边”；
+- “危险很强”；
+- “有人被抓”；
+
+不能传播：
+- ProjectilePressure；
+- PiercingPressure；
+- CounterKillPressure；
+- ExplosionPressure；
+- Confidence；
+- DominantSignature；
+- 当前玩家手持什么（除非 receiver 自己看到）。
+
+Receiver 如果自己能看到同一个 Player：
+- 可以把 Signal context + 自己的 Task11 Memory/Cue 一起用于决策。
+
+例如：
+A：Alarm(Player0)
+B：自己已经记得 Player0 CounterKill=0.8，并且自己也看见 Player0 拿 Spear
+→ B 对 Alarm 更认真，拒绝 Harass/Rally 的概率更高。
+
+但 B 不能因为 A 的 Alarm 学到 SpearPressure。
+
+
+============================================================
+21. Signal Display / 玩家可观察表现
+============================================================
+
+Task12 不允许完全后台运行。
+玩家应能大致看到“某只蝠蝇正在发信号”。
+
+建议新增 realized-only：
+DesertBatflySignalDisplayState
+- Kind
+- Intensity
+- Ticks
+- Phase
+- Direction（如有）
+
+供 DesertBatflyGraphics 读取。
+
+21.1 AlarmFlutter
+------------------------------------------------------------
+建议：
+- 短时急促拍翼；
+- 身体/翅部快速抖动；
+- 可提高 flap animation frequency/visual amplitude；
+- 不额外写物理速度。
+
+21.2 DistressCall
+------------------------------------------------------------
+- 被抓时更剧烈持续挣扎；
+- 翅部快速不规则拍动；
+- 与现有 capture animation 叠加；
+- 不产生额外脱困力，除非现有 rescue/capture 系统本来就有。
+
+21.3 RallySignal
+------------------------------------------------------------
+- True Avenger 的现有 Observe/Circle/Feint 本身作为主要 Display；
+- 可增加短暂张翼/Pattern contrast pulse；
+- 不制造固定站位/外围半径。
+
+21.4 RoostCall
+------------------------------------------------------------
+- 成功挂住后短暂张翼再收拢；
+- 或稳定 Chain 时一次轻微 wing display；
+- 不反复刷动画。
+
+21.5 HarassSignal
+------------------------------------------------------------
+- 主要复用 Observe/Circle/FakeDive 本身；
+- 可附加一次短暂头向/翅姿态；
+- 不新增专属飞行轨迹。
+
+21.6 SafeSignal
+------------------------------------------------------------
+- 一次短暂、缓慢的舒展/收翼；
+- 必须低频；
+- 不应像 Alarm 一样显眼。
+
+禁止：
+- HUD 图标；
+- 浮动文字；
+- 发光图标常驻头顶；
+- Signal 专属 teleport/velocity。
+
+
+============================================================
+22. Signal 发出节奏 / 防刷屏
+============================================================
+
+每个 Signal 需要 emitter cooldown。
+
+建议初始值：
+- Alarm：同 generation 只主动发一次；强危险可刷新 TTL，不新建 generation；
+- Distress：capture token 内 20~35 tick 最多视觉刷新一次，不新建 generation；
+- Rally：40~80 tick 最多刷新；
+- Roost：进入稳定 Roost 时一次，后续约 160~260 tick 才允许弱刷新；
+- Harass：35~70 tick 最多一次；
+- Safe：RecentAlarmContext 内最多一次或极低频。
+
+所有随机节奏尽量使用 stable seed / stagger，不允许每帧 `Random.value` 决定是否发 signal。
+
+
+============================================================
+23. 性能要求
+============================================================
+
+目标实机场景：20~30 只 Desert Batfly。
+
+禁止：
+- 每帧每只 × 所有 Signal × 所有同类；
+- 每帧重新 LOS 全群；
+- 每只个体维护无限 signal history；
+- 每个 Signal 创建大量临时字符串；
+- 每个 emitter 每帧创建 packet。
+
+允许：
+- Alarm/Distress 等真实低频事件一次性 O(N) recipient scan；
+- 非紧急 signal 12~24 tick room cache；
+- 固定 16~24 ActiveSignal 上限；
+- 固定 ring buffer generation 去重；
+- watched-only Debug string formatting。
+
+建议复用：
+- Task10 Room runtime/candidate cache 思路；
+- DesertSwarmRoom.For(room).Hive.flies；
+- ConditionalWeakTable<Room,...>；
+- stable stagger by EntityID / VisualSeed。
+
+
+============================================================
+24. 生命周期与清理
+============================================================
+
+以下情况 emitter packet 必须失效或不再刷新：
+- death；
+- slatedForDeletion；
+- room transition；
+- shortcut；
+- unrealized；
+- signal TTL 到期。
+
+Receiver realized state 在：
+- NewRoom；
+- death；
+- reset/mod disable；
+清理。
+
+Signal 不需要 save/load。
+
+如果 emitter 被抓：
+- 原 Roost/Harass 等 neutral packet 立即失效；
+- 可启动新的 Distress generation。
+
+
+============================================================
+25. 未来扩展接口
+============================================================
+
+Task12 V1 完成后，未来系统应通过正式 API 接入，而不是自己遍历整群。
+
+建议 API：
+- EmitAlarm(...)
+- EmitDistress(...)
+- EmitRally(...)
+- EmitRoost(...)
+- EmitHarass(...)
+- TryEmitSafe(...)
+- GetInfluence(DesertBatfly)
+- TryGetRecentSignal(...)
+
+未来 Corpse Ecology：
+- 发现尸体的个体可以 EmitAlarm(origin=corpse)；
+- Corpse 系统不再自己发群体 fear wave。
+
+未来 Environmental Group Behavior：
+- 如确有需要，可在 Task12 上新增 ShelterCall；
+- 不能直接修改现有六种 Signal 的语义。
+
+未来自定义生物/物品：
+- 可以触发 Alarm/Distress context；
+- 不允许用 signal API 绕过 Task11 真实 evidence 规则。
+
+
+============================================================
+26. Debug / Observatory
+============================================================
+
+必须新增 Task12 Debug source，并包住/兼容 Task11/10/09 信息。
+
+每只 watched Desert Batfly 至少显示：
+- LastReceivedSignalKind
+- LastReceivedGeneration
+- LastSignalEmitter
+- LastSignalOrigin
+- LastSignalAge
+- LastSignalHop
+- PerceptionMode = Visual / Acoustic / DirectEvent
+- AlarmPressure
+- DistressInterest
+- RallyInterest
+- RoostInterest
+- HarassInterest
+- SafeConfidence
+- CurrentRallyTarget
+- CurrentHarassTarget
+- RecentAlarmContext
+- RelayEligible
+- LastRelayReason
+- SignalPriorityBlockReason
+
+Room-level Debug：
+- ActiveSignalCount
+- AlarmCount
+- DistressCount
+- RallyCount
+- RoostCount
+- HarassCount
+- SafeCount
+- NextGenerationID
+- DroppedByCapacityCount
+
+Trace 事件建议：
+- SignalEmitted
+- SignalReceived
+- SignalIgnored
+- SignalRelayed
+- SignalExpired
+- AlarmConcernRaised
+- SafeAccepted
+- SafeRejectedDueToDirectThreat
+- DistressRescueInterestRaised
+- RallySupportInterestRaised
+- RoostInterestRaised
+- HarassInterestRaised
+
+Trace 必须解释：
+- 谁发；
+- 为什么发；
+- receiver 通过 Visual 还是 Acoustic；
+- 为什么接受/拒绝；
+- 哪个既有系统最终消费。
+
+Debug 不允许让 signal runtime 在正常模式每帧构造大量字符串。
+
+
+============================================================
+27. 自动回归要求
+============================================================
+
+必须新增：
+tests/DesertBatfly/Program.Task12.cs
+
+并接入正式 DesertBatfly regression dispatcher。
+
+至少覆盖：
+
+A. 数据结构
+1) V1 正好包含六种 Signal；
+2) Signal state 不进入 DesertBatflyState；
+3) Room runtime 有固定 ActiveSignal cap；
+4) receiver history 是固定 ring/small state，不是无限 Dictionary。
+
+B. Relay
+5) 只有 Alarm 允许 Hop > 0；
+6) Alarm 最大 Hop=2；
+7) 同一 Generation 同一个体最多处理一次；
+8) Hop1/Hop2 强度递减；
+9) 不存在循环 relay。
+
+C. Perception
+10) Visual signal 需要范围 + LOS；
+11) Alarm/Distress 允许 close acoustic；
+12) Rally/Roost/Harass/Safe 不允许穿墙 acoustic；
+13) acoustic 接收强度低于 visual。
+
+D. 边界
+14) Signal 不写 BodyChunk.vel；
+15) Signal 不读取 Player Input；
+16) Signal 不写 Task11 memory；
+17) Safe 不清 Trauma/PTSD；
+18) Rally 不创建 Vengeance；
+19) RoostCall 不调用自己的 Roost legality/pathfinder；
+20) HarassSignal 不绕过 CanHarass/PTSD/Injury/AttackSlots。
+
+E. 现有系统迁移
+21) DesertBatflyAI 不再用旧 RaiseLocalAlarm 直接写邻居 retreat；
+22) Intimidation indirect Secondary/Chain 传播不与 Task12 Alarm 双算；
+23) Direct Witness Intimidation 仍存在；
+24) Task10 Roost backend 仍存在；
+25) Task10 SocialChase 不产生 HarassSignal/CounterKill formal aggression。
+
+F. Personality
+26) 高 Conformity 提高 Alarm/Roost/Harass 社会响应，但不是 100%；
+27) 低 Nerve 更容易受 Alarm 驱动 Escape；
+28) SocialBond 对 Distress/Rally/Roost 有 bonus；
+29) Sex 不决定 signal role。
+
+G. Priority
+30) Immediate Danger > Signal；
+31) Severe Injury > Rally/Harass/Distress rescue；
+32) Task09 Travel > Signal behavior；
+33) PTSD > Rally/Harass；
+34) strong Alarm cancels Task10 neutral interaction；
+35) Safe 不能覆盖 current projectile / direct predator。
+
+H. Task02 anti-regression
+36) DesertBatflySocialRoles 不存在；
+37) DesertBatflyRoleScores 不存在；
+38) ExpressedSocialRole 不存在；
+39) Intimidation 不新增公开/持久 SocialRole API；
+40) Task12 不增加 permanent Leader role。
+
+
+============================================================
+28. 实机场景 A~P
+============================================================
+
+Scenario A — 单次普通 Alarm
+- Player 靠近一只中等 Nerve 蝠蝇；
+- 其发 Alarm；
+- 近处高 Conformity 个体更容易响应；
+- 低 Conformity 个体可能只警觉；
+- 不整房同步。
+
+Scenario B — 墙后近距离 Alarm
+- emitter/receiver 被薄墙遮挡但距离 < acoustic radius；
+- receiver 有弱 Alarm；
+- 远墙后个体无反应。
+
+Scenario C — 两跳上限
+- 排布 A-B-C-D；
+- A发 Hop0；B Hop1；C Hop2；
+- D 不因为 C 再收到 Hop3。
+
+Scenario D — Player Kill direct witness
+- A亲眼看到 B 被 Player 杀；
+- A 获得 Direct Intimidation / Task11 evidence；
+- C只看到 A Alarm；
+- C 不获得 Task11 Piercing/CounterKill memory。
+
+Scenario E — Peach Tongue Distress
+- A被 Peach 舌头抓；
+- A发 Distress + Alarm；
+- 低 Bond个体逃；
+- 高 Bond/高 Nerve个体提高现有 rescue interest；
+- 不保证所有人救。
+
+Scenario F — Rally 分裂
+- True Avenger 已经产生；
+- Avenger发 Rally；
+- 高 Nerve/Temperament supporter 加入；
+- 高 Task11 CounterKill caution 个体拒绝；
+- Rally 不创造第二个 True Avenger。
+
+Scenario G — PTSD vs Rally
+- PTSD个体收到 Rally；
+- 不因 Conformity 高就覆盖 PTSD。
+
+Scenario H — RoostCall
+- 一只成功挂到 Floor underside / Beam / Solid ceiling；
+- 附近合适个体 RoostInvitation 增强；
+- 实际挂点仍全部通过 ChainTile；
+- 不合法位置不因 Signal 被强制挂住。
+
+Scenario I — HarassSignal
+- A Observe/Circle Player；
+- B看到 A Harass；
+- B高 Temperament/低 Threat caution 时更可能关注；
+- B仍需自己满足 CanHarass/AttackSlots；
+- C高 CounterKill memory 时可拒绝。
+
+Scenario J — SocialChase isolation
+- 两只 Task10 SocialChase；
+- 不产生 HarassSignal；
+- 不产生 Rally；
+- 不产生 CounterKill formal aggression window。
+
+Scenario K — SafeSignal
+- Alarm结束后安全一段时间；
+- Safe 加速 signal concern decay；
+- PTSD/ThreatMemory 不清除。
+
+Scenario L — False Safe rejection
+- A发 Safe；
+- B仍看到 Player/Predator/projectile；
+- B拒绝 Safe。
+
+Scenario M — Task11 Acute Explosion
+- A直接处于爆炸范围并发 Alarm；
+- B只接 Alarm；
+- B若未直接看到爆炸，不增加 ExplosionPressure。
+
+Scenario N — Task09 priority
+- 天气/迁徙 travel 正在驱动；
+- 收到 Rally/Roost/Harass 不改变跨房 route；
+- Alarm仅可作为短时 context，不夺取已成功 owned travel frame。
+
+Scenario O — 20~30只压力测试
+- 多种 neutral/harass/roost/alarm 混合；
+- ActiveSignal 数量受控；
+- 无明显 GC spike；
+- 无全群每帧扫描；
+- 无 signal feedback storm。
+
+Scenario P — 长时间稳定性
+- 房间运行数分钟；
+- generation/ring buffer 正常回收；
+- 没有永久 AlarmPressure；
+- 没有失效 emitter 引用；
+- 没有 Signal reservation/state 泄漏。
+
+
+============================================================
+29. 建议文件结构
+============================================================
+
+建议：
+
+src/Creatures/DesertBatfly/Signals/
+├─ DesertBatflySignalKind.cs
+├─ DesertBatflySignalPacket.cs
+├─ DesertBatflySignalRuntime.cs
+├─ DesertBatflySignalRoomRuntime.cs
+├─ DesertBatflySignalPerception.cs
+├─ DesertBatflySignalInfluence.cs
+├─ DesertBatflySignalDisplay.cs
+├─ DesertBatflySignalIntegration.cs
+└─ DesertBatflySignalDebug.cs
+
+允许根据实际架构合并小文件，但禁止把全部内容继续塞进 DesertBatflyAI.cs 或 DesertBatflyIntimidation.cs。
+
+现有文件预计最小接线：
+- DesertBatflyHooks.cs
+- DesertBatflyAI.cs
+- DesertBatflyIntimidation.cs
+- Social/DesertBatflySocialLife.cs
+- DesertBatflyGraphics.cs
+- Task11 runtime（只提供粗粒度 trigger/context，不传播 memory）
+- Debug source registration
+- tests dispatcher
+
+
+============================================================
+30. 实施阶段建议
+============================================================
+
+Phase A — Core Runtime
+- SignalKind / Packet / Generation / RoomState / TTL / cap；
+- receiver small-state / dedup；
+- lifecycle。
+
+Phase B — Perception
+- Visual LOS/radius；
+- Alarm/Distress close acoustic；
+- attenuation；
+- Hop rules。
+
+Phase C — Alarm Migration
+- DesertBatflyAI RaiseLocalAlarm 收编；
+- Intimidation indirect Secondary/Chain fear 收编；
+- Direct Witness 保留；
+- 防双算。
+
+Phase D — Distress + Vengeance
+- capture emit；
+- RescueInterest；
+- Rally emit；
+- supporter candidacy；
+- `SocialRole` → `VengeanceParticipation` 术语清理。
+
+Phase E — Task10 Integration
+- RoostCall → RoostInvitation；
+- HarassSignal → formal Harass interest；
+- 移除主要的 AI-state spying contagion；
+- Safe recovery。
+
+Phase F — Task11 / Acute Integration
+- Acute → Alarm；
+- coarse threat context；
+- 确认 memory 不传播。
+
+Phase G — Graphics / Debug
+- SignalDisplayState；
+- Observatory；
+- AIDebugTrace；
+- watched-only formatting。
+
+Phase H — Regression / Performance
+- Program.Task12；
+- anti-loop；
+- anti-role；
+- no velocity ownership；
+- room cap / cache；
+- DoD audit。
+
+
+============================================================
+31. Definition of Done
+============================================================
+
+DoD 01
+存在统一 Task12 Social Signal runtime，而不是六种行为各自重复扫描群体。
+
+DoD 02
+V1 六种 Signal 全部存在：Alarm / Distress / Rally / Roost / Harass / Safe。
+
+DoD 03
+所有 Signal realized-only，不写 DesertBatflyState，不跨 room/Cycle。
+
+DoD 04
+Task12 不拥有 mainBodyChunk.vel，不成为第二套 locomotion controller。
+
+DoD 05
+Signal packet 有 GenerationID / Hop / TTL / emitter/origin/intensity。
+
+DoD 06
+同一 Generation 同一个体不会重复处理形成循环。
+
+DoD 07
+只有 Alarm 允许普通 relay。
+
+DoD 08
+Alarm 最大 Hop=2，强度逐 hop 衰减。
+
+DoD 09
+Alarm/Distress 支持近距离无 LOS acoustic；其它四种 V1 Signal 不支持。
+
+DoD 10
+Direct Witness 与 Social Signal Receiver 语义严格分开。
+
+DoD 11
+Direct Witness 仍可获得 Intimidation/Trauma/Task11 evidence。
+
+DoD 12
+仅接收 Alarm 的个体不会获得 Task11 detailed Threat Signature evidence。
+
+DoD 13
+DesertBatflyAI 旧 RaiseLocalAlarm 不再直接批量写邻居 retreat/escapeFrom。
+
+DoD 14
+Intimidation 旧 indirect Secondary/Chain fear 不与新 Alarm 双重结算。
+
+DoD 15
+DistressCall 对 Peach/Player/Predator capture 生效。
+
+DoD 16
+Distress 不直接创建 Bond，不直接创建 Vengeance。
+
+DoD 17
+SocialBond 能明显提高重要同伴 Distress 的 RescueInterest。
+
+DoD 18
+Rally 只能由已存在的 Vengeance Avenger 产生。
+
+DoD 19
+Rally 不创建 True Avenger，只影响现有 supporter candidacy。
+
+DoD 20
+Intimidation 内部不再使用容易与 Task02 混淆的 SocialRole 术语；使用 VengeanceParticipation 或等价名称。
+
+DoD 21
+RoostCall 只影响 Task10 RoostInvitation/ChainSocialization 权重。
+
+DoD 22
+RoostCall 不能绕过 FlyAI.ChainTile / Platform underside / reservation。
+
+DoD 23
+HarassSignal 只提供目标关注/社会动机，不绕过 CanHarass / Injury / PTSD / Cooldown / AttackSlots。
+
+DoD 24
+Task10 SocialChase 不产生 HarassSignal 或 formal CounterKill aggression。
+
+DoD 25
+SafeSignal 只处理 signal-induced concern。
+
+DoD 26
+Safe 不清 Trauma / PTSD / ThreatSignature / GrabMemory / Grief。
+
+DoD 27
+接收者仍看到直接危险时拒绝 Safe。
+
+DoD 28
+Personality 产生连续响应差异，不形成 signal role。
+
+DoD 29
+Sex 不决定 Signal 职责。
+
+DoD 30
+Task09 survival travel 不依赖 Signal，且优先于 Rally/Roost/Harass/Safe。
+
+DoD 31
+Task11 详细 12 维 memory 永远不通过 Signal 复制。
+
+DoD 32
+Task11 Current Cue 只有 receiver 自己真实观察时才使用。
+
+DoD 33
+AcuteExplosion/Startle/MassCasualty 可以触发 Alarm，但 indirect receiver 不因此训练长期 memory。
+
+DoD 34
+玩家能从 Graphics/现有动作中观察到 Signal display。
+
+DoD 35
+Signal display 不增加物理速度/位移控制。
+
+DoD 36
+Room runtime 有 ActiveSignal cap 和过期回收。
+
+DoD 37
+receiver generation history 使用固定小状态/ring buffer，不无限增长。
+
+DoD 38
+20~30 只个体场景没有每帧 O(N²) Signal 扫描。
+
+DoD 39
+Urgent Signal 事件驱动，neutral Signal 低频采样。
+
+DoD 40
+Debug/Observatory 能解释 emitter、generation、hop、perception、accept/ignore reason、最终 consumer。
+
+DoD 41
+AIDebugTrace 不在非 watched 模式制造热路径字符串垃圾。
+
+DoD 42
+Task02 的 DesertBatflySocialRoles / DesertBatflyRoleScores / ExpressedSocialRole 仍然不存在。
+
+DoD 43
+Task12 不新增 permanent Leader/SignalRole。
+
+DoD 44
+未来 Corpse Ecology / Weather group behavior 可以通过公开 Signal API 接入，不需要再造传播层。
+
+DoD 45
+自动回归覆盖 relay、LOS/acoustic、priority、no velocity、no Task11 memory broadcast、anti-role。
+
+DoD 46
+Scenario A~P 完成 Rain World 实机验收；在此之前只能标记“代码侧完成，待实机验收”，不得声称 live verified。
+
+
+============================================================
+32. 最终设计原则
+============================================================
+
+Task12 的成功标准不是“房间里出现很多信号”。
+
+正确表现应该是：
+- 一只蝠蝇先发现危险；
+- 附近部分同类真实看到/听到它的惊慌；
+- 有的跟着退，有的因为胆大只保持警觉；
+- 被抓个体能让重要同伴更倾向救援；
+- True Avenger 可以吸引少量合适支援者，但不会召唤整个群落；
+- 一只蝠蝇开始稳定倒挂，会让附近中性同类更容易加入；
+- 一个爱骚扰的个体可以吸引少量同伴关注目标，但 Task11 经验丰富的个体可能拒绝；
+- 危险真正解除后，群体逐渐恢复，而不是瞬间全体清零恐惧。
+
+最终目标是：
+
+【让 Desert Batfly 群体的信息流变得可见、有因果、有距离、有个体差异；同时把现有 Fear、Vengeance、SocialLife、Roost、ThreatMemory 的传播职责统一起来，而不是在它们上面再增加一层新的群体控制器。】
