@@ -1,0 +1,1114 @@
+Desert Batfly Task 11
+Threat Signature Memory + Player Combat Learning
+威胁特征记忆 + 玩家战斗风格学习
+Codex Execution Specification
+============================================================
+
+0. 任务性质
+============================================================
+
+这是 Desert Batfly 第 11 项正式可执行任务书。
+
+本任务的核心目标不是把 Desert Batfly 做成“读取玩家输入、提前预判操作”的作弊 AI，也不是建立一个固定的 SpearHeavy / RockHeavy / Passive / CounterKiller 四选一职业分类。
+
+Task 11 要实现的是：
+
+【同一只 Desert Batfly 能根据自己亲身经历、亲眼目击以及当前真实可观察到的威胁线索，对“具体玩家近期制造过哪些类型的威胁”形成有限、会衰减、可解释的 Threat Signature Memory，并据此调整之后的风险评估、观察距离、接近角度、假俯冲、正式俯冲、Attach 意愿、撤退方式和短时规避。】
+
+本任务必须解决以下问题：
+- 普通 Spear、Rock、爆炸矛、爆炸物、鞭炮草、Shock 类物品等威胁性质不同，不能只靠 SpearHeavy / RockHeavy 两个值表达；
+- 同一个物品可能同时具备 Projectile、Piercing、Explosion、Startle 等多种性质；
+- 玩家当前手持某种危险物品，与“过去经常使用这种威胁”必须分离；
+- 刚刚发生的爆炸、群体死亡、抓捕、惊吓等急性事件，与跨 Cycle 的长期记忆必须分离；
+- 记忆必须属于具体 Desert Batfly 对具体 Player 的个体经验，不允许自动成为全群落数据库；
+- ThreatStyle 不负责决定爱、恨、PTSD 或复仇，只负责回答“我知道这个玩家过去通常怎么制造危险，因此我现在该怎么接近/规避”。
+
+【Task 11 的三层核心架构】
+
+A. Threat Signature Memory
+   跨 Cycle 的中期个体记忆。
+   回答：“这个玩家过去经常用什么类型的威胁？”
+
+B. Current Threat Cue
+   当前房间、当前视野、当前几秒钟内可以真实观察到的线索。
+   回答：“这个玩家现在手里拿着什么、刚投出了什么、当前有没有真实 projectile threat？”
+
+C. Acute Event State
+   极短时间内的急性事件状态。
+   回答：“附近刚刚发生了什么严重事件？”
+
+禁止把三层混成一个数值。
+
+【绝对禁止】
+- 不读取 Player 输入；
+- 不读取 throw button / controller / mouse aim 等玩家意图；
+- 不提前知道下一帧会不会投矛；
+- 不全房间心灵感应；
+- 不把详细玩家 Threat Signature 通过 SocialSignal 自动广播给整个群落；
+- 不恢复被否决的 Task 02 SocialRole；
+- 不增加 SpearExpert / BombExpert / CowardHunter / CounterHunter 等永久职业；
+- 不用 Threat Signature 覆盖 PTSD / Severe Injury / Immediate Danger 等生存优先级；
+- 不因为 Threat Signature 高就强制所有个体使用同一种战术；
+- 不为每一种 Item 写一套永久 Memory 字段并无限膨胀。
+
+【必须】执行前重新读取 main 当前 DesertBatfly 代码，特别是 Task04 Injury、Task05 SocialBond、Intimidation、Vengeance、Task09 Travel、Task10 SocialLife、DesertBatflyState、DebugTrace 和 Rain World 当前 Weapon / violence / grasp 事件接口。
+
+
+============================================================
+1. 与现有系统的职责边界
+============================================================
+
+Task 11 必须和现有系统严格分工。
+
+Trauma / PTSD：
+- 回答“这个玩家让我有多害怕”；
+- 强 Trauma / PTSD 可以决定彻底回避；
+- Threat Signature 不得降低或覆盖 PTSD。
+
+Intimidation：
+- 回答“当前这个对象总体危险不危险”；
+- 可综合近期死亡、攻击和局部环境；
+- Threat Signature 只提供“危险方式”的战术信息。
+
+GrabMemory：
+- 回答“我是否有被这个对象抓过的具体经历”；
+- Task11 可把真实 Grab/Capture 事件转化为 GrabCapturePressure 的证据，但不能删除原 GrabMemory。
+
+Vengeance / Extreme Vengeance：
+- 回答“我要不要继续针对这个玩家”；
+- Threat Signature 只回答“如果我要攻击，怎么攻击更合理”；
+- Extreme Vengeance 不得因为 CounterKillPressure 高而被取消。
+
+Task 09：
+- EmergencyRefuge / ReturnHome / ColonyMigration 优先于 Threat Signature 战术行为；
+- Task11 不得阻止跨房生存旅行。
+
+Task 10：
+- 中性 SocialLife 低于 Threat / Combat；
+- Acute Event 或真实 projectile danger 发生时，Task10 interaction 必须立即让路；
+- Task11 不把中性 SocialChase 当成正式攻击，也不能让 SocialChase 产生 CounterKill 证据。
+
+
+============================================================
+2. 长期 Threat Signature Memory：12 个连续维度
+============================================================
+
+第一版长期记忆必须采用连续值，不使用单一 Style enum。
+
+每个维度范围建议统一为 0..1：
+
+1) ProjectilePressure
+2) PiercingPressure
+3) BluntStunPressure
+4) ExplosionPressure
+5) StartlePressure
+6) ShockPressure
+7) AreaDenialPressure
+8) GrabCapturePressure
+9) PursuitPressure
+10) CounterKillPressure
+11) RetreatTendency
+12) NonAggressionConfidence
+
+另设：
+- Confidence 0..1
+- LastMeaningfulEncounterCycle
+- 可选 LastEvidenceCycle / LastDecayCycle
+
+说明：
+Debug 可以显示一个 Dominant Signature，例如 Spear-like / Explosion-heavy，但 Dominant Signature 只能是展示层，不得成为 AI 真正唯一依据。
+
+多个维度可以同时很高。
+
+例如：
+Projectile 0.82
+Piercing 0.76
+CounterKill 0.61
+Explosion 0.08
+Retreat 0.03
+
+表示这个玩家长期更像“频繁使用矛并擅长反杀骚扰者”，而不是被塞进一个固定 enum。
+
+
+============================================================
+3. 12 个维度的语义与主要行为影响
+============================================================
+
+3.1 ProjectilePressure
+------------------------------------------------------------
+表示玩家是否经常通过高速或抛掷物远距离制造威胁。
+
+典型来源：
+- Spear；
+- Rock；
+- Explosive Spear；
+- Electric Spear / 其他投射物；
+- 未来自定义 Projectile 类物品。
+
+主要战术影响：
+- 减少长时间在玩家正前方悬停；
+- 增加横向移动偏好；
+- 增加对真实 projectile trajectory 的注意；
+- 降低长直线接近的权重；
+- 不直接等于“致命”。
+
+3.2 PiercingPressure
+------------------------------------------------------------
+表示玩家经常使用刺穿型高杀伤武器。
+
+典型来源：
+- 普通 Spear；
+- Explosive Spear 的刺穿部分；
+- 其他高穿刺武器。
+
+主要战术影响：
+- Circle 半径增加；
+- Frontal Dive 降权；
+- Long Straight Dive 降权；
+- Side Approach 增加；
+- FakeDive / abort approach 增加；
+- Attach 阈值提高；
+- 若当前玩家手里真实可见 Spear，则上述效果加强。
+
+3.3 BluntStunPressure
+------------------------------------------------------------
+表示玩家擅长通过冲击/Stun 把蝠蝇从空中打断。
+
+典型来源：
+- Rock；
+- 其他主要造成 Impact/Stun 的物品。
+
+主要战术影响：
+- 减少近距离正面悬停；
+- 增加短时 lateral movement；
+- Attach 前犹豫增加；
+- 被真实投射物威胁时更偏短横向闪避；
+- 不应像 Piercing 一样大幅提升长期远离距离；
+- 不允许长期提高飞行高度，避免重新制造无聊上下飞。
+
+3.4 ExplosionPressure
+------------------------------------------------------------
+表示玩家经常制造瞬时大范围爆炸危险。
+
+典型来源：
+- 爆炸矛；
+- 炸弹/爆炸物；
+- 未来自定义爆炸物。
+
+主要战术影响：
+- 玩家持有已识别爆炸物时最低安全距离增加；
+- 爆炸刚发生后，不立即飞回爆心附近；
+- 对玩家附近密集 MicroFlock 的容忍度降低；
+- 正式攻击更少从拥挤方向进入；
+- 与 Acute Explosion 状态叠加时产生明显散开。
+
+3.5 StartlePressure
+------------------------------------------------------------
+表示玩家经常制造强烈、突然、但不一定致命的惊吓刺激。
+
+典型来源：
+- FirecrackerPlant / 鞭炮草；
+- 巨大突然声响；
+- 明确触发 Startle/Fear 的非致命物体。
+
+主要战术影响：
+- 玩家当前持有已知 Startle 物品时更早拉开；
+- 刚经历 Startle 后短时散开；
+- Roost 个体更容易惊醒/拒绝立即恢复中性群聚；
+- 短时抑制 GroupDrift / RoostInvitation；
+- 不等于 Lethal Fear，不能自动产生 Piercing/Explosion 级别的致命判断。
+
+3.6 ShockPressure
+------------------------------------------------------------
+表示玩家经常使用电击、麻痹、强制 Stun 类威胁。
+
+来源只允许来自真实 Shock/Paralysis/Stun 事件，不能只看物品名字。
+
+主要战术影响：
+- 降低近身体飞行；
+- Attach 明显降权；
+- 被电击后更长时间保持 separation；
+- 当前可见 Shock 物品时提高近身警惕。
+
+3.7 AreaDenialPressure
+------------------------------------------------------------
+表示玩家擅长制造一块“短时间不适合进入”的危险区域。
+
+典型来源：
+- 持续爆炸危险区；
+- 危险云/持续伤害区；
+- 未来 Mod 的区域危险物；
+- 其他真实具有持续 hazard footprint 的效果。
+
+长期影响：
+- 更重视局部 hazard center；
+- 更少穿过玩家刚制造的危险区域。
+
+短期实现必须依赖 Acute/Current hazard，不允许凭长期 AreaDenialPressure 凭空生成看不见的危险区。
+
+3.8 GrabCapturePressure
+------------------------------------------------------------
+表示玩家经常近身抓取、控制、携带或抓后处置 Desert Batfly。
+
+来源：
+- 自己被 Player 抓；
+- 目击同类被 Player 抓后造成严重后果；
+- 真实 Grab/Capture 事件。
+
+主要战术影响：
+- Attach 明显降权；
+- 近距离 Circle 降权；
+- 玩家身体正上方/侧面停留时间下降；
+- 玩家主动逼近时更早退出。
+
+3.9 PursuitPressure
+------------------------------------------------------------
+表示玩家在 Desert Batfly 已经撤退后仍持续追击。
+
+必须和 CounterKill 分离。
+
+CounterKill：
+“你攻击他，他反杀你。”
+
+Pursuit：
+“你已经撤，他还继续追你。”
+
+只有满足真实追逐窗口才积累：
+- Desert Batfly 已进入 Escape / disengage；
+- Player 持续缩短距离或沿相同路径追击；
+- 持续达到最小时间；
+- 不能因为玩家偶然同方向移动就判定追杀。
+
+主要影响：
+- 更早 Escape；
+- 撤退距离更长；
+- 更倾向利用出口/障碍；
+- 刚脱离后不立即回来 Harass。
+
+3.10 CounterKillPressure
+------------------------------------------------------------
+严格表示“这个玩家擅长反杀正在主动骚扰/攻击他的 Desert Batfly”。
+
+只有以下窗口有效：
+- Desert Batfly 正在 Harass / FakeDive / Dive / Attach / 正式 Attack；
+- 目标明确是 Player A；
+- 在一个有限 RecentAggressionAgainstPlayer 时间窗内被 Player A 杀死。
+
+普通路过杀死一只 Batfly 不算 CounterKill，主要进入：
+- Intimidation；
+- Trauma；
+- 对应 weapon signature。
+
+主要影响：
+- Harass initiation 降权；
+- Attach 降权；
+- 长 Dive 降权；
+- Observe / Probe / FakeDive 增加；
+- 失败后撤离更彻底。
+
+Extreme Vengeance 仍可决定继续攻击，只改变攻击方式。
+
+3.11 RetreatTendency
+------------------------------------------------------------
+表示玩家在被观察/骚扰时经常主动拉开距离且没有攻击。
+
+不能把普通走路当 Retreat。
+
+只有 encounter window 内满足：
+- Desert Batfly 明确正在 Observe / Harass Player A；
+- 双方达到合理互动距离；
+- Player 持续扩大距离；
+- 没有同时投掷/攻击 Desert Batfly；
+- 持续达到最小 tick。
+
+该维度增长必须是所有维度中较慢的一类。
+
+主要影响必须乘 Personality：
+- 高 Temperament / Nerve 个体：Harass confidence 可略提高；
+- 低 Temperament / Nerve 个体：最多减少少量回避，不得突然变成攻击型个体。
+
+3.12 NonAggressionConfidence
+------------------------------------------------------------
+表示多次真实 encounter 中，玩家长期没有对 Desert Batfly 造成攻击/伤害。
+
+必须非常慢建立。
+
+不能因为：
+- 玩家站着不动；
+- 玩家当前空手；
+- 单次没有攻击；
+就快速提高。
+
+主要影响：
+- 轻微降低普通即时 Threat Confidence；
+- 允许部分高 Temperament 个体更愿意靠近观察。
+
+绝对不能覆盖：
+- PTSD；
+- 近期杀戮；
+- 当前危险武器；
+- 当前飞来的 projectile；
+- Acute Event。
+
+
+============================================================
+4. Threat Tags：不要把长期记忆绑死在 Item 名字上
+============================================================
+
+Task11 应建立一个中间层 ThreatEvent / ThreatSignatureEvidence。
+
+概念结构建议：
+
+ThreatEvent
+- InstigatorPlayer
+- SourceObject
+- Victim
+- Position
+- Tick / Cycle
+- DirectVictim
+- Lethality
+- StunStrength
+- Projectile
+- Piercing
+- Blunt
+- Explosion
+- Startle
+- Shock
+- AreaDenial
+- Grab
+- Pursuit
+- CounterKill
+
+实际字段可按 main 架构调整，但必须保留“事件性质”和“物品身份”分离原则。
+
+示例：
+
+普通 Spear：
+- Projectile
+- Piercing
+- Lethal potential
+
+Rock：
+- Projectile
+- Blunt
+- Stun
+
+FirecrackerPlant：
+- Startle
+- Loud/Acute stimulus
+- 可选弱 AreaDenial
+- 不产生 Piercing
+
+Explosive Spear：
+- Projectile
+- Piercing
+- Explosion
+- AreaDamage / AreaDenial
+- Lethal
+
+未来自定义物品：
+只要能报告 Threat Tags，就能被 Desert Batfly 学习。
+
+禁止：
+- 给每个 Mod Item 新增独立永久字段；
+- 在 AI 主逻辑中不断追加 if (weapon is NewItem123)。
+
+允许有一个轻量 adapter/registry，把具体 Rain World / DLC / DryCycle 物品转换成 Threat Tags。
+
+
+============================================================
+5. 证据强度：亲身经历 > 目击 > 远距离观察
+============================================================
+
+Task11 必须采用 Evidence Strength，而不是事件发生就固定 +0.5。
+
+建议相对强度：
+
+自己被武器直接命中：极强
+自己被 Rock 击晕：强 Blunt/Stun
+自己被 Grab：强 GrabCapture
+自己成功逃离持续 Pursuit：中强 Pursuit
+近距离目击同类被杀：强
+目击同类被刺伤/击晕：中强
+投射物从自己附近高速掠过：弱~中
+远距离目击：弱
+玩家只是手持物品：不增加长期 Memory
+
+目击学习必须满足：
+- 同 room；
+- 合理距离；
+- 必要时真实 VisualContact / LOS；
+- 不穿墙；
+- 不跨房；
+- 事件发生时一次性低频扫描 witness，不允许每帧 N×N 观察。
+
+建议 witness multiplier：
+- Direct victim：1.0
+- 近距离 LOS witness：0.4~0.65
+- 更远 LOS witness：0.2~0.35
+
+SocialBond 可以作为很弱的 witness significance bonus：
+例如高 Bond 个体目击 partner 被杀，witness multiplier 略提高；
+但 Grief / Trauma 仍负责情绪，Task11 只负责“学到威胁性质”。
+
+
+============================================================
+6. 饱和式学习，不允许简单线性累加
+============================================================
+
+长期 score 建议使用饱和式更新：
+
+score += evidence * (1 - score)
+
+可附加：
+- confidence；
+- direct/witness multiplier；
+- personality 的极弱记忆敏感度（如确有必要）。
+
+目标：
+- 0.2 收到强 evidence 后可以明显跳升；
+- 0.9 再收到同类 evidence 只缓慢接近 1；
+- 不能两次事件就简单 0.5 + 0.5 = 1.0。
+
+同一个真实事件可以同时训练多个维度。
+
+例如 Explosive Spear hit：
+- Projectile + 中
+- Piercing + 强
+- Explosion + 强
+- AreaDenial + 弱~中
+
+如果同时属于反杀正在 Dive 的同类：
+- CounterKill 再额外增加。
+
+
+============================================================
+7. 记忆衰减与跨 Cycle 保存
+============================================================
+
+Threat Signature Memory 必须跨 Cycle / Save 保存，但不能永久。
+
+目标有效记忆周期：约 3~6 Cycle 有明显影响。
+
+建议每 Cycle 衰减：
+- Signature score *= 0.75~0.82
+- Confidence *= 0.82~0.88
+
+具体值可实机调整。
+
+要求：
+- 不突然清零；
+- 玩家长期改变打法后，个体能重新评价；
+- PTSD 可以比 Threat Signature 保存更久；
+- Threat Signature 不能成为永久仇恨系统。
+
+示例：
+Spear/Piercing = 0.90
+若之后完全没有相关证据：
+Cycle 1 ~0.72
+Cycle 2 ~0.58
+Cycle 3 ~0.46
+Cycle 4 ~0.37
+Cycle 5 ~0.30
+
+实际数值按最终 decay 常数变化。
+
+
+============================================================
+8. 每个 Player 独立记忆 / Co-op
+============================================================
+
+Task11 必须按具体玩家分开。
+
+同一只 Desert Batfly 可以：
+
+Player 0：
+Projectile 0.9
+Piercing 0.8
+CounterKill 0.6
+
+Player 1：
+Retreat 0.7
+NonAggression 0.5
+
+长期绑定建议使用 Campaign 内稳定 Player slot / playerNumber 等可持久身份。
+
+运行时可使用 realized Player / AbstractCreature / EntityID 辅助事件归属，但持久存储不能只依赖 realized 对象引用。
+
+建议最多固定支持 4 个 PlayerMemory 槽，避免无限 Dictionary 增长。
+
+要求：
+- Player 0 的行为不能污染 Player 1；
+- witness event 必须归属真实 Instigator；
+- 多玩家同时存在时，AI 针对当前 target 读取对应 slot；
+- 若无法可靠归属攻击者，则宁可不写长期证据，也不要误写给错误玩家。
+
+
+============================================================
+9. Current Threat Cue：当前真实可观察线索
+============================================================
+
+Current Cue 不持久化。
+
+候选字段：
+- VisibleSpear
+- VisibleRock
+- VisibleExplosiveItem
+- VisibleStartleItem
+- VisibleShockItem
+- RecentSpearThrow
+- RecentRockThrow
+- RecentExplosion
+- RecentGrabAttempt
+- ProjectileThreat
+- ProjectileThreatDirection
+- CurrentHazardCenter
+- PlayerRetreating
+
+Current Cue 的原则：
+- 只允许读取游戏世界中已经存在、可以合理观察到的信息；
+- 玩家当前手里拿着 Spear 可以成为 Cue；
+- 但手持 Spear 本身绝不增加长期 PiercingPressure；
+- 必须等真实攻击/命中/目击等事件才形成 Memory evidence。
+
+禁止：
+- Input.GetKey 推测玩家会投；
+- 读取 throw button；
+- 读取未发生的攻击；
+- 无 LOS 情况下知道玩家手持什么。
+
+
+============================================================
+10. Acute Event State：急性危险事件
+============================================================
+
+Acute Event 是秒级/短时状态，不写长期 State。
+
+第一版至少考虑：
+
+AcuteExplosion
+- 记录爆心/强度/短期危险时间；
+- 附近个体短时散开；
+- 不立即飞回爆心。
+
+AcuteStartle
+- 鞭炮草/突然强刺激；
+- 中断 Task10 中性互动；
+- 短时拒绝重新 GroupDrift；
+- Roost 个体可被惊醒或提高警戒。
+
+AcuteMassCasualty
+- 短时间内同一玩家导致多只 Desert Batfly 死亡；
+- 强烈提升即时 Escape / dispersal；
+- 停止 SocialChase / RoostInvitation；
+- 这是短期事件状态，不建议做第 13 个永久 Memory 维度；
+- 长期影响通过 Intimidation / Trauma / 对应 Threat Signature evidence 体现。
+
+AcuteCapture / AcuteShock（按实现需要）：
+- 真实抓取/电击发生后短时提高 separation。
+
+
+============================================================
+11. Spear / Piercing 风格的具体战术修正
+============================================================
+
+Task11 必须让玩家实际看得出“这只蝠蝇学过”，但不能变成完美闪避。
+
+高 Projectile + Piercing，对当前 Player：
+- Observe distance 稍增；
+- Circle radius 增；
+- 正面长 Dive 权重下降；
+- SideApproach 权重增加；
+- FakeDive 权重增加；
+- Attach threshold 提高；
+- Attack abort 更愿意发生；
+- 当前 VisibleSpear 时进一步加强。
+
+如果真实 Spear projectile 已经投出并且轨迹构成真实威胁：
+- 给一个短时 lateral evade target；
+- 使用现有/原版 Fly locomotion 执行；
+- 不直接每帧写 mainBodyChunk.vel；
+- 不做超人级瞬移；
+- 反应必须有距离、方向、感知窗口。
+
+
+============================================================
+12. Rock / Blunt/Stun 风格的具体战术修正
+============================================================
+
+高 Projectile + BluntStun：
+- 减少玩家正前方静止/低速停留；
+- 近距离左右位移增加；
+- Attach 前犹豫增加；
+- 当前 VisibleRock / real projectile threat 时短时 lateral evade；
+- 对总体攻击欲和 Circle radius 的长期影响明显弱于 Piercing；
+- 不允许因为 RockPressure 高而永久提高 Y 目标或造成大量上下弹飞。
+
+
+============================================================
+13. Explosion / AreaDenial 风格的具体战术修正
+============================================================
+
+高 ExplosionPressure：
+- 当前 VisibleExplosive 时保持更大最低距离；
+- 攻击进入点更偏侧面/疏散区域；
+- 当前玩家附近不鼓励形成密集 MicroFlock；
+- AcuteExplosion 后一定时间内保留局部危险中心；
+- 不立即回到爆心；
+- 允许局部 route/goal 对 hazard center 做弱规避。
+
+高 AreaDenialPressure 只表示“更相信这个玩家会制造区域危险”。
+真正避开的空间必须来自 Current/Acute hazard 数据，不能凭记忆生成虚拟禁区。
+
+
+============================================================
+14. Startle / Firecracker 风格的具体战术修正
+============================================================
+
+FirecrackerPlant 是 Task11 必须覆盖的代表案例。
+
+当真实 Startle 事件发生：
+- Direct affected individual 得到强 Startle evidence；
+- LOS witness 得到弱~中 evidence；
+- 不增加 Piercing；
+- 不增加 Blunt；
+- 除非实际存在爆炸伤害，否则不把它当 Lethal Explosion。
+
+之后同一 Player 再次持有可识别 Startle 物品：
+- 高 StartlePressure 个体提前扩大距离；
+- Roost 个体提高警觉；
+- GroupDrift 临时稀疏；
+- Attach 权重降低；
+- 高 Temperament 个体仍可继续 Harass，但方式更试探。
+
+
+============================================================
+15. Grab / Close-range 风格
+============================================================
+
+高 GrabCapturePressure：
+- 降低 Attach；
+- 降低贴身体 Circle；
+- 玩家主动逼近时更早退出；
+- 被抓过的个体表现应比纯 witness 更明显。
+
+CloseCombatPressure 当前不列为独立第 13 维度。
+如果后续发现 Grab 无法覆盖大量近战伤害，可在 Task11 扩展阶段加入 CloseCombatPressure，但第一版不强制。
+
+
+============================================================
+16. Pursuit / CounterKill / Retreat 的行为差异
+============================================================
+
+PursuitPressure 高：
+- Escape 更早；
+- disengage 后保持更久；
+- 更重视出口/障碍；
+- 不轻易刚撤开就回来。
+
+CounterKillPressure 高：
+- 主动 Harass 降权；
+- Attach 降权；
+- Observe / Probe / FakeDive 增加；
+- Extreme Vengeance 仍可攻击。
+
+RetreatTendency 高：
+- 只对高 Temperament/Nerve 个体提供有限“这个玩家常退”的信心；
+- 不能让低 Nerve 个体突然变成攻击型；
+- 不能覆盖 PTSD。
+
+NonAggressionConfidence 高：
+- 只轻微降低普通警惕；
+- 当前危险 Cue 出现时立即失去主导权。
+
+
+============================================================
+17. Personality 的作用
+============================================================
+
+Task11 只做战术偏置，不建立新 Role。
+
+建议：
+
+Temperament 高：
+- 即使 Threat Signature 很危险，也更可能继续 Probe / FakeDive；
+- RetreatTendency 对其骚扰信心提升更明显。
+
+Nerve 高：
+- 对高 Threat Signature 的距离放大较弱；
+- 更敢等待攻击窗口。
+
+Nerve 低：
+- Projectile/Explosion/Pursuit 的安全距离和撤退时间更明显。
+
+Conformity：
+- 不直接共享 Threat Signature；
+- 后续 Social Signal 可影响“是否响应危险信号”，但不能复制详细玩家画像。
+
+RoostAffinity：
+- Acute Startle/Explosion 后可能更倾向安全 Roost；
+- 不把 RoostAffinity 变成战斗记忆维度。
+
+
+============================================================
+18. 优先级
+============================================================
+
+建议总优先级：
+
+1) Death / unconscious / held / shortcut
+2) Immediate lethal danger / real incoming projectile
+3) Severe Injury / inability to fly
+4) Task09 EmergencyRefuge / ReturnHome / ColonyMigration
+5) Strong PTSD / Trauma avoidance
+6) Extreme Vengeance / existing formal attack intent
+7) Acute Event response
+8) Threat Signature tactical modifiers
+9) ordinary Attack / Observe / Harass
+10) Task10 Neutral SocialLife
+11) Idle / Swarm / Solo Flight
+
+说明：
+- Extreme Vengeance 决定“是否继续攻击”；
+- Threat Signature 决定“如何攻击”；
+- Strong PTSD 可以直接否决普通骚扰；
+- Immediate projectile danger 高于所有风格学习。
+
+
+============================================================
+19. 状态持久化设计
+============================================================
+
+建议在 DesertBatflyState 或专用 Task11 持久结构中保存：
+
+PerPlayerThreatMemory[0..3]
+- 12 个 0..1 score
+- Confidence
+- LastMeaningfulEncounterCycle
+- Decay bookkeeping
+
+禁止持久化：
+- CurrentCue；
+- AcuteExplosion；
+- AcuteStartle；
+- ProjectileThreatDirection；
+- 临时 hazard center；
+- realized Player 引用；
+- 当前 weapon 对象引用。
+
+序列化必须向后兼容：
+- 旧存档没有 Task11 字段时默认 0；
+- 缺少某维度时安全补 0；
+- 不因字段版本升级损坏现有 DesertBatflyState。
+
+
+============================================================
+20. 性能约束
+============================================================
+
+严禁：
+- 每帧每只 Desert Batfly × 每个 Player × 全房物品扫描；
+- 每帧 witness N×N；
+- 每帧重新识别所有 weapon 类型；
+- 每帧创建大量 List/string/Dictionary；
+- 为所有 Room 保存长期 projectile history。
+
+建议：
+- 真实伤害/抓取/爆炸/Startle 事件发生时事件驱动上报；
+- witness 只在高价值事件发生时一次性低频扫描当前 room Desert Batfly；
+- Current weapon cue 可低频采样或复用现有 target scan；
+- projectile threat 只对当前正式目标/附近真实 projectile 做局部检查；
+- 使用固定 Player slot memory；
+- Debug 字符串仅在 Debug 请求时生成。
+
+目标：
+20~30 只 Desert Batfly + 多 Player + 连续投掷/爆炸情况下不出现明显额外卡顿。
+
+
+============================================================
+21. Debug / AI Observatory
+============================================================
+
+Task11 必须接入现有 DesertBatfly Debug/Observatory。
+
+至少展示：
+
+Threat Target Player Slot
+Confidence
+ProjectilePressure
+PiercingPressure
+BluntStunPressure
+ExplosionPressure
+StartlePressure
+ShockPressure
+AreaDenialPressure
+GrabCapturePressure
+PursuitPressure
+CounterKillPressure
+RetreatTendency
+NonAggressionConfidence
+DominantSignature（展示用）
+
+Current Cue：
+VisibleSpear
+VisibleRock
+VisibleExplosive
+VisibleStartle
+VisibleShock
+RecentProjectile
+ProjectileThreat
+RecentExplosion
+RecentGrabAttempt
+PlayerRetreating
+
+Acute：
+AcuteExplosionTimer
+AcuteStartleTimer
+AcuteMassCasualty
+CurrentHazardCenter / age
+
+Decision：
+ThreatStyleModifierReason
+AttackGeometryAdjustment
+AttachSuppression
+EvadeTarget
+LastEvidenceType
+LastEvidenceStrength
+LastEvidencePlayerSlot
+LastWitnessReason
+
+Trace Event 建议：
+ThreatEvidenceAdded
+ThreatMemoryDecayed
+ThreatCueChanged
+ThreatAcuteEvent
+ThreatEvadeStarted
+ThreatAttackAdjusted
+ThreatWitnessLearned
+ThreatMemoryIgnoredDueToPriority
+
+
+============================================================
+22. 自动测试要求
+============================================================
+
+新增 Task11 tests，至少覆盖：
+
+1. 12 个长期维度存在且范围可 clamp 0..1。
+2. 不存在固定 SpearHeavy/CounterKiller Role enum 作为核心 AI 分类。
+3. 一个 ThreatEvent 可以同时训练多个维度。
+4. Firecracker/Startle 不错误增加 Piercing。
+5. Rock/Stun 不错误等价于 Lethal Piercing。
+6. Explosive Spear 可同时产生 Projectile/Piercing/Explosion evidence。
+7. 玩家手持武器 CurrentCue 不直接写长期 Memory。
+8. Direct victim evidence > witness evidence。
+9. 无 LOS witness 不学习。
+10. 跨房个体不学习。
+11. SocialBond 只能弱增强 witness significance。
+12. 饱和公式不会简单线性溢出。
+13. 所有 score clamp 0..1。
+14. Cycle decay 生效。
+15. 3~6 Cycle 无新证据后显著衰减。
+16. Player 0 和 Player 1 记忆隔离。
+17. 无法归属 Instigator 时不污染其他玩家槽。
+18. CounterKill 只在 recent formal aggression window 中成立。
+19. Task10 SocialChase 不产生 CounterKill。
+20. Pursuit 需要持续追击窗口，普通同方向移动不算。
+21. RetreatTendency 需要真实 encounter window。
+22. NonAggressionConfidence 建立速度受限。
+23. Strong PTSD 优先于 Threat Signature。
+24. Extreme Vengeance 不被 CounterKillPressure 取消。
+25. Task09 Travel 优先于 Task11。
+26. Acute Event 不持久化。
+27. Current Cue 不持久化。
+28. Per-player memory 可向后兼容旧存档。
+29. Threat Signature 不恢复 Task02 Roles。
+30. Task11 social/weapon learning 不直接每帧写 BodyChunk.vel 作为第二套 locomotion。
+
+
+============================================================
+23. 实机场景
+============================================================
+
+Scenario A — Spear learner
+- Player 0 多次用 Spear 命中/杀死 Desert Batfly；
+- witness 有 LOS；
+- 后续同一 Player 拿 Spear 出现；
+- 观察 Circle、Dive、Attach 是否发生可见但非完美的调整。
+
+Scenario B — Rock learner
+- 多次用 Rock 砸晕但不杀；
+- 验证主要增长 Projectile + BluntStun；
+- 行为偏短横向规避，不应像 Spear 一样极端远离。
+
+Scenario C — Firecracker / Startle
+- 使用鞭炮草惊散群体；
+- 验证 StartlePressure；
+- 验证 Roost/GroupDrift 短时打断；
+- 再次持有鞭炮草时出现提前警惕。
+
+Scenario D — Explosive Spear
+- 验证 Projectile/Piercing/Explosion/AreaDenial 多标签学习；
+- 爆后不立即回到爆心。
+
+Scenario E — Grabber
+- Player 经常抓 Desert Batfly；
+- 验证 Attach 与近身体 Circle 明显下降。
+
+Scenario F — Pursuer
+- 蝠蝇撤退后 Player 持续追击；
+- 验证 PursuitPressure；
+- 后续撤退更早、更彻底。
+
+Scenario G — Counter killer
+- 只反杀正在 Harass/Dive/Attach 的个体；
+- witness 学到 CounterKill；
+- 后续更多 Probe/FakeDive，普通攻击欲降低。
+
+Scenario H — Ordinary kill is not CounterKill
+- 玩家主动先手杀死一只未攻击的 Batfly；
+- 只产生 weapon/intimidation/trauma 相关影响；
+- CounterKill 不应被错误提高。
+
+Scenario I — Passive/Retreat
+- 多次真实 encounter 中 Player 持续拉开且不攻击；
+- RetreatTendency 缓慢建立；
+- 高 Temperament 个体稍微更大胆，低 Nerve 个体不得突然变凶。
+
+Scenario J — Co-op
+- Player0 用矛；Player1 基本回避；
+- 同一只 Batfly 对两个玩家形成不同记忆和战术。
+
+Scenario K — Memory decay
+- 连续数 Cycle 不再使用对应武器；
+- 观察 Threat Signature 逐渐衰减。
+
+Scenario L — Change style
+- 前期 Spear-heavy，后期持续 retreat；
+- 允许多个维度并存并逐渐重新评价。
+
+Scenario M — PTSD override
+- 对某 Player 已有强 PTSD；
+- 即使 NonAggression/Retreat 很高，也不得主动恢复普通骚扰。
+
+Scenario N — Extreme vengeance
+- True Avenger 面对高 CounterKill/high Piercing Player；
+- 仍允许复仇，但路径和攻击方式更谨慎。
+
+Scenario O — Mass casualty
+- 短时间内同一 Player 导致多只死亡；
+- AcuteMassCasualty 立即打断 Task10 中性互动并促使散开/逃离。
+
+Scenario P — 20~30 bat stress
+- 多只 Desert Batfly + 多种武器事件持续发生；
+- 检查帧率、GC、witness scan、debug 状态是否稳定。
+
+
+============================================================
+24. Definition of Done
+============================================================
+
+Task11 只有满足以下条件才算代码侧完成：
+
+1. 建立 Threat Signature Memory / Current Cue / Acute Event 三层架构。
+2. 长期记忆至少实现 12 个连续维度。
+3. 不使用固定 SpearHeavy/RockHeavy/Passive/CounterKiller 四选一作为核心 AI。
+4. 建立通用 ThreatEvent/ThreatTag 证据层。
+5. 普通 Spear、Rock、Firecracker/Startle、Explosive threat 至少有正确映射。
+6. 支持未来 DryCycle/Mod item 通过 adapter/registry 报告 Threat Tags。
+7. Direct victim 与 witness 学习强度不同。
+8. witness 必须满足距离/LOS，不能穿墙/跨房。
+9. SocialBond 只提供弱 witness bonus。
+10. 使用饱和式证据更新并 clamp 0..1。
+11. 记忆跨 Cycle 保存。
+12. 记忆约 3~6 Cycle 显著衰减。
+13. Current Cue 不持久化。
+14. Acute State 不持久化。
+15. Player slot 独立，Co-op 不串记忆。
+16. 手持物品只影响 CurrentCue，不直接训练长期 Memory。
+17. 不读取玩家输入或未发生攻击。
+18. Spear/Piercing 能明显影响 Circle/Dive/Attach/SideApproach。
+19. Rock/Blunt 主要影响短时横向规避和近距离停留，不重新制造长期上下飞。
+20. Explosion/AreaDenial 能产生短期 hazard avoidance。
+21. Firecracker/Startle 能产生惊吓学习而不被当成 Piercing kill weapon。
+22. GrabCapture 能降低贴身/Attach 风险行为。
+23. Pursuit 和 CounterKill 有明确不同的事件定义和行为反馈。
+24. Retreat/NonAggression 建立缓慢且不能覆盖 PTSD。
+25. Strong PTSD / Severe Injury / Immediate Danger 优先。
+26. Extreme Vengeance 不被 Threat Signature 取消，只改变战术。
+27. Task09 Travel 优先于 Task11。
+28. Task10 中性 SocialLife 在 Acute/Combat 中正确让路。
+29. 不恢复任何 Task02 SocialRole。
+30. 不建立第二套长期直接 velocity locomotion。
+31. 无每帧 N×N witness scan。
+32. 20~30 只压力场景下无明显新增热路径。
+33. Observatory/Trace 能解释“学到了什么、为什么现在改战术”。
+34. Task11 自动回归测试接入 tests/DesertBatfly。
+35. 旧存档无 Task11 字段时安全默认。
+36. 完成 Scenario A~P 的实机验收后，才允许标记为 Live Verified。
+
+
+============================================================
+25. 推荐实施阶段
+============================================================
+
+Phase A — Data model
+- Per-player 12 维 Memory
+- Confidence
+- Save/Load/Decay
+
+Phase B — ThreatEvent + Tag adapters
+- Spear
+- Rock
+- Startle/Firecracker
+- Explosion
+- Shock/Grab 基础入口
+
+Phase C — Event-driven evidence
+- direct victim
+- witness LOS
+- kill / stun / grab / explosion / startle
+
+Phase D — Current Cue
+- visible held item
+- recent projectile
+- projectile threat
+- current hazard
+
+Phase E — Acute Event
+- Explosion
+- Startle
+- MassCasualty
+- Capture/Shock as needed
+
+Phase F — AI tactical integration
+- Circle
+- Observe
+- FakeDive
+- Dive
+- Attach
+- Escape/disengage
+- lateral evade target
+
+Phase G — Personality / PTSD / Vengeance / Task09 / Task10 integration
+
+Phase H — Debug / Observatory / Trace
+
+Phase I — Regression tests
+
+Phase J — Live tuning
+
+
+============================================================
+26. 最终设计摘要
+============================================================
+
+Task11 的目标不是：
+
+“这个玩家是 SpearHeavy，所以全部蝠蝇统一怕矛。”
+
+而是：
+
+“这只 Desert Batfly 过去亲身经历/亲眼见过 Player 0 多次使用投射、穿刺、爆炸、惊吓、抓捕、追杀或反杀行为，因此它对 Player 0 形成了一组会衰减的 Threat Signature；当 Player 0 当前又真实展示某种对应 Cue 时，它会以自己的 Personality、Trauma、Vengeance、Injury 和当前环境为基础，调整接近方式、攻击几何、撤退和规避，而不是作弊预判。”
+
+这套系统必须让 Desert Batfly 看起来是在“学习真实经历”，而不是读取脚本答案。
