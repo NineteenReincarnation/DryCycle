@@ -12,6 +12,10 @@ internal static partial class Program
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", true);
         Type traceType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTrace", true);
+        Type threatRuntimeType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type socialLifeType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type aiType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type hooksType = mod.GetType(
@@ -52,14 +56,19 @@ internal static partial class Program
             "Task11 personality modulation makes low-Nerve bats more cautious than high-Nerve bats");
 
         MethodInfo adjustFakeDive = tacticsType.GetMethod("AdjustFakeDiveChance", Flags);
+        MethodInfo ordinaryProjectileEvade = tacticsType.GetMethod("TryApplyOrdinaryProjectileEvade", Flags);
         MethodInfo adjustVengeance = tacticsType.GetMethod("AdjustExtremeVengeanceGoal", Flags);
         MethodInfo projectileEvade = tacticsType.GetMethod("TryIncomingProjectileEvade", Flags);
-        Check(adjustFakeDive != null && adjustVengeance != null && projectileEvade != null,
-            "Task11 exposes ordinary attack, Extreme Vengeance and real-projectile tactical entry points");
+        Check(adjustFakeDive != null && ordinaryProjectileEvade != null &&
+              adjustVengeance != null && projectileEvade != null,
+            "Task11 exposes ordinary attack, ordinary real-projectile evade and Extreme Vengeance tactical entry points");
         Check(!MethodWritesField(adjustFakeDive, typeof(BodyChunk), "vel") &&
+              !MethodWritesField(ordinaryProjectileEvade, typeof(BodyChunk), "vel") &&
               !MethodWritesField(adjustVengeance, typeof(BodyChunk), "vel") &&
               !MethodWritesField(projectileEvade, typeof(BodyChunk), "vel"),
             "Task11 tactical helpers never become a second BodyChunk velocity locomotion system");
+        Check(MethodCallsTask11(ordinaryProjectileEvade, tacticsType, "TryIncomingProjectileEvade"),
+            "ordinary real-projectile response reuses the same validated trajectory/side-step geometry as Vengeance");
         Check(!TypeCallsForbiddenTask11Input(tacticsType),
             "Task11 shared tactics never read player input/controller state or hidden intent");
 
@@ -101,23 +110,35 @@ internal static partial class Program
               MethodCallsTask11(hookRain, bridgeType, "MarkTravelOwnedFrame"),
             "Task09 marks only successfully-owned realized frames so later Intimidation/Vengeance cannot steal them back");
 
+        int threatUpdateOffset = MethodCallOffset(hookUpdateAI, threatRuntimeType, "Update");
+        int ordinaryEvadeOffset = MethodCallOffset(hookUpdateAI, tacticsType, "TryApplyOrdinaryProjectileEvade");
+        int traceOffset = MethodCallOffset(hookUpdateAI, traceType, "Sample");
+        int socialOffset = MethodCallOffset(hookUpdateAI, socialLifeType, "Update");
+        Check(threatUpdateOffset >= 0 && ordinaryEvadeOffset > threatUpdateOffset &&
+              traceOffset > ordinaryEvadeOffset && socialOffset > ordinaryEvadeOffset,
+            "real projectile cue is detected first, then ordinary lateral evade owns localGoal before Trace and neutral Task10");
+
         Type rejectedRole = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false);
         Check(rejectedRole == null,
             "Task11 final combat integration still does not restore rejected Task02 roles");
 
         Console.WriteLine(
-            "Task 11 final tactics: learned FakeDive weighting, personality/cue modulation, Extreme Vengeance geometry, exact-frame Task09 priority, cached projectile evade, velocity ownership and Trace lifecycle verified.");
+            "Task 11 final tactics: learned FakeDive weighting, ordinary real-projectile lateral evade, Extreme Vengeance geometry, exact-frame Task09 priority, velocity ownership and Trace lifecycle verified.");
     }
 
-    private static bool MethodCallsTask11(MethodInfo caller, Type targetType, string targetName)
+    private static bool MethodCallsTask11(MethodInfo caller, Type targetType, string targetName) =>
+        MethodCallOffset(caller, targetType, targetName) >= 0;
+
+    private static int MethodCallOffset(MethodInfo caller, Type targetType, string targetName)
     {
         byte[] il = caller?.GetMethodBody()?.GetILAsByteArray();
-        if (il == null || il.Length == 0) return false;
+        if (il == null || il.Length == 0) return -1;
 
         int offset = 0;
         while (offset < il.Length)
         {
+            int opcodeOffset = offset;
             OpCode opcode;
             byte first = il[offset++];
             if (first == 0xFE)
@@ -136,12 +157,12 @@ internal static partial class Program
                     MethodBase called = caller.Module.ResolveMethod(
                         BitConverter.ToInt32(il, operandOffset));
                     if (called?.DeclaringType == targetType && called.Name == targetName)
-                        return true;
+                        return opcodeOffset;
                 }
                 catch (ArgumentException) { }
             }
             offset += operandSize;
         }
-        return false;
+        return -1;
     }
 }
