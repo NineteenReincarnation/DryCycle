@@ -11,8 +11,8 @@ Task 02 已经过实现和实机观察，并于 2026-09-06 正式否决。
 任何后续 Codex / Agent / 开发者都不得根据旧设计恢复 Sentinel、Bully、Opportunist 或类似的显性社会职业系统。
 
 当前权威结论见：
-- src/Creatures/DesertBatfly/DiscussionStatus.txt 第 2 项；
-- docs/DesertBatfly-Emergent-Social-Roles.md。
+- docs/Discussion/DesertBatfly-DiscussionStatus.txt 第 2 项；
+- docs/Discussion/DesertBatfly-Emergent-Social-Roles.md。
 
 
 1. 否决内容
