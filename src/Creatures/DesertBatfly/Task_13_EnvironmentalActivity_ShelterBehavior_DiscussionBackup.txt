@@ -1,0 +1,339 @@
+Desert Batfly Task 13 - Discussion Backup
+Environmental Activity & Shelter Behavior / 环境活动与房内避险生态
+Backup date: 2026-09-07
+============================================================
+
+Purpose
+-------
+This file preserves the current Task13 design discussion before weather-by-weather design begins.
+It is a discussion backup, not yet the final executable Task13 specification.
+
+1. Reframed task role
+---------------------
+Task13 is no longer a generic "Environmental Group Behavior" controller.
+Its role is the realized-room environmental activity and shelter behavior layer.
+
+Task09 answers:
+- Can this room still be inhabited safely?
+- Should the bat leave the room?
+- Which Refuge / Home / route should be used?
+- When should ReturnHome happen?
+
+Task13 answers:
+- If the bat is staying in this realized room, how should its local activity change?
+- Should ordinary flight, harassment, social play, roosting and shelter seeking be suppressed or encouraged?
+- Which local covered pocket / shelter anchor should it prefer?
+- How should behavior recover after weather ends?
+
+Hard boundary:
+- Task13 must never own cross-room route planning, LeaveRoom, HomeColony change, Refuge selection, ColonyMigration or ReturnHome.
+- Task09 remains the sole owner of cross-room survival travel.
+
+2. Environmental phase model
+----------------------------
+Per-room environmental phase proposal:
+- Calm
+- Advisory
+- Preparation
+- Sheltering
+- Acute
+- Recovery
+
+This is environmental context, not a new DesertBatflyAI Activity/Role.
+
+Calm:
+- Task13 mostly inactive.
+- Task10, Harass, normal Roost, Task11 and vanilla Fly behavior remain normal.
+
+Advisory:
+- Near-term weather is observable/forecast but not yet severe.
+- Only weak behavior bias.
+- High RoostAffinity, low Nerve, injured and high Conformity individuals may begin reducing exposure first.
+
+Preparation:
+- Clear ecological activity contraction.
+- Harass and SocialChase strongly reduced.
+- Long solo roaming reduced.
+- RoostDrive and local shelter seeking increased.
+- Population response must remain staggered by personality/condition.
+
+Sheltering:
+- New ordinary Harass effectively stops.
+- Entertainment/neutral Task10 interactions become rare.
+- Roost/Chain becomes a major behavior where legal.
+- Non-roosting bats stay within local covered pockets rather than forcing illegal Hang points.
+
+Acute:
+- Hard survival behavior.
+- Personality may no longer justify dangerous ordinary activity.
+- Task09 owns control if active cross-room travel is required.
+- If the current room is accepted as Home/Refuge, Task13 owns hard local sheltering.
+
+Recovery:
+- Weather ending must not release the whole colony on the same frame.
+- High Nerve / Temperament may resume first.
+- Low Nerve, Trauma and Injury resume later.
+- Task10 and ordinary activity gradually return.
+
+3. No fixed flight-height controller
+------------------------------------
+The old idea "bad weather -> fly lower" is rejected as the core implementation.
+Reason:
+- It risks recreating vertical correction/oscillation.
+- It has weak physical meaning for sandstorm/heat and does not represent actual shelter.
+
+Task13 instead uses Exposure Avoidance:
+- reduce open-space exposure;
+- prefer roof/wall shielding;
+- prefer shaded / enclosed / lee-side / Hive-like areas depending on hazard;
+- use localGoal / vanilla Fly locomotion only;
+- never directly control BodyChunk.vel.
+
+4. Shelter Anchors
+------------------
+Current Task09 Refuge terrain analysis can find room shelter quality / one best tile.
+Task13 should extend realized-room shelter representation into a small Anchor Set.
+
+Proposal:
+- cache approximately 4-8 spatially separated high-quality local shelter anchors per realized room;
+- each anchor has ShelterQuality, hazard-specific suitability and current crowding;
+- avoid all bats converging on one Vector2;
+- anchor choice uses quality, distance, crowding, roost compatibility and stable individual preference;
+- anchors are room-runtime data, not persistent identity/roles.
+
+Shelter != Roost:
+- Shelter means low environmental exposure.
+- Roost means legal Chain/Hang anchor.
+- A high-quality shelter can have no legal Roost: bat remains in short-range sheltered flight.
+- A legal Roost can be environmentally exposed and therefore be a poor bad-weather choice.
+- Roost legality remains Task10 / FlyAI.ChainTile / platform underside rules.
+
+5. Integration with Task10 SocialLife
+-------------------------------------
+Task13 should provide modifiers rather than duplicate social behavior:
+- SocialActivityScale
+- HarassScale
+- PlayScale
+- RoostDriveScale
+- GroupCohesionScale
+- LocalActivityRadiusMultiplier
+
+Suggested qualitative progression:
+Calm: normal.
+Advisory: slight Roost increase, slight SocialChase/Harass decrease.
+Preparation: Harass strongly reduced, SocialChase strongly reduced, Roost strongly increased.
+Sheltering: new ordinary Harass = 0, neutral play mostly suppressed, Roost/shelter dominant.
+Acute: survival only.
+Recovery: gradual restoration.
+
+GroupDrift should not be the first neutral behavior disabled; weak group cohesion while moving toward local shelter can look natural, but Task10 must not become a navigation controller.
+
+6. Integration with Task11 Threat Signature
+-------------------------------------------
+Task11 remains player-threat memory/current cue.
+Task13 must not alter or erase ThreatMemory.
+Environmental pressure only changes current willingness to spend time on attack/harass behavior.
+Real projectile / immediate player danger still receives immediate reaction.
+
+7. Integration with Task12 Social Signals
+-----------------------------------------
+Task12 V1 remains exactly six signals.
+Do not add ShelterCall in Task13 V1.
+
+Weather is an environmental cue every bat can sense independently; survival may not depend on another bat transmitting it.
+Natural coordination can happen through existing RoostCall:
+- early responder enters/chooses Roost;
+- RoostCall becomes visible;
+- high Conformity / Bonded bats may follow via Task10.
+
+AlarmFlutter is not a weather forecast signal.
+Only true acute environmental danger may justify an anonymous Alarm hazard origin.
+SafeSignal is not the weather-recovery mechanism; Task13 Recovery owns environmental recovery.
+
+8. Personality / condition effects
+----------------------------------
+Personality changes timing and degree, not whether lethal weather is respected.
+
+Nerve high:
+- later Preparation;
+- earlier Recovery.
+
+Nerve low:
+- earlier contraction;
+- later Recovery.
+
+Conformity high:
+- more responsive to Task12 RoostCall / visible neighbor behavior;
+- should not copy another bat's Task13 phase directly.
+
+RoostAffinity high:
+- earlier Roost commitment when shelter need rises.
+
+Temperament high:
+- may continue ordinary activity slightly longer;
+- may resume sooner.
+
+HardSafetyThreshold:
+- once crossed, personality cannot justify continued ordinary harassment/play.
+
+Injury:
+- low PhysicalCapability / wing injury / PostStunShock enters preparation sooner;
+- prefers nearer anchors;
+- crosses less open space;
+- roosts sooner;
+- recovers later.
+- Task13 does not duplicate InjuryRecovery.
+
+SocialBond:
+- no direct weather-state copying;
+- existing RoostCall/Task10/Bond interactions already provide enough social following.
+
+9. Environmental commitment and hysteresis
+------------------------------------------
+Room phase requires hysteresis, e.g. Preparation enter > exit threshold, Sheltering enter > exit threshold.
+Individual shelter commitment is realized-only and should hold for a bounded period (roughly 120-300 ticks) to avoid Calm/Preparation and shelter-target oscillation.
+Immediate Danger / Task09 / Grab / Death can interrupt commitment.
+
+10. EnvironmentalInfluence proposal
+-----------------------------------
+Task13 may expose a realized-only influence struct containing approximately:
+- Phase
+- ShelterDrive
+- OpenExposureAversion
+- RoostMultiplier
+- HarassMultiplier
+- SocialMultiplier
+- PlayMultiplier
+- LocalActivityRadiusMultiplier
+- PreferredShelterPoint
+- PreferredShelterQuality
+- RecoveryProgress
+- HardSurvival
+- DecisionReason
+
+Explicitly forbidden:
+- DirectVelocity
+- fixed global FlightHeight
+- permanent environmental Role
+- Task13-owned cross-room route.
+
+11. Priority proposal
+---------------------
+Death / unconscious / grabbed
+-> Immediate physical danger
+-> Severe Injury
+-> Task09 active Travel / Emergency Refuge
+-> Task13 Acute environmental survival
+-> PTSD / Threat avoidance
+-> Extreme Vengeance
+-> Task13 Preparation / Sheltering
+-> Formal Harass / Retaliation
+-> Task12 signal influence
+-> Task10 neutral SocialLife
+-> ordinary Roost / Swarm / Idle
+
+Extreme Vengeance:
+- severe environmental survival may suspend it;
+- never clear the vengeance state solely because weather became dangerous;
+- allow resumption if the original Vengeance state is still valid after Recovery.
+
+Retaliation:
+- immediate defensive escape remains valid;
+- high environmental pressure should shorten long retaliation commitment.
+
+12. No new long-term weather memory
+-----------------------------------
+Do not add RainTrauma / HeatWaveMemory / SandstormMemory in Task13.
+Long-term habitat/weather history remains Task09 MigrationStress / shelter failure / colony history.
+Task13 is realized-room behavior.
+
+13. Narrow feedback to Task09
+-----------------------------
+Task13 may report one bounded ecological fact: LocalShelterFailure.
+Example:
+- Task09 theoretically rates Home as adequate;
+- realized Task13 repeatedly finds no usable anchors / persistent exposure / unusable overcrowding during serious weather;
+- after enough duration/evidence, report shelter-failure evidence to Task09.
+
+Task13 must not directly trigger permanent migration.
+
+14. Crowding
+------------
+Shelter anchor score includes CrowdingPenalty.
+Bats should distribute across multiple protected pockets instead of stacking at one point.
+
+15. Local exposure abstraction
+------------------------------
+Prefer a common local exposure concept/provider rather than hardcoding every weather into one monolithic AI branch.
+Conceptual provider data:
+- ExposureAt(room, position)
+- ShelterPreference / hazard-specific shielding
+- optional HazardDirection
+
+Initial fallback can use terrain roof/wall shielding.
+Future HeatWave local heat fields, HeatColumn, sunlight or Sandstorm wind direction can extend this without rebuilding the behavior layer.
+
+16. Weather-specific principles already tentatively discussed
+-------------------------------------------------------------
+LightRain:
+- extremely weak response only.
+
+Fog:
+- not a shelter emergency;
+- mild activity-radius reduction / cohesion bias only.
+
+DenseFog:
+- stronger range reduction, Harass reduction and cohesion than Fog;
+- still not a hard shelter emergency.
+
+HeavyRain:
+- classic shelter weather;
+- strong roof/covered-space preference;
+- Roost and shelter seeking increase;
+- open-sky activity and Harass decrease.
+
+HeatWave:
+- shade seeking, not low-altitude seeking;
+- activity and long-range flight decrease;
+- Roost may increase if the Roost is actually shaded;
+- future local heat exposure provider should be supported.
+
+Sandstorm:
+- roof + side-wall + enclosed/lee-side shielding;
+- avoid open exposure;
+- strong shelter behavior.
+
+DeathSandstorm / DeathRain / IntenseHeat:
+- hard survival;
+- Task09 decides whether to leave the room;
+- if staying, Task13 Acute Shelter owns local behavior.
+
+17. Core design decisions to preserve
+-------------------------------------
+1) Task13 owns realized-room environmental behavior only; Task09 owns cross-room behavior.
+2) Exposure/shelter replaces fixed low-flight-height behavior.
+3) Six environmental phases: Calm, Advisory, Preparation, Sheltering, Acute, Recovery.
+4) Shelter and Roost are separate concepts.
+5) Cache multiple Shelter Anchors, not one flock target point.
+6) Personality changes timing/strength but not lethal safety rules.
+7) Task10 receives modifiers; no duplicated social system.
+8) Task12 V1 remains six signals; no ShelterCall.
+9) Task11 ThreatMemory remains independent.
+10) Extreme Vengeance pauses under hard environmental survival, but is not erased.
+11) Task13 adds no independent long-term weather memory.
+12) Task13 may report bounded LocalShelterFailure evidence to Task09, never migration itself.
+13) Shelter movement uses localGoal / vanilla Fly locomotion only; no velocity controller.
+14) Recovery must be staggered and cannot release the whole colony on one frame.
+
+Next discussion stage
+---------------------
+Discuss each weather/hazard one at a time and define:
+- ecological meaning;
+- phase thresholds;
+- local shelter/exposure target;
+- Task10 / Harass / Roost modifiers;
+- personality/condition timing;
+- Task09 handoff boundary;
+- Task12 interaction;
+- recovery behavior;
+- concrete visual gameplay goals.
