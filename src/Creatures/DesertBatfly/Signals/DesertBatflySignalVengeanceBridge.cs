@@ -11,6 +11,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Emits RallySignal at the moment an existing Intimidation Avenger is armed.
 /// It does not create Vengeance and does not touch Vengeance state; it only exposes the
 /// already-made decision to nearby receivers before ArmVengeanceGroup scores supporters.
+/// The Task11->Task12 read-only threat-response bridge is enabled and disabled alongside
+/// this bridge so the existing DesertBatflyHooks lifecycle owns all Task12 detours.
 /// </summary>
 internal static class DesertBatflySignalVengeanceBridge
 {
@@ -21,7 +23,11 @@ internal static class DesertBatflySignalVengeanceBridge
 
     internal static void Enable()
     {
-        if (Installed) return;
+        if (Installed)
+        {
+            DesertBatflySignalThreatBridge.Enable();
+            return;
+        }
         Disable();
         try
         {
@@ -78,6 +84,7 @@ internal static class DesertBatflySignalVengeanceBridge
 
             detour = dm.CreateDelegate(detourType);
             armHook = new Hook(arm, detour);
+            DesertBatflySignalThreatBridge.Enable();
         }
         catch
         {
@@ -87,6 +94,7 @@ internal static class DesertBatflySignalVengeanceBridge
 
     internal static void Disable()
     {
+        DesertBatflySignalThreatBridge.Disable();
         try { armHook?.Dispose(); } catch { }
         armHook = null;
         detour = null;
