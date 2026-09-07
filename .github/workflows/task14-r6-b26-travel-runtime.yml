@@ -41,19 +41,17 @@ jobs:
               raise SystemExit('TravelIntent extraction did not end at class boundary')
           intent_block = intent_block.replace('private sealed class TravelIntent', 'internal sealed class DB_TravelIntent', 1)
           intent_block = intent_block.replace('internal TravelIntent(', 'internal DB_TravelIntent(', 1)
-          intent_helpers = '''
-
-    private static DB_WorldRoute CopyRoute(in DB_WorldRoute route)
-    {
-        if (!route.Valid) return default;
-        int[] rooms = new int[route.Rooms.Length];
-        Array.Copy(route.Rooms, rooms, rooms.Length);
-        return new DB_WorldRoute(rooms, route.Cost, route.Survivability);
-    }
-
-    private static string Normalize(string value) =>
-        (value ?? string.Empty).Trim().ToUpperInvariant();
-'''
+          intent_helpers = (
+              '\n\n    private static DB_WorldRoute CopyRoute(in DB_WorldRoute route)\n'
+              '    {\n'
+              '        if (!route.Valid) return default;\n'
+              '        int[] rooms = new int[route.Rooms.Length];\n'
+              '        Array.Copy(route.Rooms, rooms, rooms.Length);\n'
+              '        return new DB_WorldRoute(rooms, route.Cost, route.Survivability);\n'
+              '    }\n\n'
+              '    private static string Normalize(string value) =>\n'
+              '        (value ?? string.Empty).Trim().ToUpperInvariant();\n'
+          )
           intent_block = intent_block[:-1] + intent_helpers + '}\n'
           intent_text = 'using System;\nusing UnityEngine;\n\nnamespace DryCycle.Creatures.DesertBatfly;\n\n' + intent_block
 
