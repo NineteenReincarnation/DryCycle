@@ -57,7 +57,7 @@ internal static partial class Program
               MethodCallOffset(playersGetter, roomContext, "PrunePlayers") >= 0 &&
               MethodCallOffset(thrownGetter, roomContext, "PruneWeapons") >= 0 &&
               MethodCallOffset(roomContext.GetMethod("PlayerBySlot", Flags), roomContext, "PrunePlayers") >= 0,
-            "Task14 R2 low-frequency candidate discovery still revalidates death/room/throw-state at consumption time");
+            "Task14 R2 caches candidate discovery but revalidates current membership/throw-state at consumption time");
 
         string[] channels = Enum.GetNames(visibilityChannel);
         foreach (string channel in new[]
