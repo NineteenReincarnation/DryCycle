@@ -18,6 +18,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         internal readonly List<DesertBatflyShelterAnchor> Anchors = new(MaxAnchors);
         internal DesertBatflyEnvironmentalRoomContext Context = DesertBatflyEnvironmentalRoomContext.Calm;
         internal DesertBatflyWeatherEcologySample WeatherSample = DesertBatflyWeatherEcologySample.None;
+        internal DesertBatflyTask13WeatherAxesSample WeatherAxes = DesertBatflyTask13WeatherAxesSample.None;
         internal DesertBatflyEnvironmentalWeather LastWeather = DesertBatflyEnvironmentalWeather.None;
         internal int RecoveryStartTick = -1;
         internal int RecoveryDurationTicks;
@@ -171,8 +172,27 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             ? DesertBatflyWeatherEcology.Sample(room.world, room.abstractRoom)
             : DesertBatflyWeatherEcologySample.None;
         state.WeatherSample = sample;
+        state.WeatherAxes = room.world != null && room.abstractRoom != null
+            ? DesertBatflyWeatherEcology.SampleTask13Axes(room.world, room.abstractRoom)
+            : DesertBatflyTask13WeatherAxesSample.None;
 
         DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(sample);
+        DesertBatflyWeatherEcologySample phaseSample = sample;
+
+        // LightRain is deliberately weaker than Fog as a behavior profile. If both active
+        // authorized DryCycle events coexist, Fog owns the room activity/visibility profile
+        // while LightRain remains available as a compatible moisture axis below.
+        if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
+        {
+            weather = DesertBatflyEnvironmentalWeather.DenseFog;
+            phaseSample = Reprofile(sample, "DENSEFOG", state.WeatherAxes.DenseFogIntensity);
+        }
+        else if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.FogIntensity > 0f)
+        {
+            weather = DesertBatflyEnvironmentalWeather.Fog;
+            phaseSample = Reprofile(sample, "FOG", state.WeatherAxes.FogIntensity);
+        }
+
         DesertBatflyEnvironmentalPhase previous = state.Context.Phase;
 
         if (weather != DesertBatflyEnvironmentalWeather.None)
@@ -181,17 +201,17 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             state.RecoveryStartTick = -1;
             state.RecoveryDurationTicks = 0;
             DesertBatflyEnvironmentalPhase phase = DesertBatflyEnvironmentalProfile.ResolvePhase(
-                weather, sample, previous, out string reason);
+                weather, phaseSample, previous, out string reason);
             state.Context = new DesertBatflyEnvironmentalRoomContext(
                 true,
                 weather,
-                sample.HazardKind,
-                sample.HazardId,
-                sample.ActiveIntensity,
-                sample.ImmediateDanger,
-                sample.ShelterUrgency,
-                sample.TravelExposure,
-                sample.TimeUntilDangerTicks,
+                phaseSample.HazardKind,
+                phaseSample.HazardId,
+                phaseSample.ActiveIntensity,
+                phaseSample.ImmediateDanger,
+                phaseSample.ShelterUrgency,
+                phaseSample.TravelExposure,
+                phaseSample.TimeUntilDangerTicks,
                 phase,
                 reason);
             return;
@@ -223,6 +243,22 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         state.RecoveryDurationTicks = 0;
         state.LastWeather = DesertBatflyEnvironmentalWeather.None;
         state.Context = DesertBatflyEnvironmentalRoomContext.Calm;
+    }
+
+    private static DesertBatflyWeatherEcologySample Reprofile(
+        in DesertBatflyWeatherEcologySample aggregate,
+        string weatherId,
+        float activeIntensity)
+    {
+        return new DesertBatflyWeatherEcologySample(
+            Weather.Scheduling.WeatherScheduleEventKind.Weather,
+            weatherId,
+            activeIntensity,
+            aggregate.ImmediateDanger,
+            aggregate.ShelterUrgency,
+            aggregate.MigrationStress,
+            aggregate.TravelExposure,
+            aggregate.TimeUntilDangerTicks);
     }
 
     private static void BuildAnchors(RoomState state)
