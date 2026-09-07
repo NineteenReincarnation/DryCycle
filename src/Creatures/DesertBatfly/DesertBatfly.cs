@@ -312,8 +312,13 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (DesertState.MealConsumed || bites <= 0 || grasp?.grabber is not Player player) return;
         if (SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) < 0) return;
 
-        // The active player capture is already known by DB_EventHub. If vanilla Fly eating
-        // performs the live -> dead transition, MortalityEvent attributes it to that hold.
+        // Vanilla Fly.BitByPlayer performs the first live -> dead transition without a
+        // Creature.Violence damage fact. Record this explicit action before vanilla so the
+        // canonical MortalityEvent can attribute consumption without treating every grasp
+        // as a kill.
+        if (!dead)
+            DB_EventHub.RecordConsumptionAttribution(this, player);
+
         mealFood = SlugcatStats.NourishmentOfObjectEaten(player.SlugCatClass, this) == 4 ? 1 : 2;
         base.BitByPlayer(grasp, eu);
         mealFood = 2;
