@@ -3,11 +3,11 @@
 Last updated: 2026-09-08
 Active workstream: Desert Batfly Task14 architecture refactor
 Current branch: `task14-r6-b1-final`
-Current implementation HEAD before this progress update: `8c2ef92321924d48d61e065ac1f839896789a6d0`
+Current verified implementation HEAD before this progress update: `f93ad003ef44a16c1a6f13d36dfa54270a771992`
 
-## Current verified architecture state
+## Current architecture state
 
-Task14 R0-R5 are code-side complete on the stacked refactor branch history. R6 domain/type/file migration remains in progress. Full Rain World build/live validation is still deferred because this execution environment does not have the developer-local Rain World/BepInEx assemblies or Rain World runtime.
+Task14 R0-R5 are code-side complete on the stacked refactor history. R6 domain/type/file migration remains in progress. Full Rain World build/live acceptance is still pending because this execution environment does not contain the developer-local Rain World/BepInEx assemblies or game runtime.
 
 Completed R6 batches:
 
@@ -20,61 +20,74 @@ Completed R6 batches:
 - B7: Presentation Graphics (`DB_Graphics`).
 - B8: Threat persistent memory (`DB_ThreatMemory*`).
 - B9: Threat tactics (`DB_ThreatTactics`, `DB_ThreatTacticalProfile`).
-- B10: production/debug historical Task wording cleanup in Threat trace and Environment profile.
+- B10: historical Task wording cleanup in Threat trace and Environment profile.
+- B11: Environment Exposure/Profile physical domain migration; filenames moved to `Environment/DB_EnvironmentExposure.cs` and `Environment/DB_EnvironmentProfile.cs` with source blobs unchanged. Internal long type names remain intentionally pending a later caller-safe rename.
 
-## This run: R6-B10 historical naming cleanup
+## This run: R6-B11 Environment leaf physical migration
 
 ### Start state
 
-- Began from `26e3faa01189cfbc8ef21e8158d09bb590985cb4`.
-- Previous review recommended inspecting `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` before any mechanical rename because the migration manifest marks them SPLIT / PARTIAL ABSORB.
-- Review confirmed Threat Runtime currently owns several distinct concerns at once: per-bat cue/acute runtime state, room temporal evidence, EventHub subscribers, weapon/explosion hooks, debug state, and tactical inputs. It is therefore not safe to treat it as a leaf rename.
-- Environment Exposure/Profile were reviewed as lower-risk leaves, but the current connector write path cannot safely perform a branch-wide reference rename across their large callers with the same verification quality as prior GitHub Actions migration batches.
+- Began from `ad378510d47da75e31bc3fbf2e9ae69a42eb3a5d`.
+- Previous run had already reviewed `DesertBatflyThreatRuntime.cs` as a multi-responsibility SPLIT candidate and therefore unsuitable for mechanical rename.
+- Environment Exposure/Profile were identified by the migration manifest as lower-risk leaf responsibilities.
+- A repository-local temporary workflow approach was attempted but blocked by platform safety checks. The container also has no external DNS access, so a local Git clone could not be used for pre-commit repository guards.
 
 ### Completed
 
-1. `src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTrace.cs`
-   - Removed four production/debug strings that exposed the historical `Task11` development label.
-   - Replaced them with domain terminology: `Threat Signature`.
-   - No control flow, state, constants, calls, or trace keys changed.
-   - Commit: `0cb6774105c75d0f7237e8d5165efb39d424d1e5`.
+1. Physical domain move for Environment Exposure:
+   - `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalExposure.cs`
+   - -> `src/Creatures/DesertBatfly/Environment/DB_EnvironmentExposure.cs`
+   - Source blob SHA remains exactly `2910ad2ebbcb0ee0651ee2e11a6a35021cfcfcae`.
+   - Therefore this move changes no compiled logic, constants, namespace, type identity, or caller behavior.
 
-2. `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalProfile.cs`
-   - Removed historical `Task09` wording from DeathRain ownership reasons; wording now refers directly to the Travel domain/cross-room ownership.
-   - Removed historical `Task13` wording from the HeavyRain shelter-ecology comment; wording now refers directly to Environment.
-   - No weather thresholds, six-phase logic, profile math, or weather classification changed.
-   - Commit: `8c2ef92321924d48d61e065ac1f839896789a6d0`.
+2. Physical domain move for Environment Profile:
+   - `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalProfile.cs`
+   - -> `src/Creatures/DesertBatfly/Environment/DB_EnvironmentProfile.cs`
+   - Source blob SHA remains exactly `c36a390ca4842d9a0e819de873b7123ad98156c3`.
+   - Weather classification, six-phase resolution, HeavyRain/Heat/Sandstorm math, thresholds, and reason strings are byte-for-byte unchanged from the prior implementation.
 
-### Self-review
+3. R5 retention guard path coverage was extended so its Environment cross-room-ownership prohibitions cover both the remaining historical `Environmental/` directory and the new `Environment/` directory.
+   - No assertion was removed or weakened.
+   - Script executable mode was explicitly preserved as `100755`.
 
-- Compare from `26e3faa01189cfbc8ef21e8158d09bb590985cb4` to `8c2ef92321924d48d61e065ac1f839896789a6d0` contains exactly two modified production files.
-- ThreatTrace diff is exactly four string replacements: `Task11` -> `Threat Signature` domain wording.
-- EnvironmentProfile diff contains two DeathRain reason-string replacements and one HeavyRain historical-label comment replacement. Three incidental double-space comment formatting changes were also observed; they do not affect compiled behavior.
-- No gameplay algorithm, threshold, save identity, external ID, event ownership, movement authority, or serialization logic changed.
+Implementation commit:
 
-### Validation performed
+`f93ad003ef44a16c1a6f13d36dfa54270a771992` — `R6 B11 move Environment exposure/profile leaves`
 
-- GitHub commit/diff review performed for both B10 commits.
-- R6 B10 diff scope verified as two files only.
-- No behavior pass is claimed from compilation or live play.
+## Self-review and verification
 
-Not executable in this run:
+- Commit compare from `ad378510d47da75e31bc3fbf2e9ae69a42eb3a5d` to `f93ad003ef44a16c1a6f13d36dfa54270a771992` contains exactly three changed paths:
+  - R5 guard: 2 additions / 2 deletions, only extending directory scope.
+  - Environment Exposure: Git rename with 0 additions / 0 deletions.
+  - Environment Profile: Git rename with 0 additions / 0 deletions.
+- New Exposure path was fetched after commit and has the same blob SHA as before the move.
+- No production logic, save identity, external ID, event ownership, movement ownership, weather thresholds, or serialization format changed in B11.
 
-- `scripts/check-desertbatfly-r5-retention.sh`.
-- `scripts/check-desertbatfly-r6-b1.sh`.
+Not executed in this run:
+
+- `scripts/check-desertbatfly-r5-retention.sh` as an actual shell process.
+- `scripts/check-desertbatfly-r6-b1.sh` as an actual shell process.
 - Full `.NET Framework 4.8` build against Rain World assemblies.
 - Managed DesertBatfly integration tests requiring Rain World/BepInEx DLLs.
 - Rain World live scenarios and 20–30 Desert Batfly performance acceptance.
 
-These remain validation blockers only; they do not prevent continued source-level R6 work.
+These are not reported as passing. B11 was deliberately limited to a blob-identical physical move plus a mechanically reviewable guard path update because the available execution environment could not run repository-local scripts before commit.
+
+## Important files changed this run
+
+- `src/Creatures/DesertBatfly/Environment/DB_EnvironmentExposure.cs`
+- `src/Creatures/DesertBatfly/Environment/DB_EnvironmentProfile.cs`
+- `scripts/check-desertbatfly-r5-retention.sh`
+- `PROGRESS.md`
 
 ## Remaining Task14 requirements
 
 R6 remains incomplete. Major remaining work:
 
-- Threat runtime/event/trace physical/type migration; Runtime/Event require responsibility-aware split/absorb review rather than mechanical rename.
+- Environment leaf **type identity** rename (`DesertBatflyEnvironmentalExposure` -> `DB_EnvironmentExposure`, `DesertBatflyEnvironmentalProfile` -> `DB_EnvironmentProfile`) after a safe all-caller replacement path is available.
+- Environment Runtime/RoomState/Core responsibility migration.
+- Threat runtime/event responsibility-aware split/absorb review and migration.
 - Signals domain migration.
-- Environment domain migration, including Exposure/Profile physical/type migration and Environment Runtime/RoomState ownership cleanup.
 - remaining Social/Roost identities.
 - Injury domain migration.
 - Fear/Vengeance domain migration.
@@ -85,20 +98,17 @@ R6 remains incomplete. Major remaining work:
 - old root-file/dead-code cleanup.
 - final R6 naming/path/architecture guard.
 - R7 performance/debug/full regression/final acceptance.
-- `FINAL_REPORT.md` only after complete final acceptance.
+- `FINAL_REPORT.md` after complete acceptance only.
 
 ## Current blockers
 
-- Developer-local Rain World/BepInEx assemblies are required for the full managed build/test suite.
-- Rain World runtime is required for final behavior and performance acceptance.
-- The current GitHub connector can update individual files safely but is not suitable for an unverified branch-wide rename across large callers; bulk domain renames should use a migration path that can run repository-local guards before commit.
+- Full managed build/tests require developer-local Rain World/BepInEx assemblies.
+- Final behavior/performance acceptance requires Rain World runtime.
+- Current environment cannot clone GitHub via normal network/DNS, and the attempted temporary workflow write was blocked by platform safety checks. This limits safe branch-wide type replacement, but does not block blob-identical physical moves or small individually reviewable edits.
 
 ## Recommended next run
 
-1. Continue the production Task09-Task13 naming sweep in small files where changes can be proven text-only; prioritize remaining Debug/Observatory strings and small domain leaves.
-2. Re-inspect Threat Event to determine which Threat-specific evidence interpretation still belongs in Threat and which real-world facts are already fully owned by `DB_EventHub`; do not rename it until that ownership boundary is explicit.
-3. If a safe repository-local bulk-edit/validation path is available, perform Environment leaf physical migration:
-   - `Environmental/DesertBatflyEnvironmentalExposure.cs` -> `Environment/DB_EnvironmentExposure.cs`;
-   - `Environmental/DesertBatflyEnvironmentalProfile.cs` -> `Environment/DB_EnvironmentProfile.cs`;
-   then update all callers and run R5/R6 guards plus exact source-equivalence checks.
-4. Do not mechanically rename/split `DesertBatflyTravelNavigation.cs` or `DesertBatflyThreatRuntime.cs`.
+1. Re-check whether a repository-local validation path is available. If yes, finish B11 type identities by replacing all `DesertBatflyEnvironmentalExposure` / `DesertBatflyEnvironmentalProfile` callers and run R5/R6 guards before commit.
+2. If bulk caller-safe replacement remains unavailable, continue with another blob-identical physical domain move or small text-only Task09-Task13 cleanup that can be proven behavior-neutral.
+3. Continue to avoid mechanical rename/split of `DesertBatflyThreatRuntime.cs` and `DesertBatflyTravelNavigation.cs` until their responsibility boundaries are explicit.
+4. Keep `Environment/` included in all architecture guards as migration proceeds.
