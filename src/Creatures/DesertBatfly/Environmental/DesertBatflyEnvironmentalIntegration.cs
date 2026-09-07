@@ -218,8 +218,18 @@ internal static class DesertBatflyEnvironmentalIntegration
             float angle = Stable01(bat.Personality.VisualSeed ^ bucket * 0x45d9f3b) * Mathf.PI * 2f;
             float familiarity = FogNavigationFamiliarityScale(bat, influence.Weather);
             float uncertainty = Mathf.Clamp01(influence.NavigationUncertainty * familiarity);
+            float anticipation = Mathf.Clamp(influence.ObstacleAnticipationScale, 0.30f, 1f);
             float errorRadius = Mathf.Lerp(5f, 62f, uncertainty);
-            float distanceFade = Mathf.InverseLerp(65f, 300f, Vector2.Distance(bat.mainBodyChunk.pos, goal));
+
+            // Lower obstacle anticipation means the animal carries an imprecise goal much
+            // closer to nearby geometry before the error fades. Any actual collision remains
+            // vanilla Rain World terrain/body physics; Task13 never scripts a wall impact.
+            float correctionStart = Mathf.Lerp(22f, 65f, anticipation);
+            float correctionFull = Mathf.Lerp(175f, 300f, anticipation);
+            float distanceFade = Mathf.InverseLerp(
+                correctionStart,
+                correctionFull,
+                Vector2.Distance(bat.mainBodyChunk.pos, goal));
             goal += new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * errorRadius * distanceFade;
         }
         orig(ai, goal, speed);
