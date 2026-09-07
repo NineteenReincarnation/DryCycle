@@ -29,7 +29,7 @@ internal static class DB_RainWorldHooks
         DB_EventConsumers.Enable();
         DesertBatflyThreatRuntime.Enable();
         DB_ColonyRuntime.Enable();
-        DesertBatflyPlatformRoostRuntime.Enable();
+        DB_PlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
             AIDebugRegistry.Register(new DB_EnvironmentDebugSource());
@@ -74,7 +74,7 @@ internal static class DB_RainWorldHooks
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflySocialLife.Reset();
-        DesertBatflyPlatformRoostRuntime.Disable();
+        DB_PlatformRoostRuntime.Disable();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();

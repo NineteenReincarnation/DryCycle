@@ -8,7 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Vanilla ChainTile remains authoritative first; the additional rule is deliberately
 /// narrow and retains vanilla's five-tile solid/water clearance requirement.
 /// </summary>
-internal static class DesertBatflyPlatformRoostRuntime
+internal static class DB_PlatformRoostRuntime
 {
     private static bool _enabled;
 
