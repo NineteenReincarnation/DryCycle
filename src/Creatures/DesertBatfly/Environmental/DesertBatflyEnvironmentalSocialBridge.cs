@@ -90,9 +90,9 @@ internal static class DesertBatflyEnvironmentalSocialBridge
         currentBat = bat;
         try
         {
-            if (bat != null && DesertBatflyEnvironmentalBehavior.SuppressNeutralSocial(bat))
+            if (bat != null && ShouldYieldToEnvironment(bat))
             {
-                DesertBatflySocialLife.CancelForPriority(bat, "Task13 suppresses neutral social activity");
+                DesertBatflySocialLife.CancelForPriority(bat, "Task13 environmental survival priority");
                 return;
             }
             orig(bat);
@@ -101,6 +101,16 @@ internal static class DesertBatflyEnvironmentalSocialBridge
         {
             currentBat = previous;
         }
+    }
+
+    private static bool ShouldYieldToEnvironment(DesertBatfly bat)
+    {
+        if (DesertBatflyEnvironmentalBehavior.SuppressNeutralSocial(bat)) return true;
+        if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(
+                bat, out DesertBatflyEnvironmentalInfluence influence))
+            return false;
+        return DesertBatflyEnvironmentalSurvivalBridge.ShouldSeekHome(influence) ||
+               DesertBatflyEnvironmentalSurvivalBridge.ShouldBurrow(influence);
     }
 
     private static float DriveHook(SocialDriveOrig orig, DesertBatflyPersonality personality)
