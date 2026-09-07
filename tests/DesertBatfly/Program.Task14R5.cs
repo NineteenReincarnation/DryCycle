@@ -31,9 +31,22 @@ internal static partial class Program
               policy.GetMethod("CombatMotivation", Flags) != null &&
               policy.GetMethod("AllowsHarassCandidate", Flags) != null &&
               policy.GetMethod("AdjustRoostDuration", Flags) != null &&
-              policy.GetMethod("BlocksNeutralSocial", Flags) != null,
+              policy.GetMethod("BlocksNeutralSocial", Flags) != null &&
+              policy.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
+              policy.GetMethod("ShouldRecallHomeForSandstorm", Flags) != null &&
+              policy.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
+              policy.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
             "R5 explicit environmental policy replaces mutation/detour based cross-domain behavior");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", false) == null,
+            "R5 B3 physically removes Task09 and Survival RuntimeDetour bridges");
 
-        Console.WriteLine("Task14 R5 B2: Environment Combat/Roost/Social integration is explicit; old detours and temporary Thirst spoofing are removed.");
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null &&
+              behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
+            "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Task13 owners");
+
+        Console.WriteLine("Task14 R5 B3: Task09 and same-room survival consume explicit Environment policy/behavior; both RuntimeDetour bridges are removed.");
     }
 }

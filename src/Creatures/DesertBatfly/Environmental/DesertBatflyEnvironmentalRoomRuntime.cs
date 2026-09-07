@@ -15,6 +15,10 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     internal const int PreparationMinimumHoldTicks = 120;
     internal const int ShelteringMinimumHoldTicks = 180;
     internal const int AcuteMinimumHoldTicks = 120;
+    internal const int ShelterFailureMinTicks = 360;
+    internal const int ShelterFailureReportCooldownTicks = 1800;
+    internal const float MinimumUsableAnchorQuality = 0.44f;
+    internal const float SevereCrowdingPerAnchor = 5f;
 
     internal sealed class RoomState
     {
@@ -30,6 +34,11 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         internal int LastCrowdingSampleTick = int.MinValue;
         internal int PhaseStartTick = int.MinValue;
         internal bool AnchorsBuilt;
+        internal int ShelterFailureLastTick = int.MinValue;
+        internal int ShelterFailureAccumulatedTicks;
+        internal int ShelterFailureLastReportTick = int.MinValue;
+        internal string ShelterFailureReason = string.Empty;
+        internal float ShelterFailureSeverity;
 
         internal RoomState(Room room)
         {
@@ -67,7 +76,9 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     internal static void Update(Room room)
     {
         if (room == null) return;
-        Refresh(states.GetValue(room, r => new RoomState(r)));
+        RoomState state = states.GetValue(room, r => new RoomState(r));
+        Refresh(state);
+        ObserveLocalShelterFailure(state);
     }
 
     internal static bool TryGetContext(Room room, out DesertBatflyEnvironmentalRoomContext context)
@@ -80,6 +91,22 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         }
         context = state.Context;
         return true;
+    }
+
+    internal static bool TryGetShelterFailureDebug(
+        Room room,
+        out int accumulatedTicks,
+        out float severity,
+        out string reason)
+    {
+        accumulatedTicks = 0;
+        severity = 0f;
+        reason = string.Empty;
+        if (room == null || !states.TryGetValue(room, out RoomState state)) return false;
+        accumulatedTicks = state.ShelterFailureAccumulatedTicks;
+        severity = state.ShelterFailureSeverity;
+        reason = state.ShelterFailureReason;
+        return accumulatedTicks > 0 || severity > 0f;
     }
 
     internal static bool TryChooseAnchor(
@@ -149,6 +176,101 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     {
         if (state == null || state.RecoveryStartTick < 0 || state.RecoveryDurationTicks <= 0) return 1f;
         return Mathf.Clamp01((tick - state.RecoveryStartTick) / (float)state.RecoveryDurationTicks);
+    }
+
+
+    private static void ObserveLocalShelterFailure(RoomState state)
+    {
+        Room room = state?.Room;
+        if (room?.abstractRoom == null || room.world == null || room.game == null) return;
+
+        int tick = room.game.clock;
+        int elapsed = state.ShelterFailureLastTick == int.MinValue
+            ? 1
+            : Mathf.Clamp(tick - state.ShelterFailureLastTick, 1, 60);
+        state.ShelterFailureLastTick = tick;
+
+        DesertBatflyEnvironmentalRoomContext context = state.Context;
+        if (!SeriousShelterFailureWeather(context))
+        {
+            state.ShelterFailureAccumulatedTicks = Mathf.Max(
+                0, state.ShelterFailureAccumulatedTicks - elapsed * 3);
+            state.ShelterFailureSeverity = 0f;
+            state.ShelterFailureReason = "no serious active Task13 shelter demand";
+            return;
+        }
+
+        float bestQuality = 0f;
+        bool anyUsable = false;
+        bool allCrowded = state.Anchors.Count > 0;
+        for (int i = 0; i < state.Anchors.Count; i++)
+        {
+            DesertBatflyShelterAnchor anchor = state.Anchors[i];
+            float quality = WeatherQuality(anchor, context.Weather);
+            bestQuality = Mathf.Max(bestQuality, quality);
+            if (quality >= MinimumUsableAnchorQuality && anchor.Crowding < SevereCrowdingPerAnchor)
+                anyUsable = true;
+            if (anchor.Crowding < SevereCrowdingPerAnchor)
+                allCrowded = false;
+        }
+
+        bool noAnchors = state.Anchors.Count == 0;
+        bool badQuality = bestQuality < MinimumUsableAnchorQuality;
+        bool failing = noAnchors || !anyUsable || allCrowded;
+        if (!failing)
+        {
+            state.ShelterFailureAccumulatedTicks = Mathf.Max(
+                0, state.ShelterFailureAccumulatedTicks - elapsed * 2);
+            state.ShelterFailureSeverity = 0f;
+            state.ShelterFailureReason = "usable realized shelter anchor available";
+            return;
+        }
+
+        float severity = noAnchors
+            ? 0.72f
+            : allCrowded
+                ? 0.55f
+                : Mathf.Clamp01(0.48f + (MinimumUsableAnchorQuality - bestQuality));
+        severity *= Mathf.Lerp(0.72f, 1f,
+            Mathf.Max(context.ActiveIntensity, context.ImmediateDanger));
+        state.ShelterFailureSeverity = Mathf.Clamp01(severity);
+        state.ShelterFailureReason = noAnchors
+            ? "serious weather: no realized shelter anchors"
+            : allCrowded
+                ? "serious weather: all usable shelter anchors overcrowded"
+                : badQuality
+                    ? "serious weather: available anchors have inadequate weather protection"
+                    : "serious weather: no sufficiently protected uncrowded anchor";
+        state.ShelterFailureAccumulatedTicks = Mathf.Min(
+            ShelterFailureMinTicks * 2,
+            state.ShelterFailureAccumulatedTicks + elapsed);
+
+        if (state.ShelterFailureAccumulatedTicks < ShelterFailureMinTicks) return;
+        if (state.ShelterFailureLastReportTick != int.MinValue &&
+            tick - state.ShelterFailureLastReportTick < ShelterFailureReportCooldownTicks)
+            return;
+
+        DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(room.abstractRoom);
+        if (colony == null) return;
+        DesertBatflyColonyRuntime.ReportExternalRefuge(
+            colony.RoomName,
+            null,
+            Mathf.Clamp(state.ShelterFailureSeverity, 0.12f, 0.80f));
+        state.ShelterFailureLastReportTick = tick;
+        state.ShelterFailureAccumulatedTicks = 0;
+    }
+
+    private static bool SeriousShelterFailureWeather(
+        in DesertBatflyEnvironmentalRoomContext context)
+    {
+        if (!context.WeatherSourceValid) return false;
+        if (context.Weather is DesertBatflyEnvironmentalWeather.LightRain or
+            DesertBatflyEnvironmentalWeather.Fog)
+            return false;
+        return context.Phase is DesertBatflyEnvironmentalPhase.Sheltering or
+                   DesertBatflyEnvironmentalPhase.Acute ||
+               (context.Phase == DesertBatflyEnvironmentalPhase.Preparation &&
+                context.ShelterUrgency >= 0.68f);
     }
 
     private static void Refresh(RoomState state)

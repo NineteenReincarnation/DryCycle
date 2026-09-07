@@ -381,6 +381,8 @@ internal static class DesertBatflyColonyRuntime
 
     private static void ScheduleMigrationBatch(World world, DesertBatflyColonyState source, int cycle)
     {
+        // Task09 remains the migration owner; Task13 only supplies a read-only timing veto.
+        if (DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)) return;
         if (!DesertBatflyColonyMigration.CanScheduleBatch(source)) return;
         CollectOwnedBats(source.RoomName, sourceMembersScratch);
         if (sourceMembersScratch.Count == 0 ||

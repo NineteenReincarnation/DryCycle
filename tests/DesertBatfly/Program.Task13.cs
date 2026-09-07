@@ -109,32 +109,29 @@ internal static partial class Program
                 "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalDenseFogBridge", false) == null,
             "Task13 DenseFog behavior-neutral RuntimeDetour shim is retired in R5");
 
-        Type task09Bridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", true);
-        Check(task09Bridge.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
-              task09Bridge.GetMethod("TryGetShelterFailureDebug", Flags) != null,
-            "Task13 has a narrow Task09 bridge for migration timing and realized shelter failure");
-        Check((int)task09Bridge.GetField("ShelterFailureMinTicks", Flags).GetRawConstantValue() >= 300,
-            "Task13 LocalShelterFailure requires sustained realized failure");
-        Check((int)task09Bridge.GetField("ShelterFailureReportCooldownTicks", Flags).GetRawConstantValue() >= 1200,
-            "Task13 LocalShelterFailure reporting is bounded by cooldown");
-        Check(task09Bridge.GetMethod("ShouldRecallHomeForSandstorm", Flags) != null &&
-              task09Bridge.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
-              task09Bridge.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
-            "Task13 Sandstorm Task09 policy distinguishes early Home recall from narrow outward emergency refuge");
-        Check((int)task09Bridge.GetField("SandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 2 &&
-              (int)task09Bridge.GetField("DeathSandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 1,
-            "Task13 Sandstorm outward emergency exception is deliberately short-range");
-        Check((int)task09Bridge.GetField("SandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory &&
-              (int)task09Bridge.GetField("DeathSandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory,
-            "Task13 Sandstorm Home recall operates inside the bounded species forecast horizon");
-
-        Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
-        Check(survivalBridge.GetMethod("ShouldSeekHome", Flags) != null &&
-              survivalBridge.GetMethod("ShouldBurrow", Flags) != null &&
-              survivalBridge.GetMethod("HigherPriorityOwnsLocalGoal", Flags) != null,
-            "Task13 HomeReturn/Burrow uses native FlyAI while preserving higher-priority local goals");
-
         Type environmentalPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", false) == null,
+            "Task13 R5 retires Task09/native-survival RuntimeDetour bridges");
+        Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null,
+            "Task13 realized-room runtime owns LocalShelterFailure evidence directly");
+        Check((int)roomRuntime.GetField("ShelterFailureMinTicks", Flags).GetRawConstantValue() >= 300 &&
+              (int)roomRuntime.GetField("ShelterFailureReportCooldownTicks", Flags).GetRawConstantValue() >= 1200,
+            "Task13 LocalShelterFailure remains sustained and cooldown-bounded");
+        Check(environmentalPolicy.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
+              environmentalPolicy.GetMethod("ShouldRecallHomeForSandstorm", Flags) != null &&
+              environmentalPolicy.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
+              environmentalPolicy.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
+            "Task09 directly consumes explicit Sandstorm environment policy");
+        Check((int)environmentalPolicy.GetField("SandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 2 &&
+              (int)environmentalPolicy.GetField("DeathSandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 1,
+            "Task13 Sandstorm outward emergency exception remains deliberately short-range");
+        Check((int)environmentalPolicy.GetField("SandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory &&
+              (int)environmentalPolicy.GetField("DeathSandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory,
+            "Task13 Sandstorm Home recall remains inside the bounded species forecast horizon");
+        Check(behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
+            "Task13 same-room Home/Hive/Burrow executes through the Environment-owned behavior path");
+
         Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
         Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", false) == null &&
@@ -158,12 +155,11 @@ internal static partial class Program
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
         MethodInfo hooksDisable = hooks.GetMethod("Disable", Flags);
-        Check(MethodCallOffset(hooksEnable, task09Bridge, "Enable") >= 0 &&
-              MethodCallOffset(hooksEnable, survivalBridge, "Enable") >= 0,
-            "Task13 remaining Task09/native-survival adapters are wired into DesertBatfly lifecycle");
-        Check(MethodCallOffset(hooksDisable, task09Bridge, "Disable") >= 0 &&
-              MethodCallOffset(hooksDisable, survivalBridge, "Disable") >= 0,
-            "Task13 remaining auxiliary adapters are removed with DesertBatfly lifecycle");
+        Check(MethodCallOffset(hooksEnable, behavior, "Reset") >= 0 &&
+              MethodCallOffset(hooksEnable, roomRuntime, "Reset") >= 0 &&
+              MethodCallOffset(hooksDisable, behavior, "Reset") >= 0 &&
+              MethodCallOffset(hooksDisable, roomRuntime, "Reset") >= 0,
+            "Task13 direct behavior/room runtimes remain wired into DesertBatfly lifecycle");
 
         Type signalKind = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalKind", true);
         Check(Enum.GetNames(signalKind).Length == 6,
@@ -191,7 +187,7 @@ internal static partial class Program
         foreach (Type type in new[]
                  {
                      behavior, roomRuntime, profile, environmentalPolicy,
-                     visibilityPolicy, weaponPerception, task09Bridge, survivalBridge,
+                     visibilityPolicy, weaponPerception,
                      mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalExposure", true)
                  })
             Check(!TypeCallsTask13Forbidden(type),

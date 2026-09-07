@@ -20,6 +20,7 @@ internal static class DesertBatflyEnvironmentalBehavior
         internal int HeatExposureTicks;
         internal int LastWeatherOrdinal = -1;
         internal DesertBatflyEnvironmentalPhase LastPhase = DesertBatflyEnvironmentalPhase.Calm;
+        internal int LastSecondaryMoistureTick = int.MinValue;
     }
 
     private static ConditionalWeakTable<DesertBatfly, State> states = new();
@@ -53,6 +54,7 @@ internal static class DesertBatflyEnvironmentalBehavior
             state.LastDecisionTick = tick;
             Recompute(bat, state, tick);
         }
+        ApplySecondaryLightRainMoisture(bat, state, tick);
     }
 
     internal static bool ApplyOwnedBehavior(DesertBatfly bat)
@@ -65,6 +67,7 @@ internal static class DesertBatflyEnvironmentalBehavior
                     DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentLocalSurvival);
         if (!owns) return false;
 
+        if (ApplyNativeHomeAndBurrow(bat, state.Influence)) return true;
         ApplyLocalBehavior(bat, state);
         return true;
     }
@@ -666,6 +669,93 @@ internal static class DesertBatflyEnvironmentalBehavior
             (1f - bat.Personality.Temperament) * 0.08f +
             Stable01(bat.Personality.VisualSeed ^ 0x6D2B79F5) * 0.14f);
         return Mathf.InverseLerp(delay * 0.46f, 1f, roomProgress);
+    }
+
+
+    private static void ApplySecondaryLightRainMoisture(DesertBatfly bat, State state, int tick)
+    {
+        if (bat?.room == null || bat.mainBodyChunk == null || bat.DesertState.Thirst <= 0f || state == null)
+            return;
+
+        DesertBatflyEnvironmentalRoomRuntime.RoomState roomState =
+            DesertBatflyEnvironmentalRoomRuntime.For(bat.room);
+        if (roomState == null ||
+            roomState.Context.Weather is DesertBatflyEnvironmentalWeather.LightRain or
+                DesertBatflyEnvironmentalWeather.HeavyRain ||
+            roomState.WeatherAxes.LightRainIntensity <= 0f)
+            return;
+
+        const int secondaryMoistureIntervalTicks = 14;
+        if (state.LastSecondaryMoistureTick != int.MinValue &&
+            tick - state.LastSecondaryMoistureTick < secondaryMoistureIntervalTicks)
+            return;
+        state.LastSecondaryMoistureTick = tick;
+
+        IntVector2 tile = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        DesertBatflyEnvironmentalExposureSample exposure =
+            DesertBatflyEnvironmentalExposure.Sample(bat.room, tile, 1f);
+        if (exposure.RainExposure < 0.55f) return;
+
+        float rain = roomState.WeatherAxes.LightRainIntensity;
+        float relief = DesertBatflyTuning.ThirstPerTick * 2.15f * rain * exposure.RainExposure;
+        bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
+    }
+
+    private static bool ApplyNativeHomeAndBurrow(
+        DesertBatfly bat,
+        in DesertBatflyEnvironmentalInfluence influence)
+    {
+        if (bat?.room?.aimap == null || bat.AI == null || bat.dead || !bat.Consious ||
+            bat.inShortcut || bat.Emergence?.Active == true)
+            return false;
+        bool seekHome = DB_EnvironmentalPolicy.ShouldSeekHome(influence);
+        bool burrow = DB_EnvironmentalPolicy.ShouldBurrow(influence);
+        if (!seekHome && !burrow) return false;
+        if (bat.room.hives == null || bat.room.hives.Length == 0) return false;
+
+        int bestMap = -1;
+        int bestHive = -1;
+        int bestDistance = int.MaxValue;
+        IntVector2 current = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        for (int i = 0; i < bat.room.hives.Length; i++)
+        {
+            IntVector2[] hive = bat.room.hives[i];
+            if (hive == null || hive.Length == 0) continue;
+            int map = bat.room.exitAndDenIndex.Length + i;
+            int distance = bat.room.aimap.ExitDistanceForCreature(current, map, bat.Template);
+            if (distance < 0 || distance >= bestDistance) continue;
+            bestDistance = distance;
+            bestHive = i;
+            bestMap = map;
+        }
+        if (bestHive < 0 || bestMap < 0) return false;
+
+        bool onHiveTile = bat.room.GetTile(bat.mainBodyChunk.pos).hive;
+        if (onHiveTile && burrow)
+        {
+            DesertBatflySocialLife.CancelForPriority(bat, "Task13 environmental Burrow priority");
+            bat.DesertAI.CancelAttack();
+            bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
+            bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
+            bat.movMode = Fly.MovementMode.Burrow;
+            bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.25f : 0.62f);
+            return true;
+        }
+
+        if (!seekHome && influence.BurrowDrive < 0.45f) return false;
+        if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return false;
+
+        DesertBatflySocialLife.CancelForPriority(bat, "Task13 same-room Home/Hive retreat");
+        if (influence.HardSurvival) bat.DesertAI.CancelAttack();
+        bat.AI.leaveRoomDijkstra = -1;
+        bat.AI.followingDijkstraMap = bestMap;
+        Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);
+        DB_BehaviorOwner owner = influence.HardSurvival
+            ? DB_BehaviorOwner.EnvironmentHardSurvival
+            : DB_BehaviorOwner.EnvironmentLocalSurvival;
+        DB_FlightMotor.TryGuideNative(bat, owner, nextGoal);
+        bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.10f : 0.35f);
+        return true;
     }
 
     private static void ApplyLightRainMoisture(

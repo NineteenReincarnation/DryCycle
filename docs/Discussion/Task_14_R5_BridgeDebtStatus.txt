@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R5 Internal Bridge / Detour Debt Status
-Revision: R5-B2 / 2026-09-07
+Revision: R5-B3 / 2026-09-07
 Branch: task14-r5-bridge-debt
 Base: R4 code-side complete at a461631633360fff30c721fb774acec99fc23889
-Status: 【R5 进行中 / B2 Environmental detour debt removed】
+Status: 【R5 进行中 / B3 Task09 + same-room survival bridges removed】
 
 ======================================================================
 1. R5 objective
@@ -87,4 +87,25 @@ decision.
   than old Architecture Locks.
 
 Remaining R5 bridge debt is Task09/Survival and Signal bridge families plus RuntimePatch
+classification.
+
+
+======================================================================
+6. R5-B3 closed
+======================================================================
+
+- DesertBatflyEnvironmentalTask09Bridge.cs DELETED.
+- DesertBatflyEnvironmentalSurvivalBridge.cs DELETED.
+- Task09 remains the sole cross-room destination/route/ReturnHome/Migration owner. It now
+  directly queries DB_EnvironmentalPolicy for Sandstorm migration timing, early Home recall
+  and the narrow outward-refuge exception. No Reflection is used to invoke ReturnHome.
+- LocalShelterFailure observation moved into DesertBatflyEnvironmentalRoomRuntime; only the
+  bounded evidence report crosses into DesertBatflyColonyRuntime.
+- Same-room Home/Hive/Burrow execution moved into DesertBatflyEnvironmentalBehavior's
+  Environment-owned execution path, using native FlyAI Dijkstra/Burrow plus DB_FlightMotor.
+- Secondary LightRain moisture moved into RefreshInfluence with its original bounded interval;
+  it no longer depends on a detour around an obsolete EnvironmentalBehavior.Update entry.
+- Task13 debug and regression guards now reference direct owners/policy rather than adapters.
+
+Remaining R5 bridge debt is the Signal bridge family plus DesertBatflyRuntimePatch
 classification.

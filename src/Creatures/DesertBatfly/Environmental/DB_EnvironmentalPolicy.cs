@@ -14,6 +14,13 @@ internal static class DB_EnvironmentalPolicy
     private const float SandstormReturningBatRadius = 340f;
     private const float MinimumActivityRangeScale = 0.28f;
 
+    internal const int SandstormHomeRecallMinimumLeadTicks = 2800;
+    internal const int DeathSandstormHomeRecallMinimumLeadTicks = 3600;
+    internal const int SandstormEmergencyMinimumLeadTicks = 4200;
+    internal const int DeathSandstormEmergencyMinimumLeadTicks = 5200;
+    internal const int SandstormEmergencyMaxHops = 2;
+    internal const int DeathSandstormEmergencyMaxHops = 1;
+
     internal static bool AggressionAuthorized(DesertBatfly bat)
         => bat != null && (bat.Personality.Aggressive ||
             DesertBatflyEnvironmentalBehavior.AllowsEnvironmentalDamageAttack(bat));
@@ -133,6 +140,88 @@ internal static class DB_EnvironmentalPolicy
         return influence.BurrowDrive >= 0.68f;
     }
 
+
+    internal static bool ShouldSuppressNewMigration(World world, DesertBatflyColonyState source)
+    {
+        if (world == null || source == null) return false;
+        AbstractRoom room = DesertBatflyColonyRuntime.FindRoom(world, source.RoomName);
+        if (room == null) return false;
+
+        DesertBatflyWeatherEcologySample sample = DesertBatflyWeatherEcology.Sample(world, room);
+        DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(sample);
+        if (!IsSandstorm(weather)) return false;
+
+        float suppression = DesertBatflyEnvironmentalProfile.SandstormMigrationSuppression(weather, sample);
+        return suppression >= 0.70f;
+    }
+
+    internal static bool ShouldRecallHomeForSandstorm(
+        DesertBatflyEnvironmentalWeather weather,
+        in DesertBatflyWeatherEcologySample sample)
+    {
+        if (!IsSandstorm(weather) || !sample.HasHazard || !sample.ForecastDanger)
+            return false;
+        if (sample.ActiveIntensity > 0.08f || sample.ImmediateDanger >= 0.48f)
+            return false;
+
+        int minimumLead = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? DeathSandstormHomeRecallMinimumLeadTicks
+            : SandstormHomeRecallMinimumLeadTicks;
+        return sample.TimeUntilDangerTicks >= minimumLead &&
+               sample.TimeUntilDangerTicks <= DesertBatflyEnvironmentalProfile.SandstormAdvisoryTicks;
+    }
+
+    internal static bool CanConsiderSandstormOutwardRefuge(
+        AbstractRoom home,
+        DesertBatflyEnvironmentalWeather weather,
+        in DesertBatflyWeatherEcologySample sample,
+        out float homeQuality)
+    {
+        homeQuality = 1f;
+        if (home == null || !IsSandstorm(weather) || !sample.HasHazard || !sample.ForecastDanger)
+            return false;
+        if (sample.ActiveIntensity > 0.04f || sample.ImmediateDanger >= 0.38f)
+            return false;
+
+        int minimumLead = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? DeathSandstormEmergencyMinimumLeadTicks
+            : SandstormEmergencyMinimumLeadTicks;
+        if (sample.TimeUntilDangerTicks < minimumLead) return false;
+
+        homeQuality = DesertBatflyRefuge.HomeHiveShelterQuality(
+            home, sample.HazardKind, sample.HazardId);
+        float maximumAcceptableHome = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? 0.24f
+            : 0.30f;
+        return homeQuality < maximumAcceptableHome;
+    }
+
+    internal static bool AcceptSandstormEmergencyRefuge(
+        DesertBatflyEnvironmentalWeather weather,
+        in DesertBatflyWeatherEcologySample sample,
+        float homeQuality,
+        in DesertBatflyRefugeTarget target)
+    {
+        if (!target.Valid || !IsSandstorm(weather)) return false;
+        int maxHops = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? DeathSandstormEmergencyMaxHops
+            : SandstormEmergencyMaxHops;
+        float minimumImprovement = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? 0.24f
+            : 0.18f;
+        int extraMargin = weather == DesertBatflyEnvironmentalWeather.DeathSandstorm
+            ? 1300
+            : 900;
+
+        if (target.Route.HopCount > maxHops ||
+            target.ShelterQuality < homeQuality + minimumImprovement ||
+            !sample.ForecastDanger || sample.TimeUntilDangerTicks == int.MaxValue)
+            return false;
+
+        long required = (long)target.EstimatedTravelTicks + extraMargin;
+        return required < sample.TimeUntilDangerTicks;
+    }
+
     internal static float FogNavigationFamiliarityScale(
         DesertBatfly bat,
         DesertBatflyEnvironmentalWeather weather)
@@ -184,6 +273,10 @@ internal static class DB_EnvironmentalPolicy
         }
         return false;
     }
+
+    private static bool IsSandstorm(DesertBatflyEnvironmentalWeather weather)
+        => weather is DesertBatflyEnvironmentalWeather.Sandstorm or
+                      DesertBatflyEnvironmentalWeather.DeathSandstorm;
 
     private static float Stable01(int seed)
     {

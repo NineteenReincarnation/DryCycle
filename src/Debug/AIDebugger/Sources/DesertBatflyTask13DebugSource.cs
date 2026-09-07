@@ -44,7 +44,7 @@ internal sealed class DesertBatflyTask13DebugSource : IAIDebugSource
             }
         }
 
-        bool hasFailure = DesertBatflyEnvironmentalTask09Bridge.TryGetShelterFailureDebug(
+        bool hasFailure = DesertBatflyEnvironmentalRoomRuntime.TryGetShelterFailureDebug(
             bat.room,
             out int failureTicks,
             out float failureSeverity,

@@ -127,9 +127,28 @@ internal static class DesertBatflyRefuge
         Func<AbstractRoom, float> crowding,
         out DesertBatflyRefugeTarget target)
     {
-        return TryFindEmergencyRefugeFrom(
-            world, home, home, template, hazard, physicalCapability, knownRefuge,
-            predatorRisk, crowding, -1, false, out target);
+        DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(hazard);
+        bool sandstorm = weather is DesertBatflyEnvironmentalWeather.Sandstorm or
+                         DesertBatflyEnvironmentalWeather.DeathSandstorm;
+        if (!sandstorm)
+            return TryFindEmergencyRefugeFrom(
+                world, home, home, template, hazard, physicalCapability, knownRefuge,
+                predatorRisk, crowding, -1, false, out target);
+
+        target = default;
+        if (!DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge(
+                home, weather, hazard, out float homeQuality))
+            return false;
+        if (!TryFindEmergencyRefugeFrom(
+                world, home, home, template, hazard, physicalCapability, knownRefuge,
+                predatorRisk, crowding, -1, false, out DesertBatflyRefugeTarget candidate))
+            return false;
+        if (!DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge(
+                weather, hazard, homeQuality, candidate))
+            return false;
+
+        target = candidate;
+        return true;
     }
 
     /// <summary>
