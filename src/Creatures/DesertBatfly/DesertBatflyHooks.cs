@@ -14,6 +14,7 @@ internal static class DesertBatflyHooks
     {
         if (enabled) return;
         enabled = true;
+        DB_CorpseWarningRuntime.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
@@ -86,6 +87,7 @@ internal static class DesertBatflyHooks
         DesertBatflyPlatformRoostRuntime.Disable();
         DesertBatflyColonyRuntime.Disable();
         DesertBatflyRefuge.Reset();
+        DB_CorpseWarningRuntime.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
