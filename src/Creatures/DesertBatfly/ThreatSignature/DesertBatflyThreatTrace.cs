@@ -23,7 +23,7 @@ internal static class DesertBatflyThreatTrace
             AIDebugEventCategory.Perception,
             "ThreatTargetPlayerSlot",
             threat.PlayerSlot,
-            "per-player Task11 memory selection");
+            "per-player Threat Signature memory selection");
         AIDebugTrace.RecordChange(
             creature,
             AIDebugEventCategory.State,
@@ -46,7 +46,7 @@ internal static class DesertBatflyThreatTrace
             "ThreatEvidenceAdded",
             evidenceKey,
             string.IsNullOrEmpty(threat.LastWitnessReason)
-                ? "no Task11 evidence yet"
+                ? "no Threat Signature evidence yet"
                 : threat.LastWitnessReason);
 
         AIDebugTrace.RecordChange(
@@ -74,7 +74,7 @@ internal static class DesertBatflyThreatTrace
             "ThreatAttackAdjusted",
             adjustment,
             string.IsNullOrEmpty(threat.ModifierReason)
-                ? "no active Task11 tactical modifier"
+                ? "no active Threat Signature tactical modifier"
                 : threat.ModifierReason);
 
         string evade = threat.EvadeTarget.HasValue
@@ -86,7 +86,7 @@ internal static class DesertBatflyThreatTrace
             "ThreatEvadeTarget",
             evade,
             string.IsNullOrEmpty(threat.ModifierReason)
-                ? "no Task11 evade"
+                ? "no Threat Signature evade"
                 : threat.ModifierReason);
     }
 
