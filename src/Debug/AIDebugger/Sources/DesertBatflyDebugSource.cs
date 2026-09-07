@@ -125,8 +125,51 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.flee_from_rain", "FlyAI.fleeFromRain", bat.AI?.fleeFromRain ?? false)
             .Add("field.lured_counter", "FlyAI.luredCounter", bat.AI?.luredCounter ?? 0));
 
+        BuildArbiterSection(snapshot, bat);
         BuildDecisionStack(snapshot, bat);
         return snapshot;
+    }
+
+    private static void BuildArbiterSection(AIDebugSnapshot snapshot, DesertBatfly bat)
+    {
+        var section = new AIDebugSection("section.arbiter");
+        if (bat?.room == null ||
+            !DB_BehaviorArbiter.TryGetDebugState(bat, out DB_BehaviorArbiterDebugState debug) ||
+            debug.Resolution.Clock != (bat.room.game?.clock ?? int.MinValue))
+        {
+            section.Add("field.arbiter_owner", "DB_BehaviorArbiter.PrimaryOwner", "R3 / unresolved")
+                .Add("field.arbiter_rejected_count", "DB_BehaviorArbiter.Rejected.Count", 0);
+            snapshot.Sections.Add(section);
+            return;
+        }
+
+        DB_BehaviorResolution resolution = debug.Resolution;
+        section.Add("field.arbiter_owner", "DB_BehaviorResolution.PrimaryOwner", resolution.PrimaryOwner)
+            .Add("field.arbiter_priority", "DB_BehaviorProposal.Priority", resolution.WinningProposal.Priority)
+            .Add("field.arbiter_kind", "DB_BehaviorProposal.BehaviorKind", resolution.WinningProposal.BehaviorKind)
+            .Add("field.arbiter_reason", "DB_BehaviorResolution.Reason", resolution.Reason)
+            .Add("field.arbiter_goal", "DB_BehaviorResolution.FinalGoal",
+                resolution.FinalGoal.HasValue ? resolution.FinalGoal.Value.ToString() : "—")
+            .Add("field.arbiter_native_behavior", "DB_BehaviorResolution.FinalNativeBehavior",
+                resolution.FinalNativeBehavior?.ToString() ?? "—")
+            .Add("field.arbiter_special_physics", "DB_BehaviorResolution.SpecialPhysicsOwner",
+                resolution.SpecialPhysicsOwner)
+            .Add("field.arbiter_rejected_count", "DB_BehaviorArbiterDebugState.Rejected.Length",
+                debug.Rejected?.Length ?? 0);
+
+        if (debug.Rejected != null)
+        {
+            for (int i = 0; i < debug.Rejected.Length; i++)
+            {
+                DB_BehaviorRejection rejected = debug.Rejected[i];
+                section.Add(
+                    "field.arbiter_rejected",
+                    $"DB_BehaviorArbiter.Rejected[{i}]",
+                    $"{rejected.Owner} / P{rejected.Priority} / {rejected.Reason}");
+            }
+        }
+
+        snapshot.Sections.Add(section);
     }
 
     private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat)

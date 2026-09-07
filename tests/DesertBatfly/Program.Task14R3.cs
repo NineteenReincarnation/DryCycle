@@ -202,6 +202,9 @@ internal static partial class Program
         Type observatory = mod.GetType("DryCycle.Debugging.AI.DesertBatflyDebugSource", true);
         Check(MethodCallOffset(observatory.GetMethod("ControlOwner", Flags), arbiter, "TryGetResolution") >= 0,
             "Task14 R3 Observatory ControlOwner reads the actual arbiter resolution instead of post-hoc guessing");
+        Check(observatory.GetMethod("BuildArbiterSection", Flags) != null &&
+              MethodCallOffset(observatory.GetMethod("BuildArbiterSection", Flags), arbiter, "TryGetDebugState") >= 0,
+            "Task14 R3 Observatory formally presents winner plus rejected arbiter proposals");
 
         Check(frame.Name.StartsWith("DB_", StringComparison.Ordinal) &&
               proposal.Name.StartsWith("DB_", StringComparison.Ordinal) &&
@@ -209,6 +212,6 @@ internal static partial class Program
             "Task14 R3 architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Task14 R3: ordinary locomotion domains are owner-gated; Rain World live validation and rejected-proposal Observatory presentation remain.");
+            "Task14 R3: code-side owner arbitration and rejected-proposal Observatory presentation are closed; Rain World live validation remains.");
     }
 }

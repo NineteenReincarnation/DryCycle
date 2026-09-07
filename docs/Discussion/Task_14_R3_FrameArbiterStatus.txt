@@ -351,11 +351,19 @@ R3-CLOSED-06 — projectile modifier migration（代码侧已收敛）
 
 仍需实机验证 spear/rock near-miss 与 Vengeance geometry override 的连续性。
 
-R3-OPEN-07 — Observatory rejected proposal presentation
-------------------------------------------------------
+R3-CLOSED-07 — Observatory rejected proposal presentation（代码侧已收敛）
+--------------------------------------------------------------------------
 
-Arbiter runtime 已记录 rejected proposals + reasons。
-当前通用 ControlOwner 已读真实 winner；后续再把 rejected proposal stack 正式显示到 Observatory。
+Arbiter runtime 的 rejected proposals + reasons 已正式进入 AI Observatory：
+
+- 新增 `R3 Arbiter / R3 仲裁器` Inspector 区块；
+- 显示真实 PrimaryOwner、winning priority、BehaviorKind、winner reason；
+- 显示 FinalGoal、FinalNativeBehavior、SpecialPhysicsOwner；
+- 显示 rejected proposal 数量；
+- 对每条 rejected proposal 显示 Owner / Priority / Reason；
+- 数据来自同 tick `DB_BehaviorArbiter.TryGetDebugState`，不做 post-hoc 猜测。
+
+因此 R3 代码侧 Observatory owner/rejection 可观测性已闭合。
 
 ======================================================================
 4. 当前自动回归
@@ -418,5 +426,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 代码侧单 owner 已收敛：ImmediateDanger / InjuryRecovery / Travel / HardSurvival / Fear / Vengeance / Environment / ProjectileEvade / Combat / Roost / Social / Ordinary 均通过 Arbiter 进入。】
-【R3 尚不标记最终完成：仍需 Observatory rejected proposal 正式展示，以及 Rain World live scenarios 验收。】
+【R3 代码侧已收敛：所有 ordinary locomotion domain 均通过 Arbiter，Observatory 已正式显示 winner + rejected proposal stack。】
+【R3 尚不标记最终完成：只剩 Rain World live scenarios / managed integration 的实机验收。】
