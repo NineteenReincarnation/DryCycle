@@ -20,6 +20,8 @@ internal static class DesertBatflyHooks
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
+        DesertBatflyEnvironmentalTask09Bridge.Enable();
+        DesertBatflyEnvironmentalSurvivalBridge.Enable();
         DesertBatflyEnvironmentalIntegration.Enable();
         DesertBatflySignalIntegration.Enable();
         DesertBatflySignalVengeanceBridge.Enable();
@@ -73,6 +75,8 @@ internal static class DesertBatflyHooks
         DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
         DesertBatflyEnvironmentalIntegration.Disable();
+        DesertBatflyEnvironmentalSurvivalBridge.Disable();
+        DesertBatflyEnvironmentalTask09Bridge.Disable();
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
