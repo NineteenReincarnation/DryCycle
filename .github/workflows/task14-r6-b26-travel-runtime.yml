@@ -1,0 +1,144 @@
+name: Task14 R6 B26 Travel runtime split
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b26-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Split Travel responsibilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+
+          src = Path('src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs')
+          text = src.read_text(encoding='utf-8')
+          debug_start = text.index('internal readonly struct DesertBatflyTravelDebugState')
+          runtime_doc = text.index('/// <summary>\n/// High-level cross-room travel state')
+          intent_start = text.index('    private sealed class TravelIntent')
+          intent_end = text.index('    private static Dictionary<string, TravelIntent> intents')
+          header = text[:debug_start]
+
+          debug_block = text[debug_start:runtime_doc]
+          debug_text = header + debug_block
+
+          intent_block = textwrap.dedent(text[intent_start:intent_end]).rstrip()
+          if not intent_block.endswith('}'):
+              raise SystemExit('TravelIntent extraction did not end at class boundary')
+          intent_block = intent_block.replace('private sealed class TravelIntent', 'internal sealed class DB_TravelIntent', 1)
+          intent_block = intent_block.replace('internal TravelIntent(', 'internal DB_TravelIntent(', 1)
+          intent_helpers = '''
+
+    private static DB_WorldRoute CopyRoute(in DB_WorldRoute route)
+    {
+        if (!route.Valid) return default;
+        int[] rooms = new int[route.Rooms.Length];
+        Array.Copy(route.Rooms, rooms, rooms.Length);
+        return new DB_WorldRoute(rooms, route.Cost, route.Survivability);
+    }
+
+    private static string Normalize(string value) =>
+        (value ?? string.Empty).Trim().ToUpperInvariant();
+'''
+          intent_block = intent_block[:-1] + intent_helpers + '}\n'
+          intent_text = 'using System;\nusing UnityEngine;\n\nnamespace DryCycle.Creatures.DesertBatfly;\n\n' + intent_block
+
+          runtime_text = header + text[runtime_doc:intent_start] + text[intent_end:]
+
+          replacements = [
+              (r'\bDesertBatflyTravelNavigation\b', 'DB_TravelRuntime'),
+              (r'\bDesertBatflyTravelDebugState\b', 'DB_TravelDebugState'),
+              (r'\bTravelIntent\b', 'DB_TravelIntent'),
+          ]
+          def migrate_names(value):
+              for pattern, replacement in replacements:
+                  value = re.sub(pattern, replacement, value)
+              return value
+
+          travel = Path('src/Creatures/DesertBatfly/Travel')
+          travel.mkdir(parents=True, exist_ok=True)
+          (travel / 'DB_TravelRuntime.cs').write_text(migrate_names(runtime_text), encoding='utf-8')
+          (travel / 'DB_TravelDebugState.cs').write_text(migrate_names(debug_text), encoding='utf-8')
+          (travel / 'DB_TravelIntent.cs').write_text(migrate_names(intent_text), encoding='utf-8')
+          src.unlink()
+
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs', '.csproj', '.sh', '.py', '.md'}:
+                      continue
+                  value = path.read_text(encoding='utf-8')
+                  new = migrate_names(value)
+                  new = new.replace(
+                      'src/Creatures/DesertBatfly/DB_TravelRuntime.cs',
+                      'src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs')
+                  if new != value:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate Travel compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          old=src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
+          runtime=src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
+          intent=src/Creatures/DesertBatfly/Travel/DB_TravelIntent.cs
+          debug=src/Creatures/DesertBatfly/Travel/DB_TravelDebugState.cs
+          test ! -e "$old"
+          for p in "$runtime" "$intent" "$debug"; do test -f "$p"; done
+          if grep -RIn --include='*.cs' --include='*.csproj' --include='*.sh' -E 'DesertBatflyTravelNavigation|DesertBatflyTravelDebugState|\bTravelIntent\b' src tests scripts; then
+            echo 'Old Travel identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'internal static class DB_TravelRuntime' "$runtime"
+          grep -q 'internal sealed class DB_TravelIntent' "$intent"
+          grep -q 'internal readonly struct DB_TravelDebugState' "$debug"
+          grep -q 'RequestPermanentMigration' "$runtime"
+          grep -q 'UpdateAbstractWorld' "$runtime"
+          grep -q 'TryDriveRealized' "$runtime"
+          grep -q 'EvaluateColonyWeather' "$runtime"
+          grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' "$runtime"
+          grep -q 'DB_FlightMotor.TryGuideNative' "$runtime"
+          grep -q 'DB_TravelPurpose.EmergencyRefuge' "$runtime"
+          grep -q 'DB_TravelPurpose.ReturnHome' "$runtime"
+          grep -q 'DB_TravelPurpose.ColonyMigration' "$runtime"
+          grep -q 'internal DB_TravelPurpose Purpose' "$intent"
+          grep -q 'internal DB_WorldRoute Route' "$intent"
+          grep -q 'internal int DepartureDelay' "$intent"
+          grep -q 'internal bool WaitingAtRefuge' "$intent"
+          grep -q 'internal bool Suspended' "$intent"
+          grep -q 'internal DB_WeatherEcologySample Hazard' "$intent"
+          ! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$runtime"
+          grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' "$runtime"
+          grep -q 'src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs' scripts/check-desertbatfly-r5-retention.sh
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b26-travel-runtime.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B26 split Travel responsibilities [r6-b26-done]'
+          git push origin HEAD:task14-r6-b1-final
