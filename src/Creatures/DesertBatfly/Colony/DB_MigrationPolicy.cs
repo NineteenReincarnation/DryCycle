@@ -23,7 +23,7 @@ internal static class DB_MigrationPolicy
     }
 
     internal static float IndividualPropensity(
-        DesertBatflyPersonality personality,
+        DB_Personality personality,
         float physicalCapability,
         bool severeInjury,
         bool injuryRecovery,
@@ -124,7 +124,7 @@ internal static class DB_MigrationPolicy
         return count == 0 ? 0f : Mathf.Clamp01(sum / count);
     }
 
-    internal static float ActiveTrauma(DesertBatflyState state)
+    internal static float ActiveTrauma(DB_State state)
     {
         if (state == null) return 0f;
         return Mathf.Max(

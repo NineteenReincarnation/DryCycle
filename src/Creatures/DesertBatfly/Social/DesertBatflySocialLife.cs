@@ -182,7 +182,7 @@ internal static class DesertBatflySocialLife
         float traumaScale = Mathf.Lerp(
             1f,
             0.58f,
-            Mathf.InverseLerp(0.18f, DesertBatflyTuning.TraumaSevere, ActiveTrauma(bat)));
+            Mathf.InverseLerp(0.18f, DB_Tuning.TraumaSevere, ActiveTrauma(bat)));
         state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality) * traumaScale *
             DB_EnvironmentalPolicy.SocialDriveScale(bat));
 
@@ -303,7 +303,7 @@ internal static class DesertBatflySocialLife
 
     // Pure helpers are intentionally internal so the managed regression suite can verify
     // Task 10 without constructing a full Unity room/game loop.
-    internal static float SocialDrivePerTick(DesertBatflyPersonality personality)
+    internal static float SocialDrivePerTick(DB_Personality personality)
     {
         if (personality == null) return 0f;
         return 0.00175f *
@@ -311,7 +311,7 @@ internal static class DesertBatflySocialLife
             Mathf.Lerp(0.94f, 1.08f, personality.Temperament);
     }
 
-    internal static float StartThreshold(DesertBatflyPersonality personality)
+    internal static float StartThreshold(DB_Personality personality)
     {
         if (personality == null) return 1f;
         float value = Mathf.Lerp(0.72f, 0.52f, personality.Conformity) -
@@ -403,7 +403,7 @@ internal static class DesertBatflySocialLife
         if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) ||
             DesertBatflyIntimidation.HasActiveFearSuppression(bat))
             return "fear / vengeance suppression";
-        if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaSevere) return "severe trauma";
+        if (ActiveTrauma(bat) >= DB_Tuning.TraumaSevere) return "severe trauma";
         if (bat.AI.behavior != FlyAI.Behavior.Idle && bat.AI.behavior != FlyAI.Behavior.Swarm)
             return "non-neutral vanilla behavior";
         return null;

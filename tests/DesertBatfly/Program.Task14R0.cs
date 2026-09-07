@@ -20,7 +20,7 @@ internal static partial class Program
             "Task14 R0 freezes sandbox unlock value DesertBatfly");
 
         Type stateType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+            "DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check((string)stateType.GetField("SaveKey", Flags).GetRawConstantValue() == "DCDesertBatflyV1",
             "Task14 R0 freezes primary Desert Batfly save key");
 

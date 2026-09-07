@@ -262,7 +262,7 @@ internal static class DB_ThreatTactics
         DB_WeaponPerception.TryObserveHeldThreats(
             bat,
             player,
-            DesertBatflyTuning.SightRange,
+            DB_Tuning.SightRange,
             out DB_HeldThreatObservation held);
 
         bool visibleSpear = held.VisibleSpear;

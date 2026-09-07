@@ -113,7 +113,7 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
         snapshot.Sections.Add(travelSection);
 
         float propensity = 0f;
-        if (colony != null && record != null && creature.state is DesertBatflyState state)
+        if (colony != null && record != null && creature.state is DB_State state)
         {
             float bondAtHome = state.SocialBondStrength;
             propensity = DB_MigrationPolicy.IndividualPropensity(

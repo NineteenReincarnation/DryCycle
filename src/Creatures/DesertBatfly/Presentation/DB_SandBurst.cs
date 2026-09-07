@@ -80,8 +80,8 @@ internal sealed class DB_SandBurst : CosmeticSprite
         darkSandColor = Color.Lerp(sandColor, new Color(0.24f, 0.17f, 0.10f), 0.38f);
 
         int grainCount = Mathf.RoundToInt(Mathf.Lerp(
-            DesertBatflyTuning.SandWorldParticleMin,
-            DesertBatflyTuning.SandWorldParticleMax,
+            DB_Tuning.SandWorldParticleMin,
+            DB_Tuning.SandWorldParticleMax,
             intensity));
         grains = new WorldGrain[grainCount];
 
@@ -108,8 +108,8 @@ internal sealed class DB_SandBurst : CosmeticSprite
 
         int markCount = screenOverlayEnabled
             ? Mathf.RoundToInt(Mathf.Lerp(
-                DesertBatflyTuning.SandScreenMarkMin,
-                DesertBatflyTuning.SandScreenMarkMax,
+                DB_Tuning.SandScreenMarkMin,
+                DB_Tuning.SandScreenMarkMax,
                 intensity))
             : 0;
         marks = new ScreenMark[markCount];
@@ -121,8 +121,8 @@ internal sealed class DB_SandBurst : CosmeticSprite
             bool round = i % 2 == 0;
             int life = Mathf.RoundToInt(Lerp(
                 random,
-                DesertBatflyTuning.SandScreenLifeMin,
-                DesertBatflyTuning.SandScreenLifeMax));
+                DB_Tuning.SandScreenLifeMin,
+                DB_Tuning.SandScreenLifeMax));
             float baseScale = Lerp(random, 0.72f, 1.18f) * Mathf.Lerp(0.86f, 1.08f, intensity);
             marks[i] = new ScreenMark(
                 offset,
@@ -156,7 +156,7 @@ internal sealed class DB_SandBurst : CosmeticSprite
             }
         }
 
-        bool allowScreen = activeScreenBursts < DesertBatflyTuning.SandScreenMaxConcurrentBursts;
+        bool allowScreen = activeScreenBursts < DB_Tuning.SandScreenMaxConcurrentBursts;
         room.AddObject(new DB_SandBurst(
             room,
             bat,

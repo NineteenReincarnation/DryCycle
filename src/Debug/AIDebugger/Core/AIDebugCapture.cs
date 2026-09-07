@@ -187,7 +187,7 @@ internal static class AIDebugAnomalyDetector
                     other != bat && other.DesertAI.Target == bat.DesertAI.Target && other.DesertAI.FormalAttack)
                     attackers++;
             if (bat.DesertAI.FormalAttack) attackers++;
-            if (attackers > Creatures.DesertBatfly.DesertBatflyTuning.AttackSlots)
+            if (attackers > Creatures.DesertBatfly.DB_Tuning.AttackSlots)
                 reason = "AttackSlotsViolation";
         }
 

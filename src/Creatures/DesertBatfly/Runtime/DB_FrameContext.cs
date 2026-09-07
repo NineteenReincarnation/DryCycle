@@ -93,7 +93,7 @@ internal readonly struct DB_FrameContext
     internal readonly Fly.MovementMode NativeMovementMode;
     internal readonly FlyAI.Behavior NativeBehavior;
 
-    internal readonly DesertBatflyPersonality Personality;
+    internal readonly DB_Personality Personality;
     internal readonly float PhysicalCapability;
     internal readonly bool SevereInjury;
     internal readonly bool InjuryRecovering;
@@ -147,7 +147,7 @@ internal readonly struct DB_FrameContext
         bool inHive,
         Fly.MovementMode nativeMovementMode,
         FlyAI.Behavior nativeBehavior,
-        DesertBatflyPersonality personality,
+        DB_Personality personality,
         float physicalCapability,
         bool severeInjury,
         bool injuryRecovering,
@@ -271,7 +271,7 @@ internal static class DB_FrameContextRuntime
         Room room = bat.room;
         DB_Injury injury = bat.Injury;
         DesertBatflyAI ai = bat.DesertAI;
-        DesertBatflyState persistent = bat.DesertState;
+        DB_State persistent = bat.DesertState;
         DB_RoomContext roomContext = DB_RoomContext.For(room);
 
         int visiblePlayers = 0;
@@ -290,7 +290,7 @@ internal static class DB_FrameContextRuntime
                 if (player == null || player.dead || player.room != room || player.mainBodyChunk == null)
                     continue;
                 if (!DB_VisibilityPolicy.CanObserve(
-                        bat, player.mainBodyChunk.pos, DesertBatflyTuning.SightRange,
+                        bat, player.mainBodyChunk.pos, DB_Tuning.SightRange,
                         DB_VisibilityChannel.Player))
                     continue;
                 visiblePlayers++;
@@ -314,7 +314,7 @@ internal static class DB_FrameContextRuntime
                                 reverse.type == CreatureTemplate.Relationship.Type.Eats ||
                                 reverse.type == CreatureTemplate.Relationship.Type.Attacks;
                 if (!predator || !DB_VisibilityPolicy.CanObserve(
-                        bat, creature.mainBodyChunk.pos, DesertBatflyTuning.SightRange,
+                        bat, creature.mainBodyChunk.pos, DB_Tuning.SightRange,
                         DB_VisibilityChannel.Creature))
                     continue;
                 predators++;

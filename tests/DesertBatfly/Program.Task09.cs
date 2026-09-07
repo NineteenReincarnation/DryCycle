@@ -62,7 +62,7 @@ internal static partial class Program
         int normalBatch = (int)colonyType.GetMethod("RecommendedBatchSize", Flags).Invoke(colony, null);
         Check(normalBatch >= 1 && normalBatch <= 3, "Task09 migration uses a small bounded batch");
 
-        Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyPersonality", true);
+        Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Personality", true);
         object personality = Activator.CreateInstance(personalityType, Flags, null, new object[] { 909 }, null);
         MethodInfo propensity = migrationType.GetMethod("IndividualPropensity", Flags);
         float healthyPropensity = (float)propensity.Invoke(null, new object[]

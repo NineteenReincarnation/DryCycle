@@ -15,7 +15,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// their own individuals: weak followers only circle/feint, stronger followers make one
 /// weaker charge, and any follower may abandon the mob when fear or persistent trauma wins.
 ///
-/// Persistent trauma is kept in DesertBatflyState, not this weak table. This class owns only
+/// Persistent trauma is kept in DB_State, not this weak table. This class owns only
 /// realized runtime steering and fixed-size fear state; there is no per-frame observer graph.
 /// </summary>
 internal static class DesertBatflyIntimidation
@@ -285,7 +285,7 @@ internal static class DesertBatflyIntimidation
     {
         if (bat == null) return;
 
-        DesertBatflyState persistent = bat.DesertState;
+        DB_State persistent = bat.DesertState;
         State state;
         if (persistent.HasTrauma)
         {
@@ -444,7 +444,7 @@ internal static class DesertBatflyIntimidation
             threatScale = Mathf.Min(1.35f, threatScale * 1.28f);
 
         List<DesertBatfly> bats = new(
-            DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation);
+            DB_Tuning.HivePopulation + DB_Tuning.CurvePopulation);
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
             if (other is DesertBatfly bat && bat != victim && !bat.dead &&
@@ -675,7 +675,7 @@ internal static class DesertBatflyIntimidation
 
         if (state.VengeanceTarget == threat &&
             (memory.Strength >= VengeanceCollapseStrength ||
-             PersistentTraumaStrength(bat, threat) >= DesertBatflyTuning.TraumaSevere))
+             PersistentTraumaStrength(bat, threat) >= DB_Tuning.TraumaSevere))
         {
             ClearVengeance(state);
         }
@@ -781,7 +781,7 @@ internal static class DesertBatflyIntimidation
                 return;
         }
 
-        if (participants >= DesertBatflyTuning.SocialVengeanceGroupCap)
+        if (participants >= DB_Tuning.SocialVengeanceGroupCap)
             return;
 
         if (leaders.Count == 0)
@@ -795,7 +795,7 @@ internal static class DesertBatflyIntimidation
 
             for (int i = 0; i < trueCandidates.Count &&
                  leaders.Count < MaxTrueAvengersPerEvent &&
-                 participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
+                 participants < DB_Tuning.SocialVengeanceGroupCap; i++)
             {
                 DesertBatfly bat = trueCandidates[i];
                 if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat)) continue;
@@ -803,7 +803,7 @@ internal static class DesertBatflyIntimidation
                 FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
                 float trauma = PersistentTraumaStrength(bat, threat);
                 if (fear.Strength >= VengeanceCollapseStrength ||
-                    trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+                    trauma >= DB_Tuning.TraumaAggressionBlock)
                     continue;
 
                 ArmVengeance(
@@ -823,7 +823,7 @@ internal static class DesertBatflyIntimidation
         }
 
         if (leaders.Count == 0 ||
-            participants >= DesertBatflyTuning.SocialVengeanceGroupCap)
+            participants >= DB_Tuning.SocialVengeanceGroupCap)
             return;
 
         List<FollowerCandidate> followers = new(bats.Count);
@@ -831,12 +831,12 @@ internal static class DesertBatflyIntimidation
         {
             DesertBatfly bat = bats[i];
             if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
-                bat.Personality.Conformity < DesertBatflyTuning.SocialFollowerMinConformity ||
+                bat.Personality.Conformity < DB_Tuning.SocialFollowerMinConformity ||
                 IsExtremeVengeanceActive(bat))
                 continue;
 
             float trauma = PersistentTraumaStrength(bat, threat);
-            if (trauma >= DesertBatflyTuning.TraumaAggressionBlock) continue;
+            if (trauma >= DB_Tuning.TraumaAggressionBlock) continue;
 
             DesertBatfly bestLeader = null;
             float bestLeaderDrive = 0f;
@@ -847,8 +847,8 @@ internal static class DesertBatflyIntimidation
                     bat.mainBodyChunk.pos,
                     leader.mainBodyChunk.pos);
                 bool sociallyVisible =
-                    distance <= DesertBatflyTuning.SocialFollowerRange ||
-                    (distance <= DesertBatflyTuning.SocialFollowerRange * 1.45f &&
+                    distance <= DB_Tuning.SocialFollowerRange ||
+                    (distance <= DB_Tuning.SocialFollowerRange * 1.45f &&
                      bat.room.VisualContact(bat.mainBodyChunk.pos, leader.mainBodyChunk.pos));
                 if (!sociallyVisible) continue;
 
@@ -880,7 +880,7 @@ internal static class DesertBatflyIntimidation
 
         followers.Sort((a, b) => b.Score.CompareTo(a.Score));
         for (int i = 0; i < followers.Count &&
-             participants < DesertBatflyTuning.SocialVengeanceGroupCap; i++)
+             participants < DB_Tuning.SocialVengeanceGroupCap; i++)
         {
             FollowerCandidate follower = followers[i];
             State state = StateFor(follower.Bat);
@@ -1007,7 +1007,7 @@ internal static class DesertBatflyIntimidation
             }
         }
 
-        if (PersistentTraumaStrength(bat, target) >= DesertBatflyTuning.TraumaSevere)
+        if (PersistentTraumaStrength(bat, target) >= DB_Tuning.TraumaSevere)
         {
             ClearVengeance(state);
             bat.DesertAI.Threatened(target, false);
@@ -1323,13 +1323,13 @@ internal static class DesertBatflyIntimidation
 
     private static void EnforcePersistentTrauma(DesertBatfly bat, State state)
     {
-        DesertBatflyState persistent = bat.DesertState;
+        DB_State persistent = bat.DesertState;
         if (!persistent.HasTrauma) return;
 
         Creature currentTarget = bat.DesertAI.Target;
         if (currentTarget != null &&
             PersistentTraumaStrength(bat, currentTarget) >=
-            DesertBatflyTuning.TraumaAggressionBlock)
+            DB_Tuning.TraumaAggressionBlock)
         {
             bat.DesertAI.SuppressHostility(currentTarget);
         }
@@ -1342,15 +1342,15 @@ internal static class DesertBatflyIntimidation
         Creature threat = ResolveStrongestTraumaThreat(bat);
         if (!ValidThreat(threat, bat.room)) return;
         float strength = PersistentTraumaStrength(bat, threat);
-        if (strength < DesertBatflyTuning.TraumaAggressionBlock) return;
+        if (strength < DB_Tuning.TraumaAggressionBlock) return;
 
         if (state.VengeanceTarget == threat)
             ClearVengeance(state);
         bat.DesertAI.SuppressHostility(threat);
 
         float fearDistance = Mathf.Lerp(
-            DesertBatflyTuning.TraumaFearMinDistance,
-            DesertBatflyTuning.TraumaFearMaxDistance,
+            DB_Tuning.TraumaFearMinDistance,
+            DB_Tuning.TraumaFearMaxDistance,
             strength) *
             Mathf.Lerp(0.95f, 1.18f, bat.Personality.Conformity);
         if (!Custom.DistLess(
@@ -1386,7 +1386,7 @@ internal static class DesertBatflyIntimidation
         float gain)
     {
         if (bat == null || threat == null || gain <= 0f) return;
-        DesertBatflyState state = bat.DesertState;
+        DB_State state = bat.DesertState;
         gain = Mathf.Clamp(gain, 0f, 0.65f);
 
         if (threat is Player player)
@@ -1405,8 +1405,8 @@ internal static class DesertBatflyIntimidation
             state.PlayerTraumaTicks = Mathf.Max(
                 state.PlayerTraumaTicks,
                 Mathf.RoundToInt(Mathf.Lerp(
-                    DesertBatflyTuning.TraumaMinTicks,
-                    DesertBatflyTuning.TraumaMaxTicks,
+                    DB_Tuning.TraumaMinTicks,
+                    DB_Tuning.TraumaMaxTicks,
                     state.PlayerTraumaStrength)));
         }
         else if (IsPeach(threat))
@@ -1425,8 +1425,8 @@ internal static class DesertBatflyIntimidation
             state.PredatorTraumaTicks = Mathf.Max(
                 state.PredatorTraumaTicks,
                 Mathf.RoundToInt(Mathf.Lerp(
-                    DesertBatflyTuning.TraumaMinTicks,
-                    DesertBatflyTuning.TraumaMaxTicks,
+                    DB_Tuning.TraumaMinTicks,
+                    DB_Tuning.TraumaMaxTicks,
                     state.PredatorTraumaStrength)));
         }
     }
@@ -1436,7 +1436,7 @@ internal static class DesertBatflyIntimidation
         Creature threat)
     {
         if (bat == null || threat == null) return 0f;
-        DesertBatflyState state = bat.DesertState;
+        DB_State state = bat.DesertState;
 
         if (threat is Player player)
         {

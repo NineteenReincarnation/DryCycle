@@ -32,7 +32,7 @@ internal sealed class DB_Definition : CreatureDefinition
     }
 
     internal override Creature CreateRealizedCreature(AbstractCreature creature) => new DesertBatfly(creature, creature.world);
-    internal override CreatureState CreateState(AbstractCreature creature) => new DesertBatflyState(creature);
+    internal override CreatureState CreateState(AbstractCreature creature) => new DB_State(creature);
 
     internal override void EstablishRelationships()
     {
@@ -44,7 +44,7 @@ internal sealed class DB_Definition : CreatureDefinition
             desert.relationships[other.type.Index] = fly.CreatureRelationship(other).Duplicate();
             other.relationships[Type.Index] = other.CreatureRelationship(fly).Duplicate();
             if (other.TopAncestor().type == CreatureTemplate.Type.Scavenger)
-                other.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Attacks, DesertBatflyTuning.ScavengerHostility);
+                other.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Attacks, DB_Tuning.ScavengerHostility);
         }
 
         // Peach Lizard is a deliberate ecological predator of Desert Batflies. Its

@@ -10,7 +10,7 @@ internal sealed class DB_Emergence
     private Vector2 surface, normal;
     private int age;
     internal bool Active { get; private set; }
-    internal float Progress => !Active ? 1f : Mathf.Clamp01((age - 12f) / (DesertBatflyTuning.EmergenceTicks - 12f));
+    internal float Progress => !Active ? 1f : Mathf.Clamp01((age - 12f) / (DB_Tuning.EmergenceTicks - 12f));
 
     internal DB_Emergence(DesertBatfly fly) { this.fly = fly; }
 
@@ -45,7 +45,7 @@ internal sealed class DB_Emergence
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, surface + normal * Mathf.Lerp(-12f, 30f, Mathf.SmoothStep(0f, 1f, Progress)));
         fly.mainBodyChunk.vel = Vector2.zero;
         fly.dir = normal;
-        if (age >= DesertBatflyTuning.EmergenceTicks)
+        if (age >= DB_Tuning.EmergenceTicks)
         {
             Cancel();
             fly.mainBodyChunk.vel = normal * 5f;
@@ -70,7 +70,7 @@ internal sealed class DB_Emergence
         }
         if (candidates.Count == 0) return false;
         var sand = SampleSand(room);
-        for (int i = 0; i < DesertBatflyTuning.CurveAttempts; i++)
+        for (int i = 0; i < DB_Tuning.CurveAttempts; i++)
         {
             var terrain = candidates[Random.Range(0, candidates.Count)];
             Vector2 sample = new(Random.Range(20f, room.PixelWidth - 20f), Random.Range(20f, room.PixelHeight - 20f));
@@ -96,7 +96,7 @@ internal sealed class DB_Emergence
             Vector2 test = point + normal * offset;
             if (test.x < 12f || test.y < 12f || test.x > room.PixelWidth - 12f || test.y > room.PixelHeight - 12f) return false;
             foreach (var zone in sand)
-                if (QuicksandSurface.TryGetContact(test, DesertBatflyTuning.SandMargin, zone.surface, zone.bottom, out _)) return false;
+                if (QuicksandSurface.TryGetContact(test, DB_Tuning.SandMargin, zone.surface, zone.bottom, out _)) return false;
             if (offset >= 12f && (room.GetTile(test).Solid || room.terrain.Contains(test) || room.PointSubmerged(test))) return false;
         }
         return true;

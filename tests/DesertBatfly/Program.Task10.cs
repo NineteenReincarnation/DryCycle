@@ -12,8 +12,8 @@ internal static partial class Program
         Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialMode", true);
         Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialDebugState", true);
         Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoomRuntime", true);
-        Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyPersonality", true);
-        Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+        Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Personality", true);
+        Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
 
         string[] expectedModes =
         {
@@ -137,7 +137,7 @@ internal static partial class Program
         })
         {
             Check(stateType.GetField(forbidden, Flags) == null && stateType.GetProperty(forbidden, Flags) == null,
-                "Task10 realized-only state is not persisted in DesertBatflyState: " + forbidden);
+                "Task10 realized-only state is not persisted in DB_State: " + forbidden);
         }
 
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null &&

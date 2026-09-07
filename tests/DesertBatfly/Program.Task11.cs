@@ -29,7 +29,7 @@ internal static partial class Program
         Type debugType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatDebugState", true);
         Type stateType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+            "DryCycle.Creatures.DesertBatfly.DB_State", true);
 
         string[] expectedDimensions =
         {
@@ -126,7 +126,7 @@ internal static partial class Program
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
         creature.ID = new EntityID(-1, 11011);
-        var persistent = new DesertBatflyState(creature);
+        var persistent = new DB_State(creature);
         object evidence = Activator.CreateInstance(evidenceType);
         evidenceType.GetField("Projectile", Flags).SetValue(evidence, 0.40f);
         evidenceType.GetField("Piercing", Flags).SetValue(evidence, 0.55f);
@@ -144,13 +144,13 @@ internal static partial class Program
             "Task11 evidence for player slot 0 cannot leak into co-op player slot 1");
 
         string serializedState = persistent.ToString();
-        var restored = new DesertBatflyState(creature);
+        var restored = new DB_State(creature);
         restored.LoadFromString(System.Text.RegularExpressions.Regex.Split(serializedState, "<cB>"));
         storeType.GetMethod("ResetRuntime", Flags).Invoke(null, null);
         object restoredP0 = forPlayer.Invoke(null, new object[] { restored, 0 });
         Check(Math.Abs((float)memoryType.GetField("PiercingPressure", Flags).GetValue(restoredP0) -
                        (float)memoryType.GetField("PiercingPressure", Flags).GetValue(p0)) < 0.0001f,
-            "Task11 threat signature round-trips without modifying the legacy DesertBatflyState payload");
+            "Task11 threat signature round-trips without modifying the legacy DB_State payload");
 
         Check(stateType.GetField("CurrentThreatCue", Flags) == null &&
               stateType.GetField("AcuteExplosionTimer", Flags) == null &&

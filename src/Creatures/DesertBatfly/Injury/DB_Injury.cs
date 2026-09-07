@@ -22,7 +22,7 @@ internal sealed class DB_Injury
     internal string LastInjurySource { get; private set; } = "none";
     internal string LastInjuryDamageType { get; private set; } = "none";
     internal int LastInjuryTick { get; private set; } = -1;
-    private DesertBatflyState State => bat.DesertState;
+    private DB_State State => bat.DesertState;
     internal float WingMean => State.WingMean;
     internal float WingAsymmetry => State.WingAsymmetry;
     internal float WingBias => State.WingBias;

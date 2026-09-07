@@ -59,8 +59,8 @@ internal static class DB_SocialBond
     {
         var state = source.DesertState;
         if (!Available(source) || !source.Consious ||
-            state.PlayerTraumaStrength >= DesertBatflyTuning.TraumaSevere ||
-            state.PredatorTraumaStrength >= DesertBatflyTuning.TraumaSevere ||
+            state.PlayerTraumaStrength >= DB_Tuning.TraumaSevere ||
+            state.PredatorTraumaStrength >= DB_Tuning.TraumaSevere ||
             DesertBatflyIntimidation.IsExtremeVengeanceActive(source)) return 1f;
         float scale = state.GriefRoostScale;
         if (TryResolveBondPartner(source, out var partner) && partner.AI?.behavior == FlyAI.Behavior.Chain &&

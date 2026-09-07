@@ -176,13 +176,13 @@ internal static partial class Program
         Check(task11 >= 0 && task12 > task11 && task13 > task12 && task10 > task13,
             "realized pipeline stays Task11 -> Task12 -> Task13 -> Task10 after Task09 travel refusal");
 
-        Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+        Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check(state.GetFields(Flags).All(f =>
                 f.Name.IndexOf("Environmental", StringComparison.OrdinalIgnoreCase) < 0 &&
                 f.Name.IndexOf("HeatAgitation", StringComparison.OrdinalIgnoreCase) < 0 &&
                 f.Name.IndexOf("FogMemory", StringComparison.OrdinalIgnoreCase) < 0 &&
                 f.Name.IndexOf("SandstormMemory", StringComparison.OrdinalIgnoreCase) < 0),
-            "Task13 current environmental state is not persisted in DesertBatflyState");
+            "Task13 current environmental state is not persisted in DB_State");
 
         foreach (Type type in new[]
                  {

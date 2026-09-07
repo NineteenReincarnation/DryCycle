@@ -104,7 +104,7 @@ internal static class DB_Trace
             bat.AI.luredCounter > 0 || bat.safariControlled)
             return "VanillaPriority";
         if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
-        if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
+        if (ActiveTrauma(bat) >= DB_Tuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
         if (DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return "Fear";
         if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)

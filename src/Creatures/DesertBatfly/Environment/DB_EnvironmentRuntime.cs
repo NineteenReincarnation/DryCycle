@@ -697,7 +697,7 @@ internal static class DB_EnvironmentRuntime
         if (exposure.RainExposure < 0.55f) return;
 
         float rain = roomState.WeatherAxes.LightRainIntensity;
-        float relief = DesertBatflyTuning.ThirstPerTick * 2.15f * rain * exposure.RainExposure;
+        float relief = DB_Tuning.ThirstPerTick * 2.15f * rain * exposure.RainExposure;
         bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
     }
 
@@ -772,7 +772,7 @@ internal static class DB_EnvironmentRuntime
             return;
 
         float rainFactor = lightRain ? 1f : 0.52f;
-        float relief = DesertBatflyTuning.ThirstPerTick * 2.15f * rainFactor * context.ActiveIntensity * exposure.RainExposure;
+        float relief = DB_Tuning.ThirstPerTick * 2.15f * rainFactor * context.ActiveIntensity * exposure.RainExposure;
         bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
     }
 

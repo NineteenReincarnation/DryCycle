@@ -279,7 +279,7 @@ internal static class DB_BehaviorArbiter
                 commitment: 1f));
 
         if (frame.FearSuppressed || frame.Threat.AcuteThreat ||
-            frame.Trauma >= DesertBatflyTuning.TraumaAggressionBlock)
+            frame.Trauma >= DB_Tuning.TraumaAggressionBlock)
         {
             Vector2? fearGoal = frame.CurrentGoal;
             bool preserveFearGoal = true;

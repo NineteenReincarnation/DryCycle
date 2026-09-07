@@ -46,28 +46,28 @@ internal static partial class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Run()
     {
-        Check(DesertBatflyTuning.MealWater == 50f, "meal water cost is 50 raw points");
-        Check(DesertBatflyTuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
+        Check(DB_Tuning.MealWater == 50f, "meal water cost is 50 raw points");
+        Check(DB_Tuning.AttackWaterPerSecond == 50f, "attached drain is 50 raw points per second");
 
         int males = 0;
         int sandSpitters = 0;
         int trueAvengers = 0;
         for (int seed = 0; seed < 10000; seed++)
         {
-            var a = new DesertBatflyPersonality(seed);
-            var b = new DesertBatflyPersonality(seed);
+            var a = new DB_Personality(seed);
+            var b = new DB_Personality(seed);
             Check(a.Sex == b.Sex, "stable sex");
-            if (a.Sex == DesertBatflySex.Male) males++;
+            if (a.Sex == DB_Sex.Male) males++;
             var originalPersonality = new System.Random(seed);
             Check(a.PatternSeed == originalPersonality.Next() && a.SpikeSeed == originalPersonality.Next() &&
                 a.Temperament == (float)originalPersonality.NextDouble(), "original personality stream preserved");
             float oldNerve = Mathf.Clamp01(Mathf.Lerp((float)new System.Random(seed ^ 0x5A17B1D3).NextDouble(), a.Temperament, 0.25f));
             float oldSand = Mathf.Clamp01((float)new System.Random(seed ^ 0x6D2B79F5).NextDouble() * 0.62f + a.Temperament * 0.28f + oldNerve * 0.10f);
             Check(a.Nerve == oldNerve && a.SandSpitAffinity == oldSand, "original nerve and sand-spit distribution unchanged");
-            Check(DesertBatflyTuning.Mass * a.Size < 0.2f, "both sexes stay lightweight");
+            Check(DB_Tuning.Mass * a.Size < 0.2f, "both sexes stay lightweight");
             Check(a.PatternSeed == b.PatternSeed && a.SpikeSeed == b.SpikeSeed && a.BaseColor == b.BaseColor, "stable appearance");
-            Check(a.SpikeCount >= 0 && a.SpikeCount <= DesertBatflyTuning.MaxSpikes, "spike bound");
-            Check(a.PatternCount >= 5 && a.PatternCount <= DesertBatflyTuning.MaxPatterns, "pattern bound");
+            Check(a.SpikeCount >= 0 && a.SpikeCount <= DB_Tuning.MaxSpikes, "spike bound");
+            Check(a.PatternCount >= 5 && a.PatternCount <= DB_Tuning.MaxPatterns, "pattern bound");
             Check(a.Nerve >= 0f && a.Nerve <= 1f && a.RoostAffinity >= 0f && a.RoostAffinity <= 1f, "stable personality factors bounded");
             Check(a.SandSpitAffinity == b.SandSpitAffinity && a.SandSpitAffinity >= 0f && a.SandSpitAffinity <= 1f, "stable sand-spit personality factor");
             Check(a.VengeanceAffinity == b.VengeanceAffinity && a.VengeanceAffinity >= 0f && a.VengeanceAffinity <= 1f, "stable vengeance personality factor");
@@ -102,7 +102,7 @@ internal static partial class Program
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
         creature.ID = new EntityID(-1, 973);
-        var state = new DesertBatflyState(creature)
+        var state = new DB_State(creature)
         {
             Thirst = 0.74321f,
             Cooldown = 1133,
@@ -128,7 +128,7 @@ internal static partial class Program
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
             string save = state.ToString();
-            var restored = new DesertBatflyState(creature);
+            var restored = new DB_State(creature);
             restored.LoadFromString(Regex.Split(save, "<cB>"));
             Check(restored.Thirst == state.Thirst && restored.Cooldown == 1133 && restored.Bites == 1, "state round trip");
             Check(restored.InHive && restored.MealConsumed && Math.Abs(restored.health - 0.35f) < 0.001f, "hive/meal/health round trip");
@@ -156,7 +156,7 @@ internal static partial class Program
         finally { CultureInfo.CurrentCulture = culture; }
         Console.WriteLine("State: locale-independent round trip, grab memory, persistent player/predator trauma, legacy schema, malformed data, foreign fields.");
 
-        var bonds = new DesertBatflyState(creature);
+        var bonds = new DB_State(creature);
         var friend = new EntityID(3, 20);
         var challenger = new EntityID(4, 20);
         Check(bonds.StrengthenBond(friend, 0.05f), "empty slot establishes bond");
@@ -175,7 +175,7 @@ internal static partial class Program
 
         Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
-        Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+        Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         var bat = (Fly)FormatterServices.GetUninitializedObject(batType);
         bat.abstractPhysicalObject = creature;
         creature.realizedCreature = bat;

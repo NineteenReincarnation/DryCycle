@@ -99,9 +99,9 @@ internal static partial class Program
         Check(!TypeCallsTask12Forbidden(runtime) && !TypeCallsTask12Forbidden(socialBond),
             "Task12 signal data path never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
 
-        Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+        Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check(state.GetFields(Flags).All(f => f.Name.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) < 0),
-            "Task12 realized signal state is not persisted in DesertBatflyState");
+            "Task12 realized signal state is not persisted in DB_State");
 
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
         int task11 = MethodCallOffset(updateAI, threatRuntime, "Update");

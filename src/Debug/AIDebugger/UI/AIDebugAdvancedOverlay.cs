@@ -229,9 +229,9 @@ internal static class AIDebugAdvancedOverlay
         }
         Num.Vector2 t = World(camera, target.mainBodyChunk.pos);
         draw.AddCircle(t, 11f, attack, 24, 2f);
-        if (AttackersScratch.Count > DesertBatflyTuning.AttackSlots && AIDebugSettings.OverlayLabels)
+        if (AttackersScratch.Count > DB_Tuning.AttackSlots && AIDebugSettings.OverlayLabels)
             draw.AddText(t + new Num.Vector2(14f, -16f), attack,
-                $"ATTACK SLOT VIOLATION {AttackersScratch.Count}/{DesertBatflyTuning.AttackSlots}");
+                $"ATTACK SLOT VIOLATION {AttackersScratch.Count}/{DB_Tuning.AttackSlots}");
     }
 
     private static void DrawCandidates(ImDrawListPtr draw, RoomCamera camera, AbstractCreature owner)

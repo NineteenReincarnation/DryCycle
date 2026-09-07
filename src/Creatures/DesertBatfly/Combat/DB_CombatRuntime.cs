@@ -56,7 +56,7 @@ internal sealed class DB_CombatRuntime
     internal int UnseenTicks => unseen;
     internal int PhaseTicks => ticks;
     internal bool PullingUp => ai.Mode == DesertBatflyAI.Activity.FakeDive &&
-                               ticks > DesertBatflyTuning.FakeDivePullUpTicks;
+                               ticks > DB_Tuning.FakeDivePullUpTicks;
     internal bool FormalAttack => hasSlot && ai.Mode is
         DesertBatflyAI.Activity.Approach or DesertBatflyAI.Activity.Circle or
         DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
@@ -125,7 +125,7 @@ internal sealed class DB_CombatRuntime
     {
         if (source == null || source == fly || source is DesertBatfly) return;
         attacker = source;
-        memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
+        memory = Mathf.Max(memory, DB_Tuning.AttackerMemory);
         if (retaliationStrength > 0f && source is Player player)
             ArmRetaliation(player, retaliationStrength);
     }
@@ -134,7 +134,7 @@ internal sealed class DB_CombatRuntime
     {
         if (player == null) return;
         attacker = player;
-        memory = Mathf.Max(memory, DesertBatflyTuning.AttackerMemory);
+        memory = Mathf.Max(memory, DB_Tuning.AttackerMemory);
     }
 
     internal void ArmRetaliation(Player player, float strength)
@@ -199,7 +199,7 @@ internal sealed class DB_CombatRuntime
     {
         scanCandidate = null;
         rememberedCandidate = null;
-        closestCandidate = DesertBatflyTuning.SightRange;
+        closestCandidate = DB_Tuning.SightRange;
     }
 
     internal void ConsiderCandidate(Creature creature, float distance)
@@ -226,7 +226,7 @@ internal sealed class DB_CombatRuntime
 
         Player socialCandidate = FindSocialHarassTarget();
         float observeThreshold = Mathf.Lerp(
-            DesertBatflyTuning.ObserveThirst,
+            DB_Tuning.ObserveThirst,
             0.18f,
             fly.Personality.AggressionDrive * 0.45f);
         float socialMotivationScale = socialCandidate != null
@@ -297,9 +297,9 @@ internal sealed class DB_CombatRuntime
         float motivation = DB_EnvironmentalPolicy.CombatMotivation(fly);
         return !fly.Injury.BlocksCombat &&
             (fly.DesertState.GriefStrength <= 0f ||
-             motivation * fly.DesertState.GriefAttackScale >= DesertBatflyTuning.ObserveThirst) &&
+             motivation * fly.DesertState.GriefAttackScale >= DB_Tuning.ObserveThirst) &&
             (fly.Injury.AggressionScale >= 0.99f ||
-             motivation * fly.Injury.AggressionScale >= DesertBatflyTuning.ObserveThirst);
+             motivation * fly.Injury.AggressionScale >= DB_Tuning.ObserveThirst);
     }
 
     private bool CanHarass(Creature creature)
@@ -312,7 +312,7 @@ internal sealed class DB_CombatRuntime
 
         CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
         CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(fly.Template);
-        bool legal = creature.TotalMass <= DesertBatflyTuning.LightTargetMass &&
+        bool legal = creature.TotalMass <= DB_Tuning.LightTargetMass &&
                      relation.type != CreatureTemplate.Relationship.Type.Afraid &&
                      reverse.type != CreatureTemplate.Relationship.Type.Eats &&
                      reverse.type != CreatureTemplate.Relationship.Type.Attacks;
@@ -330,7 +330,7 @@ internal sealed class DB_CombatRuntime
         Player target = influence.HarassTarget;
         if (target == null || target.dead || target.room != fly.room || !CanHarass(target) ||
             !DB_VisibilityPolicy.CanObserve(
-                fly, target.mainBodyChunk.pos, DesertBatflyTuning.SightRange, DB_VisibilityChannel.Player))
+                fly, target.mainBodyChunk.pos, DB_Tuning.SightRange, DB_VisibilityChannel.Player))
             return null;
 
         if (DesertBatflyThreatRuntime.TryGetDebugState(fly, out DesertBatflyThreatDebugState threat))
@@ -367,7 +367,7 @@ internal sealed class DB_CombatRuntime
         else
             unseen = 0;
 
-        if (++interest > DesertBatflyTuning.InterestTicks || unseen > 35 ||
+        if (++interest > DB_Tuning.InterestTicks || unseen > 35 ||
             !Custom.DistLess(fly.mainBodyChunk.pos, target.mainBodyChunk.pos, 430f))
         {
             Finish(false);
@@ -407,8 +407,8 @@ internal sealed class DB_CombatRuntime
                     }
 
                     float effectiveAttackThirst = Mathf.Lerp(
-                        DesertBatflyTuning.AttackThirst,
-                        DesertBatflyTuning.ObserveThirst,
+                        DB_Tuning.AttackThirst,
+                        DB_Tuning.ObserveThirst,
                         fly.Personality.AggressionDrive * 0.35f);
                     float combatMotivation = DB_EnvironmentalPolicy.CombatMotivation(fly);
                     bool thirsty = combatMotivation * fly.DesertState.GriefAttackScale *
@@ -438,7 +438,7 @@ internal sealed class DB_CombatRuntime
                     center + Vector2.up * 100f,
                     6f + fly.Personality.AggressionDrive * 1.2f,
                     DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.ApproachTicks || distance < 110f)
+                if (ticks > DB_Tuning.ApproachTicks || distance < 110f)
                     ai.SetMode(DesertBatflyAI.Activity.Circle);
                 break;
 
@@ -447,20 +447,20 @@ internal sealed class DB_CombatRuntime
                     center + Orbit(95f, 65f),
                     6.5f + fly.Personality.AggressionDrive,
                     DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.CircleTicks)
+                if (ticks > DB_Tuning.CircleTicks)
                     ai.SetMode(DesertBatflyAI.Activity.Dive);
                 break;
 
             case DesertBatflyAI.Activity.FakeDive:
-                if (distance < 52f || ticks > DesertBatflyTuning.FakeDivePullUpTicks)
-                    ticks = Mathf.Max(DesertBatflyTuning.FakeDivePullUpTicks + 1, ticks);
+                if (distance < 52f || ticks > DB_Tuning.FakeDivePullUpTicks)
+                    ticks = Mathf.Max(DB_Tuning.FakeDivePullUpTicks + 1, ticks);
                 ai.SteerOwned(
                     PullingUp
                         ? center + Vector2.up * 160f + Custom.DirVec(center, fly.mainBodyChunk.pos) * 80f
                         : center,
                     PullingUp ? 10f : 12f,
                     DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.FakeDiveTicks)
+                if (ticks > DB_Tuning.FakeDiveTicks)
                     ai.SetMode(DesertBatflyAI.Activity.Observe);
                 break;
 
@@ -478,13 +478,13 @@ internal sealed class DB_CombatRuntime
                     drainedWater = 0f;
                     ai.SetMode(DesertBatflyAI.Activity.Attach);
                 }
-                else if (ticks > DesertBatflyTuning.DiveTicks)
+                else if (ticks > DB_Tuning.DiveTicks)
                     Finish(false);
                 break;
 
             case DesertBatflyAI.Activity.Attach:
                 fly.movMode = Fly.MovementMode.Passive;
-                if (ticks >= DesertBatflyTuning.AttachTicks)
+                if (ticks >= DB_Tuning.AttachTicks)
                     Finish(drainedWater > 0.001f);
                 break;
 
@@ -509,7 +509,7 @@ internal sealed class DB_CombatRuntime
                     ApplyInitialRetaliationImpact(chargeTarget);
                     ai.SetMode(DesertBatflyAI.Activity.Interfere);
                 }
-                else if (ticks > DesertBatflyTuning.RetaliationChargeTicks)
+                else if (ticks > DB_Tuning.RetaliationChargeTicks)
                     FinishRetaliation(false);
                 break;
 
@@ -558,9 +558,9 @@ internal sealed class DB_CombatRuntime
         fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
         fly.mainBodyChunk.vel = attachedChunk.vel;
 
-        if (ticks >= DesertBatflyTuning.DrainStartTicks && ticks <= DesertBatflyTuning.DrainEndTicks)
+        if (ticks >= DB_Tuning.DrainStartTicks && ticks <= DB_Tuning.DrainEndTicks)
         {
-            float amount = DesertBatflyTuning.AttackWaterPerSecond / ThirstConstants.SimulationTicksPerSecond;
+            float amount = DB_Tuning.AttackWaterPerSecond / ThirstConstants.SimulationTicksPerSecond;
             bool transferred = true;
             if (target is Player player)
             {
@@ -575,14 +575,14 @@ internal sealed class DB_CombatRuntime
             if (transferred)
             {
                 drainedWater += amount;
-                float fullWindowWater = DesertBatflyTuning.AttackWaterPerSecond *
-                    (DesertBatflyTuning.DrainEndTicks - DesertBatflyTuning.DrainStartTicks + 1f) /
+                float fullWindowWater = DB_Tuning.AttackWaterPerSecond *
+                    (DB_Tuning.DrainEndTicks - DB_Tuning.DrainStartTicks + 1f) /
                     ThirstConstants.SimulationTicksPerSecond;
                 fly.DesertState.Thirst = Mathf.Max(
                     0f,
-                    fly.DesertState.Thirst - DesertBatflyTuning.DrainRelief *
+                    fly.DesertState.Thirst - DB_Tuning.DrainRelief *
                     (amount / Mathf.Max(0.001f, fullWindowWater)));
-                fly.DesertState.Cooldown = DesertBatflyTuning.Cooldown;
+                fly.DesertState.Cooldown = DB_Tuning.Cooldown;
             }
         }
     }
@@ -644,7 +644,7 @@ internal sealed class DB_CombatRuntime
         Vector2 from = target?.mainBodyChunk.pos ?? fly.mainBodyChunk.pos - Vector2.up;
         ClearAttackState();
         ClearTarget();
-        fly.DesertState.Cooldown = Mathf.Max(fly.DesertState.Cooldown, DesertBatflyTuning.RetaliationCooldown);
+        fly.DesertState.Cooldown = Mathf.Max(fly.DesertState.Cooldown, DB_Tuning.RetaliationCooldown);
         retaliationRecovery = success ? 120 : 75;
         ai.BeginCombatEscape(from, success ? 55 : 40);
         fly.mainBodyChunk.vel +=
@@ -659,7 +659,7 @@ internal sealed class DB_CombatRuntime
         ClearTarget();
         fly.DesertState.Cooldown = Mathf.Max(
             fly.DesertState.Cooldown,
-            success ? DesertBatflyTuning.Cooldown : DesertBatflyTuning.FailedCooldown);
+            success ? DB_Tuning.Cooldown : DB_Tuning.FailedCooldown);
         ai.BeginCombatEscape(from, 75);
         fly.mainBodyChunk.vel +=
             Custom.DirVec(from, fly.mainBodyChunk.pos) * 5f + Vector2.up * 3f;
@@ -690,7 +690,7 @@ internal sealed class DB_CombatRuntime
             }
         }
 
-        hasSlot = count < DesertBatflyTuning.AttackSlots;
+        hasSlot = count < DB_Tuning.AttackSlots;
         return hasSlot;
     }
 

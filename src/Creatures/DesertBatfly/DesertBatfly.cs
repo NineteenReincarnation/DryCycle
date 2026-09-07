@@ -11,8 +11,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal DB_Injury Injury => injury ??= new DB_Injury(this);
     internal readonly DesertBatflyAI DesertAI;
     internal readonly DB_Emergence Emergence;
-    internal DesertBatflyState DesertState => (DesertBatflyState)State;
-    internal DesertBatflyPersonality Personality => DesertState.Personality;
+    internal DB_State DesertState => (DB_State)State;
+    internal DB_Personality Personality => DesertState.Personality;
     internal World world => abstractCreature?.world;
 
     private int mealFood = 2;
@@ -31,8 +31,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     internal DesertBatfly(AbstractCreature creature, World world) : base(creature, world)
     {
-        mainBodyChunk.rad = DesertBatflyTuning.Radius * Personality.Size;
-        mainBodyChunk.mass = DesertBatflyTuning.Mass * Personality.Size;
+        mainBodyChunk.rad = DB_Tuning.Radius * Personality.Size;
+        mainBodyChunk.mass = DB_Tuning.Mass * Personality.Size;
         airFriction = 0.975f;
         bites = DesertState.Bites;
         if (DesertState.MealConsumed) eaten = 1;
@@ -87,7 +87,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         UpdateHeldSandStruggle();
 
         DesertState.Thirst = Mathf.Clamp01(
-            DesertState.Thirst + (dead ? 0f : DesertBatflyTuning.ThirstPerTick));
+            DesertState.Thirst + (dead ? 0f : DB_Tuning.ThirstPerTick));
         if (DesertState.Cooldown > 0) DesertState.Cooldown--;
         DesertAI.TickMemory();
         if (!dead)
@@ -143,11 +143,11 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         float movement = Mathf.Clamp01(playerHolder.mainBodyChunk.vel.magnitude / 8f);
         sandStruggleMeter += Personality.SandSpitMeterRate +
-            movement * DesertBatflyTuning.SandSpitMovementBonus;
+            movement * DB_Tuning.SandSpitMovementBonus;
 
         if (sandStruggleMeter < sandSpitThreshold) return;
         sandStruggleMeter = 0f;
-        sandSpitWindup = DesertBatflyTuning.SandSpitWindupTicks;
+        sandSpitWindup = DB_Tuning.SandSpitWindupTicks;
     }
 
     private void EmitSandSpit()
@@ -165,8 +165,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
         float cooldownT = Stable01(0x45D9F3B + sandSpitCycle * 17);
         sandSpitCooldown = Mathf.RoundToInt(Mathf.Lerp(
-            DesertBatflyTuning.SandSpitCooldownMaxTicks,
-            DesertBatflyTuning.SandSpitCooldownMinTicks,
+            DB_Tuning.SandSpitCooldownMaxTicks,
+            DB_Tuning.SandSpitCooldownMinTicks,
             Mathf.Clamp01(Personality.SandSpitDrive * 0.7f + cooldownT * 0.3f)));
 
         sandSpitCycle++;
@@ -177,8 +177,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         float t = Stable01(0x1F123BB5 + sandSpitCycle * 31);
         sandSpitThreshold = Mathf.Lerp(
-            DesertBatflyTuning.SandSpitThresholdMin,
-            DesertBatflyTuning.SandSpitThresholdMax,
+            DB_Tuning.SandSpitThresholdMin,
+            DB_Tuning.SandSpitThresholdMax,
             t);
     }
 
@@ -324,7 +324,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertState.MealConsumed = true;
         ThirstStore.RemoveRuntime(
             player,
-            DesertBatflyTuning.MealWater / ThirstConstants.WaterValuePerPip);
+            DB_Tuning.MealWater / ThirstConstants.WaterValuePerPip);
     }
 
     public override void Die()

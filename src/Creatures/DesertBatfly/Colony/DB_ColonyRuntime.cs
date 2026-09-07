@@ -399,7 +399,7 @@ internal static class DB_ColonyRuntime
             if (!LivingDesertBatfly(creature)) continue;
             IndividualRecord record = RecordFor(creature);
             if (!string.IsNullOrEmpty(record.PendingMigrationColony) ||
-                creature.state is not DesertBatflyState state)
+                creature.state is not DB_State state)
                 continue;
 
             float capability = AbstractPhysicalCapability(state);
@@ -509,7 +509,7 @@ internal static class DB_ColonyRuntime
                     record.PreviousColony, destinationRoom, StringComparison.OrdinalIgnoreCase))
                 formerResidents++;
 
-            if (creature?.state is not DesertBatflyState state ||
+            if (creature?.state is not DB_State state ||
                 !state.SocialBondTarget.HasValue || state.SocialBondStrength <= strongestBond)
                 continue;
             if (BondPartnerOwnedBy(state.SocialBondTarget, destinationRoom))
@@ -554,7 +554,7 @@ internal static class DB_ColonyRuntime
         int node = ColonyNode(room, template);
         WorldCoordinate coordinate = new(room.index, -1, -1, node);
         AbstractCreature creature = new(world, template, null, coordinate, world.game.GetNewID());
-        if (creature.state is DesertBatflyState state) state.InHive = room.batHives > 0;
+        if (creature.state is DB_State state) state.InHive = room.batHives > 0;
         room.AddEntity(creature);
         TrackCreature(creature);
         return creature;
@@ -576,7 +576,7 @@ internal static class DB_ColonyRuntime
     private static int PreferredPopulation(AbstractRoom room, int existing)
     {
         int ecologicalBaseline = 8 + Mathf.Max(1, room?.batHives ?? 0) * 6;
-        int legacyBaseline = DesertBatflyTuning.HivePopulation + DesertBatflyTuning.CurvePopulation;
+        int legacyBaseline = DB_Tuning.HivePopulation + DB_Tuning.CurvePopulation;
         return Mathf.Clamp(Mathf.Max(existing, ecologicalBaseline, legacyBaseline), 6, 40);
     }
 
@@ -632,7 +632,7 @@ internal static class DB_ColonyRuntime
         return string.Equals(record.CurrentColony, colonyRoom, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static float AbstractPhysicalCapability(DesertBatflyState state)
+    private static float AbstractPhysicalCapability(DB_State state)
     {
         if (state == null) return 0f;
         float wingSeverity = Mathf.SmoothStep(0f, 1f, state.WingMean);

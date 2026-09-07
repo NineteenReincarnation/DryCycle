@@ -21,8 +21,8 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         if (creature?.realizedCreature is not DesertBatfly bat) return null;
 
         DesertBatflyAI ai = bat.DesertAI;
-        DesertBatflyState state = bat.DesertState;
-        DesertBatflyPersonality p = bat.Personality;
+        DB_State state = bat.DesertState;
+        DB_Personality p = bat.Personality;
         DB_Injury injury = bat.Injury;
         string controlOwner = ControlOwner(bat);
 
@@ -44,13 +44,13 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.conscious", "Creature.Consious", bat.Consious)
             .Add("field.in_shortcut", "Creature.inShortcut", bat.inShortcut)
             .Add("field.in_den", "AbstractCreature.InDen", creature.InDen)
-            .Add("field.thirst", "DesertBatflyState.Thirst", state.Thirst)
-            .Add("field.cooldown", "DesertBatflyState.Cooldown", state.Cooldown));
+            .Add("field.thirst", "DB_State.Thirst", state.Thirst)
+            .Add("field.cooldown", "DB_State.Cooldown", state.Cooldown));
 
         snapshot.Sections.Add(new AIDebugSection("section.injury")
-            .Add("field.health", "DesertBatflyState.health", state.health)
-            .Add("field.left_wing_injury", "DesertBatflyState.LeftWingInjury", state.LeftWingInjury)
-            .Add("field.right_wing_injury", "DesertBatflyState.RightWingInjury", state.RightWingInjury)
+            .Add("field.health", "DB_State.health", state.health)
+            .Add("field.left_wing_injury", "DB_State.LeftWingInjury", state.LeftWingInjury)
+            .Add("field.right_wing_injury", "DB_State.RightWingInjury", state.RightWingInjury)
             .Add("field.wing_mean", "DB_Injury.WingMean", injury.WingMean)
             .Add("field.wing_asymmetry", "DB_Injury.WingAsymmetry", injury.WingAsymmetry)
             .Add("field.wing_bias", "DB_Injury.WingBias", injury.WingBias)
@@ -67,14 +67,14 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.last_injury_tick", "DB_Injury.LastInjuryTick", injury.LastInjuryTick));
 
         snapshot.Sections.Add(new AIDebugSection("section.personality")
-            .Add("field.sex", "DesertBatflyPersonality.Sex", p.Sex)
-            .Add("field.temperament", "DesertBatflyPersonality.Temperament", p.Temperament)
-            .Add("field.nerve", "DesertBatflyPersonality.Nerve", p.Nerve)
-            .Add("field.conformity", "DesertBatflyPersonality.Conformity", p.Conformity)
-            .Add("field.roost_affinity", "DesertBatflyPersonality.RoostAffinity", p.RoostAffinity)
-            .Add("field.vengeance_affinity", "DesertBatflyPersonality.VengeanceAffinity", p.VengeanceAffinity)
-            .Add("field.sand_affinity", "DesertBatflyPersonality.SandSpitAffinity", p.SandSpitAffinity)
-            .Add("field.aggressive", "DesertBatflyPersonality.Aggressive", p.Aggressive));
+            .Add("field.sex", "DB_Personality.Sex", p.Sex)
+            .Add("field.temperament", "DB_Personality.Temperament", p.Temperament)
+            .Add("field.nerve", "DB_Personality.Nerve", p.Nerve)
+            .Add("field.conformity", "DB_Personality.Conformity", p.Conformity)
+            .Add("field.roost_affinity", "DB_Personality.RoostAffinity", p.RoostAffinity)
+            .Add("field.vengeance_affinity", "DB_Personality.VengeanceAffinity", p.VengeanceAffinity)
+            .Add("field.sand_affinity", "DB_Personality.SandSpitAffinity", p.SandSpitAffinity)
+            .Add("field.aggressive", "DB_Personality.Aggressive", p.Aggressive));
 
         snapshot.Sections.Add(new AIDebugSection("section.ai")
             .Add("field.mode", "DesertBatflyAI.Mode", ai.Mode)
@@ -102,14 +102,14 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         }
 
         snapshot.Sections.Add(new AIDebugSection("section.social")
-            .Add("field.grab_memory", "DesertBatflyState.GrabMemoryStrength", state.GrabMemoryStrength)
-            .Add("field.grief", "DesertBatflyState.GriefStrength", state.GriefStrength)
-            .Add("field.player_trauma", "DesertBatflyState.PlayerTraumaStrength",
+            .Add("field.grab_memory", "DB_State.GrabMemoryStrength", state.GrabMemoryStrength)
+            .Add("field.grief", "DB_State.GriefStrength", state.GriefStrength)
+            .Add("field.player_trauma", "DB_State.PlayerTraumaStrength",
                 state.PlayerTraumaTicks > 0 ? state.PlayerTraumaStrength : 0f)
-            .Add("field.predator_trauma", "DesertBatflyState.PredatorTraumaStrength",
+            .Add("field.predator_trauma", "DB_State.PredatorTraumaStrength",
                 state.PredatorTraumaTicks > 0 ? state.PredatorTraumaStrength : 0f)
-            .Add("field.social_bond", "DesertBatflyState.SocialBondStrength", state.SocialBondStrength)
-            .Add("field.social_bond_target", "DesertBatflyState.SocialBondTarget",
+            .Add("field.social_bond", "DB_State.SocialBondStrength", state.SocialBondStrength)
+            .Add("field.social_bond_target", "DB_State.SocialBondTarget",
                 state.SocialBondTarget.HasValue ? state.SocialBondTarget.Value.ToString() : "—"));
 
         snapshot.Sections.Add(new AIDebugSection("section.movement")
@@ -205,7 +205,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         bool restrained = RestrainedByNonFly(bat);
         bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
-        bool traumatized = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
+        bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
         bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain ||
                      bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost;
@@ -234,18 +234,18 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.trauma",
             traumatized ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             traumatized ? $"active trauma={trauma:0.000}" : null,
-            "DesertBatflyState Trauma", 1));
+            "DB_State Trauma", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.physical_condition",
             injury.BlocksCombat ? AIDebugDecisionState.Warning : AIDebugDecisionState.Pass,
             injury.CombatBlockReason,
             "DB_Injury.BlocksCombat"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.health", AIDebugDecisionState.Active,
-            $"{bat.DesertState.health:0.000}", "DesertBatflyState.health", 1));
+            $"{bat.DesertState.health:0.000}", "DB_State.health", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.left_wing_injury", AIDebugDecisionState.Active,
-            $"{bat.DesertState.LeftWingInjury:0.000}", "DesertBatflyState.LeftWingInjury", 1));
+            $"{bat.DesertState.LeftWingInjury:0.000}", "DB_State.LeftWingInjury", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.right_wing_injury", AIDebugDecisionState.Active,
-            $"{bat.DesertState.RightWingInjury:0.000}", "DesertBatflyState.RightWingInjury", 1));
+            $"{bat.DesertState.RightWingInjury:0.000}", "DB_State.RightWingInjury", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.post_stun_shock", AIDebugDecisionState.Active,
             $"{injury.PostStunShock:0.000}", "DB_Injury.PostStunShock", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("field.physical_capability", AIDebugDecisionState.Active,
@@ -264,7 +264,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.grief",
             bat.DesertState.GriefStrength >= 0.30f ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             bat.DesertState.GriefStrength >= 0.30f ? $"grief={bat.DesertState.GriefStrength:0.000}" : null,
-            "DesertBatflyState.GriefStrength", 1));
+            "DB_State.GriefStrength", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance",
             vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             vengeance ? "Extreme Vengeance active" : null,

@@ -171,21 +171,21 @@ internal static class DB_ThreatMemoryStore
     internal const float SignatureDecayPerCycle = 0.80f;
     internal const float ConfidenceDecayPerCycle = 0.86f;
 
-    private static ConditionalWeakTable<DesertBatflyState, DB_ThreatMemorySet> memories = new();
+    private static ConditionalWeakTable<DB_State, DB_ThreatMemorySet> memories = new();
 
     internal static void ResetRuntime()
     {
-        memories = new ConditionalWeakTable<DesertBatflyState, DB_ThreatMemorySet>();
+        memories = new ConditionalWeakTable<DB_State, DB_ThreatMemorySet>();
     }
 
-    internal static DB_PlayerThreatMemory For(DesertBatflyState state, int playerSlot)
+    internal static DB_PlayerThreatMemory For(DB_State state, int playerSlot)
     {
         if (state == null || playerSlot < 0 || playerSlot >= DB_ThreatMemorySet.PlayerSlots)
             return null;
         return SetFor(state).Players[playerSlot];
     }
 
-    internal static DB_ThreatMemorySet SetFor(DesertBatflyState state)
+    internal static DB_ThreatMemorySet SetFor(DB_State state)
     {
         if (state == null) return null;
         if (memories.TryGetValue(state, out DB_ThreatMemorySet existing))
@@ -198,7 +198,7 @@ internal static class DB_ThreatMemoryStore
     }
 
     internal static void AddEvidence(
-        DesertBatflyState state,
+        DB_State state,
         int playerSlot,
         in DB_ThreatEvidence evidence,
         float multiplier,
@@ -236,7 +236,7 @@ internal static class DB_ThreatMemoryStore
         Sync(state);
     }
 
-    internal static void DecayToCycle(DesertBatflyState state, int currentCycle)
+    internal static void DecayToCycle(DB_State state, int currentCycle)
     {
         if (state == null || currentCycle < 0) return;
         DB_ThreatMemorySet set = SetFor(state);
@@ -274,7 +274,7 @@ internal static class DB_ThreatMemoryStore
         return best < 0.08f ? "None" : bestDimension.ToString();
     }
 
-    internal static void Sync(DesertBatflyState state)
+    internal static void Sync(DB_State state)
     {
         if (state == null || !memories.TryGetValue(state, out DB_ThreatMemorySet set)) return;
         state.unrecognizedSaveStrings[SaveKey] = Serialize(set);
@@ -301,7 +301,7 @@ internal static class DB_ThreatMemoryStore
         return string.Join("/", slots);
     }
 
-    private static void Load(DesertBatflyState state, DB_ThreatMemorySet set)
+    private static void Load(DB_State state, DB_ThreatMemorySet set)
     {
         if (!state.unrecognizedSaveStrings.TryGetValue(SaveKey, out string raw) || string.IsNullOrEmpty(raw))
             return;

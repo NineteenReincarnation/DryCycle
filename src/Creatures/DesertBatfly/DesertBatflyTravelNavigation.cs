@@ -267,7 +267,7 @@ internal static class DesertBatflyTravelNavigation
                 continue;
             }
 
-            float capability = creature.state is DesertBatflyState state ? PhysicalCapability(state) : 1f;
+            float capability = creature.state is DB_State state ? PhysicalCapability(state) : 1f;
             if (!EnsureRouteSafety(world, intent, currentRoom, capability)) continue;
             if (intent.RouteIndex + 1 >= intent.Route.Rooms.Length)
             {
@@ -423,7 +423,7 @@ internal static class DesertBatflyTravelNavigation
                 if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
                     existing.Purpose == DB_TravelPurpose.ColonyMigration)
                     continue;
-                if (creature.state is not DesertBatflyState state) continue;
+                if (creature.state is not DB_State state) continue;
 
                 float capability = PhysicalCapability(state);
                 bool severe = state.WingMean >= 0.60f ||
@@ -881,7 +881,7 @@ internal static class DesertBatflyTravelNavigation
         activeEvacuations.RemoveWhere(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static float PhysicalCapability(DesertBatflyState state)
+    private static float PhysicalCapability(DB_State state)
     {
         if (state == null) return 0f;
         float wingSeverity = Mathf.SmoothStep(0f, 1f, state.WingMean);
@@ -889,7 +889,7 @@ internal static class DesertBatflyTravelNavigation
             0.46f * wingSeverity - 0.15f * state.WingAsymmetry);
     }
 
-    private static int BondDepartureSeed(EntityID id, DesertBatflyState state)
+    private static int BondDepartureSeed(EntityID id, DB_State state)
     {
         if (state?.SocialBondTarget is not EntityID partner || state.SocialBondStrength < 0.50f)
             return id.RandomSeed;

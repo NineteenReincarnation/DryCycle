@@ -57,7 +57,7 @@ internal sealed class DesertBatflyAI
         if (!fly.Consious || RestrainedByNonFly() || fly.inShortcut)
         {
             if (IsInFlyChain(fly))
-                BreakHangChain(null, DesertBatflyTuning.RetreatTicks);
+                BreakHangChain(null, DB_Tuning.RetreatTicks);
             else if (Mode == Activity.Roost)
                 StopRoost(false);
             CancelAttack();
@@ -81,7 +81,7 @@ internal sealed class DesertBatflyAI
 
     private void TickGrabMemory()
     {
-        DesertBatflyState state = fly.DesertState;
+        DB_State state = fly.DesertState;
         if (state.GrabMemoryTicks <= 0) return;
         state.GrabMemoryTicks--;
         if (state.GrabMemoryTicks > 0) return;
@@ -126,10 +126,10 @@ internal sealed class DesertBatflyAI
         escapeFrom = origin;
 
         if (IsInFlyChain(fly))
-            BreakHangChain(source, DesertBatflyTuning.RetreatTicks);
+            BreakHangChain(source, DB_Tuning.RetreatTicks);
         else
         {
-            retreat = DesertBatflyTuning.RetreatTicks;
+            retreat = DB_Tuning.RetreatTicks;
             CancelAttack();
             SetMode(Activity.Escape);
         }
@@ -143,15 +143,15 @@ internal sealed class DesertBatflyAI
     internal void PlayerGrabbed(Player player)
     {
         if (player == null) return;
-        RememberGrabber(player, DesertBatflyTuning.GrabMemoryGain);
+        RememberGrabber(player, DB_Tuning.GrabMemoryGain);
         combat.RecordGrabber(player);
         escapeFrom = player.mainBodyChunk.pos;
 
         if (IsInFlyChain(fly))
-            BreakHangChain(player, DesertBatflyTuning.RetreatTicks);
+            BreakHangChain(player, DB_Tuning.RetreatTicks);
         else
         {
-            retreat = Mathf.Max(retreat, DesertBatflyTuning.RetreatTicks);
+            retreat = Mathf.Max(retreat, DB_Tuning.RetreatTicks);
             CancelAttack();
             SetMode(Activity.Escape);
         }
@@ -163,14 +163,14 @@ internal sealed class DesertBatflyAI
     {
         if (player == null || fly.dead) return;
 
-        bool thrown = releaseSpeed >= DesertBatflyTuning.GrabThrowSpeed;
+        bool thrown = releaseSpeed >= DB_Tuning.GrabThrowSpeed;
         if (thrown)
-            RememberGrabber(player, DesertBatflyTuning.GrabThrowBonus);
+            RememberGrabber(player, DB_Tuning.GrabThrowBonus);
         combat.RecordGrabber(player);
         escapeFrom = player.mainBodyChunk.pos;
 
         float trauma = PlayerTraumaStrength(player);
-        bool traumaBlocksAggression = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
+        bool traumaBlocksAggression = trauma >= DB_Tuning.TraumaAggressionBlock;
         if (fly.Personality.Aggressive && !traumaBlocksAggression)
         {
             combat.ArmRetaliation(
@@ -196,7 +196,7 @@ internal sealed class DesertBatflyAI
 
     private void RememberGrabber(Player player, float gain)
     {
-        DesertBatflyState state = fly.DesertState;
+        DB_State state = fly.DesertState;
         int playerNumber = PlayerNumber(player);
 
         if (state.GrabMemoryPlayer != playerNumber)
@@ -209,15 +209,15 @@ internal sealed class DesertBatflyAI
         state.GrabMemoryStrength = Mathf.Clamp01(
             state.GrabMemoryStrength + Mathf.Max(0f, gain));
         int duration = Mathf.RoundToInt(Mathf.Lerp(
-            DesertBatflyTuning.GrabMemoryMinTicks,
-            DesertBatflyTuning.GrabMemoryMaxTicks,
+            DB_Tuning.GrabMemoryMinTicks,
+            DB_Tuning.GrabMemoryMaxTicks,
             state.GrabMemoryStrength));
         duration = Mathf.RoundToInt(
             duration * Mathf.Lerp(0.95f, 1.12f, fly.Personality.Temperament));
         state.GrabMemoryTicks = Mathf.Clamp(
             Mathf.Max(state.GrabMemoryTicks, duration),
             0,
-            DesertBatflyTuning.GrabMemoryMaxTicks);
+            DB_Tuning.GrabMemoryMaxTicks);
     }
 
     private void RaiseLocalAlarm(Creature threat, Vector2 origin, string reason)
@@ -239,7 +239,7 @@ internal sealed class DesertBatflyAI
         // release/steering later in the same FlyAI frame.
         escapeFrom = source?.mainBodyChunk.pos ??
                      fly.mainBodyChunk.pos - Vector2.up * 20f;
-        retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
+        retreat = Mathf.Max(retreat, DB_Tuning.ApproachRetreatTicks);
     }
 
     internal void CancelPhysicalAttack()
@@ -552,7 +552,7 @@ internal sealed class DesertBatflyAI
         if (danger != null && retreat <= 0)
         {
             escapeFrom = danger.mainBodyChunk.pos;
-            retreat = Mathf.Max(retreat, DesertBatflyTuning.ApproachRetreatTicks);
+            retreat = Mathf.Max(retreat, DB_Tuning.ApproachRetreatTicks);
         }
 
         if (danger != null || retreat > 0)
@@ -734,9 +734,9 @@ internal sealed class DesertBatflyAI
             DB_VisibilityChannel channel = creature is Player
                 ? DB_VisibilityChannel.Player
                 : DB_VisibilityChannel.Creature;
-            if (distance > DesertBatflyTuning.SightRange ||
+            if (distance > DB_Tuning.SightRange ||
                 !DB_VisibilityPolicy.CanObserve(
-                    fly, creature.mainBodyChunk.pos, DesertBatflyTuning.SightRange, channel))
+                    fly, creature.mainBodyChunk.pos, DB_Tuning.SightRange, channel))
                 continue;
 
             CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
@@ -761,8 +761,8 @@ internal sealed class DesertBatflyAI
                 if (remembered && !fly.Personality.Aggressive)
                 {
                     float fearDistance = Mathf.Lerp(
-                        DesertBatflyTuning.GrabFearMinDistance,
-                        DesertBatflyTuning.GrabFearMaxDistance,
+                        DB_Tuning.GrabFearMinDistance,
+                        DB_Tuning.GrabFearMaxDistance,
                         fly.DesertState.GrabMemoryStrength);
                     fearDistance *= Mathf.Lerp(1.12f, 0.72f, fly.Personality.Nerve);
                     if (distance < fearDistance) danger = player;
@@ -805,7 +805,7 @@ internal sealed class DesertBatflyAI
 
     internal bool IsRememberedPlayer(Player player)
     {
-        DesertBatflyState state = fly.DesertState;
+        DB_State state = fly.DesertState;
         return player != null && state.GrabMemoryTicks > 0 &&
             state.GrabMemoryStrength > 0f &&
             state.GrabMemoryPlayer == PlayerNumber(player);
@@ -814,13 +814,13 @@ internal sealed class DesertBatflyAI
     internal bool IsTraumatizedPlayer(Player player)
     {
         return PlayerTraumaStrength(player) >=
-               DesertBatflyTuning.TraumaAggressionBlock;
+               DB_Tuning.TraumaAggressionBlock;
     }
 
     private float PlayerTraumaStrength(Player player)
     {
         if (player == null) return 0f;
-        DesertBatflyState state = fly.DesertState;
+        DB_State state = fly.DesertState;
         int playerNumber = PlayerNumber(player);
         return state.PlayerTraumaTicks > 0 &&
                state.PlayerTraumaPlayer == playerNumber

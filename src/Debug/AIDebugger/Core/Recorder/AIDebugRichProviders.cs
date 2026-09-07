@@ -169,17 +169,17 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.survival","DesertBatfly survival"),
                 D("decision.danger","DesertBatflyAI.HasImmediateDanger",1),
                 D("decision.fear","DesertBatflyIntimidation.HasActiveFearSuppression",1),
-                D("decision.trauma","DesertBatflyState Trauma",1),
+                D("decision.trauma","DB_State Trauma",1),
                 D("decision.physical_condition","DB_Injury.BlocksCombat"),
-                D("field.health","DesertBatflyState.health",1),
-                D("field.left_wing_injury","DesertBatflyState.LeftWingInjury",1),
-                D("field.right_wing_injury","DesertBatflyState.RightWingInjury",1),
+                D("field.health","DB_State.health",1),
+                D("field.left_wing_injury","DB_State.LeftWingInjury",1),
+                D("field.right_wing_injury","DB_State.RightWingInjury",1),
                 D("field.post_stun_shock","DB_Injury.PostStunShock",1),
                 D("field.physical_capability","DB_Injury.PhysicalCapability",1),
                 D("decision.injury_recovery","DB_Injury.RecoveryState"),
                 D("decision.special","DesertBatfly special state"),
                 D("decision.injury","DB_Injury.BlocksCombat",1),
-                D("decision.grief","DesertBatflyState.GriefStrength",1),
+                D("decision.grief","DB_State.GriefStrength",1),
                 D("decision.vengeance","DesertBatflyIntimidation.IsExtremeVengeanceActive",1),
                 D("decision.roost","FlyAI.behavior / DesertBatflyAI.Mode",1),
                 D("decision.retaliation_injury","DB_Injury.BlocksCombat",1),
@@ -203,8 +203,8 @@ internal static class AIDebugRecorderRichProviderRegistry
             }
 
             DesertBatflyAI ai = bat.DesertAI;
-            DesertBatflyState state = bat.DesertState;
-            DesertBatflyPersonality p = bat.Personality;
+            DB_State state = bat.DesertState;
+            DB_Personality p = bat.Personality;
             DB_Injury injury = bat.Injury;
             SetIdentity(fields, creature);
 
@@ -284,7 +284,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             bool restrained = RestrainedByNonFly(bat);
             bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
             float trauma = ActiveTrauma(bat);
-            bool traumatized = trauma >= DesertBatflyTuning.TraumaAggressionBlock;
+            bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
             bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
             bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain || ai.Mode == DesertBatflyAI.Activity.Roost;
 
@@ -341,11 +341,11 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(6,"section.state","field.conscious","Creature.Consious",AIDebugRawValueKind.Bool),
             F(7,"section.state","field.in_shortcut","Creature.inShortcut",AIDebugRawValueKind.Bool),
             F(8,"section.state","field.in_den","AbstractCreature.InDen",AIDebugRawValueKind.Bool),
-            F(9,"section.state","field.thirst","DesertBatflyState.Thirst",AIDebugRawValueKind.Float,true),
-            F(10,"section.state","field.cooldown","DesertBatflyState.Cooldown",AIDebugRawValueKind.Int,true),
-            F(11,"section.injury","field.health","DesertBatflyState.health",AIDebugRawValueKind.Float,true),
-            F(12,"section.injury","field.left_wing_injury","DesertBatflyState.LeftWingInjury",AIDebugRawValueKind.Float,true),
-            F(13,"section.injury","field.right_wing_injury","DesertBatflyState.RightWingInjury",AIDebugRawValueKind.Float,true),
+            F(9,"section.state","field.thirst","DB_State.Thirst",AIDebugRawValueKind.Float,true),
+            F(10,"section.state","field.cooldown","DB_State.Cooldown",AIDebugRawValueKind.Int,true),
+            F(11,"section.injury","field.health","DB_State.health",AIDebugRawValueKind.Float,true),
+            F(12,"section.injury","field.left_wing_injury","DB_State.LeftWingInjury",AIDebugRawValueKind.Float,true),
+            F(13,"section.injury","field.right_wing_injury","DB_State.RightWingInjury",AIDebugRawValueKind.Float,true),
             F(14,"section.injury","field.wing_mean","DB_Injury.WingMean",AIDebugRawValueKind.Float,true),
             F(15,"section.injury","field.wing_asymmetry","DB_Injury.WingAsymmetry",AIDebugRawValueKind.Float,true),
             F(16,"section.injury","field.wing_bias","DB_Injury.WingBias",AIDebugRawValueKind.Float,true),
@@ -359,14 +359,14 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(24,"section.injury","field.last_injury_source","DB_Injury.LastInjurySource",AIDebugRawValueKind.StringId,true),
             F(25,"section.injury","field.last_injury_damage_type","DB_Injury.LastInjuryDamageType",AIDebugRawValueKind.StringId,true),
             F(26,"section.injury","field.last_injury_tick","DB_Injury.LastInjuryTick",AIDebugRawValueKind.Int,true),
-            F(27,"section.personality","field.sex","DesertBatflyPersonality.Sex",AIDebugRawValueKind.StringId,true),
-            F(28,"section.personality","field.temperament","DesertBatflyPersonality.Temperament",AIDebugRawValueKind.Float,true),
-            F(29,"section.personality","field.nerve","DesertBatflyPersonality.Nerve",AIDebugRawValueKind.Float,true),
-            F(30,"section.personality","field.conformity","DesertBatflyPersonality.Conformity",AIDebugRawValueKind.Float,true),
-            F(31,"section.personality","field.roost_affinity","DesertBatflyPersonality.RoostAffinity",AIDebugRawValueKind.Float,true),
-            F(32,"section.personality","field.vengeance_affinity","DesertBatflyPersonality.VengeanceAffinity",AIDebugRawValueKind.Float,true),
-            F(33,"section.personality","field.sand_affinity","DesertBatflyPersonality.SandSpitAffinity",AIDebugRawValueKind.Float,true),
-            F(34,"section.personality","field.aggressive","DesertBatflyPersonality.Aggressive",AIDebugRawValueKind.Bool,true),
+            F(27,"section.personality","field.sex","DB_Personality.Sex",AIDebugRawValueKind.StringId,true),
+            F(28,"section.personality","field.temperament","DB_Personality.Temperament",AIDebugRawValueKind.Float,true),
+            F(29,"section.personality","field.nerve","DB_Personality.Nerve",AIDebugRawValueKind.Float,true),
+            F(30,"section.personality","field.conformity","DB_Personality.Conformity",AIDebugRawValueKind.Float,true),
+            F(31,"section.personality","field.roost_affinity","DB_Personality.RoostAffinity",AIDebugRawValueKind.Float,true),
+            F(32,"section.personality","field.vengeance_affinity","DB_Personality.VengeanceAffinity",AIDebugRawValueKind.Float,true),
+            F(33,"section.personality","field.sand_affinity","DB_Personality.SandSpitAffinity",AIDebugRawValueKind.Float,true),
+            F(34,"section.personality","field.aggressive","DB_Personality.Aggressive",AIDebugRawValueKind.Bool,true),
             F(35,"section.ai","field.mode","DesertBatflyAI.Mode",AIDebugRawValueKind.StringId,true),
             F(36,"section.ai","field.target","DesertBatflyAI.Target",AIDebugRawValueKind.EntityId,true),
             F(37,"section.ai","field.formal_attack","DesertBatflyAI.FormalAttack",AIDebugRawValueKind.Bool,true),
@@ -383,12 +383,12 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(48,"section.flock","field.panic_ratio","DB_FlockSnapshot.PanicRatio",AIDebugRawValueKind.Float,true),
             F(49,"section.flock","field.previous_panic","DB_FlockSnapshot.PreviousPanicRatio",AIDebugRawValueKind.Float,true),
             F(50,"section.flock","field.roost_ratio","DB_FlockSnapshot.RoostRatio",AIDebugRawValueKind.Float,true),
-            F(51,"section.social","field.grab_memory","DesertBatflyState.GrabMemoryStrength",AIDebugRawValueKind.Float,true),
-            F(52,"section.social","field.grief","DesertBatflyState.GriefStrength",AIDebugRawValueKind.Float,true),
-            F(53,"section.social","field.player_trauma","DesertBatflyState.PlayerTraumaStrength",AIDebugRawValueKind.Float,true),
-            F(54,"section.social","field.predator_trauma","DesertBatflyState.PredatorTraumaStrength",AIDebugRawValueKind.Float,true),
-            F(55,"section.social","field.social_bond","DesertBatflyState.SocialBondStrength",AIDebugRawValueKind.Float,true),
-            F(56,"section.social","field.social_bond_target","DesertBatflyState.SocialBondTarget",AIDebugRawValueKind.EntityId,true),
+            F(51,"section.social","field.grab_memory","DB_State.GrabMemoryStrength",AIDebugRawValueKind.Float,true),
+            F(52,"section.social","field.grief","DB_State.GriefStrength",AIDebugRawValueKind.Float,true),
+            F(53,"section.social","field.player_trauma","DB_State.PlayerTraumaStrength",AIDebugRawValueKind.Float,true),
+            F(54,"section.social","field.predator_trauma","DB_State.PredatorTraumaStrength",AIDebugRawValueKind.Float,true),
+            F(55,"section.social","field.social_bond","DB_State.SocialBondStrength",AIDebugRawValueKind.Float,true),
+            F(56,"section.social","field.social_bond_target","DB_State.SocialBondTarget",AIDebugRawValueKind.EntityId,true),
             F(57,"section.movement","field.position","mainBodyChunk.pos",AIDebugRawValueKind.Vector2,true),
             F(58,"section.movement","field.velocity","mainBodyChunk.vel",AIDebugRawValueKind.Vector2,true),
             F(59,"section.movement","field.escape_from","DesertBatflyAI.escapeFrom",AIDebugRawValueKind.Vector2,true),
@@ -413,7 +413,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             else if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape) owner = "Danger / Escape";
             else if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery) owner = "Injury Recovery";
             else if (vengeance) owner = "Vengeance";
-            else if (trauma >= DesertBatflyTuning.TraumaAggressionBlock) owner = "Trauma";
+            else if (trauma >= DB_Tuning.TraumaAggressionBlock) owner = "Trauma";
             else if (bat.DesertState.GriefStrength >= 0.30f) owner = "Grief";
             else if (fear) owner = "Fear / Intimidation";
             else if (roost) owner = "Roost / Chain";
