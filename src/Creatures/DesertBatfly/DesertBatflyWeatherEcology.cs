@@ -199,7 +199,10 @@ internal static class DesertBatflyWeatherEcology
         {
             "LIGHTRAIN" => new Profile(0.04f, 0.10f, 0f, 0.06f),
             "FOG" => new Profile(0.02f, 0.05f, 0f, 0.05f),
-            "DENSEFOG" => new Profile(0.06f, 0.16f, 0.01f, 0.12f),
+            // DenseFog is a temporary usability/shelter problem, not a permanent-habitat
+            // migration signal. High Shelter lets Task09 consider a nearby clearer Refuge;
+            // near-zero Migration prevents one fog event from becoming a ColonyMigration.
+            "DENSEFOG" => new Profile(0.06f, 0.62f, 0.01f, 0.12f),
             "HEAVYRAIN" => new Profile(0.24f, 0.66f, 0.15f, 0.42f),
             "HEATWAVE" => new Profile(0.28f, 0.55f, 0.55f, 0.44f),
             "SANDSTORM" => new Profile(0.62f, 0.88f, 0.72f, 0.82f),
