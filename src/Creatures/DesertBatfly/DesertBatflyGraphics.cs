@@ -46,8 +46,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         patterns = new PatternMark[owner.Personality.PatternCount];
         for (int i = 0; i < patterns.Length; i++)
         {
-            // Roughly two thirds of the markings sit on the moving wing membranes;
-            // the rest break up the body silhouette. Everything is deterministic.
             bool wing = i % 3 != 0;
             int side = random.NextDouble() < 0.5 ? -1 : 1;
             float along = Mathf.Lerp(0.18f, 0.88f, (float)random.NextDouble());
@@ -66,9 +64,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
 
     public override void Update()
     {
-        // Preserve the original grabbed struggle first. During the short sand-spit
-        // wind-up we only exaggerate its existing wing/body motion so the player gets
-        // a readable warning without replacing FlyGraphics with a custom animation.
         base.Update();
         if (!desert.dead && desert.Injury.WingMean > 0f)
         {
@@ -91,8 +86,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        // This creates the exact vanilla FlyBody / FlyWing / FlyWing / FlyEyes set
-        // and keeps all vanilla grabbed/dead/flight animation behavior intact.
         base.InitiateSprites(sLeaser, rCam);
 
         FSprite[] vanilla = sLeaser.sprites;
@@ -101,7 +94,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
 
         for (int i = 0; i < patterns.Length; i++)
         {
-            // Mix dots and broken bars instead of painting the animal one flat color.
             expanded[PatternStart + i] = patterns[i].Shape == 0
                 ? new FSprite("Circle20")
                 : new FSprite("pixel");
@@ -120,7 +112,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
 
     public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
     {
-        // Let vanilla perform its normal setup first, then replace only the colors.
         base.ApplyPalette(sLeaser, rCam, palette);
 
         float darkness = Mathf.Clamp01(palette.darkness * 0.72f);
@@ -141,8 +132,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         for (int i = 0; i < patterns.Length; i++)
         {
             Color mark = Color.Lerp(darkMark, warmMark, patterns[i].Shade);
-            // A little local mixing keeps adjacent markings from becoming a single
-            // solid patch when many aggressive markings overlap.
             sLeaser.sprites[PatternStart + i].color = Color.Lerp(
                 mark,
                 patterns[i].Wing ? wingColor : bodyColor,
@@ -155,8 +144,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
 
     public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
     {
-        // Vanilla owns lowerBody, wing phases, grabbed struggle, death pose and the
-        // base four sprite positions. We deliberately do not reimplement any of it.
         base.DrawSprites(sLeaser, rCam, timeStacker, camPos);
         if (culled || desert.slatedForDeletetion || desert.room != rCam.room || sLeaser.sprites.Length < VanillaSpriteCount) return;
 
@@ -165,7 +152,6 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         float emerge = desert.Emergence.Progress;
         float alpha = Mathf.SmoothStep(0f, 1f, emerge);
 
-        // Vanilla geometry, personality-controlled 1.00x-1.25x scaling.
         sLeaser.sprites[0].scaleX = bodySize;
         sLeaser.sprites[0].scaleY = bodySize;
         sLeaser.sprites[1].scaleX *= size * desert.Personality.WingWidthScale;
@@ -174,6 +160,8 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
         sLeaser.sprites[2].scaleY = size * desert.Personality.WingLengthScale;
         sLeaser.sprites[3].scaleX = bodySize;
         sLeaser.sprites[3].scaleY = bodySize;
+
+        ApplySignalDisplay(sLeaser, timeStacker);
 
         Vector2 head = Vector2.Lerp(desert.mainBodyChunk.lastPos, desert.mainBodyChunk.pos, timeStacker) - camPos;
         Vector2 tail = Vector2.Lerp(lowerBody.lastPos, lowerBody.pos, timeStacker) - camPos;
@@ -250,11 +238,62 @@ internal sealed class DesertBatflyGraphics : FlyGraphics
             mesh.alpha = alpha;
         }
 
-        // Curve emergence fades the entire vanilla silhouette in while its body is
-        // physically moved through the surface. Normal hive emergence stays at 1.
         for (int i = 0; i < VanillaSpriteCount; i++)
             sLeaser.sprites[i].alpha = alpha;
         sLeaser.sprites[1].alpha *= 1f - desert.DesertState.LeftWingInjury * 0.15f;
         sLeaser.sprites[2].alpha *= 1f - desert.DesertState.RightWingInjury * 0.15f;
+    }
+
+    private void ApplySignalDisplay(RoomCamera.SpriteLeaser sLeaser, float timeStacker)
+    {
+        if (!DesertBatflySignalRuntime.TryGetDisplay(desert, out DesertBatflySignalDisplayState display))
+            return;
+
+        float clock = (desert.room?.game?.clock ?? 0) + timeStacker;
+        float intensity = display.Intensity;
+        float pulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.75f);
+        float left = 0f;
+        float right = 0f;
+        float spread = 0f;
+
+        switch (display.Kind)
+        {
+            case DesertBatflySignalKind.AlarmFlutter:
+                left = Mathf.Sin(clock * 1.75f) * (7f + 12f * intensity);
+                right = -left;
+                spread = 0.08f + pulse * 0.12f * intensity;
+                break;
+            case DesertBatflySignalKind.DistressCall:
+                left = Mathf.Sin(clock * 2.25f) * (11f + 15f * intensity);
+                right = Mathf.Sin(clock * 2.25f + Mathf.PI * 0.72f) * (11f + 15f * intensity);
+                spread = 0.14f + pulse * 0.18f * intensity;
+                break;
+            case DesertBatflySignalKind.RallySignal:
+                left = -8f * intensity;
+                right = 8f * intensity;
+                spread = 0.10f + pulse * 0.08f;
+                break;
+            case DesertBatflySignalKind.RoostCall:
+                left = -4f * intensity;
+                right = 4f * intensity;
+                spread = 0.05f;
+                break;
+            case DesertBatflySignalKind.SafeSignal:
+                left = -Mathf.Sin(clock * 0.18f) * 2.5f * intensity;
+                right = -left;
+                spread = pulse * 0.025f;
+                break;
+            case DesertBatflySignalKind.HarassSignal:
+                left = 3f * intensity;
+                right = -3f * intensity;
+                spread = pulse * 0.035f;
+                break;
+        }
+
+        // Visual-only wing posture. No BodyChunk/lowerBody velocity is touched here.
+        sLeaser.sprites[1].rotation += left;
+        sLeaser.sprites[2].rotation += right;
+        sLeaser.sprites[1].scaleX *= 1f + spread;
+        sLeaser.sprites[2].scaleX *= 1f + spread;
     }
 }
