@@ -8,6 +8,8 @@ internal static class DesertBatflyEnvironmentalProfile
     internal const int SandstormAdvisoryTicks = 6800;
     internal const int SandstormPreparationTicks = 4700;
     internal const int SandstormStrongPreparationTicks = 2600;
+    internal const int DeathRainPreparationLeadTicks = 3600;
+    internal const int DeathRainShelterLeadTicks = 1800;
 
     internal static DesertBatflyEnvironmentalWeather Classify(in DesertBatflyWeatherEcologySample sample)
     {
@@ -83,7 +85,28 @@ internal static class DesertBatflyEnvironmentalProfile
             }
         }
 
-        if (weather is DesertBatflyEnvironmentalWeather.IntenseHeat or DesertBatflyEnvironmentalWeather.DeathRain)
+        if (weather == DesertBatflyEnvironmentalWeather.DeathRain)
+        {
+            if (danger >= 0.72f && active >= 0.50f)
+            {
+                reason = "DeathRain lethal local hard survival";
+                return DesertBatflyEnvironmentalPhase.Acute;
+            }
+            if (active >= 0.30f || forecast <= DeathRainShelterLeadTicks)
+            {
+                reason = "DeathRain local sheltering while Task09 owns cross-room safety";
+                return DesertBatflyEnvironmentalPhase.Sheltering;
+            }
+            if (active > 0f || forecast <= DeathRainPreparationLeadTicks)
+            {
+                reason = "DeathRain pre-onset local preparation; Task09 retains travel ownership";
+                return DesertBatflyEnvironmentalPhase.Preparation;
+            }
+            reason = "DeathRain bounded forecast advisory";
+            return DesertBatflyEnvironmentalPhase.Advisory;
+        }
+
+        if (weather == DesertBatflyEnvironmentalWeather.IntenseHeat)
         {
             if (danger >= 0.72f && active >= 0.50f)
             {
@@ -126,14 +149,17 @@ internal static class DesertBatflyEnvironmentalProfile
                 return DesertBatflyEnvironmentalPhase.Advisory;
 
             case DesertBatflyEnvironmentalWeather.HeavyRain:
+                // HeavyRain is deliberately non-lethal Task13 shelter ecology.  It may
+                // contract the room strongly, but it never escalates itself into Acute.
                 if (active >= EnterThreshold(previous, DesertBatflyEnvironmentalPhase.Sheltering, 0.58f, 0.44f))
                 {
-                    reason = "HeavyRain covered-space sheltering";
+                    reason = "HeavyRain covered-space sheltering; Acute reserved for DeathRain";
                     return DesertBatflyEnvironmentalPhase.Sheltering;
                 }
-                if (active >= 0.18f || forecast <= 2200)
+                if (active >= EnterThreshold(previous, DesertBatflyEnvironmentalPhase.Preparation, 0.18f, 0.12f) ||
+                    forecast <= 2200)
                 {
-                    reason = "HeavyRain preparation";
+                    reason = "HeavyRain exposure-aware covered-space preparation";
                     return DesertBatflyEnvironmentalPhase.Preparation;
                 }
                 reason = "HeavyRain advisory";
@@ -172,6 +198,30 @@ internal static class DesertBatflyEnvironmentalProfile
 
         reason = "environment recovered";
         return DesertBatflyEnvironmentalPhase.Recovery;
+    }
+
+    /// <summary>
+    /// Local realized HeavyRain burden.  Roof shelter matters more than side walls;
+    /// injury/shock make exposed travel costly, while personality never turns rain into
+    /// a lethal profile.  The result is realized-only and is not persistent memory.
+    /// </summary>
+    internal static float HeavyRainBurden(
+        float activeIntensity,
+        float rainExposure,
+        float roofShielding,
+        float shelterUrgency,
+        float physicalCapability,
+        float postStunShock,
+        float nerve)
+    {
+        float active = Mathf.Clamp01(activeIntensity);
+        float rain = Mathf.Clamp01(rainExposure);
+        float roof = Mathf.Clamp01(roofShielding);
+        float injury = 1f - Mathf.Clamp01(physicalCapability);
+        float sensitivity = injury * 0.24f + Mathf.Clamp01(postStunShock) * 0.10f + (1f - Mathf.Clamp01(nerve)) * 0.08f;
+        float raw = active * Mathf.Lerp(0.28f, 1f, rain) + Mathf.Clamp01(shelterUrgency) * 0.16f + sensitivity;
+        float roofRelief = Mathf.Lerp(1f, 0.18f, roof);
+        return Mathf.Clamp01(raw * roofRelief);
     }
 
     internal static float VisibilityConfidence(DesertBatflyEnvironmentalWeather weather, float intensity)
