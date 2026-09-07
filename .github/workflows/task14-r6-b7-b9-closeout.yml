@@ -1,24 +1,20 @@
 name: Task14 R6 B7-B9 closeout
-
 on:
   push:
     branches:
       - task14-r6-b1-final
-
 permissions:
   contents: write
-
 jobs:
   closeout:
-    if: contains(github.event.head_commit.message, '[r6-b7-b9-closeout-repair]')
+    if: contains(github.event.head_commit.message, '[r6-b7-b9-closeout-simple]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: task14-r6-b1-final
           fetch-depth: 0
-
-      - name: Revalidate current source state
+      - name: Revalidate
         shell: bash
         run: |
           set -euo pipefail
@@ -27,110 +23,17 @@ jobs:
           test -f src/Creatures/DesertBatfly/Presentation/DB_Graphics.cs
           test -f src/Creatures/DesertBatfly/Threat/DB_ThreatMemory.cs
           test -f src/Creatures/DesertBatfly/Threat/DB_ThreatTactics.cs
-          ! test -e src/Creatures/DesertBatfly/DesertBatflyGraphics.cs
-          ! test -e src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatMemory.cs
-          ! test -e src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTactics.cs
           grep -q 'DCDesertBatflyThreatV1' src/Creatures/DesertBatfly/Threat/DB_ThreatMemory.cs
           git diff --check
-
-      - name: Append progress and R6 status
+      - name: Record progress
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          root = Path('src/Creatures/DesertBatfly')
-          root_count = sum(1 for p in root.glob('DesertBatfly*.cs') if p.is_file())
-          task_re = re.compile(r'Task ?(?:09|10|11|12|13)')
-          task_count = 0
-          for base in [Path('src/Creatures/DesertBatfly'), Path('src/Debug/AIDebugger')]:
-              for p in base.rglob('*.cs'):
-                  try:
-                      text = p.read_text(encoding='utf-8')
-                  except Exception:
-                      continue
-                  task_count += sum(1 for line in text.splitlines() if task_re.search(line))
-
-          progress = f"""
-
-## Continuation run — R6 B7/B8/B9
-
-### Start state
-- Began from branch HEAD `752ea378363e040d5b64a9cd5c430267b9f28131`, with B1-B6 already code-side verified.
-- Reviewed `DesertBatflyGraphics.cs` before migration. Its responsibility remains cohesive: Rain World `FlyGraphics` presentation plus read-only Injury/Signal display inputs.
-
-### Completed
-- R6-B7: `DesertBatflyGraphics.cs` -> `Presentation/DB_Graphics.cs`; production type `DesertBatflyGraphics` -> `DB_Graphics`.
-- R6-B8: `ThreatSignature/DesertBatflyThreatMemory.cs` -> `Threat/DB_ThreatMemory.cs`; migrated memory dimension/player/set/store identities to `DB_*` names.
-- R6-B9: `ThreatSignature/DesertBatflyThreatTactics.cs` -> `Threat/DB_ThreatTactics.cs`; migrated tactical profile/type identities to `DB_*` names.
-- Temporary migration workflows were removed after successful commits.
-
-### Validation
-- B7 GitHub Actions run `34155488424`: SUCCESS.
-- B8 GitHub Actions run `34155529191`: SUCCESS.
-- B9 GitHub Actions run `34155584734`: SUCCESS.
-- Each batch passed exact behavior-preserving source equivalence allowing only intended identity substitutions.
-- Existing R5 bridge/debt retention audit passed after each batch and again at closeout.
-- Existing R6 B1 retention audit passed after each batch and again at closeout.
-- Threat save key remains exactly `DCDesertBatflyThreatV1`; serialized version marker remains `1`; decay constants remain 0.80/0.86.
-- Threat tactics still uses current held-item perception without training persistent memory, retains immediate projectile-evade Arbiter ownership, and routes movement through `DB_FlightMotor`.
-- `git diff --check` passed.
-- Full developer-local .NET Framework/Rain World managed build and live-play validation remain unavailable and are not claimed as passing.
-
-### Self-review findings and fixes
-- No production behavior regression was found in B7-B9.
-- Graphics was explicitly reviewed for cohesion before migration; it was not split merely because it consumes Injury/Signal presentation state.
-- Threat memory and tactics were selected because the migration manifest marks them KEEP/RENAME and their algorithms could be guarded by exact source equivalence.
-- The first B7-B9 closeout workflow failed before job creation because its YAML heredoc body was not indented as YAML block content. No production code or progress file was changed by that failed closeout attempt. This repaired closeout uses a Python append step instead.
-
-### Remaining Task14 requirements
-- R6 remains incomplete: Threat runtime/event/trace migration; Signals; Environment; remaining Social/Roost; Injury; Fear/Vengeance; Core; TravelNavigation responsibility-aware migration; production Task09-Task13 naming cleanup; old-root/dead-code cleanup; final R6 naming/path guard.
-- Current quick inventory after B9: `{root_count}` root-level `DesertBatfly*.cs` files remain; `{task_count}` production/debug source lines still match Task09-Task13 historical labels.
-- R7 performance/debug/full regression/final acceptance remains pending.
-
-### Blockers
-- Full managed build/tests still require developer-local Rain World/BepInEx assemblies.
-- Final behavior/performance acceptance still requires Rain World runtime.
-- These blockers do not prevent additional source-level R6 migration.
-
-### Recommended next hour
-- Continue within Threat before opening a new domain: inspect `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` against the manifest. Do not mechanically rename either if responsibilities still require split or partial EventHub absorption.
-- If Threat runtime is too coupled for one safe unit, choose a smaller KEEP/RENAME leaf such as Environment exposure/profile, then update any guard paths without weakening assertions.
-"""
-          with Path('PROGRESS.md').open('a', encoding='utf-8') as f:
-              f.write(progress)
-
-          status = """
-
-======================================================================
-B7-B9 — Presentation Graphics + Threat leaves
-======================================================================
-
-B7:
-- DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs
-- FlyGraphics behavior retained by exact identity-substitution source equivalence.
-- Validation run 34155488424: SUCCESS.
-
-B8:
-- ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs
-- DB_ThreatDimension / DB_PlayerThreatMemory / DB_ThreatMemorySet / DB_ThreatMemoryStore identities adopted.
-- Save key DCDesertBatflyThreatV1 and serialized version 1 retained.
-- Validation run 34155529191: SUCCESS.
-
-B9:
-- ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs
-- DB_ThreatTacticalProfile / DB_ThreatTactics identities adopted.
-- no input cheating, no held-item persistent-memory training, Arbiter projectile-evade ownership and FlightMotor routing retained.
-- Validation run 34155584734: SUCCESS.
-
-R6 remains in progress. Threat runtime/event ownership, Signals, Environment, remaining domains, final naming cleanup and final R6 guard remain open.
-"""
-          with Path('docs/Discussion/Task_14_R6_DomainMigrationStatus.txt').open('a', encoding='utf-8') as f:
-              f.write(status)
-          PY
-
-      - name: Commit closeout and remove temporary workflow
+          ROOT_COUNT=$(find src/Creatures/DesertBatfly -maxdepth 1 -type f -name 'DesertBatfly*.cs' | wc -l | tr -d ' ')
+          TASK_COUNT=$(grep -RIn --include='*.cs' -E 'Task ?(09|10|11|12|13)' src/Creatures/DesertBatfly src/Debug/AIDebugger 2>/dev/null | wc -l | tr -d ' ' || true)
+          printf '%s\n' '' '## Continuation run — R6 B7/B8/B9' '' '### Start state' '- Began from branch HEAD `752ea378363e040d5b64a9cd5c430267b9f28131`, with B1-B6 already verified.' '- Reviewed `DesertBatflyGraphics.cs` for cohesion before migration; it remained a Presentation owner with read-only Injury/Signal display inputs.' '' '### Completed' '- R6-B7: `DesertBatflyGraphics.cs` -> `Presentation/DB_Graphics.cs`; `DesertBatflyGraphics` -> `DB_Graphics`.' '- R6-B8: `ThreatSignature/DesertBatflyThreatMemory.cs` -> `Threat/DB_ThreatMemory.cs`, including DB_ memory dimension/player/set/store identities.' '- R6-B9: `ThreatSignature/DesertBatflyThreatTactics.cs` -> `Threat/DB_ThreatTactics.cs`, including `DB_ThreatTacticalProfile`.' '- Temporary B7/B8/B9 migration workflows were removed after success.' '' '### Validation' '- B7 GitHub Actions run `34155488424`: SUCCESS.' '- B8 GitHub Actions run `34155529191`: SUCCESS.' '- B9 GitHub Actions run `34155584734`: SUCCESS.' '- Each batch passed exact source-equivalence checks permitting only intended identity substitutions.' '- Existing R5 and R6 retention audits passed after every batch and at closeout.' '- Threat save key remains `DCDesertBatflyThreatV1`; serialized marker remains `1`; decay constants remain 0.80/0.86.' '- Threat tactics retains no held-item memory training, Arbiter projectile-evade ownership, and `DB_FlightMotor` routing.' '- `git diff --check` passed.' '- Full Rain World/.NET Framework managed build and live-play validation remain unavailable and are not claimed as passing.' '' '### Self-review findings and fixes' '- No production behavior regression was found in B7-B9.' '- Two earlier closeout workflow attempts failed before job creation because of YAML multiline formatting; neither changed production code or progress files. This simple closeout replaces them.' '' '### Remaining Task14 requirements' '- R6 remains incomplete: Threat runtime/event/trace; Signals; Environment; remaining Social/Roost; Injury; Fear/Vengeance; Core; TravelNavigation responsibility-aware migration; Task09-Task13 naming cleanup; old-root/dead-code cleanup; final R6 naming/path guard.' "- Current inventory after B9: ${ROOT_COUNT} root-level DesertBatfly*.cs files remain; ${TASK_COUNT} production/debug source lines match Task09-Task13 historical labels." '- R7 performance/debug/full regression/final acceptance remains pending.' '' '### Blockers' '- Full managed build/tests require developer-local Rain World/BepInEx assemblies.' '- Final behavior/performance acceptance requires Rain World runtime.' '' '### Recommended next hour' '- Inspect `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` against the migration manifest before any rename; do not mechanically rename split/partial-absorb owners.' '- If Threat runtime is too coupled, choose a smaller KEEP/RENAME leaf such as Environment exposure/profile and update guard paths without weakening assertions.' >> PROGRESS.md
+          printf '%s\n' '' '======================================================================' 'B7-B9 — Presentation Graphics + Threat leaves' '======================================================================' '- B7: DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs; validation run 34155488424 SUCCESS.' '- B8: ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs; DCDesertBatflyThreatV1 and serialized version 1 retained; run 34155529191 SUCCESS.' '- B9: ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs; no input cheating/no held-item memory training/Arbiter+FlightMotor contracts retained; run 34155584734 SUCCESS.' '- R6 remains in progress; Threat runtime/event, Signals, Environment, remaining domains, naming cleanup and final guard remain open.' >> docs/Discussion/Task_14_R6_DomainMigrationStatus.txt
+      - name: Commit and cleanup
         shell: bash
         run: |
           set -euo pipefail
