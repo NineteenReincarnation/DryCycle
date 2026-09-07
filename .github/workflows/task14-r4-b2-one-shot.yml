@@ -19,12 +19,13 @@ jobs:
           fetch-depth: 0
 
       - name: Apply guarded R4 B2 migration
-        run: python scripts/task14_r4_batch2_apply.py
+        run: python scripts/task14_r4_batch2_apply_v2.py
 
       - name: Validate R4 B2 source contracts
         run: |
           git diff --check
           test ! -e scripts/task14_r4_batch2_apply.py
+          test ! -e scripts/task14_r4_batch2_apply_v2.py
           test ! -e .github/workflows/task14-r4-b2-one-shot.yml
           grep -q 'internal static bool TryGuideNative' src/Creatures/DesertBatfly/Runtime/DB_FlightMotor.cs
           grep -q 'internal static bool TryRetarget' src/Creatures/DesertBatfly/Runtime/DB_FlightMotor.cs
@@ -56,4 +57,4 @@ jobs:
           git commit -m 'Converge R4 domain steering into FlightMotor'
           git push origin HEAD:task14-r4-b2-working
 
-# trigger
+# trigger-v2
