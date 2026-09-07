@@ -278,17 +278,24 @@ internal sealed class DesertBatflyAI
         retaliationCharges = retaliationRecovery = 0;
     }
 
-    internal bool TryInjuryRecovery()
+    internal bool ExecuteInjuryRecoveryOwned()
     {
         DesertBatflyInjury injury = fly.Injury;
-        if (!injury.IsSeverelyInjured || fly.dead || !fly.Consious || fly.room == null ||
-            RestrainedByNonFly() || fly.inShortcut || fly.Emergence?.Active == true || HasImmediateDanger)
+        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery))
+            return false;
+
+        if (!injury.IsSeverelyInjured)
         {
             ClearRecoveryNavigation();
-            injury.SetRecovery(InjuryRecoveryState.None, null, "not severe or immediate survival priority");
+            injury.SetRecovery(InjuryRecoveryState.None, null, "recovered below severe threshold");
             if (Mode == Activity.InjuryRecovery) SetMode(Activity.Flight);
             return false;
         }
+
+        // Higher-priority preemption must not erase recovery state or Task09 intent.
+        if (fly.dead || !fly.Consious || fly.room == null || RestrainedByNonFly() ||
+            fly.inShortcut || fly.Emergence?.Active == true || HasImmediateDanger)
+            return false;
 
         CancelPhysicalAttack();
         SetMode(Activity.InjuryRecovery);
@@ -594,7 +601,7 @@ internal sealed class DesertBatflyAI
         }
 
         if (Mode == Activity.Escape) SetMode(Activity.Flight);
-        if (TryInjuryRecovery()) return;
+        // R3: severe InjuryRecovery movement is owner-gated outside this legacy pipeline.
         if (fly.Injury.BlocksCombat)
         {
             CancelPhysicalAttack();

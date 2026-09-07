@@ -14,6 +14,8 @@ internal static partial class Program
         Type proposal = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorProposal", true);
         Type resolution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorResolution", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
+        Type injuryExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecoveryExecutor", true);
+        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
 
         foreach (string name in new[]
                  {
@@ -118,8 +120,15 @@ internal static partial class Program
               MethodCallOffset(hooksDisable, arbiter, "Reset") >= 0,
             "Task14 R3 FrameContext/Arbiter cache follows Desert Batfly lifecycle");
         Check(MethodCallOffset(updateAI, arbiter, "ResolveFrame") >= 0 &&
+              MethodCallOffset(updateAI, injuryExecutor, "TryExecute") >= 0 &&
               MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0,
-            "Task14 R3 realized Travel is now entered through the central owner resolution path");
+            "Task14 R3 InjuryRecovery and Travel enter through central owner resolution");
+        Check(injuryExecutor.GetMethod("TryExecute", Flags) != null &&
+              desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
+              desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
+            "Task14 R3 severe injury movement has one explicit owner-gated executor surface");
+        Check(MethodCallOffset(desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 InjuryRecovery executor requires same-tick PrimaryOwner");
 
         Type observatory = mod.GetType("DryCycle.Debugging.AI.DesertBatflyDebugSource", true);
         Check(MethodCallOffset(observatory.GetMethod("ControlOwner", Flags), arbiter, "TryGetResolution") >= 0,
@@ -131,6 +140,6 @@ internal static partial class Program
             "Task14 R3 architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Task14 R3 foundation: FrameContext, one-winner priority model, explicit special physics, Travel preflight, Vengeance API and Observatory owner wiring verified. Ordinary single-writer migration remains a later R3 gate.");
+            "Task14 R3: FrameContext/Arbiter plus owner-gated InjuryRecovery and Travel verified. Vengeance/Environment/Social single-writer migration remains open.");
     }
 }

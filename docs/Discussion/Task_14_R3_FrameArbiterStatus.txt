@@ -259,17 +259,22 @@ Read facts -> Proposal -> Arbiter -> selected executor
 
 否则 R3 不能宣称 ordinary single writer。
 
-R3-OPEN-02 — Injury proposal executor
--------------------------------------
+R3-CLOSED-02 — Injury proposal executor（代码侧已收敛）
+--------------------------------------------------------
 
-目前 Arbiter 已能识别 Severe Injury / InjuryRecovery 高于 Travel，
-但现有 InjuryRecovery movement 仍在 DesertBatflyAI.Update 内执行。
+新增 src/Creatures/DesertBatfly/Runtime/DB_InjuryRecoveryExecutor.cs。
 
-后续要把该 executor 独立出来，并验证：
+执行链已改为：
+FrameContext -> Arbiter -> PrimaryOwner=InjuryRecovery -> DB_InjuryRecoveryExecutor。
 
-- severe Injury beats current Travel；
-- TravelIntent 仍保留，不被清除；
-- recovery 结束后 Travel 可恢复。
+- 旧 TryInjuryRecovery 入口删除；
+- DesertBatflyAI.Update 不再自行启动 severe InjuryRecovery movement；
+- ExecuteInjuryRecoveryOwned 必须验证同 tick PrimaryOwner；
+- InjuryRecovery 高于 Travel；
+- 若伤势刚降出 severe 阈值，清理 stale Recovery 后同帧重新仲裁；
+- 不删除 Task09 TravelIntent，因此恢复后 Travel 可重新竞争。
+
+仍需 Rain World 实机验证 severe injury -> recovery -> Travel resume。
 
 R3-OPEN-03 — Vengeance proposal executor
 ----------------------------------------
@@ -394,5 +399,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 foundation 已建立；Travel 已成为第一个真正经 Arbiter 获得 owner 后执行的 domain。】
-【R3 尚未完成；下一阶段是拆 DesertBatflyAI / Injury / Environment / Social 的 decision 与 executor。】
+【R3 foundation 已建立；InjuryRecovery 与 Travel 都必须先获得 Arbiter PrimaryOwner 才执行。】
+【R3 尚未完成；下一阶段继续拆 Vengeance / Environment / Social，并最终消除 ordinary localGoal 多 writer。】

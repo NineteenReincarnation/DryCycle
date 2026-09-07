@@ -190,6 +190,23 @@ internal static class DesertBatflyHooks
         DesertBatflyEnvironmentalIntegration.Register(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.InjuryRecovery)
+        {
+            if (DB_InjuryRecoveryExecutor.TryExecute(desert, ownership))
+            {
+                if (AIDebugTrace.IsWatched(desert.abstractCreature))
+                    AIDebugTrace.RecordChange(desert.abstractCreature, AIDebugEventCategory.Decision,
+                        "PrimaryOwner", ownership.PrimaryOwner, ownership.Reason);
+                DesertBatflySocialLife.SampleTrace(desert);
+                DesertBatflyDebugTrace.Sample(desert);
+                return;
+            }
+
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.InjuryRecovery,
+                "InjuryRecovery executor yielded after current physical recheck");
+        }
+
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
             if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
@@ -217,9 +234,8 @@ internal static class DesertBatflyHooks
                 "Travel executor yielded after preflight / route validation");
         }
 
-        // R3 foundation currently centralizes ownership classification and Travel execution.
-        // Injury/Vengeance/Environment/Social are still being migrated behind proposals;
-        // keep their existing execution order until each domain has a dedicated executor.
+        // R3 has dedicated owner-gated executors for InjuryRecovery and Travel.
+        // Vengeance/Environment/Social remain in the legacy pipeline until migrated.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
         DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
