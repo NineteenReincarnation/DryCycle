@@ -24,11 +24,17 @@ jobs:
           from pathlib import Path
           p = Path('scripts/task14_r2_apply.py')
           s = p.read_text(encoding='utf-8')
-          old = '"    private sealed class ProcessedExplosion\\n",'
-          new = '"    private sealed class ProcessedExplosion { }\\n",'
-          if old not in s:
-              raise SystemExit('expected ProcessedExplosion marker not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+          replacements = [
+              ('"    private sealed class ProcessedExplosion\\n",',
+               '"    private sealed class ProcessedExplosion { }\\n",'),
+              ('"    private static RuntimeState StateFor(DesertBatfly bat)\\n",',
+               '"    private static RuntimeState StateFor(DesertBatfly bat) =>",'),
+          ]
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit('expected guarded marker not found: ' + old)
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8', newline='\n')
           PY
 
       - name: Apply guarded R2 migration
