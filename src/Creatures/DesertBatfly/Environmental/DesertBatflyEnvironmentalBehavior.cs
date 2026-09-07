@@ -509,7 +509,7 @@ internal static class DesertBatflyEnvironmentalBehavior
 
         if (influence.PreferredShelterPoint is not Vector2 shelterPoint) return;
         if (influence.ShelterDrive < 0.28f && !influence.HardSurvival) return;
-        if (bat.DesertAI.IsFormalAttackActive && !influence.HardSurvival) return;
+        if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return;
         if (bat.AI.behavior == FlyAI.Behavior.Chain) return;
 
         Vector2 goal = shelterPoint;
