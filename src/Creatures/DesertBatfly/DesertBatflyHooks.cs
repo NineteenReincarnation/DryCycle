@@ -20,6 +20,7 @@ internal static class DesertBatflyHooks
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
+        DesertBatflyEnvironmentalIntegration.Enable();
         DesertBatflySignalIntegration.Enable();
         DesertBatflySignalVengeanceBridge.Enable();
         DesertBatflyThreatRuntime.Enable();
@@ -71,6 +72,7 @@ internal static class DesertBatflyHooks
         DesertBatflyThreatRuntime.Disable();
         DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
+        DesertBatflyEnvironmentalIntegration.Disable();
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
@@ -189,6 +191,7 @@ internal static class DesertBatflyHooks
 
         orig(self);
         if (self.fly is not DesertBatfly desert) return;
+        DesertBatflyEnvironmentalIntegration.Register(desert);
 
         if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
         {
