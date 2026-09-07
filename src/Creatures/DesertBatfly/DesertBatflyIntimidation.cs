@@ -22,7 +22,7 @@ internal static class DesertBatflyIntimidation
 {
     private enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
     private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
-    private enum SocialRole { None, TrueAvenger, Follower }
+    private enum VengeanceParticipation { None, Avenger, Supporter }
 
     private const float DirectWitnessRadius = 340f;
     private const float SecondaryAlarmRadius = 180f;
@@ -115,7 +115,7 @@ internal static class DesertBatflyIntimidation
         internal FearMemory PredatorFear;
 
         internal VengeanceMode Vengeance;
-        internal SocialRole Role;
+        internal VengeanceParticipation Role;
         internal Creature VengeanceTarget;
         internal DesertBatfly Leader;
         internal DesertBatfly RescueVictim;
@@ -396,9 +396,9 @@ internal static class DesertBatflyIntimidation
         if (room == null || !ValidThreat(threat, room)) return;
 
         bool victimHadState = TryGetVengeanceState(victim, out State victimState);
-        bool victimWasLeader = victimHadState && victimState.Role == SocialRole.TrueAvenger &&
+        bool victimWasLeader = victimHadState && victimState.Role == VengeanceParticipation.Avenger &&
                                victimState.Vengeance != VengeanceMode.None;
-        bool victimWasFollower = victimHadState && victimState.Role == SocialRole.Follower &&
+        bool victimWasFollower = victimHadState && victimState.Role == VengeanceParticipation.Supporter &&
                                  victimState.Vengeance != VengeanceMode.None;
         DesertBatfly victimLeader = victimWasFollower ? victimState.Leader : null;
 
@@ -422,7 +422,7 @@ internal static class DesertBatflyIntimidation
             {
                 DesertBatfly bat = bats[i];
                 if (!TryGetVengeanceState(bat, out State follower) ||
-                    follower.Role != SocialRole.Follower || follower.Leader != victim ||
+                    follower.Role != VengeanceParticipation.Supporter || follower.Leader != victim ||
                     follower.VengeanceTarget != threat)
                     continue;
 
@@ -440,7 +440,7 @@ internal static class DesertBatflyIntimidation
             {
                 DesertBatfly bat = bats[i];
                 if (!TryGetVengeanceState(bat, out State social) ||
-                    social.Role != SocialRole.Follower || social.Leader != victimLeader ||
+                    social.Role != VengeanceParticipation.Supporter || social.Leader != victimLeader ||
                     social.VengeanceTarget != threat)
                     continue;
 
@@ -574,7 +574,7 @@ internal static class DesertBatflyIntimidation
         float socialScale = tier == 0
             ? Mathf.Lerp(0.92f, 1.10f, bat.Personality.Conformity)
             : bat.Personality.SocialFearScale;
-        bool followingThisThreat = state.Role == SocialRole.Follower &&
+        bool followingThisThreat = state.Role == VengeanceParticipation.Supporter &&
                                    state.VengeanceTarget == threat;
         if (followingThisThreat)
             socialScale *= Mathf.Lerp(1.22f, 1.90f, bat.Personality.Conformity);
@@ -689,10 +689,6 @@ internal static class DesertBatflyIntimidation
         if (suppressNewVengeance || !ValidThreat(threat, victim?.room))
             return;
 
-        // Count the whole currently active social group for this target, not merely
-        // the participants created by this event. Without this cross-event count, a
-        // leader surviving multiple nearby deaths could accumulate two new followers
-        // per event and silently grow beyond the intended 1+2 group size.
         List<DesertBatfly> leaders = new(MaxTrueAvengersPerEvent);
         int participants = 0;
         DesertBatfly existingLeader = null;
@@ -704,11 +700,11 @@ internal static class DesertBatflyIntimidation
             if (!TryGetVengeanceState(bat, out State social) ||
                 social.Vengeance == VengeanceMode.None ||
                 social.VengeanceTarget != threat ||
-                social.Role == SocialRole.None)
+                social.Role == VengeanceParticipation.None)
                 continue;
 
             participants++;
-            if (existingLeader == null && social.Role == SocialRole.TrueAvenger)
+            if (existingLeader == null && social.Role == VengeanceParticipation.Avenger)
             {
                 existingLeader = bat;
                 existingLeaderState = social;
@@ -718,10 +714,6 @@ internal static class DesertBatflyIntimidation
         if (existingLeader != null)
         {
             leaders.Add(existingLeader);
-
-            // A leader already disengaging cannot recruit fresh followers from a later
-            // event. Let the existing group finish cleanly instead of turning Withdraw
-            // into an accidental recruitment window.
             if (existingLeaderState.Vengeance == VengeanceMode.Withdraw)
                 return;
         }
@@ -869,7 +861,7 @@ internal static class DesertBatflyIntimidation
         if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
         {
             state.Rage = Mathf.Max(state.Rage, rage);
-            if (state.Role == SocialRole.TrueAvenger)
+            if (state.Role == VengeanceParticipation.Avenger)
                 state.PassesRemaining = Mathf.Max(
                     state.PassesRemaining,
                     drive > 0.70f ? 2 : 1);
@@ -888,7 +880,7 @@ internal static class DesertBatflyIntimidation
         state.PassesRemaining = supportOnly
             ? 0
             : (leader == null && drive > 0.70f ? 2 : 1);
-        state.Role = leader == null ? SocialRole.TrueAvenger : SocialRole.Follower;
+        state.Role = leader == null ? VengeanceParticipation.Avenger : VengeanceParticipation.Supporter;
         state.Vengeance = VengeanceMode.Waiting;
 
         int minDelay = kind == EventKind.PredatorCapture
@@ -915,7 +907,7 @@ internal static class DesertBatflyIntimidation
             return;
         }
 
-        if (state.Role == SocialRole.Follower)
+        if (state.Role == VengeanceParticipation.Supporter)
         {
             if (state.Leader == null || state.Leader.dead || state.Leader.room != bat.room)
             {
@@ -929,11 +921,9 @@ internal static class DesertBatflyIntimidation
             }
 
             if (!TryGetVengeanceState(state.Leader, out State leaderState) ||
-                leaderState.Role != SocialRole.TrueAvenger ||
+                leaderState.Role != VengeanceParticipation.Avenger ||
                 leaderState.VengeanceTarget != target)
             {
-                // The living leader simply finished or changed its mind. Followers copy
-                // that disengagement without treating a normal end as a traumatic defeat.
                 if (state.Vengeance != VengeanceMode.Withdraw)
                     StartWithdraw(state, CombatDrive(bat, state));
             }
@@ -1134,7 +1124,7 @@ internal static class DesertBatflyIntimidation
         float chance = Mathf.Lerp(TongueRescueChanceMin, TongueRescueChanceMax, drive) *
                        Mathf.Lerp(0.92f, 1.10f, bat.Personality.Nerve) *
                        Mathf.Lerp(0.90f, 1.08f, state.Rage);
-        if (state.Role == SocialRole.Follower)
+        if (state.Role == VengeanceParticipation.Supporter)
             chance *= Mathf.Lerp(0.72f, 0.96f, state.Commitment);
 
         DesertBatfly victim = state.RescueVictim;
@@ -1189,7 +1179,7 @@ internal static class DesertBatflyIntimidation
         state.RescueTongue = null;
         state.WasRescuePlan = false;
 
-        if (state.Role == SocialRole.TrueAvenger && state.PassesRemaining > 0 &&
+        if (state.Role == VengeanceParticipation.Avenger && state.PassesRemaining > 0 &&
             target != null && !target.dead)
         {
             state.Vengeance = VengeanceMode.Circle;
@@ -1331,8 +1321,6 @@ internal static class DesertBatflyIntimidation
             int id = player.playerState?.playerNumber ?? 0;
             if (state.PlayerTraumaPlayer != id)
             {
-                // Fixed-size co-op memory retains the stronger currently active PTSD
-                // instead of letting one weak event from another player erase it.
                 if (state.PlayerTraumaTicks > 0 && state.PlayerTraumaStrength > gain)
                     return;
                 state.PlayerTraumaPlayer = id;
@@ -1400,7 +1388,7 @@ internal static class DesertBatflyIntimidation
 
     private static float CombatDrive(DesertBatfly bat, State state)
     {
-        return state.Role == SocialRole.Follower
+        return state.Role == VengeanceParticipation.Supporter
             ? Mathf.Lerp(0.38f, 0.72f, state.Commitment)
             : bat.Personality.VengeanceDrive;
     }
@@ -1452,7 +1440,7 @@ internal static class DesertBatflyIntimidation
     {
         if (state == null) return;
         state.Vengeance = VengeanceMode.None;
-        state.Role = SocialRole.None;
+        state.Role = VengeanceParticipation.None;
         state.VengeanceTarget = null;
         state.Leader = null;
         state.RescueVictim = null;
