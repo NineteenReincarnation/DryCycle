@@ -1,0 +1,200 @@
+name: Task14 R6 B27 SandSpit runtime extraction
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b27-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract held SandSpit runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+
+          src = Path('src/Creatures/DesertBatfly/DesertBatfly.cs')
+          text = src.read_text(encoding='utf-8')
+
+          method_start = text.index('    private void UpdateHeldSandStruggle()')
+          method_end = text.index('    public override void Stun(int ticks)')
+          methods = textwrap.dedent(text[method_start:method_end]).rstrip()
+          methods = methods.replace('private void UpdateHeldSandStruggle()', 'internal void UpdateHeldStruggle()', 1)
+
+          old_hold = (
+              'private void BeginPlayerHold(Player player)\n'
+              '{\n'
+              '    playerHolder = player;\n'
+              '    sandStruggleMeter = 0f;\n'
+              '    sandSpitWindup = 0;\n'
+              '    sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);\n'
+              '    PrepareNextSandThreshold();\n'
+              '}'
+          )
+          new_hold = (
+              'internal bool BeginPlayerHold(Player player)\n'
+              '{\n'
+              '    if (player == null || playerHolder == player) return false;\n'
+              '    playerHolder = player;\n'
+              '    sandStruggleMeter = 0f;\n'
+              '    sandSpitWindup = 0;\n'
+              '    sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);\n'
+              '    PrepareNextSandThreshold();\n'
+              '    return true;\n'
+              '}'
+          )
+          if old_hold not in methods:
+              raise SystemExit('SandSpit BeginPlayerHold block not found')
+          methods = methods.replace(old_hold, new_hold, 1)
+
+          for name in ('Personality', 'room', 'dead', 'Consious', 'inShortcut',
+                       'grabbedBy', 'slatedForDeletetion', 'DesertAI', 'mainBodyChunk'):
+              methods = re.sub(r'(?<!\.)\b' + name + r'\b', 'bat.' + name, methods)
+          methods = methods.replace('\n            this,\n', '\n            bat,\n')
+
+          runtime_header = (
+              'using UnityEngine;\n\n'
+              'namespace DryCycle.Creatures.DesertBatfly;\n\n'
+              '/// <summary>\n'
+              '/// Player-held defensive sand-spit state. Owns struggle meter, windup and cooldown;\n'
+              '/// presentation remains DB_SandBurst and ordinary locomotion remains outside this runtime.\n'
+              '/// </summary>\n'
+              'internal sealed class DB_SandSpitRuntime\n'
+              '{\n'
+              '    private readonly DesertBatfly bat;\n'
+              '    private Player playerHolder;\n'
+              '    private float sandStruggleMeter, sandSpitThreshold;\n'
+              '    private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;\n\n'
+              '    internal bool WindingUp => sandSpitWindup > 0;\n'
+              '    internal int WindupRemaining => sandSpitWindup;\n\n'
+              '    internal DB_SandSpitRuntime(DesertBatfly bat)\n'
+              '    {\n'
+              '        this.bat = bat;\n'
+              '        PrepareNextSandThreshold();\n'
+              '    }\n\n'
+              '    internal void PreUpdate()\n'
+              '    {\n'
+              '        TrackPlayerRelease();\n'
+              '        if (sandSpitCooldown > 0) sandSpitCooldown--;\n'
+              '    }\n\n'
+              '    internal void ClearTransient()\n'
+              '    {\n'
+              '        playerHolder = null;\n'
+              '        sandStruggleMeter = 0f;\n'
+              '        sandSpitWindup = 0;\n'
+              '    }\n\n'
+          )
+          runtime_text = runtime_header + textwrap.indent(methods, '    ') + '\n}\n'
+          out = Path('src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs')
+          out.write_text(runtime_text, encoding='utf-8')
+
+          field_block = (
+              '    private Player playerHolder;\n\n'
+              '    private float sandStruggleMeter, sandSpitThreshold;\n'
+              '    private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;\n\n'
+              '    internal bool SandSpitWindingUp => sandSpitWindup > 0;\n'
+              '    internal int SandSpitWindupRemaining => sandSpitWindup;\n'
+          )
+          replacement_fields = (
+              '    internal readonly DB_SandSpitRuntime SandSpit;\n'
+              '    internal bool SandSpitWindingUp => SandSpit.WindingUp;\n'
+              '    internal int SandSpitWindupRemaining => SandSpit.WindupRemaining;\n'
+          )
+          if field_block not in text:
+              raise SystemExit('SandSpit field block not found')
+          text = text.replace(field_block, replacement_fields, 1)
+          text = text.replace(
+              '        Emergence = new DB_Emergence(this);\n        PrepareNextSandThreshold();',
+              '        Emergence = new DB_Emergence(this);\n        SandSpit = new DB_SandSpitRuntime(this);', 1)
+          text = text.replace(
+              '        TrackPlayerRelease();\n        if (sandSpitCooldown > 0) sandSpitCooldown--;',
+              '        SandSpit.PreUpdate();', 1)
+          text = text.replace('        UpdateHeldSandStruggle();', '        SandSpit.UpdateHeldStruggle();', 1)
+
+          start = text.index('    private void UpdateHeldSandStruggle()')
+          end = text.index('    public override void Stun(int ticks)')
+          text = text[:start] + text[end:]
+
+          old_grab = (
+              '        if (grasp?.grabber is Player player)\n'
+              '        {\n'
+              '            if (playerHolder != player)\n'
+              '            {\n'
+              '                BeginPlayerHold(player);\n'
+              '                DesertAI.PlayerGrabbed(player);\n'
+              '            }\n'
+              '        }'
+          )
+          new_grab = (
+              '        if (grasp?.grabber is Player player)\n'
+              '        {\n'
+              '            if (SandSpit.BeginPlayerHold(player))\n'
+              '                DesertAI.PlayerGrabbed(player);\n'
+              '        }'
+          )
+          if old_grab not in text:
+              raise SystemExit('Player grab SandSpit block not found')
+          text = text.replace(old_grab, new_grab, 1)
+
+          transient = '        playerHolder = null;\n        sandStruggleMeter = 0f;\n        sandSpitWindup = 0;'
+          if text.count(transient) != 2:
+              raise SystemExit('Expected Die/Destroy SandSpit transient blocks not found twice')
+          text = text.replace(transient, '        SandSpit.ClearTransient();')
+          src.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate SandSpit ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          creature=src/Creatures/DesertBatfly/DesertBatfly.cs
+          runtime=src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+          test -f "$runtime"
+          grep -q 'internal sealed class DB_SandSpitRuntime' "$runtime"
+          grep -q 'internal bool BeginPlayerHold' "$runtime"
+          grep -q 'internal void UpdateHeldStruggle' "$runtime"
+          grep -q 'internal void PreUpdate' "$runtime"
+          grep -q 'internal void ClearTransient' "$runtime"
+          grep -q 'DB_SandBurst.Emit' "$runtime"
+          grep -q 'DB_Tuning.SandSpitWindupTicks' "$runtime"
+          grep -q 'DB_Tuning.SandSpitCooldownMaxTicks' "$runtime"
+          grep -q 'internal readonly DB_SandSpitRuntime SandSpit' "$creature"
+          grep -q 'SandSpit.PreUpdate()' "$creature"
+          grep -q 'SandSpit.UpdateHeldStruggle()' "$creature"
+          grep -q 'SandSpit.BeginPlayerHold(player)' "$creature"
+          test "$(grep -c 'SandSpit.ClearTransient()' "$creature")" -eq 2
+          if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' "$creature"; then
+            echo 'Creature shell still owns SandSpit runtime state.' >&2
+            exit 1
+          fi
+          grep -q 'IPlayerEdible.FoodPoints' "$creature"
+          grep -q 'DB_EventHub.RecordConsumptionAttribution' "$creature"
+          ! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$runtime"
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b27-sandspit-runtime.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B27 extract SandSpit runtime [r6-b27-done]'
+          git push origin HEAD:task14-r6-b1-final
