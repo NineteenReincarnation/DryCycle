@@ -151,9 +151,9 @@ internal static class DesertBatflyEnvironmentalBehavior
         IntVector2 currentTile = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
         float visibility = context.Phase == DesertBatflyEnvironmentalPhase.Recovery
             ? RecoveryVisibility(roomState, tick)
-            : DesertBatflyEnvironmentalProfile.VisibilityConfidence(context.Weather, context.ActiveIntensity);
-        DesertBatflyEnvironmentalExposureSample exposure =
-            DesertBatflyEnvironmentalExposure.Sample(bat.room, currentTile, visibility);
+            : DB_EnvironmentProfile.VisibilityConfidence(context.Weather, context.ActiveIntensity);
+        DB_EnvironmentExposureSample exposure =
+            DB_EnvironmentExposure.Sample(bat.room, currentTile, visibility);
 
         if (context.Weather is DesertBatflyEnvironmentalWeather.HeatWave or DesertBatflyEnvironmentalWeather.IntenseHeat &&
             context.ActiveIntensity > 0f)
@@ -190,8 +190,8 @@ internal static class DesertBatflyEnvironmentalBehavior
         float groupCohesion = Mathf.Lerp(1f, 0.78f, phasePressure);
         float radiusMultiplier = Mathf.Lerp(1f, 0.38f, phasePressure);
         float navUncertainty = context.Phase == DesertBatflyEnvironmentalPhase.Recovery
-            ? DesertBatflyEnvironmentalProfile.NavigationUncertainty(context.Weather, 1f) * (1f - RecoveryVisibility(roomState, tick))
-            : DesertBatflyEnvironmentalProfile.NavigationUncertainty(context.Weather, context.ActiveIntensity);
+            ? DB_EnvironmentProfile.NavigationUncertainty(context.Weather, 1f) * (1f - RecoveryVisibility(roomState, tick))
+            : DB_EnvironmentProfile.NavigationUncertainty(context.Weather, context.ActiveIntensity);
         float obstacleScale = Mathf.Clamp01(1f - navUncertainty * 0.72f);
         float homeReturn = 0f;
         float burrow = 0f;
@@ -325,7 +325,7 @@ internal static class DesertBatflyEnvironmentalBehavior
     private static void ApplyWeatherProfile(
         DesertBatfly bat,
         in DesertBatflyEnvironmentalRoomContext context,
-        in DesertBatflyEnvironmentalExposureSample exposure,
+        in DB_EnvironmentExposureSample exposure,
         float heatExposure01,
         float heatTolerance,
         ref float shelterDrive,
@@ -389,14 +389,14 @@ internal static class DesertBatflyEnvironmentalBehavior
                 radiusMultiplier = Mathf.Lerp(0.58f, 0.28f, i);
                 roostMultiplier = Mathf.Lerp(1.35f, 1.90f, i);
                 homeReturn = Mathf.Lerp(0.20f, 0.72f, i);
-                navUncertainty = DesertBatflyEnvironmentalProfile.NavigationUncertainty(context.Weather, i);
-                obstacleScale = DesertBatflyEnvironmentalProfile.ObstacleAnticipationScale(context.Weather, i);
+                navUncertainty = DB_EnvironmentProfile.NavigationUncertainty(context.Weather, i);
+                obstacleScale = DB_EnvironmentProfile.ObstacleAnticipationScale(context.Weather, i);
                 reason = "DenseFog: navigation uncertainty / Home and Roost bias";
                 break;
 
             case DesertBatflyEnvironmentalWeather.HeavyRain:
             {
-                float rainBurden = DesertBatflyEnvironmentalProfile.HeavyRainBurden(
+                float rainBurden = DB_EnvironmentProfile.HeavyRainBurden(
                     i,
                     exposure.RainExposure,
                     exposure.RoofShielding,
@@ -439,9 +439,9 @@ internal static class DesertBatflyEnvironmentalBehavior
 
             case DesertBatflyEnvironmentalWeather.HeatWave:
             {
-                heatAgitation = DesertBatflyEnvironmentalProfile.HeatAgitation(i) * Mathf.Lerp(0.58f, 1.20f, temperament) * Mathf.Lerp(0.82f, 1.10f, nerve);
-                heatShelter = DesertBatflyEnvironmentalProfile.HeatShelterDrive(i) * Mathf.Lerp(1.18f, 0.80f, heatTolerance);
-                thermalExhaustion = DesertBatflyEnvironmentalProfile.ThermalExhaustion(i, heatExposure01) * Mathf.Lerp(1.18f, 0.72f, heatTolerance);
+                heatAgitation = DB_EnvironmentProfile.HeatAgitation(i) * Mathf.Lerp(0.58f, 1.20f, temperament) * Mathf.Lerp(0.82f, 1.10f, nerve);
+                heatShelter = DB_EnvironmentProfile.HeatShelterDrive(i) * Mathf.Lerp(1.18f, 0.80f, heatTolerance);
+                thermalExhaustion = DB_EnvironmentProfile.ThermalExhaustion(i, heatExposure01) * Mathf.Lerp(1.18f, 0.72f, heatTolerance);
                 shelterDrive = Mathf.Clamp01(Mathf.Max(shelterDrive, heatShelter + thermalExhaustion * 0.45f));
                 openAversion = Mathf.Clamp01(Mathf.Max(openAversion, heatShelter * 0.72f));
                 float activeAggression = Mathf.Clamp01(heatAgitation * (1f - thermalExhaustion) * (1f - shelterDrive * 0.62f));
@@ -499,7 +499,7 @@ internal static class DesertBatflyEnvironmentalBehavior
                 burrow = Mathf.Clamp01(0.28f + context.ShelterUrgency * 0.62f);
                 shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.36f, 0.92f, Mathf.Max(i, context.ShelterUrgency)));
                 openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.55f, 0.96f, Mathf.Max(i, context.ShelterUrgency)));
-                migrationSuppression = Mathf.Max(0f, DesertBatflyEnvironmentalProfile.SandstormMigrationSuppression(
+                migrationSuppression = Mathf.Max(0f, DB_EnvironmentProfile.SandstormMigrationSuppression(
                     context.Weather, DesertBatflyEnvironmentalRoomRuntime.For(bat.room).WeatherSample));
                 roostMultiplier = Mathf.Lerp(1.45f, 2.65f, shelterDrive);
                 harassMultiplier = Mathf.Lerp(0.68f, 0.08f, shelterDrive);
@@ -652,7 +652,7 @@ internal static class DesertBatflyEnvironmentalBehavior
     private static float RecoveryVisibility(DesertBatflyEnvironmentalRoomRuntime.RoomState state, int tick)
     {
         float progress = DesertBatflyEnvironmentalRoomRuntime.RecoveryProgress(state, tick);
-        float worst = DesertBatflyEnvironmentalProfile.VisibilityConfidence(state.LastWeather, 1f);
+        float worst = DB_EnvironmentProfile.VisibilityConfidence(state.LastWeather, 1f);
         return Mathf.Lerp(worst, 1f, progress);
     }
 
@@ -692,8 +692,8 @@ internal static class DesertBatflyEnvironmentalBehavior
         state.LastSecondaryMoistureTick = tick;
 
         IntVector2 tile = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
-        DesertBatflyEnvironmentalExposureSample exposure =
-            DesertBatflyEnvironmentalExposure.Sample(bat.room, tile, 1f);
+        DB_EnvironmentExposureSample exposure =
+            DB_EnvironmentExposure.Sample(bat.room, tile, 1f);
         if (exposure.RainExposure < 0.55f) return;
 
         float rain = roomState.WeatherAxes.LightRainIntensity;
@@ -761,7 +761,7 @@ internal static class DesertBatflyEnvironmentalBehavior
     private static void ApplyLightRainMoisture(
         DesertBatfly bat,
         in DesertBatflyEnvironmentalRoomContext context,
-        in DesertBatflyEnvironmentalExposureSample exposure)
+        in DB_EnvironmentExposureSample exposure)
     {
         bool lightRain = context.Weather == DesertBatflyEnvironmentalWeather.LightRain;
         bool tolerableHeavyRain = context.Weather == DesertBatflyEnvironmentalWeather.HeavyRain &&

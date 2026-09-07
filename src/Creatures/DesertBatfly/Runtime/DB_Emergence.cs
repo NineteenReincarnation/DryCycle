@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertBatflyEmergence
+internal sealed class DB_Emergence
 {
     private readonly DesertBatfly fly;
     private Vector2 surface, normal;
@@ -12,7 +12,7 @@ internal sealed class DesertBatflyEmergence
     internal bool Active { get; private set; }
     internal float Progress => !Active ? 1f : Mathf.Clamp01((age - 12f) / (DesertBatflyTuning.EmergenceTicks - 12f));
 
-    internal DesertBatflyEmergence(DesertBatfly fly) { this.fly = fly; }
+    internal DB_Emergence(DesertBatfly fly) { this.fly = fly; }
 
     internal void Begin(Vector2 point, Vector2 outward)
     {

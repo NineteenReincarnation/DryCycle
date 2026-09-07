@@ -10,7 +10,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private DesertBatflyInjury injury;
     internal DesertBatflyInjury Injury => injury ??= new DesertBatflyInjury(this);
     internal readonly DesertBatflyAI DesertAI;
-    internal readonly DesertBatflyEmergence Emergence;
+    internal readonly DB_Emergence Emergence;
     internal DesertBatflyState DesertState => (DesertBatflyState)State;
     internal DesertBatflyPersonality Personality => DesertState.Personality;
     internal World world => abstractCreature?.world;
@@ -37,7 +37,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         bites = DesertState.Bites;
         if (DesertState.MealConsumed) eaten = 1;
         DesertAI = new DesertBatflyAI(this);
-        Emergence = new DesertBatflyEmergence(this);
+        Emergence = new DB_Emergence(this);
         PrepareNextSandThreshold();
     }
 

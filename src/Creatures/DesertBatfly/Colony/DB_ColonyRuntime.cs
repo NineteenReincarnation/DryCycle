@@ -225,7 +225,7 @@ internal static class DB_ColonyRuntime
         RebuildWorldIndex(world);
         DB_RefugePolicy.Reset();
 
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DB_Definition.CreatureType);
         for (int i = 0; i < colonyRooms.Count; i++)
         {
             AbstractRoom room = colonyRooms[i];
@@ -450,7 +450,7 @@ internal static class DB_ColonyRuntime
         destination = null;
         route = default;
         AbstractRoom sourceRoom = FindRoom(world, source.RoomName);
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DB_Definition.CreatureType);
         if (sourceRoom == null || template == null) return false;
 
         float best = float.NegativeInfinity;
@@ -540,7 +540,7 @@ internal static class DB_ColonyRuntime
 
         float roll = Stable01(saveSeed, cycle, colony.Key, 0x51A7);
         if (roll > colony.RecoveryChance()) return;
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DB_Definition.CreatureType);
         AbstractCreature created = CreateAbstract(world, room, template);
         if (created == null) return;
         IndividualRecord record = RecordFor(created);
@@ -761,7 +761,7 @@ internal static class DB_ColonyRuntime
         IsDesertBatfly(creature) && creature.state?.alive != false && !creature.slatedForDeletion;
 
     private static bool IsDesertBatfly(AbstractCreature creature) =>
-        creature?.creatureTemplate?.type == DesertBatflyDefinition.CreatureType;
+        creature?.creatureTemplate?.type == DB_Definition.CreatureType;
 
     private static bool IsPeach(Creature creature) =>
         ModManager.Watcher && creature is Lizard lizard && lizard.Template?.type == WatcherEnums.CreatureTemplateType.PeachLizard;

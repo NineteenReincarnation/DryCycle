@@ -71,7 +71,7 @@ internal static partial class Program
               behavior.GetMethod("VisibilityScale", Flags) != null,
             "Task13 exposes heat attack, migration suppression and visibility influences to existing systems");
 
-        Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalProfile", true);
+        Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentProfile", true);
         int advisory = (int)profile.GetField("SandstormAdvisoryTicks", Flags).GetRawConstantValue();
         int preparation = (int)profile.GetField("SandstormPreparationTicks", Flags).GetRawConstantValue();
         int strong = (int)profile.GetField("SandstormStrongPreparationTicks", Flags).GetRawConstantValue();
@@ -188,7 +188,7 @@ internal static partial class Program
                  {
                      behavior, roomRuntime, profile, environmentalPolicy,
                      visibilityPolicy, weaponPerception,
-                     mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalExposure", true)
+                     mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExposure", true)
                  })
             Check(!TypeCallsTask13Forbidden(type),
                 "Task13 type " + type.Name + " has no RoomSettings/Input/BodyChunk.vel or cross-room LeaveRoom ownership");

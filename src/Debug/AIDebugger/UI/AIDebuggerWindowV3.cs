@@ -398,7 +398,7 @@ internal sealed class AIDebuggerWindowV3
                     Row(AIDebugLocalization.T("field.position"), AIDebugFormat.Value(f.Position));
                     Row(AIDebugLocalization.T("field.velocity"), AIDebugFormat.Value(f.Velocity));
                     Row(AIDebugLocalization.T("field.local_goal"), AIDebugFormat.Value(f.LocalGoal));
-                    if (selected?.realizedCreature is DesertBatfly || selected?.creatureTemplate?.type == DesertBatflyDefinition.CreatureType)
+                    if (selected?.realizedCreature is DesertBatfly || selected?.creatureTemplate?.type == DB_Definition.CreatureType)
                     {
                         Row(AIDebugLocalization.T("field.health"), f.Health.ToString("0.000"));
                         Row(AIDebugLocalization.T("field.left_wing_injury"), f.LeftWing.ToString("0.000"));

@@ -347,7 +347,7 @@ internal static partial class Program
         for (int i = 0; i <= 60; i++) curve.collisionPoints[i] = new Vector2(i * 10f, 100f);
         room.terrain.terrainList.Add(curve);
         var sandGeometry = new List<(Vector2[], Vector2[])> { (top, bottom) };
-        Type emergence = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEmergence", true);
+        Type emergence = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Emergence", true);
         var validPath = emergence.GetMethod("ValidPath", Flags);
         bool Path(float x, Vector2 outward) => (bool)validPath.Invoke(null, new object[] { room, sandGeometry, new Vector2(x, 100f), outward });
         Check(Path(300f, Vector2.up), "real terrain accepts clear outward emergence");

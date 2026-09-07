@@ -7,7 +7,7 @@ internal static partial class Program
     {
         Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalPhase", true);
         Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalWeather", true);
-        Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalProfile", true);
+        Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentProfile", true);
         Type ecologySample = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcologySample", true);
         Type eventKind = mod.GetType("DryCycle.Weather.Scheduling.WeatherScheduleEventKind", true);
         object weatherKind = Enum.Parse(eventKind, "Weather");

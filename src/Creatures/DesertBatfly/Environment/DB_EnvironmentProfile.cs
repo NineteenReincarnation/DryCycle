@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflyEnvironmentalProfile
+internal static class DB_EnvironmentProfile
 {
     internal const int SandstormAdvisoryTicks = 6800;
     internal const int SandstormPreparationTicks = 4700;

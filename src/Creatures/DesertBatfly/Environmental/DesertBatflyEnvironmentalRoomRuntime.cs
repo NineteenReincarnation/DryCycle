@@ -52,7 +52,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     private sealed class AnchorCandidate
     {
         internal IntVector2 Tile;
-        internal DesertBatflyEnvironmentalExposureSample Exposure;
+        internal DB_EnvironmentExposureSample Exposure;
         internal bool Roost;
         internal bool Hive;
         internal float Score;
@@ -155,7 +155,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         DesertBatflyEnvironmentalWeather weather)
     {
         if (anchor == null) return 0f;
-        DesertBatflyEnvironmentalExposureSample e = anchor.Exposure;
+        DB_EnvironmentExposureSample e = anchor.Exposure;
         return weather switch
         {
             DesertBatflyEnvironmentalWeather.LightRain => e.RoofShielding * 0.75f + e.Enclosure * 0.25f,
@@ -306,7 +306,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             ? DesertBatflyWeatherEcology.SampleTask13Axes(room.world, room.abstractRoom)
             : DesertBatflyTask13WeatherAxesSample.None;
 
-        DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(sample);
+        DesertBatflyEnvironmentalWeather weather = DB_EnvironmentProfile.Classify(sample);
         DesertBatflyWeatherEcologySample phaseSample = sample;
 
         if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
@@ -327,7 +327,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             state.LastWeather = weather;
             state.RecoveryStartTick = -1;
             state.RecoveryDurationTicks = 0;
-            DesertBatflyEnvironmentalPhase candidate = DesertBatflyEnvironmentalProfile.ResolvePhase(
+            DesertBatflyEnvironmentalPhase candidate = DB_EnvironmentProfile.ResolvePhase(
                 weather, phaseSample, previous, out string reason);
             DesertBatflyEnvironmentalPhase phase = ApplyPhaseHold(state, candidate, tick, ref reason);
             SetContext(state, new DesertBatflyEnvironmentalRoomContext(
@@ -456,10 +456,10 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             Room.Tile current = room.GetTile(tile);
             if (current.Solid || current.AnyWater) continue;
 
-            DesertBatflyEnvironmentalExposureSample exposure =
-                DesertBatflyEnvironmentalExposure.Sample(room, tile, 1f);
-            bool roost = DesertBatflyEnvironmentalExposure.RoostCompatibilityHint(room, tile);
-            bool hive = DesertBatflyEnvironmentalExposure.NearHive(room, tile);
+            DB_EnvironmentExposureSample exposure =
+                DB_EnvironmentExposure.Sample(room, tile, 1f);
+            bool roost = DB_EnvironmentExposure.RoostCompatibilityHint(room, tile);
+            bool hive = DB_EnvironmentExposure.NearHive(room, tile);
             float score = 1f - exposure.Exposure;
             score += exposure.Enclosure * 0.22f;
             if (roost) score += 0.08f;

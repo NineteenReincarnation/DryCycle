@@ -4,10 +4,10 @@ using Watcher;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertBatflyDefinition : CreatureDefinition
+internal sealed class DB_Definition : CreatureDefinition
 {
     internal static readonly CreatureTemplate.Type CreatureType = new("DesertBatfly", true);
-    internal DesertBatflyDefinition() : base(CreatureType) { }
+    internal DB_Definition() : base(CreatureType) { }
 
     internal override CreatureTemplate CreateTemplate()
     {

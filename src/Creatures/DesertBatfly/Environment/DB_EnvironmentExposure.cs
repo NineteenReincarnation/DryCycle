@@ -2,18 +2,18 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflyEnvironmentalExposure
+internal static class DB_EnvironmentExposure
 {
     private const int RoofProbeTiles = 8;
     private const int SideProbeTiles = 6;
 
-    internal static DesertBatflyEnvironmentalExposureSample Sample(
+    internal static DB_EnvironmentExposureSample Sample(
         Room room,
         IntVector2 tile,
         float visibilityConfidence)
     {
         if (room == null || !InBounds(room, tile) || room.GetTile(tile).Solid)
-            return new DesertBatflyEnvironmentalExposureSample(
+            return new DB_EnvironmentExposureSample(
                 1f, 0f, 0f, 0f, 0f, 0f, visibilityConfidence);
 
         float roof = ProbeRoof(room, tile);
@@ -24,7 +24,7 @@ internal static class DesertBatflyEnvironmentalExposure
         float exposure = Mathf.Clamp01(1f - (roof * 0.46f + side * 0.24f + enclosure * 0.30f));
         float rainExposure = Mathf.Clamp01(1f - roof);
 
-        return new DesertBatflyEnvironmentalExposureSample(
+        return new DB_EnvironmentExposureSample(
             exposure,
             roof,
             side,

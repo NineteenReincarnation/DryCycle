@@ -181,7 +181,7 @@ internal readonly struct DesertBatflyEnvironmentalInfluence
         "calm / no Task13 influence");
 }
 
-internal readonly struct DesertBatflyEnvironmentalExposureSample
+internal readonly struct DB_EnvironmentExposureSample
 {
     internal readonly float Exposure;
     internal readonly float RoofShielding;
@@ -191,7 +191,7 @@ internal readonly struct DesertBatflyEnvironmentalExposureSample
     internal readonly float RainExposure;
     internal readonly float VisibilityConfidence;
 
-    internal DesertBatflyEnvironmentalExposureSample(
+    internal DB_EnvironmentExposureSample(
         float exposure,
         float roofShielding,
         float sideShielding,
@@ -215,7 +215,7 @@ internal sealed class DesertBatflyShelterAnchor
     internal readonly int Id;
     internal readonly IntVector2 Tile;
     internal readonly Vector2 Position;
-    internal readonly DesertBatflyEnvironmentalExposureSample Exposure;
+    internal readonly DB_EnvironmentExposureSample Exposure;
     internal readonly bool RoostCompatible;
     internal readonly bool NearHive;
     internal float Crowding;
@@ -224,7 +224,7 @@ internal sealed class DesertBatflyShelterAnchor
         int id,
         IntVector2 tile,
         Vector2 position,
-        DesertBatflyEnvironmentalExposureSample exposure,
+        DB_EnvironmentExposureSample exposure,
         bool roostCompatible,
         bool nearHive)
     {

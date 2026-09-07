@@ -9,7 +9,7 @@ internal static partial class Program
     {
         // R0 protects external/game-visible identities before DB_ source renaming begins.
         Type definitionType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyDefinition", true);
+            "DryCycle.Creatures.DesertBatfly.DB_Definition", true);
         var creatureType = (CreatureTemplate.Type)definitionType.GetField("CreatureType", Flags).GetValue(null);
         Check(creatureType != null && creatureType.value == "DesertBatfly",
             "Task14 R0 freezes CreatureTemplate.Type value DesertBatfly");

@@ -366,7 +366,7 @@ internal static class DesertBatflyTravelNavigation
     {
         if (world?.region == null || world.abstractRooms == null) return;
         OnWorldChangedIfNeeded(world);
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DB_Definition.CreatureType);
         if (template == null) return;
 
         List<DB_ColonyState> colonies = new();
@@ -381,7 +381,7 @@ internal static class DesertBatflyTravelNavigation
             if (home == null) continue;
             DesertBatflyWeatherEcologySample hazard = DesertBatflyWeatherEcology.Sample(world, home);
             DesertBatflyEnvironmentalWeather environmentalWeather =
-                DesertBatflyEnvironmentalProfile.Classify(hazard);
+                DB_EnvironmentProfile.Classify(hazard);
             if (DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm(environmentalWeather, hazard))
                 EndEvacuationAndReturn(world, colony.RoomName, template);
 
@@ -529,7 +529,7 @@ internal static class DesertBatflyTravelNavigation
     private static void RestorePendingMigrations(World world)
     {
         if (world?.abstractRooms == null) return;
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(DB_Definition.CreatureType);
         if (template == null) return;
         foreach (DB_ColonyState colony in DB_ColonyRuntime.Colonies)
         {
@@ -911,7 +911,7 @@ internal static class DesertBatflyTravelNavigation
     }
 
     private static bool ValidCreature(AbstractCreature creature) =>
-        creature != null && creature.creatureTemplate?.type == DesertBatflyDefinition.CreatureType &&
+        creature != null && creature.creatureTemplate?.type == DB_Definition.CreatureType &&
         creature.state?.alive != false && !creature.slatedForDeletion;
 
     private static void OnWorldChangedIfNeeded(World world)

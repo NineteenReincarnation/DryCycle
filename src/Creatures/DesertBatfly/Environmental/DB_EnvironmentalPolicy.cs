@@ -148,10 +148,10 @@ internal static class DB_EnvironmentalPolicy
         if (room == null) return false;
 
         DesertBatflyWeatherEcologySample sample = DesertBatflyWeatherEcology.Sample(world, room);
-        DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(sample);
+        DesertBatflyEnvironmentalWeather weather = DB_EnvironmentProfile.Classify(sample);
         if (!IsSandstorm(weather)) return false;
 
-        float suppression = DesertBatflyEnvironmentalProfile.SandstormMigrationSuppression(weather, sample);
+        float suppression = DB_EnvironmentProfile.SandstormMigrationSuppression(weather, sample);
         return suppression >= 0.70f;
     }
 
@@ -168,7 +168,7 @@ internal static class DB_EnvironmentalPolicy
             ? DeathSandstormHomeRecallMinimumLeadTicks
             : SandstormHomeRecallMinimumLeadTicks;
         return sample.TimeUntilDangerTicks >= minimumLead &&
-               sample.TimeUntilDangerTicks <= DesertBatflyEnvironmentalProfile.SandstormAdvisoryTicks;
+               sample.TimeUntilDangerTicks <= DB_EnvironmentProfile.SandstormAdvisoryTicks;
     }
 
     internal static bool CanConsiderSandstormOutwardRefuge(
@@ -236,7 +236,7 @@ internal static class DB_EnvironmentalPolicy
             string.Equals(record.CurrentColony, bat.room.abstractRoom.name, StringComparison.OrdinalIgnoreCase);
         if (!homeRoom) return 1f;
 
-        bool nearHive = DesertBatflyEnvironmentalExposure.NearHive(
+        bool nearHive = DB_EnvironmentExposure.NearHive(
             bat.room, bat.room.GetTilePosition(bat.mainBodyChunk.pos), 10);
         if (weather == DesertBatflyEnvironmentalWeather.DenseFog)
             return nearHive ? 0.52f : 0.66f;

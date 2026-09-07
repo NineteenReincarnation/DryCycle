@@ -76,14 +76,14 @@ internal static class DB_Sandbox
     // need no custom spawning or save format.
     private static bool SpriteNamePrefix(IconSymbol.IconSymbolData iconData, ref string __result)
     {
-        if (iconData.critType != DesertBatflyDefinition.CreatureType) return true;
+        if (iconData.critType != DB_Definition.CreatureType) return true;
         __result = "Kill_Bat";
         return false;
     }
 
     private static bool ColorPrefix(IconSymbol.IconSymbolData iconData, ref Color __result)
     {
-        if (iconData.critType != DesertBatflyDefinition.CreatureType) return true;
+        if (iconData.critType != DB_Definition.CreatureType) return true;
         __result = new Color(0.67f, 0.45f, 0.26f);
         return false;
     }

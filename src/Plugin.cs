@@ -54,7 +54,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (!_contentRegistered)
         {
             DryCycleContent.Register(new MossySpiderDefinition());
-            DryCycleContent.Register(new DesertBatflyDefinition());
+            DryCycleContent.Register(new DB_Definition());
             _contentRegistered = true;
         }
 
