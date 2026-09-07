@@ -78,7 +78,6 @@ internal static class DesertBatflyThreatTactics
             profile.VisibleSpear);
     }
 
-    // Pure helper retained for regression tests and tuning without a realized Unity room.
     internal static float LearnedFakeDiveChance(
         float baseChance,
         float projectile,
@@ -103,12 +102,6 @@ internal static class DesertBatflyThreatTactics
         return Mathf.Clamp01(baseChance + bonus * (1f - baseChance));
     }
 
-    /// <summary>
-    /// Applies only the already-observed real projectile cue to ordinary Desert Batfly
-    /// local movement. The cue detector owns range/trajectory/instigator validation;
-    /// this method only replaces FlyAI.localGoal for the current AI frame and leaves
-    /// velocity, collision and movement execution to the existing Fly locomotion.
-    /// </summary>
     internal static bool TryApplyOrdinaryProjectileEvade(DesertBatfly bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
@@ -176,15 +169,11 @@ internal static class DesertBatflyThreatTactics
 
         if (radius >= 105f)
         {
-            // Observe/Circle/Withdraw keep more spacing. Low Nerve is already represented
-            // in Caution; this remains a tactical radius change, never a decision to cancel revenge.
             float scale = 1f + profile.Caution * (radius >= 150f ? 0.26f : 0.38f);
             adjusted = center + offset * scale;
         }
         else
         {
-            // Feint/Charge stop using a perfectly straight line against a player this
-            // individual remembers as a projectile/counter-kill threat.
             float lateralRisk = Mathf.Clamp01(
                 profile.ProjectileRisk * 0.62f + profile.CounterRisk * 0.38f);
             float lateral = Mathf.Lerp(6f, 52f, lateralRisk * profile.Confidence);
@@ -252,29 +241,17 @@ internal static class DesertBatflyThreatTactics
         DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.001f) return false;
 
-        bool visibleSpear = false;
-        bool visibleRock = false;
-        bool visibleExplosive = false;
-        bool visibleStartle = false;
-        bool visibleShock = false;
-        bool canInspectHeld = bat.room.VisualContact(
-            bat.mainBodyChunk.pos,
-            player.mainBodyChunk.pos);
-        if (canInspectHeld && player.grasps != null)
-        {
-            for (int i = 0; i < player.grasps.Length; i++)
-            {
-                PhysicalObject held = player.grasps[i]?.grabbed;
-                if (held == null) continue;
-                DesertBatflyThreatEvidence heldEvidence =
-                    DesertBatflyThreatAdapterRegistry.Classify(held, null, 0f, 0f, false);
-                visibleSpear |= held is Spear;
-                visibleRock |= held is Rock;
-                visibleExplosive |= heldEvidence.Explosion > 0.15f;
-                visibleStartle |= heldEvidence.Startle > 0.15f;
-                visibleShock |= heldEvidence.Shock > 0.15f;
-            }
-        }
+        DB_WeaponPerception.TryObserveHeldThreats(
+            bat,
+            player,
+            DesertBatflyTuning.SightRange,
+            out DB_HeldThreatObservation held);
+
+        bool visibleSpear = held.VisibleSpear;
+        bool visibleRock = held.VisibleRock;
+        bool visibleExplosive = held.VisibleExplosive;
+        bool visibleStartle = held.VisibleStartle;
+        bool visibleShock = held.VisibleShock;
 
         float projectileRisk = Mathf.Clamp01(
             memory.ProjectilePressure * 0.35f + memory.PiercingPressure * 0.65f);
@@ -318,19 +295,8 @@ internal static class DesertBatflyThreatTactics
 
     private static Player PlayerBySlot(Room room, int slot)
     {
-        if (room?.game?.Players == null || !DesertBatflyThreatRuntime.ValidSlot(slot))
-            return null;
-
-        // Campaign player count is bounded (Task11 persists four slots), so this lookup
-        // stays O(players) rather than walking every creature in a 20-30 bat room.
-        for (int i = 0; i < room.game.Players.Count; i++)
-        {
-            if (room.game.Players[i]?.realizedCreature is Player player &&
-                !player.dead && !player.slatedForDeletetion && player.room == room &&
-                DesertBatflyThreatRuntime.PlayerSlot(player) == slot)
-                return player;
-        }
-        return null;
+        if (!DesertBatflyThreatRuntime.ValidSlot(slot)) return null;
+        return DB_RoomContext.For(room)?.PlayerBySlot(slot);
     }
 
     private static float StableSide(DesertBatfly bat, int slot)
