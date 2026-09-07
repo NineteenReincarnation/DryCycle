@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using RWCustom;
 using UnityEngine;
@@ -25,6 +24,7 @@ internal static class DesertBatflySignalRuntime
         internal bool GenerationInitialized;
         internal int NextScan;
         internal int ScanSerial;
+
         internal float AlarmPressure;
         internal Vector2 AlarmOrigin;
         internal Creature AlarmThreat;
@@ -39,14 +39,18 @@ internal static class DesertBatflySignalRuntime
         internal DesertBatfly HarassSource;
         internal Player HarassTarget;
         internal float SafeConfidence;
+
         internal int LastAlarmTick = int.MinValue;
         internal int LastSafeEmitTick = int.MinValue;
         internal int LastNeutralEmitTick = int.MinValue;
+        internal int LastDistressEmitTick = int.MinValue;
+
         internal int LastGeneration;
         internal DesertBatflySignalKind LastKind;
         internal DesertBatflySignalPerception LastPerception;
         internal int LastHop;
         internal string LastDecision = "no signal received";
+
         internal DesertBatflySignalDisplayState Display;
         internal int DisplayUntil = int.MinValue;
     }
@@ -71,8 +75,7 @@ internal static class DesertBatflySignalRuntime
         ReceiverState state = states.GetValue(bat, _ => new ReceiverState());
         TickInfluence(state);
 
-        if (bat.dead || bat.slatedForDeletetion || !bat.Consious || bat.room == null || bat.inShortcut)
-            return;
+        if (!Available(bat) || !bat.Consious) return;
 
         int clock = bat.room.game?.clock ?? 0;
         EmitExistingBehaviorSignals(bat, state, clock);
@@ -80,19 +83,21 @@ internal static class DesertBatflySignalRuntime
         if (state.NextScan == 0)
             state.NextScan = clock + StableInt(bat, 0x2B19, NeutralScanMinTicks, NeutralScanMaxTicks + 1);
         if (clock < state.NextScan) return;
+
         state.NextScan = clock + StableInt(
             bat,
             0x41C7 + ++state.ScanSerial * 31,
             NeutralScanMinTicks,
             NeutralScanMaxTicks + 1);
 
-        DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(bat.room);
-        room?.Prune(bat.room);
-        if (room == null) return;
+        DesertBatflySignalRoomRuntime.RoomState roomState =
+            DesertBatflySignalRoomRuntime.For(bat.room);
+        roomState?.Prune(bat.room);
+        if (roomState == null) return;
 
-        for (int i = 0; i < room.ActiveSignals.Count; i++)
+        for (int i = 0; i < roomState.ActiveSignals.Count; i++)
         {
-            DesertBatflySignalPacket packet = room.ActiveSignals[i];
+            DesertBatflySignalPacket packet = roomState.ActiveSignals[i];
             if (packet == null || packet.Emitter == bat || packet.Expired(clock)) continue;
             ReceivePacket(bat, packet, out _);
         }
@@ -120,6 +125,7 @@ internal static class DesertBatflySignalRuntime
             intensity,
             AlarmTtlTicks);
         if (packet == null) return null;
+
         SetDisplay(emitter, DesertBatflySignalKind.AlarmFlutter, intensity, 38, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
@@ -133,11 +139,13 @@ internal static class DesertBatflySignalRuntime
         string reason)
     {
         if (!Available(emitter)) return null;
-        ReceiverState emitterState = states.GetValue(emitter, _ => new ReceiverState());
+        ReceiverState state = states.GetValue(emitter, _ => new ReceiverState());
         int clock = emitter.room.game?.clock ?? 0;
-        if (clock - emitterState.LastNeutralEmitTick >= 0 && clock - emitterState.LastNeutralEmitTick < 24)
+        if (state.LastDistressEmitTick != int.MinValue &&
+            clock - state.LastDistressEmitTick >= 0 &&
+            clock - state.LastDistressEmitTick < 24)
             return null;
-        emitterState.LastNeutralEmitTick = clock;
+        state.LastDistressEmitTick = clock;
 
         Vector2 origin = emitter.mainBodyChunk.pos;
         Vector2 direction = threat?.mainBodyChunk != null
@@ -156,6 +164,7 @@ internal static class DesertBatflySignalRuntime
             intensity,
             120);
         if (packet == null) return null;
+
         SetDisplay(emitter, DesertBatflySignalKind.DistressCall, intensity, 52, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
@@ -168,13 +177,13 @@ internal static class DesertBatflySignalRuntime
         out bool relayAlarm)
     {
         relayAlarm = false;
-        if (!Available(receiver) || packet == null || packet.Emitter == receiver ||
-            packet.Emitter?.room != receiver.room || packet.Expired(receiver.room.game?.clock ?? 0))
+        if (!Available(receiver) || !receiver.Consious || packet == null ||
+            packet.Emitter == receiver || packet.Emitter?.room != receiver.room ||
+            packet.Expired(receiver.room.game?.clock ?? 0))
             return false;
 
         ReceiverState state = states.GetValue(receiver, _ => new ReceiverState());
         if (HasGeneration(state, packet.Generation)) return false;
-
         if (!TryPerceive(receiver, packet, out DesertBatflySignalPerception perception, out float attenuation))
             return false;
 
@@ -294,7 +303,6 @@ internal static class DesertBatflySignalRuntime
         if (!TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
             !states.TryGetValue(bat, out ReceiverState state))
             return false;
-        int count = DesertBatflySignalRoomRuntime.For(bat.room)?.Count ?? 0;
         debug = new DesertBatflySignalDebugState(
             influence,
             state.LastGeneration,
@@ -302,18 +310,26 @@ internal static class DesertBatflySignalRuntime
             state.LastPerception,
             state.LastHop,
             state.LastDecision,
-            count);
+            DesertBatflySignalRoomRuntime.For(bat.room)?.Count ?? 0);
         return true;
     }
 
     private static void EmitExistingBehaviorSignals(DesertBatfly bat, ReceiverState state, int clock)
     {
-        if (clock - state.LastNeutralEmitTick < 18) return;
+        if (state.LastNeutralEmitTick != int.MinValue && clock - state.LastNeutralEmitTick < 18)
+            return;
 
         if (DesertBatflySignalIntegration.IsVengeanceAvenger(bat))
         {
             Creature target = DesertBatflySignalIntegration.VengeanceTarget(bat);
-            EmitNeutral(bat, DesertBatflySignalKind.RallySignal, bat, target, target as Player, 0.70f, 70,
+            EmitNeutral(
+                bat,
+                DesertBatflySignalKind.RallySignal,
+                bat,
+                target,
+                target as Player,
+                0.70f,
+                70,
                 "existing Avenger emits RallySignal");
             state.LastNeutralEmitTick = clock;
             return;
@@ -322,8 +338,14 @@ internal static class DesertBatflySignalRuntime
         if (bat.AI?.behavior == FlyAI.Behavior.Chain || bat.movMode == Fly.MovementMode.Hang ||
             bat.DesertAI?.Mode == DesertBatflyAI.Activity.Roost)
         {
-            EmitNeutral(bat, DesertBatflySignalKind.RoostCall, bat, null, null,
-                Mathf.Lerp(0.42f, 0.78f, bat.Personality.RoostAffinity), 110,
+            EmitNeutral(
+                bat,
+                DesertBatflySignalKind.RoostCall,
+                bat,
+                null,
+                null,
+                Mathf.Lerp(0.42f, 0.78f, bat.Personality.RoostAffinity),
+                110,
                 "committed legal roost emits RoostCall");
             state.LastNeutralEmitTick = clock;
             return;
@@ -334,20 +356,33 @@ internal static class DesertBatflySignalRuntime
             DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
             DesertBatflyAI.Activity.Dive)
         {
-            EmitNeutral(bat, DesertBatflySignalKind.HarassSignal, bat, player, player,
-                Mathf.Lerp(0.34f, 0.74f, bat.Personality.AggressionDrive), 72,
+            EmitNeutral(
+                bat,
+                DesertBatflySignalKind.HarassSignal,
+                bat,
+                player,
+                player,
+                Mathf.Lerp(0.34f, 0.74f, bat.Personality.AggressionDrive),
+                72,
                 "existing formal harass posture emits HarassSignal");
             state.LastNeutralEmitTick = clock;
             return;
         }
 
-        if (state.LastAlarmTick != int.MinValue && clock - state.LastAlarmTick >= SafeDelayTicks &&
-            clock - state.LastSafeEmitTick >= SafeDelayTicks && CanAcceptSafe(bat) &&
-            state.AlarmPressure > 0.04f)
+        if (state.LastAlarmTick != int.MinValue &&
+            clock - state.LastAlarmTick >= SafeDelayTicks &&
+            (state.LastSafeEmitTick == int.MinValue || clock - state.LastSafeEmitTick >= SafeDelayTicks) &&
+            state.AlarmPressure > 0.04f && CanAcceptSafe(bat))
         {
-            EmitNeutral(bat, DesertBatflySignalKind.SafeSignal, bat, null, null,
-                Mathf.Lerp(0.28f, 0.58f, bat.Personality.Nerve), 80,
-                "recent local alarm has remained clear long enough for SafeSignal");
+            EmitNeutral(
+                bat,
+                DesertBatflySignalKind.SafeSignal,
+                bat,
+                null,
+                null,
+                Mathf.Lerp(0.28f, 0.58f, bat.Personality.Nerve),
+                80,
+                "recent local alarm remained clear long enough for SafeSignal");
             state.LastSafeEmitTick = clock;
             state.LastNeutralEmitTick = clock;
         }
@@ -380,7 +415,13 @@ internal static class DesertBatflySignalRuntime
             intensity,
             Mathf.Max(NeutralSignalTtl, ttl));
         if (packet == null) return;
-        SetDisplay(emitter, kind, intensity, kind == DesertBatflySignalKind.RallySignal ? 42 : 30, direction);
+
+        SetDisplay(
+            emitter,
+            kind,
+            intensity,
+            kind == DesertBatflySignalKind.RallySignal ? 42 : 30,
+            direction);
         TraceEmit(emitter, packet, reason);
     }
 
@@ -394,6 +435,7 @@ internal static class DesertBatflySignalRuntime
         attenuation = 0f;
         float distance = Vector2.Distance(receiver.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
         float visualRadius = VisualRadius(packet.Kind);
+
         if (distance <= visualRadius && receiver.room.VisualContact(
                 receiver.mainBodyChunk.pos,
                 packet.Emitter.mainBodyChunk.pos))
@@ -403,19 +445,17 @@ internal static class DesertBatflySignalRuntime
             return true;
         }
 
-        float acoustic = packet.Kind switch
+        float acousticRadius = packet.Kind switch
         {
             DesertBatflySignalKind.AlarmFlutter => 95f,
             DesertBatflySignalKind.DistressCall => 108f,
             _ => 0f
         };
-        if (acoustic > 0f && distance <= acoustic)
-        {
-            perception = DesertBatflySignalPerception.CloseAcoustic;
-            attenuation = Mathf.Lerp(0.62f, 0.30f, Mathf.Clamp01(distance / acoustic));
-            return true;
-        }
-        return false;
+        if (acousticRadius <= 0f || distance > acousticRadius) return false;
+
+        perception = DesertBatflySignalPerception.CloseAcoustic;
+        attenuation = Mathf.Lerp(0.62f, 0.30f, Mathf.Clamp01(distance / acousticRadius));
+        return true;
     }
 
     private static float VisualRadius(DesertBatflySignalKind kind) => kind switch
@@ -440,6 +480,7 @@ internal static class DesertBatflySignalRuntime
         float bond = packet.Emitter != null
             ? DesertBatflySocialBond.GetBondStrength(receiver, packet.Emitter)
             : 0f;
+
         float scale = packet.Kind switch
         {
             DesertBatflySignalKind.AlarmFlutter =>
@@ -478,10 +519,16 @@ internal static class DesertBatflySignalRuntime
             return false;
         if (bat.Injury.IsSeverelyInjured || DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature))
             return false;
+
         if (DesertBatflyThreatRuntime.TryGetDebugState(bat, out DesertBatflyThreatDebugState threat) &&
-            (threat.Cue.ProjectileThreat || threat.AcuteExplosion > 0 ||
-             threat.AcuteStartle > 0 || threat.AcuteMassCasualty > 0 || threat.AcuteCapture > 0))
+            (threat.Cue.ProjectileThreat ||
+             threat.AcuteExplosionTimer > 0 ||
+             threat.AcuteStartleTimer > 0 ||
+             threat.AcuteMassCasualtyTimer > 0 ||
+             threat.AcuteCaptureTimer > 0 ||
+             threat.AcuteShockTimer > 0))
             return false;
+
         return !DesertBatflyIntimidation.HasActiveFearSuppression(bat);
     }
 
@@ -493,6 +540,7 @@ internal static class DesertBatflySignalRuntime
         state.RoostInterest = Mathf.Max(0f, state.RoostInterest - 0.0022f);
         state.HarassInterest = Mathf.Max(0f, state.HarassInterest - 0.0030f);
         state.SafeConfidence = Mathf.Max(0f, state.SafeConfidence - 0.0035f);
+
         if (state.DistressInterest <= 0f) state.DistressSource = null;
         if (state.RallyInterest <= 0f) { state.RallySource = null; state.RallyTarget = null; }
         if (state.RoostInterest <= 0f) state.RoostSource = null;
@@ -511,7 +559,8 @@ internal static class DesertBatflySignalRuntime
     {
         if (!state.GenerationInitialized)
         {
-            for (int i = 0; i < state.Generations.Length; i++) state.Generations[i] = int.MinValue;
+            for (int i = 0; i < state.Generations.Length; i++)
+                state.Generations[i] = int.MinValue;
             state.GenerationInitialized = true;
         }
         state.Generations[state.GenerationCursor] = generation;
@@ -556,7 +605,8 @@ internal static class DesertBatflySignalRuntime
 
     private static void TraceEmit(DesertBatfly emitter, DesertBatflySignalPacket packet, string reason)
     {
-        if (emitter?.abstractCreature == null || !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(emitter.abstractCreature))
+        if (emitter?.abstractCreature == null ||
+            !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(emitter.abstractCreature))
             return;
         DryCycle.Debugging.AI.AIDebugTrace.Record(
             emitter.abstractCreature,
@@ -573,7 +623,8 @@ internal static class DesertBatflySignalRuntime
         float response,
         string reason)
     {
-        if (receiver?.abstractCreature == null || !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(receiver.abstractCreature))
+        if (receiver?.abstractCreature == null ||
+            !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(receiver.abstractCreature))
             return;
         DryCycle.Debugging.AI.AIDebugTrace.Record(
             receiver.abstractCreature,
