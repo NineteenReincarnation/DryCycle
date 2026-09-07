@@ -83,6 +83,7 @@ internal static partial class Program
             "Task13 Heat keeps agitation, shelter drive and exhaustion as separate axes");
 
         Type ecology = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcology", true);
+        Type ecologySample = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcologySample", true);
         Type eventKind = mod.GetType("DryCycle.Weather.Scheduling.WeatherScheduleEventKind", true);
         object weatherKind = Enum.Parse(eventKind, "Weather");
         MethodInfo demand = ecology.GetMethod("HazardShelterDemand", Flags);
@@ -90,6 +91,26 @@ internal static partial class Program
         float denseFogDemand = (float)demand.Invoke(null, new[] { weatherKind, (object)"DENSEFOG" });
         Check(fogDemand < 0.50f && denseFogDemand >= 0.50f,
             "ordinary Fog stays local while DenseFog can hand temporary displacement to Task09");
+
+        // Ordinary Fog is an activity/visibility modifier only. Even full-intensity DryCycle
+        // Fog must not silently acquire DenseFog's Home/refuge Preparation semantics.
+        object fullFogSample = Activator.CreateInstance(
+            ecologySample,
+            Flags,
+            null,
+            new object[] { weatherKind, "FOG", 1f, 0.02f, 0.05f, 0f, 0.05f, int.MaxValue },
+            null);
+        MethodInfo resolvePhase = profile.GetMethod("ResolvePhase", Flags);
+        object[] fogPhaseArgs =
+        {
+            Enum.Parse(weather, "Fog"),
+            fullFogSample,
+            Enum.Parse(phase, "Calm"),
+            null
+        };
+        object resolvedFogPhase = resolvePhase.Invoke(null, fogPhaseArgs);
+        Check(resolvedFogPhase.ToString() == "Advisory",
+            "ordinary Fog has a hard Advisory ceiling; DenseFog owns shelter/displacement escalation");
 
         Type task09Bridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", true);
         Check(task09Bridge.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
@@ -99,6 +120,16 @@ internal static partial class Program
             "Task13 LocalShelterFailure requires sustained realized failure");
         Check((int)task09Bridge.GetField("ShelterFailureReportCooldownTicks", Flags).GetRawConstantValue() >= 1200,
             "Task13 LocalShelterFailure reporting is bounded by cooldown");
+        Check(task09Bridge.GetMethod("ShouldRecallHomeForSandstorm", Flags) != null &&
+              task09Bridge.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
+              task09Bridge.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
+            "Task13 Sandstorm Task09 policy distinguishes early Home recall from narrow outward emergency refuge");
+        Check((int)task09Bridge.GetField("SandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 2 &&
+              (int)task09Bridge.GetField("DeathSandstormEmergencyMaxHops", Flags).GetRawConstantValue() <= 1,
+            "Task13 Sandstorm outward emergency exception is deliberately short-range");
+        Check((int)task09Bridge.GetField("SandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory &&
+              (int)task09Bridge.GetField("DeathSandstormHomeRecallMinimumLeadTicks", Flags).GetRawConstantValue() < advisory,
+            "Task13 Sandstorm Home recall operates inside the bounded species forecast horizon");
 
         Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
         Check(survivalBridge.GetMethod("ShouldSeekHome", Flags) != null &&
@@ -123,6 +154,8 @@ internal static partial class Program
         Check(integration.GetMethod("CanHarassHook", Flags) != null &&
               integration.GetMethod("SteerHook", Flags) != null,
             "Task13 integrates environmental aggression and Fog navigation through existing DesertBatflyAI gates");
+        Check(integration.GetMethod("FogNavigationFamiliarityScale", Flags) != null,
+            "Task13 DenseFog navigation has an explicit Home/Hive familiarity mitigation path");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
@@ -163,7 +196,7 @@ internal static partial class Program
             "Task13 does not restore rejected Task02 role runtime");
 
         Console.WriteLine(
-            "Task 13 environment: six phases, DryCycle-only weather input, bounded anchors, DenseFog Task09 handoff, Heat axes, Sandstorm migration timing, native Home/Burrow, pipeline, persistence and no-velocity/no-route guards verified.");
+            "Task 13 environment: six phases, DryCycle-only weather input, bounded anchors, Fog ceiling, DenseFog familiarity/Task09 handoff, Heat axes, Sandstorm Home-retention travel policy, native Home/Burrow, pipeline, persistence and no-velocity/no-route guards verified.");
     }
 
     private static bool TypeCallsTask13Forbidden(Type type)
