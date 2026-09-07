@@ -90,6 +90,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             DesertState.Thirst + (dead ? 0f : DesertBatflyTuning.ThirstPerTick));
         if (DesertState.Cooldown > 0) DesertState.Cooldown--;
         DesertAI.TickMemory();
+        if (!dead)
+            DesertBatflyIntimidation.UpdateState(this);
 
         Room currentRoom = room;
         FliesRoomAI original = currentRoom.fliesRoomAi;
@@ -107,16 +109,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        // DB_EventHub owns one-shot mortality facts. Corpses must not recreate a runtime
-        // morale state merely because persistent Trauma remains in CreatureState.
-        bool extremeVengeance = false;
-        if (!dead)
-        {
-            DesertBatflyIntimidation.Update(this);
-            extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
-            if (extremeVengeance)
-                DesertAI.CancelAttack();
-        }
+        // Vengeance state/fear was refreshed before base.Update so the R3 arbiter saw the
+        // current facts. Movement itself can only have run through DB_VengeanceExecutor.
+        bool extremeVengeance = !dead && DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
+        if (extremeVengeance) DesertAI.CancelAttack();
 
         if (room == null) return;
         Emergence.Update(eu);

@@ -38,6 +38,12 @@ internal static class DesertBatflyEnvironmentalBehavior
 
     internal static void Update(DesertBatfly bat)
     {
+        RefreshInfluence(bat);
+        ApplyOwnedBehavior(bat);
+    }
+
+    internal static void RefreshInfluence(DesertBatfly bat)
+    {
         if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion)
             return;
 
@@ -49,8 +55,20 @@ internal static class DesertBatflyEnvironmentalBehavior
             state.LastDecisionTick = tick;
             Recompute(bat, state, tick);
         }
+    }
 
-        ApplyLocalBehavior(bat, state, tick);
+    internal static bool ApplyOwnedBehavior(DesertBatfly bat)
+    {
+        if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion ||
+            !states.TryGetValue(bat, out State state))
+            return false;
+
+        bool owns = DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentHardSurvival) ||
+                    DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentLocalSurvival);
+        if (!owns) return false;
+
+        ApplyLocalBehavior(bat, state, bat.room.game?.clock ?? 0);
+        return true;
     }
 
     internal static bool TryGetInfluence(DesertBatfly bat, out DesertBatflyEnvironmentalInfluence influence)

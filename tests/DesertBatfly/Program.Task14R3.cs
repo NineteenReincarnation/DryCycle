@@ -15,7 +15,11 @@ internal static partial class Program
         Type resolution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorResolution", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         Type injuryExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecoveryExecutor", true);
+        Type vengeanceExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceExecutor", true);
+        Type environmentExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExecutor", true);
+        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
 
         foreach (string name in new[]
                  {
@@ -106,9 +110,21 @@ internal static partial class Program
               vengeanceBridge.GetField("vengeanceTargetField", Flags) == null &&
               vengeanceBridge.GetField("travelFrames", Flags) == null,
             "Task14 R3 removes private Intimidation reflection and parallel Travel frame stamps");
-        Check(MethodCallOffset(vengeanceBridge.GetMethod("IntimidationUpdateHook", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
+        Check(vengeanceBridge.GetMethod("IntimidationUpdateHook", Flags) == null &&
+              vengeanceBridge.GetField("intimidationUpdateHook", Flags) == null &&
               MethodCallOffset(vengeanceBridge.GetMethod("ForceFlightHook", Flags), intimidation, "TryGetVengeanceTarget") >= 0,
-            "Task14 R3 Vengeance bridge consumes actual PrimaryOwner and explicit target facts");
+            "Task14 R3 Vengeance bridge is tactic-only and no longer intercepts state lifecycle");
+        Check(intimidation.GetMethod("UpdateState", Flags) != null &&
+              intimidation.GetMethod("ExecuteVengeanceOwned", Flags) != null &&
+              MethodCallOffset(intimidation.GetMethod("ExecuteVengeanceOwned", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
+              MethodCallOffset(intimidation.GetMethod("ForceFlight", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 Vengeance state tick is split from owner-gated movement/contact execution");
+        Check(MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
+            "Task14 R3 refreshes Vengeance/fear facts before FlyAI arbitration");
+        Check(environmentBehavior.GetMethod("RefreshInfluence", Flags) != null &&
+              environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              MethodCallOffset(environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "Task14 R3 Environment influence refresh is split from owner-gated local apply");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -120,9 +136,12 @@ internal static partial class Program
               MethodCallOffset(hooksDisable, arbiter, "Reset") >= 0,
             "Task14 R3 FrameContext/Arbiter cache follows Desert Batfly lifecycle");
         Check(MethodCallOffset(updateAI, arbiter, "ResolveFrame") >= 0 &&
+              MethodCallOffset(updateAI, environmentBehavior, "RefreshInfluence") >= 0 &&
               MethodCallOffset(updateAI, injuryExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0,
-            "Task14 R3 InjuryRecovery and Travel enter through central owner resolution");
+              MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0 &&
+              MethodCallOffset(updateAI, environmentExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, vengeanceExecutor, "TryExecute") >= 0,
+            "Task14 R3 migrated owner executors enter through central owner resolution");
         Check(injuryExecutor.GetMethod("TryExecute", Flags) != null &&
               desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
               desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
@@ -140,6 +159,6 @@ internal static partial class Program
             "Task14 R3 architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Task14 R3: FrameContext/Arbiter plus owner-gated InjuryRecovery and Travel verified. Vengeance/Environment/Social single-writer migration remains open.");
+            "Task14 R3: InjuryRecovery, Travel, Vengeance and Environment now have owner-gated execution. Social/combat/projectile/ordinary migration remains open.");
     }
 }

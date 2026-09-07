@@ -274,7 +274,7 @@ internal static class DesertBatflyIntimidation
         return result.Count == 0 ? Array.Empty<DesertBatfly>() : result.ToArray();
     }
 
-    internal static void Update(DesertBatfly bat)
+    internal static void UpdateState(DesertBatfly bat)
     {
         if (bat == null) return;
 
@@ -312,9 +312,25 @@ internal static class DesertBatflyIntimidation
             EnforceFear(bat, ref state.PredatorFear, false);
         }
 
-        UpdateVengeance(bat, state);
+        // R3: Vengeance phase timers/contact/movement are frozen while another owner wins.
+        // Fear memory, trauma and collapse checks above continue to tick independently.
         TryDeactivate(bat, state);
     }
+
+    internal static bool ExecuteVengeanceOwned(DesertBatfly bat)
+    {
+        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance) ||
+            !states.TryGetValue(bat, out State state) || !state.Active ||
+            state.Vengeance == VengeanceMode.None)
+            return false;
+
+        UpdateVengeance(bat, state);
+        TryDeactivate(bat, state);
+        return true;
+    }
+
+    // Compatibility/readability surface: state tick only, never Vengeance locomotion.
+    internal static void Update(DesertBatfly bat) => UpdateState(bat);
 
     internal static void BroadcastPlayerKill(
         DesertBatfly victim,
@@ -1556,7 +1572,9 @@ internal static class DesertBatflyIntimidation
         Vector2 goal,
         float speed)
     {
-        if (bat?.room == null) return;
+        if (bat?.room == null ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
+            return;
 
         bat.LoseAllGrasps();
         bat.burrowOrHangSpot = null;

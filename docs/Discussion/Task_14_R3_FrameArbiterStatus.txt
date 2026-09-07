@@ -276,38 +276,38 @@ FrameContext -> Arbiter -> PrimaryOwner=InjuryRecovery -> DB_InjuryRecoveryExecu
 
 仍需 Rain World 实机验证 severe injury -> recovery -> Travel resume。
 
-R3-OPEN-03 — Vengeance proposal executor
-----------------------------------------
+R3-CLOSED-03 — Vengeance proposal executor（代码侧已收敛）
+----------------------------------------------------------
 
-当前已解决：
+已完成状态与执行拆分：
 
-- private reflection；
-- Travel frame stamp；
-- owner 可观测性。
+- `UpdateState` 只更新 fear / trauma / collapse / lifecycle；
+- Vengeance Observe/Circle/Feint/Charge/Withdraw 阶段只由 `ExecuteVengeanceOwned` 推进；
+- `DB_VengeanceExecutor` 要求同 tick `PrimaryOwner=Vengeance`；
+- `ForceFlight` 自身还有 owner guard，防止旁路写 movement；
+- 被 Injury / Travel / HardSurvival / fear 抢占时，Vengeance movement/timer 冻结但 fear/trauma 继续更新；
+- Task11 bridge 只剩 ForceFlight tactic modifier，不再 hook Intimidation.Update。
 
-但 Intimidation.Update / ForceFlight 仍是旧 executor。
+仍需 Rain World 实机验证 preemption/resume 与 rescue charge/contact。
 
-后续要让 Vengeance 只在 PrimaryOwner=Vengeance 时执行 movement 部分；
-fear / trauma / state decay 可继续独立更新。
+R3-CLOSED-04 — Environment decision / apply split（代码侧已收敛）
+-------------------------------------------------------------------
 
-R3-OPEN-04 — Environment decision / apply split
------------------------------------------------
+`DesertBatflyEnvironmentalBehavior` 已拆为：
 
-DesertBatflyEnvironmentalBehavior.Update 当前仍同时：
+- `RefreshInfluence`：只刷新授权天气/暴露/anchor/influence；
+- Arbiter 从最新 influence 构建 Environment proposal；
+- `ApplyOwnedBehavior`：只有 `EnvironmentHardSurvival` 或 `EnvironmentLocalSurvival` 为当前 PrimaryOwner 才调用本地 apply；
+- `DB_EnvironmentExecutor` 是唯一 R3 环境执行入口。
 
-- refresh influence；
-- ApplyLocalBehavior；
-- 写 localGoal。
-
-需要拆成：
-
-RefreshInfluence / BuildProposal / ApplyOwnedBehavior
-
-Task13 ownership 边界不变：
+Task13 边界不变：
 
 - 不获得 cross-room authority；
-- 不新增 velocity controller；
-- Task09 仍独占跨房间 travel。
+- 不新增第二 velocity controller；
+- 不新增 world planner；
+- Task09 仍独占跨房间 Travel。
+
+仍需 Rain World 实机验证 HeavyRain/DeathRain/DenseFog/Heat/Sandstorm 的 owner 切换。
 
 R3-OPEN-05 — Social decision / apply split
 ------------------------------------------
@@ -399,5 +399,5 @@ R3 只有同时满足以下条件才能改成【完成】：
 
 当前结论：
 
-【R3 foundation 已建立；InjuryRecovery 与 Travel 都必须先获得 Arbiter PrimaryOwner 才执行。】
-【R3 尚未完成；下一阶段继续拆 Vengeance / Environment / Social，并最终消除 ordinary localGoal 多 writer。】
+【R3 foundation 已建立；InjuryRecovery / Travel / Vengeance / Environment 都已进入 owner-gated executor。】
+【R3 尚未完成；下一阶段继续拆 Social、projectile/combat/ordinary，并最终消除 ordinary localGoal 多 writer。】
