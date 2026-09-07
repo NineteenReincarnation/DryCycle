@@ -1,0 +1,52 @@
+name: Task14 R5 B1 bridge removal
+
+on:
+  push:
+    branches:
+      - task14-r5-b1-working
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.message == 'Trigger R5 B1 bridge removal'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r5-b1-working
+          fetch-depth: 0
+
+      - name: Apply guarded migration
+        run: python scripts/task14_r5_b1_apply.py
+
+      - name: Validate source contracts
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r5_b1_apply.py
+          test ! -e .github/workflows/task14-r5-b1.yml
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalDenseFogBridge.cs
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalVengeanceBridge.cs
+          test ! -e src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatVengeanceBridge.cs
+          ! grep -q 'DesertBatflyEnvironmentalDenseFogBridge' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'DesertBatflyThreatVengeanceBridge' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'DesertBatflyEnvironmentalVengeanceBridge' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalIntegration.cs
+          grep -q 'AdjustExtremeVengeanceGoal(bat, player, goal, ref speed)' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'RunTask14R5();' tests/DesertBatfly/Program.RejectedTask02.cs
+          grep -q 'R5 已正式启动' docs/Discussion/Task_14_R5_BridgeDebtStatus.txt
+
+      - name: Audit internal detour debt after B1
+        run: |
+          echo '--- remaining RuntimeDetour imports ---'
+          grep -RIl --include='*.cs' 'MonoMod.RuntimeDetour' src/Creatures/DesertBatfly | sort || true
+          echo '--- remaining Bridge production files ---'
+          find src/Creatures/DesertBatfly -type f -name '*Bridge.cs' | sort || true
+
+      - name: Commit migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          git add -A
+          git commit -m 'Start Task14 R5 bridge debt removal'
+          git push origin HEAD:task14-r5-b1-working
