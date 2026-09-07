@@ -1,0 +1,99 @@
+name: Task14 R6 B23 Threat evidence split
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b23-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Split Threat evidence, event and classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/Creatures/DesertBatfly/Threat
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatEvent.cs')
+          text = src.read_text(encoding='utf-8')
+          flags = text.index('[Flags]')
+          event = text.index('internal readonly struct DesertBatflyThreatEvent')
+          adapter = text.index('internal delegate void DesertBatflyThreatAdapter')
+          header = text[:flags]
+          Path('src/Creatures/DesertBatfly/Threat/DB_ThreatEvidence.cs').write_text(header + text[flags:event], encoding='utf-8')
+          Path('src/Creatures/DesertBatfly/Threat/DB_ThreatEvent.cs').write_text(header + text[event:adapter], encoding='utf-8')
+          Path('src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs').write_text(header + text[adapter:], encoding='utf-8')
+          src.unlink()
+
+          replacements = {
+              'DesertBatflyThreatTag': 'DB_ThreatTag',
+              'DesertBatflyThreatEvidence': 'DB_ThreatEvidence',
+              'DesertBatflyThreatEvent': 'DB_ThreatEvent',
+              'DesertBatflyThreatAdapterRegistry': 'DB_ThreatClassifier',
+              'DesertBatflyThreatAdapter': 'DB_ThreatAdapter',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  value = path.read_text(encoding='utf-8')
+                  new = value
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != value:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate Threat evidence semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatEvent.cs
+          for p in \
+            src/Creatures/DesertBatfly/Threat/DB_ThreatEvidence.cs \
+            src/Creatures/DesertBatfly/Threat/DB_ThreatEvent.cs \
+            src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs; do test -f "$p"; done
+          if git grep -n -E 'DesertBatflyThreatTag|DesertBatflyThreatEvidence|DesertBatflyThreatEvent|DesertBatflyThreatAdapterRegistry|DesertBatflyThreatAdapter' -- src tests scripts; then
+            echo 'Old Threat evidence identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'enum DB_ThreatTag' src/Creatures/DesertBatfly/Threat/DB_ThreatEvidence.cs
+          grep -q 'struct DB_ThreatEvidence' src/Creatures/DesertBatfly/Threat/DB_ThreatEvidence.cs
+          grep -q 'struct DB_ThreatEvent' src/Creatures/DesertBatfly/Threat/DB_ThreatEvent.cs
+          grep -q 'class DB_ThreatClassifier' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'GrabCapture = 0.58f' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'Pursuit = 0.30f' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'CounterKill = 0.42f' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'Startle = 0.58f' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'source is Rock' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'source is Spear' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          grep -q 'Creature.DamageType.Explosion' src/Creatures/DesertBatfly/Threat/DB_ThreatClassifier.cs
+          # Common mortality/capture authority must remain EventHub, not be reintroduced here.
+          if git grep -n -E 'On\.Creature\.Die|On\.Fly\.Grabbed|On\.Creature\.Violence' -- src/Creatures/DesertBatfly/Threat; then
+            echo 'Threat evidence layer regained raw semantic root hooks.' >&2
+            exit 1
+          fi
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b23-threat-evidence.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B23 split Threat evidence responsibilities [r6-b23-done]'
+          git push origin HEAD:task14-r6-b1-final
