@@ -9,8 +9,8 @@ internal static partial class Program
         Type migrationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_MigrationPolicy", true);
         Type routePlannerType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WorldRoutePlanner", true);
         Type travelPurposeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelPurpose", true);
-        Type travelNavigationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
-        Type travelDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelDebugState", true);
+        Type travelNavigationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);
+        Type travelDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelDebugState", true);
         Type refugeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RefugePolicy", true);
 
         object colony = Activator.CreateInstance(

@@ -49,7 +49,7 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             out int failureTicks,
             out float failureSeverity,
             out string failureReason);
-        bool task09Owns = DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature);
+        bool task09Owns = DB_TravelRuntime.HasIntent(bat.abstractCreature);
 
         snapshot.Sections.Add(new AIDebugSection("Environment Environment / 环境活动")
             .Add("Weather source valid / 天气源有效", "Environment.WeatherSourceValid",

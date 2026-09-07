@@ -36,11 +36,11 @@ grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/Desert
 grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs
 grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRoomRuntime.cs
 grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
 grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
 grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
-! grep -RIn --include='*.cs' 'new TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
+! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
 
 grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
 grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs

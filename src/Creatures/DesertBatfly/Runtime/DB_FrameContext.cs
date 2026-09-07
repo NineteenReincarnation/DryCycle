@@ -351,9 +351,9 @@ internal static class DB_FrameContextRuntime
         bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
             bat, out DesertBatflySocialDebugState social);
 
-        bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
-            bat.abstractCreature, out DesertBatflyTravelDebugState travelDebug);
-        bool travelCanOwn = DesertBatflyTravelNavigation.CanOwnRealizedFrame(
+        bool hasTravel = DB_TravelRuntime.TryGetDebugState(
+            bat.abstractCreature, out DB_TravelDebugState travelDebug);
+        bool travelCanOwn = DB_TravelRuntime.CanOwnRealizedFrame(
             bat, out string travelReason);
         DB_TravelFrameSummary travel = new(
             hasTravel,

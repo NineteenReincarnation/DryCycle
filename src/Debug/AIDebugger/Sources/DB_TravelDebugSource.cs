@@ -81,33 +81,33 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
                 .Add("Home shelter quality / 本巢庇护质量", "DB_RefugePolicy.HomeHiveShelterQuality", shelter));
         }
 
-        bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
-            creature, out DesertBatflyTravelDebugState travel);
+        bool hasTravel = DB_TravelRuntime.TryGetDebugState(
+            creature, out DB_TravelDebugState travel);
         var travelSection = new AIDebugSection("Travel / Colony Travel / 跨房旅行")
             .Add("Travel purpose / 旅行目的", "DB_TravelPurpose",
                 hasTravel ? travel.Purpose.ToString() : "None")
-            .Add("Destination / 目的房间", "DesertBatflyTravelNavigation.DestinationRoom",
+            .Add("Destination / 目的房间", "DB_TravelRuntime.DestinationRoom",
                 hasTravel && !string.IsNullOrEmpty(travel.DestinationRoom) ? travel.DestinationRoom : "—")
-            .Add("Route index / 路线进度", "DesertBatflyTravelNavigation.RouteIndex",
+            .Add("Route index / 路线进度", "DB_TravelRuntime.RouteIndex",
                 hasTravel ? travel.RouteIndex : 0)
-            .Add("Departure delay / 出发延迟", "DesertBatflyTravelNavigation.DepartureDelay",
+            .Add("Departure delay / 出发延迟", "DB_TravelRuntime.DepartureDelay",
                 hasTravel ? travel.DepartureDelay : 0)
-            .Add("Waiting at refuge / 正在避难", "DesertBatflyTravelNavigation.WaitingAtRefuge",
+            .Add("Waiting at refuge / 正在避难", "DB_TravelRuntime.WaitingAtRefuge",
                 hasTravel && travel.WaitingAtRefuge)
-            .Add("Travel suspended / 旅行暂停", "DesertBatflyTravelNavigation.Suspended",
+            .Add("Travel suspended / 旅行暂停", "DB_TravelRuntime.Suspended",
                 hasTravel && travel.Suspended)
-            .Add("Travel reason / 旅行原因", "DesertBatflyTravelNavigation.StatusReason",
+            .Add("Travel reason / 旅行原因", "DB_TravelRuntime.StatusReason",
                 hasTravel && !string.IsNullOrEmpty(travel.StatusReason) ? travel.StatusReason : "—")
-            .Add("Route cost / 路线代价", "DesertBatflyTravelNavigation.RouteCost",
+            .Add("Route cost / 路线代价", "DB_TravelRuntime.RouteCost",
                 hasTravel ? travel.RouteCost : 0f)
-            .Add("Route survivability / 路线生存性", "DesertBatflyTravelNavigation.RouteSurvivability",
+            .Add("Route survivability / 路线生存性", "DB_TravelRuntime.RouteSurvivability",
                 hasTravel ? travel.RouteSurvivability : 0f);
 
         if (hasTravel)
         {
-            travelSection.Add("Next room / 下一房间", "DesertBatflyTravelNavigation.NextRoom",
+            travelSection.Add("Next room / 下一房间", "DB_TravelRuntime.NextRoom",
                 RoomName(world, travel.NextRoom));
-            travelSection.Add("Route / 世界图路线", "DesertBatflyTravelNavigation.RouteRooms",
+            travelSection.Add("Route / 世界图路线", "DB_TravelRuntime.RouteRooms",
                 RouteNames(world, travel.RouteRooms));
         }
         snapshot.Sections.Add(travelSection);
@@ -137,8 +137,8 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
                 : AIDebugDecisionState.Inactive,
             hasTravel
                 ? $"{travel.Purpose} -> {travel.DestinationRoom}; routeIndex={travel.RouteIndex}; {travel.StatusReason}"
-                : "no active TravelIntent",
-            "DesertBatflyTravelNavigation"));
+                : "no active DB_TravelIntent",
+            "DB_TravelRuntime"));
 
         return snapshot;
     }

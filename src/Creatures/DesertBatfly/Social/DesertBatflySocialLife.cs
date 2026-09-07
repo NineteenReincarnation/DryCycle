@@ -382,7 +382,7 @@ internal static class DesertBatflySocialLife
         if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return "immediate danger";
-        if (DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature)) return "Task09 travel priority";
+        if (DB_TravelRuntime.HasIntent(bat.abstractCreature)) return "Task09 travel priority";
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
             return "severe injury / recovery";
@@ -1253,7 +1253,7 @@ internal static class DesertBatflySocialLife
     {
         if (!DesertBatflySocialRoomRuntime.ValidMember(bat) || !bat.Consious || bat.AI == null || bat.DesertAI == null)
             return false;
-        if (DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature) ||
+        if (DB_TravelRuntime.HasIntent(bat.abstractCreature) ||
             bat.DesertAI.HasImmediateDanger ||
             bat.Injury.IsSeverelyInjured ||
             bat.Injury.IsRecovering ||

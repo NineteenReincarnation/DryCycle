@@ -5,118 +5,25 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal readonly struct DesertBatflyTravelDebugState
-{
-    internal readonly DB_TravelPurpose Purpose;
-    internal readonly string HomeColony;
-    internal readonly string DestinationRoom;
-    internal readonly int RouteIndex;
-    internal readonly int[] RouteRooms;
-    internal readonly int NextRoom;
-    internal readonly int DepartureDelay;
-    internal readonly bool WaitingAtRefuge;
-    internal readonly bool Suspended;
-    internal readonly string StatusReason;
-    internal readonly float RouteCost;
-    internal readonly float RouteSurvivability;
-    internal readonly int RefugeNode;
-
-    internal DesertBatflyTravelDebugState(
-        DB_TravelPurpose purpose,
-        string homeColony,
-        string destinationRoom,
-        int routeIndex,
-        int[] routeRooms,
-        int nextRoom,
-        int departureDelay,
-        bool waitingAtRefuge,
-        bool suspended,
-        string statusReason,
-        float routeCost,
-        float routeSurvivability,
-        int refugeNode)
-    {
-        Purpose = purpose;
-        HomeColony = homeColony ?? string.Empty;
-        DestinationRoom = destinationRoom ?? string.Empty;
-        RouteIndex = routeIndex;
-        RouteRooms = routeRooms ?? Array.Empty<int>();
-        NextRoom = nextRoom;
-        DepartureDelay = Mathf.Max(0, departureDelay);
-        WaitingAtRefuge = waitingAtRefuge;
-        Suspended = suspended;
-        StatusReason = statusReason ?? string.Empty;
-        RouteCost = routeCost;
-        RouteSurvivability = Mathf.Clamp01(routeSurvivability);
-        RefugeNode = refugeNode;
-    }
-}
-
 /// <summary>
 /// High-level cross-room travel state for Task 09. It owns destination/room route only.
 /// Realized room-local movement is still FlyAI.LeaveRoom/AImap/shortcut; no travel code
 /// writes body velocity or maintains a second tile pathfinder.
 /// </summary>
-internal static class DesertBatflyTravelNavigation
+internal static class DB_TravelRuntime
 {
     private const int NativeExitTimeoutTicks = 1200;
     private const int ReplanCooldownTicks = 160;
     private const int RefugeGoalRefreshTicks = 80;
 
-    private sealed class TravelIntent
-    {
-        internal readonly AbstractCreature Creature;
-        internal DB_TravelPurpose Purpose;
-        internal string HomeColony;
-        internal string DestinationRoom;
-        internal DB_WorldRoute Route;
-        internal int RouteIndex;
-        internal int DepartureDelay;
-        internal bool WaitingAtRefuge;
-        internal bool Suspended;
-        internal string StatusReason;
-        internal int ReplanCooldown;
-        internal int SameRoomTravelTicks;
-        internal int LastObservedRoom = int.MinValue;
-        internal int LastObservedFrame = int.MinValue;
-        internal int RefugeGoalRefresh;
-        internal DB_WeatherEcologySample Hazard;
-        internal float RefugeScore;
-        internal int RefugeNode;
-
-        internal TravelIntent(
-            AbstractCreature creature,
-            DB_TravelPurpose purpose,
-            string homeColony,
-            string destinationRoom,
-            in DB_WorldRoute route,
-            int departureDelay,
-            in DB_WeatherEcologySample hazard,
-            float refugeScore = 0f,
-            int refugeNode = -1)
-        {
-            Creature = creature;
-            Purpose = purpose;
-            HomeColony = Normalize(homeColony);
-            DestinationRoom = Normalize(destinationRoom);
-            Route = CopyRoute(route);
-            RouteIndex = 0;
-            DepartureDelay = Mathf.Max(0, departureDelay);
-            Hazard = hazard;
-            RefugeScore = refugeScore;
-            RefugeNode = refugeNode;
-            StatusReason = departureDelay > 0 ? "scheduled / staggered departure" : "route committed";
-        }
-    }
-
-    private static Dictionary<string, TravelIntent> intents = new(StringComparer.Ordinal);
+    private static Dictionary<string, DB_TravelIntent> intents = new(StringComparer.Ordinal);
     private static HashSet<string> activeEvacuations = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<AbstractCreature> ownedScratch = new(64);
     private static WeakReference activeWorld;
 
     internal static void Reset()
     {
-        intents = new Dictionary<string, TravelIntent>(StringComparer.Ordinal);
+        intents = new Dictionary<string, DB_TravelIntent>(StringComparer.Ordinal);
         activeEvacuations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         ownedScratch.Clear();
         activeWorld = null;
@@ -143,7 +50,7 @@ internal static class DesertBatflyTravelNavigation
 
     /// <summary>
     /// R3 proposal query. This method never decrements departure delay, replans, calls
-    /// LeaveRoom or mutates TravelIntent. Historical Suspended state is deliberately not a
+    /// LeaveRoom or mutates DB_TravelIntent. Historical Suspended state is deliberately not a
     /// veto: once the current blocker clears, the arbiter may select Travel and the existing
     /// executor is allowed to resume/replan normally.
     /// </summary>
@@ -153,7 +60,7 @@ internal static class DesertBatflyTravelNavigation
         if (bat?.abstractCreature == null || bat.AI == null || bat.room == null ||
             bat.dead || !bat.Consious || bat.inShortcut)
             return false;
-        if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out TravelIntent intent))
+        if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out DB_TravelIntent intent))
             return false;
 
         if (intent.Purpose == DB_TravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
@@ -193,10 +100,10 @@ internal static class DesertBatflyTravelNavigation
         return true;
     }
 
-    internal static bool TryGetDebugState(AbstractCreature creature, out DesertBatflyTravelDebugState state)
+    internal static bool TryGetDebugState(AbstractCreature creature, out DB_TravelDebugState state)
     {
         state = default;
-        if (creature == null || !intents.TryGetValue(Key(creature.ID), out TravelIntent intent))
+        if (creature == null || !intents.TryGetValue(Key(creature.ID), out DB_TravelIntent intent))
             return false;
 
         int[] routeRooms = intent.Route.Valid ? new int[intent.Route.Rooms.Length] : Array.Empty<int>();
@@ -205,7 +112,7 @@ internal static class DesertBatflyTravelNavigation
         if (intent.Route.Valid && intent.RouteIndex + 1 < intent.Route.Rooms.Length)
             next = intent.Route.Rooms[intent.RouteIndex + 1];
 
-        state = new DesertBatflyTravelDebugState(
+        state = new DB_TravelDebugState(
             intent.Purpose, intent.HomeColony, intent.DestinationRoom, intent.RouteIndex,
             routeRooms, next, intent.DepartureDelay, intent.WaitingAtRefuge, intent.Suspended,
             intent.StatusReason, intent.Route.Valid ? intent.Route.Cost : float.PositiveInfinity,
@@ -223,7 +130,7 @@ internal static class DesertBatflyTravelNavigation
             return;
         DB_ColonyRuntime.EnsureIndividualOwnership(creature);
         DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature);
-        intents[Key(creature.ID)] = new TravelIntent(
+        intents[Key(creature.ID)] = new DB_TravelIntent(
             creature, DB_TravelPurpose.ColonyMigration, record?.CurrentColony,
             destinationRoom, route, departureDelay, DB_WeatherEcologySample.None);
     }
@@ -235,7 +142,7 @@ internal static class DesertBatflyTravelNavigation
         List<string> keys = new(intents.Keys);
         for (int i = 0; i < keys.Count; i++)
         {
-            if (!intents.TryGetValue(keys[i], out TravelIntent intent)) continue;
+            if (!intents.TryGetValue(keys[i], out DB_TravelIntent intent)) continue;
             AbstractCreature creature = intent.Creature;
             if (!ValidCreature(creature) || creature.world != world)
             {
@@ -307,7 +214,7 @@ internal static class DesertBatflyTravelNavigation
         if (bat?.abstractCreature == null || bat.AI == null || bat.room == null ||
             bat.dead || !bat.Consious || bat.inShortcut)
             return false;
-        if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out TravelIntent intent)) return false;
+        if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out DB_TravelIntent intent)) return false;
 
         TickCooldownRealized(intent);
         if (intent.Purpose == DB_TravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
@@ -420,7 +327,7 @@ internal static class DesertBatflyTravelNavigation
                 if (!ValidCreature(creature)) continue;
                 DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
                 if (record == null || !string.IsNullOrEmpty(record.PendingMigrationColony)) continue;
-                if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
+                if (intents.TryGetValue(Key(creature.ID), out DB_TravelIntent existing) &&
                     existing.Purpose == DB_TravelPurpose.ColonyMigration)
                     continue;
                 if (creature.state is not DB_State state) continue;
@@ -451,7 +358,7 @@ internal static class DesertBatflyTravelNavigation
                 int stagger = 20 + StableInt(staggerSeed ^ personalRefuge.RoomIndex, 0, 220);
                 AbstractRoom refugeRoom = world.GetAbstractRoom(personalRefuge.RoomIndex);
                 if (refugeRoom == null) continue;
-                intents[Key(creature.ID)] = new TravelIntent(
+                intents[Key(creature.ID)] = new DB_TravelIntent(
                     creature, DB_TravelPurpose.EmergencyRefuge, colony.RoomName,
                     refugeRoom.name, personalRefuge.Route, stagger, hazard,
                     personalRefuge.Score, personalRefuge.AbstractNode);
@@ -475,7 +382,7 @@ internal static class DesertBatflyTravelNavigation
         List<string> keys = new(intents.Keys);
         for (int i = 0; i < keys.Count; i++)
         {
-            if (!intents.TryGetValue(keys[i], out TravelIntent intent) ||
+            if (!intents.TryGetValue(keys[i], out DB_TravelIntent intent) ||
                 intent.Purpose != DB_TravelPurpose.EmergencyRefuge ||
                 !string.Equals(intent.HomeColony, homeColony, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -505,11 +412,11 @@ internal static class DesertBatflyTravelNavigation
             if (!ValidCreature(creature) || creature.pos.room == home.index) continue;
             DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
             if (record == null || !string.IsNullOrEmpty(record.PendingMigrationColony)) continue;
-            if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
+            if (intents.TryGetValue(Key(creature.ID), out DB_TravelIntent existing) &&
                 existing.Purpose is DB_TravelPurpose.ColonyMigration or DB_TravelPurpose.ReturnHome)
                 continue;
             if (!TryBuildReturnRoute(world, creature, home, template, out DB_WorldRoute route)) continue;
-            intents[Key(creature.ID)] = new TravelIntent(
+            intents[Key(creature.ID)] = new DB_TravelIntent(
                 creature, DB_TravelPurpose.ReturnHome, homeColony, home.name, route,
                 20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180),
                 DB_WeatherEcologySample.None);
@@ -556,7 +463,7 @@ internal static class DesertBatflyTravelNavigation
                         roomCandidate => CurrentRouteRisk(world, roomCandidate),
                         DB_WorldRoutePlanner.MigrationMaxHops, out DB_WorldRoute route))
                     continue;
-                intents[Key(creature.ID)] = new TravelIntent(
+                intents[Key(creature.ID)] = new DB_TravelIntent(
                     creature, DB_TravelPurpose.ColonyMigration, record.CurrentColony,
                     destination.name, route, StableInt(creature.ID.RandomSeed ^ 0x6A09E667, 0, 180),
                     DB_WeatherEcologySample.None);
@@ -564,7 +471,7 @@ internal static class DesertBatflyTravelNavigation
         }
     }
 
-    private static bool EnsureRouteSafety(World world, TravelIntent intent, int currentRoom, float physicalCapability)
+    private static bool EnsureRouteSafety(World world, DB_TravelIntent intent, int currentRoom, float physicalCapability)
     {
         if (world == null || intent == null || currentRoom < 0) return false;
         if (!TrySynchronizeRouteIndex(intent, currentRoom) &&
@@ -616,7 +523,7 @@ internal static class DesertBatflyTravelNavigation
     }
 
     private static bool TrySwitchEmergencyRefuge(
-        World world, TravelIntent intent, int currentRoom, float physicalCapability, string reason)
+        World world, DB_TravelIntent intent, int currentRoom, float physicalCapability, string reason)
     {
         if (world == null || intent == null || intent.Purpose != DB_TravelPurpose.EmergencyRefuge)
             return false;
@@ -667,7 +574,7 @@ internal static class DesertBatflyTravelNavigation
         return true;
     }
 
-    private static bool TryReplan(World world, TravelIntent intent, int currentRoom, string reason)
+    private static bool TryReplan(World world, DB_TravelIntent intent, int currentRoom, string reason)
     {
         if (world == null || intent == null || currentRoom < 0) return false;
         AbstractRoom destination = DB_ColonyRuntime.FindRoom(world, intent.DestinationRoom);
@@ -688,7 +595,7 @@ internal static class DesertBatflyTravelNavigation
         return true;
     }
 
-    private static void HandleArrival(World world, TravelIntent intent)
+    private static void HandleArrival(World world, DB_TravelIntent intent)
     {
         if (intent?.Creature == null) return;
         string key = Key(intent.Creature.ID);
@@ -714,7 +621,7 @@ internal static class DesertBatflyTravelNavigation
         }
     }
 
-    private static bool HoldAtRefuge(DesertBatfly bat, TravelIntent intent)
+    private static bool HoldAtRefuge(DesertBatfly bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null) return false;
         intent.Suspended = false;
@@ -758,7 +665,7 @@ internal static class DesertBatflyTravelNavigation
         return true;
     }
 
-    private static void TryEmergeForTravel(DesertBatfly bat, TravelIntent intent)
+    private static void TryEmergeForTravel(DesertBatfly bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null || !bat.DesertState.InHive) return;
         try
@@ -776,7 +683,7 @@ internal static class DesertBatflyTravelNavigation
         }
     }
 
-    private static void ConvertToReturnHome(TravelIntent intent, AbstractRoom home, in DB_WorldRoute route)
+    private static void ConvertToReturnHome(DB_TravelIntent intent, AbstractRoom home, in DB_WorldRoute route)
     {
         intent.Purpose = DB_TravelPurpose.ReturnHome;
         intent.DestinationRoom = Normalize(home.name);
@@ -792,7 +699,7 @@ internal static class DesertBatflyTravelNavigation
         intent.StatusReason = "weather safe; staggered return home";
     }
 
-    private static float RouteRiskForIntent(World world, TravelIntent intent, AbstractRoom room)
+    private static float RouteRiskForIntent(World world, DB_TravelIntent intent, AbstractRoom room)
     {
         if (intent != null && intent.Purpose == DB_TravelPurpose.EmergencyRefuge && intent.Hazard.HasHazard)
             return DB_RefugePolicy.RouteRisk(world, room, intent.Hazard, DB_ColonyRuntime.PredatorRisk);
@@ -808,7 +715,7 @@ internal static class DesertBatflyTravelNavigation
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + predator * 0.22f);
     }
 
-    private static void TickRoomProgress(TravelIntent intent, int roomIndex, int ticks)
+    private static void TickRoomProgress(DB_TravelIntent intent, int roomIndex, int ticks)
     {
         if (intent == null) return;
         if (intent.LastObservedRoom != roomIndex)
@@ -820,7 +727,7 @@ internal static class DesertBatflyTravelNavigation
         intent.SameRoomTravelTicks = Mathf.Min(NativeExitTimeoutTicks + 120, intent.SameRoomTravelTicks + ticks);
     }
 
-    private static void TickRoomProgressRealized(TravelIntent intent, int roomIndex)
+    private static void TickRoomProgressRealized(DB_TravelIntent intent, int roomIndex)
     {
         if (intent == null) return;
         int frame = Time.frameCount;
@@ -829,17 +736,17 @@ internal static class DesertBatflyTravelNavigation
         TickRoomProgress(intent, roomIndex, 1);
     }
 
-    private static void TickCooldownAbstract(TravelIntent intent)
+    private static void TickCooldownAbstract(DB_TravelIntent intent)
     {
         if (intent?.ReplanCooldown > 0) intent.ReplanCooldown = Mathf.Max(0, intent.ReplanCooldown - 120);
     }
 
-    private static void TickCooldownRealized(TravelIntent intent)
+    private static void TickCooldownRealized(DB_TravelIntent intent)
     {
         if (intent?.ReplanCooldown > 0) intent.ReplanCooldown--;
     }
 
-    private static bool TrySynchronizeRouteIndex(TravelIntent intent, int currentRoom)
+    private static bool TrySynchronizeRouteIndex(DB_TravelIntent intent, int currentRoom)
     {
         if (intent?.Route.Rooms == null || intent.Route.Rooms.Length == 0) return false;
         int start = Mathf.Clamp(intent.RouteIndex, 0, intent.Route.Rooms.Length - 1);
@@ -857,7 +764,7 @@ internal static class DesertBatflyTravelNavigation
         return false;
     }
 
-    private static bool ReachedDestination(TravelIntent intent, int roomIndex)
+    private static bool ReachedDestination(DB_TravelIntent intent, int roomIndex)
     {
         if (intent == null || roomIndex < 0 || !intent.Route.Valid) return false;
         return intent.Route.Rooms[intent.Route.Rooms.Length - 1] == roomIndex;
@@ -903,7 +810,7 @@ internal static class DesertBatflyTravelNavigation
         }
     }
 
-    private static void Suspend(TravelIntent intent, string reason)
+    private static void Suspend(DB_TravelIntent intent, string reason)
     {
         if (intent == null) return;
         intent.Suspended = true;

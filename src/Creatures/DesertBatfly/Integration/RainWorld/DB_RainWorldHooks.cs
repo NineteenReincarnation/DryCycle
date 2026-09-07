@@ -219,7 +219,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
-            if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+            if (DB_TravelRuntime.TryDriveRealized(desert))
             {
                 DesertBatflySocialLife.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
                 desert.DesertAI.CancelAttack();

@@ -318,7 +318,7 @@ internal static class DB_SignalRuntime
         if (receiver == null || packet == null || response < ThreatAlarmEscapeThreshold || receiver.dead ||
             !receiver.Consious || receiver.room == null || receiver.inShortcut ||
             receiver.Injury.IsSeverelyInjured ||
-            DesertBatflyTravelNavigation.HasIntent(receiver.abstractCreature))
+            DB_TravelRuntime.HasIntent(receiver.abstractCreature))
             return;
 
         Creature threat = packet.Threat;
@@ -648,7 +648,7 @@ internal static class DB_SignalRuntime
         if (!Available(bat) || !bat.Consious || bat.DesertAI == null) return false;
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return false;
-        if (bat.Injury.IsSeverelyInjured || DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature))
+        if (bat.Injury.IsSeverelyInjured || DB_TravelRuntime.HasIntent(bat.abstractCreature))
             return false;
 
         if (DesertBatflyThreatRuntime.TryGetDebugState(bat, out DesertBatflyThreatDebugState threat) &&

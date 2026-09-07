@@ -104,7 +104,7 @@ internal static partial class Program
             Check(specialNames.Contains(required),
                 "Task14 R3 special-physics ownership explicitly includes " + required);
 
-        Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
+        Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);
         Check(travel.GetMethod("CanOwnRealizedFrame", Flags) != null,
             "Task14 R3 Travel exposes a non-destructive proposal eligibility query");
 

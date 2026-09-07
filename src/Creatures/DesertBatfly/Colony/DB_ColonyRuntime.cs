@@ -91,7 +91,7 @@ internal static class DB_ColonyRuntime
         activeWorld = null;
         abstractTick = 0;
         DB_RefugePolicy.Reset();
-        DesertBatflyTravelNavigation.Reset();
+        DB_TravelRuntime.Reset();
     }
 
     internal static DB_ColonyState TryGetColony(string roomName)
@@ -268,7 +268,7 @@ internal static class DB_ColonyRuntime
         RefreshPopulationCounts(world);
 
         // Restore persisted migration routes only after room and ownership indexes exist.
-        DesertBatflyTravelNavigation.OnWorldChanged(world);
+        DB_TravelRuntime.OnWorldChanged(world);
     }
 
     internal static int CurrentCycle(World world)
@@ -340,8 +340,8 @@ internal static class DB_ColonyRuntime
         if (self?.world?.game == null || ++abstractTick < 120) return;
         abstractTick = 0;
         EnsureWorld(self.world);
-        DesertBatflyTravelNavigation.UpdateAbstractWorld(self.world);
-        DesertBatflyTravelNavigation.EvaluateColonyWeather(self.world);
+        DB_TravelRuntime.UpdateAbstractWorld(self.world);
+        DB_TravelRuntime.EvaluateColonyWeather(self.world);
     }
 
     private static void SettleSurvivedCycle(World world, int cycle, int saveSeed)
@@ -429,7 +429,7 @@ internal static class DB_ColonyRuntime
             IndividualRecord record = RecordFor(creature);
             record.PendingMigrationColony = destination.RoomName;
             int stagger = 60 + StableInt(creature.ID.RandomSeed ^ cycle * 7919, 0, 360);
-            DesertBatflyTravelNavigation.RequestPermanentMigration(
+            DB_TravelRuntime.RequestPermanentMigration(
                 creature, destination.RoomName, sharedRoute, stagger);
         }
         if (selected <= 0) return;
@@ -715,7 +715,7 @@ internal static class DB_ColonyRuntime
         trackedBats.Clear();
         activeWorld = null;
         DB_RefugePolicy.Reset();
-        DesertBatflyTravelNavigation.Reset();
+        DB_TravelRuntime.Reset();
         if (save?.unrecognizedSaveStrings == null) return;
 
         string encoded = null;

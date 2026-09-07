@@ -19,8 +19,8 @@ internal static class DB_Trace
             flockAge = colony.SnapshotAge;
         }
 
-        bool hasTravel = DesertBatflyTravelNavigation.TryGetDebugState(
-            bat.abstractCreature, out DesertBatflyTravelDebugState travel);
+        bool hasTravel = DB_TravelRuntime.TryGetDebugState(
+            bat.abstractCreature, out DB_TravelDebugState travel);
         bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
             bat, out DesertBatflySocialDebugState social) &&
             social.Mode != DesertBatflySocialMode.None;
@@ -44,14 +44,14 @@ internal static class DB_Trace
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "Task09TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
-            hasTravel ? travel.StatusReason : "no active TravelIntent");
+            hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "Task09TravelDestination", hasTravel ? travel.DestinationRoom : "—",
-            hasTravel ? travel.StatusReason : "no active TravelIntent");
+            hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "Task09TravelProgress",
             hasTravel ? $"{travel.RouteIndex}/{Mathf.Max(0, travel.RouteRooms.Length - 1)} next={travel.NextRoom}" : "—",
-            hasTravel ? travel.StatusReason : "no active TravelIntent");
+            hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "Task09TravelStatus", hasTravel ? travel.StatusReason : "—",
             hasTravel && travel.Suspended ? "TravelSuspended" : "TravelActiveOrNone");
@@ -88,7 +88,7 @@ internal static class DB_Trace
     private static string Suppression(
         DesertBatfly bat,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel)
+        in DB_TravelDebugState travel)
     {
         if (bat.dead || !bat.Consious || bat.room == null) return "Unavailable";
         if (bat.inShortcut) return "Shortcut";
@@ -116,7 +116,7 @@ internal static class DB_Trace
         DesertBatfly bat,
         string suppression,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel,
+        in DB_TravelDebugState travel,
         bool hasSocial,
         in DesertBatflySocialDebugState social)
     {
@@ -147,7 +147,7 @@ internal static class DB_Trace
         DesertBatfly bat,
         string suppression,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel)
+        in DB_TravelDebugState travel)
     {
         switch (suppression)
         {
@@ -173,7 +173,7 @@ internal static class DB_Trace
         DesertBatfly bat,
         string suppression,
         bool hasTravel,
-        in DesertBatflyTravelDebugState travel,
+        in DB_TravelDebugState travel,
         bool hasSocial,
         in DesertBatflySocialDebugState social)
     {

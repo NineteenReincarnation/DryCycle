@@ -71,8 +71,8 @@ internal static partial class Program
         // truly idempotent. R3 will extend this exactly-once rule to every realized travel
         // countdown/cooldown, including DepartureDelay and ReplanCooldown.
         Type travelType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
-        Type intentType = travelType.GetNestedType("TravelIntent", Flags);
+            "DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);
+        Type intentType = travelType.GetNestedType("DB_TravelIntent", Flags);
         object intent = FormatterServices.GetUninitializedObject(intentType);
         intentType.GetField("LastObservedFrame", Flags).SetValue(intent, int.MinValue);
         intentType.GetField("LastObservedRoom", Flags).SetValue(intent, 77);
