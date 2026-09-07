@@ -1,0 +1,14 @@
+Task 13 weather-by-weather discussion order
+==========================================
+
+1. LIGHTRAIN
+2. FOG
+3. DENSEFOG
+4. HEAVYRAIN
+5. HEATWAVE
+6. SANDSTORM
+7. INTENSEHEAT
+8. DEATHRAIN
+9. DEATHSANDSTORM
+
+The detailed design is discussed one weather at a time before the final Task13 specification is written.
