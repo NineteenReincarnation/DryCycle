@@ -1,0 +1,237 @@
+using System;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using MonoMod.RuntimeDetour;
+using UnityEngine;
+
+namespace DryCycle.Creatures.DesertBatfly;
+
+/// <summary>
+/// Narrow Task13 bridge into already-existing DesertBatfly decision points.
+/// It does not implement a second combat, roost or locomotion state machine.
+/// </summary>
+internal static class DesertBatflyEnvironmentalIntegration
+{
+    private delegate bool AggressiveOrig(DesertBatflyPersonality self);
+    private delegate bool AggressiveDetour(AggressiveOrig orig, DesertBatflyPersonality self);
+    private delegate float RoostChanceOrig(DesertBatflyPersonality self);
+    private delegate float RoostChanceDetour(RoostChanceOrig orig, DesertBatflyPersonality self);
+    private delegate int RoostDurationOrig(DesertBatflyPersonality self);
+    private delegate int RoostDurationDetour(RoostDurationOrig orig, DesertBatflyPersonality self);
+    private delegate bool CanHarassOrig(DesertBatflyAI self, Creature creature);
+    private delegate bool CanHarassDetour(CanHarassOrig orig, DesertBatflyAI self, Creature creature);
+    private delegate void ScanCreaturesOrig(DesertBatflyAI self);
+    private delegate void ScanCreaturesDetour(ScanCreaturesOrig orig, DesertBatflyAI self);
+    private delegate void SteerOrig(DesertBatflyAI self, Vector2 goal, float speed);
+    private delegate void SteerDetour(SteerOrig orig, DesertBatflyAI self, Vector2 goal, float speed);
+
+    private sealed class BatRef
+    {
+        internal DesertBatfly Bat;
+    }
+
+    private static Hook aggressiveHook;
+    private static Hook roostChanceHook;
+    private static Hook roostDurationHook;
+    private static Hook canHarassHook;
+    private static Hook scanCreaturesHook;
+    private static Hook steerHook;
+    private static FieldInfo aiFlyField;
+    private static ConditionalWeakTable<DesertBatflyPersonality, BatRef> personalityOwners = new();
+
+    internal static bool Installed => aggressiveHook != null;
+
+    internal static void Enable()
+    {
+        if (Installed) return;
+        Disable();
+        try
+        {
+            BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+            PropertyInfo aggressive = typeof(DesertBatflyPersonality).GetProperty("Aggressive", instance);
+            PropertyInfo roostChance = typeof(DesertBatflyPersonality).GetProperty("RoostChance", instance);
+            PropertyInfo roostDuration = typeof(DesertBatflyPersonality).GetProperty("RoostDuration", instance);
+            MethodInfo canHarass = typeof(DesertBatflyAI).GetMethod(
+                "CanHarass", BindingFlags.Instance | BindingFlags.NonPublic, null,
+                new[] { typeof(Creature) }, null);
+            MethodInfo scanCreatures = typeof(DesertBatflyAI).GetMethod(
+                "ScanCreatures", BindingFlags.Instance | BindingFlags.NonPublic, null,
+                Type.EmptyTypes, null);
+            MethodInfo steer = typeof(DesertBatflyAI).GetMethod(
+                "Steer", BindingFlags.Instance | BindingFlags.NonPublic, null,
+                new[] { typeof(Vector2), typeof(float) }, null);
+            aiFlyField = typeof(DesertBatflyAI).GetField("fly", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            MethodInfo aggressiveGetter = aggressive?.GetGetMethod(true);
+            MethodInfo roostChanceGetter = roostChance?.GetGetMethod(true);
+            MethodInfo roostDurationGetter = roostDuration?.GetGetMethod(true);
+            if (aggressiveGetter == null || roostChanceGetter == null || roostDurationGetter == null ||
+                canHarass == null || scanCreatures == null || steer == null || aiFlyField == null)
+                return;
+
+            aggressiveHook = new Hook(aggressiveGetter, (AggressiveDetour)AggressiveHook);
+            roostChanceHook = new Hook(roostChanceGetter, (RoostChanceDetour)RoostChanceHook);
+            roostDurationHook = new Hook(roostDurationGetter, (RoostDurationDetour)RoostDurationHook);
+            canHarassHook = new Hook(canHarass, (CanHarassDetour)CanHarassHook);
+            scanCreaturesHook = new Hook(scanCreatures, (ScanCreaturesDetour)ScanCreaturesHook);
+            steerHook = new Hook(steer, (SteerDetour)SteerHook);
+        }
+        catch
+        {
+            Disable();
+        }
+    }
+
+    internal static void Disable()
+    {
+        try { steerHook?.Dispose(); } catch { }
+        try { scanCreaturesHook?.Dispose(); } catch { }
+        try { canHarassHook?.Dispose(); } catch { }
+        try { roostDurationHook?.Dispose(); } catch { }
+        try { roostChanceHook?.Dispose(); } catch { }
+        try { aggressiveHook?.Dispose(); } catch { }
+        steerHook = null;
+        scanCreaturesHook = null;
+        canHarassHook = null;
+        roostDurationHook = null;
+        roostChanceHook = null;
+        aggressiveHook = null;
+        aiFlyField = null;
+        personalityOwners = new ConditionalWeakTable<DesertBatflyPersonality, BatRef>();
+    }
+
+    internal static void Register(DesertBatfly bat)
+    {
+        if (bat?.Personality == null) return;
+        personalityOwners.GetValue(bat.Personality, _ => new BatRef()).Bat = bat;
+    }
+
+    private static bool AggressiveHook(AggressiveOrig orig, DesertBatflyPersonality personality)
+    {
+        if (orig(personality)) return true;
+        DesertBatfly bat = Resolve(personality);
+        return bat != null && DesertBatflyEnvironmentalBehavior.AllowsEnvironmentalDamageAttack(bat);
+    }
+
+    private static float RoostChanceHook(RoostChanceOrig orig, DesertBatflyPersonality personality)
+    {
+        float chance = orig(personality);
+        DesertBatfly bat = Resolve(personality);
+        if (bat == null) return chance;
+        return chance * DesertBatflyEnvironmentalBehavior.RoostScale(bat);
+    }
+
+    private static int RoostDurationHook(RoostDurationOrig orig, DesertBatflyPersonality personality)
+    {
+        int duration = orig(personality);
+        DesertBatfly bat = Resolve(personality);
+        if (bat == null || !DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out var influence))
+            return duration;
+
+        float scale = Mathf.Clamp(influence.RoostMultiplier, 1f, 4.5f);
+        int adjusted = Mathf.RoundToInt(duration * scale);
+        if (DesertBatflyEnvironmentalBehavior.ShouldHoldEnvironmentalRoost(bat))
+            adjusted = Mathf.Max(adjusted, influence.HardSurvival ? 2400 : 1200);
+        return Mathf.Clamp(adjusted, duration, 4200);
+    }
+
+    private static bool CanHarassHook(CanHarassOrig orig, DesertBatflyAI ai, Creature creature)
+    {
+        if (!orig(ai, creature)) return false;
+        DesertBatfly bat = Resolve(ai);
+        if (bat == null || !DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out var influence))
+            return true;
+        if (influence.HardSurvival) return false;
+
+        float scale = influence.HarassMultiplier;
+        if (scale >= 0.999f) return true;
+        if (scale <= 0.001f) return false;
+
+        int clockBucket = (bat.room?.game?.clock ?? 0) / 80;
+        int targetKey = creature?.abstractCreature?.ID.number ?? 0;
+        return Stable01(bat.Personality.VisualSeed ^ targetKey * 397 ^ clockBucket * 7919) <= scale;
+    }
+
+    private static void ScanCreaturesHook(ScanCreaturesOrig orig, DesertBatflyAI ai)
+    {
+        DesertBatfly bat = Resolve(ai);
+        if (bat == null || !DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out var influence))
+        {
+            orig(ai);
+            return;
+        }
+
+        float savedThirst = bat.DesertState.Thirst;
+        try
+        {
+            float decisionThirst = savedThirst;
+            if (influence.HarassMultiplier < 1f)
+                decisionThirst *= Mathf.Lerp(0.28f, 1f, influence.HarassMultiplier);
+            if (influence.HeatAgitation > 0f && !influence.HardSurvival)
+            {
+                float heatMotivation = influence.HeatAgitation *
+                    (1f - influence.ThermalExhaustion) * 0.38f;
+                decisionThirst = Mathf.Max(decisionThirst, savedThirst + heatMotivation);
+            }
+            bat.DesertState.Thirst = Mathf.Clamp01(decisionThirst);
+            orig(ai);
+        }
+        finally
+        {
+            bat.DesertState.Thirst = savedThirst;
+        }
+
+        if (influence.VisibilityConfidence >= 0.98f || ai.Target == null || ai.FormalAttack)
+            return;
+
+        float visibleRange = DesertBatflyTuning.SightRange * Mathf.Lerp(0.42f, 1f, influence.VisibilityConfidence);
+        if (Vector2.Distance(bat.mainBodyChunk.pos, ai.Target.mainBodyChunk.pos) > visibleRange &&
+            ai.Mode == DesertBatflyAI.Activity.Observe)
+            ai.CancelAttack();
+    }
+
+    private static void SteerHook(SteerOrig orig, DesertBatflyAI ai, Vector2 goal, float speed)
+    {
+        DesertBatfly bat = Resolve(ai);
+        if (bat != null && DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out var influence) &&
+            influence.NavigationUncertainty > 0.04f &&
+            influence.Weather is DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog)
+        {
+            int clock = bat.room?.game?.clock ?? 0;
+            int bucket = clock / 110;
+            float angle = Stable01(bat.Personality.VisualSeed ^ bucket * 0x45d9f3b) * Mathf.PI * 2f;
+            float errorRadius = Mathf.Lerp(5f, 62f, influence.NavigationUncertainty);
+            float distanceFade = Mathf.InverseLerp(65f, 300f, Vector2.Distance(bat.mainBodyChunk.pos, goal));
+            goal += new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * errorRadius * distanceFade;
+        }
+        orig(ai, goal, speed);
+    }
+
+    private static DesertBatfly Resolve(DesertBatflyPersonality personality)
+    {
+        if (personality == null || !personalityOwners.TryGetValue(personality, out BatRef holder)) return null;
+        DesertBatfly bat = holder.Bat;
+        return bat != null && !bat.dead && !bat.slatedForDeletetion ? bat : null;
+    }
+
+    private static DesertBatfly Resolve(DesertBatflyAI ai)
+    {
+        if (ai == null || aiFlyField == null) return null;
+        try { return aiFlyField.GetValue(ai) as DesertBatfly; }
+        catch { return null; }
+    }
+
+    private static float Stable01(int seed)
+    {
+        unchecked
+        {
+            uint x = (uint)seed;
+            x ^= x >> 16;
+            x *= 0x7feb352d;
+            x ^= x >> 15;
+            x *= 0x846ca68b;
+            x ^= x >> 16;
+            return (x & 0x00ffffffu) / 16777215f;
+        }
+    }
+}
