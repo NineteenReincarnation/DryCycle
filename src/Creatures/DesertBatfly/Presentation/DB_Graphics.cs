@@ -246,7 +246,7 @@ internal sealed class DB_Graphics : FlyGraphics
 
     private void ApplySignalDisplay(RoomCamera.SpriteLeaser sLeaser, float timeStacker)
     {
-        if (!DB_SignalRuntime.TryGetDisplay(desert, out DesertBatflySignalDisplayState display))
+        if (!DB_SignalRuntime.TryGetDisplay(desert, out DB_SignalDisplayState display))
             return;
 
         float clock = (desert.room?.game?.clock ?? 0) + timeStacker;
@@ -258,32 +258,32 @@ internal sealed class DB_Graphics : FlyGraphics
 
         switch (display.Kind)
         {
-            case DesertBatflySignalKind.AlarmFlutter:
+            case DB_SignalKind.AlarmFlutter:
                 left = Mathf.Sin(clock * 1.75f) * (7f + 12f * intensity);
                 right = -left;
                 spread = 0.08f + pulse * 0.12f * intensity;
                 break;
-            case DesertBatflySignalKind.DistressCall:
+            case DB_SignalKind.DistressCall:
                 left = Mathf.Sin(clock * 2.25f) * (11f + 15f * intensity);
                 right = Mathf.Sin(clock * 2.25f + Mathf.PI * 0.72f) * (11f + 15f * intensity);
                 spread = 0.14f + pulse * 0.18f * intensity;
                 break;
-            case DesertBatflySignalKind.RallySignal:
+            case DB_SignalKind.RallySignal:
                 left = -8f * intensity;
                 right = 8f * intensity;
                 spread = 0.10f + pulse * 0.08f;
                 break;
-            case DesertBatflySignalKind.RoostCall:
+            case DB_SignalKind.RoostCall:
                 left = -4f * intensity;
                 right = 4f * intensity;
                 spread = 0.05f;
                 break;
-            case DesertBatflySignalKind.SafeSignal:
+            case DB_SignalKind.SafeSignal:
                 left = -Mathf.Sin(clock * 0.18f) * 2.5f * intensity;
                 right = -left;
                 spread = pulse * 0.025f;
                 break;
-            case DesertBatflySignalKind.HarassSignal:
+            case DB_SignalKind.HarassSignal:
                 left = 3f * intensity;
                 right = -3f * intensity;
                 spread = pulse * 0.035f;

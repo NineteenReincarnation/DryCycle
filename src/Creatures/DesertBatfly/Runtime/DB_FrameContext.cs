@@ -114,7 +114,7 @@ internal readonly struct DB_FrameContext
 
     internal readonly DB_TravelFrameSummary Travel;
     internal readonly bool HasSignalInfluence;
-    internal readonly DesertBatflySignalInfluence SignalInfluence;
+    internal readonly DB_SignalInfluence SignalInfluence;
     internal readonly bool HasEnvironmentInfluence;
     internal readonly DesertBatflyEnvironmentalInfluence EnvironmentInfluence;
     internal readonly DB_ThreatFrameSummary Threat;
@@ -166,7 +166,7 @@ internal readonly struct DB_FrameContext
         float visibilityFactor,
         in DB_TravelFrameSummary travel,
         bool hasSignalInfluence,
-        in DesertBatflySignalInfluence signalInfluence,
+        in DB_SignalInfluence signalInfluence,
         bool hasEnvironmentInfluence,
         in DesertBatflyEnvironmentalInfluence environmentInfluence,
         in DB_ThreatFrameSummary threat,
@@ -332,7 +332,7 @@ internal static class DB_FrameContextRuntime
             bat, out DesertBatflyEnvironmentalInfluence environment);
         if (!hasEnvironment) environment = DesertBatflyEnvironmentalInfluence.Neutral;
         bool hasSignal = DB_SignalRuntime.TryGetInfluence(
-            bat, out DesertBatflySignalInfluence signal);
+            bat, out DB_SignalInfluence signal);
 
         bool hasThreat = DesertBatflyThreatRuntime.TryGetDebugState(
             bat, out DesertBatflyThreatDebugState threatDebug);

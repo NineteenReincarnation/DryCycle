@@ -7,7 +7,7 @@ internal static partial class Program
 {
     private static void RunTask12()
     {
-        Type kind = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalKind", true);
+        Type kind = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalKind", true);
         string[] names = Enum.GetNames(kind);
         string[] expected =
         {
@@ -17,7 +17,7 @@ internal static partial class Program
         Check(names.Length == expected.Length && expected.All(n => names.Contains(n)),
             "Task12 V1 exposes exactly six accepted signal kinds");
 
-        Type packet = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalPacket", true);
+        Type packet = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalPacket", true);
         foreach (string field in new[]
                  {
                      "Generation", "Kind", "Emitter", "Subject", "Threat", "PlayerTarget",

@@ -51,12 +51,12 @@ internal static class DB_SignalRuntime
         internal int LastDistressEmitTick = int.MinValue;
 
         internal int LastGeneration;
-        internal DesertBatflySignalKind LastKind;
-        internal DesertBatflySignalPerception LastPerception;
+        internal DB_SignalKind LastKind;
+        internal DB_SignalPerception LastPerception;
         internal int LastHop;
         internal string LastDecision = "no signal received";
 
-        internal DesertBatflySignalDisplayState Display;
+        internal DB_SignalDisplayState Display;
         internal int DisplayUntil = int.MinValue;
     }
 
@@ -101,13 +101,13 @@ internal static class DB_SignalRuntime
 
         for (int i = 0; i < roomState.ActiveSignals.Count; i++)
         {
-            DesertBatflySignalPacket packet = roomState.ActiveSignals[i];
+            DB_SignalPacket packet = roomState.ActiveSignals[i];
             if (packet == null || packet.Emitter == bat || packet.Expired(clock)) continue;
             ReceivePacket(bat, packet, out _);
         }
     }
 
-    internal static DesertBatflySignalPacket EmitAlarm(
+    internal static DB_SignalPacket EmitAlarm(
         DesertBatfly emitter,
         Creature threat,
         Vector2 origin,
@@ -117,9 +117,9 @@ internal static class DB_SignalRuntime
     {
         if (!Available(emitter)) return null;
         DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
-        DesertBatflySignalPacket packet = room?.AddOrRefresh(
+        DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
-            DesertBatflySignalKind.AlarmFlutter,
+            DB_SignalKind.AlarmFlutter,
             emitter,
             emitter,
             threat,
@@ -130,14 +130,14 @@ internal static class DB_SignalRuntime
             AlarmTtlTicks);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DesertBatflySignalKind.AlarmFlutter, intensity, 38, direction);
+        SetDisplay(emitter, DB_SignalKind.AlarmFlutter, intensity, 38, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
     }
 
 
-    internal static DesertBatflySignalPacket EmitRally(
+    internal static DB_SignalPacket EmitRally(
         DesertBatfly emitter,
         Creature threat,
         float drive,
@@ -149,9 +149,9 @@ internal static class DB_SignalRuntime
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
         DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
-        DesertBatflySignalPacket packet = room?.AddOrRefresh(
+        DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
-            DesertBatflySignalKind.RallySignal,
+            DB_SignalKind.RallySignal,
             emitter,
             emitter,
             threat,
@@ -162,13 +162,13 @@ internal static class DB_SignalRuntime
             84);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DesertBatflySignalKind.RallySignal, packet.Intensity, 42, direction);
+        SetDisplay(emitter, DB_SignalKind.RallySignal, packet.Intensity, 42, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
     }
 
-    internal static DesertBatflySignalPacket EmitAcuteAlarm(
+    internal static DB_SignalPacket EmitAcuteAlarm(
         Room room,
         Creature threat,
         Vector2 position,
@@ -181,7 +181,7 @@ internal static class DB_SignalRuntime
         return EmitAlarm(emitter, threat, position, direction, intensity, reason);
     }
 
-    internal static DesertBatflySignalPacket EmitDistress(
+    internal static DB_SignalPacket EmitDistress(
         DesertBatfly emitter,
         Creature threat,
         float intensity,
@@ -201,9 +201,9 @@ internal static class DB_SignalRuntime
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
         DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
-        DesertBatflySignalPacket packet = room?.AddOrRefresh(
+        DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
-            DesertBatflySignalKind.DistressCall,
+            DB_SignalKind.DistressCall,
             emitter,
             emitter,
             threat,
@@ -214,7 +214,7 @@ internal static class DB_SignalRuntime
             120);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DesertBatflySignalKind.DistressCall, intensity, 52, direction);
+        SetDisplay(emitter, DB_SignalKind.DistressCall, intensity, 52, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
@@ -222,7 +222,7 @@ internal static class DB_SignalRuntime
 
     internal static bool ReceivePacket(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
+        DB_SignalPacket packet,
         out bool relayAlarm)
     {
         relayAlarm = false;
@@ -233,7 +233,7 @@ internal static class DB_SignalRuntime
 
         ReceiverState state = states.GetValue(receiver, _ => new ReceiverState());
         if (HasGeneration(state, packet.Generation)) return false;
-        if (!TryPerceive(receiver, packet, out DesertBatflySignalPerception perception, out float attenuation))
+        if (!TryPerceive(receiver, packet, out DB_SignalPerception perception, out float attenuation))
             return false;
 
         RememberGeneration(state, packet.Generation);
@@ -252,7 +252,7 @@ internal static class DB_SignalRuntime
 
         switch (packet.Kind)
         {
-            case DesertBatflySignalKind.AlarmFlutter:
+            case DB_SignalKind.AlarmFlutter:
                 state.AlarmPressure = Mathf.Max(state.AlarmPressure, response);
                 state.AlarmOrigin = packet.Origin;
                 state.AlarmThreat = packet.Threat;
@@ -263,7 +263,7 @@ internal static class DB_SignalRuntime
                 relayAlarm = packet.Hop < MaxAlarmHop && ShouldRelayAlarm(receiver, packet, response);
                 break;
 
-            case DesertBatflySignalKind.DistressCall:
+            case DB_SignalKind.DistressCall:
                 state.DistressInterest = Mathf.Max(state.DistressInterest, response);
                 state.DistressSource = packet.Subject ?? packet.Emitter;
                 state.LastDecision = "accepted DistressCall; existing rescue/vengeance systems retain authority";
@@ -271,27 +271,27 @@ internal static class DB_SignalRuntime
                     DesertBatflySocialLife.CancelForPriority(receiver, "Task12 DistressCall");
                 break;
 
-            case DesertBatflySignalKind.RallySignal:
+            case DB_SignalKind.RallySignal:
                 state.RallyInterest = Mathf.Max(state.RallyInterest, response);
                 state.RallySource = packet.Emitter;
                 state.RallyTarget = packet.Threat;
                 state.LastDecision = "accepted RallySignal as supporter interest only";
                 break;
 
-            case DesertBatflySignalKind.RoostCall:
+            case DB_SignalKind.RoostCall:
                 state.RoostInterest = Mathf.Max(state.RoostInterest, response);
                 state.RoostSource = packet.Emitter;
                 state.LastDecision = "accepted RoostCall; Task10 still owns legal roost/reservation";
                 break;
 
-            case DesertBatflySignalKind.HarassSignal:
+            case DB_SignalKind.HarassSignal:
                 state.HarassInterest = Mathf.Max(state.HarassInterest, response);
                 state.HarassSource = packet.Emitter;
                 state.HarassTarget = packet.PlayerTarget;
                 state.LastDecision = "accepted HarassSignal as target interest only";
                 break;
 
-            case DesertBatflySignalKind.SafeSignal:
+            case DB_SignalKind.SafeSignal:
                 if (CanAcceptSafe(receiver))
                 {
                     state.SafeConfidence = Mathf.Max(state.SafeConfidence, response);
@@ -312,7 +312,7 @@ internal static class DB_SignalRuntime
 
     private static void ApplyAlarm(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
+        DB_SignalPacket packet,
         float response)
     {
         if (receiver == null || packet == null || response < ThreatAlarmEscapeThreshold || receiver.dead ||
@@ -353,11 +353,11 @@ internal static class DB_SignalRuntime
         return best;
     }
 
-    internal static bool TryGetInfluence(DesertBatfly bat, out DesertBatflySignalInfluence influence)
+    internal static bool TryGetInfluence(DesertBatfly bat, out DB_SignalInfluence influence)
     {
         influence = default;
         if (bat == null || !states.TryGetValue(bat, out ReceiverState state)) return false;
-        influence = new DesertBatflySignalInfluence(
+        influence = new DB_SignalInfluence(
             state.AlarmPressure,
             state.AlarmOrigin,
             state.AlarmThreat,
@@ -376,13 +376,13 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    internal static bool TryGetDisplay(DesertBatfly bat, out DesertBatflySignalDisplayState display)
+    internal static bool TryGetDisplay(DesertBatfly bat, out DB_SignalDisplayState display)
     {
         display = default;
         if (bat == null || !states.TryGetValue(bat, out ReceiverState state)) return false;
         int clock = bat.room?.game?.clock ?? int.MaxValue;
         if (clock >= state.DisplayUntil) return false;
-        display = new DesertBatflySignalDisplayState(
+        display = new DB_SignalDisplayState(
             state.Display.Kind,
             state.Display.Intensity,
             state.DisplayUntil - clock,
@@ -390,13 +390,13 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    internal static bool TryGetDebugState(DesertBatfly bat, out DesertBatflySignalDebugState debug)
+    internal static bool TryGetDebugState(DesertBatfly bat, out DB_SignalDebugState debug)
     {
         debug = default;
-        if (!TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
+        if (!TryGetInfluence(bat, out DB_SignalInfluence influence) ||
             !states.TryGetValue(bat, out ReceiverState state))
             return false;
-        debug = new DesertBatflySignalDebugState(
+        debug = new DB_SignalDebugState(
             influence,
             state.LastGeneration,
             state.LastKind,
@@ -417,7 +417,7 @@ internal static class DB_SignalRuntime
             DesertBatflyIntimidation.TryGetVengeanceTarget(bat, out Creature target);
             EmitNeutral(
                 bat,
-                DesertBatflySignalKind.RallySignal,
+                DB_SignalKind.RallySignal,
                 bat,
                 target,
                 target as Player,
@@ -433,7 +433,7 @@ internal static class DB_SignalRuntime
         {
             EmitNeutral(
                 bat,
-                DesertBatflySignalKind.RoostCall,
+                DB_SignalKind.RoostCall,
                 bat,
                 null,
                 null,
@@ -451,7 +451,7 @@ internal static class DB_SignalRuntime
         {
             EmitNeutral(
                 bat,
-                DesertBatflySignalKind.HarassSignal,
+                DB_SignalKind.HarassSignal,
                 bat,
                 player,
                 player,
@@ -469,7 +469,7 @@ internal static class DB_SignalRuntime
         {
             EmitNeutral(
                 bat,
-                DesertBatflySignalKind.SafeSignal,
+                DB_SignalKind.SafeSignal,
                 bat,
                 null,
                 null,
@@ -483,7 +483,7 @@ internal static class DB_SignalRuntime
 
     private static void EmitNeutral(
         DesertBatfly emitter,
-        DesertBatflySignalKind kind,
+        DB_SignalKind kind,
         DesertBatfly subject,
         Creature threat,
         Player playerTarget,
@@ -496,7 +496,7 @@ internal static class DB_SignalRuntime
         Vector2 direction = threat?.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
-        DesertBatflySignalPacket packet = DesertBatflySignalRoomRuntime.For(emitter.room)?.AddOrRefresh(
+        DB_SignalPacket packet = DesertBatflySignalRoomRuntime.For(emitter.room)?.AddOrRefresh(
             emitter.room,
             kind,
             emitter,
@@ -513,18 +513,18 @@ internal static class DB_SignalRuntime
             emitter,
             kind,
             intensity,
-            kind == DesertBatflySignalKind.RallySignal ? 42 : 30,
+            kind == DB_SignalKind.RallySignal ? 42 : 30,
             direction);
         TraceEmit(emitter, packet, reason);
     }
 
     private static bool TryPerceive(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
-        out DesertBatflySignalPerception perception,
+        DB_SignalPacket packet,
+        out DB_SignalPerception perception,
         out float attenuation)
     {
-        perception = DesertBatflySignalPerception.None;
+        perception = DB_SignalPerception.None;
         attenuation = 0f;
         float distance = Vector2.Distance(receiver.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
         float baseVisualRadius = VisualRadius(packet.Kind);
@@ -538,38 +538,38 @@ internal static class DB_SignalRuntime
                 baseVisualRadius,
                 DB_VisibilityChannel.Signal))
         {
-            perception = DesertBatflySignalPerception.Visual;
+            perception = DB_SignalPerception.Visual;
             attenuation = Mathf.Lerp(1f, 0.34f, Mathf.Clamp01(distance / Mathf.Max(1f, visualRadius)));
             return true;
         }
 
         float acousticRadius = packet.Kind switch
         {
-            DesertBatflySignalKind.AlarmFlutter => 95f,
-            DesertBatflySignalKind.DistressCall => 108f,
+            DB_SignalKind.AlarmFlutter => 95f,
+            DB_SignalKind.DistressCall => 108f,
             _ => 0f
         };
         if (acousticRadius <= 0f || distance > acousticRadius) return false;
 
-        perception = DesertBatflySignalPerception.CloseAcoustic;
+        perception = DB_SignalPerception.CloseAcoustic;
         attenuation = Mathf.Lerp(0.62f, 0.30f, Mathf.Clamp01(distance / acousticRadius));
         return true;
     }
 
-    internal static float VisualRadius(DesertBatflySignalKind kind) => kind switch
+    internal static float VisualRadius(DB_SignalKind kind) => kind switch
     {
-        DesertBatflySignalKind.AlarmFlutter => 300f,
-        DesertBatflySignalKind.DistressCall => 250f,
-        DesertBatflySignalKind.RallySignal => 235f,
-        DesertBatflySignalKind.RoostCall => 215f,
-        DesertBatflySignalKind.HarassSignal => 235f,
-        DesertBatflySignalKind.SafeSignal => 195f,
+        DB_SignalKind.AlarmFlutter => 300f,
+        DB_SignalKind.DistressCall => 250f,
+        DB_SignalKind.RallySignal => 235f,
+        DB_SignalKind.RoostCall => 215f,
+        DB_SignalKind.HarassSignal => 235f,
+        DB_SignalKind.SafeSignal => 195f,
         _ => 200f
     };
 
     private static float ResponseStrength(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
+        DB_SignalPacket packet,
         float attenuation)
     {
         float c = receiver.Personality.Conformity;
@@ -581,17 +581,17 @@ internal static class DB_SignalRuntime
 
         float scale = packet.Kind switch
         {
-            DesertBatflySignalKind.AlarmFlutter =>
+            DB_SignalKind.AlarmFlutter =>
                 Mathf.Lerp(0.72f, 1.22f, c) * Mathf.Lerp(1.18f, 0.72f, n),
-            DesertBatflySignalKind.DistressCall =>
+            DB_SignalKind.DistressCall =>
                 0.62f + bond * 0.52f + t * 0.20f + n * 0.18f,
-            DesertBatflySignalKind.RallySignal =>
+            DB_SignalKind.RallySignal =>
                 0.38f + t * 0.34f + n * 0.28f + c * 0.20f + bond * 0.18f,
-            DesertBatflySignalKind.RoostCall =>
+            DB_SignalKind.RoostCall =>
                 0.42f + c * 0.34f + receiver.Personality.RoostAffinity * 0.38f + bond * 0.18f,
-            DesertBatflySignalKind.HarassSignal =>
+            DB_SignalKind.HarassSignal =>
                 0.28f + t * 0.38f + n * 0.25f + c * 0.17f,
-            DesertBatflySignalKind.SafeSignal =>
+            DB_SignalKind.SafeSignal =>
                 0.38f + n * 0.34f + c * 0.28f,
             _ => 1f
         };
@@ -618,10 +618,10 @@ internal static class DB_SignalRuntime
                     float caution = lethalCaution * memory.Confidence;
                     response *= packet.Kind switch
                     {
-                        DesertBatflySignalKind.AlarmFlutter => 1f + caution * 0.24f,
-                        DesertBatflySignalKind.DistressCall => 1f - caution * 0.22f,
-                        DesertBatflySignalKind.RallySignal => 1f - caution * 0.52f,
-                        DesertBatflySignalKind.HarassSignal => 1f - caution * 0.62f,
+                        DB_SignalKind.AlarmFlutter => 1f + caution * 0.24f,
+                        DB_SignalKind.DistressCall => 1f - caution * 0.22f,
+                        DB_SignalKind.RallySignal => 1f - caution * 0.52f,
+                        DB_SignalKind.HarassSignal => 1f - caution * 0.62f,
                         _ => 1f
                     };
                 }
@@ -633,7 +633,7 @@ internal static class DB_SignalRuntime
 
     private static bool ShouldRelayAlarm(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
+        DB_SignalPacket packet,
         float response)
     {
         if (packet.Hop >= MaxAlarmHop || response < 0.24f) return false;
@@ -700,14 +700,14 @@ internal static class DB_SignalRuntime
 
     private static void SetDisplay(
         DesertBatfly emitter,
-        DesertBatflySignalKind kind,
+        DB_SignalKind kind,
         float intensity,
         int ticks,
         Vector2 direction)
     {
         ReceiverState state = states.GetValue(emitter, _ => new ReceiverState());
         int clock = emitter.room?.game?.clock ?? 0;
-        state.Display = new DesertBatflySignalDisplayState(kind, intensity, ticks, direction);
+        state.Display = new DB_SignalDisplayState(kind, intensity, ticks, direction);
         state.DisplayUntil = Mathf.Max(state.DisplayUntil, clock + Mathf.Max(1, ticks));
     }
 
@@ -734,7 +734,7 @@ internal static class DB_SignalRuntime
         }
     }
 
-    private static void TraceEmit(DesertBatfly emitter, DesertBatflySignalPacket packet, string reason)
+    private static void TraceEmit(DesertBatfly emitter, DB_SignalPacket packet, string reason)
     {
         if (emitter?.abstractCreature == null ||
             !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(emitter.abstractCreature))
@@ -749,8 +749,8 @@ internal static class DB_SignalRuntime
 
     private static void TraceReceive(
         DesertBatfly receiver,
-        DesertBatflySignalPacket packet,
-        DesertBatflySignalPerception perception,
+        DB_SignalPacket packet,
+        DB_SignalPerception perception,
         float response,
         string reason)
     {

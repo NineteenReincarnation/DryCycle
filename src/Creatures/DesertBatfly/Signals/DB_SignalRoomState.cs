@@ -12,8 +12,8 @@ internal static class DesertBatflySignalRoomRuntime
 
     internal sealed class RoomState
     {
-        internal readonly List<DesertBatflySignalPacket> ActiveSignals = new(ActiveSignalCap);
-        private readonly Queue<DesertBatflySignalPacket> urgentQueue = new(12);
+        internal readonly List<DB_SignalPacket> ActiveSignals = new(ActiveSignalCap);
+        private readonly Queue<DB_SignalPacket> urgentQueue = new(12);
         private int serial;
         private int lastPruneTick = int.MinValue;
 
@@ -36,15 +36,15 @@ internal static class DesertBatflySignalRoomRuntime
             lastPruneTick = clock;
             for (int i = ActiveSignals.Count - 1; i >= 0; i--)
             {
-                DesertBatflySignalPacket packet = ActiveSignals[i];
+                DB_SignalPacket packet = ActiveSignals[i];
                 if (packet == null || packet.Expired(clock) || packet.Emitter.room != room)
                     ActiveSignals.RemoveAt(i);
             }
         }
 
-        internal DesertBatflySignalPacket AddOrRefresh(
+        internal DB_SignalPacket AddOrRefresh(
             Room room,
-            DesertBatflySignalKind kind,
+            DB_SignalKind kind,
             DesertBatfly emitter,
             DesertBatfly subject,
             Creature threat,
@@ -66,13 +66,13 @@ internal static class DesertBatflySignalRoomRuntime
             // Keep one live generation for the same emitter+threat until it expires.
             // Separate directly affected bats from one acute event still collapse through
             // the bounded 14-tick / 58px root merge below.
-            if (kind == DesertBatflySignalKind.AlarmFlutter && hop == 0 && generation == 0)
+            if (kind == DB_SignalKind.AlarmFlutter && hop == 0 && generation == 0)
             {
                 float radiusSq = AlarmRootMergeRadius * AlarmRootMergeRadius;
                 for (int i = 0; i < ActiveSignals.Count; i++)
                 {
-                    DesertBatflySignalPacket existing = ActiveSignals[i];
-                    if (existing == null || existing.Kind != DesertBatflySignalKind.AlarmFlutter ||
+                    DB_SignalPacket existing = ActiveSignals[i];
+                    if (existing == null || existing.Kind != DB_SignalKind.AlarmFlutter ||
                         existing.Hop != 0 || existing.Threat != threat)
                         continue;
 
@@ -95,7 +95,7 @@ internal static class DesertBatflySignalRoomRuntime
             {
                 for (int i = 0; i < ActiveSignals.Count; i++)
                 {
-                    DesertBatflySignalPacket existing = ActiveSignals[i];
+                    DB_SignalPacket existing = ActiveSignals[i];
                     if (existing.Kind != kind || existing.Emitter != emitter || existing.Hop != 0)
                         continue;
                     if (existing.Subject != subject || existing.Threat != threat || existing.PlayerTarget != target)
@@ -107,7 +107,7 @@ internal static class DesertBatflySignalRoomRuntime
             }
 
             int id = generation != 0 ? generation : NextGeneration(room);
-            var packet = new DesertBatflySignalPacket(
+            var packet = new DB_SignalPacket(
                 id,
                 kind,
                 emitter,
@@ -137,10 +137,10 @@ internal static class DesertBatflySignalRoomRuntime
             int bestScore = int.MaxValue;
             for (int i = 0; i < ActiveSignals.Count; i++)
             {
-                DesertBatflySignalPacket signal = ActiveSignals[i];
+                DB_SignalPacket signal = ActiveSignals[i];
                 if (signal == null) return i;
                 int urgencyBias = signal.Kind is
-                    DesertBatflySignalKind.AlarmFlutter or DesertBatflySignalKind.DistressCall
+                    DB_SignalKind.AlarmFlutter or DB_SignalKind.DistressCall
                     ? 1000000
                     : 0;
                 int score = signal.ExpiresTick + urgencyBias;
@@ -151,7 +151,7 @@ internal static class DesertBatflySignalRoomRuntime
             return best;
         }
 
-        internal void DeliverUrgent(Room room, DesertBatflySignalPacket root)
+        internal void DeliverUrgent(Room room, DB_SignalPacket root)
         {
             if (room == null || root == null) return;
             urgentQueue.Clear();
@@ -160,7 +160,7 @@ internal static class DesertBatflySignalRoomRuntime
 
             while (urgentQueue.Count > 0 && guard++ < ActiveSignalCap * 3)
             {
-                DesertBatflySignalPacket packet = urgentQueue.Dequeue();
+                DB_SignalPacket packet = urgentQueue.Dequeue();
                 if (packet == null || packet.Emitter?.room != room) continue;
 
                 foreach (Fly member in DesertSwarmRoom.For(room).Hive.flies)
@@ -172,7 +172,7 @@ internal static class DesertBatflySignalRoomRuntime
 
                     if (!DB_SignalRuntime.ReceivePacket(receiver, packet, out bool relay))
                         continue;
-                    if (!relay || packet.Kind != DesertBatflySignalKind.AlarmFlutter ||
+                    if (!relay || packet.Kind != DB_SignalKind.AlarmFlutter ||
                         packet.Hop >= DB_SignalRuntime.MaxAlarmHop)
                         continue;
 
@@ -182,9 +182,9 @@ internal static class DesertBatflySignalRoomRuntime
                             : DB_SignalRuntime.AlarmHop2Scale);
                     if (relayIntensity < 0.08f) continue;
 
-                    DesertBatflySignalPacket relayed = AddOrRefresh(
+                    DB_SignalPacket relayed = AddOrRefresh(
                         room,
-                        DesertBatflySignalKind.AlarmFlutter,
+                        DB_SignalKind.AlarmFlutter,
                         receiver,
                         packet.Subject,
                         packet.Threat,

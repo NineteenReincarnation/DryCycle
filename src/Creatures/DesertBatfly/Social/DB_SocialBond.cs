@@ -79,7 +79,7 @@ internal static class DB_SocialBond
             ? source.DesertState.GriefStrength * source.DesertState.GriefAnger * 0.15f : 0f;
 
         float signal = 0f;
-        if (DB_SignalRuntime.TryGetInfluence(source, out DesertBatflySignalInfluence influence))
+        if (DB_SignalRuntime.TryGetInfluence(source, out DB_SignalInfluence influence))
         {
             if (victim != null && influence.DistressSource == victim)
                 signal += influence.DistressInterest * 0.20f;

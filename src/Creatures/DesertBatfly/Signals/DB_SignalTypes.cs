@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DesertBatflySignalKind
+internal enum DB_SignalKind
 {
     AlarmFlutter,
     DistressCall,
@@ -12,61 +12,14 @@ internal enum DesertBatflySignalKind
     SafeSignal
 }
 
-internal enum DesertBatflySignalPerception
+internal enum DB_SignalPerception
 {
     None,
     Visual,
     CloseAcoustic
 }
 
-internal sealed class DesertBatflySignalPacket
-{
-    internal readonly int Generation;
-    internal readonly DesertBatflySignalKind Kind;
-    internal readonly DesertBatfly Emitter;
-    internal readonly DesertBatfly Subject;
-    internal readonly Creature Threat;
-    internal readonly Player PlayerTarget;
-    internal readonly Vector2 Origin;
-    internal readonly Vector2 Direction;
-    internal readonly int Hop;
-    internal readonly int CreatedTick;
-    internal int ExpiresTick;
-    internal float Intensity;
-
-    internal DesertBatflySignalPacket(
-        int generation,
-        DesertBatflySignalKind kind,
-        DesertBatfly emitter,
-        DesertBatfly subject,
-        Creature threat,
-        Player playerTarget,
-        Vector2 origin,
-        Vector2 direction,
-        float intensity,
-        int hop,
-        int createdTick,
-        int expiresTick)
-    {
-        Generation = generation;
-        Kind = kind;
-        Emitter = emitter;
-        Subject = subject;
-        Threat = threat;
-        PlayerTarget = playerTarget;
-        Origin = origin;
-        Direction = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.zero;
-        Intensity = Mathf.Clamp01(intensity);
-        Hop = Mathf.Clamp(hop, 0, DB_SignalRuntime.MaxAlarmHop);
-        CreatedTick = createdTick;
-        ExpiresTick = Mathf.Max(createdTick + 1, expiresTick);
-    }
-
-    internal bool Expired(int clock) => clock >= ExpiresTick ||
-        Emitter == null || Emitter.dead || Emitter.slatedForDeletetion || Emitter.room == null;
-}
-
-internal readonly struct DesertBatflySignalInfluence
+internal readonly struct DB_SignalInfluence
 {
     internal readonly float AlarmPressure;
     internal readonly Vector2 AlarmOrigin;
@@ -84,7 +37,7 @@ internal readonly struct DesertBatflySignalInfluence
     internal readonly float SafeConfidence;
     internal readonly string LastReason;
 
-    internal DesertBatflySignalInfluence(
+    internal DB_SignalInfluence(
         float alarmPressure,
         Vector2 alarmOrigin,
         Creature alarmThreat,
@@ -119,15 +72,15 @@ internal readonly struct DesertBatflySignalInfluence
     }
 }
 
-internal readonly struct DesertBatflySignalDisplayState
+internal readonly struct DB_SignalDisplayState
 {
-    internal readonly DesertBatflySignalKind Kind;
+    internal readonly DB_SignalKind Kind;
     internal readonly float Intensity;
     internal readonly int TicksRemaining;
     internal readonly Vector2 Direction;
 
-    internal DesertBatflySignalDisplayState(
-        DesertBatflySignalKind kind,
+    internal DB_SignalDisplayState(
+        DB_SignalKind kind,
         float intensity,
         int ticksRemaining,
         Vector2 direction)
@@ -139,21 +92,21 @@ internal readonly struct DesertBatflySignalDisplayState
     }
 }
 
-internal readonly struct DesertBatflySignalDebugState
+internal readonly struct DB_SignalDebugState
 {
-    internal readonly DesertBatflySignalInfluence Influence;
+    internal readonly DB_SignalInfluence Influence;
     internal readonly int LastGeneration;
-    internal readonly DesertBatflySignalKind LastKind;
-    internal readonly DesertBatflySignalPerception LastPerception;
+    internal readonly DB_SignalKind LastKind;
+    internal readonly DB_SignalPerception LastPerception;
     internal readonly int LastHop;
     internal readonly string LastDecision;
     internal readonly int ActiveRoomSignals;
 
-    internal DesertBatflySignalDebugState(
-        DesertBatflySignalInfluence influence,
+    internal DB_SignalDebugState(
+        DB_SignalInfluence influence,
         int lastGeneration,
-        DesertBatflySignalKind lastKind,
-        DesertBatflySignalPerception lastPerception,
+        DB_SignalKind lastKind,
+        DB_SignalPerception lastPerception,
         int lastHop,
         string lastDecision,
         int activeRoomSignals)

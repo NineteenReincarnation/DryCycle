@@ -161,7 +161,7 @@ internal static partial class Program
               MethodCallOffset(hooksDisable, roomRuntime, "Reset") >= 0,
             "Task13 direct behavior/room runtimes remain wired into DesertBatfly lifecycle");
 
-        Type signalKind = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalKind", true);
+        Type signalKind = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalKind", true);
         Check(Enum.GetNames(signalKind).Length == 6,
             "Task13 does not add weather signal kinds to Task12 V1");
 

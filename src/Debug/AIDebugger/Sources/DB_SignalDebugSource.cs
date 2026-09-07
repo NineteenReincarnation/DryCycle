@@ -16,9 +16,9 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
             return snapshot;
 
         bool hasSignal = DB_SignalRuntime.TryGetDebugState(
-            bat, out DesertBatflySignalDebugState signal);
-        DesertBatflySignalInfluence influence = hasSignal ? signal.Influence : default;
-        DesertBatflySignalPacket lastPacket = hasSignal
+            bat, out DB_SignalDebugState signal);
+        DB_SignalInfluence influence = hasSignal ? signal.Influence : default;
+        DB_SignalPacket lastPacket = hasSignal
             ? FindSignalPacket(bat, signal.LastGeneration)
             : null;
 
@@ -62,7 +62,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
         snapshot.Sections.Add(section);
 
         bool display = DB_SignalRuntime.TryGetDisplay(
-            bat, out DesertBatflySignalDisplayState visual);
+            bat, out DB_SignalDisplayState visual);
         snapshot.Sections.Add(new AIDebugSection("Signal Signal Display / 信号视觉")
             .Add("Displaying / 正在表现", "SignalDisplay.Active", display)
             .Add("Kind / 类型", "SignalDisplay.Kind", display ? visual.Kind.ToString() : "None")
@@ -84,28 +84,28 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
         return snapshot;
     }
 
-    private static DesertBatflySignalPacket FindSignalPacket(DesertBatfly bat, int generation)
+    private static DB_SignalPacket FindSignalPacket(DesertBatfly bat, int generation)
     {
         DesertBatflySignalRoomRuntime.RoomState room =
             DesertBatflySignalRoomRuntime.For(bat?.room);
         if (room == null) return null;
         for (int i = 0; i < room.ActiveSignals.Count; i++)
         {
-            DesertBatflySignalPacket packet = room.ActiveSignals[i];
+            DB_SignalPacket packet = room.ActiveSignals[i];
             if (packet != null && packet.Generation == generation)
                 return packet;
         }
         return null;
     }
 
-    private static string ConsumerFor(DesertBatflySignalKind kind) => kind switch
+    private static string ConsumerFor(DB_SignalKind kind) => kind switch
     {
-        DesertBatflySignalKind.AlarmFlutter => "DesertBatflyAI danger / Task10 cancel",
-        DesertBatflySignalKind.DistressCall => "SocialBond + Intimidation rescue/support motivation",
-        DesertBatflySignalKind.RallySignal => "Intimidation supporter candidacy",
-        DesertBatflySignalKind.RoostCall => "Task10 RoostInvitation / ChainSocialization",
-        DesertBatflySignalKind.HarassSignal => "DesertBatflyAI social harass target interest",
-        DesertBatflySignalKind.SafeSignal => "Signal signal concern recovery",
+        DB_SignalKind.AlarmFlutter => "DesertBatflyAI danger / Task10 cancel",
+        DB_SignalKind.DistressCall => "SocialBond + Intimidation rescue/support motivation",
+        DB_SignalKind.RallySignal => "Intimidation supporter candidacy",
+        DB_SignalKind.RoostCall => "Task10 RoostInvitation / ChainSocialization",
+        DB_SignalKind.HarassSignal => "DesertBatflyAI social harass target interest",
+        DB_SignalKind.SafeSignal => "Signal signal concern recovery",
         _ => "None"
     };
 
