@@ -1,0 +1,55 @@
+name: Task14 R4 FlightMotor batch1 one-shot
+
+on:
+  push:
+    branches:
+      - task14-r4-flightmotor
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r4-flightmotor-batch1:
+    if: github.event.head_commit.message == 'Trigger R4 FlightMotor batch1 migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r4-flightmotor
+          fetch-depth: 0
+
+      - name: Apply guarded R4 batch1 migration
+        run: python scripts/task14_r4_flightmotor_batch1_apply.py
+
+      - name: Validate R4 batch1 source contracts
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r4_flightmotor_batch1_apply.py
+          test ! -e .github/workflows/task14-r4-flightmotor-batch1-one-shot.yml
+          grep -q 'internal static class DB_FlightMotor' src/Creatures/DesertBatfly/Runtime/DB_FlightMotor.cs
+          grep -q 'internal static class DB_FogGoalModifier' src/Creatures/DesertBatfly/Runtime/DB_FogGoalModifier.cs
+          grep -q 'ProgressLocalGoalAlongDijkstraMap(dijkstraInput, bestMap)' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          ! grep -q 'ProgressLocalGoalAlongDijkstraMap(fly.mainBodyChunk.pos, bestMap)' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'DB_FlightMotor.TrySteer(fly, owner, goal, speed)' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'DB_FlightMotor.ApplyPostPhysics(this, previousFlightVelocity)' src/Creatures/DesertBatfly/DesertBatfly.cs
+          ! grep -q 'NominalFlightSpeed' src/Creatures/DesertBatfly/DesertBatflyInjury.cs
+          ! grep -q 'internal void ApplyFlight' src/Creatures/DesertBatfly/DesertBatflyInjury.cs
+          ! grep -q 'FogGoalOffset' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          grep -q 'DB_FlightMotor.TrySteer' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          grep -q 'RunTask14R4' tests/DesertBatfly/Program.RejectedTask02.cs
+          grep -q 'R4-OPEN-01' docs/Discussion/Task_14_R4_FlightMotorStatus.txt
+
+      - name: Audit remaining ordinary movement writers
+        run: |
+          echo '--- localGoal writers after R4 batch1 ---'
+          grep -RIn --include='*.cs' 'localGoal[[:space:]]*=' src/Creatures/DesertBatfly || true
+          echo '--- direct mainBodyChunk.vel writers after R4 batch1 ---'
+          grep -RIn --include='*.cs' 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly || true
+
+      - name: Commit R4 batch1
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Introduce R4 FlightMotor foundation'
+          git push origin HEAD:task14-r4-flightmotor
