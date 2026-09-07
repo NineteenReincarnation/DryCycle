@@ -19,13 +19,9 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     private int socialSampleTicks;
     private bool runningVanillaUpdate;
     private bool resolvingRockViolence;
-    private Player playerHolder;
-
-    private float sandStruggleMeter, sandSpitThreshold;
-    private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
-
-    internal bool SandSpitWindingUp => sandSpitWindup > 0;
-    internal int SandSpitWindupRemaining => sandSpitWindup;
+    internal readonly DB_SandSpitRuntime SandSpit;
+    internal bool SandSpitWindingUp => SandSpit.WindingUp;
+    internal int SandSpitWindupRemaining => SandSpit.WindupRemaining;
 
     int IPlayerEdible.FoodPoints => mealFood;
 
@@ -38,7 +34,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (DesertState.MealConsumed) eaten = 1;
         DesertAI = new DesertBatflyAI(this);
         Emergence = new DB_Emergence(this);
-        PrepareNextSandThreshold();
+        SandSpit = new DB_SandSpitRuntime(this);
     }
 
     public override void InitiateGraphicsModule()
@@ -65,8 +61,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         Injury.Tick();
         Vector2 previousFlightVelocity = mainBodyChunk?.vel ?? Vector2.zero;
-        TrackPlayerRelease();
-        if (sandSpitCooldown > 0) sandSpitCooldown--;
+        SandSpit.PreUpdate();
         if (!dead)
         {
             DesertState.TickTrauma();
@@ -84,7 +79,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
         }
 
-        UpdateHeldSandStruggle();
+        SandSpit.UpdateHeldStruggle();
 
         DesertState.Thirst = Mathf.Clamp01(
             DesertState.Thirst + (dead ? 0f : DB_Tuning.ThirstPerTick));
@@ -119,113 +114,6 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (!extremeVengeance)
             DesertAI.Combat.AfterPhysics(eu);
         DB_FlightMotor.ApplyPostPhysics(this, previousFlightVelocity);
-    }
-
-    private void UpdateHeldSandStruggle()
-    {
-        if (playerHolder == null || !Personality.CanSandSpit || dead || !Consious ||
-            inShortcut || playerHolder.room != room)
-        {
-            sandSpitWindup = 0;
-            sandStruggleMeter = Mathf.Max(0f, sandStruggleMeter - 0.02f);
-            return;
-        }
-
-        if (sandSpitWindup > 0)
-        {
-            sandSpitWindup--;
-            if (sandSpitWindup == 0)
-                EmitSandSpit();
-            return;
-        }
-
-        if (sandSpitCooldown > 0) return;
-
-        float movement = Mathf.Clamp01(playerHolder.mainBodyChunk.vel.magnitude / 8f);
-        sandStruggleMeter += Personality.SandSpitMeterRate +
-            movement * DB_Tuning.SandSpitMovementBonus;
-
-        if (sandStruggleMeter < sandSpitThreshold) return;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = DB_Tuning.SandSpitWindupTicks;
-    }
-
-    private void EmitSandSpit()
-    {
-        if (room == null || playerHolder == null || dead || !Consious ||
-            !Personality.CanSandSpit) return;
-
-        int seed = unchecked(Personality.VisualSeed ^ (sandSpitCycle * 1103515245));
-        DB_SandBurst.Emit(
-            room,
-            this,
-            playerHolder,
-            Personality.SandSpitIntensity,
-            seed);
-
-        float cooldownT = Stable01(0x45D9F3B + sandSpitCycle * 17);
-        sandSpitCooldown = Mathf.RoundToInt(Mathf.Lerp(
-            DB_Tuning.SandSpitCooldownMaxTicks,
-            DB_Tuning.SandSpitCooldownMinTicks,
-            Mathf.Clamp01(Personality.SandSpitDrive * 0.7f + cooldownT * 0.3f)));
-
-        sandSpitCycle++;
-        PrepareNextSandThreshold();
-    }
-
-    private void PrepareNextSandThreshold()
-    {
-        float t = Stable01(0x1F123BB5 + sandSpitCycle * 31);
-        sandSpitThreshold = Mathf.Lerp(
-            DB_Tuning.SandSpitThresholdMin,
-            DB_Tuning.SandSpitThresholdMax,
-            t);
-    }
-
-    private float Stable01(int salt)
-    {
-        unchecked
-        {
-            uint x = (uint)(Personality.VisualSeed * 1103515245 + salt * 12345);
-            x ^= x >> 16;
-            x *= 0x7FEB352Du;
-            x ^= x >> 15;
-            x *= 0x846CA68Bu;
-            x ^= x >> 16;
-            return (x & 0x00FFFFFFu) / 16777215f;
-        }
-    }
-
-    private void BeginPlayerHold(Player player)
-    {
-        playerHolder = player;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);
-        PrepareNextSandThreshold();
-    }
-
-    private void TrackPlayerRelease()
-    {
-        if (playerHolder == null) return;
-
-        bool stillHeld = false;
-        for (int i = 0; i < grabbedBy.Count; i++)
-        {
-            if (grabbedBy[i]?.grabber == playerHolder)
-            {
-                stillHeld = true;
-                break;
-            }
-        }
-        if (stillHeld) return;
-
-        Player releasedBy = playerHolder;
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        if (!dead && !slatedForDeletetion)
-            DesertAI.PlayerReleased(releasedBy, mainBodyChunk.vel.magnitude);
     }
 
     public override void Stun(int ticks)
@@ -285,11 +173,8 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     {
         if (grasp?.grabber is Player player)
         {
-            if (playerHolder != player)
-            {
-                BeginPlayerHold(player);
+            if (SandSpit.BeginPlayerHold(player))
                 DesertAI.PlayerGrabbed(player);
-            }
         }
         else if (grasp?.grabber != null && grasp.grabber is not Fly)
         {
@@ -344,9 +229,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             return;
 
         bool wasDead = dead;
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
+        SandSpit.ClearTransient();
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
         base.Die();
@@ -360,9 +243,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     public override void Destroy()
     {
         injury?.ClearTransient();
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
+        SandSpit.ClearTransient();
         DesertAI?.CancelAttack();
         DesertBatflyIntimidation.Forget(this);
         base.Destroy();
