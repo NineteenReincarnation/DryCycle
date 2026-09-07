@@ -6,7 +6,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
 /// Applies Task13 soft environmental modifiers to Task10 without touching Task10's
-/// reservation, partner or MicroFlock state model.
+/// reservation, partner or MicroFlock state model. This bridge also owns the lifecycle
+/// of the narrow Task13 survival/Task09 bridges so the whole environmental layer still
+/// has a single Enable/Disable entry through DesertBatflyEnvironmentalIntegration.
 /// </summary>
 internal static class DesertBatflyEnvironmentalSocialBridge
 {
@@ -31,8 +33,13 @@ internal static class DesertBatflyEnvironmentalSocialBridge
 
     internal static void Enable()
     {
+        // These bridges are independent of the Task10 reflection hooks. Enable them first
+        // so a future Task10 rename cannot silently disable Task13 Home/Burrow/Task09 policy.
+        DesertBatflyEnvironmentalTask09Bridge.Enable();
+        DesertBatflyEnvironmentalSurvivalBridge.Enable();
+
         if (Installed) return;
-        Disable();
+        DisposeTask10Hooks();
         try
         {
             BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
@@ -53,11 +60,19 @@ internal static class DesertBatflyEnvironmentalSocialBridge
         }
         catch
         {
-            Disable();
+            DisposeTask10Hooks();
         }
     }
 
     internal static void Disable()
+    {
+        DisposeTask10Hooks();
+        DesertBatflyEnvironmentalSurvivalBridge.Disable();
+        DesertBatflyEnvironmentalTask09Bridge.Disable();
+        currentBat = null;
+    }
+
+    private static void DisposeTask10Hooks()
     {
         try { chaseHook?.Dispose(); } catch { }
         try { groupJoinHook?.Dispose(); } catch { }
@@ -67,7 +82,6 @@ internal static class DesertBatflyEnvironmentalSocialBridge
         groupJoinHook = null;
         driveHook = null;
         updateHook = null;
-        currentBat = null;
     }
 
     private static void UpdateHook(SocialUpdateOrig orig, DesertBatfly bat)
