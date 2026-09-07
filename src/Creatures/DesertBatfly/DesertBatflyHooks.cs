@@ -29,7 +29,7 @@ internal static class DesertBatflyHooks
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
-            AIDebugRegistry.Register(new DesertBatflyTask12DebugSource());
+            AIDebugRegistry.Register(new DesertBatflyTask13DebugSource());
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
