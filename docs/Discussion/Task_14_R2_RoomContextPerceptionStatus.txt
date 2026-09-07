@@ -1,0 +1,286 @@
+Task 14 / R2 — RoomContext & Perception Consolidation
+Status record
+Date: 2026-09-07
+
+Current status:
+【R2 已启动 / 第一批基础与 consumer 迁移已实现 / 尚未完成全部 scanner 收敛】
+
+======================================================================
+1. 本轮目标
+======================================================================
+
+R2 只处理 Task14 中的 RoomContext / Perception 层：
+
+- DB_RoomContext；
+- active bats / players / realized creatures / weapons 共享观察；
+- DB_WeaponPerception；
+- DB_VisibilityPolicy；
+- lazy room activation；
+- old duplicate scanner 逐步迁移；
+- DenseFog close real-projectile fallback 保留。
+
+本轮不进入：
+
+- DB_FrameContext；
+- DB_BehaviorArbiter；
+- PrimaryOwner；
+- FlightMotor；
+- Injury Dijkstra fix；
+- Bridge 全量删除；
+- 大规模 DB_ rename / move。
+
+以上属于 R3+。
+
+======================================================================
+2. 已实现
+======================================================================
+
+2.1 DB_RoomContext
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Runtime/DB_RoomContext.cs
+
+当前共享低层观察：
+
+- Creatures；
+- Bats；
+- Players；
+- Weapons；
+- ThrownWeapons。
+
+缓存特点：
+
+- ConditionalWeakTable<Room, DB_RoomContext>；
+- 第一个 Desert Batfly consumer 请求时 lazy 建立；
+- 不因为 Room 单纯存在就主动扫描；
+- RefreshIntervalTicks = 8；
+- 同一 refresh window 内多个蝠/模块复用同一 snapshot；
+- Creature scan 与 physicalObjects scan 分开计数，便于后续 Observatory/performance 验收；
+- Enable/Disable 生命周期会 Reset。
+
+DB_RoomContext 只拥有 observation，不拥有：
+
+- Threat memory；
+- Social reservations；
+- Environment anchor semantics；
+- TravelIntent；
+- Colony persistent state；
+- Signal packet internals。
+
+2.2 DB_VisibilityPolicy
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Perception/DB_VisibilityPolicy.cs
+
+统一入口：
+
+- Room.VisualContact 仍是 terrain LOS authority；
+- Environment VisibilityConfidence 只通过已验证 Task13 influence 输入；
+- RoomSettings Fog / shader fog 本身不能激活该生态限制；
+- clear weather confidence=1 时不缩短原基础范围；
+- DenseFog/Fog 会降低远距离 recognition；
+- real projectile 保留 bounded close fallback；
+- close projectile floor 当前 90 px，仍必须通过真实 Room.VisualContact。
+
+当前 channel：
+
+- Creature；
+- Player；
+- Social；
+- HeldItem；
+- Projectile。
+
+2.3 DB_WeaponPerception
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Perception/DB_WeaponPerception.cs
+
+当前统一能力：
+
+- incoming thrown projectile trajectory；
+- immediate moving-held Spear threat；
+- held-item current cue classification；
+- projectile instigator；
+- position / velocity / closest approach observation。
+
+该层：
+
+- 不训练 persistent Threat memory；
+- 不写 AI goal；
+- 不写 BodyChunk.vel；
+- 不决定行为 owner。
+
+2.4 第一个 consumer 已迁移
+--------------------
+
+DesertBatflyThreatTactics 已迁移：
+
+- PlayerBySlot 不再遍历 room.game.Players；
+- 改为 DB_RoomContext.For(room).PlayerBySlot(slot)；
+- held item recognition 不再自己重复 Classify player grasps；
+- 改为 DB_WeaponPerception.TryObserveHeldThreats；
+- held-item LOS/range 改走 DB_VisibilityPolicy。
+
+这一步只迁 current cue observation，不改变 persistent Threat training 规则。
+
+2.5 生命周期
+--------------------
+
+DesertBatflyHooks.Enable / Disable 已接：
+
+DB_RoomContext.Reset()
+
+避免 disable/re-enable 后旧 room cache 跨生命周期残留。
+
+======================================================================
+3. 当前仍存在的旧 scanner / 下一批迁移
+======================================================================
+
+以下明确仍 OPEN，不把本阶段误写成 R2 完成。
+
+R2-OPEN-01 — DesertBatflyAI.ScanWeapons
+--------------------------------------
+
+现状：
+
+每只 bat 约每 8 ticks 仍遍历 room.physicalObjects。
+
+目标：
+
+改为消费 DB_WeaponPerception.TryFindImmediateThreat。
+
+完成后 AI 不再拥有自己的 physicalObjects weapon scan。
+
+R2-OPEN-02 — DesertBatflyThreatRuntime.RoomState.Refresh
+-------------------------------------------------------
+
+现状：
+
+ThreatRuntime 仍维护独立 Players / ThrownWeapons cache，自己扫描：
+
+- room.abstractRoom.creatures；
+- room.physicalObjects。
+
+目标：
+
+RoomState 只保留 Threat-owned event timestamps：
+
+- RecentSpearThrow；
+- RecentRockThrow；
+- RecentExplosion；
+- RecentGrab；
+- Casualty window。
+
+Players / ThrownWeapons observation 改为 DB_RoomContext / DB_WeaponPerception。
+
+R2-OPEN-03 — DesertBatflyAI.ScanCreatures
+----------------------------------------
+
+现状：
+
+每只 bat 仍遍历 room.abstractRoom.creatures。
+
+目标：
+
+改为共享 DB_RoomContext.Creatures，再保留 per-bat：
+
+- distance；
+- personality；
+- relationship；
+- trauma；
+- local danger/harass decision。
+
+共享 observation 不等于共享决策。
+
+R2-OPEN-04 — AttackSlots realized bat enumeration
+-------------------------------------------------
+
+现状：
+
+AcquireSlot 仍单独遍历 abstractRoom.creatures。
+
+目标：
+
+使用 DB_RoomContext.Bats 做当前 realized candidate view。
+
+AttackSlots 规则/上限不改。
+
+R2-OPEN-05 — visibility consumer migration
+------------------------------------------
+
+DB_VisibilityPolicy 已建立，但尚未迁完：
+
+- ordinary AI target recognition；
+- Threat current cue；
+- Signal visual channel；
+- selected social visual checks。
+
+迁移必须保持：
+
+- DenseFog 远距 recognition 下降；
+- close real projectile 可反应；
+- Home/Hive familiarity 不恢复远距视觉；
+- RoomSettings Fog alone 无效。
+
+R2-OPEN-06 — Environment room lazy activation review
+----------------------------------------------------
+
+Task14 HB-08 仍需检查：
+
+DesertBatflyEnvironmentalRoomRuntime 是否对完全无 Desert Batfly relevance 的 Room 过早初始化/建 shelter cache。
+
+R2 后段再处理，不在 foundation commit 偷改 Task13 weather semantics。
+
+======================================================================
+4. 自动回归
+======================================================================
+
+新增：
+
+tests/DesertBatfly/Program.Task14R2.cs
+
+当前保护：
+
+- DB_RoomContext API shape；
+- 8-tick bounded refresh interval；
+- shared creatures/bats/players/weapons/thrown-weapons observation surface；
+- VisibilityPolicy channels；
+- clear visibility 不缩基础范围；
+- low visibility 缩短远距 player recognition；
+- DenseFog close real-projectile fallback；
+- DB_WeaponPerception incoming/immediate/held APIs；
+- ThreatTactics 已使用 RoomContext；
+- ThreatTactics 已使用 shared held-item perception；
+- RoomContext Enable/Disable lifecycle；
+- 新架构遵守 DB_ 命名。
+
+注意：
+
+这些是 managed regression source；当前环境仍缺完整 Rain World/BepInEx 开发机 DLL 集，不能宣称完整 net48 integration tests 已运行通过。
+
+======================================================================
+5. R2 完成定义
+======================================================================
+
+R2 只有在以下条件同时满足时才能改为【完成】：
+
+1. DesertBatflyAI.ScanWeapons 不再直接扫描 physicalObjects；
+2. ThreatRuntime 不再维护第二套 Players / ThrownWeapons room scanner；
+3. ordinary creature scan 使用共享 RoomContext candidate view；
+4. AttackSlots 使用共享 active bat view；
+5. Threat current cue 使用 shared perception；
+6. VisibilityPolicy 覆盖批准的主要 recognition channel；
+7. DenseFog close real projectile 回归保留；
+8. irrelevant room 不发生不必要的 Desert Batfly shelter/perception heavy build；
+9. Disable/Reset cache lifecycle 可回收；
+10. 开发机 managed tests + 实机场景通过。
+
+当前结论：
+
+【R2 第一批代码已实现；进入 old scanner migration 阶段。】
