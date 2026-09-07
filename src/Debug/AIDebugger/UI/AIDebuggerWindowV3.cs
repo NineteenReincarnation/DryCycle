@@ -760,7 +760,7 @@ internal sealed class AIDebuggerWindowV3
     {
         if (creature?.realizedCreature is DesertBatfly bat)
         {
-            DesertBatflyDebugTrace.Sample(bat);
+            DB_Trace.Sample(bat);
             return;
         }
 

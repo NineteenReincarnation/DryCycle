@@ -5,7 +5,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 // Debug instrumentation is deliberately outside the behavior code. When the Observatory
 // is closed AIDebugTrace.IsWatched is false and this method returns before allocating strings.
-internal static class DesertBatflyDebugTrace
+internal static class DB_Trace
 {
     internal static void Sample(DesertBatfly bat)
     {

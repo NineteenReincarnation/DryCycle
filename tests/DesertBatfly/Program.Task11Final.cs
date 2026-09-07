@@ -11,7 +11,7 @@ internal static partial class Program
         Type bridgeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", true);
         Type traceType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTrace", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatTrace", true);
         Type threatRuntimeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type socialLifeType = mod.GetType(

@@ -363,10 +363,10 @@ internal static class DB_RainWorldHooks
     {
         if (desert == null) return;
         DesertBatflyThreatRuntime.CommitFrame(desert);
-        DesertBatflyThreatTrace.Sample(desert);
+        DB_ThreatTrace.Sample(desert);
         DesertBatflySignalRuntime.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
-        DesertBatflyDebugTrace.Sample(desert);
+        DB_Trace.Sample(desert);
         if (desert.abstractCreature != null && AIDebugTrace.IsWatched(desert.abstractCreature))
             AIDebugTrace.RecordChange(
                 desert.abstractCreature,

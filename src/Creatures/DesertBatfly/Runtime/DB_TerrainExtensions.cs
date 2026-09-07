@@ -8,7 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// same Room tile mapping used by the game and delegate to the native terrain manager.
 /// Keep this species-local rather than changing TerrainManager globally.
 /// </summary>
-internal static class DesertBatflyTerrainExtensions
+internal static class DB_TerrainExtensions
 {
     internal static bool Contains(this TerrainManager terrain, Vector2 worldPosition)
     {

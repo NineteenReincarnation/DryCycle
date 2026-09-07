@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflyThreatTrace
+internal static class DB_ThreatTrace
 {
     internal static void Sample(DesertBatfly bat)
     {
