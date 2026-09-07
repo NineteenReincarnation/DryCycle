@@ -80,7 +80,7 @@ internal static class DesertBatflyTravelNavigation
         internal int LastObservedRoom = int.MinValue;
         internal int LastObservedFrame = int.MinValue;
         internal int RefugeGoalRefresh;
-        internal DesertBatflyWeatherEcologySample Hazard;
+        internal DB_WeatherEcologySample Hazard;
         internal float RefugeScore;
         internal int RefugeNode;
 
@@ -91,7 +91,7 @@ internal static class DesertBatflyTravelNavigation
             string destinationRoom,
             in DB_WorldRoute route,
             int departureDelay,
-            in DesertBatflyWeatherEcologySample hazard,
+            in DB_WeatherEcologySample hazard,
             float refugeScore = 0f,
             int refugeNode = -1)
         {
@@ -225,7 +225,7 @@ internal static class DesertBatflyTravelNavigation
         DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature);
         intents[Key(creature.ID)] = new TravelIntent(
             creature, DB_TravelPurpose.ColonyMigration, record?.CurrentColony,
-            destinationRoom, route, departureDelay, DesertBatflyWeatherEcologySample.None);
+            destinationRoom, route, departureDelay, DB_WeatherEcologySample.None);
     }
 
     internal static void UpdateAbstractWorld(World world)
@@ -379,7 +379,7 @@ internal static class DesertBatflyTravelNavigation
             DB_ColonyState colony = colonies[c];
             AbstractRoom home = DB_ColonyRuntime.FindRoom(world, colony.RoomName);
             if (home == null) continue;
-            DesertBatflyWeatherEcologySample hazard = DesertBatflyWeatherEcology.Sample(world, home);
+            DB_WeatherEcologySample hazard = DB_WeatherEcology.Sample(world, home);
             DB_EnvironmentWeather environmentalWeather =
                 DB_EnvironmentProfile.Classify(hazard);
             if (DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm(environmentalWeather, hazard))
@@ -512,7 +512,7 @@ internal static class DesertBatflyTravelNavigation
             intents[Key(creature.ID)] = new TravelIntent(
                 creature, DB_TravelPurpose.ReturnHome, homeColony, home.name, route,
                 20 + StableInt(creature.ID.RandomSeed ^ 0x4D31, 0, 180),
-                DesertBatflyWeatherEcologySample.None);
+                DB_WeatherEcologySample.None);
         }
     }
 
@@ -559,7 +559,7 @@ internal static class DesertBatflyTravelNavigation
                 intents[Key(creature.ID)] = new TravelIntent(
                     creature, DB_TravelPurpose.ColonyMigration, record.CurrentColony,
                     destination.name, route, StableInt(creature.ID.RandomSeed ^ 0x6A09E667, 0, 180),
-                    DesertBatflyWeatherEcologySample.None);
+                    DB_WeatherEcologySample.None);
             }
         }
     }
@@ -624,7 +624,7 @@ internal static class DesertBatflyTravelNavigation
         AbstractRoom current = world.GetAbstractRoom(currentRoom);
         if (home == null || current == null) return false;
 
-        DesertBatflyWeatherEcologySample currentHazard = DesertBatflyWeatherEcology.Sample(world, home);
+        DB_WeatherEcologySample currentHazard = DB_WeatherEcology.Sample(world, home);
         float homeQuality = currentHazard.HasHazard
             ? DB_RefugePolicy.HomeHiveShelterQuality(home, currentHazard.HazardKind, currentHazard.HazardId)
             : 1f;
@@ -787,7 +787,7 @@ internal static class DesertBatflyTravelNavigation
         intent.Suspended = false;
         intent.ReplanCooldown = 0;
         intent.SameRoomTravelTicks = 0;
-        intent.Hazard = DesertBatflyWeatherEcologySample.None;
+        intent.Hazard = DB_WeatherEcologySample.None;
         intent.RefugeNode = -1;
         intent.StatusReason = "weather safe; staggered return home";
     }
@@ -802,7 +802,7 @@ internal static class DesertBatflyTravelNavigation
     private static float CurrentRouteRisk(World world, AbstractRoom room)
     {
         if (room == null) return 8f;
-        DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample weather = DB_WeatherEcology.Sample(world, room);
         if (weather.LethalNow) return 8f;
         float predator = DB_ColonyRuntime.PredatorRisk(room);
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + predator * 0.22f);

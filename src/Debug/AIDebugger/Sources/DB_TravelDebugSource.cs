@@ -64,19 +64,19 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
             : null;
         if (world != null && home != null)
         {
-            DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, home);
+            DB_WeatherEcologySample weather = DB_WeatherEcology.Sample(world, home);
             float shelter = weather.HasHazard
                 ? DB_RefugePolicy.HomeHiveShelterQuality(home, weather.HazardKind, weather.HazardId)
                 : 0f;
             snapshot.Sections.Add(new AIDebugSection("Travel / Colony Weather Refuge / 天气避难")
-                .Add("Hazard / 危险天气", "DesertBatflyWeatherEcology.HazardId",
+                .Add("Hazard / 危险天气", "DB_WeatherEcology.HazardId",
                     string.IsNullOrEmpty(weather.HazardId) ? "—" : weather.HazardId)
-                .Add("Active intensity / 当前强度", "DesertBatflyWeatherEcology.ActiveIntensity", weather.ActiveIntensity)
-                .Add("Immediate danger / 即时危险", "DesertBatflyWeatherEcology.ImmediateDanger", weather.ImmediateDanger)
-                .Add("Shelter urgency / 避难紧迫度", "DesertBatflyWeatherEcology.ShelterUrgency", weather.ShelterUrgency)
-                .Add("Migration stress / 天气迁徙压力", "DesertBatflyWeatherEcology.MigrationStress", weather.MigrationStress)
-                .Add("Travel exposure / 路线暴露", "DesertBatflyWeatherEcology.TravelExposure", weather.TravelExposure)
-                .Add("Time until danger / 距危险", "DesertBatflyWeatherEcology.TimeUntilDangerTicks",
+                .Add("Active intensity / 当前强度", "DB_WeatherEcology.ActiveIntensity", weather.ActiveIntensity)
+                .Add("Immediate danger / 即时危险", "DB_WeatherEcology.ImmediateDanger", weather.ImmediateDanger)
+                .Add("Shelter urgency / 避难紧迫度", "DB_WeatherEcology.ShelterUrgency", weather.ShelterUrgency)
+                .Add("Migration stress / 天气迁徙压力", "DB_WeatherEcology.MigrationStress", weather.MigrationStress)
+                .Add("Travel exposure / 路线暴露", "DB_WeatherEcology.TravelExposure", weather.TravelExposure)
+                .Add("Time until danger / 距危险", "DB_WeatherEcology.TimeUntilDangerTicks",
                     weather.TimeUntilDangerTicks == int.MaxValue ? "—" : weather.TimeUntilDangerTicks)
                 .Add("Home shelter quality / 本巢庇护质量", "DB_RefugePolicy.HomeHiveShelterQuality", shelter));
         }

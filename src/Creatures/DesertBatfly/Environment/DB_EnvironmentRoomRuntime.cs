@@ -25,7 +25,7 @@ internal static class DB_EnvironmentRoomRuntime
         internal readonly Room Room;
         internal readonly List<DB_ShelterAnchor> Anchors = new(MaxAnchors);
         internal DB_EnvironmentContext Context = DB_EnvironmentContext.Calm;
-        internal DesertBatflyWeatherEcologySample WeatherSample = DesertBatflyWeatherEcologySample.None;
+        internal DB_WeatherEcologySample WeatherSample = DB_WeatherEcologySample.None;
         internal DB_WeatherAxesSample WeatherAxes = DB_WeatherAxesSample.None;
         internal DB_EnvironmentWeather LastWeather = DB_EnvironmentWeather.None;
         internal int RecoveryStartTick = -1;
@@ -298,16 +298,16 @@ internal static class DB_EnvironmentRoomRuntime
     private static void RefreshWeather(RoomState state, int tick)
     {
         Room room = state.Room;
-        DesertBatflyWeatherEcologySample sample = room.world != null && room.abstractRoom != null
-            ? DesertBatflyWeatherEcology.Sample(room.world, room.abstractRoom)
-            : DesertBatflyWeatherEcologySample.None;
+        DB_WeatherEcologySample sample = room.world != null && room.abstractRoom != null
+            ? DB_WeatherEcology.Sample(room.world, room.abstractRoom)
+            : DB_WeatherEcologySample.None;
         state.WeatherSample = sample;
         state.WeatherAxes = room.world != null && room.abstractRoom != null
-            ? DesertBatflyWeatherEcology.SampleTask13Axes(room.world, room.abstractRoom)
+            ? DB_WeatherEcology.SampleEnvironmentAxes(room.world, room.abstractRoom)
             : DB_WeatherAxesSample.None;
 
         DB_EnvironmentWeather weather = DB_EnvironmentProfile.Classify(sample);
-        DesertBatflyWeatherEcologySample phaseSample = sample;
+        DB_WeatherEcologySample phaseSample = sample;
 
         if (weather == DB_EnvironmentWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
         {
@@ -426,12 +426,12 @@ internal static class DB_EnvironmentRoomRuntime
             _ => 0
         };
 
-    private static DesertBatflyWeatherEcologySample Reprofile(
-        in DesertBatflyWeatherEcologySample aggregate,
+    private static DB_WeatherEcologySample Reprofile(
+        in DB_WeatherEcologySample aggregate,
         string weatherId,
         float activeIntensity)
     {
-        return new DesertBatflyWeatherEcologySample(
+        return new DB_WeatherEcologySample(
             Weather.Scheduling.WeatherScheduleEventKind.Weather,
             weatherId,
             activeIntensity,

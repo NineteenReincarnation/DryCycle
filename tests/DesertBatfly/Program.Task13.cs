@@ -84,7 +84,7 @@ internal static partial class Program
 
         // Ordinary Fog is an activity/visibility modifier only. Even full-intensity DryCycle
         // Fog must not silently acquire DenseFog's Home/refuge escalation semantics.
-        Type ecologySample = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcologySample", true);
+        Type ecologySample = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeatherEcologySample", true);
         Type eventKind = mod.GetType("DryCycle.Weather.Scheduling.WeatherScheduleEventKind", true);
         object weatherKind = Enum.Parse(eventKind, "Weather");
         object fullFogSample = Activator.CreateInstance(

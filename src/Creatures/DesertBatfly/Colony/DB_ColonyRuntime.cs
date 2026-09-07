@@ -185,8 +185,8 @@ internal static class DB_ColonyRuntime
         DB_ColonyState colony = TryGetColony(room.abstractRoom);
         if (colony == null) return;
 
-        DesertBatflyWeatherEcologySample weather =
-            DesertBatflyWeatherEcology.Sample(room.world, room.abstractRoom);
+        DB_WeatherEcologySample weather =
+            DB_WeatherEcology.Sample(room.world, room.abstractRoom);
         colony.SampleEnvironment(weather.MigrationStress, sampleSeconds);
 
         bool predatorPresent = false;
@@ -525,7 +525,7 @@ internal static class DB_ColonyRuntime
 
     private static float PermanentTravelRisk(World world, AbstractRoom room)
     {
-        DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample weather = DB_WeatherEcology.Sample(world, room);
         if (weather.LethalNow) return 8f;
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + PredatorRisk(room) * 0.22f);
     }
@@ -535,7 +535,7 @@ internal static class DB_ColonyRuntime
         if (colony.CurrentPopulation >= colony.NaturalRecoveryCeiling) return;
         AbstractRoom room = FindRoom(world, colony.RoomName);
         if (room == null) return;
-        DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample weather = DB_WeatherEcology.Sample(world, room);
         if (weather.LethalNow || weather.ImmediateDanger >= 0.82f) return;
 
         float roll = Stable01(saveSeed, cycle, colony.Key, 0x51A7);

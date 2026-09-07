@@ -11,7 +11,7 @@ internal static class DB_EnvironmentProfile
     internal const int DeathRainPreparationLeadTicks = 3600;
     internal const int DeathRainShelterLeadTicks = 1800;
 
-    internal static DB_EnvironmentWeather Classify(in DesertBatflyWeatherEcologySample sample)
+    internal static DB_EnvironmentWeather Classify(in DB_WeatherEcologySample sample)
     {
         if (!sample.HasHazard) return DB_EnvironmentWeather.None;
         string id = WeatherSpatialCatalog.NormalizeId(sample.HazardId);
@@ -32,7 +32,7 @@ internal static class DB_EnvironmentProfile
 
     internal static DB_EnvironmentPhase ResolvePhase(
         DB_EnvironmentWeather weather,
-        in DesertBatflyWeatherEcologySample sample,
+        in DB_WeatherEcologySample sample,
         DB_EnvironmentPhase previous,
         out string reason)
     {
@@ -273,7 +273,7 @@ internal static class DB_EnvironmentProfile
 
     internal static float SandstormMigrationSuppression(
         DB_EnvironmentWeather weather,
-        in DesertBatflyWeatherEcologySample sample)
+        in DB_WeatherEcologySample sample)
     {
         if (weather != DB_EnvironmentWeather.Sandstorm &&
             weather != DB_EnvironmentWeather.DeathSandstorm)

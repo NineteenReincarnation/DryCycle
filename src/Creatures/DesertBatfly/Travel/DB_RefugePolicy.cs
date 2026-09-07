@@ -88,7 +88,7 @@ internal static class DB_RefugePolicy
                 baseQuality = Mathf.Max(baseQuality, terrain * 0.92f);
         }
 
-        float demand = DesertBatflyWeatherEcology.HazardShelterDemand(hazardKind, hazardId);
+        float demand = DB_WeatherEcology.HazardShelterDemand(hazardKind, hazardId);
         return Mathf.Clamp01(Mathf.Lerp(1f, baseQuality, demand));
     }
 
@@ -120,7 +120,7 @@ internal static class DB_RefugePolicy
         World world,
         AbstractRoom home,
         CreatureTemplate template,
-        DesertBatflyWeatherEcologySample hazard,
+        DB_WeatherEcologySample hazard,
         float physicalCapability,
         string knownRefuge,
         Func<AbstractRoom, float> predatorRisk,
@@ -161,7 +161,7 @@ internal static class DB_RefugePolicy
         AbstractRoom start,
         AbstractRoom home,
         CreatureTemplate template,
-        DesertBatflyWeatherEcologySample hazard,
+        DB_WeatherEcologySample hazard,
         float physicalCapability,
         string knownRefuge,
         Func<AbstractRoom, float> predatorRisk,
@@ -244,7 +244,7 @@ internal static class DB_RefugePolicy
     }
 
     internal static bool CanLeaveBeforeDanger(
-        in DesertBatflyWeatherEcologySample hazard,
+        in DB_WeatherEcologySample hazard,
         int estimatedTravelTicks)
     {
         if (estimatedTravelTicks == int.MaxValue) return false;
@@ -288,29 +288,29 @@ internal static class DB_RefugePolicy
         string hazardId)
     {
         if (world == null || room == null) return false;
-        DesertBatflyWeatherEcologySample local = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample local = DB_WeatherEcology.Sample(world, room);
         if (local.LethalNow) return false;
         return RefugeShelterQuality(room, hazardKind, hazardId) >= MinimumRefugeQuality;
     }
 
     internal static float RouteRisk(World world, AbstractRoom room,
-        in DesertBatflyWeatherEcologySample hazard, Func<AbstractRoom, float> predatorRisk)
+        in DB_WeatherEcologySample hazard, Func<AbstractRoom, float> predatorRisk)
     {
         if (room == null) return 8f;
-        DesertBatflyWeatherEcologySample local = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample local = DB_WeatherEcology.Sample(world, room);
         if (local.LethalNow) return 8f;
         float weather = local.TravelExposure;
         if (hazard.ForecastDanger &&
             DryCycle.Weather.Spatial.WeatherSpatialRegistry.IsAllowed(
                 world.region?.name, room.name, hazard.HazardKind, hazard.HazardId))
             weather = Mathf.Max(weather,
-                DesertBatflyWeatherEcology.HazardShelterDemand(hazard.HazardKind, hazard.HazardId) * 0.46f);
+                DB_WeatherEcology.HazardShelterDemand(hazard.HazardKind, hazard.HazardId) * 0.46f);
         float pred = Mathf.Clamp01(predatorRisk?.Invoke(room) ?? 0f);
         return Mathf.Clamp01(weather * 0.78f + pred * 0.22f);
     }
 
     private static bool CanReachRefuge(
-        in DesertBatflyWeatherEcologySample hazard,
+        in DB_WeatherEcologySample hazard,
         int estimatedTravelTicks,
         in DB_WorldRoute route,
         bool alreadyEvacuating)

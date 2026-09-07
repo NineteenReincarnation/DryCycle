@@ -147,7 +147,7 @@ internal static class DB_EnvironmentalPolicy
         AbstractRoom room = DB_ColonyRuntime.FindRoom(world, source.RoomName);
         if (room == null) return false;
 
-        DesertBatflyWeatherEcologySample sample = DesertBatflyWeatherEcology.Sample(world, room);
+        DB_WeatherEcologySample sample = DB_WeatherEcology.Sample(world, room);
         DB_EnvironmentWeather weather = DB_EnvironmentProfile.Classify(sample);
         if (!IsSandstorm(weather)) return false;
 
@@ -157,7 +157,7 @@ internal static class DB_EnvironmentalPolicy
 
     internal static bool ShouldRecallHomeForSandstorm(
         DB_EnvironmentWeather weather,
-        in DesertBatflyWeatherEcologySample sample)
+        in DB_WeatherEcologySample sample)
     {
         if (!IsSandstorm(weather) || !sample.HasHazard || !sample.ForecastDanger)
             return false;
@@ -174,7 +174,7 @@ internal static class DB_EnvironmentalPolicy
     internal static bool CanConsiderSandstormOutwardRefuge(
         AbstractRoom home,
         DB_EnvironmentWeather weather,
-        in DesertBatflyWeatherEcologySample sample,
+        in DB_WeatherEcologySample sample,
         out float homeQuality)
     {
         homeQuality = 1f;
@@ -198,7 +198,7 @@ internal static class DB_EnvironmentalPolicy
 
     internal static bool AcceptSandstormEmergencyRefuge(
         DB_EnvironmentWeather weather,
-        in DesertBatflyWeatherEcologySample sample,
+        in DB_WeatherEcologySample sample,
         float homeQuality,
         in DB_RefugeTarget target)
     {

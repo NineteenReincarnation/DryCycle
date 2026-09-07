@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal readonly struct DesertBatflyWeatherEcologySample
+internal readonly struct DB_WeatherEcologySample
 {
     internal readonly WeatherScheduleEventKind HazardKind;
     internal readonly string HazardId;
@@ -22,7 +22,7 @@ internal readonly struct DesertBatflyWeatherEcologySample
     internal bool ForecastDanger => TimeUntilDangerTicks < int.MaxValue;
     internal bool LethalNow => ImmediateDanger >= 0.72f && ActiveIntensity >= 0.55f;
 
-    internal DesertBatflyWeatherEcologySample(
+    internal DB_WeatherEcologySample(
         WeatherScheduleEventKind hazardKind,
         string hazardId,
         float activeIntensity,
@@ -42,12 +42,12 @@ internal readonly struct DesertBatflyWeatherEcologySample
         TimeUntilDangerTicks = timeUntilDangerTicks < 0 ? 0 : timeUntilDangerTicks;
     }
 
-    internal static DesertBatflyWeatherEcologySample None => new(
+    internal static DB_WeatherEcologySample None => new(
         WeatherScheduleEventKind.Weather, string.Empty, 0f, 0f, 0f, 0f, 0f, int.MaxValue);
 }
 
 /// <summary>
-/// Active DryCycle weather axes that Task13 is allowed to compose with the dominant
+/// Active DryCycle weather axes that Environment is allowed to compose with the dominant
 /// ecological hazard. These values are sourced from the same schedule/spatial registry
 /// as Sample(); RoomSettings/default Effects can never populate them.
 /// </summary>
@@ -78,7 +78,7 @@ internal readonly struct DB_WeatherAxesSample
 /// MigrationStress is accumulated only from an event that is actually active and
 /// spatially allowed in the queried room.
 /// </summary>
-internal static class DesertBatflyWeatherEcology
+internal static class DB_WeatherEcology
 {
     // Bats should not evacuate at the start of a half-cycle merely because the scheduler
     // already knows a disaster exists later. Three minutes is enough to evaluate a route,
@@ -97,13 +97,13 @@ internal static class DesertBatflyWeatherEcology
         }
     }
 
-    internal static DesertBatflyWeatherEcologySample Sample(World world, AbstractRoom room)
+    internal static DB_WeatherEcologySample Sample(World world, AbstractRoom room)
     {
         if (world == null || room == null || world.region == null ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock) ||
             !WeatherScheduleRuntime.TryGetCurrentSchedule(world, out WeatherPhaseSchedule schedule) ||
             schedule == null)
-            return DesertBatflyWeatherEcologySample.None;
+            return DB_WeatherEcologySample.None;
 
         long phaseTicks = CurrentPhaseTicks(clock);
         string region = world.region.name;
@@ -186,16 +186,16 @@ internal static class DesertBatflyWeatherEcology
             }
         }
 
-        return new DesertBatflyWeatherEcologySample(
+        return new DB_WeatherEcologySample(
             hazardKind, hazardId, active, immediate, shelter, migration, travel, nearestDanger);
     }
 
     /// <summary>
-    /// Samples only compatible active Task13 axes. This intentionally does not expose new
+    /// Samples only compatible active Environment axes. This intentionally does not expose new
     /// forecast information: Fog is reactive, and LightRain's moisture/cooling benefit
     /// exists only while rain is actually present in the authorized room.
     /// </summary>
-    internal static DB_WeatherAxesSample SampleTask13Axes(World world, AbstractRoom room)
+    internal static DB_WeatherAxesSample SampleEnvironmentAxes(World world, AbstractRoom room)
     {
         if (world == null || room == null || world.region == null ||
             !WorldClockHooks.TryGetClock(world, out WorldClock clock) ||
@@ -246,7 +246,7 @@ internal static class DesertBatflyWeatherEcology
         foreach (AbstractRoom room in colonyRooms)
         {
             if (room == null) continue;
-            DesertBatflyWeatherEcologySample sample = Sample(world, room);
+            DB_WeatherEcologySample sample = Sample(world, room);
             sum += sample.MigrationStress;
             count++;
         }
