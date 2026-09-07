@@ -1,0 +1,83 @@
+name: Task14 R6 B4 Roost migration
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: contains(github.event.head_commit.message, '[r6-b4-roost]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+
+      - name: Assert B3 source state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/Creatures/DesertBatfly/DesertBatflyPlatformRoostRuntime.cs
+          test -f src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
+          test -f src/Creatures/DesertBatfly/Travel/DB_WorldRoutePlanner.cs
+
+      - name: Move Roost runtime and rename identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/Creatures/DesertBatfly/Roost
+          git mv src/Creatures/DesertBatfly/DesertBatflyPlatformRoostRuntime.cs src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          old = 'DesertBatflyPlatformRoostRuntime'
+          new = 'DB_PlatformRoostRuntime'
+          for base in (Path('src'), Path('tests'), Path('scripts')):
+              for p in base.rglob('*'):
+                  if not p.is_file() or p.suffix not in {'.cs', '.sh'}:
+                      continue
+                  text = p.read_text(encoding='utf-8')
+                  replaced = text.replace(old, new)
+                  if replaced != text:
+                      p.write_text(replaced, encoding='utf-8')
+          PY
+
+      - name: Validate existing architecture guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+      - name: Validate Roost contract retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          test ! -e src/Creatures/DesertBatfly/DesertBatflyPlatformRoostRuntime.cs
+          ! grep -RIn --include='*.cs' 'DesertBatflyPlatformRoostRuntime' src
+          grep -q 'internal static class DB_PlatformRoostRuntime' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'On.FlyAI.ChainTile += FlyAI_ChainTile' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'On.FlyAI.ChainTile -= FlyAI_ChainTile' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'if (orig(self, testTile))' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'self?.fly is not DesertBatfly' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'for (int i = 0; i < 5; i++)' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'above.Terrain == Room.Tile.TerrainType.Floor' src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs
+          grep -q 'DB_PlatformRoostRuntime.Enable()' src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs
+          grep -q 'DB_PlatformRoostRuntime.Disable()' src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs
+          git diff --check
+
+      - name: Commit migration and retire workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/task14-r6-b4-roost.yml
+          git add src tests scripts
+          git commit -m 'R6 B4 migrate Platform Roost identity'
+          git push origin HEAD:task14-r6-b1-final
