@@ -182,8 +182,6 @@ internal sealed class DesertBatflyAI
         }
         else
         {
-            // Severe trauma changes the meaning of a repeat grab even for a vicious bat:
-            // it is treated as another danger signal, not an invitation to revenge.
             float fear = Mathf.Max(fly.DesertState.GrabMemoryStrength, trauma) *
                          Mathf.Lerp(1.15f, 0.8f, fly.Personality.Nerve);
             retreat = Mathf.Max(
@@ -295,8 +293,6 @@ internal sealed class DesertBatflyAI
         CancelPhysicalAttack();
         SetMode(Activity.InjuryRecovery);
 
-        // Existing vanilla chain/roost is already a legal recovery point. Do not break
-        // a valid chain just to search for a different resting place.
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
         {
             Vector2 target = fly.burrowOrHangSpot ?? fly.mainBodyChunk.pos;
@@ -308,8 +304,6 @@ internal sealed class DesertBatflyAI
         if (recoveryRoostTarget.HasValue && !RecoveryRoostTargetValid(recoveryRoostTarget.Value))
             recoveryRoostTarget = null;
 
-        // Search only a bounded local area, and only once every 30 ticks while no
-        // valid target is retained. This is not a second pathfinder.
         if (!recoveryRoostTarget.HasValue && recoverySearchCooldown <= 0)
         {
             recoverySearchCooldown = 30;
@@ -334,8 +328,6 @@ internal sealed class DesertBatflyAI
             return true;
         }
 
-        // Reuse FlyAI's native hive Dijkstra map. We only choose the existing map and
-        // advance its localGoal; no new PathFinder or room-wide navigation graph exists.
         if (TryDriveRecoveryHive(out Vector2 hiveTarget))
         {
             SetMode(Activity.InjuryRecovery);
@@ -714,6 +706,11 @@ internal sealed class DesertBatflyAI
                             0.48f,
                             fly.DesertState.GrabMemoryStrength);
                     if (counter) fakeChance *= 0.82f;
+                    if (Target is Player learnedTarget)
+                        fakeChance = DesertBatflyThreatTactics.AdjustFakeDiveChance(
+                            fly,
+                            learnedTarget,
+                            fakeChance);
 
                     if (!wantsRealAttack || Random.value < fakeChance)
                         SetMode(Activity.FakeDive);
@@ -1178,9 +1175,6 @@ internal sealed class DesertBatflyAI
             0.18f,
             fly.Personality.AggressionDrive * 0.45f);
 
-        // Conformity can lower the motivation threshold when another nearby bat is
-        // already making an obvious harassment decision, but it never bypasses the
-        // individual's Aggressive gate, cooldown, fear, trauma, or AttackSlots.
         float socialMotivationScale = socialCandidate != null
             ? Mathf.Lerp(1f, 0.72f, fly.Personality.Conformity)
             : 1f;
