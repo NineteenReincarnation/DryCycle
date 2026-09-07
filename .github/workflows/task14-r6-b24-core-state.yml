@@ -52,6 +52,20 @@ jobs:
                       new = new.replace(old, replacement)
                   if new != value:
                       path.write_text(new, encoding='utf-8')
+
+          # The test project explicitly links the state source. Splitting the source means
+          # its compile list must move with the production files or local net48 tests break.
+          project = Path('tests/DesertBatfly/DesertBatfly.Tests.csproj')
+          value = project.read_text(encoding='utf-8')
+          old = '    <Compile Include="../../src/Creatures/DesertBatfly/DesertBatflyState.cs" Link="DesertBatflyState.cs" />'
+          new = '\n'.join([
+              '    <Compile Include="../../src/Creatures/DesertBatfly/Core/DB_Tuning.cs" Link="DB_Tuning.cs" />',
+              '    <Compile Include="../../src/Creatures/DesertBatfly/Core/DB_Personality.cs" Link="DB_Personality.cs" />',
+              '    <Compile Include="../../src/Creatures/DesertBatfly/Core/DB_State.cs" Link="DB_State.cs" />',
+          ])
+          if old not in value:
+              raise SystemExit('Expected legacy DesertBatflyState.cs test-project link not found')
+          project.write_text(value.replace(old, new), encoding='utf-8')
           PY
       - name: Validate Core state compatibility
         shell: bash
@@ -76,6 +90,9 @@ jobs:
           grep -q 'SocialFollowerMinConformity = 0.48f' src/Creatures/DesertBatfly/Core/DB_Tuning.cs
           grep -q 'LeftWingInjury.ToString("R"' src/Creatures/DesertBatfly/Core/DB_State.cs
           grep -q 'RightWingInjury.ToString("R"' src/Creatures/DesertBatfly/Core/DB_State.cs
+          grep -q 'Core/DB_Tuning.cs' tests/DesertBatfly/DesertBatfly.Tests.csproj
+          grep -q 'Core/DB_Personality.cs' tests/DesertBatfly/DesertBatfly.Tests.csproj
+          grep -q 'Core/DB_State.cs' tests/DesertBatfly/DesertBatfly.Tests.csproj
           git grep -q 'DCDesertBatflyV1' -- src tests
           git grep -q 'DCDesertBatflyThreatV1' -- src tests
           git grep -q 'DCBATCOLONY09<svB>' -- src tests
