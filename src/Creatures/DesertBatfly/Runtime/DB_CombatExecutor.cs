@@ -12,7 +12,7 @@ internal static class DB_CombatExecutor
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat))
             return false;
         DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=Combat");
-        if (!bat.DesertAI.ExecuteCombatOwned()) return false;
+        if (!bat.DesertAI.Combat.TryExecuteOwned()) return false;
         DesertBatflyThreatRuntime.ApplyOwnedTacticalModifier(bat);
         return true;
     }

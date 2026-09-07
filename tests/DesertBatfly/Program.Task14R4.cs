@@ -22,6 +22,8 @@ internal static partial class Program
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
         Type frame = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
+        Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
 
         Check(motor.GetMethod("Reset", Flags) != null &&
               motor.GetMethod("Forget", Flags) != null &&
@@ -63,11 +65,22 @@ internal static partial class Program
             "same-room environmental Home retreat uses FlightMotor while native Burrow stays special physics");
         Check(Enum.IsDefined(special, "NativeBurrow") && Enum.IsDefined(special, "NativeChain"),
             "Task14 R4 explicitly classifies native Burrow and Chain as special-physics owners");
+        Check(combatRuntime.GetMethod("TryExecuteOwned", Flags) != null &&
+              combatRuntime.GetMethod("AfterPhysics", Flags) != null &&
+              combatRuntime.GetProperty("FormalAttack", Flags) != null,
+            "Task14 R4 Combat runtime owns formal phase execution, contact physics and formal-attack state");
+        Check(MethodCallOffset(combatExecutor.GetMethod("TryExecute", Flags), combatRuntime, "TryExecuteOwned") >= 0,
+            "Task14 R4 Combat executor calls DB_CombatRuntime rather than old AI state-machine implementation");
+        Check(MethodCallOffset(creature.GetMethod("Update", Flags), combatRuntime, "AfterPhysics") >= 0,
+            "Task14 R4 post-physics Attach/Interfere execution calls DB_CombatRuntime directly");
+        Check(ai.GetMethod("FindContact", Flags) == null && ai.GetMethod("AcquireSlot", Flags) == null &&
+              ai.GetMethod("UpdateInterference", Flags) == null && ai.GetMethod("Finish", Flags) == null,
+            "Task14 R4 old AI shell no longer owns combat contact/slot/finish implementation");
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("Disable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
             "FlightMotor/Fog transient state follows species lifecycle");
 
-        Console.WriteLine("Task14 R4 B2: ordinary domain goal writers are centralized through FlightMotor; Combat responsibility extraction remains open.");
+        Console.WriteLine("Task14 R4 B3: FlightMotor boundary is centralized and formal Combat execution/contact/AttackSlot responsibility is extracted from the AI shell; target selection/motivation remains for B4.");
     }
 }

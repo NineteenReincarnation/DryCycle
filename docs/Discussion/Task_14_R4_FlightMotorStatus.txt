@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R4 FlightMotor / AI Responsibility Split Status
-Revision: R4-B2 / 2026-09-07
+Revision: R4-B3 / 2026-09-07
 Branch: task14-r4-flightmotor
 Base: R3 code-side closed at a2260b110af22f84317c90d8dcd7ec6ec128a67c
-Status: 【R4 进行中 / B2 ordinary goal writer convergence】
+Status: 【R4 进行中 / B3 Combat execution/contact extraction】
 
 ======================================================================
 1. 已完成
@@ -72,8 +72,10 @@ B2 不把所有 owner 强制改成同一种飞法。
 4. 当前仍 OPEN
 ======================================================================
 
-R4-OPEN-01 — Combat state/motivation/contact responsibilities split out of DesertBatflyAI.
-R4-OPEN-02 — final source audit of every localGoal / sustained velocity writer after Combat extraction.
+R4-B3 CLOSED — DB_CombatRuntime now owns formal phase execution, combat-local timers, AttackSlot counting, Attach/Interfere contact state and special contact physics. Production Combat executor and creature post-physics call it directly.
+
+R4-OPEN-01 — move target discovery / Harass motivation / retaliation preparation out of DesertBatflyAI into Combat domain.
+R4-OPEN-02 — final source audit of every localGoal / sustained velocity writer after Combat selection extraction.
 R4-OPEN-03 — Observatory expose FlightMotor owner/goal/nominal speed and special-physics boundary.
 R4-OPEN-04 — managed compile/integration and Rain World live scenarios deferred to final validation stage per project decision.
 
@@ -92,3 +94,26 @@ R4 代码侧完成要求：
 - source architecture regressions 通过。
 
 Rain World live scenarios 统一留到最终重构验收阶段。
+
+
+======================================================================
+6. R4-B3 Combat responsibility extraction
+======================================================================
+
+新增 Combat/DB_CombatRuntime.cs。
+
+已迁出 DesertBatflyAI：
+- Observe/Approach/Circle/FakeDive/Dive/Attach/RetaliationCharge/Interfere 的 owner execution；
+- combat-local phase timer / unseen / interest；
+- AttackSlot membership/counting；
+- attached chunk / contact offset / drained water；
+- retaliation contact direction；
+- FindContact；
+- Attach post-physics；
+- Interfere post-physics；
+- initial retaliation impact；
+- Finish / FinishRetaliation 瞬时退出 impulse。
+
+特殊物理仍明确合法：Attach/Interfere 的 MoveFromOutsideMyUpdate + attachedChunk velocity 同步，以及完成攻击时一次性 retreat impulse。它们由 PrimaryOwner=Combat 和 special-physics state 约束，不属于第二套 ordinary FlightMotor。
+
+DesertBatflyAI 暂时保留 Target/attacker/memory/retaliation preparation、ScanCreatures/CanHarass 作为 B4 兼容选择层；Mode/Target/FormalAttack/PullingUp 对外查询面保持兼容，避免 Threat/Signals/Observatory 同批破坏。

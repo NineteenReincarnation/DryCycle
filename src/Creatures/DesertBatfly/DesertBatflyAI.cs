@@ -24,29 +24,31 @@ internal sealed class DesertBatflyAI
     }
 
     private readonly DesertBatfly fly;
+    private readonly DB_CombatRuntime combat;
+    internal DB_CombatRuntime Combat => combat;
     internal bool HasImmediateDanger => danger != null || retreat > 0 || Mode == Activity.Escape;
     internal Activity Mode { get; private set; }
     internal Creature Target { get; private set; }
 
     private Creature attacker;
     private Creature danger;
-    private int memory, retreat, ticks, scan, pursuit, unseen, interest;
+    private int memory, retreat, ticks, scan, pursuit;
     private int retaliationCharges, retaliationRecovery, recoverySearchCooldown;
-    private bool hasSlot, hasRoost;
-    private float drainedWater;
-    private Vector2 escapeFrom, attachOffset, roost, retaliationDirection;
+    private bool hasRoost;
+    private Vector2 escapeFrom, roost;
     private Vector2? recoveryRoostTarget;
-    private BodyChunk attachedChunk;
 
-    internal bool PullingUp => Mode == Activity.FakeDive &&
-                               ticks > DesertBatflyTuning.FakeDivePullUpTicks;
-    internal bool FormalAttack => hasSlot && Mode is
-        Activity.Approach or Activity.Circle or Activity.Dive or Activity.Attach or
-        Activity.RetaliationCharge or Activity.Interfere;
+    internal bool PullingUp => combat.PullingUp;
+    internal bool FormalAttack => combat.FormalAttack;
+    internal Creature CombatAttacker => attacker;
+    internal int CombatMemory => memory;
+    internal int CombatRetaliationCharges { get => retaliationCharges; set => retaliationCharges = Mathf.Max(0, value); }
+    internal int CombatRetaliationRecovery { get => retaliationRecovery; set => retaliationRecovery = Mathf.Max(0, value); }
 
     internal DesertBatflyAI(DesertBatfly fly)
     {
         this.fly = fly;
+        combat = new DB_CombatRuntime(this, fly);
     }
 
     internal void TickMemory()
@@ -68,7 +70,7 @@ internal sealed class DesertBatflyAI
         if (retreat > 0) retreat--;
     }
 
-    private bool RestrainedByNonFly()
+    internal bool RestrainedByNonFly()
     {
         for (int i = 0; i < fly.grabbedBy.Count; i++)
         {
@@ -94,8 +96,9 @@ internal sealed class DesertBatflyAI
         fly.Injury.ClearTransient();
         if (Mode == Activity.Roost) StopRoost(false);
         CancelAttack();
+        combat.Reset();
         attacker = danger = null;
-        memory = retreat = pursuit = unseen = 0;
+        memory = retreat = pursuit = 0;
         retaliationCharges = retaliationRecovery = 0;
         recoverySearchCooldown = 0;
         recoveryRoostTarget = null;
@@ -267,7 +270,7 @@ internal sealed class DesertBatflyAI
 
     internal void CancelPhysicalAttack()
     {
-        if (Target != null || hasSlot) CancelAttack();
+        if (Target != null || combat.HasSlot) CancelAttack();
         retaliationCharges = retaliationRecovery = 0;
     }
 
@@ -487,12 +490,8 @@ internal sealed class DesertBatflyAI
 
     internal void CancelAttack()
     {
-        hasSlot = false;
-        attachedChunk = null;
+        combat.ClearAttackState();
         Target = null;
-        drainedWater = 0f;
-        interest = 0;
-        unseen = 0;
         SetMode(Activity.Flight);
     }
 
@@ -516,14 +515,24 @@ internal sealed class DesertBatflyAI
             retaliationRecovery = 0;
         }
         pursuit = 0;
-        unseen = 0;
+        combat.ClearVisibilityTracking();
     }
 
-    private void SetMode(Activity next)
+    internal void SetMode(Activity next)
     {
         if (Mode == next) return;
         Mode = next;
         ticks = 0;
+        combat.OnModeChanged(next);
+    }
+
+    internal void ClearCombatTarget() => Target = null;
+
+    internal void BeginCombatEscape(Vector2 from, int retreatTicks)
+    {
+        escapeFrom = from;
+        retreat = Mathf.Max(retreat, retreatTicks);
+        SetMode(Activity.Escape);
     }
 
     internal void RefreshDecisionState()
@@ -588,8 +597,7 @@ internal sealed class DesertBatflyAI
             recoverySearchCooldown = 0;
             fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "danger / escape");
             hasRoost = false;
-            hasSlot = false;
-            attachedChunk = null;
+            combat.ClearAttackState();
             Target = null;
             SetMode(Activity.Escape);
             if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
@@ -680,8 +688,7 @@ internal sealed class DesertBatflyAI
         ClearRecoveryNavigation();
         fly.Injury.SetRecovery(InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
         hasRoost = false;
-        hasSlot = false;
-        attachedChunk = null;
+        combat.ClearAttackState();
         Target = null;
         SetMode(Activity.Escape);
         if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
@@ -716,188 +723,7 @@ internal sealed class DesertBatflyAI
     }
 
     internal bool ExecuteCombatOwned()
-    {
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat) ||
-            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() ||
-            fly.inShortcut || fly.Injury.BlocksCombat || !Valid(Target) ||
-            Mode is not (Activity.Observe or Activity.Approach or Activity.Circle or
-                Activity.FakeDive or Activity.Dive or Activity.Attach or
-                Activity.RetaliationCharge or Activity.Interfere))
-            return false;
-
-        ticks++;
-        DB_VisibilityChannel targetChannel = Target is Player
-            ? DB_VisibilityChannel.Player
-            : DB_VisibilityChannel.Creature;
-        if (!DB_VisibilityPolicy.CanObserve(
-                fly,
-                Target.mainBodyChunk.pos,
-                430f,
-                targetChannel))
-            unseen++;
-        else
-            unseen = 0;
-
-        if (++interest > DesertBatflyTuning.InterestTicks || unseen > 35 ||
-            !Custom.DistLess(fly.mainBodyChunk.pos, Target.mainBodyChunk.pos, 430f))
-        {
-            Finish(false);
-            return true;
-        }
-
-        Vector2 center = Target.mainBodyChunk.pos;
-        float distance = Vector2.Distance(fly.mainBodyChunk.pos, center);
-
-        switch (Mode)
-        {
-            case Activity.Observe:
-                SteerOwned(center + Orbit(150f, 90f), 4.5f, DB_BehaviorOwner.Combat);
-                if (ticks > fly.Personality.ObserveDuration)
-                {
-                    bool counter = Target == attacker && memory > 0;
-                    bool grudge = Target is Player targetPlayer &&
-                                  IsRememberedPlayer(targetPlayer) &&
-                                  !IsTraumatizedPlayer(targetPlayer);
-
-                    if ((counter || grudge) && Target is Player retaliationTarget &&
-                        !IsTraumatizedPlayer(retaliationTarget) &&
-                        retaliationCharges > 0 && retaliationRecovery <= 0)
-                    {
-                        float memoryBoost = grudge
-                            ? fly.DesertState.GrabMemoryStrength * 0.18f
-                            : 0f;
-                        if (Random.value < Mathf.Clamp01(
-                                fly.Personality.RetaliationChance * fly.Injury.AggressionScale + memoryBoost) &&
-                            AcquireSlot())
-                        {
-                            retaliationCharges--;
-                            retaliationDirection = Custom.DirVec(
-                                fly.mainBodyChunk.pos,
-                                retaliationTarget.mainBodyChunk.pos);
-                            SetMode(Activity.RetaliationCharge);
-                            break;
-                        }
-                    }
-
-                    float effectiveAttackThirst = Mathf.Lerp(
-                        DesertBatflyTuning.AttackThirst,
-                        DesertBatflyTuning.ObserveThirst,
-                        fly.Personality.AggressionDrive * 0.35f);
-                    bool thirsty = fly.DesertState.Thirst * fly.DesertState.GriefAttackScale * fly.Injury.AggressionScale > effectiveAttackThirst;
-                    bool revengeDrink = grudge && fly.DesertState.GrabMemoryStrength > 0.12f;
-                    bool wantsRealAttack = thirsty || counter || revengeDrink;
-
-                    float fakeChance = Mathf.Clamp01(fly.Personality.FakeDiveChance);
-                    if (grudge)
-                        fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
-                    if (counter) fakeChance *= 0.82f;
-                    if (Target is Player learnedTarget)
-                        fakeChance = DesertBatflyThreatTactics.AdjustFakeDiveChance(
-                            fly, learnedTarget, fakeChance);
-
-                    if (!wantsRealAttack || Random.value < fakeChance)
-                        SetMode(Activity.FakeDive);
-                    else if (AcquireSlot())
-                        SetMode(Activity.Approach);
-                    else
-                        ticks = fly.Personality.ObserveDuration / 2;
-                }
-                break;
-
-            case Activity.Approach:
-                SteerOwned(
-                    center + Vector2.up * 100f,
-                    6f + fly.Personality.AggressionDrive * 1.2f,
-                    DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.ApproachTicks || distance < 110f)
-                    SetMode(Activity.Circle);
-                break;
-
-            case Activity.Circle:
-                SteerOwned(
-                    center + Orbit(95f, 65f),
-                    6.5f + fly.Personality.AggressionDrive,
-                    DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.CircleTicks)
-                    SetMode(Activity.Dive);
-                break;
-
-            case Activity.FakeDive:
-                if (distance < 52f || ticks > DesertBatflyTuning.FakeDivePullUpTicks)
-                    ticks = Mathf.Max(DesertBatflyTuning.FakeDivePullUpTicks + 1, ticks);
-                SteerOwned(
-                    PullingUp
-                        ? center + Vector2.up * 160f +
-                          Custom.DirVec(center, fly.mainBodyChunk.pos) * 80f
-                        : center,
-                    PullingUp ? 10f : 12f,
-                    DB_BehaviorOwner.Combat);
-                if (ticks > DesertBatflyTuning.FakeDiveTicks)
-                    SetMode(Activity.Observe);
-                break;
-
-            case Activity.Dive:
-                SteerOwned(
-                    center + Target.mainBodyChunk.vel * 1.5f,
-                    12f + fly.Personality.AggressionDrive * 1.5f,
-                    DB_BehaviorOwner.Combat);
-                BodyChunk contact = FindContact();
-                if (contact != null && unseen == 0)
-                {
-                    attachedChunk = contact;
-                    attachOffset = Custom.DirVec(contact.pos, fly.mainBodyChunk.pos) *
-                        (contact.rad + fly.mainBodyChunk.rad * 0.5f);
-                    drainedWater = 0f;
-                    SetMode(Activity.Attach);
-                }
-                else if (ticks > DesertBatflyTuning.DiveTicks)
-                {
-                    Finish(false);
-                }
-                break;
-
-            case Activity.Attach:
-                fly.movMode = Fly.MovementMode.Passive;
-                if (ticks >= DesertBatflyTuning.AttachTicks)
-                    Finish(drainedWater > 0.001f);
-                break;
-
-            case Activity.RetaliationCharge:
-                if (Target is not Player chargeTarget || IsTraumatizedPlayer(chargeTarget))
-                {
-                    FinishRetaliation(false);
-                    break;
-                }
-
-                Vector2 predicted = chargeTarget.mainBodyChunk.pos +
-                                    chargeTarget.mainBodyChunk.vel * 1.15f;
-                SteerOwned(predicted, fly.Personality.RetaliationSpeed, DB_BehaviorOwner.Combat);
-                BodyChunk retaliationContact = FindContact();
-                if (retaliationContact != null && unseen == 0)
-                {
-                    attachedChunk = retaliationContact;
-                    retaliationDirection = fly.mainBodyChunk.vel.sqrMagnitude > 0.5f
-                        ? fly.mainBodyChunk.vel.normalized
-                        : Custom.DirVec(fly.mainBodyChunk.pos, retaliationContact.pos);
-                    attachOffset = Custom.DirVec(retaliationContact.pos, fly.mainBodyChunk.pos) *
-                        (retaliationContact.rad + fly.mainBodyChunk.rad * 0.45f);
-                    ApplyInitialRetaliationImpact(chargeTarget);
-                    SetMode(Activity.Interfere);
-                }
-                else if (ticks > DesertBatflyTuning.RetaliationChargeTicks)
-                {
-                    FinishRetaliation(false);
-                }
-                break;
-
-            case Activity.Interfere:
-                fly.movMode = Fly.MovementMode.Passive;
-                if (ticks >= fly.Personality.RetaliationContactDuration)
-                    FinishRetaliation(true);
-                break;
-        }
-        return true;
-    }
+        => combat.TryExecuteOwned();
 
     internal bool ExecuteRoostOwned()
     {
@@ -935,198 +761,11 @@ internal sealed class DesertBatflyAI
         return false;
     }
 
-    private BodyChunk FindContact()
-    {
-        if (Target?.bodyChunks == null) return null;
-        foreach (BodyChunk chunk in Target.bodyChunks)
-        {
-            if (Custom.DistLess(
-                    chunk.pos,
-                    fly.mainBodyChunk.pos,
-                    chunk.rad + fly.mainBodyChunk.rad + 3f))
-                return chunk;
-        }
-        return null;
-    }
-
+    // Compatibility surface for older tests/callers. Production calls Combat.AfterPhysics directly.
     internal void AfterPhysics(bool eu)
-    {
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
+        => combat.AfterPhysics(eu);
 
-        if (Mode == Activity.Interfere)
-        {
-            UpdateInterference(eu);
-            return;
-        }
-
-        if (Mode != Activity.Attach) return;
-        if (!Valid(Target) || attachedChunk == null || !fly.Consious ||
-            RestrainedByNonFly() || fly.inShortcut || Target.inShortcut || !hasSlot ||
-            !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
-        {
-            Finish(drainedWater > 0.001f);
-            return;
-        }
-
-        if (Target is Player attachedPlayer && IsTraumatizedPlayer(attachedPlayer))
-        {
-            SuppressHostility(attachedPlayer);
-            escapeFrom = attachedPlayer.mainBodyChunk.pos;
-            retreat = Mathf.Max(retreat, 80);
-            SetMode(Activity.Escape);
-            return;
-        }
-
-        Vector2 position = attachedChunk.pos + attachOffset;
-        if (fly.room.GetTile(position).Solid ||
-            !fly.room.VisualContact(fly.mainBodyChunk.pos, position))
-        {
-            Finish(drainedWater > 0.001f);
-            return;
-        }
-
-        fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
-        fly.mainBodyChunk.vel = attachedChunk.vel;
-
-        if (ticks >= DesertBatflyTuning.DrainStartTicks &&
-            ticks <= DesertBatflyTuning.DrainEndTicks)
-        {
-            float amount = DesertBatflyTuning.AttackWaterPerSecond /
-                           ThirstConstants.SimulationTicksPerSecond;
-            bool transferred = true;
-
-            if (Target is Player player)
-            {
-                transferred = ThirstStore.RemoveRuntime(
-                    player,
-                    amount / ThirstConstants.WaterValuePerPip);
-                player.showKarmaFoodRainTime = Mathf.Max(
-                    player.showKarmaFoodRainTime,
-                    ThirstConstants.HydrationLossHudHoldFrames);
-            }
-
-            if (transferred)
-            {
-                drainedWater += amount;
-                float fullWindowWater = DesertBatflyTuning.AttackWaterPerSecond *
-                    (DesertBatflyTuning.DrainEndTicks -
-                     DesertBatflyTuning.DrainStartTicks + 1f) /
-                    ThirstConstants.SimulationTicksPerSecond;
-                fly.DesertState.Thirst = Mathf.Max(
-                    0f,
-                    fly.DesertState.Thirst -
-                    DesertBatflyTuning.DrainRelief *
-                    (amount / Mathf.Max(0.001f, fullWindowWater)));
-                fly.DesertState.Cooldown = DesertBatflyTuning.Cooldown;
-            }
-        }
-    }
-
-    private void ApplyInitialRetaliationImpact(Player player)
-    {
-        if (player?.bodyChunks == null) return;
-        Vector2 impulse = retaliationDirection * fly.Personality.RetaliationImpact;
-        foreach (BodyChunk chunk in player.bodyChunks)
-            chunk.vel += impulse;
-    }
-
-    private void UpdateInterference(bool eu)
-    {
-        if (Target is not Player player || IsTraumatizedPlayer(player) ||
-            !Valid(player) || attachedChunk == null || !fly.Consious ||
-            RestrainedByNonFly() || fly.inShortcut || player.inShortcut ||
-            !hasSlot ||
-            !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 75f))
-        {
-            FinishRetaliation(false);
-            return;
-        }
-
-        Vector2 position = attachedChunk.pos + attachOffset;
-        if (fly.room.GetTile(position).Solid)
-        {
-            FinishRetaliation(false);
-            return;
-        }
-
-        fly.mainBodyChunk.MoveFromOutsideMyUpdate(eu, position);
-        fly.mainBodyChunk.vel = attachedChunk.vel;
-
-        float drag = fly.Personality.RetaliationDrag;
-        Vector2 push = retaliationDirection * fly.Personality.RetaliationPush;
-        foreach (BodyChunk chunk in player.bodyChunks)
-        {
-            chunk.vel.x *= 1f - drag;
-            chunk.vel.y *= 1f - drag * 0.22f;
-            chunk.vel += push;
-        }
-    }
-
-    private void FinishRetaliation(bool success)
-    {
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
-        Vector2 from = Target?.mainBodyChunk.pos ??
-                       fly.mainBodyChunk.pos - Vector2.up;
-        CancelAttack();
-        fly.DesertState.Cooldown = Mathf.Max(
-            fly.DesertState.Cooldown,
-            DesertBatflyTuning.RetaliationCooldown);
-        retaliationRecovery = success ? 120 : 75;
-        escapeFrom = from;
-        retreat = success ? 55 : 40;
-        fly.mainBodyChunk.vel +=
-            Custom.DirVec(from, fly.mainBodyChunk.pos) * 5.5f + Vector2.up * 2.5f;
-        SetMode(Activity.Escape);
-    }
-
-    private void Finish(bool success)
-    {
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
-        Vector2 from = Target?.mainBodyChunk.pos ??
-                       fly.mainBodyChunk.pos - Vector2.up;
-        CancelAttack();
-        fly.DesertState.Cooldown = Mathf.Max(
-            fly.DesertState.Cooldown,
-            success
-                ? DesertBatflyTuning.Cooldown
-                : DesertBatflyTuning.FailedCooldown);
-        escapeFrom = from;
-        retreat = 75;
-        fly.mainBodyChunk.vel +=
-            Custom.DirVec(from, fly.mainBodyChunk.pos) * 5f + Vector2.up * 3f;
-        SetMode(Activity.Escape);
-    }
-
-    private bool AcquireSlot()
-    {
-        if (fly.Injury.BlocksCombat) { hasSlot = false; return false; }
-        if (Target is Player player && IsTraumatizedPlayer(player))
-        {
-            hasSlot = false;
-            return false;
-        }
-
-        int count = 0;
-        DB_RoomContext context = DB_RoomContext.For(fly.room);
-        var bats = context?.Bats;
-        if (bats != null)
-        {
-            for (int i = 0; i < bats.Count; i++)
-            {
-                DesertBatfly other = bats[i];
-                if (other == null || other == fly || !other.Consious ||
-                    other.grabbedBy.Count != 0 ||
-                    other.DesertAI.Target != Target || !other.DesertAI.FormalAttack)
-                    continue;
-                count++;
-            }
-        }
-
-        hasSlot = count < DesertBatflyTuning.AttackSlots;
-        return hasSlot;
-    }
-
-    private bool Valid(Creature creature)
+    internal bool Valid(Creature creature)
     {
         return creature != null && !creature.dead &&
                !creature.slatedForDeletetion && creature.room == fly.room &&
@@ -1383,7 +1022,7 @@ internal sealed class DesertBatflyAI
 
 
 
-    private bool IsRememberedPlayer(Player player)
+    internal bool IsRememberedPlayer(Player player)
     {
         DesertBatflyState state = fly.DesertState;
         return player != null && state.GrabMemoryTicks > 0 &&
@@ -1391,7 +1030,7 @@ internal sealed class DesertBatflyAI
             state.GrabMemoryPlayer == PlayerNumber(player);
     }
 
-    private bool IsTraumatizedPlayer(Player player)
+    internal bool IsTraumatizedPlayer(Player player)
     {
         return PlayerTraumaStrength(player) >=
                DesertBatflyTuning.TraumaAggressionBlock;
@@ -1413,16 +1052,7 @@ internal sealed class DesertBatflyAI
         return player?.playerState?.playerNumber ?? 0;
     }
 
-    private Vector2 Orbit(float width, float height)
-    {
-        float angle =
-            (fly.room.game.clock + (fly.Personality.VisualSeed & 1023)) * 0.025f;
-        return new Vector2(
-            Mathf.Cos(angle) * width,
-            55f + Mathf.Sin(angle) * height * 0.45f);
-    }
-
-    private bool SteerOwned(Vector2 goal, float speed, DB_BehaviorOwner owner)
+    internal bool SteerOwned(Vector2 goal, float speed, DB_BehaviorOwner owner)
     {
         if (!DB_FlightMotor.TrySteer(fly, owner, goal, speed)) return false;
         hasRoost = false;
@@ -1528,11 +1158,8 @@ internal sealed class DesertBatflyAI
             {
                 DesertBatflyAI brain = desert.DesertAI;
                 brain.hasRoost = false;
-                brain.hasSlot = false;
-                brain.attachedChunk = null;
+                brain.combat.ClearAttackState();
                 brain.Target = null;
-                brain.drainedWater = 0f;
-                brain.interest = 0;
 
                 if (frightened)
                 {

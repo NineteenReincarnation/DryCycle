@@ -117,7 +117,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         if (room == null) return;
         Emergence.Update(eu);
         if (!extremeVengeance)
-            DesertAI.AfterPhysics(eu);
+            DesertAI.Combat.AfterPhysics(eu);
         DB_FlightMotor.ApplyPostPhysics(this, previousFlightVelocity);
     }
 
