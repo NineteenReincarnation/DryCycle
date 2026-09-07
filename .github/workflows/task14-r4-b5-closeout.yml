@@ -38,11 +38,11 @@ jobs:
 
       - name: Final writer audit
         run: |
-          echo '--- localGoal assignments ---'
-          grep -RIn --include='*.cs' -E 'localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly || true
+          echo '--- FlyAI.localGoal member assignments ---'
+          grep -RIn --include='*.cs' -E '\.localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly || true
           echo '--- direct velocity assignments ---'
           grep -RIn --include='*.cs' -E 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly || true
-          offenders=$(grep -RIl --include='*.cs' -E 'localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly | grep -v 'Runtime/DB_FlightMotor.cs' | grep -v 'DesertBatflyEmergence.cs' || true)
+          offenders=$(grep -RIl --include='*.cs' -E '\.localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly | grep -v 'Runtime/DB_FlightMotor.cs' | grep -v 'DesertBatflyEmergence.cs' || true)
           test -z "$offenders"
           vel_offenders=$(grep -RIl --include='*.cs' -E 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly | grep -v 'Runtime/DB_FlightMotor.cs' | grep -v 'DesertBatflyEmergence.cs' | grep -v 'Combat/DB_CombatRuntime.cs' || true)
           test -z "$vel_offenders"
@@ -54,5 +54,3 @@ jobs:
           git add -A
           git commit -m 'Close Task14 R4 FlightMotor responsibilities'
           git push origin HEAD:task14-r4-b5-observatory-working
-
-# trigger
