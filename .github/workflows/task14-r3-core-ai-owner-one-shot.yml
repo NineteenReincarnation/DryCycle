@@ -26,11 +26,9 @@ jobs:
           s = p.read_text(encoding='utf-8')
           old = '''        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);\n        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);'''
           new = '''        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);\n        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);\n        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);'''
-          fixed = '''        Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);\n        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);\n        Type coreExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CoreDecisionExecutor", true);\n        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);\n        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);'''
           if old not in s:
               raise SystemExit('original script anchor missing')
           s = s.replace(old, new, 1)
-          # The script's replacement now sees the repaired two-line anchor and inserts core types.
           p.write_text(s, encoding='utf-8')
           PY
 
@@ -56,3 +54,5 @@ jobs:
           git add -A
           git commit -m 'Gate core DesertBatfly AI behind R3 arbiter'
           git push origin HEAD:task14-r3-arbiter
+
+# trigger 2
