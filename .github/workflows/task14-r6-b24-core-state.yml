@@ -1,0 +1,95 @@
+name: Task14 R6 B24 Core state split
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b24-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Split Core state responsibilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('src/Creatures/DesertBatfly/DesertBatflyState.cs')
+          text = src.read_text(encoding='utf-8')
+          tuning = text.index('internal static class DesertBatflyTuning')
+          sex = text.index('internal enum DesertBatflySex')
+          state = text.index('internal sealed class DesertBatflyState')
+          header = text[:tuning]
+          Path('src/Creatures/DesertBatfly/Core/DB_Tuning.cs').write_text(header + text[tuning:sex], encoding='utf-8')
+          Path('src/Creatures/DesertBatfly/Core/DB_Personality.cs').write_text(header + text[sex:state], encoding='utf-8')
+          Path('src/Creatures/DesertBatfly/Core/DB_State.cs').write_text(header + text[state:], encoding='utf-8')
+          src.unlink()
+
+          replacements = {
+              'DesertBatflyTuning': 'DB_Tuning',
+              'DesertBatflySex': 'DB_Sex',
+              'DesertBatflyPersonality': 'DB_Personality',
+              'DesertBatflyState': 'DB_State',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  value = path.read_text(encoding='utf-8')
+                  new = value
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != value:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate Core state compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e src/Creatures/DesertBatfly/DesertBatflyState.cs
+          for p in \
+            src/Creatures/DesertBatfly/Core/DB_Tuning.cs \
+            src/Creatures/DesertBatfly/Core/DB_Personality.cs \
+            src/Creatures/DesertBatfly/Core/DB_State.cs; do test -f "$p"; done
+          if git grep -n -E 'DesertBatflyTuning|DesertBatflySex|DesertBatflyPersonality|DesertBatflyState' -- src tests scripts; then
+            echo 'Old Core state identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'class DB_Tuning' src/Creatures/DesertBatfly/Core/DB_Tuning.cs
+          grep -q 'enum DB_Sex' src/Creatures/DesertBatfly/Core/DB_Personality.cs
+          grep -q 'class DB_Personality' src/Creatures/DesertBatfly/Core/DB_Personality.cs
+          grep -q 'class DB_State : HealthState' src/Creatures/DesertBatfly/Core/DB_State.cs
+          grep -q 'private const string SaveKey = "DCDesertBatflyV1"' src/Creatures/DesertBatfly/Core/DB_State.cs
+          grep -q 'new System.Random(seed \^ 0x147AD639).NextDouble() < 0.48' src/Creatures/DesertBatfly/Core/DB_Personality.cs
+          grep -q 'VengeanceTraitThreshold = 0.715f' src/Creatures/DesertBatfly/Core/DB_Tuning.cs
+          grep -q 'SocialFollowerMinConformity = 0.48f' src/Creatures/DesertBatfly/Core/DB_Tuning.cs
+          grep -q 'LeftWingInjury.ToString("R"' src/Creatures/DesertBatfly/Core/DB_State.cs
+          grep -q 'RightWingInjury.ToString("R"' src/Creatures/DesertBatfly/Core/DB_State.cs
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b24-core-state.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B24 split Core state responsibilities [r6-b24-done]'
+          git push origin HEAD:task14-r6-b1-final
