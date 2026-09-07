@@ -155,16 +155,16 @@ internal static class DesertBatflySocialLife
         if (state.Cooldown > 0) state.Cooldown--;
 
         if (state.LastRoom != null && state.LastRoom != bat.room && state.Mode != DesertBatflySocialMode.None)
-            CancelState(bat, state, "room transition", true);
+            CancelForPriorityState(bat, state, "room transition");
         state.LastRoom = bat.room;
 
         string block = PriorityBlockReason(bat);
         if (block != null)
         {
             if (state.Mode != DesertBatflySocialMode.None)
-                CancelState(bat, state, block, true);
+                CancelForPriorityState(bat, state, block);
             state.Drive = Mathf.Max(0f, state.Drive - 0.0015f);
-            state.DecisionReason = "blocked: " + block;
+            state.DecisionReason = block;
             return;
         }
 
@@ -212,7 +212,7 @@ internal static class DesertBatflySocialLife
         float threshold = StartThreshold(bat.Personality);
         if (state.Drive < threshold)
         {
-            state.DecisionReason = $"social drive {state.Drive:0.00} below {threshold:0.00}";
+            state.DecisionReason = "social drive below interaction threshold";
             return;
         }
 
@@ -232,7 +232,7 @@ internal static class DesertBatflySocialLife
     {
         if (bat == null || !states.TryGetValue(bat, out State state) || state.Mode == DesertBatflySocialMode.None)
             return;
-        CancelState(bat, state, string.IsNullOrEmpty(reason) ? "higher priority" : reason, true);
+        CancelForPriorityState(bat, state, string.IsNullOrEmpty(reason) ? "higher priority" : reason);
     }
 
     internal static bool TryGetDebugState(DesertBatfly bat, out DesertBatflySocialDebugState debug)
@@ -344,6 +344,9 @@ internal static class DesertBatflySocialLife
             Mathf.Clamp01(bond) * 0.28f -
             Mathf.Clamp01(normalizedDistance) * 0.18f);
 
+    internal static float GroupJoinPreference(float conformity, float socialDrive)
+        => Mathf.Clamp01(0.15f + Mathf.Clamp01(conformity) * 0.58f + Mathf.Clamp01(socialDrive) * 0.27f);
+
     private static State CreateState(DesertBatfly bat)
     {
         return new State
@@ -437,7 +440,8 @@ internal static class DesertBatflySocialLife
                     passBy = new Choice(DesertBatflySocialMode.PassBy, other, passWeight);
             }
 
-            if (bat.Personality.Temperament >= 0.50f && bat.Personality.Nerve >= 0.38f &&
+            if (CanPlayChase(bat) && CanPlayChase(other) &&
+                bat.Personality.Temperament >= 0.50f && bat.Personality.Nerve >= 0.38f &&
                 distance >= 55f && distance <= 190f)
             {
                 float chaseWeight = (0.04f + bat.Personality.AggressionDrive * 0.62f +
@@ -448,7 +452,15 @@ internal static class DesertBatflySocialLife
             }
 
             if (distance <= 220f && state.GroupScratch.Count < GroupMax && !roomState.IsReserved(other))
-                state.GroupScratch.Add(other);
+            {
+                State otherState = states.GetValue(other, CreateState);
+                float joinPreference = GroupJoinPreference(other.Personality.Conformity, otherState.Drive);
+                float joinGate = 0.20f + Stable01(
+                    other.Personality.VisualSeed,
+                    state.ScanSerial * 97 + bat.Personality.VisualSeed) * 0.55f;
+                if (joinPreference >= joinGate)
+                    state.GroupScratch.Add(other);
+            }
         }
 
         IReadOnlyList<DesertBatfly> roosting = roomState.Roosting;
@@ -613,7 +625,8 @@ internal static class DesertBatflySocialLife
         DesertBatfly partner,
         DesertBatflySocialRoomRuntime.RoomState roomState)
     {
-        if (!roomState.TryReservePair(initiator, partner, DesertBatflySocialMode.SocialChase, out var token))
+        if (!CanPlayChase(initiator) || !CanPlayChase(partner) ||
+            !roomState.TryReservePair(initiator, partner, DesertBatflySocialMode.SocialChase, out var token))
             return;
         DesertBatfly chaser = initiator.Personality.Temperament >= partner.Personality.Temperament
             ? initiator
@@ -750,7 +763,7 @@ internal static class DesertBatflySocialLife
         string block = PriorityBlockReason(bat);
         if (block != null)
         {
-            CancelState(bat, state, block, true);
+            CancelForPriorityState(bat, state, block);
             return;
         }
         state.Ticks++;
@@ -850,9 +863,9 @@ internal static class DesertBatflySocialLife
     private static void UpdateChase(DesertBatfly bat, State state)
     {
         DesertBatfly partner = state.Partner;
-        if (!ValidSocialPeer(partner, bat))
+        if (!ValidSocialPeer(partner, bat) || !CanPlayChase(bat) || !CanPlayChase(partner))
         {
-            CancelState(bat, state, "partner unavailable", true);
+            CancelState(bat, state, "chase participant unavailable / flight capability reduced", true);
             return;
         }
         float distance = Vector2.Distance(bat.mainBodyChunk.pos, partner.mainBodyChunk.pos);
@@ -947,14 +960,10 @@ internal static class DesertBatflySocialLife
                 Mathf.Lerp(4.3f, 5.6f, bat.Personality.Nerve),
                 state.Side))
         {
-            bool remainsActive = token.Owner.RemoveGroupMember(token, bat);
-            FinalizeParticipant(bat, state, "member left microflock: local path blocked", false);
-            TraceGroupEvent(bat, "MicroFlockLeft", token, "local path blocked");
-            if (!remainsActive)
-                FinalizeReleasedGroup(token, "microflock dissolved below three members");
+            LeaveGroupParticipant(bat, state, "member left microflock: local path blocked");
             return;
         }
-        state.DecisionReason = $"microflock {token.Id}; alignment + weak cohesion + horizontal separation";
+        state.DecisionReason = "microflock active: alignment + weak cohesion + horizontal separation";
     }
 
     private static void UpdateRoostInvitation(DesertBatfly bat, State state)
@@ -1224,6 +1233,9 @@ internal static class DesertBatflySocialLife
         if (!IsNeutralCandidate(candidate) || candidate == source || candidate.room != source.room ||
             roomState.IsReserved(candidate))
             return false;
+        if (states.TryGetValue(candidate, out State candidateState) &&
+            (candidateState.Mode != DesertBatflySocialMode.None || candidateState.Cooldown > 0))
+            return false;
         return SameRipple(source, candidate);
     }
 
@@ -1248,6 +1260,10 @@ internal static class DesertBatflySocialLife
             return false;
         return bat.AI.behavior == FlyAI.Behavior.Idle || bat.AI.behavior == FlyAI.Behavior.Swarm;
     }
+
+    private static bool CanPlayChase(DesertBatfly bat)
+        => bat != null && !bat.Injury.IsSeverelyInjured && !bat.Injury.IsRecovering &&
+           bat.Injury.PostStunShock < 0.28f && bat.Injury.PhysicalCapability >= 0.72f;
 
     private static bool ValidSocialPeer(DesertBatfly peer, DesertBatfly observer)
         => peer != null && observer != null && peer.room == observer.room &&
@@ -1281,6 +1297,32 @@ internal static class DesertBatflySocialLife
         if (preserveRoost && bat?.AI?.behavior == FlyAI.Behavior.Chain &&
             states.TryGetValue(bat, out State finishedState))
             finishedState.DecisionReason = reason;
+    }
+
+    private static void CancelForPriorityState(DesertBatfly bat, State state, string reason)
+    {
+        if (state.Mode == DesertBatflySocialMode.GroupDrift && state.Token?.Active == true)
+        {
+            LeaveGroupParticipant(bat, state, reason);
+            return;
+        }
+        CancelState(bat, state, reason, true);
+    }
+
+    private static void LeaveGroupParticipant(DesertBatfly bat, State state, string reason)
+    {
+        DesertBatflySocialRoomRuntime.Reservation token = state.Token;
+        if (token == null || !token.Active || token.Mode != DesertBatflySocialMode.GroupDrift)
+        {
+            FinalizeParticipant(bat, state, reason, false);
+            return;
+        }
+
+        bool remainsActive = token.Owner.RemoveGroupMember(token, bat);
+        FinalizeParticipant(bat, state, reason, false);
+        TraceGroupEvent(bat, "MicroFlockLeft", token, reason);
+        if (!remainsActive)
+            FinalizeReleasedGroup(token, "microflock dissolved below three members");
     }
 
     private static void CancelState(DesertBatfly bat, State state, string reason, bool releaseToken)
