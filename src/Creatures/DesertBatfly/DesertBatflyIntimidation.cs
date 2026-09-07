@@ -233,6 +233,20 @@ internal static class DesertBatflyIntimidation
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
+    /// <summary>
+    /// Read-only R3 query for current Vengeance facts. It never creates State and never
+    /// changes Vengeance commitment; consumers no longer reflect into this runtime.
+    /// </summary>
+    internal static bool TryGetVengeanceTarget(DesertBatfly bat, out Creature target)
+    {
+        target = null;
+        if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active ||
+            state.Vengeance == VengeanceMode.None || state.VengeanceTarget == null)
+            return false;
+        target = state.VengeanceTarget;
+        return true;
+    }
+
     // Read-only: fear checks must never create a morale state, especially for corpses.
     internal static bool HasActiveFearSuppression(DesertBatfly bat)
     {

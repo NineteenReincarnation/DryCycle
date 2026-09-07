@@ -141,6 +141,58 @@ internal static class DesertBatflyTravelNavigation
     internal static bool HasIntent(AbstractCreature creature) =>
         creature != null && intents.ContainsKey(Key(creature.ID));
 
+    /// <summary>
+    /// R3 proposal query. This method never decrements departure delay, replans, calls
+    /// LeaveRoom or mutates TravelIntent. Historical Suspended state is deliberately not a
+    /// veto: once the current blocker clears, the arbiter may select Travel and the existing
+    /// executor is allowed to resume/replan normally.
+    /// </summary>
+    internal static bool CanOwnRealizedFrame(DesertBatfly bat, out string reason)
+    {
+        reason = "no active realized travel intent";
+        if (bat?.abstractCreature == null || bat.AI == null || bat.room == null ||
+            bat.dead || !bat.Consious || bat.inShortcut)
+            return false;
+        if (!intents.TryGetValue(Key(bat.abstractCreature.ID), out TravelIntent intent))
+            return false;
+
+        if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
+        {
+            reason = "EmergencyRefuge hold remains Travel-owned";
+            return true;
+        }
+        if (intent.DepartureDelay > 0)
+        {
+            reason = "scheduled / staggered departure remains Travel-owned";
+            return true;
+        }
+        if (RestrainedByNonFly(bat))
+        {
+            reason = "Travel yielded: restrained by non-Fly";
+            return false;
+        }
+        if (bat.DesertAI.HasImmediateDanger)
+        {
+            reason = "Travel yielded: immediate threat / escape";
+            return false;
+        }
+        if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering)
+        {
+            reason = "Travel yielded: severe injury / recovery";
+            return false;
+        }
+        if (!intent.Route.Valid)
+        {
+            reason = "Travel yielded: route currently invalid";
+            return false;
+        }
+
+        reason = intent.Suspended
+            ? "Travel eligible to resume after higher-priority suspension"
+            : string.IsNullOrEmpty(intent.StatusReason) ? "active realized Travel intent" : intent.StatusReason;
+        return true;
+    }
+
     internal static bool TryGetDebugState(AbstractCreature creature, out DesertBatflyTravelDebugState state)
     {
         state = default;

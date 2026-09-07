@@ -239,24 +239,13 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
 
     private static string ControlOwner(DesertBatfly bat)
     {
-        if (bat.dead || !bat.Consious) return "Creature / Physics";
-        if (bat.inShortcut) return "Shortcut";
-        if (RestrainedByNonFly(bat)) return "Grasp / Restraint";
-        if (bat.Emergence?.Active == true) return "Emergence";
-        if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
-            bat.AI.luredCounter > 0 || bat.safariControlled)
-            return "Vanilla FlyAI";
-        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
-            return "Danger / Escape";
-        if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
-            return "Injury Recovery";
-        if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat)) return "Vengeance";
-        if (ActiveTrauma(bat) >= DesertBatflyTuning.TraumaAggressionBlock) return "Trauma";
-        if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
-        if (DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return "Fear / Intimidation";
-        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
-            return "Roost / Chain";
-        return "DesertBatflyAI";
+        if (bat == null) return "R3 / unresolved";
+        if (!DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution))
+            return "R3 / unresolved";
+        int clock = bat.room?.game?.clock ?? int.MinValue;
+        if (resolution.Clock != clock)
+            return "R3 / unresolved";
+        return $"{resolution.PrimaryOwner} / {resolution.WinningProposal.BehaviorKind}";
     }
 
     private static T Read<T>(FieldInfo field, object instance)

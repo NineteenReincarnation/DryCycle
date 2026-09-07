@@ -16,6 +16,8 @@ internal static class DesertBatflyHooks
         enabled = true;
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
+        DB_FrameContextRuntime.Reset();
+        DB_BehaviorArbiter.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
@@ -90,6 +92,8 @@ internal static class DesertBatflyHooks
         DesertBatflyRefuge.Reset();
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
+        DB_FrameContextRuntime.Reset();
+        DB_BehaviorArbiter.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
@@ -128,6 +132,8 @@ internal static class DesertBatflyHooks
             DesertBatflySignalRuntime.Forget(desert);
             DesertBatflyThreatRuntime.Forget(desert);
             DesertBatflyEnvironmentalBehavior.Forget(desert);
+            DB_FrameContextRuntime.Forget(desert);
+            DB_BehaviorArbiter.Forget(desert);
         }
         orig(self, room);
     }
@@ -171,6 +177,7 @@ internal static class DesertBatflyHooks
         if (self.fly is DesertBatfly suspended &&
             (suspended.Emergence.Active || RestrainedByNonFly(suspended)))
         {
+            DB_BehaviorArbiter.ResolveFrame(suspended);
             DesertBatflySocialLife.CancelForPriority(suspended, "unavailable / restraint / emergence");
             suspended.DesertAI.Update();
             DesertBatflySocialLife.SampleTrace(suspended);
@@ -182,27 +189,37 @@ internal static class DesertBatflyHooks
         if (self.fly is not DesertBatfly desert) return;
         DesertBatflyEnvironmentalIntegration.Register(desert);
 
-        if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
-            DesertBatflyThreatVengeanceBridge.MarkTravelOwnedFrame(desert);
-            DesertBatflySocialLife.CancelForPriority(desert, "Task09 travel priority");
-            desert.DesertAI.CancelAttack();
-            if (AIDebugTrace.IsWatched(desert.abstractCreature))
-                AIDebugTrace.RecordChange(
-                    desert.abstractCreature,
-                    AIDebugEventCategory.Decision,
-                    "ThreatMemoryIgnoredDueToPriority",
-                    "Task09 travel",
-                    "EmergencyRefuge / ReturnHome / ColonyMigration owns this frame");
-            DesertBatflySocialLife.SampleTrace(desert);
-            DesertBatflyDebugTrace.Sample(desert);
-            return;
+            if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+            {
+                DesertBatflySocialLife.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
+                desert.DesertAI.CancelAttack();
+                if (AIDebugTrace.IsWatched(desert.abstractCreature))
+                    AIDebugTrace.RecordChange(
+                        desert.abstractCreature,
+                        AIDebugEventCategory.Decision,
+                        "PrimaryOwner",
+                        ownership.PrimaryOwner,
+                        ownership.Reason);
+                DesertBatflySocialLife.SampleTrace(desert);
+                DesertBatflyDebugTrace.Sample(desert);
+                return;
+            }
+
+            // Route validation/replanning can still refuse after a side-effect-free preflight.
+            // Re-resolve this exact frame with Travel explicitly rejected so Observatory and
+            // later Vengeance priority never report a movement owner that did not execute.
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert,
+                DB_BehaviorOwner.Travel,
+                "Travel executor yielded after preflight / route validation");
         }
 
-        // Existing DesertBatflyAI gets first refusal for immediate danger/combat/injury.
-        // Task11 adjusts learned threat tactics, Task12 updates local social information,
-        // then Task13 applies realized-room environmental pressure before Task10 runs as
-        // the final neutral-life layer. Task13 never owns cross-room travel or velocity.
+        // R3 foundation currently centralizes ownership classification and Travel execution.
+        // Injury/Vengeance/Environment/Social are still being migrated behind proposals;
+        // keep their existing execution order until each domain has a dedicated executor.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
         DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
@@ -256,10 +273,12 @@ internal static class DesertBatflyHooks
             return;
         }
 
-        if (DesertBatflyTravelNavigation.TryDriveRealized(desert))
+        // Do not execute Travel from this nested vanilla callback. If Travel wins, suppress
+        // native rain steering here and let the enclosing UpdateAI execute Travel exactly once.
+        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
-            DesertBatflyThreatVengeanceBridge.MarkTravelOwnedFrame(desert);
-            DesertBatflySocialLife.CancelForPriority(desert, "Task09 weather travel priority");
+            DesertBatflySocialLife.CancelForPriority(desert, "R3 Travel owns enclosing AI frame");
             return;
         }
 
