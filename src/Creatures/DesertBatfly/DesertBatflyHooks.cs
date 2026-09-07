@@ -4,7 +4,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 // Only bridge nonvirtual vanilla entry points here. All species decisions live
-// in its Creature, AI, Graphics, State or colony classes.
+// in its Creature, AI, Graphics, State or domain runtime classes.
 internal static class DesertBatflyHooks
 {
     private static bool enabled;
@@ -20,6 +20,8 @@ internal static class DesertBatflyHooks
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
+        DB_EventHub.Enable();
+        DB_EventConsumers.Enable();
         DesertBatflyEnvironmentalDenseFogBridge.Enable();
         DesertBatflyEnvironmentalTask09Bridge.Enable();
         DesertBatflyEnvironmentalSurvivalBridge.Enable();
@@ -45,8 +47,6 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.FlyAI.FleeFromRainUpdate += Rain;
-        On.Creature.Die += CreatureDie;
-        On.LizardTongue.Update += TongueUpdate;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
@@ -66,11 +66,11 @@ internal static class DesertBatflyHooks
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.FlyAI.FleeFromRainUpdate -= Rain;
-        On.Creature.Die -= CreatureDie;
-        On.LizardTongue.Update -= TongueUpdate;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DB_EventConsumers.Disable();
+        DB_EventHub.Disable();
         DesertBatflyThreatVengeanceBridge.Disable();
         DesertBatflyThreatRuntime.Disable();
         DesertBatflySignalVengeanceBridge.Disable();
@@ -160,27 +160,6 @@ internal static class DesertBatflyHooks
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
-    }
-
-    private static void TongueUpdate(On.LizardTongue.orig_Update orig, LizardTongue self)
-    {
-        LizardTongue.State previousState = self.state;
-        PhysicalObject previousOwner = self.attached?.owner;
-        orig(self);
-
-        if (self?.lizard == null ||
-            self.state != LizardTongue.State.AttachedInSmallObject ||
-            self.attached?.owner is not DesertBatfly desert ||
-            desert.dead || desert.slatedForDeletetion ||
-            !DesertBatflyIntimidation.IsSupportedLethalThreat(self.lizard))
-            return;
-
-        if (previousState == LizardTongue.State.AttachedInSmallObject && previousOwner == desert)
-            return;
-
-        DesertBatflySocialLife.CancelForPriority(desert, "Peach tongue capture");
-        DesertBatflyIntimidation.BroadcastPredatorCapture(desert, self.lizard, self);
-        desert.DesertAI.Threatened(self.lizard, true);
     }
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
@@ -301,33 +280,6 @@ internal static class DesertBatflyHooks
         }
         if (self.followingDijkstraMap < 0)
             self.followingDijkstraMap = self.room.exitAndDenIndex.Length + UnityEngine.Random.Range(0, self.room.hives.Length);
-    }
-
-    private static void CreatureDie(On.Creature.orig_Die orig, Creature self)
-    {
-        bool wasDead = self?.dead ?? true;
-        Creature likelyPredator = null;
-        if (!wasDead && self is DesertBatfly batBefore && batBefore.grabbedBy != null)
-        {
-            for (int i = 0; i < batBefore.grabbedBy.Count; i++)
-            {
-                Creature grabber = batBefore.grabbedBy[i]?.grabber;
-                if (grabber == null || grabber is Fly) continue;
-                likelyPredator = grabber;
-                if (grabber is Lizard) break;
-            }
-        }
-
-        orig(self);
-
-        if (!wasDead && self is DesertBatfly bat && bat.dead)
-        {
-            DesertBatflySocialLife.CancelForPriority(bat, "death");
-            DesertBatflySignalRuntime.Forget(bat);
-            DesertBatflyColonyRuntime.ReportDeath(bat, likelyPredator);
-            DesertBatflyThreatRuntime.Forget(bat);
-            DesertBatflyEnvironmentalBehavior.Forget(bat);
-        }
     }
 
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
