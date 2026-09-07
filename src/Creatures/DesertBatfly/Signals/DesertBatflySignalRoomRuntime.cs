@@ -62,10 +62,10 @@ internal static class DesertBatflySignalRoomRuntime
             int clock = room.game?.clock ?? 0;
             Prune(room);
 
-            // Several directly affected bats may react to the same explosion/death/grab
-            // in one frame. Collapse nearby same-threat root alarms into one generation;
-            // later emitters can still display AlarmFlutter, but receivers do not process
-            // five equivalent roots and create a room-wide signal storm.
+            // A continuous capture/escape may call the same alarm source every frame.
+            // Keep one live generation for the same emitter+threat until it expires.
+            // Separate directly affected bats from one acute event still collapse through
+            // the bounded 14-tick / 58px root merge below.
             if (kind == DesertBatflySignalKind.AlarmFlutter && hop == 0 && generation == 0)
             {
                 float radiusSq = AlarmRootMergeRadius * AlarmRootMergeRadius;
@@ -73,10 +73,15 @@ internal static class DesertBatflySignalRoomRuntime
                 {
                     DesertBatflySignalPacket existing = ActiveSignals[i];
                     if (existing == null || existing.Kind != DesertBatflySignalKind.AlarmFlutter ||
-                        existing.Hop != 0 || existing.Threat != threat ||
-                        clock - existing.CreatedTick < 0 || clock - existing.CreatedTick > AlarmRootMergeTicks ||
-                        (existing.Origin - origin).sqrMagnitude > radiusSq)
+                        existing.Hop != 0 || existing.Threat != threat)
                         continue;
+
+                    bool sameEmitter = existing.Emitter == emitter && !existing.Expired(clock);
+                    bool sameAcuteRoot = clock - existing.CreatedTick >= 0 &&
+                                         clock - existing.CreatedTick <= AlarmRootMergeTicks &&
+                                         (existing.Origin - origin).sqrMagnitude <= radiusSq;
+                    if (!sameEmitter && !sameAcuteRoot) continue;
+
                     existing.Intensity = Mathf.Max(existing.Intensity, Mathf.Clamp01(intensity));
                     existing.ExpiresTick = Mathf.Max(existing.ExpiresTick, clock + Mathf.Max(1, ttl));
                     return existing;
