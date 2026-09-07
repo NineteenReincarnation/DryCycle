@@ -1,0 +1,77 @@
+name: Task14 R6 B21 SwarmRoom identity
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b21-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move and rename SwarmRoom
+        shell: bash
+        run: |
+          set -euo pipefail
+          git mv src/Creatures/DesertBatfly/DesertSwarmRoom.cs src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'DesertSwarmRoom': 'DB_SwarmRoom',
+              'DesertBatflyFlockSnapshot': 'DB_FlockSnapshot',
+              'Task 09 owns population bootstrap, recovery and migration.': 'Colony/Travel own population bootstrap, recovery and migration.',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  new = text
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != text:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate SwarmRoom contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          test ! -e src/Creatures/DesertBatfly/DesertSwarmRoom.cs
+          if git grep -n -E 'DesertSwarmRoom|DesertBatflyFlockSnapshot' -- src tests scripts; then
+            echo 'Old SwarmRoom identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'class DB_SwarmRoom' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'struct DB_FlockSnapshot' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'roomTags?.Contains("DESERTSWARMROOM")' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'Hive = new FliesRoomAI(room)' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'DB_ColonyRuntime.EnsureWorld(room.world)' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'DB_ColonyRuntime.SampleRoom(room, 1f)' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'Hive.Update(eu)' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          grep -q 'resting.Injury.Recover(0.0032f / 40f)' src/Creatures/DesertBatfly/Colony/DB_SwarmRoom.cs
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b21-swarm-room.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B21 migrate SwarmRoom colony identity [r6-b21-done]'
+          git push origin HEAD:task14-r6-b1-final
