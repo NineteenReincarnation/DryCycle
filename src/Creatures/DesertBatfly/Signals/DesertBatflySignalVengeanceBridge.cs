@@ -11,8 +11,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Emits RallySignal at the moment an existing Intimidation Avenger is armed.
 /// It does not create Vengeance and does not touch Vengeance state; it only exposes the
 /// already-made decision to nearby receivers before ArmVengeanceGroup scores supporters.
-/// The Task11->Task12 read-only threat-response bridge is enabled and disabled alongside
-/// this bridge so the existing DesertBatflyHooks lifecycle owns all Task12 detours.
+/// Task11 read-only threat response and acute-event bridges share this lifecycle so the
+/// existing DesertBatflyHooks entry point owns all Task12 detours.
 /// </summary>
 internal static class DesertBatflySignalVengeanceBridge
 {
@@ -24,6 +24,7 @@ internal static class DesertBatflySignalVengeanceBridge
     internal static void Enable()
     {
         DesertBatflySignalThreatBridge.Enable();
+        DesertBatflySignalAcuteBridge.Enable();
         if (Installed) return;
 
         try
@@ -70,11 +71,11 @@ internal static class DesertBatflySignalVengeanceBridge
             for (byte i = 1; i <= 10; i++) il.Emit(OpCodes.Ldarg_S, i);
             il.Emit(OpCodes.Callvirt, origType.GetMethod("Invoke"));
 
-            il.Emit(OpCodes.Ldarg_1); // bat
-            il.Emit(OpCodes.Ldarg_3); // threat
-            il.Emit(OpCodes.Ldarg_S, (byte)7); // drive
-            il.Emit(OpCodes.Ldarg_S, (byte)9); // supportOnly
-            il.Emit(OpCodes.Ldarg_S, (byte)10); // leader
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Ldarg_S, (byte)7);
+            il.Emit(OpCodes.Ldarg_S, (byte)9);
+            il.Emit(OpCodes.Ldarg_S, (byte)10);
             il.Emit(OpCodes.Call, typeof(DesertBatflySignalVengeanceBridge).GetMethod(
                 nameof(AfterArm), BindingFlags.NonPublic | BindingFlags.Static));
             il.Emit(OpCodes.Ret);
@@ -92,6 +93,7 @@ internal static class DesertBatflySignalVengeanceBridge
 
     internal static void Disable()
     {
+        DesertBatflySignalAcuteBridge.Disable();
         DesertBatflySignalThreatBridge.Disable();
         try { armHook?.Dispose(); } catch { }
         armHook = null;
@@ -105,7 +107,6 @@ internal static class DesertBatflySignalVengeanceBridge
         bool supportOnly,
         DesertBatfly leader)
     {
-        // Only the actual Avenger emits Rally. Supporters never recursively recruit.
         if (bat?.room == null || bat.dead || threat == null || supportOnly || leader != null ||
             !DesertBatflySignalIntegration.IsVengeanceAvenger(bat))
             return;
@@ -128,8 +129,6 @@ internal static class DesertBatflySignalVengeanceBridge
             84);
         if (packet == null) return;
 
-        // Delivery is immediate so the remainder of ArmVengeanceGroup can consume
-        // RallyInterest in DesertBatflySocialBond.Motivation during this same event.
         room.DeliverUrgent(bat.room, packet);
     }
 }
