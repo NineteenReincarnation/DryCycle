@@ -84,6 +84,7 @@ internal static class DesertBatflyThreatRuntime
 
         internal int RecentDamagePlayerSlot = -1;
         internal Player RecentDamagePlayer;
+        internal PhysicalObject RecentDamageSourceObject;
         internal int RecentDamageTick = int.MinValue;
         internal DesertBatflyThreatEvidence RecentDamageEvidence;
 
@@ -94,6 +95,8 @@ internal static class DesertBatflyThreatRuntime
         internal int PursuitTicks;
         internal float PursuitLastDistance = -1f;
         internal bool PursuitAwarded;
+        internal int EscapeThreatPlayerSlot = -1;
+        internal bool PursuitDisengageExtended;
 
         internal int EncounterPlayerSlot = -1;
         internal int EncounterTicks;
@@ -142,9 +145,10 @@ internal static class DesertBatflyThreatRuntime
         {
             if (room?.game == null) return;
             int clock = room.game.clock;
-            if (LastRefreshClock != int.MinValue && clock - LastRefreshClock >= 0 &&
+            if (LastRefreshClock != int.MinValue && clock >= LastRefreshClock &&
                 clock - LastRefreshClock < CueRefreshTicks)
                 return;
+
             LastRefreshClock = clock;
             Players.Clear();
             ThrownWeapons.Clear();
@@ -166,7 +170,7 @@ internal static class DesertBatflyThreatRuntime
                 for (int i = 0; i < objects.Count; i++)
                 {
                     if (objects[i] is Weapon weapon && weapon.mode == Weapon.Mode.Thrown &&
-                        weapon.thrownBy is Player && !weapon.slatedForDeletetion)
+                        ResolvePlayer(weapon, null) is Player && !weapon.slatedForDeletetion)
                         ThrownWeapons.Add(weapon);
                 }
             }
@@ -196,8 +200,8 @@ internal static class DesertBatflyThreatRuntime
         {
             int slot = PlayerSlot(player);
             if (!ValidSlot(slot)) return false;
-            if (CasualtyWindowStart[slot] == int.MinValue || clock - CasualtyWindowStart[slot] > 320 ||
-                clock < CasualtyWindowStart[slot])
+            if (CasualtyWindowStart[slot] == int.MinValue || clock < CasualtyWindowStart[slot] ||
+                clock - CasualtyWindowStart[slot] > 320)
             {
                 CasualtyWindowStart[slot] = clock;
                 CasualtyCount[slot] = 1;
@@ -210,9 +214,16 @@ internal static class DesertBatflyThreatRuntime
 
     private sealed class ProcessedExplosion { }
 
+    private sealed class SourceOwner
+    {
+        internal Player Player;
+        internal int Clock;
+    }
+
     private static ConditionalWeakTable<DesertBatfly, RuntimeState> states = new();
     private static ConditionalWeakTable<Room, RoomState> roomStates = new();
     private static ConditionalWeakTable<Explosion, ProcessedExplosion> processedExplosions = new();
+    private static ConditionalWeakTable<PhysicalObject, SourceOwner> sourceOwners = new();
     private static bool enabled;
 
     internal static void Enable()
@@ -246,6 +257,7 @@ internal static class DesertBatflyThreatRuntime
         states = new ConditionalWeakTable<DesertBatfly, RuntimeState>();
         roomStates = new ConditionalWeakTable<Room, RoomState>();
         processedExplosions = new ConditionalWeakTable<Explosion, ProcessedExplosion>();
+        sourceOwners = new ConditionalWeakTable<PhysicalObject, SourceOwner>();
         DesertBatflyThreatMemoryStore.ResetRuntime();
     }
 
@@ -258,13 +270,14 @@ internal static class DesertBatflyThreatRuntime
     {
         if (bat == null || bat.room == null || bat.dead || bat.slatedForDeletetion) return;
         RuntimeState state = StateFor(bat);
-        int cycle = CurrentCycle(bat);
-        DesertBatflyThreatMemoryStore.DecayToCycle(bat.DesertState, cycle);
+        DesertBatflyThreatMemoryStore.DecayToCycle(bat.DesertState, CurrentCycle(bat));
         TickAcute(state);
         TrackFormalAggression(bat, state);
         UpdateCue(bat, state);
-        TrackPursuit(bat, state, cycle);
-        TrackEncounter(bat, state, cycle);
+        ApplyHeldThreatPriority(bat, state);
+        ExtendLearnedDisengage(bat, state);
+        TrackPursuit(bat, state);
+        TrackEncounter(bat, state);
         ApplyTacticalAdjustment(bat, state);
         state.PreviousMode = bat.DesertAI.Mode;
     }
@@ -295,6 +308,7 @@ internal static class DesertBatflyThreatRuntime
             debug.DominantSignature = DesertBatflyThreatMemoryStore.DominantSignature(memory);
         }
         else debug.DominantSignature = "None";
+
         debug.Cue = state.Cue;
         debug.AcuteExplosionTimer = state.AcuteExplosionTimer;
         debug.AcuteStartleTimer = state.AcuteStartleTimer;
@@ -330,21 +344,23 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
 
-        Player player = ResolvePlayer(source?.owner, null);
+        PhysicalObject sourceObject = source?.owner;
+        Player player = ResolvePlayer(sourceObject, null);
         DesertBatflyThreatEvidence evidence = default;
         RuntimeState state = StateFor(bat);
         int clock = bat.room?.game?.clock ?? int.MinValue;
+
         if (player != null)
         {
-            PhysicalObject sourceObject = source?.owner;
-            bool projectile = sourceObject is Weapon weapon && weapon.thrownBy == player;
-            evidence = DesertBatflyThreatAdapterRegistry.Classify(sourceObject, type, damage, stunBonus, projectile);
+            bool projectile = sourceObject is Weapon weapon && ResolvePlayer(weapon, null) == player;
+            evidence = DesertBatflyThreatAdapterRegistry.Classify(
+                sourceObject, type, damage, stunBonus, projectile);
             if (evidence.Any)
             {
-                int slot = PlayerSlot(player);
                 AddEvidence(bat, player, evidence, 1f, "direct hit", false);
                 state.RecentDamagePlayer = player;
-                state.RecentDamagePlayerSlot = slot;
+                state.RecentDamagePlayerSlot = PlayerSlot(player);
+                state.RecentDamageSourceObject = sourceObject;
                 state.RecentDamageTick = clock;
                 state.RecentDamageEvidence = evidence;
                 if (type == Creature.DamageType.Electric)
@@ -362,11 +378,11 @@ internal static class DesertBatflyThreatRuntime
         {
             var threatEvent = new DesertBatflyThreatEvent(
                 player,
-                source?.owner,
+                sourceObject,
                 bat,
                 bat.mainBodyChunk?.pos ?? Vector2.zero,
                 evidence,
-                false,
+                true,
                 false,
                 stunBonus,
                 "witnessed hit");
@@ -384,12 +400,14 @@ internal static class DesertBatflyThreatRuntime
 
         bool wasDead = bat.dead;
         RuntimeState state = StateFor(bat);
-        int clock = bat.room?.game?.clock ?? int.MinValue;
+        Room room = bat.room;
+        int clock = room?.game?.clock ?? int.MinValue;
         Player killer = state.RecentDamagePlayer;
         bool attributed = killer != null && state.RecentDamagePlayerSlot == PlayerSlot(killer) &&
             state.RecentDamageTick != int.MinValue && clock != int.MinValue &&
             clock >= state.RecentDamageTick && clock - state.RecentDamageTick <= RecentDamageMemoryTicks;
-        bool counterKill = attributed && state.FormalAggressionPlayerSlot == state.RecentDamagePlayerSlot &&
+        bool counterKill = attributed &&
+            state.FormalAggressionPlayerSlot == state.RecentDamagePlayerSlot &&
             state.FormalAggressionTick != int.MinValue && clock >= state.FormalAggressionTick &&
             clock - state.FormalAggressionTick <= FormalAggressionMemoryTicks;
         Vector2 deathPosition = bat.mainBodyChunk?.pos ?? Vector2.zero;
@@ -402,34 +420,36 @@ internal static class DesertBatflyThreatRuntime
         if (wasDead || !bat.dead || !attributed || killer == null) return;
         var threatEvent = new DesertBatflyThreatEvent(
             killer,
-            state.RecentDamageEvidence.Any ? null : null,
+            state.RecentDamageSourceObject,
             bat,
             deathPosition,
             killEvidence,
-            false,
+            true,
             true,
             0f,
             counterKill ? "counter kill" : "player kill");
         BroadcastWitnessEvidence(threatEvent, 0.72f);
 
-        Room room = bat.room;
-        if (room != null)
-        {
-            RoomState roomState = RoomFor(room);
-            if (roomState.RecordCasualty(killer, clock))
-                BroadcastMassCasualty(room, killer, deathPosition);
-        }
+        if (room != null && RoomFor(room).RecordCasualty(killer, clock))
+            BroadcastMassCasualty(room, killer, deathPosition);
     }
 
     private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
     {
         if (self is DesertBatfly bat && grasp?.grabber is Player player && !bat.dead)
         {
-            AddEvidence(bat, player, DesertBatflyThreatAdapterRegistry.GrabEvidence(), 1f, "player grab", false);
+            AddEvidence(
+                bat,
+                player,
+                DesertBatflyThreatAdapterRegistry.GrabEvidence(),
+                1f,
+                "player grab",
+                false);
             RuntimeState state = StateFor(bat);
             state.AcuteCaptureTimer = Mathf.Max(state.AcuteCaptureTimer, 150);
             state.AcuteInstigator = player;
-            if (bat.room?.game != null) RoomFor(bat.room).RecordGrab(player, bat.room.game.clock);
+            if (bat.room?.game != null)
+                RoomFor(bat.room).RecordGrab(player, bat.room.game.clock);
         }
         orig(self, grasp);
     }
@@ -445,8 +465,11 @@ internal static class DesertBatflyThreatRuntime
         bool eu)
     {
         orig(self, thrownBy, thrownPos, firstFrameTraceFromPos, throwDir, frc, eu);
-        if (thrownBy is Player player && self.room?.game != null)
-            RoomFor(self.room).RecordThrow(self, player, self.room.game.clock);
+        if (thrownBy is not Player player || self == null) return;
+        int clock = self.room?.game?.clock ?? int.MinValue;
+        RememberSourceOwner(self, player, clock);
+        if (clock != int.MinValue)
+            RoomFor(self.room).RecordThrow(self, player, clock);
     }
 
     private static void ExplosionUpdate(On.Explosion.orig_Update orig, Explosion self, bool eu)
@@ -459,13 +482,19 @@ internal static class DesertBatflyThreatRuntime
         orig(self, eu);
     }
 
-    private static void FirecrackerPopLump(On.FirecrackerPlant.orig_PopLump orig, FirecrackerPlant self, int lmp)
+    private static void FirecrackerPopLump(
+        On.FirecrackerPlant.orig_PopLump orig,
+        FirecrackerPlant self,
+        int lmp)
     {
         orig(self, lmp);
-        if (self?.room == null || lmp < 0 || self.lumps == null || lmp >= self.lumps.Length) return;
-        Vector2 position = self.lumps[lmp].pos;
-        Player player = ResolvePlayer(self, null);
-        BroadcastStartle(self.room, player, self, position);
+        if (self?.room == null || lmp < 0 || self.lumps == null || lmp >= self.lumps.Length)
+            return;
+        BroadcastStartle(
+            self.room,
+            ResolvePlayer(self, null),
+            self,
+            self.lumps[lmp].pos);
     }
 
     private static void ReportExplosion(Explosion explosion)
@@ -474,18 +503,24 @@ internal static class DesertBatflyThreatRuntime
         if (room == null) return;
         Player player = ResolvePlayer(explosion.sourceObject, explosion.killTagHolder);
         int clock = room.game?.clock ?? int.MinValue;
-        if (player != null && clock != int.MinValue) RoomFor(room).RecordExplosion(player, clock);
-        DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.ExplosionEvidence(explosion);
+        if (player != null && clock != int.MinValue)
+            RoomFor(room).RecordExplosion(player, clock);
+
+        DesertBatflyThreatEvidence evidence =
+            DesertBatflyThreatAdapterRegistry.ExplosionEvidence(explosion);
         float acuteRadius = Mathf.Max(190f, explosion.rad * 1.55f);
 
         foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious) continue;
+            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+                continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, explosion.pos);
             if (distance > acuteRadius) continue;
+
             RuntimeState state = StateFor(bat);
             float proximity = Mathf.InverseLerp(acuteRadius, 20f, distance);
-            state.AcuteExplosionTimer = Mathf.Max(state.AcuteExplosionTimer,
+            state.AcuteExplosionTimer = Mathf.Max(
+                state.AcuteExplosionTimer,
                 Mathf.RoundToInt(Mathf.Lerp(80f, 220f, proximity)));
             state.HazardCenter = explosion.pos;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 220);
@@ -494,7 +529,8 @@ internal static class DesertBatflyThreatRuntime
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.Threatened(player, false);
 
-            if (player != null && evidence.Any && room.VisualContact(bat.mainBodyChunk.pos, explosion.pos))
+            if (player != null && evidence.Any &&
+                room.VisualContact(bat.mainBodyChunk.pos, explosion.pos))
             {
                 float witness = distance <= explosion.rad ? 0.62f : 0.34f;
                 AddEvidence(bat, player, evidence, witness, "witnessed explosion", true);
@@ -509,16 +545,21 @@ internal static class DesertBatflyThreatRuntime
         Vector2 position)
     {
         if (room == null) return;
-        DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.FirecrackerStartleEvidence();
+        DesertBatflyThreatEvidence evidence =
+            DesertBatflyThreatAdapterRegistry.FirecrackerStartleEvidence();
         const float acuteRadius = 270f;
+
         foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious) continue;
+            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+                continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, position);
             if (distance > acuteRadius) continue;
+
             RuntimeState state = StateFor(bat);
             float proximity = Mathf.InverseLerp(acuteRadius, 35f, distance);
-            state.AcuteStartleTimer = Mathf.Max(state.AcuteStartleTimer,
+            state.AcuteStartleTimer = Mathf.Max(
+                state.AcuteStartleTimer,
                 Mathf.RoundToInt(Mathf.Lerp(70f, 190f, proximity)));
             state.HazardCenter = position;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 110);
@@ -540,10 +581,12 @@ internal static class DesertBatflyThreatRuntime
         if (room == null || player == null) return;
         foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious) continue;
+            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+                continue;
             if (!Custom.DistLess(bat.mainBodyChunk.pos, position, 470f) &&
                 !Custom.DistLess(bat.mainBodyChunk.pos, player.mainBodyChunk.pos, 470f))
                 continue;
+
             RuntimeState state = StateFor(bat);
             state.AcuteMassCasualtyTimer = Mathf.Max(state.AcuteMassCasualtyTimer, 300);
             state.AcuteInstigator = player;
@@ -553,11 +596,14 @@ internal static class DesertBatflyThreatRuntime
         }
     }
 
-    private static void BroadcastWitnessEvidence(in DesertBatflyThreatEvent threatEvent, float baseMultiplier)
+    private static void BroadcastWitnessEvidence(
+        in DesertBatflyThreatEvent threatEvent,
+        float baseMultiplier)
     {
         Room room = threatEvent.Victim?.room;
         Player player = threatEvent.Instigator;
-        if (room == null || player == null || player.room != room || !threatEvent.Evidence.Any) return;
+        if (room == null || player == null || player.room != room || !threatEvent.Evidence.Any)
+            return;
 
         foreach (Fly other in DesertSwarmRoom.For(room).Hive.flies)
         {
@@ -565,8 +611,10 @@ internal static class DesertBatflyThreatRuntime
                 witness.room != room || !witness.Consious)
                 continue;
             float distance = Vector2.Distance(witness.mainBodyChunk.pos, threatEvent.Position);
-            if (distance > WitnessFarRadius || !room.VisualContact(witness.mainBodyChunk.pos, threatEvent.Position))
+            if (distance > WitnessFarRadius ||
+                !room.VisualContact(witness.mainBodyChunk.pos, threatEvent.Position))
                 continue;
+
             float distanceMultiplier = distance <= WitnessNearRadius
                 ? Mathf.Lerp(0.65f, 0.45f, Mathf.InverseLerp(0f, WitnessNearRadius, distance))
                 : Mathf.Lerp(0.35f, 0.20f, Mathf.InverseLerp(WitnessNearRadius, WitnessFarRadius, distance));
@@ -595,8 +643,13 @@ internal static class DesertBatflyThreatRuntime
         if (bat == null || player == null || !evidence.Any) return;
         int slot = PlayerSlot(player);
         if (!ValidSlot(slot)) return;
-        int cycle = CurrentCycle(bat);
-        DesertBatflyThreatMemoryStore.AddEvidence(bat.DesertState, slot, evidence, multiplier, cycle);
+
+        DesertBatflyThreatMemoryStore.AddEvidence(
+            bat.DesertState,
+            slot,
+            evidence,
+            multiplier,
+            CurrentCycle(bat));
         RuntimeState state = StateFor(bat);
         state.LastEvidenceType = evidence.Tags.ToString();
         state.LastEvidenceStrength = Mathf.Clamp01(evidence.Strongest * multiplier);
@@ -612,6 +665,7 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
         state.CueRefresh = CueRefreshTicks;
+
         Room room = bat.room;
         RoomState roomState = RoomFor(room);
         roomState.Refresh(room);
@@ -629,17 +683,20 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
 
-        for (int i = 0; i < player.grasps.Length; i++)
+        if (player.grasps != null)
         {
-            PhysicalObject held = player.grasps[i]?.grabbed;
-            if (held == null) continue;
-            DesertBatflyThreatEvidence heldEvidence = DesertBatflyThreatAdapterRegistry.Classify(
-                held, null, 0f, 0f, false);
-            if (held is Spear) cue.VisibleSpear = true;
-            if (held is Rock) cue.VisibleRock = true;
-            if (heldEvidence.Explosion > 0.15f) cue.VisibleExplosive = true;
-            if (heldEvidence.Startle > 0.15f) cue.VisibleStartle = true;
-            if (heldEvidence.Shock > 0.15f) cue.VisibleShock = true;
+            for (int i = 0; i < player.grasps.Length; i++)
+            {
+                PhysicalObject held = player.grasps[i]?.grabbed;
+                if (held == null) continue;
+                DesertBatflyThreatEvidence heldEvidence =
+                    DesertBatflyThreatAdapterRegistry.Classify(held, null, 0f, 0f, false);
+                if (held is Spear) cue.VisibleSpear = true;
+                if (held is Rock) cue.VisibleRock = true;
+                if (heldEvidence.Explosion > 0.15f) cue.VisibleExplosive = true;
+                if (heldEvidence.Startle > 0.15f) cue.VisibleStartle = true;
+                if (heldEvidence.Shock > 0.15f) cue.VisibleShock = true;
+            }
         }
 
         int clock = room.game?.clock ?? 0;
@@ -653,14 +710,19 @@ internal static class DesertBatflyThreatRuntime
         for (int i = 0; i < roomState.ThrownWeapons.Count; i++)
         {
             Weapon weapon = roomState.ThrownWeapons[i];
-            if (weapon?.thrownBy != player || weapon.firstChunk == null) continue;
+            if (weapon?.firstChunk == null || ResolvePlayer(weapon, null) != player) continue;
             Vector2 delta = bat.mainBodyChunk.pos - weapon.firstChunk.pos;
             Vector2 velocity = weapon.firstChunk.vel;
-            if (velocity.sqrMagnitude < 16f || delta.sqrMagnitude > ProjectileNearMissMaxDistance * ProjectileNearMissMaxDistance)
+            if (velocity.sqrMagnitude < 16f ||
+                delta.sqrMagnitude > ProjectileNearMissMaxDistance * ProjectileNearMissMaxDistance)
                 continue;
-            float time = Mathf.Clamp(Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude), 0f, 5f);
+            float time = Mathf.Clamp(
+                Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude),
+                0f,
+                5f);
             Vector2 miss = delta - velocity * time;
             if (miss.sqrMagnitude > ProjectileNearMissRadius * ProjectileNearMissRadius) continue;
+
             cue.ProjectileThreat = true;
             cue.ProjectileThreatDirection = velocity.normalized;
             LearnNearMiss(bat, state, weapon, player, clock);
@@ -668,19 +730,63 @@ internal static class DesertBatflyThreatRuntime
         }
 
         state.Cue = cue;
-        if (cue.ProjectileThreat && !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+        if (cue.ProjectileThreat)
         {
             DesertBatflySocialLife.CancelForPriority(bat, "Task11 incoming projectile");
-            bat.DesertAI.Threatened(player, false);
+            if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+                bat.DesertAI.Threatened(player, false);
         }
     }
 
-    private static void LearnNearMiss(DesertBatfly bat, RuntimeState state, Weapon weapon, Player player, int clock)
+    private static void ApplyHeldThreatPriority(DesertBatfly bat, RuntimeState state)
+    {
+        DesertBatflyThreatCue cue = state.Cue;
+        if (!ValidSlot(cue.PlayerSlot) || bat.room == null) return;
+        DesertBatflyPlayerThreatMemory memory =
+            DesertBatflyThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
+        if (memory == null || memory.Confidence < 0.08f) return;
+
+        RoomState roomState = RoomFor(bat.room);
+        roomState.Refresh(bat.room);
+        Player player = PlayerBySlot(roomState.Players, cue.PlayerSlot);
+        if (player == null) return;
+
+        float heldRisk = 0f;
+        if (cue.VisibleSpear) heldRisk += memory.PiercingPressure * 0.48f;
+        if (cue.VisibleRock) heldRisk += memory.BluntStunPressure * 0.24f;
+        if (cue.VisibleExplosive) heldRisk += memory.ExplosionPressure * 0.65f;
+        if (cue.VisibleStartle) heldRisk += memory.StartlePressure * 0.46f;
+        if (cue.VisibleShock) heldRisk += memory.ShockPressure * 0.50f;
+        heldRisk *= Mathf.Lerp(1.15f, 0.72f, bat.Personality.Nerve);
+        heldRisk *= Mathf.Lerp(0.70f, 1f, memory.Confidence);
+        heldRisk = Mathf.Clamp01(heldRisk);
+        if (heldRisk < 0.22f) return;
+
+        float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
+        if (distance < Mathf.Lerp(170f, 260f, heldRisk))
+            DesertBatflySocialLife.CancelForPriority(bat, "Task11 learned held-item caution");
+
+        if (heldRisk >= 0.72f && distance < 155f &&
+            !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) &&
+            bat.DesertAI.Target == null)
+        {
+            bat.DesertAI.Threatened(player, false);
+            state.ModifierReason = "recognized currently held threat";
+        }
+    }
+
+    private static void LearnNearMiss(
+        DesertBatfly bat,
+        RuntimeState state,
+        Weapon weapon,
+        Player player,
+        int clock)
     {
         int hash = WeaponIdentity(weapon);
         if (state.LastNearMissWeaponHash == hash && state.LastNearMissTick != int.MinValue &&
             clock >= state.LastNearMissTick && clock - state.LastNearMissTick < 120)
             return;
+
         state.LastNearMissWeaponHash = hash;
         state.LastNearMissTick = clock;
         DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.Classify(
@@ -702,7 +808,7 @@ internal static class DesertBatflyThreatRuntime
         state.FormalAggressionTick = bat.room?.game?.clock ?? int.MinValue;
     }
 
-    private static void TrackPursuit(DesertBatfly bat, RuntimeState state, int cycle)
+    private static void TrackPursuit(DesertBatfly bat, RuntimeState state)
     {
         if (bat.DesertAI.Mode != DesertBatflyAI.Activity.Escape || bat.room == null)
         {
@@ -713,6 +819,9 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
 
+        if (state.PreviousMode != DesertBatflyAI.Activity.Escape)
+            state.PursuitDisengageExtended = false;
+
         RoomState room = RoomFor(bat.room);
         room.Refresh(bat.room);
         Player player = NearestVisiblePlayer(bat, room.Players, 300f);
@@ -722,7 +831,9 @@ internal static class DesertBatflyThreatRuntime
             state.PursuitLastDistance = -1f;
             return;
         }
+
         int slot = PlayerSlot(player);
+        state.EscapeThreatPlayerSlot = slot;
         float distance = Vector2.Distance(player.mainBodyChunk.pos, bat.mainBodyChunk.pos);
         float closing = Vector2.Dot(
             player.mainBodyChunk.vel,
@@ -737,12 +848,44 @@ internal static class DesertBatflyThreatRuntime
 
         if (!state.PursuitAwarded && state.PursuitTicks >= PursuitMinimumTicks)
         {
-            AddEvidence(bat, player, DesertBatflyThreatAdapterRegistry.PursuitEvidence(), 1f, "sustained pursuit", false);
+            AddEvidence(
+                bat,
+                player,
+                DesertBatflyThreatAdapterRegistry.PursuitEvidence(),
+                1f,
+                "sustained pursuit",
+                false);
             state.PursuitAwarded = true;
         }
     }
 
-    private static void TrackEncounter(DesertBatfly bat, RuntimeState state, int cycle)
+    private static void ExtendLearnedDisengage(DesertBatfly bat, RuntimeState state)
+    {
+        if (state.PreviousMode != DesertBatflyAI.Activity.Escape ||
+            bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape ||
+            state.PursuitDisengageExtended || !ValidSlot(state.EscapeThreatPlayerSlot))
+            return;
+
+        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(
+            bat.DesertState, state.EscapeThreatPlayerSlot);
+        if (memory == null || memory.PursuitPressure < 0.26f) return;
+
+        RoomState room = RoomFor(bat.room);
+        room.Refresh(bat.room);
+        Player player = PlayerBySlot(room.Players, state.EscapeThreatPlayerSlot);
+        if (player == null || !Custom.DistLess(
+                bat.mainBodyChunk.pos,
+                player.mainBodyChunk.pos,
+                Mathf.Lerp(190f, 300f, memory.PursuitPressure)))
+            return;
+
+        state.PursuitDisengageExtended = true;
+        DesertBatflySocialLife.CancelForPriority(bat, "Task11 learned pursuit disengage");
+        bat.DesertAI.Threatened(player, false);
+        state.ModifierReason = "learned pursuer: extended disengage";
+    }
+
+    private static void TrackEncounter(DesertBatfly bat, RuntimeState state)
     {
         if (bat.DesertAI.Target is not Player player || bat.room == null ||
             bat.DesertAI.Mode is DesertBatflyAI.Activity.Escape or DesertBatflyAI.Activity.Attach or
@@ -753,7 +896,8 @@ internal static class DesertBatflyThreatRuntime
         }
 
         int slot = PlayerSlot(player);
-        if (!ValidSlot(slot) || !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
+        if (!ValidSlot(slot) ||
+            !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
         {
             ResetEncounter(state);
             return;
@@ -793,14 +937,27 @@ internal static class DesertBatflyThreatRuntime
 
         if (!state.RetreatAwarded && state.RetreatTicks >= RetreatMinimumTicks)
         {
-            AddEvidence(bat, player, DesertBatflyThreatAdapterRegistry.RetreatEvidence(), 1f, "encounter retreat", false);
+            AddEvidence(
+                bat,
+                player,
+                DesertBatflyThreatAdapterRegistry.RetreatEvidence(),
+                1f,
+                "encounter retreat",
+                false);
             state.RetreatAwarded = true;
         }
 
-        if (!playerRecentlyAttacked && state.EncounterTicks >= NonAggressionEncounterTicks * (state.NonAggressionAwards + 1) &&
+        if (!playerRecentlyAttacked &&
+            state.EncounterTicks >= NonAggressionEncounterTicks * (state.NonAggressionAwards + 1) &&
             state.NonAggressionAwards < 3)
         {
-            AddEvidence(bat, player, DesertBatflyThreatAdapterRegistry.NonAggressionEvidence(), 1f, "non-aggressive encounter", false);
+            AddEvidence(
+                bat,
+                player,
+                DesertBatflyThreatAdapterRegistry.NonAggressionEvidence(),
+                1f,
+                "non-aggressive encounter",
+                false);
             state.NonAggressionAwards++;
         }
     }
@@ -825,15 +982,15 @@ internal static class DesertBatflyThreatRuntime
             bat.Injury.IsSeverelyInjured || bat.AI.fleeFromRain)
             return;
 
-        if (state.HazardTimer > 0 && state.HazardCenter.HasValue &&
-            !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+        if (state.HazardTimer > 0 && state.HazardCenter.HasValue)
         {
             Vector2 center = state.HazardCenter.Value;
-            Vector2 away = Custom.DirVec(center, bat.mainBodyChunk.pos);
             float distance = Vector2.Distance(center, bat.mainBodyChunk.pos);
             if (distance < 230f)
             {
-                Vector2 evade = bat.mainBodyChunk.pos + away * Mathf.Lerp(130f, 70f, Mathf.InverseLerp(0f, 230f, distance));
+                Vector2 away = Custom.DirVec(center, bat.mainBodyChunk.pos);
+                Vector2 evade = bat.mainBodyChunk.pos +
+                    away * Mathf.Lerp(130f, 70f, Mathf.InverseLerp(0f, 230f, distance));
                 bat.AI.localGoal = evade;
                 bat.Injury.NominalFlightSpeed = Mathf.Max(bat.Injury.NominalFlightSpeed, 7f);
                 state.EvadeTarget = evade;
@@ -845,18 +1002,25 @@ internal static class DesertBatflyThreatRuntime
 
         if (bat.DesertAI.Target is not Player player || player.room != bat.room) return;
         int slot = PlayerSlot(player);
-        DesertBatflyPlayerThreatMemory memory = DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
+        DesertBatflyPlayerThreatMemory memory =
+            DesertBatflyThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.02f) return;
 
         DesertBatflyThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;
         float nerve = bat.Personality.Nerve;
-        float projectileRisk = Mathf.Clamp01(memory.ProjectilePressure * 0.35f + memory.PiercingPressure * 0.65f);
-        float closeRisk = Mathf.Clamp01(memory.GrabCapturePressure * 0.55f + memory.ShockPressure * 0.25f + memory.BluntStunPressure * 0.20f);
-        float explosionRisk = Mathf.Clamp01(memory.ExplosionPressure * 0.72f + memory.AreaDenialPressure * 0.28f);
+        float projectileRisk = Mathf.Clamp01(
+            memory.ProjectilePressure * 0.35f + memory.PiercingPressure * 0.65f);
+        float closeRisk = Mathf.Clamp01(
+            memory.GrabCapturePressure * 0.55f + memory.ShockPressure * 0.25f +
+            memory.BluntStunPressure * 0.20f);
+        float explosionRisk = Mathf.Clamp01(
+            memory.ExplosionPressure * 0.72f + memory.AreaDenialPressure * 0.28f);
         float counterRisk = memory.CounterKillPressure;
         float caution = Mathf.Clamp01(
-            projectileRisk * 0.38f + closeRisk * 0.22f + explosionRisk * 0.22f + counterRisk * 0.18f);
-        caution *= Mathf.Lerp(1.18f, 0.72f, nerve) * Mathf.Lerp(0.72f, 1f, memory.Confidence);
+            projectileRisk * 0.38f + closeRisk * 0.22f +
+            explosionRisk * 0.22f + counterRisk * 0.18f);
+        caution *= Mathf.Lerp(1.18f, 0.72f, nerve) *
+                   Mathf.Lerp(0.72f, 1f, memory.Confidence);
         if (cue.VisibleSpear) caution += memory.PiercingPressure * 0.18f;
         if (cue.VisibleExplosive) caution += memory.ExplosionPressure * 0.18f;
         if (cue.VisibleStartle) caution += memory.StartlePressure * 0.10f;
@@ -865,6 +1029,7 @@ internal static class DesertBatflyThreatRuntime
         float confidenceRelief = memory.NonAggressionConfidence * 0.10f +
             memory.RetreatTendency * bat.Personality.Temperament * bat.Personality.Nerve * 0.12f;
         caution = Mathf.Max(0f, caution - confidenceRelief);
+
         Vector2 playerCenter = player.mainBodyChunk.pos;
         Vector2 currentOffset = bat.AI.localGoal - playerCenter;
         if (currentOffset.sqrMagnitude < 4f)
@@ -872,37 +1037,58 @@ internal static class DesertBatflyThreatRuntime
         if (currentOffset.sqrMagnitude < 4f)
             currentOffset = Vector2.right * StableSide(bat, slot);
 
+        bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
         switch (bat.DesertAI.Mode)
         {
             case DesertBatflyAI.Activity.Observe:
             {
-                float scale = 1f + caution * 0.48f + (cue.VisibleSpear ? memory.PiercingPressure * 0.22f : 0f);
-                Vector2 offset = currentOffset.normalized * Mathf.Max(currentOffset.magnitude, 135f) * scale;
+                if (!extremeVengeance && state.PreviousMode != DesertBatflyAI.Activity.Observe &&
+                    ShouldAbandonFreshHarass(bat, slot, memory, caution))
+                {
+                    bat.DesertAI.CancelAttack();
+                    Vector2 away = Custom.DirVec(playerCenter, bat.mainBodyChunk.pos);
+                    bat.AI.localGoal = bat.mainBodyChunk.pos + away * 95f;
+                    state.EvadeTarget = bat.AI.localGoal;
+                    state.ModifierReason = "learned counter-kill caution";
+                    state.AttackGeometryAdjustment = "new harassment attempt abandoned";
+                    break;
+                }
+
+                float scale = 1f + caution * 0.48f +
+                    (cue.VisibleSpear ? memory.PiercingPressure * 0.22f : 0f);
+                Vector2 offset = currentOffset.normalized *
+                    Mathf.Max(currentOffset.magnitude, 135f) * scale;
                 offset.y *= 0.72f;
                 bat.AI.localGoal = playerCenter + offset;
                 state.ModifierReason = "learned ranged threat";
                 state.AttackGeometryAdjustment = "observe radius increased";
                 break;
             }
+
             case DesertBatflyAI.Activity.Approach:
             {
                 float side = StableSide(bat, slot);
-                float lateral = Mathf.Lerp(20f, 85f, Mathf.Clamp01(projectileRisk + counterRisk * 0.35f));
+                float lateral = Mathf.Lerp(
+                    20f,
+                    85f,
+                    Mathf.Clamp01(projectileRisk + counterRisk * 0.35f));
                 Vector2 approachDir = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
                 Vector2 perpendicular = new Vector2(-approachDir.y, approachDir.x) * side;
-                bat.AI.localGoal = playerCenter + Vector2.up * Mathf.Lerp(92f, 125f, caution) + perpendicular * lateral;
+                bat.AI.localGoal = playerCenter +
+                    Vector2.up * Mathf.Lerp(92f, 125f, caution) + perpendicular * lateral;
                 state.ModifierReason = "learned side approach";
                 state.AttackGeometryAdjustment = "frontal approach reduced";
                 break;
             }
+
             case DesertBatflyAI.Activity.Circle:
             {
-                float scale = 1f + caution * 0.55f;
-                bat.AI.localGoal = playerCenter + currentOffset * scale;
+                bat.AI.localGoal = playerCenter + currentOffset * (1f + caution * 0.55f);
                 state.ModifierReason = "learned circle spacing";
                 state.AttackGeometryAdjustment = "circle radius increased";
                 break;
             }
+
             case DesertBatflyAI.Activity.FakeDive:
             {
                 if (!bat.DesertAI.PullingUp && caution > 0.18f)
@@ -916,6 +1102,7 @@ internal static class DesertBatflyThreatRuntime
                 }
                 break;
             }
+
             case DesertBatflyAI.Activity.Dive:
             {
                 float side = StableSide(bat, slot);
@@ -924,11 +1111,12 @@ internal static class DesertBatflyThreatRuntime
                 bat.AI.localGoal += perpendicular * Mathf.Lerp(8f, 62f, caution);
                 state.ModifierReason = "learned dive geometry";
                 state.AttackGeometryAdjustment = "straight dive reduced";
-                if (state.PreviousMode != DesertBatflyAI.Activity.Dive &&
+                if (!extremeVengeance && state.PreviousMode != DesertBatflyAI.Activity.Dive &&
                     ShouldAbortDive(bat, slot, caution, counterRisk, cue))
                 {
                     bat.DesertAI.CancelAttack();
-                    Vector2 evade = bat.mainBodyChunk.pos + Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 100f + perpendicular * 55f;
+                    Vector2 evade = bat.mainBodyChunk.pos +
+                        Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 100f + perpendicular * 55f;
                     bat.AI.localGoal = evade;
                     state.EvadeTarget = evade;
                     state.ModifierReason = "learned attack abort";
@@ -936,15 +1124,19 @@ internal static class DesertBatflyThreatRuntime
                 }
                 break;
             }
+
             case DesertBatflyAI.Activity.Attach:
             {
-                state.AttachSuppression = Mathf.Clamp01(closeRisk * 0.55f + counterRisk * 0.45f +
+                state.AttachSuppression = Mathf.Clamp01(
+                    closeRisk * 0.55f + counterRisk * 0.45f +
                     (cue.RecentGrabAttempt ? 0.18f : 0f));
-                if (state.AttachSuppression > Mathf.Lerp(0.88f, 0.58f, 1f - nerve) &&
+                if (!extremeVengeance &&
+                    state.AttachSuppression > Mathf.Lerp(0.88f, 0.58f, 1f - nerve) &&
                     Stable01(bat, slot, 0x53A9) < state.AttachSuppression * 0.55f)
                 {
                     bat.DesertAI.CancelAttack();
-                    Vector2 evade = bat.mainBodyChunk.pos + Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 110f;
+                    Vector2 evade = bat.mainBodyChunk.pos +
+                        Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 110f;
                     bat.AI.localGoal = evade;
                     state.EvadeTarget = evade;
                     state.ModifierReason = "learned close-range capture risk";
@@ -952,6 +1144,7 @@ internal static class DesertBatflyThreatRuntime
                 }
                 break;
             }
+
             case DesertBatflyAI.Activity.RetaliationCharge:
             {
                 float side = StableSide(bat, slot);
@@ -963,6 +1156,21 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
         }
+    }
+
+    private static bool ShouldAbandonFreshHarass(
+        DesertBatfly bat,
+        int slot,
+        DesertBatflyPlayerThreatMemory memory,
+        float caution)
+    {
+        float chance =
+            memory.CounterKillPressure * 0.34f +
+            memory.PursuitPressure * 0.10f +
+            memory.PiercingPressure * 0.10f + caution * 0.10f;
+        chance *= Mathf.Lerp(1.12f, 0.55f, bat.Personality.Nerve);
+        chance *= Mathf.Lerp(1.08f, 0.52f, bat.Personality.Temperament);
+        return Stable01(bat, slot, 0x6E21) < Mathf.Clamp01(chance);
     }
 
     private static bool ShouldAbortDive(
@@ -998,19 +1206,41 @@ internal static class DesertBatflyThreatRuntime
             state.AcuteInstigator = null;
     }
 
+    private static void RememberSourceOwner(PhysicalObject source, Player player, int clock)
+    {
+        if (source == null || player == null) return;
+        SourceOwner owner = sourceOwners.GetValue(source, _ => new SourceOwner());
+        owner.Player = player;
+        owner.Clock = clock;
+    }
+
     private static Player ResolvePlayer(PhysicalObject source, Creature killTagHolder)
     {
         if (killTagHolder is Player direct) return direct;
+        if (source is Player playerSource) return playerSource;
         if (source is Weapon weapon && weapon.thrownBy is Player thrown) return thrown;
         if (source?.grabbedBy != null)
         {
             for (int i = 0; i < source.grabbedBy.Count; i++)
                 if (source.grabbedBy[i]?.grabber is Player holder) return holder;
         }
+        if (source != null && sourceOwners.TryGetValue(source, out SourceOwner remembered))
+            return remembered.Player;
         return null;
     }
 
-    private static Player NearestVisiblePlayer(DesertBatfly bat, List<Player> players, float maxDistance = 430f)
+    private static Player PlayerBySlot(List<Player> players, int slot)
+    {
+        if (players == null || !ValidSlot(slot)) return null;
+        for (int i = 0; i < players.Count; i++)
+            if (PlayerSlot(players[i]) == slot) return players[i];
+        return null;
+    }
+
+    private static Player NearestVisiblePlayer(
+        DesertBatfly bat,
+        List<Player> players,
+        float maxDistance = 430f)
     {
         Player best = null;
         float bestDistance = maxDistance;
@@ -1019,7 +1249,8 @@ internal static class DesertBatflyThreatRuntime
             Player player = players[i];
             if (player == null || player.dead || player.room != bat.room) continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
-            if (distance >= bestDistance || !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
+            if (distance >= bestDistance ||
+                !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
                 continue;
             bestDistance = distance;
             best = player;
@@ -1033,11 +1264,14 @@ internal static class DesertBatflyThreatRuntime
     private static int CurrentCycle(DesertBatfly bat)
     {
         RainWorldGame game = bat?.room?.game;
-        return game != null && game.IsStorySession ? game.GetStorySession.saveState.cycleNumber : -1;
+        return game != null && game.IsStorySession
+            ? game.GetStorySession.saveState.cycleNumber
+            : -1;
     }
 
     internal static int PlayerSlot(Player player) => player?.playerState?.playerNumber ?? -1;
-    internal static bool ValidSlot(int slot) => slot >= 0 && slot < DesertBatflyThreatMemorySet.PlayerSlots;
+    internal static bool ValidSlot(int slot) =>
+        slot >= 0 && slot < DesertBatflyThreatMemorySet.PlayerSlots;
 
     private static bool Recent(int stamp, int clock, int window) =>
         stamp != int.MinValue && clock >= stamp && clock - stamp <= window;
@@ -1059,7 +1293,9 @@ internal static class DesertBatflyThreatRuntime
     {
         unchecked
         {
-            uint x = (uint)(bat.Personality.VisualSeed * 1103515245 + slot * 486187739 + salt * 12345);
+            uint x = (uint)(
+                bat.Personality.VisualSeed * 1103515245 +
+                slot * 486187739 + salt * 12345);
             x ^= x >> 16;
             x *= 0x7FEB352Du;
             x ^= x >> 15;
