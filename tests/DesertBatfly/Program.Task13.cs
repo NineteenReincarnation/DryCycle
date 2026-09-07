@@ -1,0 +1,218 @@
+using System;
+using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
+
+internal static partial class Program
+{
+    private static void RunTask13()
+    {
+        Type phase = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalPhase", true);
+        string[] phases = Enum.GetNames(phase);
+        string[] expectedPhases = { "Calm", "Advisory", "Preparation", "Sheltering", "Acute", "Recovery" };
+        Check(phases.Length == 6 && expectedPhases.All(phases.Contains),
+            "Task13 environmental context exposes exactly six approved phases");
+
+        Type weather = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalWeather", true);
+        foreach (string name in new[]
+                 {
+                     "None", "LightRain", "Fog", "DenseFog", "HeavyRain", "HeatWave",
+                     "IntenseHeat", "Sandstorm", "DeathSandstorm", "DeathRain"
+                 })
+            Check(Enum.GetNames(weather).Contains(name), "Task13 weather profile includes " + name);
+
+        Type context = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomContext", true);
+        foreach (string name in new[]
+                 {
+                     "WeatherSourceValid", "Weather", "WeatherId", "ActiveIntensity",
+                     "ImmediateDanger", "ShelterUrgency", "TravelExposure", "ForecastTicks",
+                     "Phase", "PhaseReason"
+                 })
+            Check(context.GetField(name, Flags) != null, "Task13 room context contains " + name);
+
+        Type influence = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalInfluence", true);
+        foreach (string name in new[]
+                 {
+                     "ShelterDrive", "OpenExposureAversion", "RoostMultiplier", "HarassMultiplier",
+                     "SocialMultiplier", "PlayMultiplier", "GroupCohesionMultiplier",
+                     "ActivityRadiusMultiplier", "VisibilityConfidence", "NavigationUncertainty",
+                     "ObstacleAnticipationScale", "HomeReturnDrive", "BurrowDrive",
+                     "MigrationSuppression", "HeatAgitation", "HeatShelterDrive",
+                     "ThermalExhaustion", "DamageAttackPermission", "HardSurvival",
+                     "PreferredShelterPoint", "PreferredShelterQuality", "CommitmentTicks",
+                     "RecoveryProgress", "DecisionReason"
+                 })
+            Check(influence.GetField(name, Flags) != null, "Task13 influence contains " + name);
+
+        Type anchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyShelterAnchor", true);
+        Check(anchor.GetField("Exposure", Flags) != null &&
+              anchor.GetField("RoostCompatible", Flags) != null &&
+              anchor.GetField("Crowding", Flags) != null,
+            "Task13 keeps shelter quality, Roost compatibility and crowding as separate anchor data");
+
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalRoomRuntime", true);
+        Check((int)roomRuntime.GetField("WeatherSampleInterval", Flags).GetRawConstantValue() == 20,
+            "Task13 room weather sample is low-frequency");
+        Check((int)roomRuntime.GetField("CrowdingSampleInterval", Flags).GetRawConstantValue() == 20,
+            "Task13 crowding refresh is low-frequency");
+        Check((int)roomRuntime.GetField("MaxAnchors", Flags).GetRawConstantValue() == 8,
+            "Task13 room shelter anchor cache is bounded");
+        Check(roomRuntime.GetMethod("TryChooseAnchor", Flags) != null &&
+              roomRuntime.GetMethod("WeatherQuality", Flags) != null,
+            "Task13 room runtime owns multi-anchor selection and weather-specific shelter quality");
+
+        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Check((int)behavior.GetField("DecisionBaseInterval", Flags).GetRawConstantValue() >= 8,
+            "Task13 individual environmental decisions are staggered/low-frequency");
+        Check((float)behavior.GetField("AnchorSwitchMargin", Flags).GetRawConstantValue() >= 0.10f,
+            "Task13 shelter anchor switching has hysteresis margin");
+        Check(behavior.GetMethod("AllowsEnvironmentalDamageAttack", Flags) != null &&
+              behavior.GetMethod("MigrationSuppression", Flags) != null &&
+              behavior.GetMethod("VisibilityScale", Flags) != null,
+            "Task13 exposes heat attack, migration suppression and visibility influences to existing systems");
+
+        Type profile = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalProfile", true);
+        int advisory = (int)profile.GetField("SandstormAdvisoryTicks", Flags).GetRawConstantValue();
+        int preparation = (int)profile.GetField("SandstormPreparationTicks", Flags).GetRawConstantValue();
+        int strong = (int)profile.GetField("SandstormStrongPreparationTicks", Flags).GetRawConstantValue();
+        Check(advisory > preparation && preparation > strong && strong > 0,
+            "Task13 Sandstorm has species-specific staged early anticipation");
+        Check(profile.GetMethod("HeatAgitation", Flags) != null &&
+              profile.GetMethod("HeatShelterDrive", Flags) != null &&
+              profile.GetMethod("ThermalExhaustion", Flags) != null,
+            "Task13 Heat keeps agitation, shelter drive and exhaustion as separate axes");
+
+        Type ecology = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWeatherEcology", true);
+        Type eventKind = mod.GetType("DryCycle.Weather.Scheduling.WeatherScheduleEventKind", true);
+        object weatherKind = Enum.Parse(eventKind, "Weather");
+        MethodInfo demand = ecology.GetMethod("HazardShelterDemand", Flags);
+        float fogDemand = (float)demand.Invoke(null, new[] { weatherKind, (object)"FOG" });
+        float denseFogDemand = (float)demand.Invoke(null, new[] { weatherKind, (object)"DENSEFOG" });
+        Check(fogDemand < 0.50f && denseFogDemand >= 0.50f,
+            "ordinary Fog stays local while DenseFog can hand temporary displacement to Task09");
+
+        Type task09Bridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", true);
+        Check(task09Bridge.GetMethod("ShouldSuppressNewMigration", Flags) != null &&
+              task09Bridge.GetMethod("TryGetShelterFailureDebug", Flags) != null,
+            "Task13 has a narrow Task09 bridge for migration timing and realized shelter failure");
+        Check((int)task09Bridge.GetField("ShelterFailureMinTicks", Flags).GetRawConstantValue() >= 300,
+            "Task13 LocalShelterFailure requires sustained realized failure");
+        Check((int)task09Bridge.GetField("ShelterFailureReportCooldownTicks", Flags).GetRawConstantValue() >= 1200,
+            "Task13 LocalShelterFailure reporting is bounded by cooldown");
+
+        Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
+        Check(survivalBridge.GetMethod("ShouldSeekHome", Flags) != null &&
+              survivalBridge.GetMethod("ShouldBurrow", Flags) != null,
+            "Task13 HomeReturn/Burrow drives have a real native behavior backend");
+
+        Type socialBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", true);
+        MethodInfo socialEnable = socialBridge.GetMethod("Enable", Flags);
+        Check(MethodCallOffset(socialEnable, task09Bridge, "Enable") >= 0 &&
+              MethodCallOffset(socialEnable, survivalBridge, "Enable") >= 0,
+            "Task13 Task09 and Home/Burrow bridges share the environmental lifecycle");
+
+        Type signalKind = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalKind", true);
+        Check(Enum.GetNames(signalKind).Length == 6,
+            "Task13 does not add weather signal kinds to Task12 V1");
+
+        Type signalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", true);
+        Check(signalBridge.GetMethod("TryPerceiveHook", Flags) != null,
+            "Task13 Fog/DenseFog modifies Task12 visual signal perception through a narrow bridge");
+
+        Type integration = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalIntegration", true);
+        Check(integration.GetMethod("CanHarassHook", Flags) != null &&
+              integration.GetMethod("SteerHook", Flags) != null,
+            "Task13 integrates environmental aggression and Fog navigation through existing DesertBatflyAI gates");
+
+        Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
+        int task11 = MethodCallOffset(updateAI, threat, "Update");
+        int task12 = MethodCallOffset(updateAI, signals, "Update");
+        int task13 = MethodCallOffset(updateAI, behavior, "Update");
+        int task10 = MethodCallOffset(updateAI, social, "Update");
+        Check(task11 >= 0 && task12 > task11 && task13 > task12 && task10 > task13,
+            "realized pipeline stays Task11 -> Task12 -> Task13 -> Task10 after Task09 travel refusal");
+
+        Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyState", true);
+        Check(state.GetFields(Flags).All(f =>
+                f.Name.IndexOf("Environmental", StringComparison.OrdinalIgnoreCase) < 0 &&
+                f.Name.IndexOf("HeatAgitation", StringComparison.OrdinalIgnoreCase) < 0 &&
+                f.Name.IndexOf("FogMemory", StringComparison.OrdinalIgnoreCase) < 0 &&
+                f.Name.IndexOf("SandstormMemory", StringComparison.OrdinalIgnoreCase) < 0),
+            "Task13 current environmental state is not persisted in DesertBatflyState");
+
+        foreach (Type type in new[]
+                 {
+                     behavior, roomRuntime, profile, integration, socialBridge, signalBridge,
+                     task09Bridge, survivalBridge,
+                     mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalExposure", true)
+                 })
+            Check(!TypeCallsTask13Forbidden(type),
+                "Task13 type " + type.Name + " has no Input, BodyChunk.vel or cross-room LeaveRoom ownership");
+
+        Type debug = mod.GetType("DryCycle.Debugging.AI.DesertBatflyTask13DebugSource", true);
+        Check(debug != null,
+            "Task13 Observatory source exists for weather/phase/anchor/heat/failure inspection");
+
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
+            "Task13 does not restore rejected Task02 role runtime");
+
+        Console.WriteLine(
+            "Task 13 environment: six phases, DryCycle-only weather input, bounded anchors, DenseFog Task09 handoff, Heat axes, Sandstorm migration timing, native Home/Burrow, pipeline, persistence and no-velocity/no-route guards verified.");
+    }
+
+    private static bool TypeCallsTask13Forbidden(Type type)
+    {
+        foreach (MethodInfo method in type.GetMethods(
+                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static |
+                     BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            byte[] il = method.GetMethodBody()?.GetILAsByteArray();
+            if (il == null || il.Length == 0) continue;
+            int offset = 0;
+            while (offset < il.Length)
+            {
+                OpCode opcode;
+                byte first = il[offset++];
+                if (first == 0xFE)
+                {
+                    if (offset >= il.Length) break;
+                    opcode = MultiByteOpCode(il[offset++]);
+                }
+                else opcode = SingleByteOpCode(first);
+
+                int operandOffset = offset;
+                int operandSize = OperandSize(opcode.OperandType, il, operandOffset);
+                if ((opcode == OpCodes.Call || opcode == OpCodes.Callvirt) && operandSize >= 4)
+                {
+                    try
+                    {
+                        MethodBase called = method.Module.ResolveMethod(BitConverter.ToInt32(il, operandOffset));
+                        string owner = called?.DeclaringType?.FullName ?? string.Empty;
+                        if (owner == "UnityEngine.Input") return true;
+                        if (called?.Name == "LeaveRoom" &&
+                            owner.IndexOf("FlyAI", StringComparison.Ordinal) >= 0)
+                            return true;
+                    }
+                    catch (ArgumentException) { }
+                }
+                else if (opcode == OpCodes.Stfld && operandSize >= 4)
+                {
+                    try
+                    {
+                        FieldInfo field = method.Module.ResolveField(BitConverter.ToInt32(il, operandOffset));
+                        if (field?.DeclaringType == typeof(BodyChunk) && field.Name == "vel") return true;
+                    }
+                    catch (ArgumentException) { }
+                }
+                offset += operandSize;
+            }
+        }
+        return false;
+    }
+}
