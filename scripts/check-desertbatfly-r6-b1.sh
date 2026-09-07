@@ -9,6 +9,10 @@ for f in \
   src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs \
   src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs \
   src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs \
+  src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs \
+  src/Creatures/DesertBatfly/Travel/DB_TravelIntent.cs \
+  src/Creatures/DesertBatfly/Travel/DB_TravelDebugState.cs \
+  src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
   src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
   src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs \
@@ -16,7 +20,7 @@ for f in \
   src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs \
   src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs; do test -f "$f"; done
 
-! grep -RIn --include='*.cs' -E 'DesertBatflyHooks|DesertBatflyRuntimePatch|DesertBatflySandbox|DesertBatflyWarpCompatibility|DesertBatflyTask(09|10|11|12|13)DebugSource|DesertBatflyDebugSource' src
+! grep -RIn --include='*.cs' -E 'DesertBatflyHooks|DesertBatflyRuntimePatch|DesertBatflySandbox|DesertBatflyWarpCompatibility|DesertBatflyTask(09|10|11|12|13)DebugSource|DesertBatflyDebugSource|DesertBatflyTravelNavigation|DesertBatflyTravelDebugState' src
 grep -q 'DB_RainWorldHooks.Enable()' src/Plugin.cs
 grep -q 'DB_RainWorldHooks.Disable()' src/Plugin.cs
 grep -q 'AIDebugRegistry.Register(new DB_EnvironmentDebugSource())' src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs
@@ -26,4 +30,19 @@ grep -q 'private readonly DB_TravelDebugSource inner = new();' src/Debug/AIDebug
 grep -q 'private readonly DB_SocialDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_ThreatDebugSource.cs
 grep -q 'private readonly DB_ThreatDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs
 grep -q 'private readonly DB_SignalDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs
-echo 'R6 B1 source retention audit passed.'
+
+grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
+grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
+
+grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+grep -q '^            bat,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+! grep -q '^            this,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' src/Creatures/DesertBatfly/DesertBatfly.cs; then
+  echo 'Creature shell regained SandSpit runtime ownership.' >&2
+  exit 1
+fi
+
+echo 'R6 source retention audit passed.'
