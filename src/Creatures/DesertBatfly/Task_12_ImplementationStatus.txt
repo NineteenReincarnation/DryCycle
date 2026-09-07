@@ -1,0 +1,178 @@
+Desert Batfly Task 12 - Implementation Status
+Observable Social Signal Network / 可观察社会信号网络
+============================================================
+
+Status: CODE-SIDE COMPLETE / LOCAL BUILD + LIVE VERIFIED PENDING
+
+This file records implementation state only. It does not replace
+Task_12_ObservableSocialSignalNetwork.txt as the design specification.
+
+Verification boundary
+---------------------
+- Task12 design targets and code-side DoD 1-45 are implemented on main.
+- Managed regression suites are authored and wired into the existing DesertBatfly test dispatcher.
+- The developer explicitly owns local DLL compilation; no DLL build was run by this implementation pass.
+- GitHub currently exposes no CI/status checks for main, so no CI PASS is claimed.
+- Rain World Scenario A-P / DoD 46 are NOT YET LIVE VERIFIED.
+- Do not change this status to Live Verified until real local build + in-game acceptance are completed.
+
+Implemented architecture
+------------------------
+1. Unified realized-only Task12 signal information layer exists under Creatures/DesertBatfly/Signals.
+2. V1 contains exactly six signal kinds:
+   - AlarmFlutter
+   - DistressCall
+   - RallySignal
+   - RoostCall
+   - HarassSignal
+   - SafeSignal
+3. Signal packets contain GenerationID, Kind, Emitter, Subject, Threat/PlayerTarget, Origin,
+   Direction, Intensity, Hop, CreatedTick and TTL/expiry.
+4. No Task12 signal state is written into DesertBatflyState; signals never persist across room/Cycle.
+5. Room state uses ConditionalWeakTable<Room,...>, a hard active packet cap of 24 and expiry pruning.
+6. Receiver generation history is a fixed 12-entry ring, not an unbounded Dictionary.
+7. Task12 owns information/influence only. It does not create a second locomotion controller.
+
+Alarm / propagation
+-------------------
+- DesertBatflyAI.RaiseLocalAlarm is intercepted and migrated from direct neighbour retreat writes to AlarmFlutter.
+- Alarm is the only V1 signal allowed to relay.
+- Alarm relay is capped at Hop 2.
+- Hop intensity decays approximately 1.00 -> 0.56 -> 0.31.
+- Same generation is processed once per receiver, preventing A->B->A feedback loops.
+- Continuous same-emitter/same-threat alarms refresh the current generation instead of creating periodic storms.
+- Multiple bats reacting to the same acute root within the bounded merge window collapse to one generation.
+- Alarm/Distress support close acoustic perception without LOS; Rally/Roost/Harass/Safe remain visual.
+- Response is continuously influenced by Conformity, Nerve, Temperament, RoostAffinity and SocialBond where appropriate.
+
+Direct witness versus indirect signal
+-------------------------------------
+- Intimidation tier-0/direct witness still runs the original Fear/Trauma/PTSD path.
+- Historical tier-1+ Secondary/Chain ReceiveFear is suppressed; indirect propagation now goes through Task12 Alarm perception.
+- The first direct witness creates the sole social Alarm generation for that mortality/capture event.
+- Persistent Bond-death Grief/Trauma is additionally gated by DesertBatflySignalDirectWitnessBridge:
+  the observer must have direct LOS to victim/killer or still be in the same physical Fly chain.
+- Therefore proximity-only indirect receivers do not obtain persistent grief/trauma merely because legacy tier logic found them.
+- Detailed Task11 Threat Signature evidence remains a direct/witness event property and is never copied by Task12.
+
+Distress / rescue
+-----------------
+- Non-Fly grasp and Peach tongue capture emit DistressCall plus AlarmFlutter.
+- Distress has its own urgent cooldown independent of neutral signal cadence.
+- Distress does not create SocialBond, Vengeance or a rescue controller.
+- DistressInterest is a weak input into existing SocialBond/Intimidation rescue-support motivation.
+- SocialBond makes an important partner's Distress more salient without transferring hidden information.
+
+Rally / vengeance
+-----------------
+- RallySignal is emitted only after existing Intimidation has already armed a real Avenger.
+- Supporters do not recursively emit recruitment Rally signals.
+- Rally never creates a True Avenger/Avenger and never bypasses Trauma, Injury or existing vengeance caps.
+- Immediate Rally delivery lets existing supporter candidacy consume a weak RallyInterest bonus in the same event.
+- Intimidation private terminology was cleaned from SocialRole/TrueAvenger/Follower to
+  VengeanceParticipation/Avenger/Supporter while preserving behavior and the State.Role reflection surface.
+- Rejected Task02 Sentinel/Bully/Opportunist roles remain absent.
+
+Roost / Harass / Safe
+---------------------
+- Task10 Roost source discovery is routed through actually perceived RoostCall.
+- Task10 still owns RoostInvitation, ChainSocialization, reservation caps, FlyAI.ChainTile,
+  chain-tail attachment and the Platform/Floor underside legality extension.
+- Formal Observe/Approach/Circle/FakeDive/Dive can emit HarassSignal.
+- Task10 SocialChase does not create formal HarassSignal.
+- Social harass target acquisition consumes HarassInterest rather than reading another bat's private AI Mode/Target.
+- Existing CanHarass/Injury/PTSD/Cooldown/AttackSlot and target visibility rules remain authoritative.
+- SafeSignal only accelerates decay of Task12 signal-induced AlarmPressure.
+- Safe is rejected while the receiver has direct danger, Escape, Severe Injury, Task09 travel,
+  Task11 projectile/acute danger or Intimidation fear suppression.
+- Safe never clears Trauma, PTSD, Threat Signature Memory, GrabMemory, Grief or Injury.
+
+Task11 integration
+------------------
+- DesertBatflySignalThreatBridge is read-only.
+- A receiver's own player-slot Threat Signature may strengthen Alarm credibility and suppress its own Rally/Harass/Distress willingness.
+- No emitter Threat Signature values are copied to another individual.
+- The Task12 bridge never calls DesertBatflyThreatMemoryStore.AddEvidence.
+- Current Threat Cue is not inferred from another bat's signal.
+- Task11 Explosion/Startle/MassCasualty are converted by DesertBatflySignalAcuteBridge into one accurately positioned Alarm root.
+- During the original Task11 acute broadcast, legacy RaiseLocalAlarm emission is suppressed; Task11 Acute/Evidence logic still runs.
+- Explosion uses the real explosion position, Firecracker Startle uses the real pop position and MassCasualty uses the real casualty position.
+
+Priority / ownership
+--------------------
+- Task09 realized travel still returns before Task11/Task12/Task10 and does not depend on social signals.
+- Realized AI order is Task11 threat context -> Task12 information -> Task10 neutral SocialLife.
+- Alarm can cancel Task10 neutral social activity, but Task12 does not own long-term movement.
+- Severe Injury and Task09 travel prevent Task12 Alarm application from taking control.
+- Rally/Roost/Harass/Safe never override survival ownership.
+
+Visual / debug
+--------------
+- DesertBatflyGraphics reads Task12 SignalDisplayState.
+- Alarm: rapid flutter; Distress: stronger asymmetric struggle; Rally: wing spread;
+  Roost: mild open/close gesture; Harass: slight asymmetric posture; Safe: slow stretch.
+- These are FSprite presentation changes only; Task12 does not write BodyChunk velocity.
+- DesertBatflyTask12DebugSource wraps Task11 and therefore preserves Task09/10/11 diagnostics.
+- Observatory exposes active room packets, generation, kind, perception mode, hop,
+  Alarm/Distress/Rally/Roost/Harass/Safe influence, last decision and display state.
+- signal trace formatting is watched-only.
+
+Performance structure
+---------------------
+- urgent Alarm/Distress delivery is event-driven rather than a per-frame all-pairs scan.
+- neutral signal sampling is staggered approximately every 14-24 ticks per bat.
+- each neutral scan reads at most the capped 24 active packets.
+- room packets expire and are pruned; receiver generation memory is fixed-size.
+- no Task12 global per-frame N x N neighbour graph is maintained.
+- continuous capture alarms refresh one live generation instead of spawning repeated roots.
+
+Regression coverage authored
+----------------------------
+Program.Task12.cs is wired into RunRoleIntegration and structurally checks:
+- exactly six V1 signal kinds;
+- required packet fields;
+- active room cap = 24;
+- Alarm max hop = 2;
+- fixed 12-entry generation history;
+- room delivery/merge/prune API;
+- perception/response/Safe gates;
+- migration of legacy alarm/indirect fear;
+- Harass/Roost signal routing;
+- Task11 read-only threat bridge lifecycle;
+- Task11 acute-event bridge lifecycle and entry points;
+- direct-witness grief bridge lifecycle;
+- no UnityEngine.Input use in Task12 signal layers;
+- no Task11 AddEvidence call from Task12;
+- no Task12 BodyChunk.vel ownership;
+- no Task12 persistence in DesertBatflyState;
+- Task11 -> Task12 -> Task10 realized ordering;
+- Graphics signal display hook;
+- Observatory source presence;
+- rejected Task02 types remain absent;
+- Intimidation private SocialRole type is absent and VengeanceParticipation exists.
+
+These checks have NOT been executed in this pass because local DLL compilation/testing is assigned to the developer.
+
+Definition of Done status
+-------------------------
+DoD 01-45: CODE-SIDE COMPLETE.
+DoD 46: PENDING LOCAL BUILD + RAIN WORLD LIVE ACCEPTANCE.
+
+Required live acceptance before changing status to Live Verified
+---------------------------------------------------------------
+Run Scenario A-P from Task_12_ObservableSocialSignalNetwork.txt, including at minimum:
+- direct witness versus indirect Alarm behavior;
+- LOS and close-acoustic Alarm/Distress cases;
+- two-hop Alarm ceiling and no feedback loop;
+- Distress + bonded rescue response;
+- Avenger Rally with selective supporters;
+- Task11-experienced bat refusing risky Rally/Harass;
+- RoostCall feeding legal Task10 roost/chain behavior;
+- SafeSignal not clearing PTSD/real danger;
+- Firecracker/Explosion/MassCasualty accurate alarm origins;
+- signal visual readability;
+- Task09 weather/travel priority;
+- 20-30 Desert Batfly stress/performance and long-run stale-state cleanup.
+
+If live tuning reveals issues, fix them inside the current signal/influence architecture.
+Do not restore Task02 SocialRole and do not solve signal tuning by adding a second locomotion controller.
