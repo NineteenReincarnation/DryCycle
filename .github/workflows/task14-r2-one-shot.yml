@@ -1,0 +1,40 @@
+name: Task14 R2 one-shot refactor
+
+on:
+  push:
+    branches:
+      - task14-r2-roomcontext
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r2:
+    if: github.event.head_commit.message == 'Trigger Task14 R2 one-shot refactor'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r2-roomcontext
+          fetch-depth: 0
+
+      - name: Apply guarded R2 migration
+        run: python scripts/task14_r2_apply.py
+
+      - name: Validate patch shape
+        run: |
+          git diff --check
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalSignalBridge.cs
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalThreatBridge.cs
+          ! grep -q 'fly.room.physicalObjects' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          ! grep -q 'roomState.Refresh' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs
+          grep -q 'DB_RoomContext.TryGetExisting' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'DB_VisibilityPolicy' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
+
+      - name: Commit guarded R2 migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Complete Task14 R2 room and perception migration'
+          git push origin HEAD:task14-r2-roomcontext
