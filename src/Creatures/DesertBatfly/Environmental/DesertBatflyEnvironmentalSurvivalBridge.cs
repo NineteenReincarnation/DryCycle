@@ -115,7 +115,7 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
         }
 
         if (!ShouldSeekHome(influence) && influence.BurrowDrive < 0.45f) return;
-        if (bat.DesertAI.IsFormalAttackActive && !influence.HardSurvival) return;
+        if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return;
 
         DesertBatflySocialLife.CancelForPriority(bat, "Task13 same-room Home/Hive retreat");
         if (influence.HardSurvival) bat.DesertAI.CancelAttack();
