@@ -14,23 +14,25 @@ jobs:
           ref: task14-r5-b5-working
           fetch-depth: 0
 
-      - name: Audit remaining bridge files
+      - name: Require no internal bridge files
         run: |
-          echo '=== DesertBatfly *Bridge.cs ==='
-          find src/Creatures/DesertBatfly -type f -name '*Bridge.cs' -print | sort || true
-          echo '=== Bridge identifiers ==='
-          grep -RIn --include='*.cs' 'class .*Bridge\|DesertBatfly.*Bridge' src/Creatures/DesertBatfly || true
+          mapfile -t bridges < <(find src/Creatures/DesertBatfly -type f -name '*Bridge.cs' -print | sort)
+          printf '%s\n' "${bridges[@]}"
+          test "${#bridges[@]}" -eq 0
 
-      - name: Audit RuntimeDetour and Reflection
+      - name: Require exact Reflection and RuntimeDetour boundary
         run: |
-          echo '=== RuntimeDetour imports ==='
-          grep -RIl --include='*.cs' 'MonoMod.RuntimeDetour' src/Creatures/DesertBatfly | sort || true
-          echo '=== Reflection imports ==='
-          grep -RIl --include='*.cs' 'System.Reflection' src/Creatures/DesertBatfly | sort || true
-          echo '=== RuntimePatch callers ==='
-          grep -RIn --include='*.cs' 'DesertBatflyRuntimePatch' src/Creatures/DesertBatfly || true
+          mapfile -t detours < <(grep -RIl --include='*.cs' 'MonoMod.RuntimeDetour' src/Creatures/DesertBatfly | sort || true)
+          printf 'RuntimeDetour files: %s\n' "${detours[*]}"
+          test "${#detours[@]}" -eq 0
 
-      - name: Verify B1-B4 deleted types stay absent
+          mapfile -t reflection < <(grep -RIl --include='*.cs' 'System.Reflection' src/Creatures/DesertBatfly | sort || true)
+          printf 'Reflection files:\n%s\n' "${reflection[*]}"
+          test "${#reflection[@]}" -eq 2
+          printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs'
+          printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
+
+      - name: Verify B1-B4 deleted types stay absent from production
         run: |
           for name in \
             DesertBatflyEnvironmentalDenseFogBridge \
@@ -45,11 +47,22 @@ jobs:
             DesertBatflySignalDirectWitnessBridge \
             DesertBatflySignalThreatBridge \
             DesertBatflySignalVengeanceBridge; do
-            if grep -RIn --include='*.cs' "$name" src tests; then
-              echo "stale deleted type reference: $name"
+            if grep -RIn --include='*.cs' "$name" src/Creatures/DesertBatfly; then
+              echo "stale production reference: $name"
               exit 1
             fi
           done
+
+      - name: Verify B1-B2 function retention
+        run: |
+          grep -q 'DesertBatflyThreatTactics.AdjustExtremeVengeanceGoal' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'DB_EnvironmentalPolicy.AggressionAuthorized' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'DB_EnvironmentalPolicy.CombatMotivation' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'DB_EnvironmentalPolicy.RoostChanceScale' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'DB_EnvironmentalPolicy.AdjustRoostDuration' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'DB_EnvironmentalPolicy.SocialDriveScale' src/Creatures/DesertBatfly/Social/DesertBatflySocialLife.cs
+          grep -q 'DB_EnvironmentalPolicy.GroupCohesionScale' src/Creatures/DesertBatfly/Social/DesertBatflySocialLife.cs
+          grep -RIl --include='*.cs' 'FogNavigationFamiliarityScale' src/Creatures/DesertBatfly/Perception src/Creatures/DesertBatfly/Runtime | grep -q .
 
       - name: Verify B3 function retention
         run: |
@@ -69,7 +82,7 @@ jobs:
           grep -q 'DesertBatflySignalRuntime.EmitAlarm' src/Creatures/DesertBatfly/DesertBatflyAI.cs
           grep -q 'receiver.DesertAI.ThreatenedAt(threat, packet.Origin, false, false)' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
           grep -q 'DesertBatflyThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
-          grep -q 'DesertBatflySignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs
+          test "$(grep -c 'DesertBatflySignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
           grep -q 'DesertBatflySignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs
           grep -q 'DesertBatflySignalRuntime.EmitAlarm' src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs
           grep -q 'DesertBatflySignalRuntime.TryGetInfluence(fly' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
@@ -79,7 +92,7 @@ jobs:
           ! grep -RIn --include='*.cs' 'DesertBatflyThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Signals
           ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Signals
 
-      - name: Verify RuntimePatch external-compatibility boundary
+      - name: Verify RuntimePatch is Warp-only compatibility infrastructure
         run: |
           mapfile -t callers < <(grep -RIl --include='*.cs' 'DesertBatflyRuntimePatch' src/Creatures/DesertBatfly | sort)
           printf '%s\n' "${callers[@]}"
@@ -88,6 +101,9 @@ jobs:
           printf '%s\n' "${callers[@]}" | grep -qx 'src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs'
           grep -q 'DesertBatflyWarpCompatibility.Enable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
           grep -q 'DesertBatflyWarpCompatibility.Disable()' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'RoomFinder' src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs
+          grep -q 'RoomInfo' src/Creatures/DesertBatfly/DesertBatflyWarpCompatibility.cs
+          grep -q 'HarmonyLib.Harmony' src/Creatures/DesertBatfly/DesertBatflyRuntimePatch.cs
 
       - name: Diff hygiene
-        run: git diff --check HEAD^ HEAD || true
+        run: git diff --check HEAD^ HEAD
