@@ -76,6 +76,21 @@ internal static partial class Program
         Check(MethodCallsTask11(aiUpdate, tacticsType, "AdjustFakeDiveChance"),
             "ordinary DesertBatflyAI attack selection actually consumes learned FakeDive weighting");
 
+        MethodInfo tryInjuryRecovery = aiType.GetMethod("TryInjuryRecovery", Flags);
+        MethodInfo canHarass = aiType.GetMethod("CanHarass", Flags);
+        MethodInfo acquireSlot = aiType.GetMethod("AcquireSlot", Flags);
+        MethodInfo armRetaliation = aiType.GetMethod("ArmRetaliation", Flags);
+        MethodInfo traumatizedPlayer = aiType.GetMethod("IsTraumatizedPlayer", Flags);
+        int injuryOffset = MethodCallOffset(aiUpdate, aiType, "TryInjuryRecovery");
+        int fakeDiveOffset = MethodCallOffset(aiUpdate, tacticsType, "AdjustFakeDiveChance");
+        Check(tryInjuryRecovery != null && injuryOffset >= 0 && fakeDiveOffset > injuryOffset,
+            "Severe Injury recovery is evaluated before Task11 learned attack weighting");
+        Check(traumatizedPlayer != null &&
+              MethodCallsTask11(canHarass, aiType, "IsTraumatizedPlayer") &&
+              MethodCallsTask11(acquireSlot, aiType, "IsTraumatizedPlayer") &&
+              MethodCallsTask11(armRetaliation, aiType, "IsTraumatizedPlayer"),
+            "strong player-specific Trauma/PTSD still vetoes ordinary harass, attack-slot acquisition and retaliation");
+
         MethodInfo bridgeHook = bridgeType.GetMethod("ForceFlightHook", Flags);
         MethodInfo bridgeUpdateHook = bridgeType.GetMethod("IntimidationUpdateHook", Flags);
         MethodInfo markTravelOwnedFrame = bridgeType.GetMethod("MarkTravelOwnedFrame", Flags);
@@ -124,7 +139,7 @@ internal static partial class Program
             "Task11 final combat integration still does not restore rejected Task02 roles");
 
         Console.WriteLine(
-            "Task 11 final tactics: learned FakeDive weighting, ordinary real-projectile lateral evade, Extreme Vengeance geometry, exact-frame Task09 priority, velocity ownership and Trace lifecycle verified.");
+            "Task 11 final tactics: learned FakeDive weighting, ordinary real-projectile lateral evade, Severe Injury/PTSD priority guards, Extreme Vengeance geometry, exact-frame Task09 priority, velocity ownership and Trace lifecycle verified.");
     }
 
     private static bool MethodCallsTask11(MethodInfo caller, Type targetType, string targetName) =>
