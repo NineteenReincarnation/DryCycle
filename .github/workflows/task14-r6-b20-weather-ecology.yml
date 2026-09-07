@@ -1,0 +1,80 @@
+name: Task14 R6 B20 WeatherEcology identity
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b20-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move and rename WeatherEcology
+        shell: bash
+        run: |
+          set -euo pipefail
+          git mv src/Creatures/DesertBatfly/DesertBatflyWeatherEcology.cs src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'DesertBatflyWeatherEcologySample': 'DB_WeatherEcologySample',
+              'DesertBatflyWeatherEcology': 'DB_WeatherEcology',
+              'SampleTask13Axes': 'SampleEnvironmentAxes',
+              'Task13 axes': 'Environment axes',
+              'Task13 is allowed to compose': 'Environment is allowed to compose',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  new = text
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != text:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate weather ecology semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          test ! -e src/Creatures/DesertBatfly/DesertBatflyWeatherEcology.cs
+          if git grep -n -E 'DesertBatflyWeatherEcology|SampleTask13Axes' -- src tests scripts; then
+            echo 'Old WeatherEcology identity remains.' >&2
+            exit 1
+          fi
+          grep -q 'struct DB_WeatherEcologySample' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          grep -q 'class DB_WeatherEcology' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          grep -q 'ForecastPlanningHorizonTicks = 7200' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          grep -q 'internal static DB_WeatherAxesSample SampleEnvironmentAxes' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          # Keep DenseFog temporary displacement semantics and permanent migration suppression.
+          grep -q '"DENSEFOG" => new Profile(0.06f, 0.90f, 0.01f, 0.12f)' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs
+          # World ecology adapter must not own travel execution.
+          if grep -n -E 'LeaveRoom\(|BeginTravel\(|new TravelIntent' src/Creatures/DesertBatfly/Environment/DB_WeatherEcology.cs; then
+            echo 'WeatherEcology acquired travel execution authority.' >&2
+            exit 1
+          fi
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b20-weather-ecology.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B20 migrate WeatherEcology identity [r6-b20-done]'
+          git push origin HEAD:task14-r6-b1-final
