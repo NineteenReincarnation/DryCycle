@@ -71,11 +71,22 @@ internal static class DesertBatflySocialBond
 
     internal static float Motivation(DesertBatfly source, DesertBatfly victim, Creature threat)
     {
+        if (source == null) return 0f;
         float grief = source.DesertState.GriefThreatIdentity.HasValue && threat?.abstractCreature != null &&
             source.DesertState.GriefThreatIdentity.Value.spawner == threat.abstractCreature.ID.spawner &&
             source.DesertState.GriefThreatIdentity.Value.number == threat.abstractCreature.ID.number
             ? source.DesertState.GriefStrength * source.DesertState.GriefAnger * 0.15f : 0f;
-        return GetBondStrength(source, victim) * 0.18f + grief;
+
+        float signal = 0f;
+        if (DesertBatflySignalRuntime.TryGetInfluence(source, out DesertBatflySignalInfluence influence))
+        {
+            if (victim != null && influence.DistressSource == victim)
+                signal += influence.DistressInterest * 0.20f;
+            if (threat != null && influence.RallyTarget == threat)
+                signal += influence.RallyInterest * 0.16f;
+        }
+
+        return GetBondStrength(source, victim) * 0.18f + grief + signal;
     }
 
     internal static void OnBondPartnerDeath(DesertBatfly observer, DesertBatfly victim, Creature killer)
