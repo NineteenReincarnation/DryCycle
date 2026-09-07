@@ -576,7 +576,7 @@ internal static class DesertBatflySignalRuntime
         float n = receiver.Personality.Nerve;
         float t = receiver.Personality.Temperament;
         float bond = packet.Emitter != null
-            ? DesertBatflySocialBond.GetBondStrength(receiver, packet.Emitter)
+            ? DB_SocialBond.GetBondStrength(receiver, packet.Emitter)
             : 0f;
 
         float scale = packet.Kind switch

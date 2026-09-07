@@ -74,7 +74,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             if (++socialSampleTicks >= 180)
             {
                 socialSampleTicks = 0;
-                DesertBatflySocialBond.SampleChain(this);
+                DB_SocialBond.SampleChain(this);
             }
         }
 

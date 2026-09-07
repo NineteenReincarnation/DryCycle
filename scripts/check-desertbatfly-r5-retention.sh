@@ -48,7 +48,7 @@ grep -q 'DesertBatflyThreatMemoryStore.For(receiver.DesertState, slot)' src/Crea
 test "$(grep -c 'DesertBatflySignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
 grep -q 'DesertBatflySignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs
 grep -q 'DesertBatflySignalRuntime.EmitRally' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
-grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBatfly/DesertBatflySocialBond.cs
+grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBatfly/Social/DB_SocialBond.cs
 ! grep -RIn --include='*.cs' 'DesertBatflyThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Signals
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Signals
 

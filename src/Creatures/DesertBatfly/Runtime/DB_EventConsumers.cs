@@ -132,7 +132,7 @@ internal static class DB_EventConsumers
                      !victim.room.VisualContact(observer.mainBodyChunk.pos, mortality.Position)))
                     continue;
 
-                DesertBatflySocialBond.OnBondPartnerDeath(observer, victim, killer);
+                DB_SocialBond.OnBondPartnerDeath(observer, victim, killer);
             }
         }
 

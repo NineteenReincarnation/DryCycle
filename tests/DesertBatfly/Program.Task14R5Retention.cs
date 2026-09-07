@@ -20,7 +20,7 @@ internal static partial class Program
         Type signal = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type consumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
-        Type bond = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
+        Type bond = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);
         Type runtimePatch = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RuntimePatch", true);
         Type sandbox = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Sandbox", true);
         Type warp = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WarpCompatibility", true);

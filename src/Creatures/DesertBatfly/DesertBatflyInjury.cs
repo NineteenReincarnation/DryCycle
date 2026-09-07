@@ -164,7 +164,7 @@ internal sealed class DesertBatflyInjury
         CheckCaptureRelease();
         if (++recoverySample < 40) return;
         recoverySample = 0;
-        if (bat.room == null || !bat.Consious || bat.inShortcut || !DesertBatflySocialBond.CanRespond(bat) ||
+        if (bat.room == null || !bat.Consious || bat.inShortcut || !DB_SocialBond.CanRespond(bat) ||
             bat.DesertAI.HasImmediateDanger || bat.DesertAI.FormalAttack ||
             DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) || DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return;
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain;

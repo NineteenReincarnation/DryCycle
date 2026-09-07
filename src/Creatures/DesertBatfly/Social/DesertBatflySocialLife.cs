@@ -433,8 +433,8 @@ internal static class DesertBatflySocialLife
             if (distance > 70f && !bat.room.VisualContact(bat.mainBodyChunk.pos, other.mainBodyChunk.pos)) continue;
 
             float bond = Mathf.Max(
-                DesertBatflySocialBond.GetBondStrength(bat, other),
-                DesertBatflySocialBond.GetBondStrength(other, bat));
+                DB_SocialBond.GetBondStrength(bat, other),
+                DB_SocialBond.GetBondStrength(other, bat));
             float companionWeight = PartnerPreference(
                 bat.Personality.Conformity,
                 1f - bat.Personality.Temperament,
@@ -598,8 +598,8 @@ internal static class DesertBatflySocialLife
         DesertBatfly anchor = a <= b ? partner : initiator;
         DesertBatfly companion = anchor == initiator ? partner : initiator;
         float bond = Mathf.Max(
-            DesertBatflySocialBond.GetBondStrength(anchor, companion),
-            DesertBatflySocialBond.GetBondStrength(companion, anchor));
+            DB_SocialBond.GetBondStrength(anchor, companion),
+            DB_SocialBond.GetBondStrength(companion, anchor));
         int duration = StableInt(
             initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed,
             0x33A9,
@@ -838,8 +838,8 @@ internal static class DesertBatflySocialLife
         }
 
         float bond = Mathf.Max(
-            DesertBatflySocialBond.GetBondStrength(bat, anchor),
-            DesertBatflySocialBond.GetBondStrength(anchor, bat));
+            DB_SocialBond.GetBondStrength(bat, anchor),
+            DB_SocialBond.GetBondStrength(anchor, bat));
         Vector2 velocity = anchor.mainBodyChunk.vel;
         Vector2 backward = velocity.sqrMagnitude > 1f ? -velocity.normalized * 22f : Vector2.zero;
         Vector2 goal = anchor.mainBodyChunk.pos + backward + CompanionOffset(state.Side, bond);
@@ -1223,8 +1223,8 @@ internal static class DesertBatflySocialLife
 
         chainSize = ChainLength(source);
         bond = Mathf.Max(
-            DesertBatflySocialBond.GetBondStrength(bat, source),
-            DesertBatflySocialBond.GetBondStrength(source, bat));
+            DB_SocialBond.GetBondStrength(bat, source),
+            DB_SocialBond.GetBondStrength(source, bat));
         return source;
     }
 

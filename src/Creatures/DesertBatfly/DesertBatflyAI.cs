@@ -846,7 +846,7 @@ internal sealed class DesertBatflyAI
             return;
         if (scan != 0 || Random.value >
             fly.Personality.RoostChance * DB_EnvironmentalPolicy.RoostChanceScale(fly) *
-            DesertBatflySocialBond.RoostScale(fly) * fly.Injury.RoostScale)
+            DB_SocialBond.RoostScale(fly) * fly.Injury.RoostScale)
             return;
         if (!TryFindRoost(out Vector2 spot)) return;
 

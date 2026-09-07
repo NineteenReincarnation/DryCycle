@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 // No runtime table or relationship graph: all persistent data occupies one state slot.
-internal static class DesertBatflySocialBond
+internal static class DB_SocialBond
 {
     internal const float DirectDeathWitnessRadius = 340f;
     internal static bool Available(DesertBatfly bat) => bat != null && !bat.dead &&

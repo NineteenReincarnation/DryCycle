@@ -259,7 +259,7 @@ internal static partial class Program
         var first = MakeBat(101);
         var second = MakeBat(102);
         var third = MakeBat(103);
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialBond", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);
         object Social(string name, params object[] arguments) => social.GetMethod(name, Flags).Invoke(null, arguments);
         first.AI = Bare<FlyAI>();
         second.AI = Bare<FlyAI>();
