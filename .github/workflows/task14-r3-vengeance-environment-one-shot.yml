@@ -1,0 +1,47 @@
+name: Task14 R3 Vengeance Environment one-shot
+
+on:
+  push:
+    branches:
+      - task14-r3-arbiter
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r3-vengeance-environment:
+    if: github.event.head_commit.message == 'Trigger R3 Vengeance Environment owner migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r3-arbiter
+          fetch-depth: 0
+
+      - name: Apply guarded R3 Vengeance and Environment migration
+        run: python scripts/task14_r3_vengeance_environment_apply.py
+
+      - name: Validate R3 owner split
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r3_vengeance_environment_apply.py
+          test ! -e .github/workflows/task14-r3-vengeance-environment-one-shot.yml
+          grep -q 'ExecuteVengeanceOwned' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'UpdateState' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'DB_BehaviorOwner.Vengeance' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'RefreshInfluence' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          grep -q 'ApplyOwnedBehavior' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          grep -q 'DB_VengeanceExecutor.TryExecute' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          grep -q 'DB_EnvironmentExecutor.TryExecute' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'DesertBatflyEnvironmentalBehavior.Update(desert)' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'IntimidationUpdateHook' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatVengeanceBridge.cs
+          grep -q 'R3-CLOSED-03' docs/Discussion/Task_14_R3_FrameArbiterStatus.txt
+          grep -q 'R3-CLOSED-04' docs/Discussion/Task_14_R3_FrameArbiterStatus.txt
+
+      - name: Commit R3 Vengeance and Environment migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Gate Vengeance and Environment behind R3 arbiter'
+          git push origin HEAD:task14-r3-arbiter
