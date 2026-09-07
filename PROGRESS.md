@@ -1,135 +1,120 @@
 # DryCycle Project Progress
 
-Last updated: 2026-09-08 (Asia/Tokyo)
+Last updated: 2026-09-08
 Active workstream: Desert Batfly Task14 architecture refactor
 Current branch: `task14-r6-b1-final`
-Current verified implementation HEAD before this progress update: `9ec4b103c307cc6fa8271562870159d8e3fe40f9`
+Current verified implementation HEAD before this progress update: `d81bfc7987e430f12326fa80e9f5d88ed89a37c8`
 
 ## Start-of-run state
 
-- Task14 R0-R5 code-side refactor work had been completed on stacked branches, with Rain World live validation intentionally deferred to final acceptance.
-- R5 stable baseline: `e7bb53e32b367fec91805c180151a36a75b68816`.
-- R6 had been started, but B1 Integration/Observatory migration had not yet produced a clean verified commit.
-- `PROGRESS.md` did not exist at the start of this run.
-- `main` remains behind the stacked Task14 work; current Task14 work is intentionally isolated on refactor branches.
+- Previous verified R6 implementation had completed B1 Integration/Observatory and B2 Colony migration.
+- Previous progress HEAD: `42a7beec7064a06a2fff942e7f1151d112d675dd`.
+- R5 stable baseline remains `e7bb53e32b367fec91805c180151a36a75b68816`.
+- `main` remains behind the stacked Task14 refactor work; active work continues on the Task14 branch.
+- Full local Rain World build/live validation is still unavailable in this execution environment.
 
 ## Completed in this run
 
-### R6-B1 Integration + Observatory identity migration
+### R6-B3 Travel support domain migration
 
-Verified and accepted:
+Verified implementation commit:
 
-`2fe1eacec6438749a6958704c23b3a4309bf6f92` — `R6 B1 migrate Integration and Observatory identities`
+`580ff8c4c8186716a06c633c134d5d4852064d56` — `R6 B3 migrate Travel support identities`
 
-Integration source identities moved to:
+Moved/renamed:
 
-- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs`
-- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs`
-- `src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs`
-- `src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs`
+- `src/Creatures/DesertBatfly/DesertBatflyRefuge.cs` -> `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`
+- `src/Creatures/DesertBatfly/DesertBatflyWorldRoutePlanner.cs` -> `src/Creatures/DesertBatfly/Travel/DB_WorldRoutePlanner.cs`
 
-Observatory source identity chain moved to:
+Supporting type identities migrated in the same cohesive Travel batch:
 
-- `DB_ObservatorySource`
-- `DB_TravelDebugSource`
-- `DB_SocialDebugSource`
-- `DB_ThreatDebugSource`
-- `DB_SignalDebugSource`
-- `DB_EnvironmentDebugSource`
+- `DesertBatflyRefugeTarget` -> `DB_RefugeTarget`
+- `DesertBatflyWorldRoute` -> `DB_WorldRoute`
+- `DesertBatflyWorldRoutePlanner` -> `DB_WorldRoutePlanner`
+- `DesertBatflyTravelPurpose` -> `DB_TravelPurpose`
+- `DesertBatflyRefuge` -> `DB_RefugePolicy`
 
-### R6-B2 Colony domain migration
+No route/refuge algorithm redesign was performed. The existing weighted bounded route planner, refuge scoring, Environment policy boundary and Task09 travel semantics were retained.
 
-Verified and accepted:
+### R6-B4 Platform Roost migration
 
-`9ec4b103c307cc6fa8271562870159d8e3fe40f9` — `R6 B2 migrate Colony domain identities`
+Verified implementation commit:
 
-Moved/renamed without changing migration or persistence algorithms:
+`d81bfc7987e430f12326fa80e9f5d88ed89a37c8` — `R6 B4 migrate Platform Roost identity`
 
-- `DesertBatflyColonyState.cs` -> `src/Creatures/DesertBatfly/Colony/DB_ColonyState.cs`
-- `DesertBatflyColonyRuntime.cs` -> `src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs`
-- `DesertBatflyColonyMigration.cs` -> `src/Creatures/DesertBatfly/Colony/DB_MigrationPolicy.cs`
+Moved/renamed:
 
-Production identities now use:
+- `src/Creatures/DesertBatfly/DesertBatflyPlatformRoostRuntime.cs` -> `src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs`
+- `DesertBatflyPlatformRoostRuntime` -> `DB_PlatformRoostRuntime`
 
-- `DB_ColonyState`
-- `DB_ColonyRuntime`
-- `DB_MigrationPolicy`
-
-Hard compatibility retained:
-
-- Colony save prefix remains `DCBATCOLONY09<svB>`.
-- Colony payload version remains `V1`.
-- Existing Task09 migration semantics and Travel/Environment ownership boundaries were not redesigned.
+The existing Rain World `FlyAI.ChainTile` extension behavior was preserved: vanilla chain validity is checked first, the extra rule remains Desert-Batfly-only, five-tile solid/water clearance remains required, and hanging remains limited to the underside of one-way Floor tiles.
 
 ## Self-review findings and fixes
 
-1. The initial B1 attempts failed because the R5 permanent retention guard still hard-coded the pre-R6 Integration paths/type names. This was validation infrastructure drift, not a gameplay regression.
-2. The R5 guard was updated to follow the R6 Integration paths and `DB_RuntimePatch` identity while preserving its behavioral/architecture checks.
-3. Updating the guard through GitHub Contents API removed its Unix executable bit. CI failed with exit code 126 (`Permission denied`). The executable bit was restored without weakening the guard.
-4. The clean B1 finalizer then completed successfully.
-5. After B1, a second low-risk unit was selected from the migration manifest. Colony was chosen because its three source files are KEEP/RENAME responsibilities and did not require algorithm redesign.
-6. B2 validation explicitly protected the external Colony save prefix/version so the DB_ rename cannot silently invalidate persistence compatibility.
+1. The first B3 migration execution reached the renamed files successfully but failed the existing R5 retention guard.
+2. Root cause: the guard had followed the `DesertBatflyRefuge` type rename but still referenced a now-invalid root path (`src/Creatures/DesertBatfly/DB_RefugePolicy.cs`) instead of the physical Travel path.
+3. This was validation-infrastructure path drift, not a behavior regression. The guard was updated to `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`; no assertion was removed or weakened.
+4. B3 was re-run from the unmodified pre-migration source state and then passed all existing and new checks.
+5. B3 diff review showed the large line-count changes in `DesertBatflyTravelNavigation.cs` are identifier substitutions only; the TravelNavigation responsibility-heavy file was deliberately not physically renamed or split in this batch.
+6. B4 was selected as the next small low-risk unit because the migration manifest marks PlatformRoostRuntime KEEP/RENAME and its lifecycle/behavior contract can be statically guarded without redesign.
 
 ## Validation performed
 
-### R6-B1
+### R6-B3
 
-- GitHub Actions: `Task14 R6 B1 clean finalizer`, run `34143572208` — **SUCCESS**.
-- R5 bridge/debt retention guard passed under the new R6 Integration paths.
-- R6 B1 source retention checks passed.
-- R6 lifecycle wiring checks passed.
-- Observatory enrichment-chain checks passed.
-- Diff hygiene check passed before the B1 migration commit.
-- R5 -> R6-B1 compare showed only expected Integration/Observatory renames, executable guard/test updates, status, and reference changes.
+- GitHub Actions: `Task14 R6 B3 Travel support migration`, run `34147710304` — **SUCCESS**.
+- `bash scripts/check-desertbatfly-r5-retention.sh` — passed after updating the guard path to the new Travel ownership.
+- `bash scripts/check-desertbatfly-r6-b1.sh` — passed.
+- Old production names `DesertBatflyRefuge`, `DesertBatflyRefugeTarget`, `DesertBatflyWorldRoute`, `DesertBatflyWorldRoutePlanner`, and `DesertBatflyTravelPurpose` were checked absent from `src/*.cs`.
+- New Travel files/types were checked present.
+- `RefugeMaxHops = 3`, `MigrationMaxHops = 5`, `MinimumRefugeQuality = 0.62f`, and the 600-tick safety margin were checked retained.
+- Sandstorm Environment-policy call sites remained present in `DB_RefugePolicy`.
+- `git diff --check` passed.
+- Compare from the prior progress HEAD to B3 showed expected Travel identity/reference changes only; no route/refuge algorithm replacement was introduced.
 
-### R6-B2
+### R6-B4
 
-- GitHub Actions: `Task14 R6 B2 Colony migration`, run `34143783596` — **SUCCESS**.
-- `bash scripts/check-desertbatfly-r5-retention.sh` passed after the Colony physical move.
-- `bash scripts/check-desertbatfly-r6-b1.sh` passed after the Colony physical move.
-- Old production Colony type identities were checked absent.
-- `DCBATCOLONY09<svB>` was checked present.
-- `PayloadVersion = "V1"` was checked present.
-- New `DB_ColonyState`, `DB_ColonyRuntime`, and `DB_MigrationPolicy` identities were checked present.
-- `git diff --check` passed before the verified B2 commit.
+- GitHub Actions: `Task14 R6 B4 Roost migration`, run `34147755095` — **SUCCESS**.
+- Existing R5 retention audit — passed.
+- Existing R6 B1 retention audit — passed.
+- Old `DesertBatflyPlatformRoostRuntime` production identity was checked absent.
+- `DB_PlatformRoostRuntime` file/type was checked present.
+- `On.FlyAI.ChainTile` Enable/Disable subscription symmetry was checked.
+- Vanilla-first `orig(self, testTile)` behavior was checked.
+- Desert-Batfly-only gating, five-tile clearance loop, and `Floor` platform condition were checked.
+- `DB_RainWorldHooks` lifecycle references were checked updated.
+- `git diff --check` passed.
 
 Not executed in this environment:
 
-- Full `.NET Framework 4.8` build against the developer-local Rain World assemblies.
+- Full `.NET Framework 4.8` build against developer-local Rain World assemblies.
 - Managed DesertBatfly integration suite requiring Rain World/BepInEx DLLs.
-- Rain World live scenarios/performance acceptance.
+- Rain World live scenarios and 20–30 Desert Batfly performance acceptance.
 
 No pass result is claimed for those deferred validations.
 
 ## Important files changed
 
-### B1
+### B3
 
-- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs`
-- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs`
-- `src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs`
-- `src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs`
-- `src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs`
-- `src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs`
-- `src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs`
-- `src/Debug/AIDebugger/Sources/DB_ThreatDebugSource.cs`
-- `src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs`
-- `src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs`
-- `src/Debug/AIDebugger/Core/AIDebugRegistry.cs`
-- `src/Plugin.cs`
-- `scripts/check-desertbatfly-r6-b1.sh`
-- `tests/DesertBatfly/Program.Task14R6.cs`
-
-### B2
-
-- `src/Creatures/DesertBatfly/Colony/DB_ColonyState.cs`
-- `src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs`
-- `src/Creatures/DesertBatfly/Colony/DB_MigrationPolicy.cs`
-- references across `src/`, `tests/`, and executable retention guards.
-
-### Shared progress/status
-
+- `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`
+- `src/Creatures/DesertBatfly/Travel/DB_WorldRoutePlanner.cs`
+- `src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs` (identifier references only)
+- `src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs` (identifier references only)
+- `src/Creatures/DesertBatfly/Runtime/DB_FrameContext.cs` (identifier references only)
+- `src/Creatures/DesertBatfly/Environmental/DB_EnvironmentalPolicy.cs` (identifier references only)
+- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs` (identifier references only)
+- `src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs` (identifier references only)
 - `scripts/check-desertbatfly-r5-retention.sh`
+- affected Task09/Task14 retention tests.
+
+### B4
+
+- `src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs`
+- references in Integration/tests/scripts as applicable.
+
+### Progress/status
+
 - `docs/Discussion/Task_14_R6_DomainMigrationStatus.txt`
 - `PROGRESS.md`
 
@@ -144,14 +129,16 @@ No pass result is claimed for those deferred validations.
 - R6 domain/type/file migration: **in progress**.
   - B1 Integration + Observatory identity migration: complete code-side and source-guard verified.
   - B2 Colony domain migration: complete code-side and source-guard verified.
+  - B3 Travel support migration: complete code-side and source-guard verified.
+  - B4 Platform Roost migration: complete code-side and source-guard verified.
+  - TravelNavigation responsibility-aware split/rename: not complete.
   - Production-wide Task09-Task13 identifier/text sweep: not complete.
-  - Travel domain migration: not complete.
   - Threat domain migration: not complete.
   - Signals domain migration: not complete.
   - Environment domain migration: not complete.
-  - Social/Roost migration: not complete.
+  - remaining Social/Roost migration: not complete.
   - Injury/Fear/Vengeance/Core/Presentation remaining identities: not complete.
-  - Final old-root-file/dead-code cleanup and final R6 naming/path guard: not complete.
+  - final old-root-file/dead-code cleanup and final R6 naming/path guard: not complete.
 - R7 performance/debug/full regression/final acceptance: not started as a formal closeout stage.
 
 ## Current blockers
@@ -163,10 +150,11 @@ Neither blocker prevents continued R6 source-level migration and static regressi
 
 ## Recommended next hour
 
-Continue from the current verified R6 branch state. Prefer another low-risk cohesive R6 batch before touching the SPLIT-heavy `DesertBatflyTravelNavigation` monolith. Recommended first choice:
+Continue from the verified B4 state. Do not mechanically rename `DesertBatflyTravelNavigation.cs`; it is explicitly SPLIT-heavy in the migration manifest and needs responsibility review before physical migration.
 
-1. migrate the low-risk Travel support files `DesertBatflyRefuge.cs` -> `Travel/DB_RefugePolicy.cs` and `DesertBatflyWorldRoutePlanner.cs` -> `Travel/DB_WorldRoutePlanner.cs`, preserving algorithms and Task09 ownership;
-2. update all executable guards/tests and run R5 + R6 retention again;
-3. only after those support files are stable, separately review `DesertBatflyTravelNavigation.cs` for responsibility-aware split/rename rather than a mechanical rename.
+Recommended next low-risk batch is Presentation support:
 
-If Travel support references make that batch unexpectedly coupled, use the same review-first process and switch to another KEEP/RENAME domain such as Roost/Presentation rather than forcing the migration.
+1. inspect `DesertBatflySandBurst.cs` and, if its responsibility remains purely visual, migrate it to `Presentation/DB_SandBurst.cs` with reference-only changes;
+2. separately review `DesertBatflyGraphics.cs` before renaming because it owns a larger Rain World graphics surface;
+3. alternatively, if Presentation coupling is larger than expected, migrate another manifest KEEP/RENAME leaf such as `DesertBatflySocialBond.cs` only after checking save/state identity implications;
+4. after each batch run the R5 retention audit, the R6 retention audit, a domain-specific absence/contract guard, and `git diff --check`.
