@@ -103,6 +103,40 @@ internal static class DesertBatflyThreatTactics
         return Mathf.Clamp01(baseChance + bonus * (1f - baseChance));
     }
 
+    /// <summary>
+    /// Applies only the already-observed real projectile cue to ordinary Desert Batfly
+    /// local movement. The cue detector owns range/trajectory/instigator validation;
+    /// this method only replaces FlyAI.localGoal for the current AI frame and leaves
+    /// velocity, collision and movement execution to the existing Fly locomotion.
+    /// </summary>
+    internal static bool TryApplyOrdinaryProjectileEvade(DesertBatfly bat)
+    {
+        if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
+            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+            return false;
+
+        if (!DesertBatflyThreatRuntime.TryGetDebugState(
+                bat,
+                out DesertBatflyThreatDebugState threat) ||
+            !threat.Cue.ProjectileThreat ||
+            threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f ||
+            !DesertBatflyThreatRuntime.ValidSlot(threat.Cue.PlayerSlot))
+            return false;
+
+        Player player = PlayerBySlot(bat.room, threat.Cue.PlayerSlot);
+        if (player == null || !TryIncomingProjectileEvade(bat, player, out Vector2 evade))
+            return false;
+
+        bat.AI.localGoal = evade;
+        DesertBatflySocialLife.CancelForPriority(bat, "Task11 real incoming projectile evade");
+        TraceAdjustment(
+            bat,
+            "ThreatEvadeStarted",
+            evade,
+            "real projectile trajectory owns this local goal; native Fly locomotion executes the dodge");
+        return true;
+    }
+
     internal static Vector2 AdjustExtremeVengeanceGoal(
         DesertBatfly bat,
         Player player,
@@ -280,6 +314,21 @@ internal static class DesertBatflyThreatTactics
             visibleStartle,
             visibleShock);
         return true;
+    }
+
+    private static Player PlayerBySlot(Room room, int slot)
+    {
+        if (room?.abstractRoom?.creatures == null || !DesertBatflyThreatRuntime.ValidSlot(slot))
+            return null;
+
+        for (int i = 0; i < room.abstractRoom.creatures.Count; i++)
+        {
+            if (room.abstractRoom.creatures[i]?.realizedCreature is Player player &&
+                !player.dead && !player.slatedForDeletetion && player.room == room &&
+                DesertBatflyThreatRuntime.PlayerSlot(player) == slot)
+                return player;
+        }
+        return null;
     }
 
     private static float StableSide(DesertBatfly bat, int slot)
