@@ -166,7 +166,7 @@ internal static partial class Program
             "Task13 does not add weather signal kinds to Task12 V1");
 
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
-        Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+        Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
         int task11 = MethodCallOffset(updateAI, threat, "Update");

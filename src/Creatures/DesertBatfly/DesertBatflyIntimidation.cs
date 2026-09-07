@@ -681,7 +681,7 @@ internal static class DesertBatflyIntimidation
         }
 
         bat.DesertAI.ThreatenedAt(threat, eventPosition, false, false);
-        DesertBatflySignalRuntime.EmitAlarm(
+        DB_SignalRuntime.EmitAlarm(
             bat,
             threat,
             eventPosition,
@@ -929,7 +929,7 @@ internal static class DesertBatflyIntimidation
                 state.PassesRemaining = Mathf.Max(
                     state.PassesRemaining,
                     drive > 0.70f ? 2 : 1);
-                DesertBatflySignalRuntime.EmitRally(
+                DB_SignalRuntime.EmitRally(
                     bat, threat, drive, "existing Avenger refreshes RallySignal");
             }
             return;
@@ -965,7 +965,7 @@ internal static class DesertBatflyIntimidation
         // Deliver synchronously before ArmVengeanceGroup scores followers so Task12 Rally
         // interest can participate in SocialBond.Motivation without a detour around this method.
         if (state.Role == VengeanceParticipation.Avenger && !supportOnly && leader == null)
-            DesertBatflySignalRuntime.EmitRally(
+            DB_SignalRuntime.EmitRally(
                 bat, threat, drive, "new Avenger armed -> immediate Task12 RallySignal");
     }
 

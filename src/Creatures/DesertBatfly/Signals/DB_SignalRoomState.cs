@@ -170,16 +170,16 @@ internal static class DesertBatflySignalRoomRuntime
                         receiver.room != room || receiver.inShortcut)
                         continue;
 
-                    if (!DesertBatflySignalRuntime.ReceivePacket(receiver, packet, out bool relay))
+                    if (!DB_SignalRuntime.ReceivePacket(receiver, packet, out bool relay))
                         continue;
                     if (!relay || packet.Kind != DesertBatflySignalKind.AlarmFlutter ||
-                        packet.Hop >= DesertBatflySignalRuntime.MaxAlarmHop)
+                        packet.Hop >= DB_SignalRuntime.MaxAlarmHop)
                         continue;
 
                     float relayIntensity = packet.Intensity *
                         (packet.Hop == 0
-                            ? DesertBatflySignalRuntime.AlarmHop1Scale
-                            : DesertBatflySignalRuntime.AlarmHop2Scale);
+                            ? DB_SignalRuntime.AlarmHop1Scale
+                            : DB_SignalRuntime.AlarmHop2Scale);
                     if (relayIntensity < 0.08f) continue;
 
                     DesertBatflySignalPacket relayed = AddOrRefresh(
@@ -192,7 +192,7 @@ internal static class DesertBatflySignalRoomRuntime
                         packet.Origin,
                         packet.Direction,
                         relayIntensity,
-                        DesertBatflySignalRuntime.AlarmTtlTicks,
+                        DB_SignalRuntime.AlarmTtlTicks,
                         packet.Generation,
                         packet.Hop + 1);
                     if (relayed != null) urgentQueue.Enqueue(relayed);

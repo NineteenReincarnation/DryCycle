@@ -25,7 +25,7 @@ internal static partial class Program
                  })
             Check(packet.GetField(field, Flags) != null, "Task12 signal packet contains " + field);
 
-        Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+        Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);

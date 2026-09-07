@@ -15,7 +15,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
         if (snapshot == null || creature?.realizedCreature is not DesertBatfly bat)
             return snapshot;
 
-        bool hasSignal = DesertBatflySignalRuntime.TryGetDebugState(
+        bool hasSignal = DB_SignalRuntime.TryGetDebugState(
             bat, out DesertBatflySignalDebugState signal);
         DesertBatflySignalInfluence influence = hasSignal ? signal.Influence : default;
         DesertBatflySignalPacket lastPacket = hasSignal
@@ -61,7 +61,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
                 hasSignal ? signal.LastDecision : "—");
         snapshot.Sections.Add(section);
 
-        bool display = DesertBatflySignalRuntime.TryGetDisplay(
+        bool display = DB_SignalRuntime.TryGetDisplay(
             bat, out DesertBatflySignalDisplayState visual);
         snapshot.Sections.Add(new AIDebugSection("Signal Signal Display / 信号视觉")
             .Add("Displaying / 正在表现", "SignalDisplay.Active", display)
@@ -79,7 +79,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
             hasSignal
                 ? $"{signal.LastKind}; gen={signal.LastGeneration}; hop={signal.LastHop}; consumer={ConsumerFor(signal.LastKind)}; {signal.LastDecision}"
                 : "no realized Signal state",
-            "DesertBatflySignalRuntime"));
+            "DB_SignalRuntime"));
 
         return snapshot;
     }

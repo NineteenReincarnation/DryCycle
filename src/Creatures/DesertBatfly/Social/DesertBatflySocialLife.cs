@@ -1212,7 +1212,7 @@ internal static class DesertBatflySocialLife
         chainSize = 0;
         bond = 0f;
         if (bat == null || bat.room == null ||
-            !DesertBatflySignalRuntime.TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
+            !DB_SignalRuntime.TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
             influence.RoostInterest < 0.16f)
             return null;
 

@@ -59,7 +59,7 @@ internal static class DB_EventConsumers
         if (signalThreat != null && signalThreat.room == victim.room)
         {
             bool tongueSignal = capture.CaptureKind == DB_CaptureKind.Tongue;
-            DesertBatflySignalRuntime.EmitDistress(
+            DB_SignalRuntime.EmitDistress(
                 victim,
                 signalThreat,
                 tongueSignal ? 0.94f : 0.88f,
@@ -67,7 +67,7 @@ internal static class DB_EventConsumers
                     ? "semantic tongue capture emits one DistressCall"
                     : "semantic non-Fly grasp emits one DistressCall");
             Vector2 signalOrigin = signalThreat.mainBodyChunk?.pos ?? capture.Position;
-            DesertBatflySignalRuntime.EmitAlarm(
+            DB_SignalRuntime.EmitAlarm(
                 victim,
                 signalThreat,
                 signalOrigin,
@@ -93,7 +93,7 @@ internal static class DB_EventConsumers
         // clears its own realized state only after it has processed this same MortalityEvent,
         // so subscriber order cannot erase counter-kill / kill evidence prematurely.
         DesertBatflySocialLife.CancelForPriority(victim, "death");
-        DesertBatflySignalRuntime.Forget(victim);
+        DB_SignalRuntime.Forget(victim);
         DB_ColonyRuntime.ReportDeath(victim, mortality.Killer);
         DesertBatflyEnvironmentalBehavior.Forget(victim);
 

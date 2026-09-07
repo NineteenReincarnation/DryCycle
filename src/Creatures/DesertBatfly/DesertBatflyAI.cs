@@ -224,7 +224,7 @@ internal sealed class DesertBatflyAI
     {
         if (fly.room == null) return;
         Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, origin);
-        DesertBatflySignalRuntime.EmitAlarm(
+        DB_SignalRuntime.EmitAlarm(
             fly,
             threat,
             origin,

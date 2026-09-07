@@ -246,7 +246,7 @@ internal sealed class DB_Graphics : FlyGraphics
 
     private void ApplySignalDisplay(RoomCamera.SpriteLeaser sLeaser, float timeStacker)
     {
-        if (!DesertBatflySignalRuntime.TryGetDisplay(desert, out DesertBatflySignalDisplayState display))
+        if (!DB_SignalRuntime.TryGetDisplay(desert, out DesertBatflySignalDisplayState display))
             return;
 
         float clock = (desert.room?.game?.clock ?? 0) + timeStacker;

@@ -528,7 +528,7 @@ internal static class DesertBatflyThreatRuntime
         float alarmIntensity = Mathf.Clamp01(
             0.60f + Mathf.Clamp01(explosion.damage) * 0.16f +
             Mathf.InverseLerp(80f, 360f, explosion.rad) * 0.16f);
-        DesertBatflySignalRuntime.EmitAcuteAlarm(
+        DB_SignalRuntime.EmitAcuteAlarm(
             room,
             explosion.killTagHolder,
             explosion.pos,
@@ -574,7 +574,7 @@ internal static class DesertBatflyThreatRuntime
             }
         }
 
-        DesertBatflySignalRuntime.EmitAcuteAlarm(
+        DB_SignalRuntime.EmitAcuteAlarm(
             room, player, position, 0.82f,
             "Task11 firecracker/startle -> Task12 AlarmFlutter at real startle center");
     }
@@ -598,7 +598,7 @@ internal static class DesertBatflyThreatRuntime
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
         }
 
-        DesertBatflySignalRuntime.EmitAcuteAlarm(
+        DB_SignalRuntime.EmitAcuteAlarm(
             room, player, position, 0.96f,
             "Task11 mass casualty -> high urgency Task12 AlarmFlutter");
     }

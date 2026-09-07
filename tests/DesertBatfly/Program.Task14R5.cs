@@ -53,7 +53,7 @@ internal static partial class Program
               behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
             "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Task13 owners");
 
-        Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+        Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Check(signalRuntime.GetMethod("EmitAcuteAlarm", Flags) != null &&
               signalRuntime.GetMethod("EmitRally", Flags) != null,
             "R5 B4 replaces signal detours with direct domain APIs");

@@ -42,12 +42,12 @@ grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/De
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
 ! grep -RIn --include='*.cs' 'new TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
 
-grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
-grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
-grep -q 'DB_ThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
-test "$(grep -c 'DesertBatflySignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
-grep -q 'DesertBatflySignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs
-grep -q 'DesertBatflySignalRuntime.EmitRally' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
+grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
+grep -q 'DB_ThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
+test "$(grep -c 'DB_SignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
+grep -q 'DB_SignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Runtime/DB_EventConsumers.cs
+grep -q 'DB_SignalRuntime.EmitRally' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
 grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBatfly/Social/DB_SocialBond.cs
 ! grep -RIn --include='*.cs' 'DB_ThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Signals
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Signals

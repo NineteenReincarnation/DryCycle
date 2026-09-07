@@ -323,7 +323,7 @@ internal sealed class DB_CombatRuntime
     {
         if (fly.room == null || fly.Injury.BlocksCombat ||
             DesertBatflyIntimidation.HasActiveFearSuppression(fly) ||
-            !DesertBatflySignalRuntime.TryGetInfluence(fly, out DesertBatflySignalInfluence influence) ||
+            !DB_SignalRuntime.TryGetInfluence(fly, out DesertBatflySignalInfluence influence) ||
             influence.HarassInterest < 0.20f)
             return null;
 

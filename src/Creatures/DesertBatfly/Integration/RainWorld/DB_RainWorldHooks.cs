@@ -22,7 +22,7 @@ internal static class DB_RainWorldHooks
         DesertBatflyIntimidation.Reset();
         DB_RefugePolicy.Reset();
         DesertBatflySocialLife.Reset();
-        DesertBatflySignalRuntime.Reset();
+        DB_SignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DB_EventHub.Enable();
@@ -70,7 +70,7 @@ internal static class DB_RainWorldHooks
         DB_EventConsumers.Disable();
         DB_EventHub.Disable();
         DesertBatflyThreatRuntime.Disable();
-        DesertBatflySignalRuntime.Reset();
+        DB_SignalRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflySocialLife.Reset();
@@ -117,7 +117,7 @@ internal static class DB_RainWorldHooks
         if (self is DesertBatfly desert)
         {
             DesertBatflySocialLife.CancelForPriority(desert, "room transition");
-            DesertBatflySignalRuntime.Forget(desert);
+            DB_SignalRuntime.Forget(desert);
             DesertBatflyThreatRuntime.Forget(desert);
             DesertBatflyEnvironmentalBehavior.Forget(desert);
             DB_FrameContextRuntime.Forget(desert);
@@ -139,7 +139,7 @@ internal static class DB_RainWorldHooks
         if (self is DesertBatfly desert)
         {
             DesertBatflySocialLife.CancelForPriority(desert, "burrow priority");
-            DesertBatflySignalRuntime.Forget(desert);
+            DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
         }
         orig(self);
@@ -154,7 +154,7 @@ internal static class DB_RainWorldHooks
         }
 
         DesertBatflySocialLife.CancelForPriority(desert, "emergence priority");
-        DesertBatflySignalRuntime.Forget(desert);
+        DB_SignalRuntime.Forget(desert);
         DesertBatflyEnvironmentalBehavior.Forget(desert);
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
@@ -364,7 +364,7 @@ internal static class DB_RainWorldHooks
         if (desert == null) return;
         DesertBatflyThreatRuntime.CommitFrame(desert);
         DB_ThreatTrace.Sample(desert);
-        DesertBatflySignalRuntime.Update(desert);
+        DB_SignalRuntime.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DB_Trace.Sample(desert);
         if (desert.abstractCreature != null && AIDebugTrace.IsWatched(desert.abstractCreature))

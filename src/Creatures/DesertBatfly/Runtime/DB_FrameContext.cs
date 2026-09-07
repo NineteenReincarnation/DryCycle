@@ -331,7 +331,7 @@ internal static class DB_FrameContextRuntime
         bool hasEnvironment = DesertBatflyEnvironmentalBehavior.TryGetInfluence(
             bat, out DesertBatflyEnvironmentalInfluence environment);
         if (!hasEnvironment) environment = DesertBatflyEnvironmentalInfluence.Neutral;
-        bool hasSignal = DesertBatflySignalRuntime.TryGetInfluence(
+        bool hasSignal = DB_SignalRuntime.TryGetInfluence(
             bat, out DesertBatflySignalInfluence signal);
 
         bool hasThreat = DesertBatflyThreatRuntime.TryGetDebugState(

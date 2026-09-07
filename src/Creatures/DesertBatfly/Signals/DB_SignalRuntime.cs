@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflySignalRuntime
+internal static class DB_SignalRuntime
 {
     internal const int MaxAlarmHop = 2;
     internal const int AlarmTtlTicks = 135;

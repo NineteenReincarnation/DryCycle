@@ -22,7 +22,7 @@ internal static partial class Program
         Type tactics = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type signalRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySignalRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type signalRoomRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
         Type environmentRuntime = mod.GetType(
