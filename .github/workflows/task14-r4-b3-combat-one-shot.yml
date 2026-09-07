@@ -1,0 +1,57 @@
+name: Task14 R4 B3 Combat one-shot
+
+on:
+  push:
+    branches:
+      - task14-r4-b3-combat-working
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r4-b3:
+    if: github.event.head_commit.message == 'Trigger R4 B3 combat extraction'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r4-b3-combat-working
+          fetch-depth: 0
+
+      - name: Apply guarded R4 B3 migration
+        run: python scripts/task14_r4_b3_combat_apply.py
+
+      - name: Validate R4 B3 source contracts
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r4_b3_combat_apply.py
+          test ! -e .github/workflows/task14-r4-b3-combat-one-shot.yml
+          test -f src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'internal sealed class DB_CombatRuntime' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'TryExecuteOwned' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'AfterPhysics' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'AcquireSlot' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          grep -q 'UpdateInterference' src/Creatures/DesertBatfly/Combat/DB_CombatRuntime.cs
+          ! grep -q 'private BodyChunk FindContact()' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          ! grep -q 'private bool AcquireSlot()' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          ! grep -q 'private void UpdateInterference(bool eu)' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          grep -q 'bat.DesertAI.Combat.TryExecuteOwned()' src/Creatures/DesertBatfly/Runtime/DB_CombatExecutor.cs
+          grep -q 'DesertAI.Combat.AfterPhysics(eu)' src/Creatures/DesertBatfly/DesertBatfly.cs
+          grep -q 'Revision: R4-B3' docs/Discussion/Task_14_R4_FlightMotorStatus.txt
+
+      - name: Audit combat/direct writers
+        run: |
+          echo '--- AI combat remnants ---'
+          grep -nE 'FindContact|AcquireSlot|UpdateInterference|FinishRetaliation|private void Finish\(' src/Creatures/DesertBatfly/DesertBatflyAI.cs || true
+          echo '--- localGoal writers ---'
+          grep -RIn --include='*.cs' -E 'localGoal[[:space:]]*(\+?=)' src/Creatures/DesertBatfly || true
+          echo '--- sustained velocity writers ---'
+          grep -RIn --include='*.cs' -E 'mainBodyChunk\.vel[[:space:]]*=' src/Creatures/DesertBatfly || true
+
+      - name: Commit R4 B3
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          git add -A
+          git commit -m 'Extract R4 combat runtime from DesertBatflyAI'
+          git push origin HEAD:task14-r4-b3-combat-working
