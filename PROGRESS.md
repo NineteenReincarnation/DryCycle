@@ -3,241 +3,102 @@
 Last updated: 2026-09-08
 Active workstream: Desert Batfly Task14 architecture refactor
 Current branch: `task14-r6-b1-final`
-Current verified implementation HEAD before this progress update: `d81bfc7987e430f12326fa80e9f5d88ed89a37c8`
+Current implementation HEAD before this progress update: `8c2ef92321924d48d61e065ac1f839896789a6d0`
 
-## Start-of-run state
+## Current verified architecture state
 
-- Previous verified R6 implementation had completed B1 Integration/Observatory and B2 Colony migration.
-- Previous progress HEAD: `42a7beec7064a06a2fff942e7f1151d112d675dd`.
-- R5 stable baseline remains `e7bb53e32b367fec91805c180151a36a75b68816`.
-- `main` remains behind the stacked Task14 refactor work; active work continues on the Task14 branch.
-- Full local Rain World build/live validation is still unavailable in this execution environment.
+Task14 R0-R5 are code-side complete on the stacked refactor branch history. R6 domain/type/file migration remains in progress. Full Rain World build/live validation is still deferred because this execution environment does not have the developer-local Rain World/BepInEx assemblies or Rain World runtime.
 
-## Completed in this run
+Completed R6 batches:
 
-### R6-B3 Travel support domain migration
+- B1: Integration + Observatory identities.
+- B2: Colony domain identities.
+- B3: Travel support identities (`DB_RefugePolicy`, `DB_WorldRoutePlanner` and supporting types).
+- B4: Platform Roost identity (`DB_PlatformRoostRuntime`).
+- B5: Presentation SandBurst (`DB_SandBurst`).
+- B6: SocialBond (`DB_SocialBond`).
+- B7: Presentation Graphics (`DB_Graphics`).
+- B8: Threat persistent memory (`DB_ThreatMemory*`).
+- B9: Threat tactics (`DB_ThreatTactics`, `DB_ThreatTacticalProfile`).
+- B10: production/debug historical Task wording cleanup in Threat trace and Environment profile.
 
-Verified implementation commit:
+## This run: R6-B10 historical naming cleanup
 
-`580ff8c4c8186716a06c633c134d5d4852064d56` — `R6 B3 migrate Travel support identities`
+### Start state
 
-Moved/renamed:
+- Began from `26e3faa01189cfbc8ef21e8158d09bb590985cb4`.
+- Previous review recommended inspecting `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` before any mechanical rename because the migration manifest marks them SPLIT / PARTIAL ABSORB.
+- Review confirmed Threat Runtime currently owns several distinct concerns at once: per-bat cue/acute runtime state, room temporal evidence, EventHub subscribers, weapon/explosion hooks, debug state, and tactical inputs. It is therefore not safe to treat it as a leaf rename.
+- Environment Exposure/Profile were reviewed as lower-risk leaves, but the current connector write path cannot safely perform a branch-wide reference rename across their large callers with the same verification quality as prior GitHub Actions migration batches.
 
-- `src/Creatures/DesertBatfly/DesertBatflyRefuge.cs` -> `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`
-- `src/Creatures/DesertBatfly/DesertBatflyWorldRoutePlanner.cs` -> `src/Creatures/DesertBatfly/Travel/DB_WorldRoutePlanner.cs`
+### Completed
 
-Supporting type identities migrated in the same cohesive Travel batch:
+1. `src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatTrace.cs`
+   - Removed four production/debug strings that exposed the historical `Task11` development label.
+   - Replaced them with domain terminology: `Threat Signature`.
+   - No control flow, state, constants, calls, or trace keys changed.
+   - Commit: `0cb6774105c75d0f7237e8d5165efb39d424d1e5`.
 
-- `DesertBatflyRefugeTarget` -> `DB_RefugeTarget`
-- `DesertBatflyWorldRoute` -> `DB_WorldRoute`
-- `DesertBatflyWorldRoutePlanner` -> `DB_WorldRoutePlanner`
-- `DesertBatflyTravelPurpose` -> `DB_TravelPurpose`
-- `DesertBatflyRefuge` -> `DB_RefugePolicy`
+2. `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalProfile.cs`
+   - Removed historical `Task09` wording from DeathRain ownership reasons; wording now refers directly to the Travel domain/cross-room ownership.
+   - Removed historical `Task13` wording from the HeavyRain shelter-ecology comment; wording now refers directly to Environment.
+   - No weather thresholds, six-phase logic, profile math, or weather classification changed.
+   - Commit: `8c2ef92321924d48d61e065ac1f839896789a6d0`.
 
-No route/refuge algorithm redesign was performed. The existing weighted bounded route planner, refuge scoring, Environment policy boundary and Task09 travel semantics were retained.
+### Self-review
 
-### R6-B4 Platform Roost migration
+- Compare from `26e3faa01189cfbc8ef21e8158d09bb590985cb4` to `8c2ef92321924d48d61e065ac1f839896789a6d0` contains exactly two modified production files.
+- ThreatTrace diff is exactly four string replacements: `Task11` -> `Threat Signature` domain wording.
+- EnvironmentProfile diff contains two DeathRain reason-string replacements and one HeavyRain historical-label comment replacement. Three incidental double-space comment formatting changes were also observed; they do not affect compiled behavior.
+- No gameplay algorithm, threshold, save identity, external ID, event ownership, movement authority, or serialization logic changed.
 
-Verified implementation commit:
+### Validation performed
 
-`d81bfc7987e430f12326fa80e9f5d88ed89a37c8` — `R6 B4 migrate Platform Roost identity`
+- GitHub commit/diff review performed for both B10 commits.
+- R6 B10 diff scope verified as two files only.
+- No behavior pass is claimed from compilation or live play.
 
-Moved/renamed:
+Not executable in this run:
 
-- `src/Creatures/DesertBatfly/DesertBatflyPlatformRoostRuntime.cs` -> `src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs`
-- `DesertBatflyPlatformRoostRuntime` -> `DB_PlatformRoostRuntime`
-
-The existing Rain World `FlyAI.ChainTile` extension behavior was preserved: vanilla chain validity is checked first, the extra rule remains Desert-Batfly-only, five-tile solid/water clearance remains required, and hanging remains limited to the underside of one-way Floor tiles.
-
-## Self-review findings and fixes
-
-1. The first B3 migration execution reached the renamed files successfully but failed the existing R5 retention guard.
-2. Root cause: the guard had followed the `DesertBatflyRefuge` type rename but still referenced a now-invalid root path (`src/Creatures/DesertBatfly/DB_RefugePolicy.cs`) instead of the physical Travel path.
-3. This was validation-infrastructure path drift, not a behavior regression. The guard was updated to `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`; no assertion was removed or weakened.
-4. B3 was re-run from the unmodified pre-migration source state and then passed all existing and new checks.
-5. B3 diff review showed the large line-count changes in `DesertBatflyTravelNavigation.cs` are identifier substitutions only; the TravelNavigation responsibility-heavy file was deliberately not physically renamed or split in this batch.
-6. B4 was selected as the next small low-risk unit because the migration manifest marks PlatformRoostRuntime KEEP/RENAME and its lifecycle/behavior contract can be statically guarded without redesign.
-
-## Validation performed
-
-### R6-B3
-
-- GitHub Actions: `Task14 R6 B3 Travel support migration`, run `34147710304` — **SUCCESS**.
-- `bash scripts/check-desertbatfly-r5-retention.sh` — passed after updating the guard path to the new Travel ownership.
-- `bash scripts/check-desertbatfly-r6-b1.sh` — passed.
-- Old production names `DesertBatflyRefuge`, `DesertBatflyRefugeTarget`, `DesertBatflyWorldRoute`, `DesertBatflyWorldRoutePlanner`, and `DesertBatflyTravelPurpose` were checked absent from `src/*.cs`.
-- New Travel files/types were checked present.
-- `RefugeMaxHops = 3`, `MigrationMaxHops = 5`, `MinimumRefugeQuality = 0.62f`, and the 600-tick safety margin were checked retained.
-- Sandstorm Environment-policy call sites remained present in `DB_RefugePolicy`.
-- `git diff --check` passed.
-- Compare from the prior progress HEAD to B3 showed expected Travel identity/reference changes only; no route/refuge algorithm replacement was introduced.
-
-### R6-B4
-
-- GitHub Actions: `Task14 R6 B4 Roost migration`, run `34147755095` — **SUCCESS**.
-- Existing R5 retention audit — passed.
-- Existing R6 B1 retention audit — passed.
-- Old `DesertBatflyPlatformRoostRuntime` production identity was checked absent.
-- `DB_PlatformRoostRuntime` file/type was checked present.
-- `On.FlyAI.ChainTile` Enable/Disable subscription symmetry was checked.
-- Vanilla-first `orig(self, testTile)` behavior was checked.
-- Desert-Batfly-only gating, five-tile clearance loop, and `Floor` platform condition were checked.
-- `DB_RainWorldHooks` lifecycle references were checked updated.
-- `git diff --check` passed.
-
-Not executed in this environment:
-
-- Full `.NET Framework 4.8` build against developer-local Rain World assemblies.
-- Managed DesertBatfly integration suite requiring Rain World/BepInEx DLLs.
+- `scripts/check-desertbatfly-r5-retention.sh`.
+- `scripts/check-desertbatfly-r6-b1.sh`.
+- Full `.NET Framework 4.8` build against Rain World assemblies.
+- Managed DesertBatfly integration tests requiring Rain World/BepInEx DLLs.
 - Rain World live scenarios and 20–30 Desert Batfly performance acceptance.
 
-No pass result is claimed for those deferred validations.
+These remain validation blockers only; they do not prevent continued source-level R6 work.
 
-## Important files changed
+## Remaining Task14 requirements
 
-### B3
+R6 remains incomplete. Major remaining work:
 
-- `src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs`
-- `src/Creatures/DesertBatfly/Travel/DB_WorldRoutePlanner.cs`
-- `src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs` (identifier references only)
-- `src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs` (identifier references only)
-- `src/Creatures/DesertBatfly/Runtime/DB_FrameContext.cs` (identifier references only)
-- `src/Creatures/DesertBatfly/Environmental/DB_EnvironmentalPolicy.cs` (identifier references only)
-- `src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs` (identifier references only)
-- `src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs` (identifier references only)
-- `scripts/check-desertbatfly-r5-retention.sh`
-- affected Task09/Task14 retention tests.
-
-### B4
-
-- `src/Creatures/DesertBatfly/Roost/DB_PlatformRoostRuntime.cs`
-- references in Integration/tests/scripts as applicable.
-
-### Progress/status
-
-- `docs/Discussion/Task_14_R6_DomainMigrationStatus.txt`
-- `PROGRESS.md`
-
-## Task14 progress review
-
-- R0 baseline/regression freeze: code-side complete; local managed validation pending.
-- R1 event foundation: code-side complete; live validation pending.
-- R2 RoomContext/perception: code-side complete; live/performance validation pending.
-- R3 FrameContext/Arbiter: code-side complete; live validation pending.
-- R4 FlightMotor/AI responsibility split: code-side complete; live validation pending.
-- R5 internal Bridge/Detour/Reflection debt cleanup: code-side complete; live validation pending.
-- R6 domain/type/file migration: **in progress**.
-  - B1 Integration + Observatory identity migration: complete code-side and source-guard verified.
-  - B2 Colony domain migration: complete code-side and source-guard verified.
-  - B3 Travel support migration: complete code-side and source-guard verified.
-  - B4 Platform Roost migration: complete code-side and source-guard verified.
-  - TravelNavigation responsibility-aware split/rename: not complete.
-  - Production-wide Task09-Task13 identifier/text sweep: not complete.
-  - Threat domain migration: not complete.
-  - Signals domain migration: not complete.
-  - Environment domain migration: not complete.
-  - remaining Social/Roost migration: not complete.
-  - Injury/Fear/Vengeance/Core/Presentation remaining identities: not complete.
-  - final old-root-file/dead-code cleanup and final R6 naming/path guard: not complete.
-- R7 performance/debug/full regression/final acceptance: not started as a formal closeout stage.
+- Threat runtime/event/trace physical/type migration; Runtime/Event require responsibility-aware split/absorb review rather than mechanical rename.
+- Signals domain migration.
+- Environment domain migration, including Exposure/Profile physical/type migration and Environment Runtime/RoomState ownership cleanup.
+- remaining Social/Roost identities.
+- Injury domain migration.
+- Fear/Vengeance domain migration.
+- Core (`DB_Creature`, state/personality/sex/tuning responsibility review, `DB_Definition`).
+- TravelNavigation responsibility-aware migration.
+- remaining Presentation/debug identities.
+- production-wide Task09-Task13 historical naming cleanup.
+- old root-file/dead-code cleanup.
+- final R6 naming/path/architecture guard.
+- R7 performance/debug/full regression/final acceptance.
+- `FINAL_REPORT.md` only after complete final acceptance.
 
 ## Current blockers
 
-- Full build/managed tests require developer-local Rain World/BepInEx assemblies referenced by the project.
-- Final live acceptance requires Rain World itself.
+- Developer-local Rain World/BepInEx assemblies are required for the full managed build/test suite.
+- Rain World runtime is required for final behavior and performance acceptance.
+- The current GitHub connector can update individual files safely but is not suitable for an unverified branch-wide rename across large callers; bulk domain renames should use a migration path that can run repository-local guards before commit.
 
-Neither blocker prevents continued R6 source-level migration and static regression work.
+## Recommended next run
 
-## Recommended next hour
-
-Continue from the verified B4 state. Do not mechanically rename `DesertBatflyTravelNavigation.cs`; it is explicitly SPLIT-heavy in the migration manifest and needs responsibility review before physical migration.
-
-Recommended next low-risk batch is Presentation support:
-
-1. inspect `DesertBatflySandBurst.cs` and, if its responsibility remains purely visual, migrate it to `Presentation/DB_SandBurst.cs` with reference-only changes;
-2. separately review `DesertBatflyGraphics.cs` before renaming because it owns a larger Rain World graphics surface;
-3. alternatively, if Presentation coupling is larger than expected, migrate another manifest KEEP/RENAME leaf such as `DesertBatflySocialBond.cs` only after checking save/state identity implications;
-4. after each batch run the R5 retention audit, the R6 retention audit, a domain-specific absence/contract guard, and `git diff --check`.
-
-## Continuation run — R6 B5/B6
-
-### Start state
-- Began from verified R6-B4 progress HEAD 30b5d9f4667397bdb20d81cd50c97f290a32384d.
-- R6 was still incomplete; Presentation and Social leaf identities remained on legacy DesertBatfly names.
-
-### Completed
-- R6-B5: moved DesertBatflySandBurst.cs to Presentation/DB_SandBurst.cs and renamed the production type to DB_SandBurst.
-- R6-B6: moved DesertBatflySocialBond.cs to Social/DB_SocialBond.cs and renamed production references to DB_SocialBond.
-
-### Important files
-- src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
-- src/Creatures/DesertBatfly/Social/DB_SocialBond.cs
-- src/Creatures/DesertBatfly/DesertBatfly.cs
-- scripts/check-desertbatfly-r5-retention.sh
-
-### Validation
-- B5 behavior-preserving guard verified the new SandBurst implementation equals the old source after only identity substitution.
-- B6 behavior-preserving guard verified the new SocialBond implementation equals the old source after only identity substitution.
-- R5 retention audit passed after both successful batches.
-- R6 B1 retention audit passed after both successful batches.
-- B6 final GitHub Actions run 34151969749 succeeded.
-- git diff --check passed in successful migration runs.
-- Full Rain World/.NET Framework managed build and live-play validation remain unavailable here and are not claimed as passing.
-
-### Self-review findings and fixes
-- First B6 attempt failed before job creation because the temporary workflow YAML contained an invalid embedded heredoc; no production code changed.
-- Second B6 attempt performed the migration but exposed R5 guard path drift: DB_SocialBond was checked at the root instead of Social/DB_SocialBond.cs.
-- The guard path was corrected without removing or weakening assertions; the full migration and retention checks then passed.
-
-### Remaining Task14 requirements
-- R6 still needs TravelNavigation responsibility-aware migration; remaining Graphics/Core/Injury/Fear/Vengeance/Social/Roost identities; Threat/Signals/Environment domain migration; production Task09-Task13 naming cleanup; old-root/dead-code cleanup; and final R6 naming/path guard.
-- R7 performance/debug/full regression/final acceptance remains pending.
-
-### Blockers
-- Full managed build/tests require developer-local Rain World/BepInEx assemblies.
-- Final live behavior/performance acceptance requires Rain World.
-- These blockers do not prevent further source-level R6 work.
-
-### Recommended next hour
-- Inspect DesertBatflyGraphics.cs before any rename. If it remains a cohesive Presentation owner, migrate it with behavior-preserving source equivalence guards; otherwise choose a smaller KEEP/RENAME Injury/Threat/Signal leaf.
-- Do not mechanically rename/split DesertBatflyTravelNavigation.cs without responsibility review.
-
-## Continuation run — R6 B7/B8/B9
-
-### Start state
-- Began from branch HEAD `752ea378363e040d5b64a9cd5c430267b9f28131`, with B1-B6 already verified.
-- Reviewed `DesertBatflyGraphics.cs` for cohesion before migration; it remained a Presentation owner with read-only Injury/Signal display inputs.
-
-### Completed
-- R6-B7: `DesertBatflyGraphics.cs` -> `Presentation/DB_Graphics.cs`; `DesertBatflyGraphics` -> `DB_Graphics`.
-- R6-B8: `ThreatSignature/DesertBatflyThreatMemory.cs` -> `Threat/DB_ThreatMemory.cs`, including DB_ memory dimension/player/set/store identities.
-- R6-B9: `ThreatSignature/DesertBatflyThreatTactics.cs` -> `Threat/DB_ThreatTactics.cs`, including `DB_ThreatTacticalProfile`.
-- Temporary B7/B8/B9 migration workflows were removed after success.
-
-### Validation
-- B7 GitHub Actions run `34155488424`: SUCCESS.
-- B8 GitHub Actions run `34155529191`: SUCCESS.
-- B9 GitHub Actions run `34155584734`: SUCCESS.
-- Each batch passed exact source-equivalence checks permitting only intended identity substitutions.
-- Existing R5 and R6 retention audits passed after every batch and at closeout.
-- Threat save key remains `DCDesertBatflyThreatV1`; serialized marker remains `1`; decay constants remain 0.80/0.86.
-- Threat tactics retains no held-item memory training, Arbiter projectile-evade ownership, and `DB_FlightMotor` routing.
-- `git diff --check` passed.
-- Full Rain World/.NET Framework managed build and live-play validation remain unavailable and are not claimed as passing.
-
-### Self-review findings and fixes
-- No production behavior regression was found in B7-B9.
-- Two earlier closeout workflow attempts failed before job creation because of YAML multiline formatting; neither changed production code or progress files. This simple closeout replaces them.
-
-### Remaining Task14 requirements
-- R6 remains incomplete: Threat runtime/event/trace; Signals; Environment; remaining Social/Roost; Injury; Fear/Vengeance; Core; TravelNavigation responsibility-aware migration; Task09-Task13 naming cleanup; old-root/dead-code cleanup; final R6 naming/path guard.
-- Current inventory after B9: 11 root-level DesertBatfly*.cs files remain; 90 production/debug source lines match Task09-Task13 historical labels.
-- R7 performance/debug/full regression/final acceptance remains pending.
-
-### Blockers
-- Full managed build/tests require developer-local Rain World/BepInEx assemblies.
-- Final behavior/performance acceptance requires Rain World runtime.
-
-### Recommended next hour
-- Inspect `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` against the migration manifest before any rename; do not mechanically rename split/partial-absorb owners.
-- If Threat runtime is too coupled, choose a smaller KEEP/RENAME leaf such as Environment exposure/profile and update guard paths without weakening assertions.
+1. Continue the production Task09-Task13 naming sweep in small files where changes can be proven text-only; prioritize remaining Debug/Observatory strings and small domain leaves.
+2. Re-inspect Threat Event to determine which Threat-specific evidence interpretation still belongs in Threat and which real-world facts are already fully owned by `DB_EventHub`; do not rename it until that ownership boundary is explicit.
+3. If a safe repository-local bulk-edit/validation path is available, perform Environment leaf physical migration:
+   - `Environmental/DesertBatflyEnvironmentalExposure.cs` -> `Environment/DB_EnvironmentExposure.cs`;
+   - `Environmental/DesertBatflyEnvironmentalProfile.cs` -> `Environment/DB_EnvironmentProfile.cs`;
+   then update all callers and run R5/R6 guards plus exact source-equivalence checks.
+4. Do not mechanically rename/split `DesertBatflyTravelNavigation.cs` or `DesertBatflyThreatRuntime.cs`.
