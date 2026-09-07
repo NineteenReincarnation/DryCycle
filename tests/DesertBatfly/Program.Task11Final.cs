@@ -68,6 +68,8 @@ internal static partial class Program
             "ordinary DesertBatflyAI attack selection actually consumes learned FakeDive weighting");
 
         MethodInfo bridgeHook = bridgeType.GetMethod("ForceFlightHook", Flags);
+        MethodInfo bridgeUpdateHook = bridgeType.GetMethod("IntimidationUpdateHook", Flags);
+        MethodInfo markTravelOwnedFrame = bridgeType.GetMethod("MarkTravelOwnedFrame", Flags);
         Check(bridgeType.GetMethod("Enable", Flags) != null &&
               bridgeType.GetMethod("Disable", Flags) != null &&
               bridgeType.GetProperty("Installed", Flags) != null,
@@ -77,6 +79,11 @@ internal static partial class Program
             "Extreme Vengeance ForceFlight bridge consumes the same per-player learned tactical profile");
         Check(!MethodWritesField(bridgeHook, typeof(BodyChunk), "vel"),
             "Task11 Vengeance bridge only changes ForceFlight arguments; original Intimidation owns velocity");
+        Check(bridgeUpdateHook != null && markTravelOwnedFrame != null,
+            "Task11 Vengeance bridge exposes exact-frame Task09 suspension without deleting Vengeance memory");
+        Check(!MethodWritesField(bridgeUpdateHook, typeof(BodyChunk), "vel") &&
+              !MethodWritesField(markTravelOwnedFrame, typeof(BodyChunk), "vel"),
+            "Task09/Vengeance priority bridge never takes over physical locomotion");
         Check(!TypeCallsForbiddenTask11Input(bridgeType),
             "Task11 Vengeance bridge does not inspect input or predict future attacks");
 
@@ -84,11 +91,15 @@ internal static partial class Program
         Check(traceSample != null,
             "Task11 has a watched-only Threat Signature trace sampler");
         MethodInfo hookUpdateAI = hooksType.GetMethod("UpdateAI", Flags);
+        MethodInfo hookRain = hooksType.GetMethod("Rain", Flags);
         Check(MethodCallsTask11(hookUpdateAI, traceType, "Sample"),
             "Task11 threat trace is sampled in the realized AI pipeline before neutral Task10 social life");
         Check(MethodCallsTask11(hooksType.GetMethod("Enable", Flags), bridgeType, "Enable") &&
               MethodCallsTask11(hooksType.GetMethod("Disable", Flags), bridgeType, "Disable"),
             "Task11 Vengeance bridge installs/uninstalls with DesertBatfly lifecycle");
+        Check(MethodCallsTask11(hookUpdateAI, bridgeType, "MarkTravelOwnedFrame") &&
+              MethodCallsTask11(hookRain, bridgeType, "MarkTravelOwnedFrame"),
+            "Task09 marks only successfully-owned realized frames so later Intimidation/Vengeance cannot steal them back");
 
         Type rejectedRole = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false);
@@ -96,7 +107,7 @@ internal static partial class Program
             "Task11 final combat integration still does not restore rejected Task02 roles");
 
         Console.WriteLine(
-            "Task 11 final tactics: learned FakeDive weighting, personality/cue modulation, Extreme Vengeance geometry bridge, cached projectile evade, velocity ownership and Trace lifecycle verified.");
+            "Task 11 final tactics: learned FakeDive weighting, personality/cue modulation, Extreme Vengeance geometry, exact-frame Task09 priority, cached projectile evade, velocity ownership and Trace lifecycle verified.");
     }
 
     private static bool MethodCallsTask11(MethodInfo caller, Type targetType, string targetName)
