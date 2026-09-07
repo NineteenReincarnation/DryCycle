@@ -13,7 +13,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 ///
 /// Snapshot discovery is low-frequency, but membership validity is cheap and live: an object
 /// that dies, changes room, enters deletion, or stops being a thrown weapon is pruned when a
-/// consumer asks for that view. Cached candidate discovery must never become cached legality.
+/// consumer asks for that view. Candidate discovery may be cached; current legality may not.
 /// </summary>
 internal sealed class DB_RoomContext
 {
