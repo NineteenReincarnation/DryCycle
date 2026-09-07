@@ -216,11 +216,41 @@ internal static class DesertBatflyEnvironmentalIntegration
             int clock = bat.room?.game?.clock ?? 0;
             int bucket = clock / 110;
             float angle = Stable01(bat.Personality.VisualSeed ^ bucket * 0x45d9f3b) * Mathf.PI * 2f;
-            float errorRadius = Mathf.Lerp(5f, 62f, influence.NavigationUncertainty);
+            float familiarity = FogNavigationFamiliarityScale(bat, influence.Weather);
+            float uncertainty = Mathf.Clamp01(influence.NavigationUncertainty * familiarity);
+            float errorRadius = Mathf.Lerp(5f, 62f, uncertainty);
             float distanceFade = Mathf.InverseLerp(65f, 300f, Vector2.Distance(bat.mainBodyChunk.pos, goal));
             goal += new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * errorRadius * distanceFade;
         }
         orig(ai, goal, speed);
+    }
+
+    internal static float FogNavigationFamiliarityScale(
+        DesertBatfly bat,
+        DesertBatflyEnvironmentalWeather weather)
+    {
+        if (bat?.room?.abstractRoom == null ||
+            weather is not (DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog))
+            return 1f;
+
+        DesertBatflyColonyRuntime.IndividualRecord record =
+            DesertBatflyColonyRuntime.RecordFor(bat.abstractCreature, false);
+        bool homeRoom = record != null && !string.IsNullOrEmpty(record.CurrentColony) &&
+            string.Equals(
+                record.CurrentColony,
+                bat.room.abstractRoom.name,
+                StringComparison.OrdinalIgnoreCase);
+        if (!homeRoom) return 1f;
+
+        // Familiar Home/Hive geometry reduces navigation-position uncertainty but does not
+        // restore visual recognition range. DenseFog keeps a meaningful residual error.
+        bool nearHive = DesertBatflyEnvironmentalExposure.NearHive(
+            bat.room,
+            bat.room.GetTilePosition(bat.mainBodyChunk.pos),
+            10);
+        if (weather == DesertBatflyEnvironmentalWeather.DenseFog)
+            return nearHive ? 0.52f : 0.66f;
+        return nearHive ? 0.72f : 0.82f;
     }
 
     private static DesertBatfly Resolve(DesertBatflyPersonality personality)
