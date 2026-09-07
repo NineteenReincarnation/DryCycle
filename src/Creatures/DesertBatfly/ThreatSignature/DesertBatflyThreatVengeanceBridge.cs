@@ -1,31 +1,45 @@
 using System;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using MonoMod.RuntimeDetour;
 using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Narrow Task 11 bridge into the existing private Vengeance movement entry point.
-/// The bridge modifies only the requested local goal/speed, then calls the original
-/// Intimidation ForceFlight implementation. Vengeance continues to own commitment,
-/// timers, damage and BodyChunk velocity.
+/// Narrow Task 11 bridge into the existing Vengeance runtime.
+///
+/// ForceFlight remains owned by Intimidation: Task 11 may only alter the requested goal
+/// and speed before calling the original method. A separate frame stamp enforces the
+/// already-defined Task 09 priority without deleting Vengeance state: when Task 09 really
+/// owns a realized frame, Intimidation.Update is skipped for that exact game tick, freezing
+/// Vengeance until travel yields again.
 /// </summary>
 internal static class DesertBatflyThreatVengeanceBridge
 {
     private delegate void ForceFlightOrig(DesertBatfly bat, Vector2 goal, float speed);
     private delegate void ForceFlightDetour(ForceFlightOrig orig, DesertBatfly bat, Vector2 goal, float speed);
+    private delegate void IntimidationUpdateOrig(DesertBatfly bat);
+    private delegate void IntimidationUpdateDetour(IntimidationUpdateOrig orig, DesertBatfly bat);
 
-    private static Hook hook;
+    private sealed class TravelFrameStamp
+    {
+        internal int Clock = int.MinValue;
+    }
+
+    private static Hook forceFlightHook;
+    private static Hook intimidationUpdateHook;
+    private static ConditionalWeakTable<DesertBatfly, TravelFrameStamp> travelFrames = new();
     private static FieldInfo statesField;
     private static MethodInfo tryGetValue;
     private static FieldInfo vengeanceTargetField;
 
-    internal static bool Installed => hook != null;
+    internal static bool Installed => forceFlightHook != null && intimidationUpdateHook != null;
 
     internal static void Enable()
     {
-        if (hook != null) return;
+        if (Installed) return;
+        Disable();
         try
         {
             Type intimidation = typeof(DesertBatflyIntimidation);
@@ -34,6 +48,12 @@ internal static class DesertBatflyThreatVengeanceBridge
                 BindingFlags.NonPublic | BindingFlags.Static,
                 null,
                 new[] { typeof(DesertBatfly), typeof(Vector2), typeof(float) },
+                null);
+            MethodInfo update = intimidation.GetMethod(
+                "Update",
+                BindingFlags.NonPublic | BindingFlags.Static,
+                null,
+                new[] { typeof(DesertBatfly) },
                 null);
             statesField = intimidation.GetField(
                 "states",
@@ -50,26 +70,53 @@ internal static class DesertBatflyThreatVengeanceBridge
                 "TryGetValue",
                 BindingFlags.Public | BindingFlags.Instance);
 
-            if (forceFlight == null || statesField == null || tryGetValue == null ||
-                vengeanceTargetField == null)
+            if (forceFlight == null || update == null || statesField == null ||
+                tryGetValue == null || vengeanceTargetField == null)
                 return;
 
-            hook = new Hook(forceFlight, (ForceFlightDetour)ForceFlightHook);
+            forceFlightHook = new Hook(forceFlight, (ForceFlightDetour)ForceFlightHook);
+            intimidationUpdateHook = new Hook(update, (IntimidationUpdateDetour)IntimidationUpdateHook);
         }
         catch
         {
-            try { hook?.Dispose(); } catch { }
-            hook = null;
+            Disable();
         }
     }
 
     internal static void Disable()
     {
-        try { hook?.Dispose(); } catch { }
-        hook = null;
+        try { intimidationUpdateHook?.Dispose(); } catch { }
+        try { forceFlightHook?.Dispose(); } catch { }
+        intimidationUpdateHook = null;
+        forceFlightHook = null;
+        travelFrames = new ConditionalWeakTable<DesertBatfly, TravelFrameStamp>();
         statesField = null;
         tryGetValue = null;
         vengeanceTargetField = null;
+    }
+
+    /// <summary>
+    /// Called only after Task09.TryDriveRealized returned true. An intent that is merely
+    /// present but suspended by restraint, immediate danger or severe injury never gets
+    /// this stamp, so those higher priorities still allow Intimidation to update normally.
+    /// </summary>
+    internal static void MarkTravelOwnedFrame(DesertBatfly bat)
+    {
+        int clock = bat?.room?.game?.clock ?? int.MinValue;
+        if (bat == null || clock == int.MinValue) return;
+        travelFrames.GetOrCreateValue(bat).Clock = clock;
+    }
+
+    private static void IntimidationUpdateHook(
+        IntimidationUpdateOrig orig,
+        DesertBatfly bat)
+    {
+        int clock = bat?.room?.game?.clock ?? int.MinValue;
+        if (clock != int.MinValue &&
+            travelFrames.TryGetValue(bat, out TravelFrameStamp stamp) &&
+            stamp.Clock == clock)
+            return;
+        orig(bat);
     }
 
     private static void ForceFlightHook(
