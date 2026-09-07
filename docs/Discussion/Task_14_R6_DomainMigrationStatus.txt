@@ -1,11 +1,11 @@
 Desert Batfly Task 14 — R6 Domain / Physical Migration Status
-Revision: R6-B2 / 2026-09-08
+Revision: R6-B4 / 2026-09-08
 Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
-Current verified R6 implementation HEAD before this status update: 9ec4b103c307cc6fa8271562870159d8e3fe40f9
-Status: 【R6 进行中 / B1 Integration+Observatory 与 B2 Colony migration code-side complete】
+Current verified R6 implementation HEAD before this status update: d81bfc7987e430f12326fa80e9f5d88ed89a37c8
+Status: 【R6 进行中 / B1 Integration+Observatory、B2 Colony、B3 Travel support、B4 Platform Roost code-side complete】
 
 R6 changes physical ownership/file/type identity without changing gameplay semantics.
-Historical R0-R5 documents retain their historical names; executable guards follow R6 names.
+Historical R0-R5 documents retain their historical names; executable guards follow R6 names and paths.
 
 ======================================================================
 B1 — Integration + Observatory identity migration
@@ -21,13 +21,6 @@ Observatory identity chain is now:
 DB_ObservatorySource -> DB_TravelDebugSource -> DB_SocialDebugSource ->
 DB_ThreatDebugSource -> DB_SignalDebugSource -> DB_EnvironmentDebugSource.
 
-Retention guarantees:
-- Plugin still enters the species hook lifecycle.
-- full Environment source remains species-registered; base source remains registry-registered.
-- Sandbox/Warp still use the same optional RuntimePatch mechanism and unchanged Harmony IDs.
-- R5 bridge/detour retention guard passes under the R6 paths.
-- stable creature/save/world IDs are untouched.
-
 Validation:
 - Task14 R6 B1 clean finalizer run 34143572208: SUCCESS.
 
@@ -40,11 +33,6 @@ Moved and renamed without changing migration/persistence algorithms:
 - DesertBatflyColonyRuntime.cs -> Colony/DB_ColonyRuntime.cs
 - DesertBatflyColonyMigration.cs -> Colony/DB_MigrationPolicy.cs
 
-Production type identities migrated accordingly:
-- DesertBatflyColonyState -> DB_ColonyState
-- DesertBatflyColonyRuntime -> DB_ColonyRuntime
-- DesertBatflyColonyMigration -> DB_MigrationPolicy
-
 Hard compatibility preserved:
 - Colony save prefix remains "DCBATCOLONY09<svB>".
 - Colony payload version remains "V1".
@@ -52,11 +40,63 @@ Hard compatibility preserved:
 
 Validation:
 - Task14 R6 B2 Colony migration run 34143783596: SUCCESS.
-- R5 retention audit passed after the Colony physical move.
-- R6 B1 retention audit passed after the Colony physical move.
-- stale production Colony type names were checked absent.
+- R5 and R6 retention audits passed.
 - stable save prefix/payload version were checked present.
-- git diff --check passed before the verified B2 commit.
+
+======================================================================
+B3 — Travel support identity migration
+======================================================================
+
+Moved and renamed without changing route/refuge algorithms:
+- DesertBatflyRefuge.cs -> Travel/DB_RefugePolicy.cs
+- DesertBatflyWorldRoutePlanner.cs -> Travel/DB_WorldRoutePlanner.cs
+
+Supporting Travel identities were migrated in the same cohesive batch:
+- DesertBatflyRefugeTarget -> DB_RefugeTarget
+- DesertBatflyWorldRoute -> DB_WorldRoute
+- DesertBatflyTravelPurpose -> DB_TravelPurpose
+
+Behavior/algorithm retention:
+- weighted bounded world-route planning remains unchanged;
+- RefugeMaxHops remains 3;
+- MigrationMaxHops remains 5;
+- MinimumRefugeQuality remains 0.62f;
+- refuge safety margin remains 600 ticks;
+- Environment may evaluate/suppress Travel through formal policy but does not gain cross-room destination ownership.
+
+Self-review fix:
+- first B3 run exposed an R5 guard path that still pointed to the old root refuge file after physical migration;
+- the executable guard was updated to Travel/DB_RefugePolicy.cs and re-run without weakening its checks.
+
+Validation:
+- Task14 R6 B3 Travel support migration run 34147710304: SUCCESS.
+- R5 retention audit passed after the Travel move.
+- R6 B1 retention audit passed after the Travel move.
+- stale production Travel support identities were checked absent.
+- git diff --check passed before the verified B3 commit.
+
+======================================================================
+B4 — Platform Roost identity migration
+======================================================================
+
+Moved and renamed:
+- DesertBatflyPlatformRoostRuntime.cs -> Roost/DB_PlatformRoostRuntime.cs
+- DesertBatflyPlatformRoostRuntime -> DB_PlatformRoostRuntime
+
+Behavior retention:
+- vanilla FlyAI.ChainTile result remains authoritative first;
+- only Desert Batflies receive the additional one-way Floor hanging rule;
+- five-tile solid/water clearance rule is retained;
+- Enable/Disable still attach/detach the same On.FlyAI.ChainTile hook;
+- RainWorld hook lifecycle still enables/disables this runtime.
+
+Validation:
+- Task14 R6 B4 Roost migration run 34147755095: SUCCESS.
+- R5 retention audit passed.
+- R6 B1 retention audit passed.
+- old PlatformRoost production identity was checked absent.
+- Roost lifecycle and platform-hang contract checks passed.
+- git diff --check passed before the verified B4 commit.
 
 ======================================================================
 Remaining R6 scope
@@ -64,14 +104,14 @@ Remaining R6 scope
 
 Still open:
 - production-wide Task09-Task13 identifier/text cleanup;
-- remaining Travel domain migration, with TravelNavigation requiring responsibility review rather than mechanical rename;
+- TravelNavigation responsibility-aware split/rename;
 - Threat domain migration;
 - Signals domain migration;
 - Environment domain migration;
-- Social/Roost migration;
+- remaining Social/Roost identities and policies;
 - Injury/Fear/Vengeance/Core/Presentation remaining identities;
 - final old-root-file and dead-code cleanup;
 - final R6 production naming/path guard.
 
 R6 does not claim full build, managed integration, or Rain World live validation.
-Those validations remain deferred to the final acceptance stage as requested.
+Those validations remain deferred to the final acceptance stage because this environment lacks the developer-local Rain World/BepInEx assemblies and game runtime.
