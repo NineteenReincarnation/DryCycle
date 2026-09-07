@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R6 Domain / Physical Migration Status
-Revision: R6-B11 / 2026-09-08
+Revision: R6-B13 / 2026-09-08
 Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
-Current verified R6 implementation HEAD before this status update: f93ad003ef44a16c1a6f13d36dfa54270a771992
-Status: 【R6 进行中 / B1-B11 source-level migration progressing】
+Current verified R6 implementation HEAD before this status update: 3e6837b7997698926ffd24f774619388be769362
+Status: 【R6 进行中 / B1-B13 source-level migration progressing】
 
 R6 changes physical ownership/file/type identity without changing gameplay semantics.
 Historical R0-R5 documents retain their historical names; executable guards follow R6 names and paths.
@@ -115,16 +115,51 @@ Behavior-preserving proof:
 Implementation commit:
 - `f93ad003ef44a16c1a6f13d36dfa54270a771992`.
 
-Validation limitation:
-- actual shell execution of R5/R6 guards was not available in B11;
+======================================================================
+B12 — Runtime Emergence physical migration
+======================================================================
+
+Physical domain path now:
+- `Runtime/DB_Emergence.cs`
+
+Scope:
+- source body is byte-for-byte unchanged from `DesertBatflyEmergence.cs`;
+- internal C# type remains `DesertBatflyEmergence` pending a caller-safe identity rename;
+- special emergence physics ownership, `MoveFromOutsideMyUpdate`, collision gating, terrain sampling and quicksand exclusion are unchanged.
+
+Behavior-preserving proof:
+- Git compare from B11 status HEAD to B13 implementation reports this file as a rename with 0 additions / 0 deletions.
+
+======================================================================
+B13 — Core Definition physical migration
+======================================================================
+
+Physical domain path now:
+- `Core/DB_Definition.cs`
+
+Scope:
+- source body is byte-for-byte unchanged from `DesertBatflyDefinition.cs`;
+- internal C# type remains `DesertBatflyDefinition` pending a caller-safe identity rename;
+- external creature identity `CreatureTemplate.Type.value = "DesertBatfly"` is untouched;
+- template properties and Peach Lizard relationship setup are unchanged.
+
+Behavior-preserving proof:
+- Git compare reports this file as a rename with 0 additions / 0 deletions.
+
+Implementation HEAD after B12-B13:
+- `3e6837b7997698926ffd24f774619388be769362`.
+
+Validation limitation for B11-B13:
+- actual shell execution of R5/R6 guards was not available;
 - no managed build or Rain World live validation is claimed.
+- changes were restricted to mechanically reviewable blob-identical physical moves where repository-local execution was unavailable.
 
 ======================================================================
 Remaining R6 scope
 ======================================================================
 
 Still open:
-- finish B11 Environment leaf C# type identity rename when all callers can be safely replaced and validated;
+- finish pending leaf C# type identities (`DB_EnvironmentExposure`, `DB_EnvironmentProfile`, `DB_Emergence`, `DB_Definition`) when all callers can be safely replaced and validated;
 - Environment Runtime/RoomState/Core responsibility migration;
 - production-wide Task09-Task13 identifier/text cleanup;
 - TravelNavigation responsibility-aware split/rename;
