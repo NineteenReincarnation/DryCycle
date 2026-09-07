@@ -131,50 +131,13 @@ internal static class DesertBatflyThreatRuntime
 
     private sealed class RoomState
     {
-        internal int LastRefreshClock = int.MinValue;
-        internal readonly List<Player> Players = new(4);
-        internal readonly List<Weapon> ThrownWeapons = new(12);
+        // Threat-owned temporal evidence only. Players/weapons belong to DB_RoomContext.
         internal readonly int[] RecentSpearThrow = { int.MinValue, int.MinValue, int.MinValue, int.MinValue };
         internal readonly int[] RecentRockThrow = { int.MinValue, int.MinValue, int.MinValue, int.MinValue };
         internal readonly int[] RecentExplosion = { int.MinValue, int.MinValue, int.MinValue, int.MinValue };
         internal readonly int[] RecentGrab = { int.MinValue, int.MinValue, int.MinValue, int.MinValue };
         internal readonly int[] CasualtyWindowStart = { int.MinValue, int.MinValue, int.MinValue, int.MinValue };
         internal readonly int[] CasualtyCount = new int[4];
-
-        internal void Refresh(Room room)
-        {
-            if (room?.game == null) return;
-            int clock = room.game.clock;
-            if (LastRefreshClock != int.MinValue && clock >= LastRefreshClock &&
-                clock - LastRefreshClock < CueRefreshTicks)
-                return;
-
-            LastRefreshClock = clock;
-            Players.Clear();
-            ThrownWeapons.Clear();
-
-            if (room.abstractRoom?.creatures != null)
-            {
-                for (int i = 0; i < room.abstractRoom.creatures.Count; i++)
-                {
-                    if (room.abstractRoom.creatures[i]?.realizedCreature is Player player &&
-                        !player.dead && !player.slatedForDeletetion && player.room == room)
-                        Players.Add(player);
-                }
-            }
-
-            if (room.physicalObjects == null) return;
-            for (int layer = 0; layer < room.physicalObjects.Length; layer++)
-            {
-                List<PhysicalObject> objects = room.physicalObjects[layer];
-                for (int i = 0; i < objects.Count; i++)
-                {
-                    if (objects[i] is Weapon weapon && weapon.mode == Weapon.Mode.Thrown &&
-                        ResolvePlayer(weapon, null) is Player && !weapon.slatedForDeletetion)
-                        ThrownWeapons.Add(weapon);
-                }
-            }
-        }
 
         internal void RecordThrow(Weapon weapon, Player player, int clock)
         {
@@ -539,7 +502,8 @@ internal static class DesertBatflyThreatRuntime
                 bat.DesertAI.Threatened(player, false);
 
             if (player != null && evidence.Any &&
-                room.VisualContact(bat.mainBodyChunk.pos, explosion.pos))
+                DB_VisibilityPolicy.CanObserve(
+                    bat, explosion.pos, acuteRadius, DB_VisibilityChannel.Signal))
             {
                 float witness = distance <= explosion.rad ? 0.62f : 0.34f;
                 AddEvidence(bat, player, evidence, witness, "witnessed explosion", true);
@@ -577,7 +541,8 @@ internal static class DesertBatflyThreatRuntime
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.Threatened(player, false);
 
-            if (player != null && room.VisualContact(bat.mainBodyChunk.pos, position))
+            if (player != null && DB_VisibilityPolicy.CanObserve(
+                    bat, position, acuteRadius, DB_VisibilityChannel.Signal))
             {
                 float multiplier = distance <= 90f ? 0.88f : distance <= 190f ? 0.52f : 0.30f;
                 AddEvidence(bat, player, evidence, multiplier, "firecracker startle", true);
@@ -621,7 +586,8 @@ internal static class DesertBatflyThreatRuntime
                 continue;
             float distance = Vector2.Distance(witness.mainBodyChunk.pos, threatEvent.Position);
             if (distance > WitnessFarRadius ||
-                !room.VisualContact(witness.mainBodyChunk.pos, threatEvent.Position))
+                !DB_VisibilityPolicy.CanObserve(
+                    witness, threatEvent.Position, WitnessFarRadius, DB_VisibilityChannel.Signal))
                 continue;
 
             float distanceMultiplier = distance <= WitnessNearRadius
@@ -677,12 +643,18 @@ internal static class DesertBatflyThreatRuntime
 
         Room room = bat.room;
         RoomState roomState = RoomFor(room);
-        roomState.Refresh(room);
+        DB_RoomContext context = DB_RoomContext.For(room);
+        if (context == null)
+        {
+            state.Cue = default;
+            return;
+        }
 
         Player player = bat.DesertAI.Target as Player;
         if (player == null || player.dead || player.room != room ||
-            !room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
-            player = NearestVisiblePlayer(bat, roomState.Players);
+            !DB_VisibilityPolicy.CanObserve(
+                bat, player.mainBodyChunk.pos, 430f, DB_VisibilityChannel.Player))
+            player = NearestVisiblePlayer(bat, context.Players);
 
         DesertBatflyThreatCue cue = default;
         cue.PlayerSlot = PlayerSlot(player);
@@ -692,20 +664,14 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
 
-        if (player.grasps != null)
+        if (DB_WeaponPerception.TryObserveHeldThreats(
+                bat, player, 430f, out DB_HeldThreatObservation held))
         {
-            for (int i = 0; i < player.grasps.Length; i++)
-            {
-                PhysicalObject held = player.grasps[i]?.grabbed;
-                if (held == null) continue;
-                DesertBatflyThreatEvidence heldEvidence =
-                    DesertBatflyThreatAdapterRegistry.Classify(held, null, 0f, 0f, false);
-                if (held is Spear) cue.VisibleSpear = true;
-                if (held is Rock) cue.VisibleRock = true;
-                if (heldEvidence.Explosion > 0.15f) cue.VisibleExplosive = true;
-                if (heldEvidence.Startle > 0.15f) cue.VisibleStartle = true;
-                if (heldEvidence.Shock > 0.15f) cue.VisibleShock = true;
-            }
+            cue.VisibleSpear = held.VisibleSpear;
+            cue.VisibleRock = held.VisibleRock;
+            cue.VisibleExplosive = held.VisibleExplosive;
+            cue.VisibleStartle = held.VisibleStartle;
+            cue.VisibleShock = held.VisibleShock;
         }
 
         int clock = room.game?.clock ?? 0;
@@ -716,26 +682,17 @@ internal static class DesertBatflyThreatRuntime
         cue.CurrentHazardCenter = state.HazardTimer > 0 ? state.HazardCenter : null;
         cue.PlayerRetreating = state.EncounterPlayerSlot == cue.PlayerSlot && state.RetreatTicks > 12;
 
-        for (int i = 0; i < roomState.ThrownWeapons.Count; i++)
+        if (DB_WeaponPerception.TryFindIncomingProjectileFrom(
+                bat,
+                player,
+                ProjectileNearMissMaxDistance,
+                ProjectileNearMissRadius,
+                16f,
+                out DB_WeaponObservation projectile))
         {
-            Weapon weapon = roomState.ThrownWeapons[i];
-            if (weapon?.firstChunk == null || ResolvePlayer(weapon, null) != player) continue;
-            Vector2 delta = bat.mainBodyChunk.pos - weapon.firstChunk.pos;
-            Vector2 velocity = weapon.firstChunk.vel;
-            if (velocity.sqrMagnitude < 16f ||
-                delta.sqrMagnitude > ProjectileNearMissMaxDistance * ProjectileNearMissMaxDistance)
-                continue;
-            float time = Mathf.Clamp(
-                Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude),
-                0f,
-                5f);
-            Vector2 miss = delta - velocity * time;
-            if (miss.sqrMagnitude > ProjectileNearMissRadius * ProjectileNearMissRadius) continue;
-
             cue.ProjectileThreat = true;
-            cue.ProjectileThreatDirection = velocity.normalized;
-            LearnNearMiss(bat, state, weapon, player, clock);
-            break;
+            cue.ProjectileThreatDirection = projectile.Velocity.normalized;
+            LearnNearMiss(bat, state, projectile.Weapon, player, clock);
         }
 
         state.Cue = cue;
@@ -755,9 +712,7 @@ internal static class DesertBatflyThreatRuntime
             DesertBatflyThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
         if (memory == null || memory.Confidence < 0.08f) return;
 
-        RoomState roomState = RoomFor(bat.room);
-        roomState.Refresh(bat.room);
-        Player player = PlayerBySlot(roomState.Players, cue.PlayerSlot);
+        Player player = DB_RoomContext.For(bat.room)?.PlayerBySlot(cue.PlayerSlot);
         if (player == null) return;
 
         float heldRisk = 0f;
@@ -831,9 +786,10 @@ internal static class DesertBatflyThreatRuntime
         if (state.PreviousMode != DesertBatflyAI.Activity.Escape)
             state.PursuitDisengageExtended = false;
 
-        RoomState room = RoomFor(bat.room);
-        room.Refresh(bat.room);
-        Player player = NearestVisiblePlayer(bat, room.Players, 300f);
+        DB_RoomContext context = DB_RoomContext.For(bat.room);
+        Player player = context != null
+            ? NearestVisiblePlayer(bat, context.Players, 300f)
+            : null;
         if (player == null)
         {
             state.PursuitTicks = 0;
@@ -879,9 +835,7 @@ internal static class DesertBatflyThreatRuntime
             bat.DesertState, state.EscapeThreatPlayerSlot);
         if (memory == null || memory.PursuitPressure < 0.26f) return;
 
-        RoomState room = RoomFor(bat.room);
-        room.Refresh(bat.room);
-        Player player = PlayerBySlot(room.Players, state.EscapeThreatPlayerSlot);
+        Player player = DB_RoomContext.For(bat.room)?.PlayerBySlot(state.EscapeThreatPlayerSlot);
         if (player == null || !Custom.DistLess(
                 bat.mainBodyChunk.pos,
                 player.mainBodyChunk.pos,
@@ -906,7 +860,8 @@ internal static class DesertBatflyThreatRuntime
 
         int slot = PlayerSlot(player);
         if (!ValidSlot(slot) ||
-            !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
+            !DB_VisibilityPolicy.CanObserve(
+                bat, player.mainBodyChunk.pos, 360f, DB_VisibilityChannel.Player))
         {
             ResetEncounter(state);
             return;
@@ -1238,19 +1193,12 @@ internal static class DesertBatflyThreatRuntime
         return null;
     }
 
-    private static Player PlayerBySlot(List<Player> players, int slot)
-    {
-        if (players == null || !ValidSlot(slot)) return null;
-        for (int i = 0; i < players.Count; i++)
-            if (PlayerSlot(players[i]) == slot) return players[i];
-        return null;
-    }
-
     private static Player NearestVisiblePlayer(
         DesertBatfly bat,
-        List<Player> players,
+        IReadOnlyList<Player> players,
         float maxDistance = 430f)
     {
+        if (bat == null || players == null) return null;
         Player best = null;
         float bestDistance = maxDistance;
         for (int i = 0; i < players.Count; i++)
@@ -1259,7 +1207,8 @@ internal static class DesertBatflyThreatRuntime
             if (player == null || player.dead || player.room != bat.room) continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
             if (distance >= bestDistance ||
-                !bat.room.VisualContact(bat.mainBodyChunk.pos, player.mainBodyChunk.pos))
+                !DB_VisibilityPolicy.CanObserve(
+                    bat, player.mainBodyChunk.pos, maxDistance, DB_VisibilityChannel.Player))
                 continue;
             bestDistance = distance;
             best = player;

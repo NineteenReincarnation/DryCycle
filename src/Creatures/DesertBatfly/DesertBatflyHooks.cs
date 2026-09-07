@@ -289,9 +289,17 @@ internal static class DesertBatflyHooks
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)
     {
         orig(self);
+
+        // DesertSwarmRoom still owns room-tag/hive spawning semantics and is intentionally
+        // not gated by realized bats. The remaining systems are DesertBatfly-only and must
+        // not allocate/scan ordinary rooms that never activated DB_RoomContext.
+        DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
+        if (!DB_RoomContext.TryGetExisting(self, out DB_RoomContext context) ||
+            context.Bats.Count == 0)
+            return;
+
         if (self.readyForAI && self.aimap != null)
             DesertBatflyRefuge.ObserveRoom(self);
-        DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
         DesertBatflySignalRoomRuntime.For(self)?.Prune(self);
         DesertBatflyEnvironmentalRoomRuntime.Update(self);
     }

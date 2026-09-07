@@ -633,9 +633,14 @@ internal sealed class DesertBatflyAI
             SetMode(Activity.Observe);
         }
 
-        if (!fly.room.VisualContact(
-                fly.mainBodyChunk.pos,
-                Target.mainBodyChunk.pos))
+        DB_VisibilityChannel targetChannel = Target is Player
+            ? DB_VisibilityChannel.Player
+            : DB_VisibilityChannel.Creature;
+        if (!DB_VisibilityPolicy.CanObserve(
+                fly,
+                Target.mainBodyChunk.pos,
+                430f,
+                targetChannel))
             unseen++;
         else
             unseen = 0;
@@ -988,13 +993,17 @@ internal sealed class DesertBatflyAI
         }
 
         int count = 0;
-        foreach (AbstractCreature abstractCreature in fly.room.abstractRoom.creatures)
+        DB_RoomContext context = DB_RoomContext.For(fly.room);
+        var bats = context?.Bats;
+        if (bats != null)
         {
-            if (abstractCreature.realizedCreature is DesertBatfly other && other != fly &&
-                other.room == fly.room && other.Consious &&
-                other.grabbedBy.Count == 0 &&
-                other.DesertAI.Target == Target && other.DesertAI.FormalAttack)
+            for (int i = 0; i < bats.Count; i++)
             {
+                DesertBatfly other = bats[i];
+                if (other == null || other == fly || !other.Consious ||
+                    other.grabbedBy.Count != 0 ||
+                    other.DesertAI.Target != Target || !other.DesertAI.FormalAttack)
+                    continue;
                 count++;
             }
         }
@@ -1042,19 +1051,28 @@ internal sealed class DesertBatflyAI
         Player rememberedCandidate = null;
         float closest = DesertBatflyTuning.SightRange;
 
-        foreach (AbstractCreature abs in fly.room.abstractRoom.creatures)
+        DB_RoomContext context = DB_RoomContext.For(fly.room);
+        var creatures = context?.Creatures;
+        if (creatures == null) return;
+
+        for (int i = 0; i < creatures.Count; i++)
         {
-            Creature creature = abs.realizedCreature;
+            Creature creature = creatures[i];
             if (creature == fly || creature is DesertBatfly || !Valid(creature))
                 continue;
 
             float distance = Vector2.Distance(
                 fly.mainBodyChunk.pos,
                 creature.mainBodyChunk.pos);
+            DB_VisibilityChannel channel = creature is Player
+                ? DB_VisibilityChannel.Player
+                : DB_VisibilityChannel.Creature;
             if (distance > DesertBatflyTuning.SightRange ||
-                !fly.room.VisualContact(
-                    fly.mainBodyChunk.pos,
-                    creature.mainBodyChunk.pos))
+                !DB_VisibilityPolicy.CanObserve(
+                    fly,
+                    creature.mainBodyChunk.pos,
+                    DesertBatflyTuning.SightRange,
+                    channel))
                 continue;
 
             CreatureTemplate.Relationship relation =
@@ -1207,12 +1225,16 @@ internal sealed class DesertBatflyAI
             fly.Personality.Nerve * 0.20f;
         if (socialDrive < 0.52f) return null;
 
+        DB_RoomContext context = DB_RoomContext.For(fly.room);
+        var bats = context?.Bats;
+        if (bats == null) return null;
+
         Player best = null;
         float bestScore = float.MinValue;
-        foreach (Fly other in DesertSwarmRoom.For(fly.room).Hive.flies)
+        for (int i = 0; i < bats.Count; i++)
         {
-            if (other is not DesertBatfly bat || bat == fly || bat.dead ||
-                bat.room != fly.room || !bat.Consious ||
+            DesertBatfly bat = bats[i];
+            if (bat == null || bat == fly || !bat.Consious ||
                 bat.DesertAI.Target is not Player target ||
                 !CanHarass(target))
                 continue;
@@ -1227,9 +1249,11 @@ internal sealed class DesertBatflyAI
                 bat.mainBodyChunk.pos);
             if (neighbourDistance > 210f ||
                 (neighbourDistance > 95f &&
-                 !fly.room.VisualContact(
-                     fly.mainBodyChunk.pos,
-                     bat.mainBodyChunk.pos)))
+                 !DB_VisibilityPolicy.CanObserve(
+                     fly,
+                     bat.mainBodyChunk.pos,
+                     210f,
+                     DB_VisibilityChannel.Social)))
                 continue;
 
             float score =
@@ -1245,38 +1269,13 @@ internal sealed class DesertBatflyAI
 
     private void ScanWeapons()
     {
-        foreach (var layer in fly.room.physicalObjects)
-        foreach (PhysicalObject obj in layer)
-        {
-            if (obj is not Weapon weapon || weapon.thrownBy == fly)
-                continue;
+        if (!DB_WeaponPerception.TryFindImmediateThreat(
+                fly,
+                out DB_WeaponObservation observation))
+            return;
 
-            if (weapon is Spear && weapon.grabbedBy.Count > 0 &&
-                Custom.DistLess(
-                    weapon.firstChunk.pos,
-                    fly.mainBodyChunk.pos,
-                    65f) &&
-                (weapon.firstChunk.pos - weapon.firstChunk.lastPos).sqrMagnitude > 36f)
-            {
-                Threatened(weapon.grabbedBy[0].grabber, false);
-                continue;
-            }
-
-            if (weapon.mode != Weapon.Mode.Thrown) continue;
-            Vector2 delta = fly.mainBodyChunk.pos - weapon.firstChunk.pos;
-            Vector2 velocity = weapon.firstChunk.vel;
-            float time = Mathf.Clamp(
-                Vector2.Dot(delta, velocity) /
-                Mathf.Max(1f, velocity.sqrMagnitude),
-                0f,
-                5f);
-            if ((delta - velocity * time).sqrMagnitude < 32f * 32f &&
-                delta.sqrMagnitude < 170f * 170f)
-            {
-                Threatened(weapon.thrownBy, false);
-                break;
-            }
-        }
+        if (observation.Instigator != null)
+            Threatened(observation.Instigator, false);
     }
 
     private bool IsRememberedPlayer(Player player)

@@ -434,11 +434,16 @@ internal static class DesertBatflySignalRuntime
         perception = DesertBatflySignalPerception.None;
         attenuation = 0f;
         float distance = Vector2.Distance(receiver.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
-        float visualRadius = VisualRadius(packet.Kind);
+        float baseVisualRadius = VisualRadius(packet.Kind);
+        float visibility = DesertBatflyEnvironmentalBehavior.VisibilityScale(receiver);
+        float visualRadius = DB_VisibilityPolicy.EffectiveRange(
+            baseVisualRadius, visibility, DB_VisibilityChannel.Signal);
 
-        if (distance <= visualRadius && receiver.room.VisualContact(
-                receiver.mainBodyChunk.pos,
-                packet.Emitter.mainBodyChunk.pos))
+        if (distance <= visualRadius && DB_VisibilityPolicy.CanObserve(
+                receiver,
+                packet.Emitter.mainBodyChunk.pos,
+                baseVisualRadius,
+                DB_VisibilityChannel.Signal))
         {
             perception = DesertBatflySignalPerception.Visual;
             attenuation = Mathf.Lerp(1f, 0.34f, Mathf.Clamp01(distance / Mathf.Max(1f, visualRadius)));
@@ -458,7 +463,7 @@ internal static class DesertBatflySignalRuntime
         return true;
     }
 
-    private static float VisualRadius(DesertBatflySignalKind kind) => kind switch
+    internal static float VisualRadius(DesertBatflySignalKind kind) => kind switch
     {
         DesertBatflySignalKind.AlarmFlutter => 300f,
         DesertBatflySignalKind.DistressCall => 250f,

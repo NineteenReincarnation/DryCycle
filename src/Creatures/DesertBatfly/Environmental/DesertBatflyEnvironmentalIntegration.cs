@@ -50,8 +50,6 @@ internal static class DesertBatflyEnvironmentalIntegration
         // Enable them first so a future AI rename cannot silently disable all Task13 social,
         // signal, Task11-visibility or hard-survival vengeance integration.
         DesertBatflyEnvironmentalSocialBridge.Enable();
-        DesertBatflyEnvironmentalSignalBridge.Enable();
-        DesertBatflyEnvironmentalThreatBridge.Enable();
         DesertBatflyEnvironmentalVengeanceBridge.Enable();
         if (Installed) return;
 
@@ -96,8 +94,6 @@ internal static class DesertBatflyEnvironmentalIntegration
     {
         DisposeCoreHooks();
         DesertBatflyEnvironmentalVengeanceBridge.Disable();
-        DesertBatflyEnvironmentalThreatBridge.Disable();
-        DesertBatflyEnvironmentalSignalBridge.Disable();
         DesertBatflyEnvironmentalSocialBridge.Disable();
         personalityOwners = new ConditionalWeakTable<DesertBatflyPersonality, BatRef>();
     }
@@ -248,13 +244,6 @@ internal static class DesertBatflyEnvironmentalIntegration
             bat.DesertState.Thirst = savedThirst;
         }
 
-        if (influence.VisibilityConfidence >= 0.98f || ai.Target == null || ai.FormalAttack)
-            return;
-
-        float visibleRange = DesertBatflyTuning.SightRange * Mathf.Lerp(0.42f, 1f, influence.VisibilityConfidence);
-        if (Vector2.Distance(bat.mainBodyChunk.pos, ai.Target.mainBodyChunk.pos) > visibleRange &&
-            ai.Mode == DesertBatflyAI.Activity.Observe)
-            ai.CancelAttack();
     }
 
     private static void SteerHook(SteerOrig orig, DesertBatflyAI ai, Vector2 goal, float speed)

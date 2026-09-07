@@ -140,13 +140,15 @@ internal static partial class Program
             "Task13 HomeReturn/Burrow uses native FlyAI while preserving higher-priority local goals");
 
         Type socialBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", true);
-        Type signalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", true);
-        Type threatBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalThreatBridge", true);
         Type vengeanceBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalVengeanceBridge", true);
-        Check(signalBridge.GetMethod("TryPerceiveHook", Flags) != null,
-            "Task13 Fog/DenseFog reduces only Task12 visual signal perception");
-        Check(threatBridge.GetMethod("NearestVisiblePlayerHook", Flags) != null,
-            "Task13 Fog/DenseFog reduces Task11 current visual recognition while keeping close projectile fallback");
+        Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
+        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalThreatBridge", false) == null,
+            "Task13 visual signal/threat bridges are retired after R2 central perception adoption");
+        Check(visibilityPolicy.GetMethod("CanObserve", Flags) != null &&
+              weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null,
+            "Task13 Fog/DenseFog visibility and close projectile recognition now use shared R2 perception policy");
         Check(vengeanceBridge.GetMethod("UpdateHook", Flags) != null,
             "Task13 hard survival suspends rather than clears Vengeance");
 
@@ -194,8 +196,9 @@ internal static partial class Program
 
         foreach (Type type in new[]
                  {
-                     behavior, roomRuntime, profile, integration, socialBridge, signalBridge,
-                     threatBridge, vengeanceBridge, denseFogBridge, task09Bridge, survivalBridge,
+                     behavior, roomRuntime, profile, integration, socialBridge,
+                     vengeanceBridge, visibilityPolicy, weaponPerception, denseFogBridge,
+                     task09Bridge, survivalBridge,
                      mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalExposure", true)
                  })
             Check(!TypeCallsTask13Forbidden(type),
