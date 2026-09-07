@@ -43,8 +43,13 @@ internal static class DesertBatflyEnvironmentalIntegration
 
     internal static void Enable()
     {
+        // These two bridges are independent of the private DesertBatflyAI reflection below.
+        // Enable them first so a future AI rename cannot silently disable all Task13 social/
+        // signal integration.
+        DesertBatflyEnvironmentalSocialBridge.Enable();
+        DesertBatflyEnvironmentalSignalBridge.Enable();
         if (Installed) return;
-        Disable();
+
         try
         {
             BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
@@ -78,11 +83,19 @@ internal static class DesertBatflyEnvironmentalIntegration
         }
         catch
         {
-            Disable();
+            DisposeCoreHooks();
         }
     }
 
     internal static void Disable()
+    {
+        DisposeCoreHooks();
+        DesertBatflyEnvironmentalSignalBridge.Disable();
+        DesertBatflyEnvironmentalSocialBridge.Disable();
+        personalityOwners = new ConditionalWeakTable<DesertBatflyPersonality, BatRef>();
+    }
+
+    private static void DisposeCoreHooks()
     {
         try { steerHook?.Dispose(); } catch { }
         try { scanCreaturesHook?.Dispose(); } catch { }
@@ -97,7 +110,6 @@ internal static class DesertBatflyEnvironmentalIntegration
         roostChanceHook = null;
         aggressiveHook = null;
         aiFlyField = null;
-        personalityOwners = new ConditionalWeakTable<DesertBatflyPersonality, BatRef>();
     }
 
     internal static void Register(DesertBatfly bat)
