@@ -18,6 +18,8 @@ internal static class DesertBatflyHooks
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
         DesertBatflySignalRuntime.Reset();
+        DesertBatflyEnvironmentalRoomRuntime.Reset();
+        DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflySignalIntegration.Enable();
         DesertBatflySignalVengeanceBridge.Enable();
         DesertBatflyThreatRuntime.Enable();
@@ -70,6 +72,8 @@ internal static class DesertBatflyHooks
         DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
         DesertBatflySignalRuntime.Reset();
+        DesertBatflyEnvironmentalBehavior.Reset();
+        DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
         DesertBatflyColonyRuntime.Disable();
@@ -111,6 +115,7 @@ internal static class DesertBatflyHooks
             DesertBatflySocialLife.CancelForPriority(desert, "room transition");
             DesertBatflySignalRuntime.Forget(desert);
             DesertBatflyThreatRuntime.Forget(desert);
+            DesertBatflyEnvironmentalBehavior.Forget(desert);
         }
         orig(self, room);
     }
@@ -143,6 +148,7 @@ internal static class DesertBatflyHooks
 
         DesertBatflySocialLife.CancelForPriority(desert, "emergence priority");
         DesertBatflySignalRuntime.Forget(desert);
+        DesertBatflyEnvironmentalBehavior.Forget(desert);
         desert.DesertState.InHive = false;
         try { orig(self, fly); }
         finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
@@ -201,15 +207,16 @@ internal static class DesertBatflyHooks
             return;
         }
 
-        // Existing DesertBatflyAI gets first refusal for danger, combat, injury and
-        // committed roost behavior. Task11 learns/adjusts realized threat tactics.
-        // Task12 then updates local social information and may cancel neutral behavior,
-        // while Task10 remains the final neutral-life layer. No signal owns velocity.
+        // Existing DesertBatflyAI gets first refusal for immediate danger/combat/injury.
+        // Task11 adjusts learned threat tactics, Task12 updates local social information,
+        // then Task13 applies realized-room environmental pressure before Task10 runs as
+        // the final neutral-life layer. Task13 never owns cross-room travel or velocity.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
         DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
         DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySignalRuntime.Update(desert);
+        DesertBatflyEnvironmentalBehavior.Update(desert);
         DesertBatflySocialLife.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
@@ -310,6 +317,7 @@ internal static class DesertBatflyHooks
             DesertBatflySignalRuntime.Forget(bat);
             DesertBatflyColonyRuntime.ReportDeath(bat, likelyPredator);
             DesertBatflyThreatRuntime.Forget(bat);
+            DesertBatflyEnvironmentalBehavior.Forget(bat);
         }
     }
 
@@ -320,6 +328,7 @@ internal static class DesertBatflyHooks
             DesertBatflyRefuge.ObserveRoom(self);
         DesertSwarmRoom.UpdateRoom(self, self.game.evenUpdate);
         DesertBatflySignalRoomRuntime.For(self)?.Prune(self);
+        DesertBatflyEnvironmentalRoomRuntime.Update(self);
     }
 
     private static int Nourishment(
