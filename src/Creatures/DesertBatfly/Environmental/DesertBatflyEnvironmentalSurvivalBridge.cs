@@ -47,8 +47,43 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
 
     private static void UpdateHook(EnvironmentalUpdateOrig orig, DesertBatfly bat)
     {
+        if (bat?.AI == null || bat.DesertAI == null)
+        {
+            orig(bat);
+            return;
+        }
+
+        bool preserveHigherPriorityGoal = HigherPriorityOwnsLocalGoal(bat);
+        Vector2 savedGoal = bat.AI.localGoal;
+        int savedMap = bat.AI.followingDijkstraMap;
+        int savedLeaveRoom = bat.AI.leaveRoomDijkstra;
+
+        // Task13 still updates its room/individual influence and debug state so recovery
+        // and weather bookkeeping do not freeze during a threat/injury frame. It may not,
+        // however, steal the local goal chosen by the higher-priority owner.
         orig(bat);
+
+        if (preserveHigherPriorityGoal)
+        {
+            bat.AI.localGoal = savedGoal;
+            bat.AI.followingDijkstraMap = savedMap;
+            bat.AI.leaveRoomDijkstra = savedLeaveRoom;
+            return;
+        }
+
         ApplyNativeHomeAndBurrow(bat);
+    }
+
+    internal static bool HigherPriorityOwnsLocalGoal(DesertBatfly bat)
+    {
+        if (bat?.AI == null || bat.DesertAI == null) return false;
+        if (DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature)) return true;
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+            return true;
+        if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
+            bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
+            return true;
+        return false;
     }
 
     internal static bool ShouldSeekHome(in DesertBatflyEnvironmentalInfluence influence)
@@ -77,8 +112,7 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
     {
         if (bat?.room?.aimap == null || bat.AI == null || bat.dead || !bat.Consious ||
             bat.inShortcut || bat.Emergence?.Active == true ||
-            DesertBatflyTravelNavigation.HasIntent(bat.abstractCreature) ||
-            bat.DesertAI.HasImmediateDanger || bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering)
+            HigherPriorityOwnsLocalGoal(bat))
             return;
         if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out DesertBatflyEnvironmentalInfluence influence))
             return;
