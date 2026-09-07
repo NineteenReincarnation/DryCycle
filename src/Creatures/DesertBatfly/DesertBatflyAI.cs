@@ -442,12 +442,17 @@ internal sealed class DesertBatflyAI
         fly.movMode = Fly.MovementMode.BatFlight;
         hasRoost = false;
 
-        Vector2 next = fly.AI.ProgressLocalGoalAlongDijkstraMap(fly.mainBodyChunk.pos, bestMap);
-        fly.AI.localGoal = next;
-        fly.Injury.NominalFlightSpeed = 4.2f;
-        Vector2 desired = Custom.DirVec(fly.mainBodyChunk.pos, next) * 4.2f;
-        fly.mainBodyChunk.vel = Vector2.Lerp(fly.mainBodyChunk.vel, desired, 0.20f);
-        return true;
+        Vector2 dijkstraInput = fly.AI.localGoal;
+        if (dijkstraInput == Vector2.zero || fly.room.GetTile(dijkstraInput).Solid)
+            dijkstraInput = fly.mainBodyChunk.pos;
+        Vector2 next = fly.AI.ProgressLocalGoalAlongDijkstraMap(dijkstraInput, bestMap);
+        return DB_FlightMotor.TrySteer(
+            fly,
+            DB_BehaviorOwner.InjuryRecovery,
+            next,
+            4.2f,
+            preserveDijkstra: true,
+            response: 0.20f);
     }
 
     private Vector2 ClosestHivePoint(int hiveIndex)
@@ -1419,34 +1424,8 @@ internal sealed class DesertBatflyAI
 
     private bool SteerOwned(Vector2 goal, float speed, DB_BehaviorOwner owner)
     {
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, owner) || fly?.room == null || fly.AI == null)
-            return false;
-
-        fly.Injury.NominalFlightSpeed = speed;
-        fly.LoseAllGrasps();
-        fly.burrowOrHangSpot = null;
-        if (fly.AI.behavior == FlyAI.Behavior.Chain)
-            fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
-        else
-            fly.AI.behavior = FlyAI.Behavior.Idle;
-        fly.AI.followingDijkstraMap = -1;
-        fly.movMode = Fly.MovementMode.BatFlight;
+        if (!DB_FlightMotor.TrySteer(fly, owner, goal, speed)) return false;
         hasRoost = false;
-
-        Vector2 direction = Custom.DirVec(fly.mainBodyChunk.pos, goal);
-        if (fly.room.GetTile(fly.mainBodyChunk.pos + direction * 25f).Solid ||
-            (fly.room.terrain != null &&
-             fly.room.terrain.Contains(fly.mainBodyChunk.pos + direction * 25f)))
-        {
-            goal = fly.mainBodyChunk.pos + Vector2.up * 70f;
-            speed = 4f;
-        }
-
-        fly.AI.localGoal = goal;
-        fly.mainBodyChunk.vel = Vector2.Lerp(
-            fly.mainBodyChunk.vel,
-            Custom.DirVec(fly.mainBodyChunk.pos, goal) * speed,
-            0.22f);
         return true;
     }
 

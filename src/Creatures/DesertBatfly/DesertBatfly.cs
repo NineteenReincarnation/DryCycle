@@ -118,7 +118,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         Emergence.Update(eu);
         if (!extremeVengeance)
             DesertAI.AfterPhysics(eu);
-        Injury.ApplyFlight(previousFlightVelocity);
+        DB_FlightMotor.ApplyPostPhysics(this, previousFlightVelocity);
     }
 
     private void UpdateHeldSandStruggle()

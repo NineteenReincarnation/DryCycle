@@ -15,7 +15,6 @@ internal sealed class DesertBatflyInjury
     private bool capturePending;
     private float recoveredSinceEvent;
     internal float PostStunShock { get; private set; }
-    internal float NominalFlightSpeed;
     internal int MotionTick { get; private set; }
     internal InjuryRecoveryState RecoveryState { get; private set; }
     internal Vector2? RecoveryTarget { get; private set; }
@@ -150,7 +149,6 @@ internal sealed class DesertBatflyInjury
 
     internal void Tick()
     {
-        NominalFlightSpeed = 0f;
         if (bat.dead || bat.slatedForDeletetion)
         {
             ClearTransient();
@@ -206,7 +204,6 @@ internal sealed class DesertBatflyInjury
         impulseGrace = 0;
         recoverySample = 0;
         recoveredSinceEvent = 0f;
-        NominalFlightSpeed = 0f;
         SetRecovery(InjuryRecoveryState.None, null, "creature lifecycle");
     }
 
@@ -229,14 +226,5 @@ internal sealed class DesertBatflyInjury
         return velocity;
     }
 
-    internal void ApplyFlight(Vector2 previous)
-    {
-        if (impulseGrace > 0 || !bat.Consious || bat.dead || bat.room == null || bat.inShortcut ||
-            bat.grabbedBy.Count > 0 || bat.Emergence?.Active == true || bat.AI?.behavior == FlyAI.Behavior.Chain ||
-            bat.movMode != Fly.MovementMode.BatFlight) return;
-        Vector2 request = bat.mainBodyChunk.vel;
-        // Explicit AI speed is intent only; injury is applied exactly here, after all controllers.
-        float nominal = NominalFlightSpeed > 0f ? NominalFlightSpeed : 12f;
-        bat.mainBodyChunk.vel = ModifyFlight(previous, request, nominal);
-    }
+
 }

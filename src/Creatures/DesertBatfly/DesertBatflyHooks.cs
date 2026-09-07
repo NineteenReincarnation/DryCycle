@@ -18,6 +18,7 @@ internal static class DesertBatflyHooks
         DB_RoomContext.Reset();
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
+        DB_FlightMotor.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
@@ -94,6 +95,7 @@ internal static class DesertBatflyHooks
         DB_RoomContext.Reset();
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
+        DB_FlightMotor.Reset();
         DesertBatflyIntimidation.Reset();
         DesertBatflyWarpCompatibility.Disable();
         DesertBatflySandbox.Disable();
@@ -134,6 +136,7 @@ internal static class DesertBatflyHooks
             DesertBatflyEnvironmentalBehavior.Forget(desert);
             DB_FrameContextRuntime.Forget(desert);
             DB_BehaviorArbiter.Forget(desert);
+            DB_FlightMotor.Forget(desert);
         }
         orig(self, room);
     }

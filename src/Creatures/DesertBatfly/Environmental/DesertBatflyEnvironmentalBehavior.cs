@@ -18,8 +18,6 @@ internal static class DesertBatflyEnvironmentalBehavior
         internal int AnchorId;
         internal float AnchorScore = float.NegativeInfinity;
         internal int HeatExposureTicks;
-        internal Vector2 FogGoalOffset;
-        internal int FogGoalOffsetUntil;
         internal int LastWeatherOrdinal = -1;
         internal DesertBatflyEnvironmentalPhase LastPhase = DesertBatflyEnvironmentalPhase.Calm;
     }
@@ -67,7 +65,7 @@ internal static class DesertBatflyEnvironmentalBehavior
                     DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentLocalSurvival);
         if (!owns) return false;
 
-        ApplyLocalBehavior(bat, state, bat.room.game?.clock ?? 0);
+        ApplyLocalBehavior(bat, state);
         return true;
     }
 
@@ -575,7 +573,7 @@ internal static class DesertBatflyEnvironmentalBehavior
         thermalExhaustion = Mathf.Clamp01(thermalExhaustion);
     }
 
-    private static void ApplyLocalBehavior(DesertBatfly bat, State state, int tick)
+    private static void ApplyLocalBehavior(DesertBatfly bat, State state)
     {
         DesertBatflyEnvironmentalInfluence influence = state.Influence;
         if (influence.Phase == DesertBatflyEnvironmentalPhase.Calm) return;
@@ -588,26 +586,14 @@ internal static class DesertBatflyEnvironmentalBehavior
         if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return;
         if (bat.AI.behavior == FlyAI.Behavior.Chain) return;
 
-        Vector2 goal = shelterPoint;
-        if (influence.NavigationUncertainty > 0.05f &&
-            influence.Weather is DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog)
-        {
-            if (tick >= state.FogGoalOffsetUntil || state.LastWeatherOrdinal != (int)influence.Weather)
-            {
-                float angle = Stable01(bat.Personality.VisualSeed ^ tick / 120) * Mathf.PI * 2f;
-                float radius = Mathf.Lerp(8f, 70f, influence.NavigationUncertainty);
-                state.FogGoalOffset = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
-                state.FogGoalOffsetUntil = tick + 90 + StableBucket(bat.Personality.VisualSeed, 70);
-            }
-            float distance = Vector2.Distance(bat.mainBodyChunk.pos, shelterPoint);
-            float fade = Mathf.InverseLerp(70f, 320f, distance);
-            goal += state.FogGoalOffset * fade;
-        }
-
-        if (!bat.room.terrain.Contains(goal))
-            bat.AI.localGoal = goal;
-        else
-            bat.AI.localGoal = shelterPoint;
+        DB_BehaviorOwner owner = influence.HardSurvival
+            ? DB_BehaviorOwner.EnvironmentHardSurvival
+            : DB_BehaviorOwner.EnvironmentLocalSurvival;
+        DB_FlightMotor.TrySteer(
+            bat,
+            owner,
+            shelterPoint,
+            Mathf.Lerp(4f, 7f, influence.ShelterDrive));
     }
 
     private static void ApplyAnchorCommitment(

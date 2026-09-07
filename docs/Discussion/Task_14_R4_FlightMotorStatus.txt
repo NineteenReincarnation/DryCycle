@@ -1,0 +1,133 @@
+Desert Batfly Task 14 — R4 FlightMotor / AI Responsibility Split Status
+Revision: R4-B1 / 2026-09-07
+Branch: task14-r4-flightmotor
+Base: R3 code-side closed at a2260b110af22f84317c90d8dcd7ec6ec128a67c
+Status: 【R4 已开始 / Batch 1 代码迁移】
+
+======================================================================
+1. 本批范围
+======================================================================
+
+R4-B1 只处理：
+
+1. 建立 DB_FlightMotor；
+2. 将 DesertBatflyAI.SteerOwned 收敛到 FlightMotor；
+3. 修复 InjuryRecovery Hive Dijkstra input semantics；
+4. 将 Injury final flight pass 从 Injury controller 迁到 FlightMotor；
+5. 将 Fog/DenseFog 的稳定短期 goal error 从 Environment direct localGoal 写入迁为 motor 前 goal modifier；
+6. 建立 lifecycle 与 architecture regression guard。
+
+本批不提前做：
+
+- R5 internal bridge debt removal；
+- R6 全量 rename / move；
+- Combat 全状态机迁出 DesertBatflyAI；
+- Travel/Social/Vengeance 所有 direct steering 的最终迁移；
+- Rain World live validation。
+
+======================================================================
+2. DB_FlightMotor
+======================================================================
+
+职责：
+
+- same-tick PrimaryOwner guard；
+- 接收 owner / goal / nominalSpeed；
+- Fog goal modifier；
+- ordinary BatFlight intent preparation；
+- localGoal intent；
+- 单次 velocity request；
+- final Injury flight modifier pass；
+- transient per-frame intent debug state。
+
+明确不负责：
+
+- world route planning；
+- Behavior arbitration；
+- terrain bypass；
+- teleport；
+- fixed Y；
+- special Attach/Interfere/Grasp/Shortcut/Emergence physics。
+
+======================================================================
+3. Injury Dijkstra fix
+======================================================================
+
+旧实现：
+
+ProgressLocalGoalAlongDijkstraMap(mainBodyChunk.pos, map)
+
+R4-B1：
+
+- 使用 FlyAI.localGoal 作为 progression input；
+- localGoal 无效时仅做一次 current-position seed；
+- 后续推进遵守 native localGoal -> next localGoal 语义；
+- preserveDijkstra=true，FlightMotor 不清除 recovery map。
+
+目标是消除 body-position 每帧重置造成的 short-step jitter / 狭窄地形反复切换风险。
+
+======================================================================
+4. Injury flight responsibility
+======================================================================
+
+DesertBatflyInjury 继续拥有：
+
+- ForwardControl；
+- TurnControl；
+- LiftControl；
+- AccelerationControl；
+- WingBias；
+- ModifyFlight(previous, requested, nominalSpeed)。
+
+不再拥有：
+
+- NominalFlightSpeed runtime intent；
+- ApplyFlight final controller。
+
+最终 flight pass 改由 DB_FlightMotor.ApplyPostPhysics 调用纯 Injury modifier。
+
+======================================================================
+5. Fog goal modifier
+======================================================================
+
+旧 Environment ApplyLocalBehavior：
+
+- 维护 FogGoalOffset；
+- 直接改 goal；
+- 直接写 FlyAI.localGoal。
+
+R4-B1：
+
+- DB_FogGoalModifier 独立维护稳定 offset；
+- Fog/DenseFog authority 仍来自 Task13 已批准的 DryCycle EnvironmentInfluence；
+- 保持约 90+stable bucket 的短期稳定误差；
+- 距离接近时继续 fade；
+- modifier 自身不写 localGoal / velocity；
+- DB_FlightMotor 在提交 environment goal 前调用 modifier。
+
+当前为 behavior-preserving migration，不扩大 Fog 对其他 owner 的影响范围。
+
+======================================================================
+6. 当前仍 OPEN
+======================================================================
+
+R4-OPEN-01 — Travel / Social / Vengeance / other normal steering migrate to FlightMotor.
+R4-OPEN-02 — Combat state/motivation/contact responsibility split out of DesertBatflyAI.
+R4-OPEN-03 — audit every direct localGoal / ordinary velocity writer and classify special physics exceptions.
+R4-OPEN-04 — Observatory expose FlightMotor intent + nominal speed + modifier result.
+R4-OPEN-05 — managed compile/integration and Rain World live scenarios deferred to final validation stage per project decision.
+
+======================================================================
+7. R4 完成条件
+======================================================================
+
+R4 只有在：
+
+- 普通飞行只通过 DB_FlightMotor；
+- Injury 只做 modifier；
+- Fog 只做 goal modifier；
+- Combat responsibility 已从旧 AI 拆出；
+- special physics owner 与 ordinary motor 边界完整；
+- source/managed regressions 通过；
+
+后才能标记代码侧完成。
