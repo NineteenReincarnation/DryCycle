@@ -3,7 +3,7 @@
 Last updated: 2026-09-08
 Active workstream: Desert Batfly Task14 architecture refactor
 Current branch: `task14-r6-b1-final`
-Current verified implementation HEAD before this progress update: `f93ad003ef44a16c1a6f13d36dfa54270a771992`
+Current verified implementation HEAD before this progress update: `3e6837b7997698926ffd24f774619388be769362`
 
 ## Current architecture state
 
@@ -21,94 +21,125 @@ Completed R6 batches:
 - B8: Threat persistent memory (`DB_ThreatMemory*`).
 - B9: Threat tactics (`DB_ThreatTactics`, `DB_ThreatTacticalProfile`).
 - B10: historical Task wording cleanup in Threat trace and Environment profile.
-- B11: Environment Exposure/Profile physical domain migration; filenames moved to `Environment/DB_EnvironmentExposure.cs` and `Environment/DB_EnvironmentProfile.cs` with source blobs unchanged. Internal long type names remain intentionally pending a later caller-safe rename.
+- B11: Environment Exposure/Profile physical domain migration; filenames moved to `Environment/DB_EnvironmentExposure.cs` and `Environment/DB_EnvironmentProfile.cs` with source blobs unchanged. Internal long type names remain pending a later caller-safe rename.
+- B12: Emergence physical domain migration to `Runtime/DB_Emergence.cs`; source body unchanged, internal type rename still pending.
+- B13: Definition physical domain migration to `Core/DB_Definition.cs`; source body unchanged, internal type rename still pending.
 
-## This run: R6-B11 Environment leaf physical migration
+## This run: R6-B12/B13 Runtime + Core leaf physical migration
 
 ### Start state
 
-- Began from `ad378510d47da75e31bc3fbf2e9ae69a42eb3a5d`.
-- Previous run had already reviewed `DesertBatflyThreatRuntime.cs` as a multi-responsibility SPLIT candidate and therefore unsuitable for mechanical rename.
-- Environment Exposure/Profile were identified by the migration manifest as lower-risk leaf responsibilities.
-- A repository-local temporary workflow approach was attempted but blocked by platform safety checks. The container also has no external DNS access, so a local Git clone could not be used for pre-commit repository guards.
+- Began from branch HEAD `ce28fdf12e7e4523b9bc5ce037521aee0a85b49e`.
+- B11 had completed only physical relocation for Environment Exposure/Profile because safe all-caller type replacement could not be validated in the available environment.
+- The same validation limitation remains: no repository-local shell/build path is available for broad type replacement.
+- Therefore this run selected only manifest entries whose physical ownership is explicit and whose move can be proven behavior-neutral by exact Git rename comparison.
 
-### Completed
+### Completed work unit 1 — B12 Runtime Emergence move
 
-1. Physical domain move for Environment Exposure:
-   - `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalExposure.cs`
-   - -> `src/Creatures/DesertBatfly/Environment/DB_EnvironmentExposure.cs`
-   - Source blob SHA remains exactly `2910ad2ebbcb0ee0651ee2e11a6a35021cfcfcae`.
-   - Therefore this move changes no compiled logic, constants, namespace, type identity, or caller behavior.
+Moved:
 
-2. Physical domain move for Environment Profile:
-   - `src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalProfile.cs`
-   - -> `src/Creatures/DesertBatfly/Environment/DB_EnvironmentProfile.cs`
-   - Source blob SHA remains exactly `c36a390ca4842d9a0e819de873b7123ad98156c3`.
-   - Weather classification, six-phase resolution, HeavyRain/Heat/Sandstorm math, thresholds, and reason strings are byte-for-byte unchanged from the prior implementation.
+- `src/Creatures/DesertBatfly/DesertBatflyEmergence.cs`
+- -> `src/Creatures/DesertBatfly/Runtime/DB_Emergence.cs`
 
-3. R5 retention guard path coverage was extended so its Environment cross-room-ownership prohibitions cover both the remaining historical `Environmental/` directory and the new `Environment/` directory.
-   - No assertion was removed or weakened.
-   - Script executable mode was explicitly preserved as `100755`.
+Why this was selected:
 
-Implementation commit:
+- Task14 migration manifest marks Emergence as `KEEP/RENAME` with target `Runtime/DB_Emergence.cs`.
+- Emergence is a coherent special physical owner: emergence collision gating, `MoveFromOutsideMyUpdate`, escape path sampling and quicksand exclusion all belong to the same lifecycle.
 
-`f93ad003ef44a16c1a6f13d36dfa54270a771992` — `R6 B11 move Environment exposure/profile leaves`
+Behavior preservation:
+
+- source contents were copied exactly;
+- internal type remains `DesertBatflyEmergence` for now, avoiding an unvalidated caller-wide rename;
+- Git compare reports the final path change as a rename with **0 additions / 0 deletions**.
+
+### Completed work unit 2 — B13 Core Definition move
+
+Moved:
+
+- `src/Creatures/DesertBatfly/DesertBatflyDefinition.cs`
+- -> `src/Creatures/DesertBatfly/Core/DB_Definition.cs`
+
+Why this was selected:
+
+- Task14 migration manifest marks Definition as `KEEP/RENAME` with target `Core/DB_Definition.cs`.
+- The file is a stable creature-definition boundary rather than a mixed behavior runtime.
+
+Behavior/compatibility preservation:
+
+- source contents were copied exactly;
+- internal type remains `DesertBatflyDefinition` pending caller-safe rename;
+- external `CreatureTemplate.Type.value` remains exactly `"DesertBatfly"`;
+- template parameters, Fly ancestry and Peach Lizard relationship setup are unchanged;
+- Git compare reports the final path change as a rename with **0 additions / 0 deletions**.
+
+Implementation commits ended at:
+
+`3e6837b7997698926ffd24f774619388be769362`
 
 ## Self-review and verification
 
-- Commit compare from `ad378510d47da75e31bc3fbf2e9ae69a42eb3a5d` to `f93ad003ef44a16c1a6f13d36dfa54270a771992` contains exactly three changed paths:
-  - R5 guard: 2 additions / 2 deletions, only extending directory scope.
-  - Environment Exposure: Git rename with 0 additions / 0 deletions.
-  - Environment Profile: Git rename with 0 additions / 0 deletions.
-- New Exposure path was fetched after commit and has the same blob SHA as before the move.
-- No production logic, save identity, external ID, event ownership, movement ownership, weather thresholds, or serialization format changed in B11.
+Self-review compare from start-of-run HEAD `ce28fdf12e7e4523b9bc5ce037521aee0a85b49e` to implementation HEAD `3e6837b7997698926ffd24f774619388be769362` contains exactly two effective file changes:
+
+- `DesertBatflyDefinition.cs` -> `Core/DB_Definition.cs`: rename, 0 additions / 0 deletions.
+- `DesertBatflyEmergence.cs` -> `Runtime/DB_Emergence.cs`: rename, 0 additions / 0 deletions.
+
+No production logic, constants, save identity, external creature ID, event ownership, flight ownership, emergence timing, collision behavior, terrain sampling, or relationship semantics changed.
+
+No regression was found in the mechanically reviewable diff, so no code repair was required after these moves.
 
 Not executed in this run:
 
 - `scripts/check-desertbatfly-r5-retention.sh` as an actual shell process.
 - `scripts/check-desertbatfly-r6-b1.sh` as an actual shell process.
-- Full `.NET Framework 4.8` build against Rain World assemblies.
-- Managed DesertBatfly integration tests requiring Rain World/BepInEx DLLs.
+- full `.NET Framework 4.8` build against Rain World assemblies.
+- managed DesertBatfly integration tests requiring Rain World/BepInEx DLLs.
 - Rain World live scenarios and 20–30 Desert Batfly performance acceptance.
 
-These are not reported as passing. B11 was deliberately limited to a blob-identical physical move plus a mechanically reviewable guard path update because the available execution environment could not run repository-local scripts before commit.
+These are **not** reported as passing. This run deliberately used only blob-identical physical moves because those can be proven behavior-neutral without a repository-local build runner.
 
 ## Important files changed this run
 
-- `src/Creatures/DesertBatfly/Environment/DB_EnvironmentExposure.cs`
-- `src/Creatures/DesertBatfly/Environment/DB_EnvironmentProfile.cs`
-- `scripts/check-desertbatfly-r5-retention.sh`
+- `src/Creatures/DesertBatfly/Runtime/DB_Emergence.cs`
+- `src/Creatures/DesertBatfly/Core/DB_Definition.cs`
+- `docs/Discussion/Task_14_R6_DomainMigrationStatus.txt`
 - `PROGRESS.md`
 
 ## Remaining Task14 requirements
 
 R6 remains incomplete. Major remaining work:
 
-- Environment leaf **type identity** rename (`DesertBatflyEnvironmentalExposure` -> `DB_EnvironmentExposure`, `DesertBatflyEnvironmentalProfile` -> `DB_EnvironmentProfile`) after a safe all-caller replacement path is available.
-- Environment Runtime/RoomState/Core responsibility migration.
-- Threat runtime/event responsibility-aware split/absorb review and migration.
-- Signals domain migration.
-- remaining Social/Roost identities.
-- Injury domain migration.
-- Fear/Vengeance domain migration.
-- Core (`DB_Creature`, state/personality/sex/tuning responsibility review, `DB_Definition`).
-- TravelNavigation responsibility-aware migration.
-- remaining Presentation/debug identities.
-- production-wide Task09-Task13 historical naming cleanup.
-- old root-file/dead-code cleanup.
-- final R6 naming/path/architecture guard.
-- R7 performance/debug/full regression/final acceptance.
-- `FINAL_REPORT.md` after complete acceptance only.
+- pending leaf **C# type identity** renames:
+  - `DesertBatflyEnvironmentalExposure` -> `DB_EnvironmentExposure`
+  - `DesertBatflyEnvironmentalProfile` -> `DB_EnvironmentProfile`
+  - `DesertBatflyEmergence` -> `DB_Emergence`
+  - `DesertBatflyDefinition` -> `DB_Definition`
+  after a safe all-caller replacement/validation path is available;
+- Environment Runtime/RoomState/Core responsibility migration;
+- Threat runtime/event responsibility-aware split/absorb review and migration;
+- Signals domain migration;
+- remaining Social/Roost identities;
+- Injury domain migration;
+- Fear/Vengeance domain migration;
+- Core (`DB_Creature`, state/personality/sex/tuning responsibility review);
+- TravelNavigation responsibility-aware migration;
+- remaining Presentation/debug identities;
+- production-wide Task09-Task13 historical naming cleanup;
+- old root-file/dead-code cleanup;
+- final R6 naming/path/architecture guard;
+- R7 performance/debug/full regression/final acceptance;
+- `FINAL_REPORT.md` only after complete acceptance.
 
 ## Current blockers
 
 - Full managed build/tests require developer-local Rain World/BepInEx assemblies.
 - Final behavior/performance acceptance requires Rain World runtime.
-- Current environment cannot clone GitHub via normal network/DNS, and the attempted temporary workflow write was blocked by platform safety checks. This limits safe branch-wide type replacement, but does not block blob-identical physical moves or small individually reviewable edits.
+- Current execution environment still lacks a reliable repository-local bulk-edit + shell validation path for caller-wide C# type renames.
+
+These blockers do not prevent additional blob-identical physical moves, narrow text-only cleanup, or responsibility review.
 
 ## Recommended next run
 
-1. Re-check whether a repository-local validation path is available. If yes, finish B11 type identities by replacing all `DesertBatflyEnvironmentalExposure` / `DesertBatflyEnvironmentalProfile` callers and run R5/R6 guards before commit.
-2. If bulk caller-safe replacement remains unavailable, continue with another blob-identical physical domain move or small text-only Task09-Task13 cleanup that can be proven behavior-neutral.
-3. Continue to avoid mechanical rename/split of `DesertBatflyThreatRuntime.cs` and `DesertBatflyTravelNavigation.cs` until their responsibility boundaries are explicit.
-4. Keep `Environment/` included in all architecture guards as migration proceeds.
+1. Re-check whether a repository-local validation path has become available. If yes, finish the four pending leaf C# type identities together with all callers and run R5/R6 guards before accepting them.
+2. If bulk caller-safe replacement remains unavailable, inventory the remaining root-level `DesertBatfly*.cs` files and select only another manifest-explicit KEEP/RENAME leaf whose physical target is unambiguous.
+3. Do **not** mechanically rename/split `DesertBatflyThreatRuntime.cs` or `DesertBatflyTravelNavigation.cs`; both still require responsibility-aware migration.
+4. Continue production-wide Task09-Task13 text cleanup only where each edit is clearly non-semantic and individually reviewable.
