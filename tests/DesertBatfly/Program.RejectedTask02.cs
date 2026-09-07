@@ -42,5 +42,6 @@ internal static partial class Program
         RunTask10Guards();
         RunTask11();
         RunTask11Final();
+        RunTask11EventSemantics();
     }
 }
