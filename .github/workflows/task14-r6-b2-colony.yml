@@ -1,0 +1,75 @@
+name: Task14 R6 B2 Colony migration
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ contains(github.event.head_commit.message, '[r6-b2-colony]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+      - name: Migrate Colony domain identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in \
+            src/Creatures/DesertBatfly/DesertBatflyColonyState.cs \
+            src/Creatures/DesertBatfly/DesertBatflyColonyRuntime.cs \
+            src/Creatures/DesertBatfly/DesertBatflyColonyMigration.cs; do test -f "$f"; done
+          mkdir -p src/Creatures/DesertBatfly/Colony
+          git mv src/Creatures/DesertBatfly/DesertBatflyColonyState.cs src/Creatures/DesertBatfly/Colony/DB_ColonyState.cs
+          git mv src/Creatures/DesertBatfly/DesertBatflyColonyRuntime.cs src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
+          git mv src/Creatures/DesertBatfly/DesertBatflyColonyMigration.cs src/Creatures/DesertBatfly/Colony/DB_MigrationPolicy.cs
+          python3 - <<'PY'
+          from pathlib import Path
+          mappings={
+              'DesertBatflyColonyState':'DB_ColonyState',
+              'DesertBatflyColonyRuntime':'DB_ColonyRuntime',
+              'DesertBatflyColonyMigration':'DB_MigrationPolicy',
+          }
+          for base in (Path('src'),Path('tests'),Path('scripts')):
+              for p in base.rglob('*'):
+                  if not p.is_file() or p.suffix not in {'.cs','.sh'}: continue
+                  text=p.read_text(encoding='utf-8')
+                  new=text
+                  for old,repl in mappings.items(): new=new.replace(old,repl)
+                  if new!=text: p.write_text(new,encoding='utf-8')
+          # R5 executable retention follows the physical Colony runtime path.
+          p=Path('scripts/check-desertbatfly-r5-retention.sh')
+          text=p.read_text(encoding='utf-8').replace(
+              'src/Creatures/DesertBatfly/DB_ColonyRuntime.cs',
+              'src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs')
+          p.write_text(text,encoding='utf-8')
+          PY
+      - name: Validate behavior retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          ! grep -RIn --include='*.cs' -E 'DesertBatflyColony(State|Runtime|Migration)' src
+          grep -q 'DCBATCOLONY09<svB>' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
+          grep -q 'PayloadVersion = "V1"' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
+          grep -q 'internal static class DB_ColonyRuntime' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
+          grep -q 'internal sealed class DB_ColonyState' src/Creatures/DesertBatfly/Colony/DB_ColonyState.cs || grep -q 'internal class DB_ColonyState' src/Creatures/DesertBatfly/Colony/DB_ColonyState.cs
+          grep -q 'internal static class DB_MigrationPolicy' src/Creatures/DesertBatfly/Colony/DB_MigrationPolicy.cs
+          git diff --check
+      - name: Commit verified Colony migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/task14-r6-b2-colony.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests scripts
+          git commit -m 'R6 B2 migrate Colony domain identities'
+          git push origin HEAD:task14-r6-b1-final
