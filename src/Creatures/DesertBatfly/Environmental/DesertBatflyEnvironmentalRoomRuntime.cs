@@ -11,6 +11,10 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
     internal const int CrowdingSampleInterval = 20;
     internal const int MaxAnchors = 8;
     internal const int MinAnchorSeparationTiles = 5;
+    internal const int AdvisoryMinimumHoldTicks = 80;
+    internal const int PreparationMinimumHoldTicks = 120;
+    internal const int ShelteringMinimumHoldTicks = 180;
+    internal const int AcuteMinimumHoldTicks = 120;
 
     internal sealed class RoomState
     {
@@ -24,12 +28,16 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         internal int RecoveryDurationTicks;
         internal int LastWeatherSampleTick = int.MinValue;
         internal int LastCrowdingSampleTick = int.MinValue;
+        internal int PhaseStartTick = int.MinValue;
         internal bool AnchorsBuilt;
 
         internal RoomState(Room room)
         {
             Room = room;
         }
+
+        internal int PhaseTicks(int tick)
+            => PhaseStartTick == int.MinValue ? 0 : Mathf.Max(0, tick - PhaseStartTick);
     }
 
     private sealed class AnchorCandidate
@@ -179,9 +187,6 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         DesertBatflyEnvironmentalWeather weather = DesertBatflyEnvironmentalProfile.Classify(sample);
         DesertBatflyWeatherEcologySample phaseSample = sample;
 
-        // LightRain is deliberately weaker than Fog as a behavior profile. If both active
-        // authorized DryCycle events coexist, Fog owns the room activity/visibility profile
-        // while LightRain remains available as a compatible moisture axis below.
         if (weather == DesertBatflyEnvironmentalWeather.LightRain && state.WeatherAxes.DenseFogIntensity > 0f)
         {
             weather = DesertBatflyEnvironmentalWeather.DenseFog;
@@ -200,9 +205,10 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             state.LastWeather = weather;
             state.RecoveryStartTick = -1;
             state.RecoveryDurationTicks = 0;
-            DesertBatflyEnvironmentalPhase phase = DesertBatflyEnvironmentalProfile.ResolvePhase(
+            DesertBatflyEnvironmentalPhase candidate = DesertBatflyEnvironmentalProfile.ResolvePhase(
                 weather, phaseSample, previous, out string reason);
-            state.Context = new DesertBatflyEnvironmentalRoomContext(
+            DesertBatflyEnvironmentalPhase phase = ApplyPhaseHold(state, candidate, tick, ref reason);
+            SetContext(state, new DesertBatflyEnvironmentalRoomContext(
                 true,
                 weather,
                 phaseSample.HazardKind,
@@ -213,7 +219,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
                 phaseSample.TravelExposure,
                 phaseSample.TimeUntilDangerTicks,
                 phase,
-                reason);
+                reason), tick);
             return;
         }
 
@@ -228,22 +234,75 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         if (state.RecoveryStartTick >= 0 &&
             tick - state.RecoveryStartTick < state.RecoveryDurationTicks)
         {
-            state.Context = new DesertBatflyEnvironmentalRoomContext(
+            SetContext(state, new DesertBatflyEnvironmentalRoomContext(
                 false,
                 state.LastWeather,
                 sample.HazardKind,
                 string.Empty,
                 0f, 0f, 0f, 0f, int.MaxValue,
                 DesertBatflyEnvironmentalPhase.Recovery,
-                "staggered recovery from last authorized DryCycle weather");
+                "staggered recovery from last authorized DryCycle weather"), tick);
             return;
         }
 
         state.RecoveryStartTick = -1;
         state.RecoveryDurationTicks = 0;
         state.LastWeather = DesertBatflyEnvironmentalWeather.None;
-        state.Context = DesertBatflyEnvironmentalRoomContext.Calm;
+        SetContext(state, DesertBatflyEnvironmentalRoomContext.Calm, tick);
     }
+
+    private static DesertBatflyEnvironmentalPhase ApplyPhaseHold(
+        RoomState state,
+        DesertBatflyEnvironmentalPhase candidate,
+        int tick,
+        ref string reason)
+    {
+        DesertBatflyEnvironmentalPhase current = state.Context.Phase;
+        if (candidate == current) return current;
+        if (candidate == DesertBatflyEnvironmentalPhase.Acute ||
+            PhaseRank(candidate) > PhaseRank(current))
+            return candidate;
+        if (current is DesertBatflyEnvironmentalPhase.Calm or DesertBatflyEnvironmentalPhase.Recovery)
+            return candidate;
+
+        int hold = MinimumHoldTicks(current);
+        int elapsed = state.PhaseTicks(tick);
+        if (elapsed >= hold) return candidate;
+        reason += $"; holding {current} for hysteresis ({elapsed}/{hold})";
+        return current;
+    }
+
+    private static void SetContext(
+        RoomState state,
+        in DesertBatflyEnvironmentalRoomContext context,
+        int tick)
+    {
+        if (state.Context.Phase != context.Phase || state.PhaseStartTick == int.MinValue)
+            state.PhaseStartTick = tick;
+        state.Context = context;
+    }
+
+    private static int MinimumHoldTicks(DesertBatflyEnvironmentalPhase phase)
+        => phase switch
+        {
+            DesertBatflyEnvironmentalPhase.Advisory => AdvisoryMinimumHoldTicks,
+            DesertBatflyEnvironmentalPhase.Preparation => PreparationMinimumHoldTicks,
+            DesertBatflyEnvironmentalPhase.Sheltering => ShelteringMinimumHoldTicks,
+            DesertBatflyEnvironmentalPhase.Acute => AcuteMinimumHoldTicks,
+            _ => 0
+        };
+
+    private static int PhaseRank(DesertBatflyEnvironmentalPhase phase)
+        => phase switch
+        {
+            DesertBatflyEnvironmentalPhase.Calm => 0,
+            DesertBatflyEnvironmentalPhase.Recovery => 0,
+            DesertBatflyEnvironmentalPhase.Advisory => 1,
+            DesertBatflyEnvironmentalPhase.Preparation => 2,
+            DesertBatflyEnvironmentalPhase.Sheltering => 3,
+            DesertBatflyEnvironmentalPhase.Acute => 4,
+            _ => 0
+        };
 
     private static DesertBatflyWeatherEcologySample Reprofile(
         in DesertBatflyWeatherEcologySample aggregate,
