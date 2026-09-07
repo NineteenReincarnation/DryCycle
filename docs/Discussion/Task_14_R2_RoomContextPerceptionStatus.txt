@@ -9,7 +9,7 @@ Current status:
 1. R2 范围
 ======================================================================
 
-R2 只收敛 DesertBatfly 的 realized-room observation / perception：
+R2 收敛 DesertBatfly 的 realized-room observation / perception：
 
 - DB_RoomContext；
 - realized creatures / bats / players / weapons / thrown weapons 共享快照；
@@ -20,9 +20,9 @@ R2 只收敛 DesertBatfly 的 realized-room observation / perception：
 - Threat current cue；
 - Task12 visual signal perception；
 - irrelevant-room lazy activation；
-- 删除已经被共享 perception 正式替代的 visual detour bridge。
+- 删除已被共享 perception 正式替代的 visual detour bridge。
 
-R2 没有进入：
+R2 不进入：
 
 - DB_FrameContext；
 - DB_BehaviorArbiter / PrimaryOwner；
@@ -58,10 +58,27 @@ src/Creatures/DesertBatfly/Runtime/DB_RoomContext.cs
 - ConditionalWeakTable<Room, DB_RoomContext>；
 - 按 consumer 请求 lazy 创建；
 - RefreshIntervalTicks = 8；
-- 同一 refresh window 内多个 bat / domain 共用同一快照；
+- 同一 refresh window 内多个 bat / domain 共用同一候选快照；
 - 只缓存 observation，不拥有 Social / Threat / Environment / Travel 的领域状态；
 - 暴露 RefreshCount / CreatureScanCount / PhysicalObjectScanCount 供后续性能与 Observatory 验收；
 - species Enable / Disable 时 Reset。
+
+重要补充：
+
+低频缓存的是“候选发现”，不是“当前合法性”。
+
+因此 Bats / Players / Creatures / Weapons / ThrownWeapons 在 consumer 读取时会执行廉价实时 revalidation：
+
+- creature/player/bat 已死亡或 slatedForDeletetion -> 从当前 view 剔除；
+- object 已离开该 Room -> 从当前 view 剔除；
+- weapon 已经不再是 Weapon.Mode.Thrown -> 从 ThrownWeapons view 剔除。
+
+这样既避免每只 bat 重扫 Room，又不会因为 8-tick snapshot 把已经换房/死亡/被捡起的对象继续当成当前合法目标。
+
+原则：
+
+Candidate discovery may be cached.
+Current legality may not be cached.
 
 2.2 DB_VisibilityPolicy
 --------------------
@@ -197,7 +214,7 @@ DesertBatflySignalRuntime.TryPerceive 已直接使用：
 - DesertBatflySignalRuntime.VisualRadius 作为 Signal 自己的 range authority；
 - DB_VisibilityPolicy.EffectiveRange / CanObserve 作为共享视觉环境 policy。
 
-AlarmFlutter / DistressCall 的 close acoustic channel 完全保留，不受视觉雾缩距删除。
+AlarmFlutter / DistressCall 的 close acoustic channel完全保留，不受视觉雾缩距删除。
 
 因此不再需要第二份 signal radius 表或 private-method visual detour。
 
@@ -270,6 +287,7 @@ Room observations：
 
 DB_RoomContext
     -> Creatures / Bats / Players / Weapons / ThrownWeapons
+    -> live membership revalidation at read time
 
 Perception：
 
@@ -295,6 +313,8 @@ tests/DesertBatfly/Program.Task14R2.cs
 完成态 guard 包括：
 
 - DB_RoomContext API / bounded refresh / counters；
+- Bats / Players / ThrownWeapons view 必须执行 live prune；
+- PlayerBySlot 必须在消费时重新验证 player membership；
 - Creature / Player / Social / Signal / HeldItem / Projectile visibility channel；
 - clear-weather range 与 low-visibility range；
 - close real-projectile fallback；
@@ -366,7 +386,9 @@ F. Alarm/Distress close acoustic fallback 仍可用；
 G. 20–30 DesertBatfly room CPU / scan counters；
 H. 无 DesertBatfly 的普通房间不建 Environment anchors / Signal cache；
 I. DESERTSWARMROOM 仍可正常 spawn / hive；
-J. disable/re-enable 后 RoomContext 不跨 lifecycle 残留。
+J. disable/re-enable 后 RoomContext 不跨 lifecycle 残留；
+K. bat/player 在 8-tick refresh window 内死亡/换房时不会被旧 snapshot 继续计入；
+L. thrown weapon 在 refresh window 内被捡起/插墙后不会继续被判定为 incoming projectile。
 
 ======================================================================
 10. R2 结论
@@ -380,7 +402,8 @@ J. disable/re-enable 后 RoomContext 不跨 lifecycle 残留。
 - R2-OPEN-04 AttackSlots duplicate realized-bat enumeration；
 - R2-OPEN-05 major visibility consumer migration；
 - R2-OPEN-06 / HB-08 irrelevant-room heavy initialization；
-- duplicate Environmental visual Signal/Threat bridge debt。
+- duplicate Environmental visual Signal/Threat bridge debt；
+- cache-window stale membership legality risk。
 
 当前结论：
 
