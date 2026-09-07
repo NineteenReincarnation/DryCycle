@@ -32,7 +32,7 @@ jobs:
           }
 
           roots = [Path('src'), Path('tests'), Path('scripts')]
-          allowed_suffixes = {'.cs', '.sh', '.py'}
+          allowed_suffixes = {'.cs', '.sh', '.py', '.md'}
           changed = []
           for root in roots:
               if not root.exists():
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
 
           if git grep -n -E 'DesertBatflyEnvironmentalExposure|DesertBatflyEnvironmentalProfile|DesertBatflyEmergence|DesertBatflyDefinition' -- src tests scripts; then
-            echo 'Old leaf C# identity remains in executable source/test/script scope.' >&2
+            echo 'Old leaf C# identity remains in source/test/script scope.' >&2
             exit 1
           fi
 
