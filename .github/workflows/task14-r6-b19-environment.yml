@@ -1,0 +1,122 @@
+name: Task14 R6 B19 Environment domain migration
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b19-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Migrate Environment runtime and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git mv src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs
+          git mv src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalRoomRuntime.cs src/Creatures/DesertBatfly/Environment/DB_EnvironmentRoomRuntime.cs
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core = Path('src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalCore.cs')
+          text = core.read_text(encoding='utf-8')
+          split = text.index('internal readonly struct DB_EnvironmentExposureSample')
+          header_end = text.index('internal enum DesertBatflyEnvironmentalPhase')
+          common = text[:header_end]
+          contracts = text[:split]
+          shelter = common + text[split:]
+          Path('src/Creatures/DesertBatfly/Environment/DB_EnvironmentContracts.cs').write_text(contracts, encoding='utf-8')
+          Path('src/Creatures/DesertBatfly/Environment/DB_ShelterAnchor.cs').write_text(shelter, encoding='utf-8')
+          core.unlink()
+
+          replacements = {
+              'DesertBatflyEnvironmentalBehavior': 'DB_EnvironmentRuntime',
+              'DesertBatflyEnvironmentalRoomRuntime': 'DB_EnvironmentRoomRuntime',
+              'DesertBatflyEnvironmentalPhase': 'DB_EnvironmentPhase',
+              'DesertBatflyEnvironmentalWeather': 'DB_EnvironmentWeather',
+              'DesertBatflyEnvironmentalRoomContext': 'DB_EnvironmentContext',
+              'DesertBatflyEnvironmentalInfluence': 'DB_EnvironmentInfluence',
+              'DesertBatflyShelterAnchor': 'DB_ShelterAnchor',
+              'DesertBatflyTask13WeatherAxesSample': 'DB_WeatherAxesSample',
+          }
+          for root in (Path('src'), Path('tests'), Path('scripts')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if not path.is_file() or path.suffix not in {'.cs','.sh','.py','.md'}:
+                      continue
+                  value = path.read_text(encoding='utf-8')
+                  new = value
+                  for old, replacement in replacements.items():
+                      new = new.replace(old, replacement)
+                  if new != value:
+                      path.write_text(new, encoding='utf-8')
+          PY
+      - name: Validate Environment contracts and authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalRoomRuntime.cs
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalCore.cs
+          for p in \
+            src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs \
+            src/Creatures/DesertBatfly/Environment/DB_EnvironmentRoomRuntime.cs \
+            src/Creatures/DesertBatfly/Environment/DB_EnvironmentContracts.cs \
+            src/Creatures/DesertBatfly/Environment/DB_ShelterAnchor.cs; do test -f "$p"; done
+
+          if git grep -n -E 'DesertBatflyEnvironmentalBehavior|DesertBatflyEnvironmentalRoomRuntime|DesertBatflyEnvironmentalPhase|DesertBatflyEnvironmentalWeather|DesertBatflyEnvironmentalRoomContext|DesertBatflyEnvironmentalInfluence|DesertBatflyShelterAnchor|DesertBatflyTask13WeatherAxesSample' -- src tests scripts; then
+            echo 'Old Environment identity remains.' >&2
+            exit 1
+          fi
+
+          grep -q 'class DB_EnvironmentRuntime' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs
+          grep -q 'class DB_EnvironmentRoomRuntime' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRoomRuntime.cs
+          grep -q 'struct DB_EnvironmentContext' src/Creatures/DesertBatfly/Environment/DB_EnvironmentContracts.cs
+          grep -q 'struct DB_EnvironmentInfluence' src/Creatures/DesertBatfly/Environment/DB_EnvironmentContracts.cs
+          grep -q 'class DB_ShelterAnchor' src/Creatures/DesertBatfly/Environment/DB_ShelterAnchor.cs
+
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('src/Creatures/DesertBatfly/Environment/DB_EnvironmentContracts.cs').read_text(encoding='utf-8')
+          m = re.search(r'enum\s+DB_EnvironmentPhase\s*\{(.*?)\}', text, re.S)
+          if not m:
+              raise SystemExit('DB_EnvironmentPhase missing')
+          values = [x.strip().split('=')[0].strip() for x in m.group(1).split(',') if x.strip()]
+          expected = ['Calm','Advisory','Preparation','Sheltering','Acute','Recovery']
+          if values != expected:
+              raise SystemExit(f'Environment phase contract changed: {values}')
+          PY
+
+          # Environment cannot become a cross-room planner during R6.
+          if git grep -n -E 'LeaveRoom\(|BeginTravel\(|TravelIntent' -- src/Creatures/DesertBatfly/Environment src/Creatures/DesertBatfly/Environmental; then
+            echo 'Environment acquired forbidden cross-room travel authority.' >&2
+            exit 1
+          fi
+
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b19-environment.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B19 migrate Environment runtime and contracts [r6-b19-done]'
+          git push origin HEAD:task14-r6-b1-final
