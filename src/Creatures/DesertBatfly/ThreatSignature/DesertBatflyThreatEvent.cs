@@ -163,6 +163,12 @@ internal static class DesertBatflyThreatAdapterRegistry
         customAdapters.Clear();
     }
 
+    /// <summary>
+    /// Classifies one observation/event. The all-zero, non-projectile form is an
+    /// observation-only Current Cue query: item identity may expose potential Explosion,
+    /// Startle or Shock. Any real projectile/hit event uses evidence semantics instead,
+    /// where those dimensions require the corresponding event to have actually happened.
+    /// </summary>
     internal static DesertBatflyThreatEvidence Classify(
         PhysicalObject source,
         Creature.DamageType damageType,
@@ -171,7 +177,8 @@ internal static class DesertBatflyThreatAdapterRegistry
         bool projectileContext)
     {
         DesertBatflyThreatEvidence evidence = default;
-        ApplyBuiltIns(source, damageType, damage, stun, projectileContext, ref evidence);
+        bool cueOnly = damageType == null && damage <= 0f && stun <= 0f && !projectileContext;
+        ApplyBuiltIns(source, damageType, damage, stun, projectileContext, cueOnly, ref evidence);
         for (int i = 0; i < customAdapters.Count; i++)
         {
             try { customAdapters[i](source, damageType, damage, stun, projectileContext, ref evidence); }
@@ -247,6 +254,7 @@ internal static class DesertBatflyThreatAdapterRegistry
         float damage,
         float stun,
         bool projectileContext,
+        bool cueOnly,
         ref DesertBatflyThreatEvidence evidence)
     {
         if (source is Weapon && projectileContext)
@@ -264,21 +272,27 @@ internal static class DesertBatflyThreatAdapterRegistry
             evidence.Piercing = Mathf.Max(evidence.Piercing, Mathf.Clamp01(0.48f + Mathf.Max(0f, damage) * 0.12f));
         }
 
-        if (source is FirecrackerPlant)
-        {
-            evidence.Startle = Mathf.Max(evidence.Startle, 0.54f);
-            evidence.AreaDenial = Mathf.Max(evidence.AreaDenial, 0.06f);
-        }
-
         string typeName = source != null ? source.GetType().Name : string.Empty;
-        if (Contains(typeName, "Explosive") || Contains(typeName, "Bomb") || Contains(typeName, "Grenade"))
-        {
-            evidence.Explosion = Mathf.Max(evidence.Explosion, 0.48f);
-            evidence.AreaDenial = Mathf.Max(evidence.AreaDenial, 0.24f);
-        }
-        if (Contains(typeName, "Electric") || Contains(typeName, "Shock"))
-            evidence.Shock = Mathf.Max(evidence.Shock, 0.46f);
 
+        // Item identity belongs to Current Cue only. Merely recognizing an explosive,
+        // firecracker or electric item must never train its long-term danger mode.
+        if (cueOnly)
+        {
+            if (source is FirecrackerPlant)
+            {
+                evidence.Startle = Mathf.Max(evidence.Startle, 0.54f);
+                evidence.AreaDenial = Mathf.Max(evidence.AreaDenial, 0.06f);
+            }
+            if (Contains(typeName, "Explosive") || Contains(typeName, "Bomb") || Contains(typeName, "Grenade"))
+            {
+                evidence.Explosion = Mathf.Max(evidence.Explosion, 0.48f);
+                evidence.AreaDenial = Mathf.Max(evidence.AreaDenial, 0.24f);
+            }
+            if (Contains(typeName, "Electric") || Contains(typeName, "Shock"))
+                evidence.Shock = Mathf.Max(evidence.Shock, 0.46f);
+        }
+
+        // Persistent Shock/Explosion evidence comes from real event semantics, not names.
         if (damageType == Creature.DamageType.Blunt)
             evidence.BluntStun = Mathf.Max(evidence.BluntStun, Mathf.Clamp01(0.24f + stun / 300f));
         if (damageType == Creature.DamageType.Electric)
