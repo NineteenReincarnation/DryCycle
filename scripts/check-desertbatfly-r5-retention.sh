@@ -39,8 +39,8 @@ grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/C
 grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
 grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
 grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
-! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental
-! grep -RIn --include='*.cs' 'new TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental
+! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
+! grep -RIn --include='*.cs' 'new TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
 
 grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
 grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DesertBatflySignalRuntime.cs
