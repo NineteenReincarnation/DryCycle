@@ -30,6 +30,8 @@ internal static partial class Program
         Type integration = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", true);
         Type vengeanceBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalVengeanceBridge", true);
         Type threatBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalThreatBridge", true);
+        Type acuteBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalAcuteBridge", true);
+        Type directWitnessBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyGraphics", true);
@@ -70,10 +72,23 @@ internal static partial class Program
         MethodInfo vengeanceEnable = vengeanceBridge.GetMethod("Enable", Flags);
         MethodInfo vengeanceDisable = vengeanceBridge.GetMethod("Disable", Flags);
         Check(MethodCallsTask12(vengeanceEnable, threatBridge, "Enable") &&
-              MethodCallsTask12(vengeanceDisable, threatBridge, "Disable"),
-            "Task12 private Task11 response bridge shares the existing signal lifecycle");
+              MethodCallsTask12(vengeanceDisable, threatBridge, "Disable") &&
+              MethodCallsTask12(vengeanceEnable, acuteBridge, "Enable") &&
+              MethodCallsTask12(vengeanceDisable, acuteBridge, "Disable") &&
+              MethodCallsTask12(vengeanceEnable, directWitnessBridge, "Enable") &&
+              MethodCallsTask12(vengeanceDisable, directWitnessBridge, "Disable"),
+            "Task12 Task11-response, acute-event and direct-witness bridges share the signal lifecycle");
 
-        Check(!TypeCallsTask12Forbidden(threatBridge) && !TypeCallsTask12Forbidden(runtime) &&
+        Check(acuteBridge.GetMethod("ExplosionHook", Flags) != null &&
+              acuteBridge.GetMethod("StartleHook", Flags) != null &&
+              acuteBridge.GetMethod("MassCasualtyHook", Flags) != null &&
+              acuteBridge.GetMethod("EmitAcuteAlarm", Flags) != null,
+            "Task12 acute bridge converts real Task11 explosion/startle/casualty positions into Alarm roots");
+        Check(directWitnessBridge.GetMethod("IsDirectWitness", Flags) != null,
+            "Task12 has an explicit direct-witness gate for persistent Bond-death Grief/Trauma");
+
+        Check(!TypeCallsTask12Forbidden(threatBridge) && !TypeCallsTask12Forbidden(acuteBridge) &&
+              !TypeCallsTask12Forbidden(directWitnessBridge) && !TypeCallsTask12Forbidden(runtime) &&
               !TypeCallsTask12Forbidden(integration),
             "Task12 signal layer never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
 
@@ -108,7 +123,7 @@ internal static partial class Program
             "Task12 terminology keeps vengeance participation separate from rejected Task02 SocialRole");
 
         Console.WriteLine(
-            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, integration migration, Task11 read-only boundary, lifecycle, pipeline, graphics, vengeance terminology and anti-role guards verified.");
+            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, indirect-fear migration, accurate acute roots, direct-witness grief boundary, Task11 read-only boundary, lifecycle, pipeline, graphics, vengeance terminology and anti-role guards verified.");
     }
 
     private static bool MethodCallsTask12(MethodInfo caller, Type targetType, string targetName) =>
