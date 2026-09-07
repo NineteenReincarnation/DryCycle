@@ -59,12 +59,12 @@ internal static class DB_EventConsumers
         DesertBatfly victim = mortality.Victim;
         if (victim == null || !victim.dead) return;
 
-        // Preserve the old death cleanup order before broadcasting fear/grief. All domains
-        // now receive the same canonical Killer chosen by DB_EventHub.
+        // Generic lifecycle consumers share the canonical killer. ThreatRuntime deliberately
+        // clears its own realized state only after it has processed this same MortalityEvent,
+        // so subscriber order cannot erase counter-kill / kill evidence prematurely.
         DesertBatflySocialLife.CancelForPriority(victim, "death");
         DesertBatflySignalRuntime.Forget(victim);
         DesertBatflyColonyRuntime.ReportDeath(victim, mortality.Killer);
-        DesertBatflyThreatRuntime.Forget(victim);
         DesertBatflyEnvironmentalBehavior.Forget(victim);
 
         Creature killer = mortality.Killer;
