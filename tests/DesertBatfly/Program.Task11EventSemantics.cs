@@ -7,9 +7,9 @@ internal static partial class Program
     private static void RunTask11EventSemantics()
     {
         Type registry = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatAdapterRegistry", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatClassifier", true);
         Type evidenceType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatEvidence", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatEvidence", true);
         MethodInfo classify = registry.GetMethod("Classify", Flags);
         MethodInfo firecrackerEvent = registry.GetMethod("FirecrackerStartleEvidence", Flags);
         Check(classify != null && firecrackerEvent != null,

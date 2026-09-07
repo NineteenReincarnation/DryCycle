@@ -86,7 +86,7 @@ internal static class DesertBatflyThreatRuntime
         // to DB_EventHub and is never reconstructed from these fields.
         internal int RecentDamagePlayerSlot = -1;
         internal int RecentDamageTick = int.MinValue;
-        internal DesertBatflyThreatEvidence RecentDamageEvidence;
+        internal DB_ThreatEvidence RecentDamageEvidence;
 
         internal int FormalAggressionPlayerSlot = -1;
         internal int FormalAggressionTick = int.MinValue;
@@ -316,7 +316,7 @@ internal static class DesertBatflyThreatRuntime
 
         bool projectile = damageEvent.SourceObject is Weapon weapon &&
                           ResolvePlayer(weapon, null) == player;
-        DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.Classify(
+        DB_ThreatEvidence evidence = DB_ThreatClassifier.Classify(
             damageEvent.SourceObject,
             damageEvent.DamageType,
             damageEvent.Damage,
@@ -340,7 +340,7 @@ internal static class DesertBatflyThreatRuntime
         // generic witnessed-hit event here would train the same fact twice.
         if (damageEvent.Lethal || bat.dead || bat.slatedForDeletetion) return;
 
-        var threatEvent = new DesertBatflyThreatEvent(
+        var threatEvent = new DB_ThreatEvent(
             player,
             damageEvent.SourceObject,
             bat,
@@ -362,7 +362,7 @@ internal static class DesertBatflyThreatRuntime
         AddEvidence(
             bat,
             player,
-            DesertBatflyThreatAdapterRegistry.GrabEvidence(),
+            DB_ThreatClassifier.GrabEvidence(),
             1f,
             "player capture",
             false);
@@ -391,7 +391,7 @@ internal static class DesertBatflyThreatRuntime
                 state.FormalAggressionPlayerSlot == slot &&
                 Recent(state.FormalAggressionTick, mortalityEvent.Clock, FormalAggressionMemoryTicks);
 
-            DesertBatflyThreatEvidence killEvidence = default;
+            DB_ThreatEvidence killEvidence = default;
             if (state.RecentDamagePlayerSlot == slot &&
                 Recent(state.RecentDamageTick, mortalityEvent.Clock, RecentDamageMemoryTicks))
             {
@@ -399,13 +399,13 @@ internal static class DesertBatflyThreatRuntime
             }
 
             if (!killEvidence.Any && mortalityEvent.WasConsumed)
-                killEvidence = DesertBatflyThreatAdapterRegistry.GrabEvidence();
+                killEvidence = DB_ThreatClassifier.GrabEvidence();
 
             if (!killEvidence.Any && mortalityEvent.SourceObject != null)
             {
                 bool projectile = mortalityEvent.SourceObject is Weapon weapon &&
                                   ResolvePlayer(weapon, null) == killer;
-                killEvidence = DesertBatflyThreatAdapterRegistry.Classify(
+                killEvidence = DB_ThreatClassifier.Classify(
                     mortalityEvent.SourceObject,
                     mortalityEvent.DamageType,
                     mortalityEvent.Damage,
@@ -414,9 +414,9 @@ internal static class DesertBatflyThreatRuntime
             }
 
             if (counterKill)
-                killEvidence.Merge(DesertBatflyThreatAdapterRegistry.CounterKillEvidence());
+                killEvidence.Merge(DB_ThreatClassifier.CounterKillEvidence());
 
-            var threatEvent = new DesertBatflyThreatEvent(
+            var threatEvent = new DB_ThreatEvent(
                 killer,
                 mortalityEvent.SourceObject,
                 bat,
@@ -493,8 +493,8 @@ internal static class DesertBatflyThreatRuntime
         if (player != null && clock != int.MinValue)
             RoomFor(room).RecordExplosion(player, clock);
 
-        DesertBatflyThreatEvidence evidence =
-            DesertBatflyThreatAdapterRegistry.ExplosionEvidence(explosion);
+        DB_ThreatEvidence evidence =
+            DB_ThreatClassifier.ExplosionEvidence(explosion);
         float acuteRadius = Mathf.Max(190f, explosion.rad * 1.55f);
 
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
@@ -543,8 +543,8 @@ internal static class DesertBatflyThreatRuntime
         Vector2 position)
     {
         if (room == null) return;
-        DesertBatflyThreatEvidence evidence =
-            DesertBatflyThreatAdapterRegistry.FirecrackerStartleEvidence();
+        DB_ThreatEvidence evidence =
+            DB_ThreatClassifier.FirecrackerStartleEvidence();
         const float acuteRadius = 270f;
 
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
@@ -604,7 +604,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static void BroadcastWitnessEvidence(
-        in DesertBatflyThreatEvent threatEvent,
+        in DB_ThreatEvent threatEvent,
         float baseMultiplier)
     {
         Room room = threatEvent.Victim?.room;
@@ -643,7 +643,7 @@ internal static class DesertBatflyThreatRuntime
     private static void AddEvidence(
         DesertBatfly bat,
         Player player,
-        in DesertBatflyThreatEvidence evidence,
+        in DB_ThreatEvidence evidence,
         float multiplier,
         string reason,
         bool witness)
@@ -788,7 +788,7 @@ internal static class DesertBatflyThreatRuntime
 
         state.LastNearMissWeaponHash = hash;
         state.LastNearMissTick = clock;
-        DesertBatflyThreatEvidence evidence = DesertBatflyThreatAdapterRegistry.Classify(
+        DB_ThreatEvidence evidence = DB_ThreatClassifier.Classify(
             weapon, null, 0f, 0f, true);
         AddEvidence(bat, player, evidence, 0.28f, "projectile near miss", false);
     }
@@ -851,7 +851,7 @@ internal static class DesertBatflyThreatRuntime
             AddEvidence(
                 bat,
                 player,
-                DesertBatflyThreatAdapterRegistry.PursuitEvidence(),
+                DB_ThreatClassifier.PursuitEvidence(),
                 1f,
                 "sustained pursuit",
                 false);
@@ -939,7 +939,7 @@ internal static class DesertBatflyThreatRuntime
             AddEvidence(
                 bat,
                 player,
-                DesertBatflyThreatAdapterRegistry.RetreatEvidence(),
+                DB_ThreatClassifier.RetreatEvidence(),
                 1f,
                 "encounter retreat",
                 false);
@@ -953,7 +953,7 @@ internal static class DesertBatflyThreatRuntime
             AddEvidence(
                 bat,
                 player,
-                DesertBatflyThreatAdapterRegistry.NonAggressionEvidence(),
+                DB_ThreatClassifier.NonAggressionEvidence(),
                 1f,
                 "non-aggressive encounter",
                 false);

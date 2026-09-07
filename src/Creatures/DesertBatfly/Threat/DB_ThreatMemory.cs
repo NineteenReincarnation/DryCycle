@@ -200,7 +200,7 @@ internal static class DB_ThreatMemoryStore
     internal static void AddEvidence(
         DesertBatflyState state,
         int playerSlot,
-        in DesertBatflyThreatEvidence evidence,
+        in DB_ThreatEvidence evidence,
         float multiplier,
         int cycle)
     {

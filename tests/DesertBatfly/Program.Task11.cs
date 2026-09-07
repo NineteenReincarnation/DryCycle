@@ -17,11 +17,11 @@ internal static partial class Program
         Type storeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Type evidenceType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatEvidence", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatEvidence", true);
         Type tagType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTag", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatTag", true);
         Type adapterType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatAdapterRegistry", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatClassifier", true);
         Type runtimeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type cueType = mod.GetType(

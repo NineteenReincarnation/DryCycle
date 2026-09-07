@@ -208,8 +208,8 @@ internal static class DB_WeaponPerception
         {
             PhysicalObject held = player.grasps[i]?.grabbed;
             if (held == null) continue;
-            DesertBatflyThreatEvidence evidence =
-                DesertBatflyThreatAdapterRegistry.Classify(held, null, 0f, 0f, false);
+            DB_ThreatEvidence evidence =
+                DB_ThreatClassifier.Classify(held, null, 0f, 0f, false);
             spear |= held is Spear;
             rock |= held is Rock;
             explosive |= evidence.Explosion > 0.15f;
