@@ -318,12 +318,14 @@ internal static class DesertBatflyThreatTactics
 
     private static Player PlayerBySlot(Room room, int slot)
     {
-        if (room?.abstractRoom?.creatures == null || !DesertBatflyThreatRuntime.ValidSlot(slot))
+        if (room?.game?.Players == null || !DesertBatflyThreatRuntime.ValidSlot(slot))
             return null;
 
-        for (int i = 0; i < room.abstractRoom.creatures.Count; i++)
+        // Campaign player count is bounded (Task11 persists four slots), so this lookup
+        // stays O(players) rather than walking every creature in a 20-30 bat room.
+        for (int i = 0; i < room.game.Players.Count; i++)
         {
-            if (room.abstractRoom.creatures[i]?.realizedCreature is Player player &&
+            if (room.game.Players[i]?.realizedCreature is Player player &&
                 !player.dead && !player.slatedForDeletetion && player.room == room &&
                 DesertBatflyThreatRuntime.PlayerSlot(player) == slot)
                 return player;
