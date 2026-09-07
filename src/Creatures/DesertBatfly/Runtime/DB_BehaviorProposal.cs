@@ -61,7 +61,9 @@ internal enum DB_SpecialPhysicsOwner
     Shortcut,
     Emergence,
     CombatAttach,
-    CombatInterfere
+    CombatInterfere,
+    NativeBurrow,
+    NativeChain
 }
 
 internal readonly struct DB_BehaviorProposal

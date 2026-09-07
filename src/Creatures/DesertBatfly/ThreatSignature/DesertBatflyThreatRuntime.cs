@@ -1012,7 +1012,7 @@ internal static class DesertBatflyThreatRuntime
                 {
                     bat.DesertAI.CancelAttack();
                     Vector2 away = Custom.DirVec(playerCenter, bat.mainBodyChunk.pos);
-                    bat.AI.localGoal = bat.mainBodyChunk.pos + away * 95f;
+                    DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, bat.mainBodyChunk.pos + away * 95f);
                     state.EvadeTarget = bat.AI.localGoal;
                     state.ModifierReason = "learned counter-kill caution";
                     state.AttackGeometryAdjustment = "new harassment attempt abandoned";
@@ -1024,7 +1024,7 @@ internal static class DesertBatflyThreatRuntime
                 Vector2 offset = currentOffset.normalized *
                     Mathf.Max(currentOffset.magnitude, 135f) * scale;
                 offset.y *= 0.72f;
-                bat.AI.localGoal = playerCenter + offset;
+                DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, playerCenter + offset);
                 state.ModifierReason = "learned ranged threat";
                 state.AttackGeometryAdjustment = "observe radius increased";
                 break;
@@ -1039,8 +1039,8 @@ internal static class DesertBatflyThreatRuntime
                     Mathf.Clamp01(projectileRisk + counterRisk * 0.35f));
                 Vector2 approachDir = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
                 Vector2 perpendicular = new Vector2(-approachDir.y, approachDir.x) * side;
-                bat.AI.localGoal = playerCenter +
-                    Vector2.up * Mathf.Lerp(92f, 125f, caution) + perpendicular * lateral;
+                DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, playerCenter +
+                    Vector2.up * Mathf.Lerp(92f, 125f, caution) + perpendicular * lateral);
                 state.ModifierReason = "learned side approach";
                 state.AttackGeometryAdjustment = "frontal approach reduced";
                 break;
@@ -1048,7 +1048,7 @@ internal static class DesertBatflyThreatRuntime
 
             case DesertBatflyAI.Activity.Circle:
             {
-                bat.AI.localGoal = playerCenter + currentOffset * (1f + caution * 0.55f);
+                DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, playerCenter + currentOffset * (1f + caution * 0.55f));
                 state.ModifierReason = "learned circle spacing";
                 state.AttackGeometryAdjustment = "circle radius increased";
                 break;
@@ -1061,7 +1061,7 @@ internal static class DesertBatflyThreatRuntime
                     float side = StableSide(bat, slot);
                     Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
                     Vector2 perpendicular = new Vector2(-direction.y, direction.x) * side;
-                    bat.AI.localGoal += perpendicular * Mathf.Lerp(12f, 48f, caution);
+                    DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, bat.AI.localGoal + (perpendicular * Mathf.Lerp(12f, 48f, caution)));
                     state.ModifierReason = "learned feint geometry";
                     state.AttackGeometryAdjustment = "fake dive shifted laterally";
                 }
@@ -1073,7 +1073,7 @@ internal static class DesertBatflyThreatRuntime
                 float side = StableSide(bat, slot);
                 Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
                 Vector2 perpendicular = new Vector2(-direction.y, direction.x) * side;
-                bat.AI.localGoal += perpendicular * Mathf.Lerp(8f, 62f, caution);
+                DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, bat.AI.localGoal + (perpendicular * Mathf.Lerp(8f, 62f, caution)));
                 state.ModifierReason = "learned dive geometry";
                 state.AttackGeometryAdjustment = "straight dive reduced";
                 if (!extremeVengeance && state.PreviousMode != DesertBatflyAI.Activity.Dive &&
@@ -1082,7 +1082,7 @@ internal static class DesertBatflyThreatRuntime
                     bat.DesertAI.CancelAttack();
                     Vector2 evade = bat.mainBodyChunk.pos +
                         Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 100f + perpendicular * 55f;
-                    bat.AI.localGoal = evade;
+                    DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, evade);
                     state.EvadeTarget = evade;
                     state.ModifierReason = "learned attack abort";
                     state.AttackGeometryAdjustment = "dive aborted after threat assessment";
@@ -1102,7 +1102,7 @@ internal static class DesertBatflyThreatRuntime
                     bat.DesertAI.CancelAttack();
                     Vector2 evade = bat.mainBodyChunk.pos +
                         Custom.DirVec(playerCenter, bat.mainBodyChunk.pos) * 110f;
-                    bat.AI.localGoal = evade;
+                    DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, evade);
                     state.EvadeTarget = evade;
                     state.ModifierReason = "learned close-range capture risk";
                     state.AttackGeometryAdjustment = "attach aborted";
@@ -1115,7 +1115,7 @@ internal static class DesertBatflyThreatRuntime
                 float side = StableSide(bat, slot);
                 Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
                 Vector2 perpendicular = new Vector2(-direction.y, direction.x) * side;
-                bat.AI.localGoal += perpendicular * Mathf.Lerp(6f, 38f, caution);
+                DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, bat.AI.localGoal + (perpendicular * Mathf.Lerp(6f, 38f, caution)));
                 state.ModifierReason = "retaliation keeps learned geometry";
                 state.AttackGeometryAdjustment = "retaliation charge shifted laterally";
                 break;

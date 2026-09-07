@@ -589,7 +589,7 @@ internal static class DesertBatflyEnvironmentalBehavior
         DB_BehaviorOwner owner = influence.HardSurvival
             ? DB_BehaviorOwner.EnvironmentHardSurvival
             : DB_BehaviorOwner.EnvironmentLocalSurvival;
-        DB_FlightMotor.TrySteer(
+        DB_FlightMotor.TryGuideNative(
             bat,
             owner,
             shelterPoint,

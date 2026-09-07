@@ -457,6 +457,8 @@ internal static class DB_FrameContextRuntime
         if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;
         if (bat.DesertAI?.Mode == DesertBatflyAI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;
         if (bat.DesertAI?.Mode == DesertBatflyAI.Activity.Interfere) return DB_SpecialPhysicsOwner.CombatInterfere;
+        if (bat.AI?.behavior == FlyAI.Behavior.Burrow) return DB_SpecialPhysicsOwner.NativeBurrow;
+        if (bat.AI?.behavior == FlyAI.Behavior.Chain) return DB_SpecialPhysicsOwner.NativeChain;
         return DB_SpecialPhysicsOwner.None;
     }
 }

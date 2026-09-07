@@ -1061,14 +1061,12 @@ internal static class DesertBatflySocialLife
             speed = Mathf.Min(speed, 4.8f);
         }
 
-        bat.Injury.NominalFlightSpeed = speed;
         bat.burrowOrHangSpot = null;
         if (bat.AI.behavior != FlyAI.Behavior.Idle)
             bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
         bat.AI.followingDijkstraMap = -1;
         bat.movMode = Fly.MovementMode.BatFlight;
-        bat.AI.localGoal = goal;
-        return true;
+        return DB_FlightMotor.TryGuideNative(bat, DB_BehaviorOwner.Social, goal, speed);
     }
 
     private static bool Obstructed(Room room, Vector2 point)

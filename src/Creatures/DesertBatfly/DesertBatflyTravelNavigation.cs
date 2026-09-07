@@ -718,8 +718,8 @@ internal static class DesertBatflyTravelNavigation
         if (intent.RefugeGoalRefresh > 0) return true;
         intent.RefugeGoalRefresh = RefugeGoalRefreshTicks;
 
-        // Prefer an authored/native abstract node. This is the same creature-specific
-        // Dijkstra map FlyAI already uses for exits/dens/hives; no custom tile path exists.
+        // Prefer an authored/native abstract node. Route planning remains Task09-era native
+        // Dijkstra semantics; R4 only centralizes the realized localGoal write.
         if (intent.RefugeNode >= 0 && bat.room.abstractRoom?.nodes != null &&
             intent.RefugeNode < bat.room.abstractRoom.nodes.Length)
         {
@@ -731,20 +731,19 @@ internal static class DesertBatflyTravelNavigation
                 if (mapped >= 0)
                 {
                     bat.AI.followingDijkstraMap = mapped;
-                    bat.AI.localGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, mapped);
+                    Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, mapped);
+                    DB_FlightMotor.TryGuideNative(bat, DB_BehaviorOwner.Travel, nextGoal);
                     intent.StatusReason = "holding refuge via native den/hive Dijkstra";
                     return true;
                 }
             }
         }
 
-        // Geometry-only refuge: low-cadence high-level nudge toward the cached covered
-        // point. FlyAI still performs the actual motion; body velocity is never written.
         if (DesertBatflyRefuge.TryGetKnownShelterPoint(bat.room, out Vector2 shelterPoint))
         {
             if (Vector2.Distance(bat.mainBodyChunk.pos, shelterPoint) > 55f &&
                 Vector2.Distance(bat.AI.localGoal, shelterPoint) > 45f)
-                bat.AI.localGoal = shelterPoint;
+                DB_FlightMotor.TryGuideNative(bat, DB_BehaviorOwner.Travel, shelterPoint);
             intent.StatusReason = "holding geometry refuge near covered point";
         }
         else

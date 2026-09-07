@@ -8,41 +8,66 @@ internal static partial class Program
         Type motor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
         Type fog = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FogGoalModifier", true);
         Type owner = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorOwner", true);
+        Type special = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SpecialPhysicsOwner", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type injury = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyInjury", true);
         Type creature = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalBehavior", true);
+        Type survival = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTactics", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);
+        Type frame = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
 
         Check(motor.GetMethod("Reset", Flags) != null &&
               motor.GetMethod("Forget", Flags) != null &&
               motor.GetMethod("TrySteer", Flags) != null &&
+              motor.GetMethod("TryGuideNative", Flags) != null &&
+              motor.GetMethod("TryRetarget", Flags) != null &&
               motor.GetMethod("ApplyPostPhysics", Flags) != null &&
               motor.GetMethod("TryGetIntent", Flags) != null,
-            "Task14 R4 FlightMotor exposes explicit lifecycle, steer and final injury-pass surfaces");
+            "Task14 R4 FlightMotor exposes active steer, native guide, same-owner retarget and final modifier surfaces");
         Check(fog.GetMethod("ModifyGoal", Flags) != null &&
               fog.GetMethod("Reset", Flags) != null && fog.GetMethod("Forget", Flags) != null,
             "Task14 R4 Fog uncertainty is an explicit goal modifier with lifecycle ownership");
         Check(MethodCallOffset(motor.GetMethod("TrySteer", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
-              MethodCallOffset(motor.GetMethod("TrySteer", Flags), fog, "ModifyGoal") >= 0,
-            "Task14 R4 FlightMotor requires same-tick owner and applies Fog before steering");
+              MethodCallOffset(motor.GetMethod("TryGuideNative", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
+              MethodCallOffset(motor.GetMethod("TryRetarget", Flags), arbiter, "IsPrimaryOwner") >= 0,
+            "all R4 FlightMotor write surfaces require the same-tick PrimaryOwner");
         Check(injury.GetField("NominalFlightSpeed", Flags) == null &&
               injury.GetMethod("ApplyFlight", Flags) == null &&
               injury.GetMethod("ModifyFlight", Flags) != null,
-            "Task14 R4 Injury is a pure flight modifier rather than nominal-speed/final-controller owner");
+            "Task14 R4 Injury stays a pure flight modifier");
         Check(MethodCallOffset(creature.GetMethod("Update", Flags), motor, "ApplyPostPhysics") >= 0,
-            "Task14 R4 creature final flight modifier passes through DB_FlightMotor");
+            "Task14 R4 creature final injury pass goes through DB_FlightMotor");
         Check(MethodCallOffset(ai.GetMethod("SteerOwned", Flags), motor, "TrySteer") >= 0 &&
               MethodCallOffset(ai.GetMethod("TryDriveRecoveryHive", Flags), motor, "TrySteer") >= 0,
-            "Task14 R4 core AI and InjuryRecovery submit ordinary steering through FlightMotor");
-        Check(MethodCallOffset(environment.GetMethod("ApplyLocalBehavior", Flags), motor, "TrySteer") >= 0,
-            "Task14 R4 Environment submits shelter goal to FlightMotor instead of writing localGoal directly");
+            "core species steering and InjuryRecovery use FlightMotor");
+        Check(MethodCallOffset(environment.GetMethod("ApplyLocalBehavior", Flags), motor, "TryGuideNative") >= 0,
+            "Environment shelter navigation preserves native flight while centralizing its goal write");
+        Check(MethodCallOffset(social.GetMethod("SocialSteer", Flags), motor, "TryGuideNative") >= 0,
+            "Social goal submission goes through FlightMotor native guidance");
+        Check(MethodCallOffset(vengeance.GetMethod("ForceFlight", Flags), motor, "TrySteer") >= 0,
+            "Vengeance active velocity request goes through FlightMotor");
+        Check(MethodCallOffset(tactics.GetMethod("ApplyProjectileEvadeOwned", Flags), motor, "TryGuideNative") >= 0,
+            "Projectile evade goal/nominal speed goes through FlightMotor");
+        Check(MethodCallOffset(threat.GetMethod("ApplyTacticalAdjustment", Flags), motor, "TryRetarget") >= 0,
+            "Threat learned geometry can only retarget the existing Combat motor intent");
+        Check(MethodCallOffset(travel.GetMethod("HoldAtRefuge", Flags), motor, "TryGuideNative") >= 0,
+            "Travel refuge holding centralizes realized localGoal writes through FlightMotor");
+        Check(MethodCallOffset(survival.GetMethod("ApplyNativeHomeAndBurrow", Flags), motor, "TryGuideNative") >= 0,
+            "same-room environmental Home retreat uses FlightMotor while native Burrow stays special physics");
+        Check(Enum.IsDefined(special, "NativeBurrow") && Enum.IsDefined(special, "NativeChain"),
+            "Task14 R4 explicitly classifies native Burrow and Chain as special-physics owners");
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("Disable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
-            "Task14 R4 FlightMotor/Fog transient state follows species lifecycle");
+            "FlightMotor/Fog transient state follows species lifecycle");
 
-        Console.WriteLine("Task14 R4 batch1: FlightMotor foundation, Injury Dijkstra semantics and Fog goal modifier are code-migrated; remaining domain steering and Combat responsibility split stay open.");
+        Console.WriteLine("Task14 R4 B2: ordinary domain goal writers are centralized through FlightMotor; Combat responsibility extraction remains open.");
     }
 }

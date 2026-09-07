@@ -1576,15 +1576,6 @@ internal static class DesertBatflyIntimidation
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
             return;
 
-        bat.LoseAllGrasps();
-        bat.burrowOrHangSpot = null;
-        if (bat.AI.behavior == FlyAI.Behavior.Chain)
-            bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
-        else
-            bat.AI.behavior = FlyAI.Behavior.Idle;
-        bat.AI.followingDijkstraMap = -1;
-        bat.movMode = Fly.MovementMode.BatFlight;
-
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
         Vector2 probe = bat.mainBodyChunk.pos + direction * 25f;
         if (bat.room.GetTile(probe).Solid ||
@@ -1594,11 +1585,11 @@ internal static class DesertBatflyIntimidation
             speed = Mathf.Min(speed, 7f);
         }
 
-        bat.Injury.NominalFlightSpeed = speed;
-        bat.AI.localGoal = goal;
-        bat.mainBodyChunk.vel = Vector2.Lerp(
-            bat.mainBodyChunk.vel,
-            Custom.DirVec(bat.mainBodyChunk.pos, goal) * speed,
-            0.28f);
+        DB_FlightMotor.TrySteer(
+            bat,
+            DB_BehaviorOwner.Vengeance,
+            goal,
+            speed,
+            response: 0.28f);
     }
 }

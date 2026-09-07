@@ -60,36 +60,8 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
 
     private static void UpdateHook(EnvironmentalUpdateOrig orig, DesertBatfly bat)
     {
-        if (bat?.AI == null || bat.DesertAI == null)
-        {
-            orig(bat);
-            return;
-        }
-
-        bool preserveHigherPriorityGoal = HigherPriorityOwnsLocalGoal(bat);
-        Vector2 savedGoal = bat.AI.localGoal;
-        int savedMap = bat.AI.followingDijkstraMap;
-        int savedLeaveRoom = bat.AI.leaveRoomDijkstra;
-
-        // Task13 still updates its room/individual influence and debug state so recovery
-        // and weather bookkeeping do not freeze during a threat/injury frame. It may not,
-        // however, steal the local goal chosen by the higher-priority owner.
         orig(bat);
-
-        // Moisture is physiological bookkeeping rather than movement ownership, so a
-        // higher-priority threat/travel frame does not erase rain that is physically
-        // touching the bat. Primary LightRain and HeavyRain are handled inside Behavior;
-        // this path exists only when another compatible weather owns the room profile.
         ApplySecondaryLightRainMoisture(bat);
-
-        if (preserveHigherPriorityGoal)
-        {
-            bat.AI.localGoal = savedGoal;
-            bat.AI.followingDijkstraMap = savedMap;
-            bat.AI.leaveRoomDijkstra = savedLeaveRoom;
-            return;
-        }
-
         ApplyNativeHomeAndBurrow(bat);
     }
 
@@ -158,9 +130,13 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
     private static void ApplyNativeHomeAndBurrow(DesertBatfly bat)
     {
         if (bat?.room?.aimap == null || bat.AI == null || bat.dead || !bat.Consious ||
-            bat.inShortcut || bat.Emergence?.Active == true ||
-            HigherPriorityOwnsLocalGoal(bat))
+            bat.inShortcut || bat.Emergence?.Active == true)
             return;
+        if (!DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution ownership) ||
+            ownership.PrimaryOwner is not (
+                DB_BehaviorOwner.EnvironmentHardSurvival or DB_BehaviorOwner.EnvironmentLocalSurvival))
+            return;
+        DB_BehaviorOwner owner = ownership.PrimaryOwner;
         if (!DesertBatflyEnvironmentalBehavior.TryGetInfluence(bat, out DesertBatflyEnvironmentalInfluence influence))
             return;
         if (!ShouldSeekHome(influence) && !ShouldBurrow(influence)) return;
@@ -202,7 +178,8 @@ internal static class DesertBatflyEnvironmentalSurvivalBridge
         if (influence.HardSurvival) bat.DesertAI.CancelAttack();
         bat.AI.leaveRoomDijkstra = -1;
         bat.AI.followingDijkstraMap = bestMap;
-        bat.AI.localGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);
+        Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);
+        DB_FlightMotor.TryGuideNative(bat, owner, nextGoal);
         bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.10f : 0.35f);
     }
 }

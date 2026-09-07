@@ -88,6 +88,59 @@ internal static class DB_FlightMotor
     }
 
     /// <summary>
+    /// Owner-validated goal submission that deliberately leaves velocity production to Rain World
+    /// native Fly physics. This preserves legacy Social/Travel/projectile behavior while making
+    /// DB_FlightMotor the single Desert Batfly localGoal write boundary.
+    /// </summary>
+    internal static bool TryGuideNative(
+        DesertBatfly bat,
+        DB_BehaviorOwner owner,
+        Vector2 goal,
+        float nominalSpeed = 0f)
+    {
+        if (bat?.room == null || bat.AI == null || bat.mainBodyChunk == null ||
+            bat.dead || !bat.Consious || bat.inShortcut || bat.Emergence?.Active == true ||
+            bat.grabbedBy.Count > 0 || !DB_BehaviorArbiter.IsPrimaryOwner(bat, owner))
+            return false;
+
+        if (DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution) &&
+            resolution.SpecialPhysicsOwner != DB_SpecialPhysicsOwner.None)
+            return false;
+
+        goal = DB_FogGoalModifier.ModifyGoal(bat, owner, goal);
+        bat.AI.localGoal = goal;
+
+        State state = states.GetOrCreateValue(bat);
+        state.Clock = bat.room.game?.clock ?? int.MinValue;
+        state.Owner = owner;
+        state.Goal = goal;
+        state.NominalSpeed = Mathf.Max(0f, nominalSpeed);
+        return true;
+    }
+
+    /// <summary>
+    /// Same-owner tactical goal adjustment after an owner has already submitted its base intent.
+    /// It never changes ownership or injects a second velocity controller.
+    /// </summary>
+    internal static bool TryRetarget(DesertBatfly bat, DB_BehaviorOwner owner, Vector2 goal)
+    {
+        if (bat?.room == null || bat.AI == null ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, owner))
+            return false;
+        int clock = bat.room.game?.clock ?? int.MinValue;
+        if (!states.TryGetValue(bat, out State state) || state.Clock != clock || state.Owner != owner)
+            return false;
+        if (DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution) &&
+            resolution.SpecialPhysicsOwner != DB_SpecialPhysicsOwner.None)
+            return false;
+
+        goal = DB_FogGoalModifier.ModifyGoal(bat, owner, goal);
+        bat.AI.localGoal = goal;
+        state.Goal = goal;
+        return true;
+    }
+
+    /// <summary>
     /// Final R4 injury-flight pass. This does not choose a goal; it only modifies the velocity
     /// produced by the selected owner/native Fly physics using the pure Injury modifier math.
     /// </summary>

@@ -1,133 +1,94 @@
 Desert Batfly Task 14 — R4 FlightMotor / AI Responsibility Split Status
-Revision: R4-B1 / 2026-09-07
+Revision: R4-B2 / 2026-09-07
 Branch: task14-r4-flightmotor
 Base: R3 code-side closed at a2260b110af22f84317c90d8dcd7ec6ec128a67c
-Status: 【R4 已开始 / Batch 1 代码迁移】
+Status: 【R4 进行中 / B2 ordinary goal writer convergence】
 
 ======================================================================
-1. 本批范围
+1. 已完成
 ======================================================================
-
-R4-B1 只处理：
-
-1. 建立 DB_FlightMotor；
-2. 将 DesertBatflyAI.SteerOwned 收敛到 FlightMotor；
-3. 修复 InjuryRecovery Hive Dijkstra input semantics；
-4. 将 Injury final flight pass 从 Injury controller 迁到 FlightMotor；
-5. 将 Fog/DenseFog 的稳定短期 goal error 从 Environment direct localGoal 写入迁为 motor 前 goal modifier；
-6. 建立 lifecycle 与 architecture regression guard。
-
-本批不提前做：
-
-- R5 internal bridge debt removal；
-- R6 全量 rename / move；
-- Combat 全状态机迁出 DesertBatflyAI；
-- Travel/Social/Vengeance 所有 direct steering 的最终迁移；
-- Rain World live validation。
-
-======================================================================
-2. DB_FlightMotor
-======================================================================
-
-职责：
-
-- same-tick PrimaryOwner guard；
-- 接收 owner / goal / nominalSpeed；
-- Fog goal modifier；
-- ordinary BatFlight intent preparation；
-- localGoal intent；
-- 单次 velocity request；
-- final Injury flight modifier pass；
-- transient per-frame intent debug state。
-
-明确不负责：
-
-- world route planning；
-- Behavior arbitration；
-- terrain bypass；
-- teleport；
-- fixed Y；
-- special Attach/Interfere/Grasp/Shortcut/Emergence physics。
-
-======================================================================
-3. Injury Dijkstra fix
-======================================================================
-
-旧实现：
-
-ProgressLocalGoalAlongDijkstraMap(mainBodyChunk.pos, map)
 
 R4-B1：
+- DB_FlightMotor foundation；
+- InjuryRecovery Dijkstra localGoal progression fix；
+- Injury final flight modifier ownership moved to motor；
+- DB_FogGoalModifier；
+- core AI ordinary SteerOwned -> FlightMotor。
 
-- 使用 FlyAI.localGoal 作为 progression input；
-- localGoal 无效时仅做一次 current-position seed；
-- 后续推进遵守 native localGoal -> next localGoal 语义；
-- preserveDijkstra=true，FlightMotor 不清除 recovery map。
-
-目标是消除 body-position 每帧重置造成的 short-step jitter / 狭窄地形反复切换风险。
-
-======================================================================
-4. Injury flight responsibility
-======================================================================
-
-DesertBatflyInjury 继续拥有：
-
-- ForwardControl；
-- TurnControl；
-- LiftControl；
-- AccelerationControl；
-- WingBias；
-- ModifyFlight(previous, requested, nominalSpeed)。
-
-不再拥有：
-
-- NominalFlightSpeed runtime intent；
-- ApplyFlight final controller。
-
-最终 flight pass 改由 DB_FlightMotor.ApplyPostPhysics 调用纯 Injury modifier。
+R4-B2：
+- DB_FlightMotor.TryGuideNative：只提交 owner-validated localGoal + nominal speed，保留 Rain World native Fly physics；
+- DB_FlightMotor.TryRetarget：Threat 等 modifier 只能调整同 owner、同 tick 已存在 motor intent；
+- Social localGoal writer -> FlightMotor；
+- Travel refuge localGoal writer -> FlightMotor；
+- Vengeance ForceFlight -> FlightMotor；
+- immediate projectile evade goal -> FlightMotor；
+- Threat learned Combat geometry -> FlightMotor retarget；
+- Environment shelter goal恢复为 goal-only native guidance，避免 B1 意外把旧 goal-only 行为升级成第二个主动速度控制；
+- Environmental same-room Home Dijkstra -> FlightMotor；
+- SurvivalBridge 不再 save/orig/restore localGoal；
+- Native Burrow / Native Chain 被显式标记为 special-physics owner。
 
 ======================================================================
-5. Fog goal modifier
+2. R4 movement boundary
 ======================================================================
 
-旧 Environment ApplyLocalBehavior：
+普通 Desert Batfly localGoal 的目标边界：
 
-- 维护 FogGoalOffset；
-- 直接改 goal；
-- 直接写 FlyAI.localGoal。
+    domain decision / executor
+        -> DB_FlightMotor.TrySteer / TryGuideNative / TryRetarget
+        -> FlyAI.localGoal
+        -> Rain World native collision / Fly physics
+        -> DB_FlightMotor.ApplyPostPhysics
+        -> Injury.ModifyFlight
 
-R4-B1：
+TrySteer：用于旧行为本来就主动请求 velocity 的 owner，例如 Combat/Vengeance。
+TryGuideNative：用于旧行为只提交 localGoal 的 owner，例如 Social/Travel/Environment/projectile evade。
+TryRetarget：用于 Threat learned tactics 这类 modifier；不得改变 PrimaryOwner。
 
-- DB_FogGoalModifier 独立维护稳定 offset；
-- Fog/DenseFog authority 仍来自 Task13 已批准的 DryCycle EnvironmentInfluence；
-- 保持约 90+stable bucket 的短期稳定误差；
-- 距离接近时继续 fade；
-- modifier 自身不写 localGoal / velocity；
-- DB_FlightMotor 在提交 environment goal 前调用 modifier。
-
-当前为 behavior-preserving migration，不扩大 Fog 对其他 owner 的影响范围。
-
-======================================================================
-6. 当前仍 OPEN
-======================================================================
-
-R4-OPEN-01 — Travel / Social / Vengeance / other normal steering migrate to FlightMotor.
-R4-OPEN-02 — Combat state/motivation/contact responsibility split out of DesertBatflyAI.
-R4-OPEN-03 — audit every direct localGoal / ordinary velocity writer and classify special physics exceptions.
-R4-OPEN-04 — Observatory expose FlightMotor intent + nominal speed + modifier result.
-R4-OPEN-05 — managed compile/integration and Rain World live scenarios deferred to final validation stage per project decision.
+特殊物理继续允许绕过普通 motor：
+- Creature physics / external grasp；
+- Shortcut；
+- Emergence；
+- Combat Attach；
+- Combat Interfere；
+- native Burrow；
+- native Chain；
+- 瞬时 hit/collision/retaliation impulse。
 
 ======================================================================
-7. R4 完成条件
+3. 行为保持说明
 ======================================================================
 
-R4 只有在：
+B2 不把所有 owner 强制改成同一种飞法。
 
-- 普通飞行只通过 DB_FlightMotor；
+- Social 原来只写 localGoal -> 继续只提交 native goal；
+- Travel refuge 原来只写 localGoal/Dijkstra -> 继续 native guidance；
+- projectile evade 原来只写 localGoal + nominal injury speed -> 继续 native guidance；
+- Environment 原来只写 shelter localGoal -> 恢复为 goal-only guidance；
+- Vengeance 原来会主动 Lerp velocity -> 继续 active TrySteer；
+- Threat 仍只改变“怎么打”的几何，不获得 locomotion owner。
+
+======================================================================
+4. 当前仍 OPEN
+======================================================================
+
+R4-OPEN-01 — Combat state/motivation/contact responsibilities split out of DesertBatflyAI.
+R4-OPEN-02 — final source audit of every localGoal / sustained velocity writer after Combat extraction.
+R4-OPEN-03 — Observatory expose FlightMotor owner/goal/nominal speed and special-physics boundary.
+R4-OPEN-04 — managed compile/integration and Rain World live scenarios deferred to final validation stage per project decision.
+
+======================================================================
+5. R4 完成条件
+======================================================================
+
+R4 代码侧完成要求：
+- 普通飞行 localGoal 只由 DB_FlightMotor 写；
 - Injury 只做 modifier；
 - Fog 只做 goal modifier；
-- Combat responsibility 已从旧 AI 拆出；
-- special physics owner 与 ordinary motor 边界完整；
-- source/managed regressions 通过；
+- Threat 只能 same-owner retarget；
+- Combat responsibility 从旧 AI 拆出；
+- special physics owner 完整；
+- Observatory 显示 motor intent；
+- source architecture regressions 通过。
 
-后才能标记代码侧完成。
+Rain World live scenarios 统一留到最终重构验收阶段。

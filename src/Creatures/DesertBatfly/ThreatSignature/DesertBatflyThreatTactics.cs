@@ -136,14 +136,15 @@ internal static class DesertBatflyThreatTactics
             bat.AI.ChangeBehavior(FlyAI.Behavior.Idle);
         bat.AI.followingDijkstraMap = -1;
         bat.movMode = Fly.MovementMode.BatFlight;
-        bat.AI.localGoal = evade;
-        bat.Injury.NominalFlightSpeed = Mathf.Max(bat.Injury.NominalFlightSpeed, 9f);
+        if (!DB_FlightMotor.TryGuideNative(
+                bat, DB_BehaviorOwner.ImmediateProjectileEvade, evade, 9f))
+            return false;
         DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateProjectileEvade");
         TraceAdjustment(
             bat,
             "ThreatEvadeStarted",
             evade,
-            "real projectile trajectory owns this local goal; native Fly locomotion executes the dodge");
+            "real projectile trajectory owns this motor goal; Rain World native Fly locomotion executes the dodge");
         return true;
     }
 
