@@ -96,7 +96,8 @@ internal static class DB_WeaponPerception
         for (int i = 0; i < weapons.Count; i++)
         {
             Weapon weapon = weapons[i];
-            if (weapon == null || weapon.firstChunk == null || weapon.thrownBy == observer)
+            if (weapon == null || weapon.slatedForDeletetion || weapon.firstChunk == null ||
+                weapon.mode != Weapon.Mode.Thrown || weapon.thrownBy == observer)
                 continue;
 
             Creature instigator = ResolveInstigator(weapon);
@@ -152,8 +153,9 @@ internal static class DB_WeaponPerception
         for (int i = 0; i < weapons.Count; i++)
         {
             Weapon weapon = weapons[i];
-            if (weapon is not Spear || weapon.firstChunk == null || weapon.grabbedBy == null ||
-                weapon.grabbedBy.Count == 0 || weapon.grabbedBy[0]?.grabber == observer)
+            if (weapon is not Spear || weapon.slatedForDeletetion || weapon.firstChunk == null ||
+                weapon.grabbedBy == null || weapon.grabbedBy.Count == 0 ||
+                weapon.grabbedBy[0]?.grabber == observer)
                 continue;
 
             Vector2 movement = weapon.firstChunk.pos - weapon.firstChunk.lastPos;
