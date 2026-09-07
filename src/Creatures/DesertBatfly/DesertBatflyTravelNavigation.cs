@@ -221,8 +221,8 @@ internal static class DesertBatflyTravelNavigation
     {
         if (!ValidCreature(creature) || string.IsNullOrWhiteSpace(destinationRoom) || !route.Valid)
             return;
-        DesertBatflyColonyRuntime.EnsureIndividualOwnership(creature);
-        DesertBatflyColonyRuntime.IndividualRecord record = DesertBatflyColonyRuntime.RecordFor(creature);
+        DB_ColonyRuntime.EnsureIndividualOwnership(creature);
+        DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature);
         intents[Key(creature.ID)] = new TravelIntent(
             creature, DesertBatflyTravelPurpose.ColonyMigration, record?.CurrentColony,
             destinationRoom, route, departureDelay, DesertBatflyWeatherEcologySample.None);
@@ -369,15 +369,15 @@ internal static class DesertBatflyTravelNavigation
         CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
         if (template == null) return;
 
-        List<DesertBatflyColonyState> colonies = new();
-        foreach (DesertBatflyColonyState colony in DesertBatflyColonyRuntime.Colonies)
+        List<DB_ColonyState> colonies = new();
+        foreach (DB_ColonyState colony in DB_ColonyRuntime.Colonies)
             if (colony != null && string.Equals(colony.RegionName, world.region.name, StringComparison.OrdinalIgnoreCase))
                 colonies.Add(colony);
 
         for (int c = 0; c < colonies.Count; c++)
         {
-            DesertBatflyColonyState colony = colonies[c];
-            AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, colony.RoomName);
+            DB_ColonyState colony = colonies[c];
+            AbstractRoom home = DB_ColonyRuntime.FindRoom(world, colony.RoomName);
             if (home == null) continue;
             DesertBatflyWeatherEcologySample hazard = DesertBatflyWeatherEcology.Sample(world, home);
             DesertBatflyEnvironmentalWeather environmentalWeather =
@@ -405,20 +405,20 @@ internal static class DesertBatflyTravelNavigation
 
             if (!DesertBatflyRefuge.TryFindEmergencyRefuge(
                     world, home, template, hazard, 1f, colony.LastSuccessfulRefuge,
-                    DesertBatflyColonyRuntime.PredatorRisk, DesertBatflyColonyRuntime.RefugeCrowding,
+                    DB_ColonyRuntime.PredatorRisk, DB_ColonyRuntime.RefugeCrowding,
                     out DesertBatflyRefugeTarget sharedRefuge))
                 continue;
 
             AbstractRoom sharedRefugeRoom = world.GetAbstractRoom(sharedRefuge.RoomIndex);
             if (sharedRefugeRoom == null) continue;
 
-            DesertBatflyColonyRuntime.CollectOwnedBats(colony.RoomName, ownedScratch);
+            DB_ColonyRuntime.CollectOwnedBats(colony.RoomName, ownedScratch);
             int started = 0;
             for (int i = 0; i < ownedScratch.Count; i++)
             {
                 AbstractCreature creature = ownedScratch[i];
                 if (!ValidCreature(creature)) continue;
-                DesertBatflyColonyRuntime.IndividualRecord record = DesertBatflyColonyRuntime.RecordFor(creature, false);
+                DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
                 if (record == null || !string.IsNullOrEmpty(record.PendingMigrationColony)) continue;
                 if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
                     existing.Purpose == DesertBatflyTravelPurpose.ColonyMigration)
@@ -437,7 +437,7 @@ internal static class DesertBatflyTravelNavigation
                     AbstractRoom actual = world.GetAbstractRoom(creature.pos.room);
                     if (actual == null || !DesertBatflyRefuge.TryFindEmergencyRefugeFrom(
                             world, actual, home, template, hazard, capability, colony.LastSuccessfulRefuge,
-                            DesertBatflyColonyRuntime.PredatorRisk, DesertBatflyColonyRuntime.RefugeCrowding,
+                            DB_ColonyRuntime.PredatorRisk, DB_ColonyRuntime.RefugeCrowding,
                             -1, true, out personalRefuge))
                         continue;
                 }
@@ -462,14 +462,14 @@ internal static class DesertBatflyTravelNavigation
             {
                 activeEvacuations.Add(evacuationKey);
                 float failure = Mathf.Clamp01(hazard.ShelterUrgency * (1f - homeQuality));
-                DesertBatflyColonyRuntime.ReportExternalRefuge(colony.RoomName, sharedRefugeRoom.name, failure);
+                DB_ColonyRuntime.ReportExternalRefuge(colony.RoomName, sharedRefugeRoom.name, failure);
             }
         }
     }
 
     private static void EndEvacuationAndReturn(World world, string homeColony, CreatureTemplate template)
     {
-        AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, homeColony);
+        AbstractRoom home = DB_ColonyRuntime.FindRoom(world, homeColony);
         if (home == null) return;
 
         List<string> keys = new(intents.Keys);
@@ -498,12 +498,12 @@ internal static class DesertBatflyTravelNavigation
             ConvertToReturnHome(intent, home, route);
         }
 
-        DesertBatflyColonyRuntime.CollectOwnedBats(homeColony, ownedScratch);
+        DB_ColonyRuntime.CollectOwnedBats(homeColony, ownedScratch);
         for (int i = 0; i < ownedScratch.Count; i++)
         {
             AbstractCreature creature = ownedScratch[i];
             if (!ValidCreature(creature) || creature.pos.room == home.index) continue;
-            DesertBatflyColonyRuntime.IndividualRecord record = DesertBatflyColonyRuntime.RecordFor(creature, false);
+            DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
             if (record == null || !string.IsNullOrEmpty(record.PendingMigrationColony)) continue;
             if (intents.TryGetValue(Key(creature.ID), out TravelIntent existing) &&
                 existing.Purpose is DesertBatflyTravelPurpose.ColonyMigration or DesertBatflyTravelPurpose.ReturnHome)
@@ -531,23 +531,23 @@ internal static class DesertBatflyTravelNavigation
         if (world?.abstractRooms == null) return;
         CreatureTemplate template = StaticWorld.GetCreatureTemplate(DesertBatflyDefinition.CreatureType);
         if (template == null) return;
-        foreach (DesertBatflyColonyState colony in DesertBatflyColonyRuntime.Colonies)
+        foreach (DB_ColonyState colony in DB_ColonyRuntime.Colonies)
         {
             if (colony == null || !string.Equals(colony.RegionName, world.region?.name, StringComparison.OrdinalIgnoreCase))
                 continue;
-            DesertBatflyColonyRuntime.CollectOwnedBats(colony.RoomName, ownedScratch);
+            DB_ColonyRuntime.CollectOwnedBats(colony.RoomName, ownedScratch);
             for (int i = 0; i < ownedScratch.Count; i++)
             {
                 AbstractCreature creature = ownedScratch[i];
                 if (!ValidCreature(creature)) continue;
-                DesertBatflyColonyRuntime.IndividualRecord record = DesertBatflyColonyRuntime.RecordFor(creature, false);
+                DB_ColonyRuntime.IndividualRecord record = DB_ColonyRuntime.RecordFor(creature, false);
                 if (record == null || string.IsNullOrWhiteSpace(record.PendingMigrationColony)) continue;
-                AbstractRoom destination = DesertBatflyColonyRuntime.FindRoom(world, record.PendingMigrationColony);
+                AbstractRoom destination = DB_ColonyRuntime.FindRoom(world, record.PendingMigrationColony);
                 if (destination == null || !DesertSwarmRoom.IsDesertSwarmRoom(destination)) continue;
                 if (creature.pos.room == destination.index)
                 {
-                    DesertBatflyColonyRuntime.CompletePermanentMigration(
-                        creature, destination.name, DesertBatflyColonyRuntime.CurrentCycle(world));
+                    DB_ColonyRuntime.CompletePermanentMigration(
+                        creature, destination.name, DB_ColonyRuntime.CurrentCycle(world));
                     continue;
                 }
                 if (!DesertBatflyWorldRoutePlanner.TryPlan(
@@ -576,7 +576,7 @@ internal static class DesertBatflyTravelNavigation
 
         if (intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge)
         {
-            AbstractRoom refuge = DesertBatflyColonyRuntime.FindRoom(world, intent.DestinationRoom);
+            AbstractRoom refuge = DB_ColonyRuntime.FindRoom(world, intent.DestinationRoom);
             if (refuge == null || !DesertBatflyRefuge.RefugeStillSuitable(
                     world, refuge, intent.Hazard.HazardKind, intent.Hazard.HazardId))
             {
@@ -620,7 +620,7 @@ internal static class DesertBatflyTravelNavigation
     {
         if (world == null || intent == null || intent.Purpose != DesertBatflyTravelPurpose.EmergencyRefuge)
             return false;
-        AbstractRoom home = DesertBatflyColonyRuntime.FindRoom(world, intent.HomeColony);
+        AbstractRoom home = DB_ColonyRuntime.FindRoom(world, intent.HomeColony);
         AbstractRoom current = world.GetAbstractRoom(currentRoom);
         if (home == null || current == null) return false;
 
@@ -640,13 +640,13 @@ internal static class DesertBatflyTravelNavigation
             }
         }
 
-        DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(intent.HomeColony);
-        AbstractRoom oldDestination = DesertBatflyColonyRuntime.FindRoom(world, intent.DestinationRoom);
+        DB_ColonyState colony = DB_ColonyRuntime.TryGetColony(intent.HomeColony);
+        AbstractRoom oldDestination = DB_ColonyRuntime.FindRoom(world, intent.DestinationRoom);
         if (!DesertBatflyRefuge.TryFindEmergencyRefugeFrom(
                 world, current, home, intent.Creature.creatureTemplate,
                 currentHazard.HasHazard ? currentHazard : intent.Hazard, physicalCapability,
-                colony?.LastSuccessfulRefuge, DesertBatflyColonyRuntime.PredatorRisk,
-                DesertBatflyColonyRuntime.RefugeCrowding, oldDestination?.index ?? -1, true,
+                colony?.LastSuccessfulRefuge, DB_ColonyRuntime.PredatorRisk,
+                DB_ColonyRuntime.RefugeCrowding, oldDestination?.index ?? -1, true,
                 out DesertBatflyRefugeTarget replacement))
             return false;
 
@@ -670,7 +670,7 @@ internal static class DesertBatflyTravelNavigation
     private static bool TryReplan(World world, TravelIntent intent, int currentRoom, string reason)
     {
         if (world == null || intent == null || currentRoom < 0) return false;
-        AbstractRoom destination = DesertBatflyColonyRuntime.FindRoom(world, intent.DestinationRoom);
+        AbstractRoom destination = DB_ColonyRuntime.FindRoom(world, intent.DestinationRoom);
         if (destination == null) return false;
         int maxHops = intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge
             ? DesertBatflyWorldRoutePlanner.RefugeMaxHops : DesertBatflyWorldRoutePlanner.MigrationMaxHops;
@@ -695,8 +695,8 @@ internal static class DesertBatflyTravelNavigation
         switch (intent.Purpose)
         {
             case DesertBatflyTravelPurpose.ColonyMigration:
-                DesertBatflyColonyRuntime.CompletePermanentMigration(
-                    intent.Creature, intent.DestinationRoom, DesertBatflyColonyRuntime.CurrentCycle(world));
+                DB_ColonyRuntime.CompletePermanentMigration(
+                    intent.Creature, intent.DestinationRoom, DB_ColonyRuntime.CurrentCycle(world));
                 intents.Remove(key);
                 break;
             case DesertBatflyTravelPurpose.ReturnHome:
@@ -795,7 +795,7 @@ internal static class DesertBatflyTravelNavigation
     private static float RouteRiskForIntent(World world, TravelIntent intent, AbstractRoom room)
     {
         if (intent != null && intent.Purpose == DesertBatflyTravelPurpose.EmergencyRefuge && intent.Hazard.HasHazard)
-            return DesertBatflyRefuge.RouteRisk(world, room, intent.Hazard, DesertBatflyColonyRuntime.PredatorRisk);
+            return DesertBatflyRefuge.RouteRisk(world, room, intent.Hazard, DB_ColonyRuntime.PredatorRisk);
         return CurrentRouteRisk(world, room);
     }
 
@@ -804,7 +804,7 @@ internal static class DesertBatflyTravelNavigation
         if (room == null) return 8f;
         DesertBatflyWeatherEcologySample weather = DesertBatflyWeatherEcology.Sample(world, room);
         if (weather.LethalNow) return 8f;
-        float predator = DesertBatflyColonyRuntime.PredatorRisk(room);
+        float predator = DB_ColonyRuntime.PredatorRisk(room);
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + predator * 0.22f);
     }
 

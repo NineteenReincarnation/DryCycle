@@ -54,7 +54,7 @@ internal sealed class DesertSwarmRoom
             if (!ecologyInitialized)
             {
                 ecologyInitialized = true;
-                DesertBatflyColonyRuntime.EnsureWorld(room.world);
+                DB_ColonyRuntime.EnsureWorld(room.world);
             }
 
             // Long-term pressure uses one low-frequency room sample per simulated second.
@@ -63,7 +63,7 @@ internal sealed class DesertSwarmRoom
             if (--ecologySampleTimer <= 0)
             {
                 ecologySampleTimer = 40;
-                DesertBatflyColonyRuntime.SampleRoom(room, 1f);
+                DB_ColonyRuntime.SampleRoom(room, 1f);
             }
         }
 

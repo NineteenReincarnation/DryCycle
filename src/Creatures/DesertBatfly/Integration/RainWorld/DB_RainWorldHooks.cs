@@ -28,7 +28,7 @@ internal static class DB_RainWorldHooks
         DB_EventHub.Enable();
         DB_EventConsumers.Enable();
         DesertBatflyThreatRuntime.Enable();
-        DesertBatflyColonyRuntime.Enable();
+        DB_ColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
@@ -75,7 +75,7 @@ internal static class DB_RainWorldHooks
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
-        DesertBatflyColonyRuntime.Disable();
+        DB_ColonyRuntime.Disable();
         DesertBatflyRefuge.Reset();
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
@@ -101,8 +101,8 @@ internal static class DB_RainWorldHooks
         {
             if (room?.world != null)
             {
-                DesertBatflyColonyRuntime.EnsureWorld(room.world);
-                DesertBatflyColonyRuntime.EnsureIndividualOwnership(desert.abstractCreature);
+                DB_ColonyRuntime.EnsureWorld(room.world);
+                DB_ColonyRuntime.EnsureIndividualOwnership(desert.abstractCreature);
             }
             DesertSwarmRoom.For(room).Hive.AddFly(self);
         }

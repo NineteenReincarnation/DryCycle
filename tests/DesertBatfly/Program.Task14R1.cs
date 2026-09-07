@@ -137,7 +137,7 @@ internal static partial class Program
         MethodInfo captureConsumer = consumers.GetMethod("OnCapture", Flags);
         MethodInfo mortalityConsumer = consumers.GetMethod("OnMortality", Flags);
         Type colony = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyColonyRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ColonyRuntime", true);
         Check(MethodCallOffset(captureConsumer, intimidation, "BroadcastPredatorCapture") >= 0,
             "Task14 R1 Peach fear consumes canonical CaptureEvent");
         Check(MethodCallOffset(mortalityConsumer, colony, "ReportDeath") >= 0 &&

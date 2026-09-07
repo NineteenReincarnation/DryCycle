@@ -141,10 +141,10 @@ internal static class DB_EnvironmentalPolicy
     }
 
 
-    internal static bool ShouldSuppressNewMigration(World world, DesertBatflyColonyState source)
+    internal static bool ShouldSuppressNewMigration(World world, DB_ColonyState source)
     {
         if (world == null || source == null) return false;
-        AbstractRoom room = DesertBatflyColonyRuntime.FindRoom(world, source.RoomName);
+        AbstractRoom room = DB_ColonyRuntime.FindRoom(world, source.RoomName);
         if (room == null) return false;
 
         DesertBatflyWeatherEcologySample sample = DesertBatflyWeatherEcology.Sample(world, room);
@@ -230,8 +230,8 @@ internal static class DB_EnvironmentalPolicy
             weather is not (DesertBatflyEnvironmentalWeather.Fog or DesertBatflyEnvironmentalWeather.DenseFog))
             return 1f;
 
-        DesertBatflyColonyRuntime.IndividualRecord record =
-            DesertBatflyColonyRuntime.RecordFor(bat.abstractCreature, false);
+        DB_ColonyRuntime.IndividualRecord record =
+            DB_ColonyRuntime.RecordFor(bat.abstractCreature, false);
         bool homeRoom = record != null && !string.IsNullOrEmpty(record.CurrentColony) &&
             string.Equals(record.CurrentColony, bat.room.abstractRoom.name, StringComparison.OrdinalIgnoreCase);
         if (!homeRoom) return 1f;

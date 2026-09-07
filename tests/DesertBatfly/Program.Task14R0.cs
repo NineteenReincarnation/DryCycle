@@ -30,7 +30,7 @@ internal static partial class Program
             "Task14 R0 freezes Threat Signature save key");
 
         Type colonyRuntimeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyColonyRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ColonyRuntime", true);
         Check((string)colonyRuntimeType.GetField("SavePrefix", Flags).GetRawConstantValue() == "DCBATCOLONY09<svB>" &&
               (string)colonyRuntimeType.GetField("PayloadVersion", Flags).GetRawConstantValue() == "V1",
             "Task14 R0 freezes colony ledger prefix/version even though its historical 09 remains external data");

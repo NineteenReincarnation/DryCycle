@@ -35,7 +35,7 @@ for name in \
 grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
 grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
 grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalRoomRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/DesertBatflyColonyRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
 grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
 grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/DesertBatflyRefuge.cs
 grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/DesertBatflyRefuge.cs

@@ -5,8 +5,8 @@ internal static partial class Program
 {
     private static void RunTask09()
     {
-        Type colonyType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyColonyState", true);
-        Type migrationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyColonyMigration", true);
+        Type colonyType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ColonyState", true);
+        Type migrationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_MigrationPolicy", true);
         Type routePlannerType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWorldRoutePlanner", true);
         Type travelPurposeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelPurpose", true);
         Type travelNavigationType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyTravelNavigation", true);

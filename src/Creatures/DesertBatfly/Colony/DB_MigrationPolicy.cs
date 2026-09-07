@@ -6,20 +6,20 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Pure decision math for Task 09. Selection is continuous and personality-driven;
 /// there is intentionally no Migrator/Scout/Leader role or runtime job state.
 /// </summary>
-internal static class DesertBatflyColonyMigration
+internal static class DB_MigrationPolicy
 {
     internal const int IndividualCooldownCycles = 3;
     internal const int ColonyCooldownCycles = 2;
     internal const float DestinationSwitchMargin = 0.14f;
 
-    internal static bool CanScheduleBatch(DesertBatflyColonyState colony)
+    internal static bool CanScheduleBatch(DB_ColonyState colony)
     {
         if (colony == null || colony.ColonyMigrationCooldown > 0 ||
             colony.CurrentPopulation <= colony.HardMinimumPersistence)
             return false;
         if (!colony.MigrationActive)
-            return colony.MigrationPressure >= DesertBatflyColonyState.BeginMigrationThreshold;
-        return colony.MigrationPressure >= DesertBatflyColonyState.ContinueMigrationThreshold;
+            return colony.MigrationPressure >= DB_ColonyState.BeginMigrationThreshold;
+        return colony.MigrationPressure >= DB_ColonyState.ContinueMigrationThreshold;
     }
 
     internal static float IndividualPropensity(
@@ -39,10 +39,10 @@ internal static class DesertBatflyColonyMigration
             currentCycle - lastMigrationCycle < IndividualCooldownCycles)
             return 0f;
 
-        physicalCapability = DesertBatflyColonyState.ClampFinite01(physicalCapability);
-        activeTrauma = DesertBatflyColonyState.ClampFinite01(activeTrauma);
-        bondStrength = DesertBatflyColonyState.ClampFinite01(bondStrength);
-        shelterFailure = DesertBatflyColonyState.ClampFinite01(shelterFailure);
+        physicalCapability = DB_ColonyState.ClampFinite01(physicalCapability);
+        activeTrauma = DB_ColonyState.ClampFinite01(activeTrauma);
+        bondStrength = DB_ColonyState.ClampFinite01(bondStrength);
+        shelterFailure = DB_ColonyState.ClampFinite01(shelterFailure);
 
         float individualism = 1f - personality.Conformity;
         float lowRoost = 1f - personality.RoostAffinity;
@@ -62,17 +62,17 @@ internal static class DesertBatflyColonyMigration
     }
 
     internal static float DestinationSuitability(
-        DesertBatflyColonyState destination,
+        DB_ColonyState destination,
         float habitatSuitability,
         float travelCost01,
         float formerColonyFamiliarity,
         float bondPartnerPresence)
     {
         if (destination == null) return float.NegativeInfinity;
-        habitatSuitability = DesertBatflyColonyState.ClampFinite01(habitatSuitability);
-        travelCost01 = DesertBatflyColonyState.ClampFinite01(travelCost01);
-        formerColonyFamiliarity = DesertBatflyColonyState.ClampFinite01(formerColonyFamiliarity);
-        bondPartnerPresence = DesertBatflyColonyState.ClampFinite01(bondPartnerPresence);
+        habitatSuitability = DB_ColonyState.ClampFinite01(habitatSuitability);
+        travelCost01 = DB_ColonyState.ClampFinite01(travelCost01);
+        formerColonyFamiliarity = DB_ColonyState.ClampFinite01(formerColonyFamiliarity);
+        bondPartnerPresence = DB_ColonyState.ClampFinite01(bondPartnerPresence);
 
         float freeCapacity = destination.SoftCapacity <= 0
             ? 0f
@@ -110,15 +110,15 @@ internal static class DesertBatflyColonyMigration
     }
 
     internal static float RegionalEnvironmentalAverage(
-        System.Collections.Generic.IEnumerable<DesertBatflyColonyState> colonies)
+        System.Collections.Generic.IEnumerable<DB_ColonyState> colonies)
     {
         if (colonies == null) return 0f;
         float sum = 0f;
         int count = 0;
-        foreach (DesertBatflyColonyState colony in colonies)
+        foreach (DB_ColonyState colony in colonies)
         {
             if (colony == null) continue;
-            sum += DesertBatflyColonyState.ClampFinite01(colony.EnvironmentalPressure);
+            sum += DB_ColonyState.ClampFinite01(colony.EnvironmentalPressure);
             count++;
         }
         return count == 0 ? 0f : Mathf.Clamp01(sum / count);

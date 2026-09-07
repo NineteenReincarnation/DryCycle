@@ -94,7 +94,7 @@ internal static class DB_EventConsumers
         // so subscriber order cannot erase counter-kill / kill evidence prematurely.
         DesertBatflySocialLife.CancelForPriority(victim, "death");
         DesertBatflySignalRuntime.Forget(victim);
-        DesertBatflyColonyRuntime.ReportDeath(victim, mortality.Killer);
+        DB_ColonyRuntime.ReportDeath(victim, mortality.Killer);
         DesertBatflyEnvironmentalBehavior.Forget(victim);
 
         Creature killer = mortality.Killer;

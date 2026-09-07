@@ -9,7 +9,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Runtime event counters are deliberately bounded and are folded into long-term
 /// pressure once per survived cycle; no event history or colony relationship graph exists.
 /// </summary>
-internal sealed class DesertBatflyColonyState
+internal sealed class DB_ColonyState
 {
     internal const float BeginMigrationThreshold = 0.70f;
     internal const float ContinueMigrationThreshold = 0.55f;
@@ -48,7 +48,7 @@ internal sealed class DesertBatflyColonyState
     internal float CycleEnvironmentalExposure;
     internal float CycleShelterFailure;
 
-    internal DesertBatflyColonyState(string regionName, string roomName, int preferredPopulation)
+    internal DB_ColonyState(string regionName, string roomName, int preferredPopulation)
     {
         RegionName = NormalizeName(regionName);
         RoomName = NormalizeName(roomName);
@@ -273,7 +273,7 @@ internal sealed class DesertBatflyColonyState
         return string.Join(";", v);
     }
 
-    internal static bool TryDeserialize(string text, out DesertBatflyColonyState state)
+    internal static bool TryDeserialize(string text, out DB_ColonyState state)
     {
         state = null;
         if (string.IsNullOrEmpty(text)) return false;
@@ -284,7 +284,7 @@ internal sealed class DesertBatflyColonyState
         if (region.Length == 0 || room.Length == 0) return false;
 
         int preferred = ParseInt(v[3], 14, 4, 80);
-        state = new DesertBatflyColonyState(region, room, preferred)
+        state = new DB_ColonyState(region, room, preferred)
         {
             CurrentPopulation = ParseInt(v[2], 0, 0, 200),
             MortalityPressure = Parse01(v[4]),

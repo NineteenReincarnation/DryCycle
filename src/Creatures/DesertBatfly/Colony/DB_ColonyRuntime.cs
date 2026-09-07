@@ -11,7 +11,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Save-backed Task 09 coordinator. It owns colony/individual ecology identity and
 /// low-frequency cycle settlement; it never controls room-local flight velocity.
 /// </summary>
-internal static class DesertBatflyColonyRuntime
+internal static class DB_ColonyRuntime
 {
     private const string SavePrefix = "DCBATCOLONY09<svB>";
     private const string PayloadVersion = "V1";
@@ -35,7 +35,7 @@ internal static class DesertBatflyColonyRuntime
                                Number.ToString(CultureInfo.InvariantCulture);
     }
 
-    private static Dictionary<string, DesertBatflyColonyState> colonies =
+    private static Dictionary<string, DB_ColonyState> colonies =
         new(StringComparer.OrdinalIgnoreCase);
     private static Dictionary<string, IndividualRecord> individuals =
         new(StringComparer.Ordinal);
@@ -55,7 +55,7 @@ internal static class DesertBatflyColonyRuntime
     private static bool enabled;
     private static int abstractTick;
 
-    internal static IEnumerable<DesertBatflyColonyState> Colonies => colonies.Values;
+    internal static IEnumerable<DB_ColonyState> Colonies => colonies.Values;
 
     internal static void Enable()
     {
@@ -80,7 +80,7 @@ internal static class DesertBatflyColonyRuntime
 
     internal static void ResetAll()
     {
-        colonies = new Dictionary<string, DesertBatflyColonyState>(StringComparer.OrdinalIgnoreCase);
+        colonies = new Dictionary<string, DB_ColonyState>(StringComparer.OrdinalIgnoreCase);
         individuals = new Dictionary<string, IndividualRecord>(StringComparer.Ordinal);
         deathsThisCycle = new HashSet<string>(StringComparer.Ordinal);
         roomLookup = new Dictionary<string, AbstractRoom>(StringComparer.OrdinalIgnoreCase);
@@ -94,19 +94,19 @@ internal static class DesertBatflyColonyRuntime
         DesertBatflyTravelNavigation.Reset();
     }
 
-    internal static DesertBatflyColonyState TryGetColony(string roomName)
+    internal static DB_ColonyState TryGetColony(string roomName)
     {
         if (string.IsNullOrWhiteSpace(roomName)) return null;
         string normalized = roomName.Trim().ToUpperInvariant();
-        foreach (DesertBatflyColonyState state in colonies.Values)
+        foreach (DB_ColonyState state in colonies.Values)
             if (state.RoomName == normalized) return state;
         return null;
     }
 
-    internal static DesertBatflyColonyState TryGetColony(AbstractRoom room)
+    internal static DB_ColonyState TryGetColony(AbstractRoom room)
     {
         if (room == null || room.world?.region == null) return null;
-        colonies.TryGetValue(ColonyKey(room.world.region.name, room.name), out DesertBatflyColonyState state);
+        colonies.TryGetValue(ColonyKey(room.world.region.name, room.name), out DB_ColonyState state);
         return state;
     }
 
@@ -172,7 +172,7 @@ internal static class DesertBatflyColonyRuntime
         if (!deathsThisCycle.Add(identity)) return;
 
         IndividualRecord record = RecordFor(victim.abstractCreature, false);
-        DesertBatflyColonyState colony = TryGetColony(record?.CurrentColony);
+        DB_ColonyState colony = TryGetColony(record?.CurrentColony);
         if (colony == null && DesertSwarmRoom.IsDesertSwarmRoom(victim.abstractCreature.Room))
             colony = TryGetColony(victim.abstractCreature.Room);
         colony?.RecordDeath(IsPeach(killer));
@@ -182,7 +182,7 @@ internal static class DesertBatflyColonyRuntime
     {
         if (room?.world == null || room.abstractRoom == null || sampleSeconds <= 0f) return;
         EnsureWorld(room.world);
-        DesertBatflyColonyState colony = TryGetColony(room.abstractRoom);
+        DB_ColonyState colony = TryGetColony(room.abstractRoom);
         if (colony == null) return;
 
         DesertBatflyWeatherEcologySample weather =
@@ -207,7 +207,7 @@ internal static class DesertBatflyColonyRuntime
 
     internal static void ReportExternalRefuge(string homeColony, string refugeRoom, float severity)
     {
-        DesertBatflyColonyState colony = TryGetColony(homeColony);
+        DB_ColonyState colony = TryGetColony(homeColony);
         if (colony == null) return;
         colony.RecordShelterFailure(severity);
         if (!string.IsNullOrWhiteSpace(refugeRoom))
@@ -231,10 +231,10 @@ internal static class DesertBatflyColonyRuntime
             AbstractRoom room = colonyRooms[i];
             int physical = CountPhysical(room);
             string key = ColonyKey(world.region.name, room.name);
-            if (!colonies.TryGetValue(key, out DesertBatflyColonyState colony))
+            if (!colonies.TryGetValue(key, out DB_ColonyState colony))
             {
                 int preferred = PreferredPopulation(room, physical);
-                colony = new DesertBatflyColonyState(world.region.name, room.name, preferred);
+                colony = new DB_ColonyState(world.region.name, room.name, preferred);
                 colonies.Add(key, colony);
 
                 // First Task-09 bootstrap only. Once this ledger entry exists, an empty
@@ -295,7 +295,7 @@ internal static class DesertBatflyColonyRuntime
 
     internal static float PredatorRisk(AbstractRoom room)
     {
-        DesertBatflyColonyState colony = TryGetColony(room);
+        DB_ColonyState colony = TryGetColony(room);
         if (colony != null) return colony.PredatorPressure;
         if (room?.creatures == null) return 0f;
         for (int i = 0; i < room.creatures.Count; i++)
@@ -348,24 +348,24 @@ internal static class DesertBatflyColonyRuntime
     {
         EnsureWorld(world);
         RefreshPopulationCounts(world);
-        List<DesertBatflyColonyState> regional = RegionColonies(world);
-        float regionalEnvironment = DesertBatflyColonyMigration.RegionalEnvironmentalAverage(regional);
+        List<DB_ColonyState> regional = RegionColonies(world);
+        float regionalEnvironment = DB_MigrationPolicy.RegionalEnvironmentalAverage(regional);
 
         for (int i = 0; i < regional.Count; i++)
             regional[i].SettleCycle(regional[i].CurrentPopulation, regionalEnvironment, cycle);
 
-        regionalEnvironment = DesertBatflyColonyMigration.RegionalEnvironmentalAverage(regional);
+        regionalEnvironment = DB_MigrationPolicy.RegionalEnvironmentalAverage(regional);
         for (int i = 0; i < regional.Count; i++)
         {
-            DesertBatflyColonyState colony = regional[i];
+            DB_ColonyState colony = regional[i];
             colony.RegionalWeatherStress = regionalEnvironment;
-            colony.RelativeHabitatStress = DesertBatflyColonyState.ComputeRelativeHabitatStress(
+            colony.RelativeHabitatStress = DB_ColonyState.ComputeRelativeHabitatStress(
                 colony.EnvironmentalPressure, regionalEnvironment, colony.ShelterFailureMemory);
-            colony.MigrationPressure = DesertBatflyColonyState.ComputeMigrationPressure(
+            colony.MigrationPressure = DB_ColonyState.ComputeMigrationPressure(
                 colony.MortalityPressure, colony.PredatorPressure,
                 colony.RelativeHabitatStress, colony.ShelterFailureMemory,
                 colony.CurrentPopulation, colony.PreferredPopulation);
-            colony.MigrationActive = DesertBatflyColonyState.NextMigrationState(
+            colony.MigrationActive = DB_ColonyState.NextMigrationState(
                 colony.MigrationActive, colony.MigrationPressure);
             colony.RecalculateRecoveryCeiling();
         }
@@ -379,15 +379,15 @@ internal static class DesertBatflyColonyRuntime
         deathsThisCycle.Clear();
     }
 
-    private static void ScheduleMigrationBatch(World world, DesertBatflyColonyState source, int cycle)
+    private static void ScheduleMigrationBatch(World world, DB_ColonyState source, int cycle)
     {
         // Task09 remains the migration owner; Task13 only supplies a read-only timing veto.
         if (DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)) return;
-        if (!DesertBatflyColonyMigration.CanScheduleBatch(source)) return;
+        if (!DB_MigrationPolicy.CanScheduleBatch(source)) return;
         CollectOwnedBats(source.RoomName, sourceMembersScratch);
         if (sourceMembersScratch.Count == 0 ||
             !TryChooseMigrationDestination(world, source, sourceMembersScratch,
-                out DesertBatflyColonyState destination, out DesertBatflyWorldRoute sharedRoute))
+                out DB_ColonyState destination, out DesertBatflyWorldRoute sharedRoute))
             return;
 
         int wanted = source.RecommendedBatchSize();
@@ -408,9 +408,9 @@ internal static class DesertBatflyColonyRuntime
             bool recovering = creature.realizedCreature is DesertBatfly realized && realized.Injury.IsRecovering;
             float bondAtHome = BondPartnerOwnedBy(state.SocialBondTarget, source.RoomName)
                 ? state.SocialBondStrength : state.SocialBondStrength * 0.25f;
-            float score = DesertBatflyColonyMigration.IndividualPropensity(
+            float score = DB_MigrationPolicy.IndividualPropensity(
                 state.Personality, capability, severe, recovering,
-                DesertBatflyColonyMigration.ActiveTrauma(state), bondAtHome,
+                DB_MigrationPolicy.ActiveTrauma(state), bondAtHome,
                 source.ShelterFailureMemory, cycle, record.LastMigrationCycle);
             if (score > 0f) candidates.Add((creature, score));
         }
@@ -436,15 +436,15 @@ internal static class DesertBatflyColonyRuntime
 
         source.LastOutboundBatch = selected;
         source.LastMigrationCycle = cycle;
-        source.ColonyMigrationCooldown = DesertBatflyColonyMigration.ColonyCooldownCycles;
+        source.ColonyMigrationCooldown = DB_MigrationPolicy.ColonyCooldownCycles;
         destination.LastInboundBatch += selected;
     }
 
     private static bool TryChooseMigrationDestination(
         World world,
-        DesertBatflyColonyState source,
+        DB_ColonyState source,
         List<AbstractCreature> sourceMembers,
-        out DesertBatflyColonyState destination,
+        out DB_ColonyState destination,
         out DesertBatflyWorldRoute route)
     {
         destination = null;
@@ -454,10 +454,10 @@ internal static class DesertBatflyColonyRuntime
         if (sourceRoom == null || template == null) return false;
 
         float best = float.NegativeInfinity;
-        List<DesertBatflyColonyState> regional = RegionColonies(world);
+        List<DB_ColonyState> regional = RegionColonies(world);
         for (int i = 0; i < regional.Count; i++)
         {
-            DesertBatflyColonyState candidate = regional[i];
+            DB_ColonyState candidate = regional[i];
             if (candidate == source) continue;
             AbstractRoom targetRoom = FindRoom(world, candidate.RoomName);
             if (targetRoom == null || !DesertSwarmRoom.IsDesertSwarmRoom(targetRoom)) continue;
@@ -478,7 +478,7 @@ internal static class DesertBatflyColonyRuntime
                 candidate.ShelterFailureMemory * 0.30f);
             DestinationAffinity(sourceMembers, candidate.RoomName,
                 out float familiarity, out float bondPresence);
-            float score = DesertBatflyColonyMigration.DestinationSuitability(
+            float score = DB_MigrationPolicy.DestinationSuitability(
                 candidate, habitat, travel, familiarity, bondPresence);
             if (score <= best) continue;
             best = score;
@@ -530,7 +530,7 @@ internal static class DesertBatflyColonyRuntime
         return Mathf.Clamp01(weather.TravelExposure * 0.78f + PredatorRisk(room) * 0.22f);
     }
 
-    private static void TryNaturalRecovery(World world, DesertBatflyColonyState colony, int cycle, int saveSeed)
+    private static void TryNaturalRecovery(World world, DB_ColonyState colony, int cycle, int saveSeed)
     {
         if (colony.CurrentPopulation >= colony.NaturalRecoveryCeiling) return;
         AbstractRoom room = FindRoom(world, colony.RoomName);
@@ -593,7 +593,7 @@ internal static class DesertBatflyColonyRuntime
     {
         if (world == null) return;
         string region = world.region?.name?.Trim().ToUpperInvariant();
-        foreach (DesertBatflyColonyState colony in colonies.Values)
+        foreach (DB_ColonyState colony in colonies.Values)
             if (!string.IsNullOrEmpty(region) && colony.RegionName == region)
                 colony.CurrentPopulation = 0;
 
@@ -609,18 +609,18 @@ internal static class DesertBatflyColonyRuntime
             if (!LivingDesertBatfly(creature)) continue;
             EnsureIndividualOwnership(creature);
             IndividualRecord record = RecordFor(creature, false);
-            DesertBatflyColonyState colony = TryGetColony(record?.CurrentColony);
+            DB_ColonyState colony = TryGetColony(record?.CurrentColony);
             if (colony != null) colony.CurrentPopulation++;
         }
         for (int i = 0; i < staleBatKeys.Count; i++) trackedBats.Remove(staleBatKeys[i]);
     }
 
-    private static List<DesertBatflyColonyState> RegionColonies(World world)
+    private static List<DB_ColonyState> RegionColonies(World world)
     {
-        List<DesertBatflyColonyState> result = new();
+        List<DB_ColonyState> result = new();
         string region = world?.region?.name?.Trim().ToUpperInvariant();
         if (string.IsNullOrEmpty(region)) return result;
-        foreach (DesertBatflyColonyState colony in colonies.Values)
+        foreach (DB_ColonyState colony in colonies.Values)
             if (colony.RegionName == region) result.Add(colony);
         return result;
     }
@@ -688,7 +688,7 @@ internal static class DesertBatflyColonyRuntime
     {
         StringBuilder b = new();
         b.AppendLine(PayloadVersion);
-        foreach (DesertBatflyColonyState colony in colonies.Values)
+        foreach (DB_ColonyState colony in colonies.Values)
             b.Append("C|").Append(Encode(colony.Serialize())).Append('\n');
         foreach (IndividualRecord record in individuals.Values)
         {
@@ -737,7 +737,7 @@ internal static class DesertBatflyColonyRuntime
             string line = lines[i];
             if (line.StartsWith("C|", StringComparison.Ordinal))
             {
-                if (DesertBatflyColonyState.TryDeserialize(Decode(line.Substring(2)), out DesertBatflyColonyState colony))
+                if (DB_ColonyState.TryDeserialize(Decode(line.Substring(2)), out DB_ColonyState colony))
                     colonies[colony.Key] = colony;
             }
             else if (line.StartsWith("I|", StringComparison.Ordinal))

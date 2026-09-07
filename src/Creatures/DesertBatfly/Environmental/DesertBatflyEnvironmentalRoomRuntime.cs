@@ -122,7 +122,7 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
         RoomState state = For(bat.room);
         if (state == null || state.Anchors.Count == 0) return false;
 
-        string currentColony = DesertBatflyColonyRuntime.RecordFor(bat.abstractCreature, false)?.CurrentColony;
+        string currentColony = DB_ColonyRuntime.RecordFor(bat.abstractCreature, false)?.CurrentColony;
         bool homeRoom = !string.IsNullOrEmpty(currentColony) &&
             string.Equals(currentColony, bat.room.abstractRoom?.name, StringComparison.OrdinalIgnoreCase);
         float injury = 1f - bat.Injury.PhysicalCapability;
@@ -250,9 +250,9 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             tick - state.ShelterFailureLastReportTick < ShelterFailureReportCooldownTicks)
             return;
 
-        DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(room.abstractRoom);
+        DB_ColonyState colony = DB_ColonyRuntime.TryGetColony(room.abstractRoom);
         if (colony == null) return;
-        DesertBatflyColonyRuntime.ReportExternalRefuge(
+        DB_ColonyRuntime.ReportExternalRefuge(
             colony.RoomName,
             null,
             Mathf.Clamp(state.ShelterFailureSeverity, 0.12f, 0.80f));

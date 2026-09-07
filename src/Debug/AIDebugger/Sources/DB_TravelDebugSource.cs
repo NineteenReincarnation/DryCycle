@@ -23,44 +23,44 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
             return snapshot;
 
         World world = creature.world ?? game?.world;
-        DesertBatflyColonyRuntime.IndividualRecord record =
-            DesertBatflyColonyRuntime.RecordFor(creature, false);
+        DB_ColonyRuntime.IndividualRecord record =
+            DB_ColonyRuntime.RecordFor(creature, false);
         string currentColony = record?.CurrentColony ?? string.Empty;
-        DesertBatflyColonyState colony = DesertBatflyColonyRuntime.TryGetColony(currentColony);
+        DB_ColonyState colony = DB_ColonyRuntime.TryGetColony(currentColony);
 
         var ecology = new AIDebugSection("Travel / Colony Colony Ecology / 群落生态");
-        ecology.Add("Current colony / 当前群落", "DesertBatflyColonyRuntime.CurrentColony",
+        ecology.Add("Current colony / 当前群落", "DB_ColonyRuntime.CurrentColony",
             string.IsNullOrEmpty(currentColony) ? "—" : currentColony);
-        ecology.Add("Previous colony / 上一群落", "DesertBatflyColonyRuntime.PreviousColony",
+        ecology.Add("Previous colony / 上一群落", "DB_ColonyRuntime.PreviousColony",
             string.IsNullOrEmpty(record?.PreviousColony) ? "—" : record.PreviousColony);
-        ecology.Add("Pending migration / 待迁徙目标", "DesertBatflyColonyRuntime.PendingMigrationColony",
+        ecology.Add("Pending migration / 待迁徙目标", "DB_ColonyRuntime.PendingMigrationColony",
             string.IsNullOrEmpty(record?.PendingMigrationColony) ? "—" : record.PendingMigrationColony);
-        ecology.Add("Last migration cycle / 上次迁徙周期", "DesertBatflyColonyRuntime.LastMigrationCycle",
+        ecology.Add("Last migration cycle / 上次迁徙周期", "DB_ColonyRuntime.LastMigrationCycle",
             record == null || record.LastMigrationCycle == int.MinValue ? "—" : record.LastMigrationCycle);
 
         if (colony != null)
         {
-            ecology.Add("Population / 当前人口", "DesertBatflyColonyState.CurrentPopulation", colony.CurrentPopulation)
-                .Add("Preferred / 理想人口", "DesertBatflyColonyState.PreferredPopulation", colony.PreferredPopulation)
-                .Add("Hard minimum / 最低保底", "DesertBatflyColonyState.HardMinimumPersistence", colony.HardMinimumPersistence)
-                .Add("Recovery ceiling / 自然恢复上限", "DesertBatflyColonyState.NaturalRecoveryCeiling", colony.NaturalRecoveryCeiling)
-                .Add("Soft capacity / 软容量", "DesertBatflyColonyState.SoftCapacity", colony.SoftCapacity)
-                .Add("Mortality pressure / 死亡压力", "DesertBatflyColonyState.MortalityPressure", colony.MortalityPressure)
-                .Add("Predator pressure / 捕食压力", "DesertBatflyColonyState.PredatorPressure", colony.PredatorPressure)
-                .Add("Environment pressure / 环境压力", "DesertBatflyColonyState.EnvironmentalPressure", colony.EnvironmentalPressure)
-                .Add("Shelter failure / 庇护失败", "DesertBatflyColonyState.ShelterFailureMemory", colony.ShelterFailureMemory)
-                .Add("Regional weather / 区域天气压力", "DesertBatflyColonyState.RegionalWeatherStress", colony.RegionalWeatherStress)
-                .Add("Relative habitat / 相对栖息地压力", "DesertBatflyColonyState.RelativeHabitatStress", colony.RelativeHabitatStress)
-                .Add("Migration pressure / 迁徙压力", "DesertBatflyColonyState.MigrationPressure", colony.MigrationPressure)
-                .Add("Migration active / 迁徙激活", "DesertBatflyColonyState.MigrationActive", colony.MigrationActive)
-                .Add("Colony cooldown / 群落冷却", "DesertBatflyColonyState.ColonyMigrationCooldown", colony.ColonyMigrationCooldown)
-                .Add("Known refuge / 已知避难所", "DesertBatflyColonyState.LastSuccessfulRefuge",
+            ecology.Add("Population / 当前人口", "DB_ColonyState.CurrentPopulation", colony.CurrentPopulation)
+                .Add("Preferred / 理想人口", "DB_ColonyState.PreferredPopulation", colony.PreferredPopulation)
+                .Add("Hard minimum / 最低保底", "DB_ColonyState.HardMinimumPersistence", colony.HardMinimumPersistence)
+                .Add("Recovery ceiling / 自然恢复上限", "DB_ColonyState.NaturalRecoveryCeiling", colony.NaturalRecoveryCeiling)
+                .Add("Soft capacity / 软容量", "DB_ColonyState.SoftCapacity", colony.SoftCapacity)
+                .Add("Mortality pressure / 死亡压力", "DB_ColonyState.MortalityPressure", colony.MortalityPressure)
+                .Add("Predator pressure / 捕食压力", "DB_ColonyState.PredatorPressure", colony.PredatorPressure)
+                .Add("Environment pressure / 环境压力", "DB_ColonyState.EnvironmentalPressure", colony.EnvironmentalPressure)
+                .Add("Shelter failure / 庇护失败", "DB_ColonyState.ShelterFailureMemory", colony.ShelterFailureMemory)
+                .Add("Regional weather / 区域天气压力", "DB_ColonyState.RegionalWeatherStress", colony.RegionalWeatherStress)
+                .Add("Relative habitat / 相对栖息地压力", "DB_ColonyState.RelativeHabitatStress", colony.RelativeHabitatStress)
+                .Add("Migration pressure / 迁徙压力", "DB_ColonyState.MigrationPressure", colony.MigrationPressure)
+                .Add("Migration active / 迁徙激活", "DB_ColonyState.MigrationActive", colony.MigrationActive)
+                .Add("Colony cooldown / 群落冷却", "DB_ColonyState.ColonyMigrationCooldown", colony.ColonyMigrationCooldown)
+                .Add("Known refuge / 已知避难所", "DB_ColonyState.LastSuccessfulRefuge",
                     string.IsNullOrEmpty(colony.LastSuccessfulRefuge) ? "—" : colony.LastSuccessfulRefuge);
         }
         snapshot.Sections.Add(ecology);
 
         AbstractRoom home = world != null && colony != null
-            ? DesertBatflyColonyRuntime.FindRoom(world, colony.RoomName)
+            ? DB_ColonyRuntime.FindRoom(world, colony.RoomName)
             : null;
         if (world != null && home != null)
         {
@@ -116,19 +116,19 @@ internal sealed class DB_TravelDebugSource : IAIDebugSource
         if (colony != null && record != null && creature.state is DesertBatflyState state)
         {
             float bondAtHome = state.SocialBondStrength;
-            propensity = DesertBatflyColonyMigration.IndividualPropensity(
+            propensity = DB_MigrationPolicy.IndividualPropensity(
                 state.Personality,
                 bat.Injury.PhysicalCapability,
                 bat.Injury.IsSeverelyInjured,
                 bat.Injury.IsRecovering,
-                DesertBatflyColonyMigration.ActiveTrauma(state),
+                DB_MigrationPolicy.ActiveTrauma(state),
                 bondAtHome,
                 colony.ShelterFailureMemory,
-                DesertBatflyColonyRuntime.CurrentCycle(world),
+                DB_ColonyRuntime.CurrentCycle(world),
                 record.LastMigrationCycle);
         }
         travelSection.Add("Migration propensity / 个体迁徙倾向",
-            "DesertBatflyColonyMigration.IndividualPropensity", propensity);
+            "DB_MigrationPolicy.IndividualPropensity", propensity);
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Travel / Colony travel / 跨房旅行",
