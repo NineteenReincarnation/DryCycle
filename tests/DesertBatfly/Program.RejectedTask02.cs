@@ -48,5 +48,6 @@ internal static partial class Program
         RunTask13Rain();
         RunTask14R0();
         RunTask14R1();
+        RunTask14R2();
     }
 }
