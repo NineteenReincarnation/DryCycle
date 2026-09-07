@@ -1,0 +1,377 @@
+Desert Batfly Task 14 — R1 Event Foundation Status
+统一语义事件、死亡归因、Peach 捕获去重与 CorpseWarning 生命周期
+
+Revision: V1 / 2026-09-07
+Status: 【R1 代码已实现，待开发机 DLL / 实机验收】
+Branch: task14-r1-eventhub
+R0 parent baseline: 746e1d3d0f7338cccad7c82a5ca867e97aad3abe
+Code review checkpoint before this status document:
+c357a60133b82af201f872a3a05928ae6647e691
+
+Related:
+- docs/Task/Task_14_DesertBatfly_ArchitectureRefactor.txt
+- docs/Discussion/Task_14_R0_BaselineFreeze.txt
+- docs/Discussion/Task_14_DB_MigrationManifest.txt
+
+======================================================================
+0. 状态说明
+======================================================================
+
+R1 的代码侧目标已经完成。
+
+本文件的“完成”只表示：
+
+- 新 EventHub authority 已建立；
+- 已知 R1 多 Hook / 多 attribution source 已迁移；
+- 对应架构回归已经加入 tests；
+- R0 登记的 HB-03 / HB-04 / HB-05 已在代码结构侧关闭。
+
+本环境没有开发机完整 Rain World / BepInEx DLL 集，不能在这里运行：
+
+- DryCycle net48 Release build；
+- tests/DesertBatfly managed integration executable；
+- Rain World 实机 Scenario E/F/G 等验收。
+
+因此当前状态不能写成“实机通过”或“全部测试通过”。
+
+
+======================================================================
+1. R1 authority
+======================================================================
+
+新生产 authority：
+
+    src/Creatures/DesertBatfly/Runtime/DB_EventHub.cs
+
+当前 R1 根事件严格为：
+
+    Damage
+    Capture
+    Mortality
+
+R1 没有提前实现完整 Task14 最终 EventHub 列表中的 Stun/Release/Consume/
+RoomChanged/Burrow/Emerge/VengeanceArmed 等后续事件。
+
+原因：R1 只收敛当前已确认的 HB-03/HB-04/HB-05，不借本阶段扩大范围。
+
+每个已发布 semantic event 带唯一 Sequence。
+
+Capture 另带 SessionSerial，用于区分：
+
+- tongue -> bite/grasp transfer：同一 capture session，不发布第二个 CaptureEvent；
+- release 后真正 recapture：新 session，可发布新 CaptureEvent。
+
+Mortality 对单个 realized victim runtime 使用 one-shot guard：
+
+    live -> dead 最多发布一次 MortalityEvent。
+
+
+======================================================================
+2. Damage -> Mortality causal order
+======================================================================
+
+Creature.Violence 可能在内部同步调用 Die()。
+
+R1 不允许因此形成：
+
+    Threat raw Violence hook
+    + Threat raw Die hook
+    + EventHub mortality
+
+三次独立解释。
+
+现在 DB_EventHub：
+
+1. 在 vanilla Violence 前缓存 attribution fact；
+2. 进入 vanilla Violence；
+3. 如果 Die() 在其中发生，先生成 PendingMortality；
+4. vanilla Violence 返回；
+5. 发布带 Lethal 结果的 DamageEvent；
+6. 再发布 Pending MortalityEvent。
+
+因此统一因果顺序为：
+
+    Damage -> Mortality
+
+ThreatRuntime 对 lethal Damage 不再额外广播普通 witnessed-hit evidence；
+死亡 witness learning 只在 MortalityEvent 路径产生，避免同一致死命中被当成
+“普通 hit + kill”重复训练。
+
+
+======================================================================
+3. Unified mortality attribution
+======================================================================
+
+R1 attribution source 现在只有：
+
+1. ExplicitConsumption；
+2. RecentDamage；
+3. Unattributed。
+
+RecentDamage window：260 ticks。
+ExplicitConsumption window：8 ticks。
+
+重要修正：
+
+    Active grasp / active tongue / grabbedBy
+    !=
+    mortality attribution
+
+即：
+
+- 被玩家抓住时因为环境原因死亡，不自动算玩家杀死；
+- 被 Peach 抓住时发生无关环境死亡，不自动算 Peach kill；
+- 当前 capture 只说明 CaptureEvent，不能代替死亡因果证据。
+
+Vanilla Fly.BitByPlayer 的首口进食可能直接调用 Die() 而没有 Creature.Violence，
+因此 DesertBatfly.BitByPlayer 在进入 vanilla 前显式调用：
+
+    DB_EventHub.RecordConsumptionAttribution(...)
+
+这样既保留玩家吃活体蝠蝇的正确归因，又不会把普通 grasp 冒充 killer。
+
+MortalityEvent 当前携带：
+
+- Sequence；
+- Victim；
+- Killer；
+- SourceObject；
+- DamageType；
+- Damage；
+- Stun；
+- Position；
+- ChainWitnesses；
+- ThreatScale；
+- RevengeFailed；
+- WasConsumed；
+- Clock；
+- Attribution。
+
+
+======================================================================
+4. HB-03 — Death attribution split
+======================================================================
+
+R0 状态：OPEN。
+R1 代码侧状态：【CLOSED / 待实机验证】。
+
+已删除/退出 killer authority 的位置：
+
+- DesertBatfly Creature-local recentLethalDamager / ticks / threatScale；
+- DesertBatflyHooks grabbedBy -> likelyPredator death guess；
+- DesertBatflyThreatRuntime Creature.Die local killer attribution。
+
+当前：
+
+- Colony ReportDeath 使用 DB_MortalityEvent.Killer；
+- Intimidation PlayerKill/PredatorKill 使用同一个 Killer；
+- fallback Grief 使用同一个 Killer/null；
+- Threat kill/counter-kill 使用同一个 Killer；
+- 后续 Corpse Ecology 必须继续消费同一个 MortalityEvent，不得再建新 death attribution。
+
+ThreatRuntime 仍保留短时 RecentDamagePlayerSlot/Tick/Evidence，
+但它只属于 Threat learning context，明确不再决定谁是 killer。
+
+
+======================================================================
+5. HB-04 — Peach tongue multi-hook semantic duplication
+======================================================================
+
+R0 状态：OPEN。
+R1 代码侧状态：【CLOSED / 待实机验证】。
+
+旧语义入口包括：
+
+- DesertBatflyHooks.LizardTongue.Update；
+- Watcher Peach predation LizardTongue.Update；
+- SignalIntegration LizardTongue.Update；
+- grasp transfer 后的 Fly.Grabbed。
+
+R1 后：
+
+- DB_EventHub 是唯一 Capture semantic detector；
+- Watcher Peach adapter 只保留 prey/path/tongue mechanics；
+- Core Hooks 不再发布 tongue fear；
+- SignalIntegration 消费 DB_EventHub.Capture；
+- Intimidation capture reaction 从 DB_EventConsumers 消费 CaptureEvent；
+- Threat player-capture learning 消费 CaptureEvent。
+
+Peach tongue -> Bite/grasp transfer 不产生第二个 semantic capture。
+Peach corpse scavenging 仍不制造 live capture event。
+
+
+======================================================================
+6. HB-05 — CorpseWarning lifecycle
+======================================================================
+
+R0 状态：OPEN。
+R1 代码侧状态：【CLOSED / 待实机验证】。
+
+新增：
+
+    src/Creatures/DesertBatfly/Runtime/DB_CorpseWarningRuntime.cs
+
+该 runtime 不接管 CorpseWarning 行为，只接管 teardown。
+
+设计：
+
+- Mortality consumer 弱记录可能产生 death-site warning 的 Room；
+- 不强引用 Room；
+- 不强引用 CorpseWarning；
+- normal Update/expiry 继续由 Rain World Room + Intimidation 负责；
+- species Enable/Disable lifecycle 都执行 Reset；
+- Reset 扫描已记录 Room.updateList；
+- 对尚未自然销毁的 DesertBatflyIntimidation.CorpseWarning 调 Destroy()；
+- Rain World 自己在普通 Room update 中完成 slated object removal。
+
+这样不会因为 Reset 只清 WeakTable 而留下失去 owner 的旧 transient warning。
+
+
+======================================================================
+7. ThreatRuntime R1 migration
+======================================================================
+
+DesertBatflyThreatRuntime 已不再直接 Hook：
+
+- On.Creature.Violence；
+- On.Creature.Die；
+- On.Fly.Grabbed。
+
+现在消费：
+
+- DB_EventHub.Damage；
+- DB_EventHub.Capture；
+- DB_EventHub.Mortality。
+
+仍保留的独立真实游戏事实入口：
+
+- On.Weapon.Thrown；
+- On.Explosion.Update；
+- On.FirecrackerPlant.PopLump。
+
+这些不是 Desert Batfly Damage/Capture/Mortality 的重复解释，
+而是 Task11 current/acute weapon-world facts，R2 Perception 阶段再统一 Room observation。
+
+Task11 12-dimensional memory、四玩家隔离、save key、no-input 约束均未修改。
+
+
+======================================================================
+8. Signals / Fear / Social / Colony consumer 状态
+======================================================================
+
+Signals：
+- capture Distress/Alarm 改为 CaptureEvent consumer；
+- 保留六种 signal kind；
+- grasp: Distress .88 / Alarm .82；
+- tongue: Distress .94 / Alarm .90。
+
+Fear / Intimidation：
+- Peach capture 从 CaptureEvent 进入；
+- Player/Peach mortality 从 MortalityEvent 进入；
+- 旧 Fear/Vengeance 内部实现本阶段不大改，R5 再移除 Reflection/Detour debt。
+
+Social：
+- capture/death priority cancel 使用 semantic event consumer；
+- Social movement ownership未改。
+
+Colony：
+- ReportDeath 只拿 canonical MortalityEvent.Killer；
+- persistence/save prefix 不变。
+
+
+======================================================================
+9. R1 regression additions
+======================================================================
+
+文件：
+
+    tests/DesertBatfly/Program.Task14R1.cs
+
+已加入正式 historical dispatcher。
+
+当前保护至少包括：
+
+- exactly Damage/Capture/Mortality R1 roots；
+- semantic Sequence 字段；
+- Damage lethal result；
+- Mortality causal fields；
+- capture transfer exactly-once；
+- true recapture allowed；
+- mortality one-shot；
+- bounded attribution window；
+- no ActiveCapture mortality attribution；
+- explicit BitByPlayer consumption attribution；
+- Core duplicate death/tongue root absent；
+- Creature local killer cache absent；
+- Watcher Peach adapter no fear publisher；
+- Colony/Fear canonical mortality consumer；
+- ThreatRuntime raw death/damage/grab hooks absent；
+- ThreatRuntime canonical event consumer entry points；
+- Threat local evidence cache is not killer cache；
+- Task12 raw grasp/tongue roots absent；
+- CorpseWarning teardown owner + lifecycle wiring；
+- DB_ naming / no TaskXX production authority。
+
+这些仍属于 managed/static regression source；
+需要在开发机完整 Rain World DLL 环境实际执行后才能记录 PASS 数量。
+
+
+======================================================================
+10. R1 不包含
+======================================================================
+
+R1 没有提前做：
+
+- DB_RoomContext；
+- DB_WeaponPerception；
+- VisibilityPolicy；
+- DB_FrameContext；
+- BehaviorArbiter；
+- FlightMotor；
+- Travel same-frame full guard；
+- Injury Dijkstra fix；
+- temporary Thirst mutation removal；
+- R5 internal Reflection/DynamicMethod removal；
+- R6 bulk DB_ rename/domain move；
+- Corpse Ecology gameplay；
+- reproduction。
+
+这些继续属于 R2～R7 或未来独立任务。
+
+
+======================================================================
+11. R1 验收结论
+======================================================================
+
+代码结构侧：
+
+[完成] DB_EventHub foundation。
+[完成] Damage/Capture/Mortality semantic roots。
+[完成] semantic Sequence。
+[完成] Damage -> Mortality causal ordering。
+[完成] Mortality exactly-once。
+[完成] unified mortality attribution。
+[完成] active grasp != killer 修正。
+[完成] explicit player consumption attribution。
+[完成] Peach live capture exactly-once root。
+[完成] ThreatRuntime event migration。
+[完成] Signals capture event migration。
+[完成] Colony/Fear/Social lifecycle consumer migration。
+[完成] CorpseWarning centralized teardown。
+[完成] R1 regression source。
+
+待开发机验收：
+
+[待运行] DryCycle Release compile。
+[待运行] DesertBatfly managed integration tests。
+[待实机] Player grab/release。
+[待实机] Peach tongue -> bite/grasp transfer。
+[待实机] Peach live capture -> kill。
+[待实机] Player consume live bat。
+[待实机] environmental death while held must remain unattributed。
+[待实机] Disable/re-enable with active CorpseWarning。
+[待实机] old save smoke test。
+
+R1 当前结论：
+
+    【代码已实现；可以进入 review / 开发机验证，但不宣称实机通过】
