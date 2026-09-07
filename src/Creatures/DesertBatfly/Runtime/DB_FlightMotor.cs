@@ -4,6 +4,24 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
+internal readonly struct DB_FlightMotorDebugState
+{
+    internal readonly int Clock;
+    internal readonly DB_BehaviorOwner Owner;
+    internal readonly Vector2 Goal;
+    internal readonly float NominalSpeed;
+    internal readonly bool ActiveSteer;
+    internal readonly Vector2 RequestedVelocity;
+    internal readonly bool PostPhysicsApplied;
+    internal readonly Vector2 PostPhysicsVelocity;
+
+    internal DB_FlightMotorDebugState(int clock, DB_BehaviorOwner owner, Vector2 goal, float nominalSpeed, bool activeSteer, Vector2 requestedVelocity, bool postPhysicsApplied, Vector2 postPhysicsVelocity)
+    {
+        Clock=clock; Owner=owner; Goal=goal; NominalSpeed=nominalSpeed; ActiveSteer=activeSteer;
+        RequestedVelocity=requestedVelocity; PostPhysicsApplied=postPhysicsApplied; PostPhysicsVelocity=postPhysicsVelocity;
+    }
+}
+
 /// <summary>
 /// R4 single entry point for ordinary Desert Batfly flight steering.
 /// It owns goal intent + requested speed, while Rain World still owns collision and Fly physics.
@@ -17,6 +35,10 @@ internal static class DB_FlightMotor
         internal DB_BehaviorOwner Owner;
         internal Vector2 Goal;
         internal float NominalSpeed;
+        internal bool ActiveSteer;
+        internal Vector2 RequestedVelocity;
+        internal bool PostPhysicsApplied;
+        internal Vector2 PostPhysicsVelocity;
     }
 
     private static ConditionalWeakTable<DesertBatfly, State> states = new();
@@ -84,6 +106,10 @@ internal static class DB_FlightMotor
         state.Owner = owner;
         state.Goal = goal;
         state.NominalSpeed = nominalSpeed;
+        state.ActiveSteer = true;
+        state.RequestedVelocity = requested;
+        state.PostPhysicsApplied = false;
+        state.PostPhysicsVelocity = default;
         return true;
     }
 
@@ -115,6 +141,10 @@ internal static class DB_FlightMotor
         state.Owner = owner;
         state.Goal = goal;
         state.NominalSpeed = Mathf.Max(0f, nominalSpeed);
+        state.ActiveSteer = false;
+        state.RequestedVelocity = default;
+        state.PostPhysicsApplied = false;
+        state.PostPhysicsVelocity = default;
         return true;
     }
 
@@ -160,6 +190,21 @@ internal static class DB_FlightMotor
             previousVelocity,
             bat.mainBodyChunk.vel,
             nominalSpeed);
+        if (states.TryGetValue(bat, out State postState) && postState.Clock == clock)
+        {
+            postState.PostPhysicsApplied = true;
+            postState.PostPhysicsVelocity = bat.mainBodyChunk.vel;
+        }
+    }
+
+    internal static bool TryGetDebugState(DesertBatfly bat, out DB_FlightMotorDebugState debug)
+    {
+        debug = default;
+        if (bat?.room == null || !states.TryGetValue(bat, out State state)) return false;
+        int clock = bat.room.game?.clock ?? int.MinValue;
+        if (state.Clock != clock) return false;
+        debug = new DB_FlightMotorDebugState(state.Clock, state.Owner, state.Goal, state.NominalSpeed, state.ActiveSteer, state.RequestedVelocity, state.PostPhysicsApplied, state.PostPhysicsVelocity);
+        return true;
     }
 
     internal static bool TryGetIntent(

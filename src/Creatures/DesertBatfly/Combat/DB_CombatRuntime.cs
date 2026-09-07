@@ -52,6 +52,9 @@ internal sealed class DB_CombatRuntime
     internal int RetaliationCharges => retaliationCharges;
     internal int RetaliationRecovery => retaliationRecovery;
     internal bool HasSlot => hasSlot;
+    internal int InterestTicks => interest;
+    internal int UnseenTicks => unseen;
+    internal int PhaseTicks => ticks;
     internal bool PullingUp => ai.Mode == DesertBatflyAI.Activity.FakeDive &&
                                ticks > DesertBatflyTuning.FakeDivePullUpTicks;
     internal bool FormalAttack => hasSlot && ai.Mode is

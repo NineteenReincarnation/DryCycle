@@ -1,8 +1,8 @@
 Desert Batfly Task 14 — R4 FlightMotor / AI Responsibility Split Status
-Revision: R4-B4 / 2026-09-07
+Revision: R4-Final / 2026-09-07
 Branch: task14-r4-flightmotor
 Base: R3 code-side closed at a2260b110af22f84317c90d8dcd7ec6ec128a67c
-Status: 【R4 进行中 / B4 Combat responsibility extraction complete】
+Status: 【R4 代码侧完成 / 实机验收统一延后】
 
 ======================================================================
 1. 已完成
@@ -76,9 +76,9 @@ R4-B3 CLOSED — DB_CombatRuntime now owns formal phase execution, combat-local 
 
 R4-B4 CLOSED — target storage, Harass candidate interpretation, social Harass candidate selection, attacker memory and retaliation preparation now live in DB_CombatRuntime. DesertBatflyAI retains only danger/approach perception and compatibility read surfaces.
 
-R4-OPEN-01 — final source audit of every localGoal / sustained velocity writer and classify every remaining special-physics exception.
-R4-OPEN-02 — Observatory expose FlightMotor owner/goal/nominal speed/modifier result and special-physics boundary.
-R4-OPEN-03 — managed compile/integration and Rain World live scenarios deferred to final validation stage per project decision.
+R4-CLOSED-01 — final source audit confirms ordinary localGoal writes are centralized in DB_FlightMotor; remaining direct writers are classified special physics.
+R4-CLOSED-02 — Observatory exposes FlightMotor owner/goal/nominal speed/requested velocity/post-Injury result/special-physics boundary and reads migrated Combat state from DB_CombatRuntime.
+R4-DEFERRED-VALIDATION — managed compile/integration and Rain World live scenarios are intentionally deferred to final refactor acceptance per project decision.
 
 ======================================================================
 5. R4 完成条件
@@ -129,3 +129,18 @@ DB_CombatRuntime 现拥有：Target、attacker memory、retaliation charges/reco
 DesertBatflyAI.ScanCreatures 保留单次 RoomContext traversal，只计算 danger / player approach fear；同一可见候选通过 Combat.ConsiderCandidate 交给 Combat 域解释，避免为了分层重新扫描房间。
 
 Target 对外仍可通过 DesertBatflyAI.Target 只读兼容面查询，但真实存储已经迁到 DB_CombatRuntime。
+
+
+======================================================================
+8. R4-Final closeout
+======================================================================
+
+Final source audit contract:
+- ordinary FlyAI.localGoal assignment authority: DB_FlightMotor only;
+- DesertBatflyEmergence direct localGoal remains explicit Emergence special physics;
+- sustained direct mainBodyChunk.vel writers outside DB_FlightMotor are limited to Emergence and Combat Attach/Interfere contact pinning;
+- one-shot collision/retaliation impulses remain classified instantaneous physics, not continuous locomotion controllers.
+
+Observatory now reads migrated Combat memory/interest/unseen/slot data from DB_CombatRuntime rather than stale DesertBatflyAI reflection, and exposes the current R4 FlightMotor intent plus post-Injury velocity result.
+
+R4 may proceed to R5 without intermediate live testing; all Rain World live validation remains part of the final refactor acceptance matrix.

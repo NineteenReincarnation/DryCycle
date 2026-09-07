@@ -24,6 +24,8 @@ internal static partial class Program
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", true);
         Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
+        Type motorDebug = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotorDebugState", true);
+        Type debugSource = mod.GetType("DryCycle.Debugging.AI.DesertBatflyDebugSource", true);
 
         Check(motor.GetMethod("Reset", Flags) != null &&
               motor.GetMethod("Forget", Flags) != null &&
@@ -31,7 +33,8 @@ internal static partial class Program
               motor.GetMethod("TryGuideNative", Flags) != null &&
               motor.GetMethod("TryRetarget", Flags) != null &&
               motor.GetMethod("ApplyPostPhysics", Flags) != null &&
-              motor.GetMethod("TryGetIntent", Flags) != null,
+              motor.GetMethod("TryGetIntent", Flags) != null &&
+              motor.GetMethod("TryGetDebugState", Flags) != null,
             "Task14 R4 FlightMotor exposes active steer, native guide, same-owner retarget and final modifier surfaces");
         Check(fog.GetMethod("ModifyGoal", Flags) != null &&
               fog.GetMethod("Reset", Flags) != null && fog.GetMethod("Forget", Flags) != null,
@@ -87,11 +90,23 @@ internal static partial class Program
         Check(ai.GetMethod("FindContact", Flags) == null && ai.GetMethod("AcquireSlot", Flags) == null &&
               ai.GetMethod("UpdateInterference", Flags) == null && ai.GetMethod("Finish", Flags) == null,
             "Task14 R4 old AI shell no longer owns combat contact/slot/finish implementation");
+        Check(motorDebug.GetField("Owner", Flags) != null &&
+              motorDebug.GetField("Goal", Flags) != null &&
+              motorDebug.GetField("NominalSpeed", Flags) != null &&
+              motorDebug.GetField("PostPhysicsVelocity", Flags) != null,
+            "Task14 R4 FlightMotor exposes owner/goal/speed/post-injury debug state");
+        Check(debugSource.GetMethod("BuildFlightMotorSection", Flags) != null,
+            "Task14 R4 Observatory exposes FlightMotor intent and special-physics boundary");
+        Check(debugSource.GetField("MemoryField", Flags) == null &&
+              debugSource.GetField("InterestField", Flags) == null &&
+              debugSource.GetField("UnseenField", Flags) == null &&
+              debugSource.GetField("HasSlotField", Flags) == null,
+            "Task14 R4 Observatory no longer reflects Combat fields from the old AI shell");
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("Disable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
             "FlightMotor/Fog transient state follows species lifecycle");
 
-        Console.WriteLine("Task14 R4 B4: Combat execution, target selection, Harass motivation and retaliation preparation are all owned by DB_CombatRuntime; final Observatory/audit closeout remains.");
+        Console.WriteLine("Task14 R4 code-side complete: single ordinary FlightMotor boundary, Combat extraction, Observatory motor/debug migration and source writer audit are all guarded; live validation is deferred to final refactor acceptance.");
     }
 }

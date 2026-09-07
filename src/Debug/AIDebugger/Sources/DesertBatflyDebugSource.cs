@@ -10,11 +10,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);
-    private static readonly FieldInfo MemoryField = typeof(DesertBatflyAI).GetField("memory", PrivateInstance);
-    private static readonly FieldInfo InterestField = typeof(DesertBatflyAI).GetField("interest", PrivateInstance);
     private static readonly FieldInfo PursuitField = typeof(DesertBatflyAI).GetField("pursuit", PrivateInstance);
-    private static readonly FieldInfo UnseenField = typeof(DesertBatflyAI).GetField("unseen", PrivateInstance);
-    private static readonly FieldInfo HasSlotField = typeof(DesertBatflyAI).GetField("hasSlot", PrivateInstance);
     private static readonly FieldInfo EscapeFromField = typeof(DesertBatflyAI).GetField("escapeFrom", PrivateInstance);
 
     public int Priority => 1000;
@@ -86,11 +82,11 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.formal_attack", "DesertBatflyAI.FormalAttack", ai.FormalAttack)
             .Add("field.immediate_danger", "DesertBatflyAI.HasImmediateDanger", ai.HasImmediateDanger)
             .Add("field.retreat", "DesertBatflyAI.retreat", Read<int>(RetreatField, ai))
-            .Add("field.memory", "DesertBatflyAI.memory", Read<int>(MemoryField, ai))
-            .Add("field.interest", "DesertBatflyAI.interest", Read<int>(InterestField, ai))
+            .Add("field.memory", "DB_CombatRuntime.Memory", ai.Combat.Memory)
+            .Add("field.interest", "DB_CombatRuntime.InterestTicks", ai.Combat.InterestTicks)
             .Add("field.pursuit", "DesertBatflyAI.pursuit", Read<int>(PursuitField, ai))
-            .Add("field.unseen", "DesertBatflyAI.unseen", Read<int>(UnseenField, ai))
-            .Add("field.has_slot", "DesertBatflyAI.hasSlot", Read<bool>(HasSlotField, ai)));
+            .Add("field.unseen", "DB_CombatRuntime.UnseenTicks", ai.Combat.UnseenTicks)
+            .Add("field.has_slot", "DB_CombatRuntime.HasSlot", ai.Combat.HasSlot));
 
         if (bat.room != null && DesertSwarmRoom.TryGet(bat.room, out DesertSwarmRoom colony))
         {
@@ -126,6 +122,7 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             .Add("field.lured_counter", "FlyAI.luredCounter", bat.AI?.luredCounter ?? 0));
 
         BuildArbiterSection(snapshot, bat);
+        BuildFlightMotorSection(snapshot, bat);
         BuildDecisionStack(snapshot, bat);
         return snapshot;
     }
@@ -169,6 +166,36 @@ internal sealed class DesertBatflyDebugSource : IAIDebugSource
             }
         }
 
+        snapshot.Sections.Add(section);
+    }
+
+    private static void BuildFlightMotorSection(AIDebugSnapshot snapshot, DesertBatfly bat)
+    {
+        var section = new AIDebugSection("section.flight_motor");
+        if (bat?.room == null || !DB_FlightMotor.TryGetDebugState(bat, out DB_FlightMotorDebugState motor))
+        {
+            DB_SpecialPhysicsOwner special = DB_SpecialPhysicsOwner.None;
+            if (bat != null && DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution unresolvedResolution))
+                special = unresolvedResolution.SpecialPhysicsOwner;
+            section.Add("field.motor_active", "DB_FlightMotor.TryGetDebugState", false)
+                .Add("field.motor_special_physics", "DB_BehaviorResolution.SpecialPhysicsOwner", special);
+            snapshot.Sections.Add(section);
+            return;
+        }
+
+        DB_SpecialPhysicsOwner specialOwner = DB_SpecialPhysicsOwner.None;
+        if (DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution))
+            specialOwner = resolution.SpecialPhysicsOwner;
+
+        section.Add("field.motor_active", "DB_FlightMotorDebugState", true)
+            .Add("field.motor_owner", "DB_FlightMotorDebugState.Owner", motor.Owner)
+            .Add("field.motor_goal", "DB_FlightMotorDebugState.Goal", motor.Goal)
+            .Add("field.motor_nominal_speed", "DB_FlightMotorDebugState.NominalSpeed", motor.NominalSpeed)
+            .Add("field.motor_active_steer", "DB_FlightMotorDebugState.ActiveSteer", motor.ActiveSteer)
+            .Add("field.motor_requested_velocity", "DB_FlightMotorDebugState.RequestedVelocity", motor.ActiveSteer ? motor.RequestedVelocity.ToString() : "native Fly physics")
+            .Add("field.motor_post_physics", "DB_FlightMotorDebugState.PostPhysicsApplied", motor.PostPhysicsApplied)
+            .Add("field.motor_post_velocity", "DB_FlightMotorDebugState.PostPhysicsVelocity", motor.PostPhysicsApplied ? motor.PostPhysicsVelocity.ToString() : "—")
+            .Add("field.motor_special_physics", "DB_BehaviorResolution.SpecialPhysicsOwner", specialOwner);
         snapshot.Sections.Add(section);
     }
 
