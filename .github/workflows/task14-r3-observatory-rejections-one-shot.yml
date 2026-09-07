@@ -40,3 +40,5 @@ jobs:
           git add -A
           git commit -m 'Expose R3 rejected proposals in AI Observatory'
           git push origin HEAD:task14-r3-arbiter
+
+# trigger
