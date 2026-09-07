@@ -1,0 +1,42 @@
+name: Task14 R3 foundation one-shot
+
+on:
+  push:
+    branches:
+      - task14-r3-arbiter
+
+permissions:
+  contents: write
+
+jobs:
+  apply-r3-foundation:
+    if: github.event.head_commit.message == 'Trigger Task14 R3 foundation wiring'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r3-arbiter
+          fetch-depth: 0
+
+      - name: Apply guarded R3 foundation wiring
+        run: python scripts/task14_r3_foundation_apply.py
+
+      - name: Validate structural R3 foundation
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r3_foundation_apply.py
+          test ! -e .github/workflows/task14-r3-foundation-one-shot.yml
+          grep -q 'CanOwnRealizedFrame' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
+          grep -q 'TryGetVengeanceTarget' src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs
+          grep -q 'DB_BehaviorArbiter.ResolveFrame' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'MarkTravelOwnedFrame' src/Creatures/DesertBatfly/DesertBatflyHooks.cs
+          ! grep -q 'statesField' src/Creatures/DesertBatfly/ThreatSignature/DesertBatflyThreatVengeanceBridge.cs
+          grep -q 'DB_BehaviorArbiter.TryGetResolution' src/Debug/AIDebugger/Sources/DesertBatflyDebugSource.cs
+
+      - name: Commit guarded R3 foundation wiring
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Wire Task14 R3 frame ownership foundation'
+          git push origin HEAD:task14-r3-arbiter
