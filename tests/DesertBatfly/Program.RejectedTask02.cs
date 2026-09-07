@@ -34,11 +34,12 @@ internal static partial class Program
 
     // Program.cs historically ended by calling RunRoleIntegration from the removed
     // Task-02 test file. Keep the old entry-point name only as a neutral regression
-    // dispatcher; it runs current Task09/Task10 suites and contains no role implementation.
+    // dispatcher; it runs current accepted task suites and contains no role implementation.
     private static void RunRoleIntegration()
     {
         RunTask09();
         RunTask10();
         RunTask10Guards();
+        RunTask11();
     }
 }
