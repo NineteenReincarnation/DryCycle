@@ -1,0 +1,1307 @@
+Desert Batfly Task 13
+Environmental Activity & Shelter Behavior
+环境活动与房内避险生态
+============================================================
+
+Status
+------
+Formal implementation specification.
+This task combines the approved Environmental Group Behavior direction with the current Task09/10/11/12 architecture and the weather-by-weather discussion finalized as of 2026-09-07.
+
+This task must be implemented as a realized-room environmental behavior layer.
+It is NOT a new migration system, NOT a new social controller, NOT a weather-memory system and NOT a second locomotion controller.
+
+============================================================
+1. Primary goal
+============================================================
+
+Make Desert Batfly colonies visibly and mechanically adapt their realized-room activity to DryCycle weather in a way that:
+- differs by weather type;
+- preserves individual Personality/Injury/ThreatMemory differences;
+- uses local shelter/exposure instead of fixed flight-height commands;
+- naturally creates group-level ecological changes without a central flock controller;
+- integrates with Task09 migration/refuge, Task10 social life, Task11 threat learning and Task12 social signals;
+- never allows vanilla/default RoomSettings effects to impersonate DryCycle weather;
+- preserves vanilla Fly/BatFlight locomotion.
+
+Expected player-facing result:
+- weather approaching is visible in how the colony behaves;
+- different weather types cause different ecological strategies;
+- the colony does not synchronously flip states on one frame;
+- environmental safety can temporarily override aggression/social behavior without erasing long-term state.
+
+============================================================
+2. Hard ownership boundary: Task09 vs Task13
+============================================================
+
+Task09 owns all cross-room survival/ecology decisions:
+- EmergencyRefuge selection;
+- ReturnHome;
+- ColonyMigration;
+- route planning;
+- LeaveRoom;
+- WorldRoute / weighted path planning;
+- permanent HomeColony change;
+- long-term weather/habitat stress and shelter-failure history.
+
+Task13 owns only realized-room local behavior while the individual is staying in the current room:
+- local shelter preference;
+- local exposure avoidance;
+- local Home/Hive retreat inside the same room;
+- local Burrow preference;
+- local Roost/Chain pressure;
+- social/harass/activity modifiers;
+- environmental phase and recovery;
+- weather-specific navigation uncertainty;
+- bounded LocalShelterFailure reporting back to Task09.
+
+Task13 MUST NOT directly:
+- call LeaveRoom for its own purposes;
+- choose a different room;
+- create a ColonyMigration batch;
+- set a permanent migration destination;
+- change HomeColony;
+- replace Task09 route planning.
+
+If Task09 currently owns a realized travel frame, Task13 yields completely.
+
+============================================================
+3. HARD RULE: weather source authority
+============================================================
+
+Task13 may react only to DryCycle's own weather runtime/scheduler/spatially-authorized weather events.
+
+Allowed sources:
+- WeatherScheduleRuntime / current scheduled weather event;
+- WeatherSpatialRegistry room authorization;
+- active DryCycle Weather event;
+- forecast DryCycle Weather event inside the allowed ecological forecast window;
+- active DryCycle DangerType event;
+- future local exposure fields explicitly owned by the active DryCycle weather implementation.
+
+Forbidden sources:
+- vanilla/default RoomSettings Fog effect;
+- RoomSettings visual Fog amount;
+- palette/effect values;
+- arbitrary visual shader fog;
+- vanilla room visual Effect flags that are not the active DryCycle weather event;
+- inferring weather from graphics state;
+- other mods' effects unless they explicitly register through a future DryCycle environmental provider API.
+
+Hard regression case:
+RoomSettings contains strong Fog but DryCycle Weather runtime says no Fog -> Task13 remains Calm and visibility/activity is unchanged.
+
+Conversely:
+DryCycle DenseFog is active -> Task13 DenseFog behavior is valid even if its rendering internally uses RoomSettings/Fog infrastructure.
+
+============================================================
+4. Environmental room phases
+============================================================
+
+Create a realized-room environmental context with these phases:
+
+1) Calm
+2) Advisory
+3) Preparation
+4) Sheltering
+5) Acute
+6) Recovery
+
+This phase is environmental context, NOT DesertBatflyAI.Activity and NOT a permanent Role.
+
+Calm:
+- Task13 nearly inactive.
+- normal Task10/Harass/Roost/Task11/vanilla Fly behavior.
+
+Advisory:
+- bounded near-term weather cue exists;
+- weak behavior bias only;
+- early responders differ by Personality/Injury/condition.
+
+Preparation:
+- visible activity changes begin;
+- shelter/home/roost pressure rises depending on weather profile;
+- ordinary non-survival activity usually contracts, except where weather-specific agitation explicitly increases it.
+
+Sheltering:
+- local shelter/roost/home/burrow behavior dominates;
+- neutral social play strongly reduced;
+- ordinary proactive Harass is normally strongly suppressed unless a specific Heat profile allows an active-aggression window before hard survival dominates.
+
+Acute:
+- hard local survival.
+- Personality cannot justify suicidal ordinary activity.
+- Task09 owns any necessary cross-room movement.
+- if staying in the room, Task13 owns local hard sheltering.
+
+Recovery:
+- weather/hazard has fallen below active thresholds;
+- activity, vision confidence, Harass and Task10 return gradually;
+- no whole-colony same-frame release.
+
+============================================================
+5. Hysteresis and commitment
+============================================================
+
+Room phase thresholds must use hysteresis.
+Example principle only:
+- Preparation enter threshold > Preparation exit threshold;
+- Sheltering enter threshold > Sheltering exit threshold;
+- Acute exit must require a materially safer condition than Acute entry.
+
+Do not use one threshold for both entry and exit.
+
+Each individual may hold a realized-only EnvironmentalCommitment:
+- approximately 120-300 ticks depending on weather/phase;
+- prevents anchor/phase thrashing;
+- stable EntityID timing offset should stagger decisions;
+- Immediate Danger, Task09 travel, Grab, Death, severe invalidation may break commitment.
+
+Recovery must also be staggered using Personality/condition + stable seed.
+
+============================================================
+6. No fixed flight-height controller
+============================================================
+
+Rejected core behavior:
+"bad weather -> fly lower"
+
+Reason:
+- causes vertical correction loops;
+- recreates artificial oscillation;
+- is physically wrong for Heat/Sandstorm;
+- does not represent actual shelter.
+
+Task13 instead uses local environmental exposure/shelter.
+
+Allowed:
+- set/adjust FlyAI.localGoal toward a local shelter/home/roost-supporting target;
+- adjust nominal activity radius/speed intent if existing APIs support it;
+- let vanilla Fly/BatFlight perform actual movement.
+
+Forbidden:
+- direct Task13 writes to BodyChunk.vel;
+- repeated custom force/velocity steering;
+- fixed Y target for all bats;
+- teleporting into shelter;
+- bypassing collision/pathing.
+
+============================================================
+7. Local exposure abstraction
+============================================================
+
+Implement a weather-aware local exposure layer, conceptually:
+
+EnvironmentalExposureSample
+- Exposure
+- RoofShielding
+- SideShielding
+- Enclosure
+- Shade
+- RainExposure
+- VisibilityConfidence
+- optional HazardDirection
+- optional ThermalExposure
+- optional WindExposure
+
+The first implementation may derive most data from room terrain:
+- roof distance;
+- nearby walls;
+- enclosure;
+- open-space ratio;
+- Hive/Den context.
+
+Future extensions must be pluggable:
+- HeatColumn / local HeatWave field;
+- sunlight/shade;
+- Sandstorm wind direction;
+- local wind/sand exposure.
+
+Do not make DesertBatflyAI itself responsible for scanning these values every frame.
+
+============================================================
+8. Shelter Anchor Set
+============================================================
+
+Extend current Task09 room-shelter analysis into a realized-room Shelter Anchor Set.
+
+Per realized Room:
+- cache approximately 4-8 spatially separated high-quality shelter anchors;
+- avoid one universal flock target;
+- anchor scan should be one-shot or low-frequency, not per bat per frame;
+- room data should be held in ConditionalWeakTable<Room,...> or equivalent realized-room runtime storage.
+
+Each anchor should contain approximately:
+- position/tile;
+- generic ShelterQuality;
+- RoofShielding;
+- SideShielding/Enclosure;
+- Shade/Thermal suitability;
+- Sandstorm suitability;
+- Rain suitability;
+- legal Roost compatibility or nearby legal Roost info;
+- current Crowding;
+- optional Hive/Burrow proximity.
+
+Anchor scoring per individual:
+Score =
++ hazard-specific shelter quality
+- travel distance
+- current crowding
++ roost compatibility where useful
++ Home/Hive familiarity where applicable
++ stable individual preference
+- injury/open-space travel cost
+
+Do not permanently assign anchors to individuals.
+
+============================================================
+9. Shelter is not Roost
+============================================================
+
+Shelter:
+- low exposure to the active environment.
+
+Roost:
+- legal Fly Chain/Hang attachment.
+
+A good shelter may have no legal Roost:
+- individual remains in short-range sheltered flight.
+
+A legal Roost can be poor environmental shelter:
+- e.g. exposed underside in a hot/open area;
+- Task13 should not prefer it merely because ChainTile is legal.
+
+Task10 remains owner of:
+- RoostInvitation;
+- ChainSocialization;
+- FlyAI.ChainTile;
+- platform underside support;
+- chain-tail attachment;
+- Roost reservation.
+
+Task13 only modifies Roost desire/priority and environmental suitability.
+
+============================================================
+10. EnvironmentalInfluence output
+============================================================
+
+Task13 should expose a realized-only influence state rather than directly implementing every downstream behavior.
+
+Suggested fields:
+- Phase
+- WeatherKind
+- WeatherId
+- ActiveIntensity
+- ForecastTicks
+- ShelterDrive
+- OpenExposureAversion
+- RoostMultiplier
+- HarassMultiplier
+- SocialMultiplier
+- PlayMultiplier
+- GroupCohesionMultiplier
+- LocalActivityRadiusMultiplier
+- VisibilityConfidence
+- NavigationUncertainty
+- PreferredShelterPoint
+- PreferredShelterQuality
+- HomeReturnDrive
+- BurrowDrive
+- WeatherMigrationSuppression
+- HeatAgitation
+- HeatShelterDrive
+- ThermalExhaustion
+- RecoveryProgress
+- HardSurvival
+- DecisionReason
+
+Task13 state is realized-only except for bounded LocalShelterFailure evidence handed to Task09.
+
+============================================================
+11. Personality / physical condition
+============================================================
+
+Personality modifies timing and response strength.
+It must not override hard lethal-safety rules.
+
+Nerve:
+- high -> later contraction, earlier Recovery, more likely to remain active during non-lethal heat agitation;
+- low -> earlier contraction, later Recovery.
+
+Conformity:
+- does NOT copy another bat's Task13 phase;
+- indirectly increases weather-group coordination through existing Task12 RoostCall and Task10 response.
+
+RoostAffinity:
+- raises probability/commitment of Roost under weather shelter pressure.
+
+Temperament:
+- can delay ordinary activity suppression slightly;
+- strongly converts HeatAgitation into aggression;
+- may resume earlier in Recovery.
+
+Injury / PostStunShock / PhysicalCapability:
+- earlier Preparation;
+- nearer shelter anchor preference;
+- lower willingness to cross exposed space;
+- earlier Roost/Burrow/Home behavior;
+- slower Recovery;
+- severe Injury usually blocks IntenseHeat damage-aggression permission.
+
+Dehydration:
+- worsens thermal tolerance;
+- raises HeatShelterDrive/ThermalExhaustion;
+- shortens heat-aggression active window;
+- can make LightRain exposure mildly beneficial.
+
+Do not create a new persistent HeatTolerance personality axis.
+Derived HeatTolerance should use existing state + stable EntityID variation.
+
+============================================================
+12. Integration with Task10 Neutral SocialLife
+============================================================
+
+Task13 must modify Task10 using multipliers/gates, not reimplement social behaviors.
+
+Relevant Task10 behaviors:
+- CompanionDrift
+- PassBy
+- SocialChase
+- GroupDrift
+- RoostInvitation
+- PositionNegotiation
+- ChainSocialization
+
+General rule:
+- weather can lower/raise eligibility or weighting;
+- Task10 still owns partner/group/reservation logic.
+
+GroupDrift:
+- may remain during early Preparation as weak group cohesion;
+- must not become a Task13 navigation controller;
+- Task13 chooses/encourages local shelter direction, Task10 only provides social cohesion.
+
+============================================================
+13. Integration with ordinary Harass / formal attack
+============================================================
+
+Task13 outputs HarassMultiplier / weather-specific aggression permission.
+It does not replace DesertBatflyAI attack states or AttackSlots.
+
+Immediate defensive response remains valid under all weather.
+
+Long retaliation commitment should shorten under strong environmental survival pressure.
+
+Heat profiles are exceptional:
+- can raise proactive aggression and damage attack permission before hard thermal survival wins.
+
+Sandstorm profiles:
+- lower proactive aggression overall;
+- may retain/increase defensive aggression near Hive/Burrow access or when attacked while returning Home.
+
+============================================================
+14. Integration with Task11 Threat Signature Memory
+============================================================
+
+Task11 memory stays private and persistent.
+Task13 must never clear, copy or rewrite Threat Signature.
+
+Weather affects current willingness to spend effort attacking.
+Task11 affects tactical caution/geometry.
+
+Example:
+IntenseHeat gives high damage attack permission.
+Receiver has high PiercingPressure + CounterKillPressure.
+Result:
+- may still attack due to heat;
+- prefers safer lateral/fake-dive/short attack windows from Task11;
+- not forced into suicidal straight Dive.
+
+Fog/DenseFog:
+- may reduce long-range CurrentCue/witness recognition range;
+- immediate projectile danger at close distance remains detectable.
+
+============================================================
+15. Integration with Task12 Observable Social Signals
+============================================================
+
+Task12 V1 remains exactly six signals:
+- AlarmFlutter
+- DistressCall
+- RallySignal
+- RoostCall
+- HarassSignal
+- SafeSignal
+
+Task13 MUST NOT add:
+- ShelterCall
+- SandstormCall
+- WeatherCall
+- FogCall
+- HeatCall
+
+Every bat can sense DryCycle environmental weather directly within the permitted forecast/current-weather rules.
+
+Natural coordination:
+weather makes A roost earlier -> A emits existing RoostCall -> B/C may follow via Task12 + Task10.
+
+AlarmFlutter:
+- not a general weather forecast signal;
+- may only represent a real acute local environmental danger event.
+
+SafeSignal:
+- not used to announce weather ending;
+- Task13 Recovery owns environmental recovery.
+
+Fog/DenseFog:
+- Task12 visual signal range may be reduced by VisibilityConfidence;
+- Alarm/Distress retain close acoustic/flutter perception.
+
+============================================================
+16. Integration with Extreme Vengeance
+============================================================
+
+Weather does not erase Vengeance.
+
+HeatWave:
+- may mildly strengthen active vengeance/aggression while thermal survival is still below hard threshold.
+
+IntenseHeat / DeathSandstorm / other hard survival:
+- may suspend Vengeance activity;
+- Vengeance state remains;
+- may resume after Recovery if still valid.
+
+Task09 travel ownership still overrides local Vengeance movement.
+
+============================================================
+17. Narrow feedback to Task09: LocalShelterFailure
+============================================================
+
+Task13 may report bounded LocalShelterFailure evidence when:
+- Task09 considers Home/current room theoretically adequate;
+- serious weather is actually active;
+- realized Task13 repeatedly finds no usable shelter anchors, unusable overcrowding or persistent exposure;
+- failure persists long enough to be ecological evidence rather than one bad frame.
+
+Task13 MUST NOT directly respond by permanently migrating.
+Task09 decides how this evidence influences future shelter confidence/migration pressure.
+
+No new persistent Task13 weather-memory model.
+
+============================================================
+18. Weather coexistence and dominant profile
+============================================================
+
+Do not blindly sum all weather modifiers.
+
+Resolve:
+- dominant ecological hazard/profile;
+- compatible secondary modifiers.
+
+Rules:
+- HeavyRain dominates LightRain shelter response.
+- LightRain may weakly reduce dehydration/heat burden but never cancel HeatWave/IntenseHeat.
+- Fog may coexist with LightRain because visibility and moisture are separate axes.
+- DangerType hard survival dominates neutral weather modifiers.
+- avoid double-counting Weather + DangerType manifestations of the same hazard family.
+
+============================================================
+19. LightRain profile
+============================================================
+
+Identity:
+weak disturbance + minor moisture opportunity.
+Not a miniature HeavyRain.
+
+DryCycle source requirement applies.
+
+Phase ceiling:
+- LightRain alone reaches at most weak Advisory.
+- must not independently force Preparation/Sheltering/Acute.
+
+Healthy bats:
+- normal Solo/Companion/Group/PassBy/SocialChase/Harass/Roost mostly preserved.
+
+Sensitive bats:
+- low Nerve, Injury/PostStunShock, high RoostAffinity may reduce activity radius slightly and Roost earlier.
+
+Dehydration:
+- true exposed rain may provide slow simple moisture recovery;
+- roof-protected bats do not receive the same benefit;
+- do not add a special drinking animation;
+- do not integrate this into the player's full thirst system.
+
+Task10 baseline intent:
+- CompanionDrift ~ normal
+- GroupDrift ~ normal
+- PassBy ~ normal
+- SocialChase slight reduction only
+- RoostInvitation/ChainSocialization slight increase
+
+Harass:
+- tiny reduction for normal individuals;
+- bold healthy individuals can remain effectively unchanged.
+
+Signals:
+- no Alarm solely due to LightRain;
+- no Safe when LightRain ends.
+
+Task09:
+- no EmergencyRefuge solely due to LightRain;
+- no permanent migration stress.
+
+Recovery:
+- short, staggered, often nearly invisible.
+
+============================================================
+20. Fog profile
+============================================================
+
+Identity:
+moderate visual-confidence loss -> reduced willingness for long-range activity.
+Not primarily a shelter emergency.
+
+Effects:
+- VisibilityConfidence moderately reduced;
+- LocalActivityRadius reduced;
+- long Solo roaming reduced;
+- long-range Harass/SocialChase reduced;
+- nearby Companion/PassBy/small Group behavior remains possible;
+- only slight Roost increase.
+
+No normal cross-room evacuation solely due to Fog.
+
+Visual/system effects:
+- Task10 target/partner discovery range may shrink;
+- Task11 long-range CurrentCue/witness recognition may shrink;
+- Task12 visual signal perception range may shrink;
+- immediate nearby projectile danger remains detectable.
+
+Default RoomSettings Fog MUST NOT trigger any of this.
+
+============================================================
+21. DenseFog profile
+============================================================
+
+Identity:
+severe visual uncertainty that can make the current room temporarily unsuitable for normal life.
+
+Effects:
+- VisibilityConfidence strongly reduced;
+- LocalActivityRadius strongly reduced;
+- long-range Harass and SocialLife strongly suppressed;
+- Roost/HomeReturn desire increases;
+- Injury/low Nerve withdraw earlier.
+
+NavigationUncertainty:
+- reduce obstacle anticipation distance;
+- introduce bounded target-position uncertainty at long range;
+- uncertainty decreases near target;
+- occasional real wall collision may naturally happen because avoidance begins late;
+- never force collision by velocity;
+- never use fixed periodic "crash" events independent of geometry.
+
+Home familiarity:
+- Home/Hive familiarity reduces uncertainty;
+- known Roost/Shelter points are easier to approach than unfamiliar geometry.
+
+Task09 temporary displacement:
+- if current room is severely fogged/unusable and a nearby reachable clearer safe room exists, temporary EmergencyRefuge/Weather displacement is allowed;
+- weather clears -> ReturnHome;
+- HomeColony does not change;
+- a single DenseFog event must not create permanent ColonyMigration.
+
+If Home is familiar and locally adequate, returning/staying Home may beat outward displacement.
+
+Recovery:
+- VisibilityConfidence/activity return gradually.
+
+============================================================
+22. HeatWave profile
+============================================================
+
+Identity:
+simultaneous agitation/aggression AND heat avoidance/exhaustion.
+
+Required derived drives:
+1) HeatAgitation
+2) HeatShelterDrive
+3) ThermalExhaustion
+
+Do not collapse Heat into one monotonic activity-down value.
+
+Heat progression:
+
+Early:
+- HeatAgitation rises quickly;
+- Harass/FakeDive/Dive willingness increases;
+- some SocialChase can increase;
+- shelter/exhaustion still limited.
+
+Middle:
+- Agitation remains high;
+- HeatShelterDrive + Exhaustion increase;
+- population visibly splits between aggressive-active and sheltering individuals.
+
+Long/severe:
+- shelter/exhaustion increasingly dominate;
+- long-range flight and neutral play decrease;
+- more shaded Roost/local shelter/Home behavior.
+
+Aggression:
+- ordinary HeatWave raises damage-capable attack permission mainly for bold/healthy individuals and some medium individuals;
+- low Nerve does not automatically become violent;
+- AttackSlots remain;
+- PTSD/Injury/Task11 caution remain meaningful.
+
+Shelter target:
+- shade/roof/local thermal relief;
+- never arbitrary low altitude;
+- exposed legal Roost may score poorly.
+
+Dehydration:
+- increases shelter drive/exhaustion;
+- shortens heat-aggression window.
+
+Task10:
+- early heat may raise SocialChase/agitation slightly;
+- later heat suppresses play and raises RoostInvitation/ChainSocialization.
+
+Vengeance:
+- can be mildly strengthened before hard thermal threshold;
+- hard thermal survival suspends without clearing.
+
+============================================================
+23. IntenseHeat / Danger Heat profile
+============================================================
+
+Identity:
+extreme agitation + broad damage aggression permission + hard heat survival.
+
+Required:
+- very high HeatAgitation;
+- very high HeatShelterDrive;
+- fast ThermalExhaustion.
+
+Damage attack permission:
+- a majority of healthy adult Desert Batflies may qualify for genuinely damaging attacks;
+- this is permission/weighting, NOT simultaneous full-colony aggro;
+- AttackSlots, opportunity, distance and active shelter state still control concurrency.
+
+Vetoes/strong suppressors:
+- severe Injury;
+- unconscious/grabbed;
+- Task09 travel ownership;
+- hard environmental shelter commitment;
+- severe PTSD;
+- very low physical capability.
+
+Population split target:
+- many individuals choose Home/Hive, long Roost or Burrow;
+- remaining active individuals are biased toward high Nerve/high Temperament/healthy bats;
+- therefore visible outdoor population may be smaller but more dangerous.
+
+Long Roost:
+- environmental Roost commitment can last much longer than normal RoostDuration;
+- may persist through high-intensity event window;
+- can be interrupted by direct danger/Task09/grab.
+
+Burrow:
+- reuse existing Burrow/Emergence;
+- increase Burrow preference near legal sand/Hive areas;
+- do not add HeatBurrow Activity.
+
+Home:
+- same-room Home/Hive retreat = Task13;
+- cross-room return/refuge = Task09.
+
+Derived HeatTolerance:
+use Nerve + PhysicalCapability + small Temperament + Injury/PostStunShock/Dehydration penalties + stable EntityID variance.
+Do not persist a new HeatTolerance axis.
+
+============================================================
+24. Sandstorm profile
+============================================================
+
+Identity:
+anticipatory Home Retention.
+Outward travel itself is dangerous.
+
+Core effects:
+- HomeReturnDrive strongly increased;
+- BurrowDrive strongly increased;
+- RoostDrive strongly increased;
+- OpenExposureAversion strongly increased;
+- discretionary travel strongly decreased;
+- new permanent migration batches strongly suppressed during strong Preparation/active Sandstorm.
+
+Unique anticipatory ability:
+- Desert Batfly responds to approaching Sandstorm earlier than to most other non-lethal weather;
+- use bounded DryCycle forecast data only;
+- do not expose full-cycle scheduler omniscience;
+- visible behavior contraction should begin significantly before comparable HeavyRain/Fog reactions.
+
+Early visible behavior:
+- high RoostAffinity / low Nerve / injured individuals start Home/Roost first;
+- roaming radius shrinks;
+- SocialChase and ordinary Harass decline;
+- progressively more bats return Home/Burrow/Roost.
+
+Player-facing objective:
+experienced players can infer an approaching Sandstorm from Desert Batfly behavior.
+
+Shelter geometry:
+- enclosure + roof + side shielding;
+- future wind direction should prefer lee-side/upwind wall protection;
+- without wind vector, enclosure/nearby walls are fallback.
+
+Attack behavior:
+- proactive ordinary Harass decreases;
+- defensive aggression may increase when Player blocks Hive/Burrow access or attacks a returning bat.
+
+Task12:
+- no SandstormCall;
+- RoostCall naturally coordinates early responders.
+
+Task09 gate:
+- do not start new permanent ColonyMigration batch during strong Sandstorm Preparation/active Sandstorm;
+- outward EmergencyRefuge requires current location to be materially unsafe AND a clearly safer reachable nearby Refuge AND enough lead time;
+- once serious Sandstorm is active, do not start long cross-room travel.
+
+============================================================
+25. DeathSandstorm / Danger Sandstorm profile
+============================================================
+
+Identity:
+hard Home-retention survival with strong pre-onset anticipation.
+
+Before onset:
+- early Sandstorm sensing is critical;
+- ReturnHome/Burrow/long Roost starts well before lethal conditions.
+
+After high danger begins:
+- long-distance relocation normally prohibited;
+- only very short clearly survivable emergency retreat to a materially safer refuge may override;
+- permanent migration must not start.
+
+Behavior priority:
+- hard survival suspends Vengeance/Harass/SocialLife;
+- states are not erased solely by weather.
+
+============================================================
+26. DenseFog vs Sandstorm travel distinction
+============================================================
+
+Mandatory strategic distinction:
+
+DenseFog:
+- current room may be unusable because of visibility;
+- travel route itself may still be viable;
+- nearby clearer temporary refuge may be sensible.
+
+Sandstorm:
+- route outside is itself dangerous;
+- default strategy is Home/Burrow/Hive/local shelter retention;
+- outward refuge requires stronger emergency justification and preferably happens before serious onset.
+
+Never collapse all weather into:
+"bad weather -> choose nearest refuge".
+
+============================================================
+27. HeavyRain baseline
+============================================================
+
+HeavyRain has not yet received the same dedicated behavioral discussion depth as Heat/Fog/Sandstorm.
+Implement only the already-approved baseline unless later discussion updates this task.
+
+Baseline:
+- classic roof/covered-space shelter weather;
+- RoostDrive increases;
+- local covered shelter preference increases;
+- open-sky activity decreases;
+- ordinary Harass/SocialChase decrease;
+- Task09 chooses cross-room Refuge if Home/current room is inadequate.
+
+Do not invent additional HeavyRain-exclusive social/aggression systems yet.
+
+============================================================
+28. DeathRain baseline
+============================================================
+
+DeathRain remains hard survival.
+
+Task09:
+- pre-onset route/refuge decision;
+- late lethal onset should not start unsafe long travel.
+
+Task13:
+- if current room is accepted as adequate, Acute local shelter behavior dominates.
+
+Do not invent additional DeathRain-exclusive behavior until discussed.
+
+============================================================
+29. Suggested implementation structure
+============================================================
+
+Create a dedicated folder, e.g.:
+
+src/Creatures/DesertBatfly/Environmental/
+    DesertBatflyEnvironmentalCore.cs
+    DesertBatflyEnvironmentalRoomRuntime.cs
+    DesertBatflyEnvironmentalBehavior.cs
+    DesertBatflyEnvironmentalProfile.cs
+    DesertBatflyShelterAnchors.cs
+    DesertBatflyEnvironmentalExposure.cs
+    DesertBatflyEnvironmentalIntegration.cs
+    DesertBatflyEnvironmentalDebug.cs
+
+Do not place the entire task inside DesertBatflyAI.cs.
+
+Suggested responsibilities:
+
+EnvironmentalCore:
+- enums/structs/phase/influence.
+
+RoomRuntime:
+- room weather sample;
+- phase/hysteresis;
+- anchor cache;
+- room-level timing;
+- crowding cache.
+
+Profile:
+- weather-specific ecological mapping.
+
+Exposure:
+- roof/wall/shade/visibility/wind abstraction.
+
+Behavior:
+- per-individual influence/timing/commitment;
+- no cross-room navigation.
+
+Integration:
+- Task09/10/11/12/Intimidation/Burrow/Roost hooks.
+
+Debug:
+- Observatory/trace only.
+
+============================================================
+30. Performance requirements
+============================================================
+
+Hard requirements:
+- no per-frame full-room terrain scan per bat;
+- no per-frame O(N^2) colony scan;
+- anchor scan cached per realized Room;
+- weather sample cached/low-frequency where possible;
+- individual decisions staggered by stable seed;
+- crowding updated low-frequency or through room cache;
+- no per-frame string formatting outside watched debug;
+- fog navigation uncertainty must not allocate new path structures every frame;
+- do not create a second world route planner.
+
+Stress target:
+20-30 realized Desert Batflies in a weather-active room should not create obvious new frame spikes from Task13 logic.
+
+============================================================
+31. Debug / Observatory requirements
+============================================================
+
+Add Task13 debug source wrapping existing Task12/11/10/09 data rather than replacing it.
+
+Per watched bat show at least:
+- WeatherSourceValid
+- WeatherKind / WeatherId
+- ActiveIntensity
+- ForecastTicks
+- RoomPhase
+- IndividualPhaseBias
+- EnvironmentalCommitment ticks
+- ShelterDrive
+- OpenExposureAversion
+- VisibilityConfidence
+- NavigationUncertainty
+- HeatAgitation
+- HeatShelterDrive
+- ThermalExhaustion
+- HomeReturnDrive
+- BurrowDrive
+- HarassMultiplier
+- SocialMultiplier
+- PlayMultiplier
+- RoostMultiplier
+- PreferredAnchor position/id
+- PreferredAnchorQuality
+- PreferredAnchorCrowding
+- HardSurvival
+- RecoveryProgress
+- Task09OwnsControl
+- LocalShelterFailure evidence/reason
+- DecisionReason
+
+Room debug:
+- active DryCycle weather source;
+- environmental phase;
+- 4-8 shelter anchors;
+- per-anchor weather-specific score;
+- crowding;
+- exposure samples where useful.
+
+Trace important transitions:
+- PhaseChanged
+- ShelterCommitmentStarted
+- ShelterAnchorChanged
+- EnvironmentalRoostCommitment
+- HeatAggressionPermissionChanged
+- BurrowPressureChanged
+- HomeReturnPressureChanged
+- DenseFogNavigationError
+- SandstormAnticipationStarted
+- RecoveryStarted/Completed
+- LocalShelterFailureReported
+
+============================================================
+32. Save/persistence rules
+============================================================
+
+Do NOT save:
+- Environmental phase;
+- active shelter anchor;
+- HeatAgitation;
+- ThermalExhaustion;
+- NavigationUncertainty;
+- current weather commitment;
+- Recovery progress.
+
+These are realized-only/current-event state.
+
+The only persistent consequence may be bounded evidence explicitly passed to existing Task09 shelter-failure/colony ecology storage.
+
+No new:
+- RainTrauma
+- FogMemory
+- HeatMemory
+- SandstormMemory
+
+============================================================
+33. Automatic regression requirements
+============================================================
+
+Create tests/DesertBatfly/Program.Task13.cs and run it from the existing DesertBatfly test dispatcher.
+
+Minimum regression coverage:
+
+1) Environmental phase enum has exactly Calm/Advisory/Preparation/Sheltering/Acute/Recovery.
+2) Task13 files do not write BodyChunk.vel.
+3) Task13 files do not use UnityEngine.Input.
+4) Task13 state is not added to DesertBatflyState persistence.
+5) no Task02 SocialRole APIs reappear.
+6) Task13 does not call LeaveRoom directly.
+7) Task13 does not create ColonyMigration/ReturnHome destinations.
+8) Task13 does not add new Task12 signal kinds.
+9) Task12 signal enum remains six kinds.
+10) default RoomSettings Fog is not a Task13 weather source.
+11) DryCycle Weather runtime is required for Fog/DenseFog behavior.
+12) LightRain phase ceiling prevents independent Preparation/Sheltering/Acute.
+13) LightRain produces no permanent migration stress through Task13.
+14) LightRain never emits Alarm merely because it is active.
+15) Fog reduces visibility/activity but does not normally request weather Refuge.
+16) DenseFog supports temporary refuge handoff only through Task09 APIs.
+17) DenseFog cannot directly create permanent ColonyMigration.
+18) DenseFog navigation uncertainty only affects localGoal/anticipation, never velocity collision forcing.
+19) Home familiarity reduces DenseFog uncertainty.
+20) HeatWave exposes HeatAgitation + HeatShelterDrive + ThermalExhaustion separately.
+21) HeatWave does not use fixed low flight height.
+22) IntenseHeat can grant damage aggression permission to many healthy individuals.
+23) severe Injury can veto IntenseHeat damage aggression permission.
+24) AttackSlots remain required for formal damaging attack concurrency.
+25) IntenseHeat raises Roost/Home/Burrow survival pressure at the same time as aggression.
+26) no persistent HeatTolerance axis is added.
+27) Sandstorm exposes earlier anticipation than ordinary weather baseline.
+28) Sandstorm raises HomeReturn/Burrow/Roost pressure.
+29) Sandstorm suppresses new permanent migration initiation.
+30) DeathSandstorm strongly suppresses late long-distance travel.
+31) Sandstorm does not emit a new SandstormCall.
+32) HeavyRain baseline remains shelter-oriented.
+33) Task09 owned travel frame suppresses Task13 local goal control.
+34) hard environmental survival can suspend but not clear Vengeance.
+35) Task11 Threat Signature data is not mutated by Task13.
+36) Task10 social behavior is modified via multipliers/gates, not duplicated.
+37) Shelter != Roost in data model.
+38) multiple anchors exist; no single universal room target API.
+39) anchor scoring contains crowding penalty.
+40) room phase entry/exit supports hysteresis.
+41) Recovery is staggered by stable individual timing.
+42) no per-frame N^2 colony scan in Task13 methods.
+43) Debug source includes weather source validity and decision reason.
+44) LocalShelterFailure only reports evidence to Task09 and does not directly migrate.
+45) DangerType hard survival dominates neutral weather modifiers.
+46) Weather family coexistence avoids duplicate LightRain+HeavyRain stacking.
+47) Fog affects Task12 visual range but not Alarm/Distress close acoustic channel.
+48) close immediate projectile danger remains valid under DenseFog.
+49) Sandstorm and DenseFog use distinct travel strategy gates.
+50) implementation status never claims live verification before in-game acceptance.
+
+============================================================
+34. Live acceptance scenarios
+============================================================
+
+Scenario A - default RoomSettings Fog only
+- Strong visual Fog effect in RoomSettings.
+- No DryCycle Fog weather.
+Expected:
+- Task13 stays Calm;
+- normal visibility/activity behavior.
+
+Scenario B - LightRain healthy colony
+Expected:
+- most bats behave normally;
+- slight individual roost differences only;
+- no refuge migration.
+
+Scenario C - LightRain injured/dehydrated mix
+Expected:
+- injured/low-Nerve bats rest earlier;
+- dehydrated exposed bats may tolerate rain longer / gain weak moisture benefit;
+- no synchronous shelter response.
+
+Scenario D - Fog
+Expected:
+- smaller activity radius;
+- fewer long-range Harass/SocialChase actions;
+- nearby social life remains.
+
+Scenario E - DenseFog home room
+Expected:
+- large activity reduction;
+- more Roost/Home behavior;
+- familiar Home navigation better than unfamiliar room;
+- occasional geometry-dependent navigation mistakes without scripted crashes.
+
+Scenario F - DenseFog temporary displacement
+Expected:
+- if current room unusable and nearby clear refuge viable, Task09 may evacuate temporarily;
+- fog clears -> ReturnHome;
+- HomeColony unchanged.
+
+Scenario G - early HeatWave
+Expected:
+- visible agitation/aggression increase before mass sheltering;
+- some SocialChase/Harass increase.
+
+Scenario H - sustained HeatWave
+Expected:
+- colony splits into active/aggressive and shade/roosting groups;
+- activity contracts over exposure duration.
+
+Scenario I - IntenseHeat with player
+Expected:
+- many healthy bats are damage-attack eligible;
+- AttackSlots prevent full-colony simultaneous attack;
+- many other individuals simultaneously Home/Roost/Burrow.
+
+Scenario J - IntenseHeat injured colony
+Expected:
+- injured bats overwhelmingly choose survival;
+- few/no severely injured damage attackers.
+
+Scenario K - Sandstorm forecast
+Expected:
+- bats react noticeably earlier than HeavyRain baseline;
+- early Home/Roost/Burrow contraction is visible before storm.
+
+Scenario L - Sandstorm active in Home
+Expected:
+- strong Home retention;
+- little outward travel;
+- multiple sheltered clusters / Burrow / Roost behavior;
+- ordinary Harass reduced.
+
+Scenario M - player blocks Hive/Burrow during Sandstorm
+Expected:
+- proactive roaming aggression remains low;
+- defensive aggression near blocked access can increase.
+
+Scenario N - DeathSandstorm late onset
+Expected:
+- no new long-distance migration/refuge run after hard danger begins unless extremely short/survivable emergency override.
+
+Scenario O - Task09 travel overlap
+Expected:
+- Task09 owns travel;
+- Task13 does not pull bat toward local anchor mid-route.
+
+Scenario P - Vengeance overlap
+Expected:
+- mild Heat may strengthen activity;
+- hard environmental threshold suspends Vengeance without deleting it;
+- valid Vengeance may resume in Recovery.
+
+Scenario Q - 20-30 bats stress
+Expected:
+- no obvious Task13-induced frame spikes;
+- anchors distribute individuals instead of one-point stacking.
+
+Scenario R - weather recovery
+Expected:
+- colony resumes in staggered order;
+- no same-frame mass release.
+
+============================================================
+35. Implementation phases
+============================================================
+
+Phase A - Core/context
+- Environmental enums/structs;
+- DryCycle weather-source validation;
+- room phase/hysteresis;
+- EnvironmentalInfluence.
+
+Phase B - Shelter/exposure
+- room anchor cache;
+- terrain exposure analysis;
+- crowding;
+- shelter vs roost separation.
+
+Phase C - Individual behavior
+- commitment;
+- Personality/Injury/Dehydration weighting;
+- localGoal-only shelter behavior;
+- Recovery staggering.
+
+Phase D - Task10/Harass integration
+- social/play/harass/roost modifiers;
+- no duplicate social state machine.
+
+Phase E - Task09 integration
+- travel ownership gate;
+- DenseFog temporary displacement request semantics;
+- Sandstorm migration/travel suppression semantics;
+- LocalShelterFailure evidence.
+
+Phase F - Weather profiles
+- LightRain;
+- Fog;
+- DenseFog;
+- HeatWave;
+- IntenseHeat;
+- Sandstorm;
+- DeathSandstorm;
+- HeavyRain baseline;
+- DeathRain baseline.
+
+Phase G - Task11/12/Vengeance integration
+- visibility effects on current cue / visual signals;
+- heat aggression vs learned caution;
+- weather survival suspension of Vengeance.
+
+Phase H - Debug/tests/status
+- Observatory/Trace;
+- Program.Task13.cs;
+- anti-regression guards;
+- ImplementationStatus.
+
+============================================================
+36. Definition of Done
+============================================================
+
+DoD 01 - Task13 reacts only to DryCycle weather runtime/scheduler/spatial authorization.
+DoD 02 - default/vanilla RoomSettings Fog/effects cannot trigger Task13 ecology.
+DoD 03 - six environmental phases implemented with hysteresis.
+DoD 04 - individual EnvironmentalCommitment prevents phase/anchor thrash.
+DoD 05 - Recovery is staggered.
+DoD 06 - Task13 owns no cross-room route planning.
+DoD 07 - Task09 travel has higher ownership priority.
+DoD 08 - no direct Task13 BodyChunk.vel locomotion controller.
+DoD 09 - no fixed global weather flight-height target.
+DoD 10 - room caches multiple spatially separated shelter anchors.
+DoD 11 - anchor selection includes crowding.
+DoD 12 - Shelter and Roost are separate concepts.
+DoD 13 - non-roost shelter flight is supported.
+DoD 14 - Task10 remains owner of Roost legality/Chain.
+DoD 15 - Task10 is modified through environmental multipliers, not duplicated.
+DoD 16 - Task11 memory is not mutated/erased by Task13.
+DoD 17 - Task12 remains exactly six signals; no weather signal is added.
+DoD 18 - LightRain remains weak and cannot independently force serious shelter phase.
+DoD 19 - LightRain may give simple local-exposure moisture benefit without a new drinking system.
+DoD 20 - ordinary Fog reduces visual confidence/activity rather than becoming a shelter emergency.
+DoD 21 - DenseFog strongly reduces visual confidence/activity.
+DoD 22 - DenseFog navigation uncertainty can cause natural geometry-dependent mistakes without forced velocity crashes.
+DoD 23 - Home familiarity mitigates DenseFog navigation uncertainty.
+DoD 24 - DenseFog may request temporary Task09 weather displacement, never permanent migration directly.
+DoD 25 - HeatWave separates HeatAgitation, HeatShelterDrive and ThermalExhaustion.
+DoD 26 - HeatWave early/middle phase can increase aggression.
+DoD 27 - sustained heat progressively increases shelter/exhaustion behavior.
+DoD 28 - IntenseHeat allows damage-capable attacks for a majority of healthy individuals under opportunity/slot constraints.
+DoD 29 - IntenseHeat simultaneously produces substantial Home/Roost/Burrow behavior.
+DoD 30 - severe Injury/low capability can block damage aggression permission.
+DoD 31 - derived HeatTolerance is not a new persistent personality axis.
+DoD 32 - Sandstorm has species-specific early anticipation inside bounded DryCycle forecast.
+DoD 33 - Sandstorm strongly raises HomeReturn/Burrow/Roost and open-exposure avoidance.
+DoD 34 - Sandstorm suppresses new permanent migration initiation during strong preparation/active event.
+DoD 35 - serious active Sandstorm discourages new long cross-room travel.
+DoD 36 - DeathSandstorm allows only narrow survivable emergency late-travel exception.
+DoD 37 - DenseFog and Sandstorm have intentionally different temporary travel strategies.
+DoD 38 - Sandstorm shelter values enclosure/side shielding in addition to roof.
+DoD 39 - defensive aggression near blocked Home/Burrow access remains possible in Sandstorm.
+DoD 40 - hard environmental survival suspends but does not clear Extreme Vengeance.
+DoD 41 - LocalShelterFailure is bounded evidence to Task09 only.
+DoD 42 - Task13 introduces no persistent weather memory.
+DoD 43 - HeavyRain baseline is implemented without inventing unapproved extra behavior.
+DoD 44 - DeathRain hard-survival baseline respects Task09 pre-onset travel ownership.
+DoD 45 - weather coexistence avoids duplicate family stacking.
+DoD 46 - 20-30 bat runtime has no obvious per-frame N^2/full-terrain scan hot path.
+DoD 47 - Debug explains weather source, phase, shelter choice and downstream modifiers.
+DoD 48 - automatic regression suite protects ownership/source/velocity/persistence boundaries.
+DoD 49 - Task02 SocialRole system remains absent.
+DoD 50 - no Live Verified claim before local compile and Scenario A-R real-game acceptance.
+
+============================================================
+37. Non-goals
+============================================================
+
+Do NOT implement in Task13:
+- reproduction;
+- corpse ecology;
+- new weather signals;
+- full visual perception rewrite for all Rain World creatures;
+- new persistent weather-trauma system;
+- second migration planner;
+- global weather locomotion forces;
+- per-weather hardcoded fixed flight heights;
+- a centralized flock commander;
+- permanent weather behavior roles.
+
+============================================================
+38. Final behavior identity target
+============================================================
+
+LightRain:
+near-normal desert ecology with small individual rest/moisture differences.
+
+Fog:
+reduced confidence and reduced range, but normal life continues locally.
+
+DenseFog:
+normal life becomes difficult; Home/Roost/temporary clearer refuge may become attractive; navigation can visibly become uncertain.
+
+HeatWave:
+first/partly more agitated and aggressive, later progressively more sheltering/exhausted.
+
+IntenseHeat:
+many healthy bats are capable of damaging aggression, while much of the colony simultaneously disappears into Home, long Roost or Burrow; fewer active bats can be more dangerous.
+
+Sandstorm:
+early sensed Home-retention event; bats visibly prepare before onset and prefer not to travel outward.
+
+DeathSandstorm:
+strong pre-onset retreat and hard late survival; long late relocation strongly discouraged.
+
+HeavyRain:
+classic covered-space shelter weather using the approved baseline only.
+
+DeathRain:
+hard survival with Task09 deciding pre-onset cross-room safety and Task13 handling local Acute shelter if staying.
+
+The overall colony must look like many individuals responding to the same environment through different thresholds and conditions, not like a room controller issuing one synchronized command.
