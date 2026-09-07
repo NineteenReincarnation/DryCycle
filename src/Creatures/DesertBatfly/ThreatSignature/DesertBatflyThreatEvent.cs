@@ -138,7 +138,7 @@ internal readonly struct DesertBatflyThreatEvent
 
 internal delegate void DesertBatflyThreatAdapter(
     PhysicalObject source,
-    Creature.DamageType? damageType,
+    Creature.DamageType damageType,
     float damage,
     float stun,
     bool projectileContext,
@@ -165,7 +165,7 @@ internal static class DesertBatflyThreatAdapterRegistry
 
     internal static DesertBatflyThreatEvidence Classify(
         PhysicalObject source,
-        Creature.DamageType? damageType,
+        Creature.DamageType damageType,
         float damage,
         float stun,
         bool projectileContext)
@@ -181,39 +181,27 @@ internal static class DesertBatflyThreatAdapterRegistry
         return evidence;
     }
 
-    internal static DesertBatflyThreatEvidence GrabEvidence()
-    {
-        return new DesertBatflyThreatEvidence { GrabCapture = 0.58f };
-    }
+    internal static DesertBatflyThreatEvidence GrabEvidence() =>
+        new DesertBatflyThreatEvidence { GrabCapture = 0.58f };
 
-    internal static DesertBatflyThreatEvidence PursuitEvidence()
-    {
-        return new DesertBatflyThreatEvidence { Pursuit = 0.30f };
-    }
+    internal static DesertBatflyThreatEvidence PursuitEvidence() =>
+        new DesertBatflyThreatEvidence { Pursuit = 0.30f };
 
-    internal static DesertBatflyThreatEvidence RetreatEvidence()
-    {
-        return new DesertBatflyThreatEvidence { RetreatTendency = 0.085f };
-    }
+    internal static DesertBatflyThreatEvidence RetreatEvidence() =>
+        new DesertBatflyThreatEvidence { RetreatTendency = 0.085f };
 
-    internal static DesertBatflyThreatEvidence NonAggressionEvidence()
-    {
-        return new DesertBatflyThreatEvidence { NonAggressionConfidence = 0.035f };
-    }
+    internal static DesertBatflyThreatEvidence NonAggressionEvidence() =>
+        new DesertBatflyThreatEvidence { NonAggressionConfidence = 0.035f };
 
-    internal static DesertBatflyThreatEvidence CounterKillEvidence()
-    {
-        return new DesertBatflyThreatEvidence { CounterKill = 0.42f };
-    }
+    internal static DesertBatflyThreatEvidence CounterKillEvidence() =>
+        new DesertBatflyThreatEvidence { CounterKill = 0.42f };
 
-    internal static DesertBatflyThreatEvidence FirecrackerStartleEvidence()
-    {
-        return new DesertBatflyThreatEvidence
+    internal static DesertBatflyThreatEvidence FirecrackerStartleEvidence() =>
+        new DesertBatflyThreatEvidence
         {
             Startle = 0.58f,
             AreaDenial = 0.08f
         };
-    }
 
     internal static DesertBatflyThreatEvidence ExplosionEvidence(Explosion explosion)
     {
@@ -232,9 +220,6 @@ internal static class DesertBatflyThreatAdapterRegistry
         bool firecracker = source is FirecrackerPlant;
         if (firecracker)
         {
-            // Vanilla FirecrackerPlant's final disintegration creates a real but very weak
-            // Explosion. Preserve that fact without teaching bats that every firecracker
-            // pop is a lethal bomb.
             result.Explosion = Mathf.Min(result.Explosion, 0.10f);
             result.AreaDenial = Mathf.Min(result.AreaDenial, 0.08f);
             result.Startle = Mathf.Max(result.Startle, 0.20f);
@@ -258,7 +243,7 @@ internal static class DesertBatflyThreatAdapterRegistry
 
     private static void ApplyBuiltIns(
         PhysicalObject source,
-        Creature.DamageType? damageType,
+        Creature.DamageType damageType,
         float damage,
         float stun,
         bool projectileContext,
@@ -285,7 +270,7 @@ internal static class DesertBatflyThreatAdapterRegistry
             evidence.AreaDenial = Mathf.Max(evidence.AreaDenial, 0.06f);
         }
 
-        string typeName = source?.GetType().Name ?? string.Empty;
+        string typeName = source != null ? source.GetType().Name : string.Empty;
         if (Contains(typeName, "Explosive") || Contains(typeName, "Bomb") || Contains(typeName, "Grenade"))
         {
             evidence.Explosion = Mathf.Max(evidence.Explosion, 0.48f);
@@ -306,7 +291,7 @@ internal static class DesertBatflyThreatAdapterRegistry
     }
 
     private static bool Contains(string text, string token) =>
-        text?.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+        !string.IsNullOrEmpty(text) && text.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static void Clamp(ref DesertBatflyThreatEvidence evidence)
     {
