@@ -194,9 +194,12 @@ internal static class DesertBatflyHooks
 
         // Existing DesertBatflyAI gets first refusal for danger, combat, injury and
         // committed roost behavior. Task 11 then learns/adjusts only the realized local
-        // combat geometry. Task 10 runs last and can only shape a remaining neutral frame.
+        // combat geometry. A real incoming projectile may replace this frame's localGoal,
+        // but native Fly locomotion still owns velocity/collision. Task 10 runs last and
+        // can only shape a remaining neutral frame.
         desert.DesertAI.Update();
         DesertBatflyThreatRuntime.Update(desert);
+        DesertBatflyThreatTactics.TryApplyOrdinaryProjectileEvade(desert);
         DesertBatflyThreatTrace.Sample(desert);
         DesertBatflySocialLife.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
