@@ -50,6 +50,15 @@ internal static partial class Program
             Check(roomContext.GetProperty(property, Flags) != null,
                 "Task14 R2 RoomContext exposes " + property);
 
+        MethodInfo batsGetter = roomContext.GetProperty("Bats", Flags).GetGetMethod(true);
+        MethodInfo playersGetter = roomContext.GetProperty("Players", Flags).GetGetMethod(true);
+        MethodInfo thrownGetter = roomContext.GetProperty("ThrownWeapons", Flags).GetGetMethod(true);
+        Check(MethodCallOffset(batsGetter, roomContext, "PruneBats") >= 0 &&
+              MethodCallOffset(playersGetter, roomContext, "PrunePlayers") >= 0 &&
+              MethodCallOffset(thrownGetter, roomContext, "PruneWeapons") >= 0 &&
+              MethodCallOffset(roomContext.GetMethod("PlayerBySlot", Flags), roomContext, "PrunePlayers") >= 0,
+            "Task14 R2 low-frequency candidate discovery still revalidates death/room/throw-state at consumption time");
+
         string[] channels = Enum.GetNames(visibilityChannel);
         foreach (string channel in new[]
                  { "Creature", "Player", "Social", "Signal", "HeldItem", "Projectile" })
@@ -156,6 +165,6 @@ internal static partial class Program
             "Task14 R2 new architecture uses DB_ domain names and no TaskXX production type");
 
         Console.WriteLine(
-            "Task14 R2 complete: shared RoomContext, creature/AttackSlots/weapon candidate views, Threat current perception, Signal visual policy, lazy irrelevant-room gating and obsolete visual-bridge removal verified.");
+            "Task14 R2 complete: shared RoomContext with live membership revalidation, creature/AttackSlots/weapon candidate views, Threat current perception, Signal visual policy, lazy irrelevant-room gating and obsolete visual-bridge removal verified.");
     }
 }
