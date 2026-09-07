@@ -50,7 +50,6 @@ internal static class DesertBatflyEnvironmentalIntegration
         // Enable them first so a future AI rename cannot silently disable all Task13 social,
         // signal, Task11-visibility or hard-survival vengeance integration.
         DesertBatflyEnvironmentalSocialBridge.Enable();
-        DesertBatflyEnvironmentalVengeanceBridge.Enable();
         if (Installed) return;
 
         try
@@ -93,7 +92,6 @@ internal static class DesertBatflyEnvironmentalIntegration
     internal static void Disable()
     {
         DisposeCoreHooks();
-        DesertBatflyEnvironmentalVengeanceBridge.Disable();
         DesertBatflyEnvironmentalSocialBridge.Disable();
         personalityOwners = new ConditionalWeakTable<DesertBatflyPersonality, BatRef>();
     }

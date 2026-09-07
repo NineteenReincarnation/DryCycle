@@ -27,14 +27,12 @@ internal static class DesertBatflyHooks
         DesertBatflyEnvironmentalBehavior.Reset();
         DB_EventHub.Enable();
         DB_EventConsumers.Enable();
-        DesertBatflyEnvironmentalDenseFogBridge.Enable();
         DesertBatflyEnvironmentalTask09Bridge.Enable();
         DesertBatflyEnvironmentalSurvivalBridge.Enable();
         DesertBatflyEnvironmentalIntegration.Enable();
         DesertBatflySignalIntegration.Enable();
         DesertBatflySignalVengeanceBridge.Enable();
         DesertBatflyThreatRuntime.Enable();
-        DesertBatflyThreatVengeanceBridge.Enable();
         DesertBatflyColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
@@ -76,14 +74,12 @@ internal static class DesertBatflyHooks
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DB_EventConsumers.Disable();
         DB_EventHub.Disable();
-        DesertBatflyThreatVengeanceBridge.Disable();
         DesertBatflyThreatRuntime.Disable();
         DesertBatflySignalVengeanceBridge.Disable();
         DesertBatflySignalIntegration.Disable();
         DesertBatflyEnvironmentalIntegration.Disable();
         DesertBatflyEnvironmentalSurvivalBridge.Disable();
         DesertBatflyEnvironmentalTask09Bridge.Disable();
-        DesertBatflyEnvironmentalDenseFogBridge.Disable();
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();

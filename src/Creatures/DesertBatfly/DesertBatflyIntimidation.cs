@@ -1576,6 +1576,12 @@ internal static class DesertBatflyIntimidation
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
             return;
 
+        // R5: Task11 is a tactical modifier, not an internal RuntimeDetour. Vengeance owns
+        // the frame and explicitly asks Threat Signature to refine the already-authorized
+        // goal/speed before the single FlightMotor write boundary.
+        if (TryGetVengeanceTarget(bat, out Creature vengeanceTarget) && vengeanceTarget is Player player)
+            goal = DesertBatflyThreatTactics.AdjustExtremeVengeanceGoal(bat, player, goal, ref speed);
+
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
         Vector2 probe = bat.mainBodyChunk.pos + direction * 25f;
         if (bat.room.GetTile(probe).Solid ||
