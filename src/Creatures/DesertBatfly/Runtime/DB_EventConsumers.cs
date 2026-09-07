@@ -1,9 +1,8 @@
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// First R1 consumers of DB_EventHub. This file deliberately contains only cross-domain
-/// lifecycle reactions that were previously duplicated in Rain World hooks. Fear, Threat
-/// and Signal semantic migration continues behind their existing domain APIs.
+/// First R1 consumers of DB_EventHub. Cross-domain reactions consume semantic facts here
+/// while their mature domain implementations remain unchanged behind explicit APIs.
 /// </summary>
 internal static class DB_EventConsumers
 {
@@ -32,9 +31,25 @@ internal static class DB_EventConsumers
         DesertBatfly victim = capture.Victim;
         if (victim == null || victim.dead) return;
 
-        // This preserves the old Core Tongue hook's neutral-social cancellation while the
-        // actual fear/signal consumers are migrated to DB_EventHub in later R1 commits.
         DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
+
+        if (capture.Captor is Lizard predator &&
+            DesertBatflyIntimidation.IsSupportedLethalThreat(predator))
+        {
+            // One capture session produces one fear event. Tongue -> ordinary lizard grasp
+            // transfer is suppressed by DB_EventHub, so Intimidation no longer needs to be
+            // called independently by every Watcher/Core tongue observer.
+            DesertBatflyIntimidation.BroadcastPredatorCapture(
+                victim,
+                predator,
+                capture.Tongue);
+
+            // A tongue capture precedes Fly.Grabbed; preserve the immediate native danger
+            // response that the old tongue hooks supplied. Grasp capture already passes
+            // through DesertBatfly.Grabbed and therefore does not need this second call.
+            if (capture.CaptureKind == DB_CaptureKind.Tongue)
+                victim.DesertAI.Threatened(predator, true);
+        }
     }
 
     private static void OnMortality(DB_MortalityEvent mortality)
