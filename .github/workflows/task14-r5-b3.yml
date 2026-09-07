@@ -1,0 +1,59 @@
+name: Task14 R5 B3 direct Task09 survival
+
+on:
+  push:
+    branches:
+      - task14-r5-b3-working
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.message == 'Trigger R5 B3 direct Task09 survival'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r5-b3-working
+          fetch-depth: 0
+
+      - name: Apply guarded migration
+        run: python scripts/task14_r5_b3_apply.py
+
+      - name: Validate direct ownership
+        run: |
+          git diff --check
+          test ! -e scripts/task14_r5_b3_apply.py
+          test ! -e .github/workflows/task14-r5-b3.yml
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalTask09Bridge.cs
+          test ! -e src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalSurvivalBridge.cs
+          ! grep -RIn --include='*.cs' 'DesertBatflyEnvironmentalTask09Bridge\|DesertBatflyEnvironmentalSurvivalBridge' src tests
+          grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/DesertBatflyColonyRuntime.cs
+          grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
+          grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/DesertBatflyRefuge.cs
+          grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalRoomRuntime.cs
+          grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/Environmental/DesertBatflyEnvironmentalBehavior.cs
+          ! grep -RIn --include='*.cs' 'MonoMod.RuntimeDetour\|System.Reflection' src/Creatures/DesertBatfly/Environmental
+
+      - name: Verify Task09 ownership boundary
+        run: |
+          ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental
+          ! grep -RIn --include='*.cs' 'RequestPermanentMigration\|new TravelIntent\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental
+          grep -q 'EndEvacuationAndReturn(world, colony.RoomName, template)' src/Creatures/DesertBatfly/DesertBatflyTravelNavigation.cs
+
+      - name: Audit remaining R5 bridge debt
+        run: |
+          echo '--- remaining DesertBatfly Bridge files ---'
+          find src/Creatures/DesertBatfly -type f -name '*Bridge.cs' | sort || true
+          echo '--- remaining DesertBatfly RuntimeDetour imports ---'
+          grep -RIl --include='*.cs' 'MonoMod.RuntimeDetour' src/Creatures/DesertBatfly | sort || true
+
+      - name: Commit migration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove Task09 and survival environment bridges'
+          git push origin HEAD:task14-r5-b3-working
