@@ -1,22 +1,23 @@
-using System;
 using System.Reflection;
 using DryCycle.Weather.Scheduling;
-using DryCycle.Weather.Spatial;
 using MonoMod.RuntimeDetour;
-using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Gives severe DryCycle DenseFog enough temporary shelter pressure for Task09's existing
-/// EmergencyRefuge path to become available without turning fog into permanent migration
-/// pressure. The source remains DesertBatflyWeatherEcology, so RoomSettings/default fog
-/// effects can never activate this bridge.
+/// Compatibility lifecycle shim retained while Task13 is being finalized.
+/// DenseFog ecology now lives directly in DesertBatflyWeatherEcology:
+/// - DENSEFOG has high temporary shelter demand;
+/// - permanent MigrationStress stays near zero;
+/// - DenseFog forecast is deliberately not exposed before the fog is active.
+///
+/// This shim must remain behavior-neutral so it cannot double-apply or weaken those
+/// semantics. It can be removed once all Task13 regression references are migrated.
 /// </summary>
 internal static class DesertBatflyEnvironmentalDenseFogBridge
 {
-    internal const float DenseFogShelterDemand = 0.56f;
-    internal const float DenseFogDisplacementStartIntensity = 0.88f;
+    internal const float DenseFogShelterDemand = 0.90f;
+    internal const float DenseFogDisplacementStartIntensity = 0.80f;
 
     private delegate DesertBatflyWeatherEcologySample SampleOrig(World world, AbstractRoom room);
     private delegate DesertBatflyWeatherEcologySample SampleDetour(
@@ -76,49 +77,11 @@ internal static class DesertBatflyEnvironmentalDenseFogBridge
         SampleOrig orig,
         World world,
         AbstractRoom room)
-    {
-        DesertBatflyWeatherEcologySample sample = orig(world, room);
-        if (!IsDenseFog(sample.HazardKind, sample.HazardId) || sample.ActiveIntensity <= 0f)
-            return sample;
-
-        // Ordinary/weak DenseFog contracts local activity but does not justify crossing
-        // rooms. Only severe realized DenseFog may reach Task09's EmergencyRefuge gate.
-        float severe = Mathf.InverseLerp(
-            DenseFogDisplacementStartIntensity,
-            1f,
-            sample.ActiveIntensity);
-        float temporaryShelter = Mathf.Lerp(
-            sample.ShelterUrgency,
-            DenseFogShelterDemand,
-            severe);
-        float travelExposure = Mathf.Max(
-            sample.TravelExposure,
-            Mathf.Lerp(0.12f, 0.28f, severe));
-
-        return new DesertBatflyWeatherEcologySample(
-            sample.HazardKind,
-            sample.HazardId,
-            sample.ActiveIntensity,
-            sample.ImmediateDanger,
-            temporaryShelter,
-            sample.MigrationStress,
-            travelExposure,
-            sample.TimeUntilDangerTicks);
-    }
+        => orig(world, room);
 
     private static float ShelterDemandHook(
         ShelterDemandOrig orig,
         WeatherScheduleEventKind kind,
         string id)
-    {
-        float original = orig(kind, id);
-        return IsDenseFog(kind, id) ? Mathf.Max(original, DenseFogShelterDemand) : original;
-    }
-
-    private static bool IsDenseFog(WeatherScheduleEventKind kind, string id)
-        => kind == WeatherScheduleEventKind.Weather &&
-           string.Equals(
-               WeatherSpatialCatalog.NormalizeId(id),
-               "DENSEFOG",
-               StringComparison.Ordinal);
+        => orig(kind, id);
 }
