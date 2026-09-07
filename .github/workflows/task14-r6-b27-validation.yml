@@ -1,0 +1,39 @@
+name: Task14 R6 B27 validation
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: "!contains(github.event.head_commit.message, '[r6-b27-validated]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate B27 ownership and retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          grep -q 'internal static void Emit(Room room, DesertBatfly bat, Player holder' src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
+          grep -q '^            bat,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+          ! grep -q '^            this,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+          git diff --check
+      - name: Mark validation complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b27-validation.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B27 SandSpit fix validated [r6-b27-validated]'
+          git push origin HEAD:task14-r6-b1-final
