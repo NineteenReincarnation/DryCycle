@@ -72,7 +72,7 @@ internal sealed class DB_SandSpitRuntime
         int seed = unchecked(bat.Personality.VisualSeed ^ (sandSpitCycle * 1103515245));
         DB_SandBurst.Emit(
             bat.room,
-            this,
+            bat,
             playerHolder,
             bat.Personality.SandSpitIntensity,
             seed);
