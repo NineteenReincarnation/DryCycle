@@ -69,6 +69,21 @@ internal static class DB_WeaponPerception
         float missRadius,
         float minimumVelocitySqr,
         out DB_WeaponObservation observation)
+        => TryFindIncomingProjectileFrom(
+            observer,
+            null,
+            maxDistance,
+            missRadius,
+            minimumVelocitySqr,
+            out observation);
+
+    internal static bool TryFindIncomingProjectileFrom(
+        DesertBatfly observer,
+        Creature requiredInstigator,
+        float maxDistance,
+        float missRadius,
+        float minimumVelocitySqr,
+        out DB_WeaponObservation observation)
     {
         observation = default;
         DB_RoomContext context = DB_RoomContext.For(observer?.room);
@@ -82,6 +97,10 @@ internal static class DB_WeaponPerception
         {
             Weapon weapon = weapons[i];
             if (weapon == null || weapon.firstChunk == null || weapon.thrownBy == observer)
+                continue;
+
+            Creature instigator = ResolveInstigator(weapon);
+            if (requiredInstigator != null && !ReferenceEquals(instigator, requiredInstigator))
                 continue;
 
             Vector2 position = weapon.firstChunk.pos;
@@ -107,7 +126,7 @@ internal static class DB_WeaponPerception
 
             observation = new DB_WeaponObservation(
                 weapon,
-                ResolveInstigator(weapon),
+                instigator,
                 position,
                 velocity,
                 closest,
