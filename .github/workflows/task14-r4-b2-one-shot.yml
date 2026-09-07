@@ -51,7 +51,9 @@ jobs:
       - name: Commit R4 B2
         run: |
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
           git add -A
           git commit -m 'Converge R4 domain steering into FlightMotor'
           git push origin HEAD:task14-r4-b2-working
+
+# trigger
