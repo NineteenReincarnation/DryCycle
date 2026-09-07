@@ -101,7 +101,8 @@ internal static class DesertBatflyEnvironmentalRoomRuntime
             float candidateScore = quality;
             candidateScore -= distance01 * Mathf.Lerp(0.24f, 0.42f, injury);
             candidateScore -= Mathf.Clamp01(candidate.Crowding / 5f) * 0.22f;
-            candidateScore += candidate.RoostCompatible * Mathf.Clamp01(roostPreference) * 0.11f;
+            if (candidate.RoostCompatible)
+                candidateScore += Mathf.Clamp01(roostPreference) * 0.11f;
             if (homeRoom && candidate.NearHive) candidateScore += 0.14f;
             candidateScore += StablePreference(bat.Personality.VisualSeed, candidate.Id) * 0.055f;
 
