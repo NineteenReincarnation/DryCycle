@@ -17,11 +17,12 @@ internal static class DesertBatflyHooks
         DesertBatflyIntimidation.Reset();
         DesertBatflyRefuge.Reset();
         DesertBatflySocialLife.Reset();
+        DesertBatflyThreatRuntime.Enable();
         DesertBatflyColonyRuntime.Enable();
         DesertBatflyPlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
-            AIDebugRegistry.Register(new DesertBatflyTask10DebugSource());
+            AIDebugRegistry.Register(new DesertBatflyTask11DebugSource());
             debugRegistered = true;
         }
         On.Fly.ReportToFliesRoomAI += Report;
@@ -60,6 +61,7 @@ internal static class DesertBatflyHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DesertBatflyThreatRuntime.Disable();
         DesertBatflySocialLife.Reset();
         DesertBatflyPlatformRoostRuntime.Disable();
         DesertBatflyColonyRuntime.Disable();
@@ -97,7 +99,10 @@ internal static class DesertBatflyHooks
     private static void FlyNewRoom(On.Fly.orig_NewRoom orig, Fly self, Room room)
     {
         if (self is DesertBatfly desert)
+        {
             DesertBatflySocialLife.CancelForPriority(desert, "room transition");
+            DesertBatflyThreatRuntime.Forget(desert);
+        }
         orig(self, room);
     }
 
@@ -178,9 +183,10 @@ internal static class DesertBatflyHooks
         }
 
         // Existing DesertBatflyAI gets first refusal for danger, combat, injury and
-        // committed roost behavior. Task 10 runs afterwards and can only shape the
-        // remaining neutral frame.
+        // committed roost behavior. Task 11 then learns/adjusts only the realized local
+        // combat geometry. Task 10 runs last and can only shape a remaining neutral frame.
         desert.DesertAI.Update();
+        DesertBatflyThreatRuntime.Update(desert);
         DesertBatflySocialLife.Update(desert);
         DesertBatflySocialLife.SampleTrace(desert);
         DesertBatflyDebugTrace.Sample(desert);
@@ -284,6 +290,7 @@ internal static class DesertBatflyHooks
         {
             DesertBatflySocialLife.CancelForPriority(bat, "death");
             DesertBatflyColonyRuntime.ReportDeath(bat, likelyPredator);
+            DesertBatflyThreatRuntime.Forget(bat);
         }
     }
 
