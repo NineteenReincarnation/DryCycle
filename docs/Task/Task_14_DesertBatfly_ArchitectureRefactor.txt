@@ -1,237 +1,285 @@
 Desert Batfly Task 14
 Architecture Refactor, Stability Consolidation & Hidden Bug Cleanup
-沙漠蝠蝇全项目架构重构、稳定性收敛、可读性提升与隐性 Bug 清理
+沙漠蝠蝇全项目架构重构、稳定性收敛、可读性重建与隐性 Bug 清理
 
-Specification revision: V1.1 / 2026-09-07
+Specification revision: V1.2 / 2026-09-07
 Status: 【正式任务书 / 待实施】
 Priority: Critical / project-wide structural maintenance
+
+Related project principle:
+- docs/项目原则/DryCycle_项目结构与代码原则.txt
 
 ======================================================================
 0. 任务定位
 ======================================================================
 
-本任务不是一个新玩法任务，也不是一次单纯的“整理文件夹 / 批量重命名”。
+本任务不是新增玩法，也不是单纯“整理文件夹 / 批量重命名”。
 
-本任务的目标是：
+本任务是在 Desert Batfly 已经拥有大量成熟行为之后进行的一次全项目架构收敛。
 
-1. 回顾并重构当前完整 Desert Batfly 项目；
-2. 保持已经批准并实现的生态、AI、社交、天气、战斗和存档行为；
-3. 收敛 Task09～Task13 连续追加后形成的跨模块 Hook / Bridge / Reflection / RuntimeDetour 技术债；
-4. 建立唯一、明确、可观测的行为控制权、事件流、感知流和普通飞行执行流；
-5. 去除重复扫描、重复感知、重复事件解释和不必要 Room Runtime；
-6. 修复在本轮全项目审查中确认或高度怀疑的隐性 Bug；
-7. 重构测试，使测试保护“行为契约”而不是保护历史 Bridge 实现；
-8. 重新整理 Desert Batfly 源码目录和文件职责，提高项目长期可读性；
-9. 将生产源码中的长前缀 DesertBatfly 统一收敛为 DB_ 前缀；
-10. 将 Task09 / Task10 / Task11 / Task12 / Task13 等开发阶段编号从生产运行时代码中移除；
-11. 为后续 Corpse Ecology、繁殖和其他大型生态任务提供稳定扩展基础。
+核心目标：
 
-本任务完成后，Desert Batfly 应从：
+1. 完整回顾当前 Desert Batfly 源码、运行时、Hook、测试和 Debug；
+2. 保持已经批准并实现的玩法与生态行为；
+3. 修复本轮审查中已经确认或高度怀疑的隐性 Bug；
+4. 收敛长期追加形成的 Bridge / Reflection / RuntimeDetour / Dynamic IL 技术债；
+5. 建立统一 Frame Context、Room Context、Event、Behavior Arbitration 和普通 Flight execution；
+6. 减少重复 Room scan / weapon scan / creature scan；
+7. 让死亡、抓取、伤害等真实游戏事实只生成一次 Desert Batfly semantic event；
+8. 将生产代码中的 Task09～Task13 开发历史术语退出运行时；
+9. 将 C# 类型和文件的长前缀 DesertBatfly 收敛为 DB_；
+10. 重新组织项目文件，让领域职责比历史实现方式更容易定位；
+11. 重构测试，使测试保护行为契约和架构边界，而不是保护旧 Bridge；
+12. 为 Corpse Ecology、繁殖以及未来更多大型生态机制提供可持续扩展基础。
 
-“多个成熟功能模块通过补丁互相协调”
+本任务必须采用 Behavior-Preserving Refactor。
 
-进入：
-
-“多个成熟功能模块通过正式 Runtime / Event / Context / Arbiter / Perception 协议协作”。
-
-本任务必须执行“行为保持型重构”。
-除任务书明确列出的 Bug 修复、结构优化和命名迁移外，不得借重构之名改变已批准玩法。
+除明确列入本任务的 Bug 修复、性能收敛、可读性重构和架构替换外，禁止借本任务重新设计生物玩法。
 
 
 ======================================================================
-1. 为什么现在必须重构
+1. 项目原则优先级
 ======================================================================
 
-Desert Batfly 当前已经包含：
+本任务遵循：
 
-- Creature / State / Personality / Graphics；
-- Injury / Shock / Trauma / Grab Memory；
-- Harass / Observe / FakeDive / Dive / Attach / Retaliation；
-- SandSpit；
-- Roost / Fly Chain / platform underside；
-- SocialBond / Sex / Grief；
-- Extreme Vengeance；
-- Peach Lizard 捕食；
-- Colony Migration / Refuge / ReturnHome / World Route；
-- Neutral Social Life；
-- Threat Signature Memory / Current Cue / Tactics；
-- Observable Social Signal Network；
-- Environmental Activity / Shelter / Weather Ecology；
-- Observatory / Debug Trace；
-- Warp / Sandbox / Watcher compatibility；
-- 一套较大的静态、反射式和行为数学回归测试。
+    docs/项目原则/DryCycle_项目结构与代码原则.txt
 
-这些功能单独看多数已经成熟。
-当前主要问题不是“功能不够”，而是后续任务为了尽量不侵入前一任务，逐渐形成：
+如果本任务某处旧表述与项目原则冲突，按以下优先级处理：
 
-- 一个模块 Detour 另一个模块的 private method；
-- Reflection 读取另一个模块 private field；
-- DynamicMethod / ILGenerator 作为内部接口；
-- frame stamp 阻止另一个模块在某一帧运行；
-- 保存/恢复 localGoal 来保护优先级；
-- 临时修改持久状态再恢复以影响另一个系统的决策；
-- 同一 Room 存在多套低频扫描器；
-- 同一物理/死亡/抓取事件被多个 Hook 分别解释；
-- 同一个概念在不同模块复制参数；
-- Observatory 只能“猜测”控制权，而不是读取真实控制权；
-- 顶层文件不断增加，文件名过长，核心职责难以快速定位；
-- Task 编号逐渐渗入运行时术语，开发历史与软件架构混在一起。
+1. 本任务明确写出的 Desert Batfly 玩法硬约束；
+2. DryCycle 项目原则；
+3. 本任务中的推荐结构/示例；
+4. 历史 Task 实现细节。
 
-继续直接新增大型生态功能，会进一步增加 Bridge 数量和文件数量。
-因此本任务优先于后续 Corpse Ecology 等大型功能。
+特别说明：
+
+- 文件行数不是 Definition of Done；
+- 不设置 500/800/1200 行的强制拆分阈值；
+- 大文件只触发职责审查；
+- 拆分依据必须是职责、内聚、变更耦合、生命周期、可测试性和认知负担；
+- 禁止为了让文件变短制造大量 Part/Helper/Utils 碎片。
 
 
 ======================================================================
-2. 总体硬原则
+2. 重构前必须保持的玩法基线
 ======================================================================
 
-2.1 行为保持
+以下默认全部保持。
+
+2.1 物种与外观
 --------------------
 
-重构前已经批准的行为默认必须保持。
+- Desert Batfly 比原版 Batfly 更大；
+- 颜色、花纹、spike、性别视觉差异保留；
+- Personality 稳定 seed 保留；
+- Male/Female 稳定 EntityID 结果保留；
+- 性别不决定 Temperament / Nerve / Aggression 等人格轴。
 
-特别包括：
-
-- Desert Batfly 体型、外观、花纹、刺、性别差异；
-- Personality 稳定随机分布；
-- Emergent Social Roles 永久否决；
-- 不得重新出现 Sentinel / Bully / Opportunist / permanent Leader / permanent Follower / Role enum；
-- Rocks 可伤害、可重度眩晕，但单次 Rock Violence 不能直接完成 live -> dead；
-- SandSpit；
-- Grab struggle；
-- Injury / Wing damage / PostStunShock；
-- PTSD / GrabMemory / PredatorTrauma；
-- SocialBond 单槽、非 N×N 图；
-- Grief；
-- Extreme Vengeance；
-- Peach Lizard 原生 PreyTracker/Hunt/Tongue/Bite/ReturnPrey 管线；
-- 跨房生态和路线所有权；
-- Neutral Social Life；
-- Threat Signature 三层语义；
-- 恰好六种 Observable Signal；
-- 六阶段 Environment behavior；
-- DryCycle-only weather authority；
-- HeavyRain / DeathRain / Fog / DenseFog / Heat / Sandstorm 已批准语义；
-- 现有 DesertBatflyState 存档兼容。
-
-2.2 不推倒重写
+2.2 被否决机制
 --------------------
 
-不得把已经工作的 Colony / Travel / Social / Threat / Signals / Environment 系统全部重新实现。
+Task02 Emergent Social Roles 继续永久否决。
 
-优先策略必须是：
+生产代码不得重新出现：
 
-- 保留纯数学；
-- 保留已验证决策规则；
-- 保留 bounded cache；
-- 保留现有存档格式；
-- 替换模块之间的连接方式；
-- 删除被新正式 API 取代的旧 Bridge / Detour / dead code。
+- Sentinel；
+- Bully；
+- Opportunist；
+- permanent Leader；
+- permanent Follower；
+- SocialRole enum；
+- role score；
+- role locomotion controller。
 
-2.3 内部零 Reflection 原则
+个体差异继续来自 Personality + Experience + Environment。
+
+2.3 Combat / Harass
 --------------------
 
-完成本任务后，Desert Batfly 自己的模块之间不得依赖：
+保持：
 
-- Reflection 获取另一个 DB_ 模块的 private field；
-- RuntimeDetour 挂另一个 DB_ 模块的 private method；
-- DynamicMethod / ILGenerator 适配另一个 DB_ 模块；
-- 字符串方法名作为内部功能契约。
-
-Reflection / Harmony / RuntimeDetour 只允许出现在真正的外部兼容/游戏 Hook 边界：
-
-- Rain World；
-- Watcher；
-- Warp；
-- 未来第三方 Mod compatibility。
-
-2.4 单一普通飞行所有权
---------------------
-
-普通飞行期间，任何时刻只能存在一个 Primary Movement Owner。
-
-Environment、Social、Threat、Vengeance、Injury 等模块不得各自成为一套普通飞行控制器。
-
-特殊物理状态可明确绕过普通 FlightMotor：
-
-- Emergence；
+- Observe；
+- Approach；
+- Circle；
+- FakeDive；
+- Dive；
 - Attach；
-- Interfere；
-- 被抓/约束；
-- 碰撞瞬时反冲；
-- 攻击瞬时 impulse；
-- SandBurst cosmetic；
-- 原生 Shortcut/Burrow/Chain 的物理所有权。
+- Retaliation；
+- AttackSlots；
+- Grab struggle；
+- SandSpit；
+- 恶劣个体可骚扰轻型生物；
+- PTSD / severe injury / hard survival 等 veto。
 
-2.5 跨房所有权不得削弱
+2.4 Rock
 --------------------
 
-现有 Travel / Colony 系统继续独占：
+Rock 可造成：
 
-- EmergencyRefuge destination；
-- ReturnHome route；
+- stun；
+- injury；
+- wing damage；
+- post-stun shock。
+
+但单次 Rock Violence 不允许直接完成 live -> dead finishing transition。
+
+2.5 Injury / Trauma
+--------------------
+
+保持：
+
+- Injury；
+- Wing injury；
+- PhysicalCapability；
+- PostStunShock；
+- PredatorTrauma；
+- PlayerTrauma；
+- GrabMemory；
+- recovery；
+- Injury 对 flight capability 的影响。
+
+2.6 Social
+--------------------
+
+保持：
+
+- Conformity；
+- SocialBond 单 persistent partner slot；
+- bond 可非对称；
+- Grief；
+- Neutral Social Life；
+- CompanionDrift；
+- PassBy；
+- SocialChase；
+- GroupDrift；
+- PositionNegotiation；
+- RoostInvitation；
+- ChainSocialization。
+
+不建立完整 N×N social graph。
+
+2.7 Vengeance
+--------------------
+
+保持 Extreme Vengeance 的设计语义。
+
+- Vengeance 是否发生由现有 vengeance/fear 逻辑决定；
+- Threat Signature 只改变“怎么打”，不决定“是否复仇”；
+- Task09 Travel / HardSurvival 可暂停 Vengeance movement；
+- 暂停不能清除 Vengeance memory。
+
+2.8 Peach Lizard
+--------------------
+
+保持原生 Watcher Peach Lizard 管线：
+
+- PreyTracker；
+- Hunt；
+- Tongue；
+- Bite；
+- ReturnPrey；
+- 活体捕食；
+- corpse scavenging。
+
+不重写第二套 Peach AI。
+
+2.9 Travel / Colony
+--------------------
+
+原 Task09 所批准内容全部保留：
+
+- EmergencyRefuge；
+- temporary displacement；
+- ReturnHome；
 - ColonyMigration；
-- HomeColony change；
-- World route planning；
+- HomeColony；
+- world route planning；
 - LeaveRoom；
 - abstract movement；
-- cross-room weather refuge；
-- migration memory/stress/history。
+- route survivability；
+- migration hysteresis/cooldown/history。
 
-Environment / Social / Threat / Signals 不得通过本次重构取得跨房移动权。
-
-2.6 Task 编号退出生产代码
+2.10 Threat Signature
 --------------------
 
-Task09、Task10、Task11、Task12、Task13、Task14 是开发文档编号，不是软件架构名称。
+原 Task11 三层保持：
 
-最终生产代码中不得出现以下类型的长期命名：
+1. persistent Threat Signature memory；
+2. current real cue；
+3. acute event state。
 
-- Task09Travel；
-- Task10Social；
-- Task11Threat；
-- Task12SignalBridge；
-- Task13Influence；
-- DB_Task13...；
-- task09OwnsFrame；
-- task12Context；
-- task13HardSurvival。
+继续禁止：
 
-这些应改为真正的领域名称：
+- 读取 Input；
+- 读取 controller；
+- 作弊预判下一次攻击；
+- held item 本身直接训练 persistent memory。
 
-- TravelIntent；
-- SocialInfluence / SocialProposal；
-- ThreatContext / ThreatMemory；
-- SignalPacket / SignalInfluence；
-- EnvironmentContext / EnvironmentInfluence；
-- HardSurvival；
-- PrimaryOwner。
-
-Task 编号只允许存在于：
-
-1. docs/Task/ 正式任务书；
-2. docs/Discussion/ 历史讨论记录；
-3. 重构迁移期用于标识“旧任务行为契约”的临时测试文件名；
-4. Git 历史。
-
-R6 完成后，src/Creatures/DesertBatfly/ 下生产源码原则上必须达到 TaskXX 命名归零。
-
-2.7 DB_ 源码前缀
+2.11 Signals
 --------------------
 
-为提高项目文件和类型可读性，DesertBatfly 源码层统一采用：
+Signal 继续恰好六种：
 
-    DB_
+- AlarmFlutter；
+- DistressCall；
+- RallySignal；
+- RoostCall；
+- HarassSignal；
+- SafeSignal。
 
-作为模块前缀。
+不得因为重构新增 WeatherCall / FogCall / ShelterCall 等类型。
 
-核心规则：
+2.12 Environment
+--------------------
 
-- 长前缀 DesertBatfly 在生产 C# 类型名和文件名中逐步退出；
-- DB_ 后使用完整、清晰的职责名；
-- 不允许为了继续缩短而制造不可读二次缩写。
+原 Task13 六 phase 保持：
 
-推荐：
+1. Calm；
+2. Advisory；
+3. Preparation；
+4. Sheltering；
+5. Acute；
+6. Recovery。
+
+保持 DryCycle-only weather authority。
+
+RoomSettings Fog / 普通 shader fog / palette effect 不能单独激活该生态系统。
+
+保持：
+
+- LightRain；
+- Fog；
+- DenseFog；
+- HeavyRain；
+- HeatWave；
+- IntenseHeat；
+- Sandstorm；
+- DeathSandstorm；
+- DeathRain。
+
+HeavyRain 继续为非致死天气，最大项目 intensity 以实际 DryCycle 值为准，不假设 1.0。
+
+2.13 Save compatibility
+--------------------
+
+现有 Desert Batfly persistent save schema 默认保持兼容。
+
+重构 C# 类型名不得迫使旧存档改 tag。
+
+
+======================================================================
+3. 源码命名规范
+======================================================================
+
+3.1 DB_ 前缀
+--------------------
+
+Desert Batfly 生产源码的主要类型/文件逐步统一：
+
+    DB_<完整职责名>
+
+示例：
 
 - DB_Creature；
 - DB_State；
@@ -240,494 +288,141 @@ R6 完成后，src/Creatures/DesertBatfly/ 下生产源码原则上必须达到 
 - DB_Runtime；
 - DB_FrameContext；
 - DB_RoomContext；
+- DB_EventHub；
 - DB_BehaviorArbiter；
 - DB_BehaviorProposal；
 - DB_FlightMotor；
-- DB_EventHub；
-- DB_EnvironmentInfluence；
 - DB_ThreatMemory；
-- DB_SignalRuntime。
-
-禁止：
-
-- DB_EnvInf；
-- DB_BhvArb；
-- DB_RtCtx；
-- DB_T11；
-- DB_T13Env；
-- DB_Mgr1 / DB_Helper2。
+- DB_SignalRuntime；
+- DB_EnvironmentRuntime。
 
 原则：
 
-“前缀短，职责名完整”。
+“前缀短，职责名完整。”
 
-2.8 外部身份字符串不得因 DB_ 重命名而改变
+禁止二次不可读缩写：
+
+- DB_EnvRt；
+- DB_BhvArb；
+- DB_TrvInt；
+- DB_T11；
+- DB_T13Env；
+- DB_Helper2。
+
+3.2 TaskXX 退出 runtime
 --------------------
 
-DB_ 只属于源码可读性重构。
+最终生产代码原则上不得存在：
 
-以下对游戏、存档、资源或第三方兼容可见的稳定身份默认保持不变：
+- Task09Travel；
+- Task10Social；
+- Task11Threat；
+- Task12SignalBridge；
+- Task13Influence；
+- DB_Task13...；
+- task09OwnsFrame；
+- task13HardSurvival。
 
-- CreatureTemplate.Type 字符串 "DesertBatfly"；
-- Sandbox unlock string "DesertBatfly"；
-- 已存在的 save schema/tag，例如 DCDesertBatflyV1；
-- 已发布资源 key / atlas key / external config key；
-- World 文件中已经定义的物种/群落语义字符串；
-- 第三方兼容层依赖的稳定外部 ID。
+替换为真正领域术语：
 
-不得因为 C# 类型改成 DB_State，就把旧存档 tag 随意改成 DB_StateV1。
+- TravelIntent；
+- SocialInfluence；
+- ThreatContext；
+- ThreatMemory；
+- SignalInfluence；
+- EnvironmentInfluence；
+- HardSurvival；
+- PrimaryOwner。
 
-源码内部重命名和外部数据兼容必须严格分开。
+Task 编号只允许长期存在于：
 
+- docs/Task；
+- docs/Discussion；
+- Git history。
 
-======================================================================
-3. 本轮审查已确认的架构问题与隐性风险
-======================================================================
+迁移期测试文件可暂时保留 TaskXX 名称，但最终测试也应按领域重组。
 
-以下问题必须在重构过程中逐项关闭。
-
-3.1 P0：没有真实 Behavior Owner
+3.3 namespace
 --------------------
 
-当前 UpdateAI 主要依靠固定调用顺序、return、CancelForPriority、frame stamp、保存/恢复 localGoal 维护优先级。
+DB_ 只压缩类型/文件前缀。
 
-目标：建立真实 DB_BehaviorArbiter，运行时明确记录当前 PrimaryOwner。
-
-3.2 P0：Injury Recovery Dijkstra 语义不一致
---------------------
-
-原版 FlyAI / Home-Hive 路径使用：
-
-    ProgressLocalGoalAlongDijkstraMap(localGoal, map)
-
-当前重伤恢复路径曾使用 body current position 作为推进输入。
-
-这可能造成：
-
-- 重伤返 Hive 短步抖动；
-- localGoal 反复靠近身体；
-- 狭窄地形方向切换；
-- 与原生路径推进互相竞争。
-
-要求：
-
-- 修正 Dijkstra 推进语义；
-- Injury 决策不再直接成为第二套普通飞行控制器；
-- Injury 仅提交 recovery proposal + flight capability modifier。
-
-3.3 P0：Travel realized drive 潜在同帧重复调用
---------------------
-
-当前 FleeFromRainUpdate 与 UpdateAI 都可能进入 TryDriveRealized。
-已有部分 LastObservedFrame 保护，但不是所有 countdown/cooldown 操作都位于同一 guard 后。
-
-要求：
-
-- 每只 DB_Creature 每个 frame/game clock，TravelRuntime realized tick 最多执行一次；
-- Rain hook 不允许再次完整推进同一 TravelIntent；
-- 增加自动回归验证 DepartureDelay / ReplanCooldown 单帧最多递减一次。
-
-3.4 P0：死亡归因分裂
---------------------
-
-当前 live -> dead 可能分别被：
-
-- Creature.Die / Intimidation；
-- Threat Runtime Creature.Die；
-- Hooks.CreatureDie / ColonyRuntime；
-
-使用不同 killer/cause/time-window 解释。
-
-要求：建立统一 DB_MortalityEvent。
-
-所有以下模块必须消费同一死亡事实：
-
-- Fear / Intimidation；
-- Threat Signature；
-- SocialBond / Grief；
-- Signals；
-- ColonyRuntime；
-- Observatory；
-- 后续 Corpse Ecology。
-
-3.5 P0：抓取/Peach Tongue 事件存在多 Hook 路径
---------------------
-
-当前 Core Hooks、Peach integration、Signal integration 均可能观察 LizardTongue.Update。
-现有代码主要依赖下游时间窗去重。
-
-要求：
-
-- Peach/other capture 只检测一次；
-- 生成统一 DB_CaptureEvent；
-- Fear/Signals/Injury/Social/Threat 各自订阅；
-- 不再靠多 handler 重复 Threatened 后由幂等兜底。
-
-3.6 P0：CorpseWarning 生命周期残留
---------------------
-
-Intimidation 的短期 Room object 在 Reset/Disable 时缺少集中销毁所有权。
-
-要求：
-
-- 不再生成无法被 runtime 集中追踪的 DB ecology Updatable；
-- 若保留 transient object，必须登记到 DB_RoomContext / transient registry 并在 Disable/Room teardown 清理；
-- 优先把 death-site warning 状态迁入 Room ecology/event runtime，而不是每次死亡 new 自治 Update object。
-
-3.7 P1：Environment 临时改写 Thirst 传递攻击动机
---------------------
-
-当前环境 integration 曾通过：
-
-    save Thirst
-    set decision Thirst
-    ScanCreatures()
-    restore Thirst
-
-把 HeatAgitation/Harass multiplier 注入旧 AI。
-
-要求：删除该机制。
-
-新增明确 DB_CombatMotivation：
-
-- HydrationDrive；
-- HeatAgitation；
-- GriefAnger；
-- RetaliationDrive；
-- SocialHarassDrive；
-- EnvironmentalDefenseDrive；
-- PhysicalCapability / Exhaustion modifier。
-
-任何决策不得临时篡改持久 CreatureState 作为函数参数。
-
-3.8 P1：旧感知与 Threat 感知重复
---------------------
-
-当前旧 AI ScanWeapons、Threat thrown weapon cache、DenseFog fallback 可能分别扫描 weapons。
-
-要求：
-
-- 建立统一 DB_WeaponPerception / Room weapon cache；
-- 普通 AI / Threat / Fog fallback 读取同一真实 weapon observation；
-- close projectile safety 保留；
-- 不读取玩家输入或隐藏意图。
-
-3.9 P1：旧 social harass 逻辑被 Signals detour 遮盖
---------------------
-
-旧 FindSocialHarassTarget 通过读取邻居 AI.Target / Mode 实现 contagion；
-正式 HarassSignal 已经批准用于传播该类信息。
-
-要求：
-
-- 删除被正式 Signal 网络取代的旧邻居私有状态窥探路径；
-- 不保留两套同时可用的 harass contagion。
-
-3.10 P1：Signal / Environment 参数复制
---------------------
-
-VisualRadius / AcousticRadius 等 signal 参数不得在 Fog integration 再复制一套。
-
-要求：
-
-- DB_SignalDefinition 成为唯一 signal range authority；
-- Environment 只提供 VisibilityMultiplier / Perception modifier；
-- 调整 signal 参数时无需同步修改 Fog 常量。
-
-3.11 P1：Room runtime 不够惰性
---------------------
-
-当前部分 Room.Update 路径会对没有 Desert Batfly 的 realized room 创建 Signal/Environment/Refuge 数据。
-
-要求：统一 DB_RoomContext 激活条件。
-
-仅在以下情况之一成立时建立/更新昂贵 room state：
-
-- 房间存在 realized DB_Creature；
-- 房间属于 Desert colony/home；
-- Travel/Colony 明确查询该房间生态；
-- Observatory 明确请求该房间 debug；
-- 某个真实 DB event 临时需要。
-
-不得让普通地图房间仅因 Room.Update 就扫描 shelter terrain。
-
-3.12 P1：测试保护了 Bridge，而非行为
---------------------
-
-现有部分测试通过：
-
-- MethodCallOffset；
-- xxxBridge 必须存在；
-- xxxHook 必须存在；
-- MarkTravelOwnedFrame 必须被调用；
-
-保护当前实现。
-
-重构时必须改为测试：
-
-- priority contract；
-- ownership contract；
-- event exactly-once；
-- save compatibility；
-- behavior math；
-- forbidden side effects；
-- no internal reflection；
-- no duplicate travel tick；
-- naming/readability boundary。
-
-3.13 P1：生产文件命名过长且职责定位困难
---------------------
-
-当前大量文件以 DesertBatfly 开头，文件名在 IDE 中高度同质化。
-例如：
-
-- DesertBatflyEnvironmentalIntegration.cs；
-- DesertBatflyEnvironmentalSurvivalBridge.cs；
-- DesertBatflyThreatVengeanceBridge.cs；
-- DesertBatflySignalDirectWitnessBridge.cs。
-
-问题不是单纯字符数，而是：
-
-- IDE tab / search result 前半段全部相同；
-- 真正职责词出现在文件名末尾；
-- Bridge 命名反映的是历史接线方式，不是领域职责；
-- 同目录大量文件难以快速形成心智地图。
-
-要求：
-
-- 迁移到领域目录；
-- 类型/文件改为 DB_ 前缀；
-- 文件名把核心职责放在 DB_ 后立即表达；
-- 删除完成使命的 Bridge 文件。
-
-
-======================================================================
-4. 源码命名与文件可读性规范
-======================================================================
-
-本节为 Task14 硬规范，不是可选风格建议。
-
-4.1 命名基本格式
---------------------
-
-Desert Batfly 生产代码主类型统一：
-
-    DB_<完整职责名>
-
-示例：
-
-    DB_Creature
-    DB_State
-    DB_Personality
-    DB_Tuning
-    DB_Runtime
-    DB_FrameContext
-    DB_RoomContext
-    DB_BehaviorArbiter
-    DB_BehaviorProposal
-    DB_FlightMotor
-    DB_EventHub
-    DB_ThreatMemory
-    DB_SignalRuntime
-    DB_EnvironmentInfluence
-
-对应文件名：
-
-    DB_Creature.cs
-    DB_State.cs
-    DB_Personality.cs
-    ...
-
-原则上“主类型名 = 文件名”。
-
-4.2 不改变 namespace 语义
---------------------
-
-DB_ 是类型/文件前缀，不要求把 namespace 改成难读的缩写。
-
-推荐继续保留语义明确的 namespace，例如：
+namespace 继续优先保持完整语义：
 
     DryCycle.Creatures.DesertBatfly
-    DryCycle.Creatures.DesertBatfly.Runtime
-    DryCycle.Creatures.DesertBatfly.Behavior.Combat
-    DryCycle.Creatures.DesertBatfly.Ecology.Environment
 
-不要把 namespace 改成：
+可根据领域建立：
 
-    DryCycle.Creatures.DB
-    DryCycle.DB
+    DryCycle.Creatures.DesertBatfly.Combat
+    DryCycle.Creatures.DesertBatfly.Travel
+    DryCycle.Creatures.DesertBatfly.Signals
 
-除非后续整个项目有统一 namespace 迁移方案。
+不要求改成 DryCycle.DB。
 
-4.3 文件夹使用领域名，不使用 Task 编号
+3.4 外部身份保持 DesertBatfly
 --------------------
 
-允许：
+源码 rename 不改变：
 
-- Core；
-- Runtime；
-- Perception；
-- Behavior；
-- Ecology；
-- Presentation；
-- Integration；
-- Debug；
-- Combat；
-- Injury；
-- Social；
-- Threat；
-- Signals；
-- Environment；
-- Colony；
-- Travel。
+- CreatureTemplate.Type "DesertBatfly"；
+- Sandbox unlock ID；
+- save tag，例如 DCDesertBatflyV1；
+- world/config tag；
+- atlas/resource ID；
+- 已发布第三方 compatibility ID。
 
-禁止：
-
-- Task09/；
-- Task10/；
-- Task11/；
-- Task13/；
-- PhaseR3/；
-- OldBridge/；
-- TempNew/。
-
-4.4 不建立泛化垃圾目录
---------------------
-
-禁止通过以下目录掩盖职责不清：
-
-- Utils/；
-- Helpers/；
-- Misc/；
-- CommonStuff/；
-- Managers/。
-
-如果一个 helper 只服务 Travel，就放 Travel。
-如果只服务 Signals，就放 Signals。
-真正跨领域的基础设施应进入 Runtime / Perception / Event，并有明确职责名。
-
-4.5 一文件一主职责
---------------------
-
-默认一个文件只包含一个主要顶层类型/主要职责。
-
-允许同文件出现：
-
-- 与主类型强绑定的小型 readonly struct；
-- 小型 enum；
-- private nested state；
-- 不值得独立公开的纯数据载体。
-
-禁止为了减少文件数把：
-
-- EventHub；
-- FrameContext；
-- Arbiter；
-- FlightMotor；
-- Combat state machine；
-
-重新塞进一个巨型 DB_Runtime.cs。
-
-4.6 文件长度可读性预算
---------------------
-
-这是软约束，但必须主动审查：
-
-- 约 0～500 行：正常；
-- 约 500～800 行：可以接受，但应确认职责是否仍单一；
-- 超过约 800 行：必须检查是否可按职责拆分；
-- 超过约 1200 行：生产手写代码原则上应拆分，除非存在非常明确且记录在案的理由。
-
-禁止机械地为了“每文件 300 行”把一个状态机切成几十个无意义碎片。
-目标是提高导航和职责清晰度，不是追求文件数量指标。
-
-4.7 方法可读性
---------------------
-
-高复杂度方法应优先拆成：
-
-- Gather / Sample；
-- Evaluate；
-- BuildProposal；
-- Resolve；
-- Apply；
-- Publish；
-
-等明确阶段。
-
-一个方法同时做：
-
-“扫描全房间 + 修改状态 + 选择目标 + 改 localGoal + 发信号 + 写 debug”
-
-应被视为重构目标。
-
-4.8 类型命名表达领域，不表达历史补丁
---------------------
-
-应逐步删除以下生产命名模式：
-
-- *Bridge；
-- *Task09Bridge；
-- *Task13Bridge；
-- *Patch（若不是外部 patch）；
-- *Hook（若不是 Rain World 外部 hook）；
-- *Compatibility（若实际只是内部模块接线）。
-
-替代为实际职责：
-
-- Policy；
-- Runtime；
-- Perception；
-- Influence；
-- Proposal；
-- Adapter；
-- Registry；
-- Event；
-- State；
-- Resolver。
-
-外部边界文件仍可使用：
-
-- Hook；
-- Adapter；
-- Integration；
-- Compatibility。
-
-4.9 DB_ 不重复表达目录
---------------------
-
-文件名应简洁但仍完整。
-
-例如位于 Ecology/Environment/：
-
-推荐：
-
-- DB_EnvironmentRuntime.cs；
-- DB_EnvironmentProfile.cs；
-- DB_EnvironmentExposure.cs；
-- DB_ShelterAnchors.cs。
-
-不推荐：
-
-- DB_DesertBatflyEnvironmentalEnvironmentalRuntime.cs；
-- DB_EnvRt.cs。
-
-4.10 搜索可读性要求
---------------------
-
-在 IDE 中搜索 `DB_` 应快速得到 Desert Batfly 全部生产类型。
-搜索 `DB_Travel` 应主要得到 Travel 领域。
-搜索 `DB_Signal` 应主要得到 Signals 领域。
-搜索 `Task13` 不应命中生产运行时类。
+内部 rename 和外部兼容严格分开。
 
 
 ======================================================================
-5. 目标目录结构
+4. 文件与目录可读性原则
 ======================================================================
 
-最终推荐结构：
+4.1 不使用硬行数拆分
+--------------------
+
+本任务不以文件行数作为验收条件。
+
+较大文件只触发职责审查。
+
+审查问题：
+
+1. 是否有多个独立修改理由？
+2. 是否存在多个生命周期？
+3. 是否存在可独立测试/演化子职责？
+4. 是否有其他模块只需要其中一部分？
+5. 修改一个功能时是否必须阅读大量无关代码？
+6. 是否经常成为多个功能修改的冲突热点？
+7. 是否暴露过大 API surface？
+
+即使 1200 行，只要高度内聚，也可以合理保留。
+
+即使 400 行，如果同时承担感知、战斗、天气、移动和事件，也必须拆。
+
+4.2 禁止机械碎片化
+--------------------
+
+不得为了缩短文件产生：
+
+- Part1/Part2；
+- HelperA；
+- Utils2；
+- CommonStuff；
+- Manager1。
+
+每次拆分必须能明确说明新文件的稳定领域职责。
+
+4.3 目录结构采用领域优先
+--------------------
+
+本任务不强制 Behavior/xxx 与 Ecology/xxx 的多层理论分组。
+
+对于 Desert Batfly 当前规模，优先让主要领域直接可见。
+
+推荐目标结构：
 
 src/Creatures/DesertBatfly/
+│
 ├─ Core/
 │  ├─ DB_Creature.cs
 │  ├─ DB_State.cs
@@ -739,10 +434,10 @@ src/Creatures/DesertBatfly/
 │  ├─ DB_Runtime.cs
 │  ├─ DB_FrameContext.cs
 │  ├─ DB_RoomContext.cs
+│  ├─ DB_EventHub.cs
 │  ├─ DB_BehaviorArbiter.cs
 │  ├─ DB_BehaviorProposal.cs
-│  ├─ DB_FlightMotor.cs
-│  └─ DB_EventHub.cs
+│  └─ DB_FlightMotor.cs
 │
 ├─ Perception/
 │  ├─ DB_PerceptionRuntime.cs
@@ -750,129 +445,284 @@ src/Creatures/DesertBatfly/
 │  ├─ DB_WeaponPerception.cs
 │  └─ DB_VisibilityPolicy.cs
 │
-├─ Behavior/
-│  ├─ Combat/
-│  │  ├─ DB_CombatRuntime.cs
-│  │  ├─ DB_CombatState.cs
-│  │  ├─ DB_CombatMotivation.cs
-│  │  └─ DB_AttackSlots.cs
-│  ├─ Injury/
-│  │  ├─ DB_Injury.cs
-│  │  ├─ DB_InjuryRecovery.cs
-│  │  └─ DB_InjuryFlightModifier.cs
-│  ├─ Vengeance/
-│  │  ├─ DB_FearRuntime.cs
-│  │  ├─ DB_VengeanceRuntime.cs
-│  │  └─ DB_VengeanceTactics.cs
-│  ├─ Social/
-│  │  ├─ DB_SocialLife.cs
-│  │  ├─ DB_SocialBond.cs
-│  │  └─ DB_SocialReservations.cs
-│  ├─ Roost/
-│  │  └─ DB_RoostPolicy.cs
-│  └─ Survival/
-│     └─ DB_SurvivalPolicy.cs
+├─ Combat/
+│  ├─ DB_CombatRuntime.cs
+│  ├─ DB_CombatState.cs
+│  ├─ DB_CombatMotivation.cs
+│  ├─ DB_AttackSlots.cs
+│  └─ DB_SandSpit.cs
 │
-├─ Ecology/
-│  ├─ Colony/
-│  │  ├─ DB_ColonyState.cs
-│  │  ├─ DB_ColonyRuntime.cs
-│  │  └─ DB_ColonyMigration.cs
-│  ├─ Travel/
-│  │  ├─ DB_TravelIntent.cs
-│  │  ├─ DB_TravelRuntime.cs
-│  │  ├─ DB_RoutePlanner.cs
-│  │  └─ DB_RefugePolicy.cs
-│  ├─ Environment/
-│  │  ├─ DB_EnvironmentRuntime.cs
-│  │  ├─ DB_EnvironmentContext.cs
-│  │  ├─ DB_EnvironmentInfluence.cs
-│  │  ├─ DB_EnvironmentProfile.cs
-│  │  ├─ DB_EnvironmentExposure.cs
-│  │  └─ DB_ShelterAnchors.cs
-│  └─ Signals/
-│     ├─ DB_SignalDefinition.cs
-│     ├─ DB_SignalPacket.cs
-│     ├─ DB_SignalRuntime.cs
-│     └─ DB_SignalRoomState.cs
+├─ Injury/
+│  ├─ DB_Injury.cs
+│  ├─ DB_InjuryRecovery.cs
+│  └─ DB_InjuryFlightModifier.cs
+│
+├─ Fear/
+│  ├─ DB_FearRuntime.cs
+│  └─ DB_FearState.cs
+│
+├─ Vengeance/
+│  ├─ DB_VengeanceRuntime.cs
+│  ├─ DB_VengeanceState.cs
+│  └─ DB_VengeancePolicy.cs
+│
+├─ Social/
+│  ├─ DB_SocialRuntime.cs
+│  ├─ DB_SocialRoomState.cs
+│  ├─ DB_SocialBond.cs
+│  └─ DB_SocialInfluence.cs
+│
+├─ Roost/
+│  ├─ DB_RoostPolicy.cs
+│  ├─ DB_RoostRuntime.cs
+│  └─ DB_PlatformRoostIntegration.cs
+│
+├─ Threat/
+│  ├─ DB_ThreatMemory.cs
+│  ├─ DB_ThreatRuntime.cs
+│  ├─ DB_ThreatTactics.cs
+│  └─ DB_ThreatObservation.cs
+│
+├─ Signals/
+│  ├─ DB_SignalDefinition.cs
+│  ├─ DB_SignalPacket.cs
+│  ├─ DB_SignalRuntime.cs
+│  └─ DB_SignalRoomState.cs
+│
+├─ Environment/
+│  ├─ DB_EnvironmentRuntime.cs
+│  ├─ DB_EnvironmentProfile.cs
+│  ├─ DB_EnvironmentExposure.cs
+│  ├─ DB_EnvironmentInfluence.cs
+│  └─ DB_ShelterAnchors.cs
+│
+├─ Colony/
+│  ├─ DB_ColonyState.cs
+│  ├─ DB_ColonyRuntime.cs
+│  └─ DB_MigrationPolicy.cs
+│
+├─ Travel/
+│  ├─ DB_TravelIntent.cs
+│  ├─ DB_TravelRuntime.cs
+│  ├─ DB_WorldRoutePlanner.cs
+│  └─ DB_RefugePolicy.cs
 │
 ├─ Presentation/
-│  ├─ Graphics/
-│  │  └─ DB_Graphics.cs
-│  ├─ SandSpit/
-│  │  └─ DB_SandBurst.cs
-│  └─ Signals/
-│     └─ DB_SignalDisplay.cs
+│  ├─ DB_Graphics.cs
+│  ├─ DB_SandBurst.cs
+│  └─ DB_SignalDisplay.cs
 │
 ├─ Integration/
 │  ├─ RainWorld/
-│  │  └─ DB_Hooks.cs
 │  ├─ Watcher/
-│  │  └─ DB_PeachPredation.cs
 │  ├─ Warp/
-│  │  └─ DB_WarpCompatibility.cs
 │  └─ Sandbox/
-│     └─ DB_Sandbox.cs
 │
 └─ Debug/
    └─ Observatory/
-      ├─ DB_DebugSource.cs
-      ├─ DB_DebugTrace.cs
-      └─ DB_DebugFormat.cs
 
-注意：
+说明：
 
-- 这是目标结构，不要求第一阶段立刻移动所有文件；
-- 若某个子系统最终不需要上述全部文件，不得为了“对齐模板”创建空壳类；
-- 若实际职责证明某些文件合并后更清晰，可以合并，但必须符合一主职责原则；
-- 禁止“一次 commit 全部移动 + 全部重写”；
-- 每个迁移阶段必须保持可编译、可测试、可回退。
+- 这是目标心智地图，不要求机械照搬每一个示例文件；
+- 如果两个领域实际高度内聚，可合理合并；
+- 如果一个目录只有非常少的简单逻辑，可在实现阶段说明后暂不拆；
+- 禁止为了匹配图示制造空壳类型和无意义 wrapper。
 
+4.4 禁止垃圾目录
+--------------------
 
-======================================================================
-6. 外部身份与兼容层
-======================================================================
+不新建：
 
-6.1 外部 ID 保持原名
+- Utils；
+- Helpers；
+- Misc；
+- CommonStuff；
+- Managers。
 
-以下仍使用 DesertBatfly，而不是 DB_：
-
-- CreatureType string；
-- Sandbox unlock string；
-- save tags；
-- 已发布资源标识；
-- external config keys；
-- 第三方兼容所需稳定名称。
-
-6.2 源码类型可以改名
-
-例如：
-
-    DesertBatfly           -> DB_Creature
-    DesertBatflyState      -> DB_State
-    DesertBatflyDefinition -> DB_Definition
-
-但改名提交必须同时修正本程序集引用和测试。
-
-6.3 不以类型名作为存档格式
-
-持久数据必须继续由显式 save tag/schema 控制。
-不得让 C# 类型重命名影响旧存档加载。
+helper 属于哪个领域就放哪个领域。
 
 
 ======================================================================
-7. 新核心：DB_FrameContext
+5. 当前项目审查确认的问题清单
 ======================================================================
 
-每次 realized AI update 开始时，构造一个只描述“当前帧事实”的 context。
+以下问题必须在 Task14 中逐项关闭或给出明确保留理由。
 
-至少包括：
+5.1 P0 — 没有真实 Behavior Owner
+--------------------
+
+当前 UpdateAI 依赖：
+
+- 固定调用顺序；
+- return；
+- CancelForPriority；
+- frame stamp；
+- localGoal 覆盖；
+- private detour。
+
+目标：建立真实 DB_BehaviorArbiter，并记录 PrimaryOwner。
+
+5.2 P0 — Injury Recovery Dijkstra 语义不一致
+--------------------
+
+原版 FlyAI/Home-Hive 路径使用：
+
+    ProgressLocalGoalAlongDijkstraMap(localGoal, map)
+
+现有 Injury Recovery 路径存在以 body current position 作为推进输入的实现。
+
+潜在后果：
+
+- short-step jitter；
+- goal 在身体附近反复重建；
+- 狭窄地形来回切换；
+- 与 native FlyAI path progression 竞争。
+
+要求：
+
+- 修复 Dijkstra input semantics；
+- Injury recovery 只提交 Recovery proposal；
+- Injury 对 flight 的影响通过 modifier 进入统一执行。
+
+5.3 P0 — Travel realized 同帧潜在重复推进
+--------------------
+
+当前 Rain/Flee hook 与 AI update 都可能进入 TryDriveRealized。
+
+已有 LastObservedFrame 只保护部分逻辑。
+
+要求：
+
+每只 DB_Creature 每个 frame/game clock：
+
+- Travel realized tick 最多一次；
+- DepartureDelay 最多递减一次；
+- ReplanCooldown 最多递减一次；
+- SameRoomTravelTicks 最多推进一次；
+- LeaveRoom 不得重复请求。
+
+5.4 P0 — 死亡 attribution 分裂
+--------------------
+
+当前死亡可能被：
+
+- Creature/Intimidation；
+- Threat Runtime；
+- Colony Hooks；
+
+分别推断 killer/cause。
+
+要求：统一 DB_MortalityEvent。
+
+5.5 P0 — Capture/Peach Tongue 多 Hook
+--------------------
+
+当前 Core、Peach integration、Signal integration 都可能观察同一 Tongue attach transition。
+
+要求：
+
+- detection once；
+- publish DB_CaptureEvent once；
+- Fear/Signals/Injury/Social/Threat 分别消费；
+- 不依赖“多次调用但下游碰巧去重”。
+
+5.6 P0 — CorpseWarning 生命周期残留
+--------------------
+
+现有短期 UpdatableAndDeletable warning 不被 Reset/Disable 集中拥有。
+
+要求：
+
+- transient ecology object 必须有 registry/lifecycle owner；
+- Disable / Room teardown 可完整清理；
+- 优先迁入 Room event/evidence state，而非每次死亡建立自治 runtime object。
+
+5.7 P1 — Environment 临时改写 Thirst
+--------------------
+
+禁止继续：
+
+    save Thirst
+    write fake decision Thirst
+    call old AI
+    restore Thirst
+
+建立 DB_CombatMotivation，显式组合：
+
+- HydrationDrive；
+- HeatAgitation；
+- GriefAnger；
+- RetaliationDrive；
+- SocialHarassDrive；
+- EnvironmentalDefenseDrive；
+- InjuryScale；
+- ThermalExhaustion；
+- PTSD/HardSurvival veto。
+
+5.8 P1 — 重复 weapon perception
+--------------------
+
+旧 AI ScanWeapons、Threat cache、DenseFog close fallback 不应各自完整扫描。
+
+要求：统一 DB_WeaponPerception / Room weapon observation。
+
+5.9 P1 — 旧 social harass contagion 与 Signal 并存
+--------------------
+
+旧 FindSocialHarassTarget 直接读取邻居 Target/Mode 的传播路径，应被正式 HarassSignal 取代。
+
+不保留两套 social contagion。
+
+5.10 P1 — Signal 参数复制
+--------------------
+
+VisualRadius / AcousticRadius 由 DB_SignalDefinition 唯一拥有。
+
+Environment/Fog 只输出 visibility modifier。
+
+5.11 P1 — Room runtime 不够 lazy
+--------------------
+
+没有 Desert Batfly 的普通 realized room 不应因为 Room.Update 自动建立完整 shelter/signal/ecology runtime。
+
+5.12 P1 — Tests 锁死 Bridge
+--------------------
+
+MethodCallOffset / xxxBridge exists / xxxHook exists 等只能作为迁移期 architecture lock。
+
+最终必须改为 contract test。
+
+5.13 P1 — Observatory ControlOwner 目前是事后猜测
+--------------------
+
+重构后 Debug 应读取 Arbiter 的真实 PrimaryOwner、winner 和 reject reason。
+
+5.14 P1 — AttackSlots 仍存在 room-wide counting pressure
+--------------------
+
+可以保留现有 bounded scan，也可以迁入 RoomContext/AttackSlotRegistry。
+
+如果优化：
+
+- target identity 必须稳定；
+- death/cancel/room change 释放；
+- 不引入 persistent complex registry；
+- AttackSlots 语义不得变化。
+
+
+======================================================================
+6. 新核心：DB_FrameContext
+======================================================================
+
+DB_FrameContext 表示“当前帧已知事实”，不是行为结果。
+
+至少包含：
 
 Identity:
-- Creature；
+- DB_Creature；
 - EntityID；
-- Room；
-- Tick / Frame；
+- Tick / frame；
+- Room。
 
 Physical:
 - Position；
@@ -882,185 +732,82 @@ Physical:
 - Restrained；
 - InShortcut；
 - InHive；
-- Current Fly movement mode；
-- Current FlyAI behavior；
+- native Fly movement mode；
+- native FlyAI behavior。
 
 Individual:
 - Personality；
 - PhysicalCapability；
-- Injury severity；
+- Injury；
 - PostStunShock；
-- Hydration / Thirst；
+- real Thirst；
 - Trauma；
 - Grief；
-- SocialBond summary；
+- Bond summary。
 
 Perception:
-- nearest visible Player；
-- current predator threat；
-- validated thrown weapon observations；
+- visible players；
+- predator candidates；
+- weapon observations；
 - incoming projectile cue；
-- room visibility factor；
+- visibility factor。
 
-Ecology:
-- TravelIntent summary；
-- SignalInfluence；
-- EnvironmentInfluence；
-- room flock snapshot；
-- room shelter summary；
+Domain influences:
+- Travel summary；
+- Signal influence；
+- Environment influence；
+- Threat summary；
+- Social eligibility；
+- Roost summary。
 
 Rules:
+- ImmediateDanger；
 - HardSurvival；
 - CombatAllowed；
 - SocialAllowed；
 - CrossRoomOwned；
 - SpecialPhysicsOwner。
 
-DB_FrameContext 只用于当前帧/决策周期，不存档。
+FrameContext 不存档。
 
-模块不得为了拿信息而 Reflection 另一个模块 private state。
-
-
-======================================================================
-8. 新核心：DB_BehaviorProposal / DB_BehaviorArbiter
-======================================================================
-
-8.1 Proposal contract
---------------------
-
-每个行为模块可提交一个或多个 proposal。
-
-建议字段：
-
-DB_BehaviorProposal
-- Owner；
-- Priority；
-- BehaviorKind；
-- Goal；
-- NominalSpeed；
-- DesiredFlyBehavior（optional）；
-- DesiredDijkstraMap（optional）；
-- RequestBurrow；
-- SuppressCombat；
-- SuppressSocial；
-- PreserveExistingGoal；
-- ValidUntilTick / commitment；
-- Reason；
-- DebugSource。
-
-Proposal 本身不得直接写 BodyChunk.vel。
-
-8.2 Primary Owner priority
---------------------
-
-推荐总体优先级保持现有批准语义：
-
-1. Death / unconscious / destroyed；
-2. Special physical restraint / grabbed / shortcut / emergence；
-3. Immediate physical danger / escape；
-4. Severe Injury / InjuryRecovery；
-5. realized cross-room Travel；
-6. Acute HardSurvival；
-7. PTSD / direct threat reaction；
-8. Extreme Vengeance；
-9. Environment Preparation/Sheltering local survival；
-10. projectile evade tactical modifier / immediate cue；
-11. Formal Harass / Retaliation / Attack；
-12. Roost / Chain；
-13. Neutral Social Life；
-14. ordinary DB idle/swarm behavior；
-15. Vanilla FlyAI fallback。
-
-注意：
-
-- 具体数值可实现为 enum rank，不要求 magic int；
-- Travel 有 intent 但当前因抓取/重伤 suspended 时，不应自动击败更高优先级；
-- HardSurvival 可暂停 Vengeance，但不能清除 Vengeance memory；
-- Signals 永远不应成为 locomotion owner；
-- Threat Signature memory 本身永远不应成为 locomotion owner；
-- visibility/navigation uncertainty 应作为 modifier，而不是第二 Primary Owner。
-
-8.3 Arbiter result
---------------------
-
-每帧只产生一个 DB_ResolvedBehavior：
-
-- PrimaryOwner；
-- WinningProposal；
-- Modifiers；
-- final Goal；
-- final NominalSpeed；
-- final Dijkstra ownership；
-- final Combat/Social gates；
-- reason；
-- rejected proposals + reject reason（debug only）。
+模块不得为了拿信息去 Reflection 兄弟模块 private field。
 
 
 ======================================================================
-9. 新核心：DB_FlightMotor
+7. 新核心：DB_RoomContext
 ======================================================================
 
-DB_FlightMotor 是普通 Desert Batfly 飞行的唯一最终执行入口。
+目标：让多个模块共享真实 Room observation，但仍保持各领域 state ownership。
 
-职责：
+推荐共享：
 
-- 接受 Arbiter final goal；
-- 设置 FlyAI.localGoal / native steering intent；
-- 接受 nominal speed；
-- 应用 Injury Forward/Turn/Lift/Acceleration modifier；
-- 保持 native Fly collision / movement pipeline；
-- 不实现第二套 path planner；
-- 不 teleport；
-- 不固定 Y；
-- 不直接绕过 terrain collision。
+- active DB bats；
+- players；
+- thrown weapons；
+- predator candidates；
+- room clock/context；
+- low-level visibility observations；
+- optional roosting view。
 
-Fog navigation error：
+不要求把所有领域状态都塞进一个巨型 RoomContext。
 
-- 作为 goal modifier；
-- 在 FlightMotor 前完成；
-- 不自己写 velocity。
+以下仍由领域自己拥有：
 
-Injury：
+- Signal packet internals；
+- Social reservation；
+- Environment anchor scoring semantics；
+- Colony persistent state；
+- TravelIntent；
+- Threat persistent memory。
 
-- DB_InjuryRecovery 提交 recovery proposal；
-- DB_InjuryFlightModifier 最终修改 native requested flight；
-- 不在 InjuryRecovery 中持续独立写 vel。
-
-
-======================================================================
-10. 特殊物理所有权
-======================================================================
-
-以下行为允许明确绕过普通 DB_FlightMotor：
-
-10.1 Emergence
-- 可使用 MoveFromOutsideMyUpdate；
-- 可临时关闭 collision；
-- 结束时恢复 collision；
-- 必须在 Cancel/Destroy/Room transition 恢复。
-
-10.2 Attach / Interfere
-- 可将 bat 约束到 target BodyChunk；
-- 可同步目标 velocity；
-- 可对目标施加批准的 drag/impulse；
-- 必须有显式 enter/exit lifecycle；
-- 退出后重新交还 DB_FlightMotor。
-
-10.3 Hit / retaliation impulse
-- 瞬时 impulse 允许直接写 velocity；
-- 不得演变成多帧普通飞行控制器。
-
-10.4 Native Burrow / Chain / Shortcut
-- 原生 Rain World system 为物理 owner；
-- Arbiter 只决定是否请求进入；
-- 不替代原生执行。
+DB_RoomContext 是共享 observation/access layer，不是 God Object。
 
 
 ======================================================================
-11. 统一 DB_EventHub
+8. 新核心：DB_EventHub
 ======================================================================
 
-必须建立统一事件入口，至少覆盖：
+至少统一：
 
 - DB_DamageEvent；
 - DB_StunEvent；
@@ -1071,1249 +818,1247 @@ Injury：
 - DB_RoomChangedEvent；
 - DB_BurrowEvent；
 - DB_EmergeEvent；
-- DB_VengeanceArmedEvent；
-- DB_DirectThreatObservedEvent；
-- DB_AcuteEnvironmentEvent（若确实需要事件化）。
+- DB_VengeanceArmedEvent。
 
-事件要求：
+要求：
 
-- 每个真实事件生成唯一 sequence/id；
-- 单个事件对每个 subscriber 最多处理一次；
-- 不依赖“90 tick 内相同对象就忽略”作为主要去重手段；
-- 时间窗可继续用于语义归因，但不能替代 exactly-once dispatch；
-- debug 可记录 event source 和 subscribers。
+- 一个真实 semantic event 有唯一 sequence/id；
+- 一个 subscriber 对同 sequence 最多处理一次；
+- 外部 Hook 重复观察不得造成重复训练；
+- event source / tick / position 可 Debug；
+- 时间窗用于 attribution，不用于替代 exactly-once dispatch。
 
 
 ======================================================================
-12. 统一死亡归因
+9. 统一 DB_MortalityEvent
 ======================================================================
 
-新增 DB_MortalityEvent snapshot。
-
-建议字段：
+推荐字段：
 
 - Victim；
 - Tick；
 - Position；
-- PrimaryCause；
+- Cause；
 - Instigator；
 - SourceObject；
 - DamageType；
 - WasCaptured；
 - WasConsumed；
-- WasDirectAttack；
 - WasProjectile；
 - WasCounterKill；
 - ThreatEvidence；
-- DirectWitness snapshot；
-- ChainWitness snapshot；
-- ThreatScale；
 - AttributionConfidence；
 - DebugReason。
 
 规则：
 
-- live -> dead transition 只发布一次；
-- Rocks 的“不能作为该次直接 finishing blow”规则保留；
+- live -> dead 只发布一次；
+- Rock non-finishing rule 保留；
 - environmental death 可 Instigator=null；
-- 被 Lizard 抓住后因其他 cause 死亡，不应自动把 Lizard 当 killer，除非统一 attribution 判断支持；
-- Threat/Fear/Colony 不再各自重新猜 killer；
-- 后续 Corpse Ecology 必须消费该事件，不再自行 Hook Death 做第二套归因。
+- 当前被抓住不自动等于 grabber 是 killer；
+- Fear/Vengeance、Threat、Grief、Signals、Colony 全部使用同一 attribution；
+- 后续 Corpse Ecology 也必须消费此事件，而不是再 Hook 一套 Death attribution。
 
 
 ======================================================================
-13. 统一 DB_CaptureEvent
+10. 统一 DB_CaptureEvent
 ======================================================================
 
-抓取检测与生态反应分离。
+Detection 与 reaction 分离。
 
-Detection：
+Detector 可识别：
 
 - Player grasp；
 - Peach tongue attach；
 - Lizard bite/grasp；
-- other supported lethal predator grasp。
+- supported predator grasp。
 
-Event consumer：
+Consumers：
 
-- Fear：capture fear；
-- Signals：DistressCall / AlarmFlutter；
-- Injury：capture shock/release survivor；
-- Social：cancel neutral interaction；
-- Threat：真实 capture evidence；
-- Debug：一次事件追踪。
+- Fear；
+- Signals；
+- Injury；
+- Social；
+- Threat；
+- Debug。
 
-Peach integration 只负责检测 Watcher-specific tongue/bite transition，
-不应再次独立完成全部 DB fear/social/signal side effects。
+Peach integration 只负责 Watcher-specific detection/adaptation，不再自行完成全部生态副作用。
 
 
 ======================================================================
-14. 统一 DB_RoomContext / Perception
+11. DB_BehaviorProposal / DB_BehaviorArbiter
 ======================================================================
 
-目标：减少“一房间五套扫描器”。
+11.1 Proposal
+--------------------
 
-14.1 Active bats cache
-- 维护有效 realized DB_Creature list；
-- dead/slated/inShortcut/inHive 可按不同 view 过滤；
-- Social/Threat/Signals/Environment 不再各自完整枚举 colony list。
+推荐字段：
 
-14.2 Players cache
-- 当前 room player list；
-- player slot；
-- visibility query 仍按当前 bat 判断。
+- Owner；
+- Priority；
+- BehaviorKind；
+- Goal；
+- NominalSpeed；
+- DesiredNativeBehavior；
+- DesiredDijkstraMap；
+- RequestBurrow；
+- SuppressCombat；
+- SuppressSocial；
+- PreserveGoal；
+- Commitment；
+- Reason。
 
-14.3 Weapon cache
-- thrown weapons；
-- owner/thrower；
-- position/velocity；
-- class/evidence type；
-- low-frequency refresh + urgent direct event path。
+Proposal 不直接写普通 locomotion velocity。
+
+11.2 Priority semantic order
+--------------------
+
+总体保持：
+
+1. death / unconscious / destroyed；
+2. special restraint / grabbed / shortcut / emergence；
+3. immediate physical danger / escape；
+4. severe Injury / InjuryRecovery；
+5. active realized Travel；
+6. Environment Acute HardSurvival；
+7. PTSD / direct threat response；
+8. Extreme Vengeance；
+9. Environment Preparation/Sheltering local survival；
+10. immediate projectile evade modifier；
+11. formal combat / retaliation / harass；
+12. roost / chain；
+13. neutral social；
+14. ordinary species idle/swarm；
+15. vanilla fallback。
+
+注意：
+
+- TravelIntent 存在但 suspended 时不自动获得 owner；
+- HardSurvival 暂停 Vengeance 不清状态；
+- Signals 永远不是 locomotion owner；
+- Threat memory 永远不是 locomotion owner；
+- Fog uncertainty 是 modifier，不是独立 owner。
+
+11.3 Result
+--------------------
+
+每帧只输出一个 ResolvedBehavior：
+
+- PrimaryOwner；
+- WinningProposal；
+- final goal；
+- final speed；
+- final native behavior；
+- modifiers；
+- rejected proposals + reason（debug only）。
+
+
+======================================================================
+12. DB_FlightMotor
+======================================================================
+
+普通飞行只有一个最终执行入口。
+
+职责：
+
+- 接受 ResolvedBehavior goal；
+- 设置 native/localGoal intent；
+- 接受 nominal speed；
+- 应用 Injury flight modifiers；
+- 保留 Rain World native collision/flight；
+- 不建立第二 world planner；
+- 不 teleport；
+- 不 fixed Y；
+- 不绕过 terrain collision。
+
+Fog navigation uncertainty：
+
+- 在 motor 前作为 goal modifier；
+- 不直接写多帧 velocity controller。
+
+
+======================================================================
+13. 特殊物理 Owner
+======================================================================
+
+以下可明确绕过普通 FlightMotor：
+
+- Emergence；
+- Attach；
+- Interfere；
+- 被外部 Creature 抓住；
+- shortcut；
+- native Burrow/Chain；
+- hit/collision/retaliation 瞬时 impulse。
+
+原则：
+
+不是“全项目禁止 BodyChunk.vel”。
+
+真正禁止的是多个普通 AI locomotion controller 同时存在。
+
+特殊物理状态必须有明确 enter/exit lifecycle，并在退出后交还 FlightMotor/native system。
+
+
+======================================================================
+14. Perception 统一
+======================================================================
+
+14.1 DB_WeaponPerception
+--------------------
+
+统一观察：
+
+- Weapon 类型；
+- thrownBy；
+- position；
+- velocity；
+- mode；
+- trajectory relevance。
 
 使用者：
-- ordinary weapon avoidance；
-- Current Threat Cue；
-- DenseFog close projectile recognition。
 
-14.4 Predator candidates
-- 只缓存候选，不缓存“这个 bat 一定害怕”；
-- relationship/personality/range 仍由 individual decision 计算。
+- ordinary threat reaction；
+- Threat current cue；
+- DenseFog close projectile fallback。
 
-14.5 Roost / social candidates
-- Social 可复用 ActiveBats / Roosting view；
-- Reservation 仍由 Social 自己拥有。
+不得每个使用者重新扫描 physicalObjects。
 
-14.6 Weather / shelter
-- Environment 继续拥有天气与 shelter anchor；
-- DB_RoomContext 只提供统一访问入口；
-- 不把 Environment 数值语义搬进通用 perception。
+14.2 DB_VisibilityPolicy
+--------------------
 
+输入：
 
-======================================================================
-15. Room Runtime 惰性与生命周期
-======================================================================
+- Room.VisualContact；
+- Environment VisibilityConfidence；
+- distance；
+- channel；
+- real projectile observation。
 
-15.1 激活
+输出用于：
 
-DB_RoomContext 不得对所有 realized rooms 自动做完整初始化。
-昂贵数据仅在需要时创建。
+- player recognition；
+- weapon recognition；
+- Signal visual channel；
+- target observation。
 
-15.2 清理
-
-Room teardown / mod disable / game session reset 时必须：
-
-- 释放 transient event queues；
-- 清理 Room-scoped reservations；
-- 清理 transient warning/effect registry；
-- 清理 signal packets；
-- 清理 environment room anchors/context；
-- 不保留对 destroyed Room 的强引用。
-
-ConditionalWeakTable 可继续使用，但不能把它当成“无需生命周期设计”的替代品。
-
-15.3 Disable
-
-DB_Hooks.Disable 后：
-
-- 不允许 DB-owned UpdatableAndDeletable 继续影响生态逻辑；
-- external hooks 必须卸载；
-- static runtime state 必须清空；
-- Warp/Sandbox compatibility 恢复外部状态；
-- next Enable 不得出现重复 hook。
+Home/Hive familiarity 只能降低 navigation uncertainty，不恢复 DenseFog 远距离视觉。
 
 
 ======================================================================
-16. Colony / Travel 重构边界
+15. Combat 重构
 ======================================================================
 
-对应历史 Task09 行为契约，但生产代码不再使用 Task09 命名。
+DB_CombatRuntime 负责 formal species combat state machine。
 
-保留：
+建议拆出：
 
-- ColonyState；
-- Migration math；
-- WorldRoutePlanner；
-- Refuge scoring；
-- TravelIntent；
-- ReturnHome / EmergencyRefuge / ColonyMigration 语义；
-- hysteresis / max hop / survivability；
-- save-backed ecology。
+- DB_CombatState；
+- DB_CombatMotivation；
+- DB_AttackSlots；
+- contact/attach execution helpers。
 
-重构：
+DB_CombatMotivation 显式组合：
 
-- realized Travel update 进入统一 Runtime；
-- same-frame exactly-once；
-- 不再需要 Vengeance frame stamp；
-- Travel proposal 通过 Arbiter 取得 PrimaryOwner；
-- 若 Travel suspended，保留 intent，但不获得当前 frame movement ownership。
-
-禁止：
-
-- 为了重构换成未经验证的新世界寻路算法；
-- 删除 route commitment；
-- 让 Environment 决定 destination。
-
-
-======================================================================
-17. Neutral Social 重构边界
-======================================================================
-
-对应历史 Task10 行为契约，但生产代码不再使用 Task10 命名。
-
-保留：
-
-- Neutral Social modes；
-- partner/anchor/reservation；
-- Companion / Group / PassBy / SocialChase；
-- RoostInvitation / ChainSocialization；
-- deterministic/no random guards；
-- 20 tick 级 room cache 思路。
-
-重构：
-
-- 读取 DB_FrameContext / DB_RoomContext；
-- 返回 Social proposal；
-- 不再被 Environment detour private Update/CanPlay/Partner method；
-- Environment 直接通过 context 提供 SocialMultiplier/PlayMultiplier/RoostMultiplier；
-- priority loss 由 Arbiter 解释，不再到处 CancelForPriority。
-
-Social 仍不得：
-
-- 处理 damage；
-- 训练 Trauma；
-- 训练 ThreatSignature；
-- 成为跨房 owner。
-
-
-======================================================================
-18. Threat Signature 重构边界
-======================================================================
-
-对应历史 Task11 行为契约，但生产代码不再使用 Task11 命名。
-
-保留三层：
-
-1. persistent Threat Memory；
-2. Current Threat Cue；
-3. Acute Event State。
-
-保留：
-
-- per-player memory dimensions；
-- projectile/piercing/blunt/explosion/etc. evidence；
-- learned FakeDive weighting；
-- projectile evade geometry；
-- Vengeance tactical geometry；
-- no input cheating；
-- close real projectile danger in fog。
-
-重构：
-
-- 使用 DB_WeaponPerception observations；
-- 使用统一 Damage/Capture/Death events 训练证据；
-- Vengeance 通过正式 API 获取 tactical modifier；
-- 删除对 Fear/Vengeance private State 的 Reflection；
-- 删除 ForceFlight private detour；
-- 删除 frame stamp suspension bridge。
-
-Threat Memory 不决定“是否复仇”，只改变已经批准攻击/复仇时的方式。
-
-
-======================================================================
-19. Signals 重构边界
-======================================================================
-
-对应历史 Task12 行为契约，但生产代码不再使用 Task12 命名。
-
-必须继续恰好六种：
-
-- AlarmFlutter；
-- DistressCall；
-- RallySignal；
-- RoostCall；
-- HarassSignal；
-- SafeSignal。
-
-禁止新增：
-
-- ShelterCall；
-- SandstormCall；
-- FogCall；
-- WeatherCall；
-- HeatCall。
-
-保留：
-
-- packet cap；
-- hop cap；
-- dedupe；
-- urgent delivery；
-- generation history ring；
-- visual vs close acoustic channel；
-- direct witness boundary。
-
-重构：
-
-- ReceiveFear 变成正式 internal contract，不再 DynamicMethod detour；
-- ArmVengeance 完成后直接发布 DB_VengeanceArmedEvent；
-- Harass target / Roost source 通过正式 SignalInfluence API；
-- DB_SignalDefinition 唯一拥有 Visual/Acoustic range；
-- Fog 只提供 visibility scaling。
-
-
-======================================================================
-20. Environment 重构边界
-======================================================================
-
-对应历史 Task13 行为契约，但生产代码不再使用 Task13 命名。
-
-保留：
-
-- 六 phase；
-- DryCycle-only weather source；
-- Exposure；
-- Shelter anchors；
-- HeavyRain / DeathRain；
-- Fog / DenseFog；
-- HeatWave / IntenseHeat；
-- Sandstorm / DeathSandstorm；
-- HomeReturnDrive / BurrowDrive；
-- LocalShelterFailure -> Travel bounded evidence；
-- recovery staggering；
-- no second locomotion；
-- no weather signal。
-
-重构：
-
-- 删除 EnvironmentIntegration 对 Personality.Aggressive/RoostChance/RoostDuration/private AI methods 的内部 detour；
-- DB_EnvironmentInfluence 直接进入 DB_FrameContext；
-- DB_CombatMotivation 正式读取 HeatAgitation 等轴；
-- 删除 temporary Thirst mutation；
-- Fog navigation 作为 normal goal modifier；
-- Fog visual perception 通过 DB_VisibilityPolicy；
-- Home/Burrow 作为 Behavior proposal/native behavior request；
-- Travel interaction 通过正式 policy/evidence API，而非 private method detour。
-
-
-======================================================================
-21. Fear / Vengeance 重构
-======================================================================
-
-当前 Intimidation 职责过大，重构时至少拆分：
-
-- Fear / intimidation state；
-- Vengeance state machine；
-- death/capture reaction；
-- corpse/death-site short-term evidence；
-- physical ForceFlight helper。
-
-目标：
-
-- death/capture 来源统一 DB_EventHub；
-- Vengeance 对外暴露明确 read-only state；
-- Vengeance 接收 Threat tactical modifier；
-- Vengeance 提交 behavior proposal；
-- Signals 监听 DB_VengeanceArmedEvent；
-- 不再允许其他模块 Reflection Vengeance private state；
-- 不再需要 DynamicMethod hook ArmVengeance；
-- 不再需要 detour Vengeance.Update 来“冻结一帧”。
-
-Vengeance memory 在 Travel/HardSurvival 暂停时保留。
-
-
-======================================================================
-22. Combat / Motivation 重构
-======================================================================
-
-建立明确 DB_CombatMotivation。
-
-至少组合：
-
-- Personality AggressionDrive；
-- real Thirst/Hydration drive；
-- memory/retaliation；
-- GriefAnger；
+- Personality aggression；
+- real hydration drive；
+- retaliation memory；
+- Grief；
 - Social Harass influence；
 - HeatAgitation；
-- Environmental defensive drive；
-- Injury AggressionScale；
+- EnvironmentalDefense；
+- InjuryScale；
 - ThermalExhaustion；
 - PTSD veto；
 - HardSurvival veto；
 - AttackSlot legality。
 
-禁止：
-
-- 为了让某种因素影响旧 AI 而临时写 State.Thirst；
-- Environment 直接把所有个体变 Aggressive；
-- DamageAttackPermission 等于自动 attack；
-- 绕过 AttackSlots。
+不得再通过临时改 Thirst 影响 ScanCreatures。
 
 
 ======================================================================
-23. AttackSlots 优化
+16. Injury 重构
 ======================================================================
 
-当前 AcquireSlot 通过扫描 abstractRoom.creatures 统计同 target FormalAttack。
+拆成两个概念：
 
-重构可以：
+1. Injury decision/recovery；
+2. flight capability modifier。
 
-- 使用 DB_RoomContext.ActiveBats；
-- 或建立 bounded DB_AttackSlots registry。
+DB_InjuryRecovery：
 
-要求：
+- 判断是否需要返回安全点/Hive；
+- 生成 proposal；
+- 使用 native Dijkstra semantics。
 
-- no stale slot after death/room change/cancel；
-- no more than configured AttackSlots；
-- target identity 不能只按 number 导致碰撞；
-- reset/disable 清理；
-- 不引入复杂 persistent reservation。
+DB_InjuryFlightModifier：
 
+- Forward control；
+- Turn control；
+- Lift；
+- Acceleration；
+- wing asymmetry。
 
-======================================================================
-24. Perception / Visibility 统一
-======================================================================
-
-建立 DB_VisibilityPolicy。
-
-输入：
-- Room.VisualContact；
-- Environment VisibilityConfidence；
-- signal channel；
-- distance；
-- current real projectile；
-- Home/Hive familiarity only for navigation uncertainty，不恢复视觉。
-
-输出用于：
-- Threat player recognition；
-- held-item recognition；
-- visual Signals；
-- Combat target observation；
-- Debug。
-
-Close projectile exception 必须基于真实 projectile observation，不能凭空识别玩家。
+Injury 不再成为第二套持续普通 flight controller。
 
 
 ======================================================================
-25. 性能目标
+17. Fear / Vengeance 重构
 ======================================================================
 
-25.1 20～30 realized Desert Batflies
+现有 DesertBatflyIntimidation 职责过多。
 
-目标：在单房 20～30 只时不因本次架构增加明显 CPU spike。
+至少分离：
 
-25.2 禁止模式
+- Fear state；
+- capture/death reaction；
+- Vengeance state；
+- Vengeance behavior proposal；
+- death-site transient evidence。
 
-- 每 bat 每 frame 完整扫描 room.physicalObjects；
-- 每 bat 每 frame 完整扫描所有 Desert Batflies；
-- 每 bat 每 frame terrain scan；
-- Environment world graph scan；
-- debug closed 时创建大量字符串；
-- 多套重复 weapon scanner；
-- 普通房间无 Desert Batfly 时创建完整 shelter anchor runtime。
+目标：
 
-25.3 推荐 cadence
+- 其他模块不 Reflection 其 private State；
+- Threat 通过明确 read-only profile/strategy API 调整 tactical behavior；
+- Signals 监听 DB_VengeanceArmedEvent；
+- 不再 Dynamic detour ArmVengeance；
+- 不再 detour Intimidation.Update 冻结某一帧；
+- 不再 frame stamp 维持 Travel priority。
 
-- ActiveBats / players: 10～20 ticks 或事件驱动更新；
-- thrown weapons: 8～12 ticks + urgent event；
-- social candidates: 20 ticks；
-- weather: 20 ticks；
-- flock snapshot: 30 ticks；
-- shelter anchors: build once / invalidate；
-- crowding: 20 ticks；
-- individual expensive decision: stagger 8～20 ticks；
-- event delivery: event-driven bounded queue。
 
-Cadence 可调，但必须保持分散刷新，避免所有 bat 同 tick 同时重算。
+======================================================================
+18. Social 重构
+======================================================================
+
+保持 Neutral Social Life 行为和 reservation 语义。
+
+重构后：
+
+- 读取 DB_FrameContext / DB_RoomContext；
+- 输出 Social proposal/influence；
+- 不被 Environment detour private social methods；
+- Environment 直接提供 SocialMultiplier/PlayMultiplier；
+- priority loss 由 Arbiter 处理；
+- 不在多个 Hook 中到处 CancelForPriority。
+
+SocialBond persistent ownership 继续独立。
+
+
+======================================================================
+19. Roost 重构
+======================================================================
+
+Roost/Chain legality 继续基于 Rain World native behavior。
+
+保留：
+
+- Platform underside capability；
+- chain stability；
+- RoostInvitation；
+- Task13/Environment 只提供 Roost multiplier / survival pressure。
+
+Environment 不直接接管 Chain physics。
+
+
+======================================================================
+20. Threat 重构
+======================================================================
+
+保持 persistent memory / current cue / acute state 三层。
+
+改为：
+
+- 读取统一 WeaponPerception；
+- Damage/Capture/Mortality event 训练 evidence；
+- Vengeance tactical modifier 走明确 API；
+- 删除 Intimidation private reflection；
+- 删除 ForceFlight private detour；
+- 删除 Travel frame stamp bridge。
+
+Threat memory 不成为 locomotion owner。
+
+
+======================================================================
+21. Signals 重构
+======================================================================
+
+保持恰好六种 Signal。
+
+DB_SignalDefinition 唯一拥有：
+
+- visual range；
+- close acoustic range；
+- TTL；
+- relay policy；
+- type-specific constants。
+
+保留：
+
+- packet cap；
+- hop cap；
+- generation ring；
+- urgent delivery；
+- dedupe；
+- direct witness boundary。
+
+删除：
+
+- internal ReceiveFear DynamicMethod detour；
+- ArmVengeance DynamicMethod detour；
+- 依赖 private method name 的 internal contract。
+
+Signal 继续只传信息，不取得 locomotion ownership。
+
+
+======================================================================
+22. Environment 重构
+======================================================================
+
+保持全部 Task13 已批准语义。
+
+DB_EnvironmentRuntime 输出 DB_EnvironmentInfluence。
+
+重构：
+
+- 删除对 Personality.Aggressive private/property detour；
+- 删除 RoostChance/RoostDuration internal detour；
+- 删除 AI.CanHarass/ScanCreatures/Steer private detour；
+- 删除 temporary Thirst mutation；
+- Visibility 进入 DB_VisibilityPolicy；
+- Fog navigation 进入 goal modifier；
+- Home/Burrow 形成 proposal/native request；
+- LocalShelterFailure 通过正式 evidence API 交 Travel/Colony。
+
+Environment 不获得跨房 destination ownership。
+
+
+======================================================================
+23. Colony / Travel 重构
+======================================================================
+
+23.1 Colony
+--------------------
+
+保留：
+
+- ColonyState；
+- pressure；
+- migration math；
+- persistent ecology；
+- population continuity。
+
+可重命名/迁移，但不得重写稳定数学只为了“更高级”。
+
+23.2 Travel
+--------------------
+
+保留：
+
+- TravelIntent；
+- Refuge；
+- ReturnHome；
+- Migration route；
+- bounded world route planner；
+- route commitment；
+- max hops；
+- survivability；
+- hysteresis。
+
+本任务不要求换成 A* 或任何新图算法。
+
+核心修复是 realized exactly-once + Arbiter ownership。
+
+
+======================================================================
+24. Room Runtime lazy activation
+======================================================================
+
+昂贵 DB_RoomContext/Environment/Shelter 数据仅在需要时建立。
+
+激活条件可包括：
+
+- room 中存在 realized DB_Creature；
+- room 是 colony/home；
+- Travel/Colony 明确查询；
+- Debug 明确请求；
+- 真实 DB event 需要。
+
+普通无关 room 不应：
+
+- 建 shelter anchors；
+- 建完整 signal receiver state；
+- 建 specialized DB ecology cache。
+
+
+======================================================================
+25. 生命周期与 Disable/Reset
+======================================================================
+
+必须明确：
+
+- Enable；
+- Disable；
+- Reset；
+- RoomChanged；
+- Burrow；
+- Emerge；
+- Death；
+- Shortcut；
+- session teardown。
+
+Disable 后：
+
+- external hooks 卸载；
+- runtime state 清理；
+- reservations 清理；
+- transient ecology objects 清理；
+- Signal runtime 清理；
+- Room context 不保留 destroyed Room 强引用；
+- Warp/Sandbox/Watcher compatibility 回到安全状态；
+- 再次 Enable 不重复 Hook。
+
+ConditionalWeakTable 不是 lifecycle design 的替代品。
 
 
 ======================================================================
 26. Hooks / Integration 收敛
 ======================================================================
 
-最终 DB_Hooks 应仅承担 Rain World callback -> DB_Runtime 的桥接。
+最终 Rain World Hooks 只负责：
 
-DB_Hooks 不应继续知道：
+    external callback
+        -> DB adapter/runtime/event
 
-- 历史 Task11 必须在 Task12 前；
-- 历史 Task13 必须在 Task10 前；
-- Vengeance frame stamp；
-- 哪个 Bridge 要 CancelSocial；
-- 哪个 private method 要被 detour。
+Hooks 不应长期知道：
 
-建议：
+- Threat 必须在 Signals 前；
+- Environment 必须在 Social 前；
+- 哪个 Bridge 要打 frame stamp；
+- 哪个 private method 要 detour。
 
-    On.FlyAI.Update
-        -> orig
-        -> DB_Runtime.UpdateAI(creature)
+内部顺序由 DB_Runtime / EventHub / Arbiter 负责。
 
-    On.Room.Update
-        -> orig
-        -> DB_Runtime.UpdateRoom(room)
+Reflection/RuntimeDetour/Harmony 可以保留在真正外部边界：
 
-    On.Creature.Violence / Die / Grabbed ...
-        -> external Adapter
-        -> DB_EventHub
+- Rain World；
+- Watcher；
+- Warp；
+- third-party compatibility。
 
-所有内部顺序由 DB_Runtime / DB_BehaviorArbiter 定义。
+外部兼容失败应 fail soft，不应拖垮 core Desert Batfly AI。
 
 
 ======================================================================
-27. 外部 Compatibility 保留边界
+27. Performance
 ======================================================================
 
-允许继续使用 Harmony/Reflection：
+目标：20～30 realized DB_Creature 单房时不因 Task14 增加明显架构性 spike。
 
-- Warp closed enum / color list compatibility；
-- Watcher-specific unavailable API；
-- Sandbox symbol edge；
-- Rain World nonvirtual entry points。
+禁止：
 
-但必须移动/标识到 Integration/Compatibility。
+- 每 bat 每 frame 全 room physicalObjects scan；
+- 每 bat 每 frame 全 DB population scan；
+- 每 bat 每 frame terrain scan；
+- 多个系统重复 weapon scan；
+- Debug 关闭仍大量分配字符串；
+- 无关 room 自动建 shelter terrain cache。
 
-任何外部 compatibility 失败：
+推荐按需要使用 bounded cadence：
 
-- 不得使 DB core AI 整体失效；
-- 必须 fail soft；
-- Debug 可记录 integration unavailable。
+- active bat/player list：事件 + 10～20 tick refresh；
+- weapon observation：8～12 tick + urgent direct cue；
+- social candidates：约 20 tick；
+- environment/weather：约 20 tick；
+- flock snapshot：约 30 tick；
+- shelter anchors：build once/invalidate；
+- individual expensive decisions：stagger。
 
-
-======================================================================
-28. 文件级迁移计划
-======================================================================
-
-以下为目标归属，不要求一次完成。
-
-28.1 Core
-
-- DesertBatfly.cs -> Core/DB_Creature.cs；
-- DesertBatflyState.cs -> Core/DB_State.cs；
-- DesertBatflyDefinition.cs -> Core/DB_Definition.cs；
-- Personality -> Core/DB_Personality.cs；
-- Tuning -> Core/DB_Tuning.cs；
-- DesertSwarmRoom 若仍承担物种房内 Fly hive wrapper -> 使用清晰 DB_SwarmRoom.cs 或按新 RoomContext 职责拆解。
-
-28.2 AI 大文件拆分
-
-DesertBatflyAI.cs 不应继续保持一个 50KB+ 的综合类。
-
-拆分方向：
-
-- perception scan -> Perception/；
-- target validation -> Combat 或 Perception；
-- combat state machine -> Behavior/Combat/；
-- injury recovery decision -> Behavior/Injury/；
-- roost decision -> Behavior/Roost/；
-- generic steering -> Runtime/DB_FlightMotor.cs；
-- Motivation -> DB_CombatMotivation.cs；
-- pure math 可保留局部 helper。
-
-最终不要求存在一个 DB_AI.cs 大总管。
-若保留 DB_AIFacade，仅允许作为非常薄的兼容 facade，不承担重新聚合全部逻辑。
-
-28.3 Intimidation
-
-DesertBatflyIntimidation.cs 拆解目标：
-
-- fear -> DB_FearRuntime；
-- vengeance -> DB_VengeanceRuntime；
-- death/capture event handling -> Event subscribers；
-- corpse warning -> Room ecology runtime；
-- direct ForceFlight -> Proposal / Motor。
-
-28.4 Colony / Travel
-
-- DesertBatflyColonyState.cs -> DB_ColonyState.cs；
-- DesertBatflyColonyRuntime.cs -> DB_ColonyRuntime.cs；
-- DesertBatflyColonyMigration.cs -> DB_ColonyMigration.cs；
-- DesertBatflyTravelNavigation.cs -> DB_TravelRuntime.cs / DB_TravelIntent.cs；
-- DesertBatflyWorldRoutePlanner.cs -> DB_RoutePlanner.cs；
-- DesertBatflyRefuge.cs -> DB_RefugePolicy.cs。
-
-28.5 Social
-
-- DesertBatflySocialLife.cs -> DB_SocialLife.cs；
-- DesertBatflySocialBond.cs -> DB_SocialBond.cs；
-- DesertBatflySocialRoomRuntime.cs -> 优先并入 DB_RoomContext view + DB_SocialReservations，而不是原样重命名全部旧结构。
-
-28.6 Threat
-
-- ThreatSignature/* -> Perception/Threat 或 Behavior/Threat；
-- DesertBatflyThreatMemory -> DB_ThreatMemory；
-- DesertBatflyThreatRuntime -> DB_ThreatRuntime；
-- DesertBatflyThreatTactics -> DB_ThreatTactics；
-- old Vengeance Bridge 删除，不能简单改名 DB_ThreatVengeanceBridge 留下。
-
-28.7 Signals
-
-- Signals/* -> Ecology/Signals；
-- DB_SignalDefinition 唯一拥有 signal metadata；
-- DB_SignalRuntime 负责 packet/influence；
-- visual display -> Presentation/Signals/DB_SignalDisplay.cs；
-- old integration bridges 应转为正式 API 或删除，不能批量换前缀保留。
-
-28.8 Environment
-
-- Environmental/* -> Ecology/Environment；
-- Core/context -> DB_EnvironmentContext / DB_EnvironmentInfluence；
-- profile -> DB_EnvironmentProfile；
-- exposure -> DB_EnvironmentExposure；
-- anchors -> DB_ShelterAnchors；
-- old xxxBridge 文件必须逐项判断：正式 API 替代后删除，不做纯重命名。
-
-28.9 Presentation
-
-- DesertBatflyGraphics.cs -> DB_Graphics.cs；
-- DesertBatflySandBurst.cs -> DB_SandBurst.cs；
-- signal display 从 Signal runtime 分离。
-
-28.10 Integration
-
-- DesertBatflyHooks.cs -> Integration/RainWorld/DB_Hooks.cs；
-- DesertBatflyWarpCompatibility.cs -> DB_WarpCompatibility.cs；
-- DesertBatflySandbox.cs -> DB_Sandbox.cs；
-- PeachLizardDesertBatflyPredation.cs -> Integration/Watcher/DB_PeachPredation.cs。
-
-28.11 Debug
-
-- DesertBatflyDebugTrace.cs -> DB_DebugTrace.cs；
-- DesertBatflyTask13DebugSource 等 TaskXX debug source 全部退出；
-- 统一为领域页面/数据源：Runtime / Travel / Threat / Signals / Social / Environment / Performance。
+这些数值是初始性能预算，不是绝对 API；实机 profiling 可调整。
 
 
 ======================================================================
-29. 测试目录和命名重构
+28. Tests 重构原则
 ======================================================================
 
-29.1 迁移期
+28.1 保留行为契约
+--------------------
 
-R0～R5 期间可暂时保留：
+必须继续验证：
+
+- stable personality；
+- sex；
+- SandSpit distribution/behavior；
+- State round-trip；
+- locale-independent save；
+- malformed save clamp；
+- foreign save field preservation；
+- Rock non-finishing；
+- Injury math；
+- SocialBond single slot；
+- Grief；
+- Peach edible/predation boundaries；
+- Travel/Colony math；
+- Neutral Social no combat ownership；
+- Threat no input cheat；
+- exactly six signals；
+- Environment six phases；
+- DryCycle-only weather authority；
+- HeavyRain/DeathRain semantics；
+- rejected Task02 remains absent。
+
+28.2 新架构测试
+--------------------
+
+必须增加：
+
+Ownership:
+- one PrimaryOwner per frame；
+- higher priority cannot be overwritten；
+- Signals never PrimaryOwner；
+- Threat memory never PrimaryOwner；
+- special physics owner explicit。
+
+Event:
+- CaptureEvent exactly once；
+- MortalityEvent exactly once；
+- one event sequence trains Threat once；
+- Grief starts once；
+- Colony uses same mortality attribution。
+
+Travel:
+- realized tick once/frame；
+- DepartureDelay once/frame；
+- ReplanCooldown once/frame；
+- no duplicate LeaveRoom。
+
+Dependency:
+- no internal RuntimeDetour after migration；
+- no internal DynamicMethod after migration；
+- no private cross-module Reflection；
+- no temporary State.Thirst mutation；
+- no TaskXX runtime identifiers；
+- no new internal *TaskXXBridge types。
+
+Lifecycle:
+- Disable unhooks；
+- Enable idempotent；
+- transient object cleanup；
+- room change clears realized-only state；
+- death releases slot/reservation/runtime。
+
+Performance/lazy:
+- irrelevant room no shelter build；
+- weapon observation shared；
+- room cache ages bounded。
+
+28.3 删除旧 architecture lock
+--------------------
+
+最终删除/改写：
+
+- xxxBridge must exist；
+- xxxHook must exist；
+- MarkTravelOwnedFrame must be called；
+- MethodCallOffset 强制历史 pipeline；
+- private detour existence = feature implemented。
+
+改测行为和 contract。
+
+
+======================================================================
+29. Test 文件组织目标
+======================================================================
+
+迁移期允许继续存在：
 
 - Program.Task09.cs；
 - Program.Task10.cs；
 - Program.Task11.cs；
 - Program.Task12.cs；
-- Program.Task13.cs；
+- Program.Task13.cs。
 
-因为它们代表历史“行为契约来源”。
+因为它们仍可帮助确认历史批准行为。
 
-但测试内容必须逐步从 Architecture Lock 改为 Behavior Contract。
+Task14 完成后建议重组为：
 
-29.2 最终目标
-
-R6 后测试按领域组织，不再以 Task 编号作为长期架构：
-
-tests/DesertBatfly/
+Tests/DesertBatfly/
 ├─ Core/
-│  ├─ DB_StateTests.cs
-│  ├─ DB_PersonalityTests.cs
-│  └─ DB_SaveCompatibilityTests.cs
-├─ Behavior/
-│  ├─ DB_CombatTests.cs
-│  ├─ DB_InjuryTests.cs
-│  ├─ DB_SocialTests.cs
-│  └─ DB_VengeanceTests.cs
-├─ Ecology/
-│  ├─ DB_ColonyTests.cs
-│  ├─ DB_TravelTests.cs
-│  ├─ DB_SignalTests.cs
-│  └─ DB_EnvironmentTests.cs
+├─ Combat/
+├─ Injury/
+├─ Social/
+├─ Threat/
+├─ Signals/
+├─ Environment/
+├─ Colony/
+├─ Travel/
 └─ Architecture/
-   ├─ DB_OwnershipTests.cs
-   ├─ DB_EventSemanticsTests.cs
-   ├─ DB_LifecycleTests.cs
-   ├─ DB_DependencyBoundaryTests.cs
-   └─ DB_NamingGuards.cs
 
-不要求为了目录结构一次性重写测试框架，但最终命名应达到同一可读性标准。
+Architecture 至少覆盖：
 
-29.3 必须保留的行为回归
-
-- stable personality seeds；
-- sex distribution；
-- CanSandSpit distribution；
-- true avenger calibration；
-- State round trip；
-- locale-independent save；
-- malformed save clamp；
-- foreign save field preservation；
-- Rock non-finishing-blow；
-- Injury math；
-- SocialBond single slot；
-- Grief；
-- Peach edible remains；
-- migration math/route；
-- neutral social no combat/trauma ownership；
-- Threat no input cheating；
-- six Signals/caps/hops；
-- six Environment phases/weather authority；
-- HeavyRain/DeathRain；
-- rejected social roles remain absent。
-
-29.4 新架构测试
-
-A. Arbiter priority tests
-- Injury > Travel；
-- active Travel > Vengeance movement；
-- HardSurvival > ordinary Harass；
-- Vengeance > neutral Social；
-- neutral Social cannot overwrite higher goal；
-- Signals never own movement。
-
-B. exactly-once event tests
-- one capture -> one DB_CaptureEvent；
-- one live->dead -> one DB_MortalityEvent；
-- one subscriber handles sequence once；
-- duplicate external Hook observation does not double-train Threat Memory。
-
-C. Travel single-frame tests
-- realized tick once/frame；
-- DepartureDelay decrements max once；
-- ReplanCooldown decrements max once；
-- SameRoomTravelTicks max once。
-
-D. lifecycle tests
-- Disable clears hooks/runtime；
-- Reset does not leave transient ecology object；
-- room change forgets realized-only state；
-- death clears attack slot/social reservation/signal receiver state。
-
-E. internal dependency guards
-- no DB internal RuntimeDetour；
-- no Reflection into DB private fields across modules；
-- no DynamicMethod/ILGenerator for internal integration；
-- no temporary writes to State.Thirst inside decision integration；
-- no Environment direct BodyChunk.vel ordinary locomotion；
-- no Signals locomotion writes。
-
-F. Room runtime laziness
-- ordinary room with no DB creature does not build shelter anchors；
-- debug read-only inspection does not accidentally create colony population；
-- room cache invalidation bounded。
-
-G. Naming/readability guards
-- src/Creatures/DesertBatfly production type/file prefixes use DB_ after migration；
-- no production TaskXX identifiers；
-- no new DesertBatflyVeryLongInternalType style names without explicit external-compat reason；
-- no internal *TaskXXBridge；
-- no new Utils/Misc/Helpers folder under DesertBatfly；
-- external ID "DesertBatfly" remains unchanged。
-
-29.5 删除/改写旧架构锁死测试
-
-以下类型测试在新架构完成后必须删除或改写：
-
-- 必须存在 xxxBridge；
-- 必须存在 xxxHook；
-- 必须通过 MethodCallOffset 证明历史 Task11->12->13->10；
-- 必须调用 MarkTravelOwnedFrame；
-- 必须 detour private method 才算实现。
-
-改为验证 DB_Runtime phase / DB_BehaviorArbiter contract。
+- Ownership；
+- EventSemantics；
+- Lifecycle；
+- DependencyBoundary；
+- NamingGuards。
 
 
 ======================================================================
-30. Observatory / Debug 升级
+30. Observatory / Debug
 ======================================================================
 
-重构后 Observatory 必须读取真实控制权，不再猜测。
-
-至少显示：
+重构后必须显示真实 runtime 状态。
 
 Frame:
-- Tick / frame id；
+- tick/frame；
 - PrimaryOwner；
 - WinningBehavior；
-- Goal；
-- NominalSpeed；
-- SpecialPhysicsOwner；
+- goal；
+- speed；
+- SpecialPhysicsOwner。
 
 Arbiter:
-- submitted proposal count；
+- proposal count；
 - winner；
 - rejected proposals；
 - reject reason；
-- modifier list；
+- modifiers。
 
 Context:
+- Injury；
 - TravelIntent；
-- Injury state；
-- immediate danger；
+- ImmediateDanger；
 - Vengeance active/suspended；
+- Threat cue；
 - Signal influence；
 - Environment influence；
-- CombatMotivation summary；
+- Combat motivation。
 
 Perception:
-- players seen；
-- predators seen；
+- players；
+- predators；
 - weapon observation count；
 - incoming projectile；
-- visibility policy；
+- visibility policy。
 
 Events:
-- latest event id；
-- Damage/Capture/Death；
+- latest sequence；
+- capture/death/damage；
 - subscribers；
-- duplicate suppressed count（应接近 0）。
+- duplicate suppression count。
 
 Performance:
-- room cache ages；
-- weapon scan age；
+- room cache age；
+- weapon refresh age；
 - social refresh age；
 - weather refresh age；
-- shelter anchor build count。
+- shelter build count。
 
-Debug UI 不再显示 Task09 / Task10 / Task11 / Task12 / Task13 作为当前运行时模块名。
-允许在 tooltip/history 中说明“来源于历史 TaskXX 行为契约”。
+不再通过状态组合猜 ControlOwner。
 
 
 ======================================================================
-31. 实施阶段
+31. 旧文件迁移指导
 ======================================================================
 
-R0 — Baseline freeze / tests first
+以下是职责迁移方向，不要求逐字一对一 rename。
+
+DesertBatfly.cs
+-> Core/DB_Creature.cs
+
+DesertBatflyState.cs
+-> Core/DB_State.cs
+
+DesertBatflyDefinition.cs
+-> Core/DB_Definition.cs
+
+DesertBatflyAI.cs
+-> 拆出：
+   Combat/DB_CombatRuntime
+   Perception/*
+   Injury/DB_InjuryRecovery
+   Runtime/DB_FlightMotor
+   Roost/DB_RoostPolicy
+   必要的 species baseline behavior
+
+DesertBatflyIntimidation.cs
+-> Fear/*
+   Vengeance/*
+   Event subscribers
+   death-site transient evidence ownership
+
+DesertBatflyInjury.cs
+-> Injury/*
+
+DesertBatflySocialLife.cs
+DesertBatflySocialRoomRuntime.cs
+DesertBatflySocialBond.cs
+-> Social/*
+
+ThreatSignature/*
+-> Threat/*
+
+Signals/*
+-> Signals/*
+
+Environmental/*
+-> Environment/*
+
+DesertBatflyColony*.cs
+-> Colony/*
+
+DesertBatflyTravelNavigation.cs
+DesertBatflyWorldRoutePlanner.cs
+DesertBatflyRefuge.cs
+-> Travel/*
+
+DesertBatflyPlatformRoostRuntime.cs
+-> Roost/* or external Integration if implementation requires native patching
+
+DesertBatflyGraphics.cs
+-> Presentation/DB_Graphics.cs
+
+DesertBatflySandBurst.cs
+-> Presentation/DB_SandBurst.cs
+
+DesertBatflyWarpCompatibility.cs
+-> Integration/Warp
+
+DesertBatflySandbox.cs
+-> Integration/Sandbox
+
+PeachLizardDesertBatflyPredation
+-> Integration/Watcher
+
+DesertBatflyDebugTrace.cs + related debug sources
+-> Debug/Observatory
+
+
+======================================================================
+32. 实施阶段
+======================================================================
+
+R0 — Baseline / regression freeze
 --------------------------------
 
-- 记录 main baseline commit；
-- 确认存档 schema 和所有外部 DesertBatfly ID；
-- 建立 old-name -> DB_-name migration manifest；
-- 将现有测试分为 Behavior Contract 与 Architecture Lock；
-- 增加 hidden bug regression；
-- 增加 naming guard，但 R0 不强制生产代码已经全部 DB_；
-- 不移动大文件。
+- 记录重构起点 commit；
+- 记录 save schema；
+- 分类 Behavior Contract vs Architecture Lock tests；
+- 先补 hidden bug regressions；
+- 不做大规模 rename/move。
 
-完成条件：重构前行为契约和外部 ID 有保护。
+完成条件：旧玩法有足够自动保护。
 
 R1 — Event foundation
 ---------------------
 
 - DB_EventHub；
-- Damage/Capture/Death unified event；
-- killer attribution；
-- Capture exactly-once；
+- Damage/Capture/Mortality semantic event；
+- unified attribution；
+- Peach capture exactly-once；
 - CorpseWarning lifecycle；
-- Fear/Threat/Colony/Social 改订阅。
+- Fear/Threat/Social/Colony/Signals 逐步改为 event consumer。
 
-完成条件：同一物理事件只有一个 DB semantic event。
+完成条件：一个真实事件不再被多条内部逻辑独立解释。
 
 R2 — RoomContext / Perception
 -----------------------------
 
 - DB_RoomContext；
-- ActiveBats；
-- Players；
-- Weapons；
-- predator candidates；
-- lazy room activation；
-- 删除重复 weapon scan；
-- Signals/Threat/Fog 读取统一 observation。
+- active bats/players；
+- DB_WeaponPerception；
+- VisibilityPolicy；
+- lazy activation；
+- old duplicate scans 迁移。
 
-完成条件：无三套 projectile scanner。
+完成条件：不存在三套 projectile scanner。
 
-R3 — FrameContext / BehaviorArbiter
------------------------------------
+R3 — FrameContext / Arbiter
+---------------------------
 
 - DB_FrameContext；
 - DB_BehaviorProposal；
-- PrimaryOwner；
 - DB_BehaviorArbiter；
+- PrimaryOwner；
 - Observatory real owner；
-- Travel / Injury / Vengeance / Social / Environment 逐步 proposal 化。
+- Travel/Injury/Vengeance/Environment/Social proposal 化。
 
-完成条件：同一帧只有一个 Primary movement owner。
+完成条件：普通移动单 owner。
 
-R4 — FlightMotor / AI split
----------------------------
+R4 — FlightMotor / AI responsibility split
+------------------------------------------
 
-- ordinary steering 收口到 DB_FlightMotor；
-- Injury recovery 修复；
-- Fog navigation modifier；
-- Combat state machine 拆分；
-- 特殊物理 owner 明确；
-- 开始将大文件按 DB_ 命名迁移到领域目录。
+- DB_FlightMotor；
+- Injury Dijkstra fix；
+- Fog goal modifier；
+- Combat responsibilities 从旧 AI 拆出；
+- special physics owner 明确。
 
-完成条件：普通飞行只有一个 motor；无第二 AI velocity loop。
+完成条件：普通飞行没有第二套持续 controller。
 
-R5 — Remove internal bridges
-----------------------------
+R5 — Remove internal bridge debt
+--------------------------------
 
-- 删除 Threat/Vengeance reflection bridge；
-- 删除 ReceiveFear IL detour；
-- 删除 ArmVengeance IL detour；
-- 删除 Environment internal Reflection/RuntimeDetour；
-- 删除 temporary Thirst mutation；
-- 删除 obsolete old social harass path；
-- 删除 frame stamp priority workaround；
-- 删除内部 *TaskXXBridge / *Bridge dead files。
+- Threat-Vengeance reflection bridge 删除；
+- Signal ReceiveFear DynamicMethod 删除；
+- ArmVengeance DynamicMethod 删除；
+- Environment private AI detours 删除；
+- temporary Thirst mutation 删除；
+- old social harass contagion 删除；
+- frame stamp priority workaround 删除。
 
-完成条件：DB internal integration 零 Reflection/Detour/Dynamic IL。
+完成条件：内部 Desert Batfly 模块间零 Reflection/RuntimeDetour/Dynamic IL integration。
 
-R6 — Directory / naming / performance / final regression
----------------------------------------------------------
+R6 — Domain naming / file migration
+----------------------------------
 
-- 完成 DB_ 类型和文件命名；
-- 完成领域目录迁移；
-- 生产源码 TaskXX 命名归零；
-- 删除 dead code；
-- 合并重复 helper；
-- 测试按领域重组；
-- performance stress；
-- full regression；
-- documentation update。
+- DB_ rename；
+- TaskXX runtime identifiers 清理；
+- 领域目录迁移；
+- dead Bridge 文件删除；
+- namespace 按需要清理；
+- tests 开始按领域重排。
 
-完成条件：结构、命名、行为、测试、debug、性能同时收敛。
+注意：
+
+R6 不按“行数”机械拆文件。
+
+每次拆分必须通过职责审查。
+
+R7 — Performance / debug / full regression
+------------------------------------------
+
+- 20～30 bat stress；
+- cache/profile review；
+- Scenario 实机；
+- Observatory；
+- old save；
+- final dead code cleanup；
+- documentation status update。
 
 
 ======================================================================
-32. 重构过程中的提交纪律
+33. 提交纪律
 ======================================================================
 
-禁止一次提交同时进行：
+禁止一次 commit 同时完成：
 
-- 全目录移动；
-- 全类型 DB_ 重命名；
-- 大量行为改写；
-- 大量测试删除；
+- 全目录 move；
+- 大量 rename；
+- 大规模行为重写；
+- Bridge 删除；
+- 测试删除；
 
-推荐 commit 粒度：
+全部一起发生。
 
-1. tests only；
-2. new API + adapter；
+推荐：
+
+1. regression only；
+2. new contract/API；
 3. one subsystem migration；
 4. remove old bridge；
-5. rename one coherent domain to DB_；
-6. file move；
-7. cleanup。
+5. rename/move；
+6. cleanup/performance。
 
-命名迁移建议按领域做：
+目标：
 
-- Core；
-- Travel/Colony；
-- Threat；
-- Signals；
-- Environment；
-- Social；
-- Integration；
-- Debug。
-
-不要制造一次数百引用重命名同时叠加逻辑改写的不可审查 diff。
-
-每个阶段应尽量：
-
-- 编译可通过；
-- 旧行为测试仍通过；
-- 新结构测试逐步增加；
-- Git diff 可审查；
-- 出问题可单阶段回滚。
+- diff 可审查；
+- bug 可 bisect；
+- 阶段可回滚；
+- 行为变化和纯 rename 尽量分开。
 
 
 ======================================================================
-33. 明确禁止事项
+34. 明确禁止事项
 ======================================================================
 
 本任务禁止：
 
-- 新增被否决的社会角色；
-- 借机改变 Personality 分布；
-- 借机重做 Graphics；
-- 借机增加 reproduction；
-- 借机实现 Corpse Ecology 正式玩法；
-- 借机新增天气；
-- 借机改变 SandSpit 玩法；
-- 借机改变 Rock 不直接杀规则；
-- 借机改变六信号模型；
-- 借机让 Environment 读取 RoomSettings Fog；
-- 借机改变 WorldRoutePlanner 为未经验证的新算法；
-- 使用玩家 Input/Controller 状态预测攻击；
-- teleport 普通飞行；
+- 恢复 Task02 roles；
+- 新增 reproduction；
+- 正式实现 Corpse Ecology 玩法；
+- 新增天气；
+- 改 Personality 分布；
+- 改 SandSpit 玩法；
+- 改 Rock non-finishing rule；
+- 改 Task12 六信号模型；
+- 让 RoomSettings Fog 激活 Environment；
+- 让 Environment/Social/Threat/Signals 取得跨房 destination ownership；
+- 为了“高级”重写稳定 WorldRoutePlanner；
+- 读取玩家 Input/controller 作弊预判；
+- 普通飞行 teleport；
 - fixed global Y；
-- Environment/Social/Threat 自己 LeaveRoom；
-- 删除旧存档兼容；
-- 把外部 Creature ID "DesertBatfly" 改成 "DB"；
-- 把 save tag 仅为了命名统一而改成 DB_ 前缀；
-- 为了“代码少”把所有模块重新塞回一个巨型 DB_AI.cs / DB_Runtime.cs；
-- 为了“解耦”制造更多 RuntimeDetour Bridge；
-- 为了“文件短”制造大量无意义 50 行碎片文件；
-- 使用 DB_EnvInf、DB_Bhv、DB_Mgr 等难懂二次缩写；
-- 在生产目录新增 TaskXX/ 文件夹；
-- 在 DesertBatfly 模块新增 Utils/Misc/Helpers 垃圾目录。
+- 删除旧 save compatibility；
+- 为减少文件数重新做巨型 DB_Runtime；
+- 为减少行数制造 Part1/Part2/HelperA；
+- 为“解耦”制造更多 internal RuntimeDetour Bridge。
 
 
 ======================================================================
-34. 自动回归最低要求
+35. 自动回归最低要求
 ======================================================================
 
-重构完成前至少必须具备以下自动 guard：
-
-01. rejected social-role runtime absent；
-02. stable personality distribution；
-03. save round trip；
-04. malformed save sanitized；
-05. foreign save fields preserved；
-06. external creature ID remains "DesertBatfly"；
-07. old save tag remains loadable after DB_ type rename；
-08. Rock hit cannot perform direct live->dead transition；
-09. Injury PhysicalCapability bounded；
-10. Injury recovery uses native Dijkstra semantics；
+01. rejected roles runtime absent；
+02. stable Personality；
+03. stable Sex；
+04. save round-trip；
+05. locale-independent save；
+06. malformed save sanitized；
+07. foreign fields preserved；
+08. Rock cannot directly finish live->dead；
+09. Injury capability bounded；
+10. Injury recovery native Dijkstra semantics；
 11. Travel realized tick once/frame；
-12. DepartureDelay decrements once/frame；
-13. ReplanCooldown decrements once/frame；
-14. DB_CaptureEvent exactly once；
-15. DB_MortalityEvent exactly once；
-16. Threat evidence from one death not double-counted；
-17. SocialBond death grief starts once；
-18. Colony death report consumes same mortality attribution；
-19. AttackSlot cap enforced；
-20. AttackSlot clears on cancel/death/room change；
+12. DepartureDelay once/frame；
+13. ReplanCooldown once/frame；
+14. CaptureEvent exactly once；
+15. MortalityEvent exactly once；
+16. Threat evidence death not double-trained；
+17. Grief starts once；
+18. Colony uses same death attribution；
+19. AttackSlots cap；
+20. AttackSlots cleanup；
 21. Social cannot own combat；
-22. Social cannot own cross-room travel；
-23. Threat cannot read input；
-24. Threat memory not changed by held-item observation alone；
-25. exactly six signal kinds；
-26. Signals no BodyChunk.vel ordinary writes；
-27. Signal relay cap preserved；
-28. exactly six Environment phases；
-29. Environment weather source remains DryCycle-only；
-30. RoomSettings Fog does not activate Environment；
-31. HeavyRain alone does not enter Acute；
-32. HeavyRain does not lower visibility itself；
+22. Social cannot own cross-room；
+23. Threat no Input；
+24. held item alone no persistent Threat training；
+25. exactly six signals；
+26. Signals no normal locomotion ownership；
+27. signal relay cap；
+28. Environment exactly six phases；
+29. Environment DryCycle-only weather source；
+30. RoomSettings Fog no activation；
+31. HeavyRain alone not Acute；
+32. HeavyRain no fog visibility penalty；
 33. DeathRain hard survival preserved；
 34. Sandstorm travel suppression preserved；
-35. Environment no temporary State.Thirst mutation；
-36. Environment no internal detour into AI private method；
-37. Signals no DynamicMethod internal integration；
-38. Threat/Vengeance no Reflection into private Vengeance state；
-39. only one PrimaryOwner per frame；
-40. higher-priority owner cannot be overwritten by Social；
+35. no temporary State.Thirst mutation；
+36. no Environment private AI detour after R5；
+37. no Signal DynamicMethod after R5；
+38. no Threat private Intimidation reflection after R5；
+39. one PrimaryOwner/frame；
+40. higher priority goal cannot be overwritten；
 41. active Travel beats Vengeance movement；
-42. severe Injury beats Travel movement while TravelIntent persists suspended；
+42. severe Injury beats current Travel movement while intent persists；
 43. HardSurvival suppresses ordinary Harass；
-44. Signals never become PrimaryOwner；
-45. projectile evade uses validated real observation；
-46. DenseFog close projectile fallback preserved；
-47. signal radius defined once；
-48. no full shelter anchor build in irrelevant room；
-49. room context cleared/collectable；
-50. Disable unhooks all DB hooks；
-51. Enable after Disable does not double-hook；
-52. transient ecology object registry cleans on Disable；
-53. Peach live capture produces capture event；
-54. Peach corpse scavenging does not produce fake live capture event；
-55. Peach consumed remains rejected；
-56. SocialBond still one persistent partner slot；
+44. Signals never PrimaryOwner；
+45. projectile evade uses validated observation；
+46. DenseFog close projectile preserved；
+47. Signal range authority single source；
+48. irrelevant room no shelter build；
+49. RoomContext cleanup/collectability；
+50. Disable unhooks；
+51. re-Enable no duplicate hook；
+52. transient registry cleanup；
+53. Peach live capture one event；
+54. Peach corpse scavenging no fake live capture；
+55. consumed corpse rejection preserved；
+56. SocialBond single slot；
 57. Grief/Trauma persistence unchanged；
 58. Travel route limits/hysteresis unchanged；
-59. no Environment cross-room destination creation；
-60. no ordinary locomotion teleport/fixed-Y controller；
-61. internal DB code contains no RuntimeDetour bridge after R5；
-62. internal DB code contains no DynamicMethod integration after R5；
-63. internal cross-module private Reflection absent after R5；
-64. Observatory reads actual PrimaryOwner rather than reconstructing heuristically；
-65. production source uses DB_ prefix after R6；
-66. production source contains no Task09/Task10/Task11/Task12/Task13 type identifiers after R6；
-67. no *TaskXXBridge production types after R6；
-68. no new Utils/Misc/Helpers folder under DesertBatfly；
-69. file/type primary name alignment guard passes；
-70. DB_ rename does not alter external serialization / creature IDs。
+59. no Environment cross-room destination；
+60. no ordinary teleport/fixed-Y controller；
+61. no internal RuntimeDetour bridge after R5；
+62. no internal DynamicMethod integration after R5；
+63. no cross-module private Reflection after R5；
+64. Observatory reads actual PrimaryOwner；
+65. production DB_ naming rule enforced after R6；
+66. production TaskXX identifiers absent after R6；
+67. no *TaskXXBridge production types；
+68. external "DesertBatfly" IDs unchanged；
+69. no new Utils/Misc/Helpers dumping directory；
+70. file split review does not use hard line-count gate。
 
 
 ======================================================================
-35. 实机验收场景
+36. 实机验收场景
 ======================================================================
 
 Scenario A — Calm baseline
-- 普通 swarm/idle/roost 不应因重构明显改变；
-- 飞行不出现抖动/左右振荡。
+- ordinary swarm/idle/roost 不明显退化；
+- no artificial oscillation。
 
 Scenario B — Severe injury to Hive
-- 重伤个体稳定沿 Dijkstra 返回；
-- 不短步抖动；
-- 不与 Social/Environment 抢 goal。
+- stable Dijkstra progress；
+- no short-step jitter；
+- no Social/Environment goal stealing。
 
-Scenario C — Injury + active Travel
-- Injury 当前帧优先；
-- TravelIntent 保留 suspended；
-- 恢复后可继续/重评路线。
+Scenario C — Injury + Travel
+- Injury current-frame owner；
+- TravelIntent persists suspended；
+- recovery 后可继续/重评。
 
-Scenario D — Rain flee + Travel
-- DepartureDelay/cooldown 不双倍减少；
-- 不重复 LeaveRoom。
+Scenario D — Rain + Travel
+- countdown 不双减；
+- no duplicate LeaveRoom。
 
 Scenario E — Player grab/release
-- 一次 DB_CaptureEvent；
-- struggle/sand spit 正常；
-- release shock/trauma 不重复。
+- one CaptureEvent；
+- struggle/SandSpit；
+- no duplicate trauma。
 
 Scenario F — Peach tongue live capture
-- 一次 capture semantic event；
-- Alarm/Distress 正确；
-- 不重复 Threatened；
-- surviving release 正常。
+- one semantic capture；
+- Alarm/Distress correct；
+- no duplicate Threatened side effects。
 
 Scenario G — Peach corpse scavenging
-- 不制造第二次 live capture；
-- corpse 仍能作为 food 被 ReturnPrey。
+- no fake live capture；
+- ReturnPrey remains。
 
 Scenario H — Player spear kill
-- Fear/Threat/Grief/Colony 使用同一 killer；
-- DB_MortalityEvent 一次。
+- Fear/Threat/Grief/Colony share killer attribution；
+- one MortalityEvent。
 
 Scenario I — Environmental death while grabbed
-- attribution 不应简单等于 current grabber；
-- Debug 显示统一 attribution reason。
+- current grabber not blindly assigned killer；
+- attribution reason visible。
 
 Scenario J — Rock spam
-- 可以重伤/重 stun；
-- rock 本身不完成 finishing transition；
-- 不造成 duplicate damage event。
+- stun/injury possible；
+- Rock not finishing direct kill；
+- no duplicate damage semantics。
 
-Scenario K — 20～30 bat calm stress
-- 无明显新 spike；
-- room scans 数量受控。
+Scenario K — 20～30 calm bats
+- no obvious new CPU spike；
+- room scans bounded。
 
-Scenario L — 20～30 bat thrown spear stress
-- weapon observation 共享；
-- 不出现每 bat 全 room weapon scan。
+Scenario L — 20～30 bats + thrown weapons
+- shared observation；
+- no per-bat full physicalObjects scan。
 
 Scenario M — Alarm wave
-- hop/cap/dedupe 保持；
-- 不出现全群重复生成 root。
+- cap/hop/dedupe preserved。
 
-Scenario N — DenseFog + thrown spear
-- 远距离视觉下降；
-- 近距离真实 projectile 仍触发反应；
-- 不恢复远距离 player vision。
+Scenario N — DenseFog + spear
+- long-range vision reduced；
+- close real projectile still recognized；
+- no fake restored long-range player sight。
 
-Scenario O — HeatWave aggression
-- HeatAgitation 有效；
-- 不再通过伪造 Thirst；
-- 真正 Thirst state 不瞬时跳变。
+Scenario O — HeatWave
+- HeatAgitation works；
+- real Thirst does not temporarily jump。
 
-Scenario P — IntenseHeat HardSurvival
-- survival priority 正确；
-- Vengeance state 暂停不清除。
+Scenario P — IntenseHeat hard survival
+- survival owns correctly；
+- Vengeance suspended not erased。
 
 Scenario Q — Sandstorm ReturnHome
-- Environment 提供 pressure；
-- Travel 真正拥有 route；
-- no outward long travel late storm。
+- Environment pressure local；
+- Travel owns route；
+- late outward travel suppressed。
 
-Scenario R — HeavyRain sheltered social cluster
-- 屋檐下仍能局部社交；
-- Social 不覆盖 shelter owner；
-- HeavyRain 不错误触发 fog visibility。
+Scenario R — HeavyRain under roof
+- local social life can remain；
+- shelter priority not overwritten；
+- visibility unchanged by rain alone。
 
-Scenario S — Roost chain + signal
-- native Chain 稳定；
-- RoostCall 正常；
-- platform underside 仍合法。
+Scenario S — Roost chain + Signals
+- native Chain stable；
+- RoostCall correct；
+- platform underside remains legal。
 
-Scenario T — Mod disable/re-enable in session where possible
-- 无残留 CorpseWarning/ecology update；
-- 无重复 Hook；
-- runtime state clean。
+Scenario T — Disable/re-enable
+- no stale warning/updatable；
+- no duplicate hooks；
+- runtime clean。
 
-Scenario U — Save/load old DesertBatfly state
-- 旧存档无损加载；
-- C# 类型改 DB_ 不改变 save schema。
+Scenario U — Old save
+- loads without schema migration requirement。
 
 Scenario V — Observatory
-- 能看到真实 owner/proposals/rejections；
-- 不再依赖猜测 ControlOwner；
-- UI 使用领域名而不是 TaskXX 名。
-
-Scenario W — Sandbox / spawn identity
-- DB_ 源码重命名后仍以 DesertBatfly 正常注册、生成、显示 sandbox icon；
-- 不产生新的 DB_ 外部 CreatureType。
-
-Scenario X — IDE / source layout audit
-- src/Creatures/DesertBatfly 根目录不再堆积大量业务文件；
-- 搜索 DB_ 能快速定位全部模块；
-- 搜索 Task13 不命中生产运行时类型；
-- Bridge 文件数量显著下降且仅保留真实外部边界。
+- actual owner；
+- proposals/rejections；
+- event sequence；
+- cache ages visible。
 
 
 ======================================================================
-36. Definition of Done
+37. Definition of Done
 ======================================================================
 
-本任务只有在以下全部满足后才可标记 Code Complete：
+Task14 Code Complete 必须满足：
 
-01. DB_Runtime / DB_FrameContext / DB_BehaviorArbiter 架构建立；
-02. 每帧只有一个 Primary Movement Owner；
-03. normal flight 通过统一 DB_FlightMotor/native Fly execution；
-04. special physical owner 边界明确；
-05. Injury recovery Dijkstra 隐性问题修复；
-06. Travel realized tick exactly-once；
-07. unified DB_CaptureEvent；
-08. unified DB_MortalityEvent；
-09. Fear/Threat/Colony/Social 使用同一死亡事实；
-10. Peach capture 不再多路径重复生态反应；
-11. CorpseWarning/transient lifecycle 可集中清理；
-12. DB_WeaponPerception cache 统一；
-13. old AI duplicate weapon scan 删除或降为统一服务调用；
-14. DenseFog projectile fallback 读取统一 observation；
-15. old social private-neighbour contagion 删除；
-16. HarassSignal 为正式社交传播；
-17. DB_SignalDefinition 唯一拥有 signal ranges；
-18. Environment 不复制 signal radius；
-19. temporary Thirst mutation 删除；
-20. DB_CombatMotivation 正式建立；
-21. Social 使用正式 environment modifiers；
-22. Threat/Vengeance tactical integration 使用正式 API；
-23. ReceiveFear 不再 DynamicMethod；
-24. ArmVengeance 不再 DynamicMethod；
-25. Environment 不再内部 detour private AI；
-26. Vengeance frame stamp workaround 删除；
-27. internal DB Reflection bridge 清零；
-28. internal DB RuntimeDetour bridge 清零；
-29. internal DynamicMethod/IL integration 清零；
-30. external compatibility Reflection 仅存在 Integration/Compatibility；
-31. DB_Hooks 缩减为 callback adapter；
-32. Room runtime lazy activation；
-33. irrelevant room 不扫描 shelter anchors；
-34. all room-scoped runtime 可清理；
-35. Disable/Enable idempotent；
-36. AttackSlots 无 stale reservation；
-37. Travel route semantics 不退化；
-38. Neutral Social semantics 不退化；
-39. Threat memory semantics 不退化；
-40. six Signals 不变化；
-41. Environment weather semantics 不退化；
-42. rejected social roles 不复活；
-43. Rock nonlethal finishing rule 不变化；
-44. SandSpit 不变化；
-45. Peach predation 不变化；
-46. SocialBond/Grief 不变化；
-47. State save schema 向后兼容；
-48. malformed save guards 保留；
-49. foreign save strings 保留；
-50. Observatory 显示真实 PrimaryOwner；
-51. Observatory 可显示 rejected proposal reason；
-52. performance cadence 有界；
-53. 20～30 bat stress 无明显架构性 spike；
-54. architecture-lock tests 已替换为 behavior-contract tests；
-55. 新 hidden-bug regression 全部存在；
-56. 原 DesertBatflyAI 综合职责已拆分，不再承担所有感知/战斗/导航/社交；
-57. 文件按目标职责重排完成或有明确合理保留说明；
-58. dead code / obsolete bridge 删除；
-59. 生产类型/文件统一采用 DB_ 前缀，明确外部兼容例外除外；
-60. DB_ 后职责名保持完整可读，不出现大量二次缩写；
-61. src/Creatures/DesertBatfly 不再使用 TaskXX 作为运行时架构命名；
-62. internal *TaskXXBridge 清零；
-63. DesertBatfly 长前缀仅保留在外部身份、namespace、必要历史/兼容语义，不再成为生产类型通用前缀；
-64. CreatureType "DesertBatfly" 不变；
-65. Sandbox unlock "DesertBatfly" 不变；
-66. 旧 save tag/schema 不变且可加载；
-67. 测试最终按领域组织或达到等价可读性；
-68. DesertBatfly 根目录不再堆积大量松散业务文件；
-69. docs/Task 中本任务书与实现保持一致；
-70. 本机 compile + Scenario A～X 实机/结构验收完成前不得标记 Live Verified。
+Architecture:
+01. DB_FrameContext exists；
+02. DB_RoomContext/shared observation exists；
+03. DB_EventHub exists；
+04. DB_BehaviorArbiter exists；
+05. one Primary Movement Owner per normal frame；
+06. DB_FlightMotor/native execution boundary clear；
+07. special physics owners explicit。
+
+Hidden bugs:
+08. Injury Dijkstra issue fixed；
+09. Travel realized exactly-once；
+10. Capture semantic event exactly-once；
+11. Mortality semantic event exactly-once；
+12. killer attribution unified；
+13. CorpseWarning/transient lifecycle fixed；
+14. temporary Thirst mutation removed。
+
+Integration debt:
+15. internal private Reflection cleared；
+16. internal RuntimeDetour bridge cleared；
+17. internal DynamicMethod/IL integration cleared；
+18. old Travel/Vengeance frame stamp removed；
+19. old social harass private-state contagion removed；
+20. duplicate weapon scanners removed；
+21. Signal range duplicated authority removed。
+
+Domains:
+22. Travel semantics preserved；
+23. Colony semantics preserved；
+24. Social semantics preserved；
+25. Threat semantics preserved；
+26. Signals six-kind semantics preserved；
+27. Environment weather semantics preserved；
+28. Vengeance semantics preserved；
+29. Injury semantics preserved；
+30. Peach predation preserved；
+31. SandSpit preserved；
+32. Rock rule preserved；
+33. SocialBond/Grief preserved；
+34. rejected roles remain absent。
+
+Readability:
+35. production types/files migrate toward DB_；
+36. production TaskXX identifiers cleared；
+37. obsolete Bridge names removed when responsibility replaced；
+38. domain directories provide clear mental map；
+39. no new dumping Utils/Misc/Helpers；
+40. large files reviewed by responsibility, not hard line limit；
+41. no mechanical fragmentation introduced；
+42. namespace remains semantically readable。
+
+Compatibility:
+43. external "DesertBatfly" IDs unchanged unless explicitly documented；
+44. save schema backward compatible；
+45. malformed save guards preserved；
+46. foreign save data preserved；
+47. external compatibility isolated/fail-soft。
+
+Runtime/performance:
+48. irrelevant rooms lazy；
+49. room-scoped state cleans；
+50. Disable/Enable idempotent；
+51. 20～30 bat stress no architecture regression；
+52. repeated expensive observation shared/bounded。
+
+Testing/debug:
+53. behavior-contract tests replace old architecture locks；
+54. hidden bug regressions present；
+55. ownership tests present；
+56. event exactly-once tests present；
+57. dependency boundary tests present；
+58. naming guards present；
+59. Observatory reads true owner/events；
+60. Task14 docs and project principle remain synchronized。
+
+只有完成本地 Rain World compile、Scenario A～V 和 20～30 bat 实机压力观察后，才能进一步标记 Live Verified。
 
 
 ======================================================================
-37. 完成状态用语
+38. 完成状态
 ======================================================================
 
 允许：
@@ -2323,118 +2068,51 @@ Scenario X — IDE / source layout audit
 - 【代码重构完成，待实机验收】
 - 【Live Verified】
 
-不得在以下情况称为 Live Verified：
+不得因为：
 
-- 只完成静态检查；
-- 只存在测试文件但未运行；
-- 当前环境缺少 Rain World DLL；
-- 未进行 Scenario A～X 实机/结构验收；
-- 未进行 20～30 bat stress。
+- 静态检查通过；
+- 测试文件存在但没运行；
+- Git diff 看起来干净；
+- 编译环境缺少 Rain World DLL；
 
-
-======================================================================
-38. 最终代码心智模型
-======================================================================
-
-重构完成后，开发者看到一个 DB_ 文件名，应当能够立即知道它属于哪个职责。
-
-理想运行流程：
-
-    Rain World callback
-          ↓
-      DB_Hooks
-          ↓
-      DB_Runtime
-          ↓
-  DB_RoomContext / Perception
-          ↓
-     DB_FrameContext
-          ↓
-各领域模块提交 Influence / Event / BehaviorProposal
-          ↓
-  DB_BehaviorArbiter
-          ↓
-    PrimaryOwner
-          ↓
-     DB_FlightMotor
-          ↓
-  Rain World native Fly movement
-
-事件流：
-
-    External physical event
-          ↓
-      Adapter / Hook
-          ↓
-      DB_EventHub
-          ↓
- Fear / Threat / Social / Signals / Colony / Debug
-
-生产代码的领域心智模型应是：
-
-- Core；
-- Runtime；
-- Perception；
-- Combat；
-- Injury；
-- Vengeance；
-- Social；
-- Colony；
-- Travel；
-- Signals；
-- Environment；
-- Presentation；
-- Integration；
-- Debug。
-
-而不是：
-
-- Task09；
-- Task10；
-- Task11；
-- Task12；
-- Task13；
-- 某某 Bridge；
-- 某某 Patch；
-- 某某兼容临时钩子。
+就宣称 Live Verified。
 
 
 ======================================================================
-39. 最终架构目标
+39. 本任务真正的成功标准
 ======================================================================
 
-重构完成后，新增一个 Desert Batfly 功能时，理想流程应是：
+Task14 完成后，新增一个 Desert Batfly 大型功能时，理想接入方式应是：
 
-1. 新模块读取 DB_FrameContext / DB_RoomContext；
-2. 若只是信息层，输出 influence/event；
-3. 若需要移动，提交 DB_BehaviorProposal；
-4. DB_BehaviorArbiter 决定是否获得当前帧所有权；
-5. DB_FlightMotor/native FlyAI 执行；
-6. 事件通过 DB_EventHub 发布；
-7. Observatory 自动看到 owner、proposal、event；
-8. 不需要为了接入旧模块再写 private Reflection/Detour/IL bridge；
-9. 新文件使用 DB_ 前缀 + 完整职责名；
-10. 不新增 TaskXX 运行时术语；
-11. 不改变外部 "DesertBatfly" 身份和旧存档格式。
+1. 找到清晰领域目录；
+2. 读取 DB_FrameContext / DB_RoomContext 或明确领域 API；
+3. 如果是事实，发布/消费 semantic event；
+4. 如果是信息，输出 influence/context；
+5. 如果需要普通移动，提交 BehaviorProposal；
+6. Arbiter 决定是否拥有当前帧；
+7. FlightMotor/native Fly 执行；
+8. Observatory 能直接显示 owner、proposal、event；
+9. 不需要 Reflection 兄弟模块 private state；
+10. 不需要新增 *TaskXXBridge；
+11. 不需要为了接入新功能再复制一套 Room scan；
+12. 不需要把所有新代码重新塞回一个巨型 AI 文件。
 
-这才是本任务真正的成功标准。
+项目可读性的成功标准不是“所有文件都很短”。
 
-本任务不是为了让文件“看起来短一点”，
-也不是为了把 DesertBatfly 四个字机械替换成 DB_。
+真正标准是：
 
-真正目标是让整个项目在继续扩展数十个生态功能后，仍然能够：
-
-- 从文件名快速理解职责；
-- 从目录快速定位领域；
-- 明确谁拥有决策；
-- 明确谁拥有移动；
-- 明确事实从哪里产生；
-- 明确谁可以修改什么状态；
-- 明确哪些行为必须保持；
-- 明确哪些名字属于外部兼容，哪些只是源码实现；
-- 明确性能预算；
-- 明确失败时在哪里调试。
+- 文件和目录能快速告诉开发者职责；
+- 修改一个领域无需理解大量无关系统；
+- 状态 owner 明确；
+- 事件 authority 明确；
+- 普通移动 owner 明确；
+- 依赖方向明确；
+- 生命周期明确；
+- 性能成本有界；
+- 测试保护真实行为；
+- 外部兼容稳定；
+- 项目继续增长后仍能安全扩展。
 
 ======================================================================
-END OF TASK 14 V1.1
+END OF TASK 14 V1.2
 ======================================================================
