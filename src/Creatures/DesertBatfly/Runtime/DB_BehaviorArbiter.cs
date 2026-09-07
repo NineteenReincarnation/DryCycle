@@ -67,7 +67,7 @@ internal static class DB_BehaviorArbiter
         state.Rejected.Clear();
         BuildProposals(frame, state.Proposals);
 
-        DB_BehaviorProposal winner = ResolveWinner(
+        DB_BehaviorProposal winner = ResolveWinnerCore(
             state.Proposals,
             excludedOwner,
             state.Rejected,
@@ -145,9 +145,9 @@ internal static class DB_BehaviorArbiter
 
     /// <summary>Pure winner selection used by managed regression tests.</summary>
     internal static DB_BehaviorProposal ResolveWinner(IReadOnlyList<DB_BehaviorProposal> proposals)
-        => ResolveWinner(proposals, DB_BehaviorOwner.None, null, null);
+        => ResolveWinnerCore(proposals, DB_BehaviorOwner.None, null, null);
 
-    private static DB_BehaviorProposal ResolveWinner(
+    private static DB_BehaviorProposal ResolveWinnerCore(
         IReadOnlyList<DB_BehaviorProposal> proposals,
         DB_BehaviorOwner excludedOwner,
         List<DB_BehaviorRejection> rejected,
