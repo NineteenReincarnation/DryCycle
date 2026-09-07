@@ -121,3 +121,11 @@ R6-B5/B6 update:
 - Social/DB_SocialBond.cs migrated from DesertBatflySocialBond with identity-only behavior-preserving changes.
 - Existing R5/R6 retention guards passed after the successful migrations.
 - R6 remains in progress; no live Rain World acceptance is claimed.
+
+======================================================================
+B7-B9 — Presentation Graphics + Threat leaves
+======================================================================
+- B7: DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs; validation run 34155488424 SUCCESS.
+- B8: ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs; DCDesertBatflyThreatV1 and serialized version 1 retained; run 34155529191 SUCCESS.
+- B9: ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs; no input cheating/no held-item memory training/Arbiter+FlightMotor contracts retained; run 34155584734 SUCCESS.
+- R6 remains in progress; Threat runtime/event, Signals, Environment, remaining domains, naming cleanup and final guard remain open.

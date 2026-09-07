@@ -201,3 +201,43 @@ Recommended next low-risk batch is Presentation support:
 ### Recommended next hour
 - Inspect DesertBatflyGraphics.cs before any rename. If it remains a cohesive Presentation owner, migrate it with behavior-preserving source equivalence guards; otherwise choose a smaller KEEP/RENAME Injury/Threat/Signal leaf.
 - Do not mechanically rename/split DesertBatflyTravelNavigation.cs without responsibility review.
+
+## Continuation run — R6 B7/B8/B9
+
+### Start state
+- Began from branch HEAD `752ea378363e040d5b64a9cd5c430267b9f28131`, with B1-B6 already verified.
+- Reviewed `DesertBatflyGraphics.cs` for cohesion before migration; it remained a Presentation owner with read-only Injury/Signal display inputs.
+
+### Completed
+- R6-B7: `DesertBatflyGraphics.cs` -> `Presentation/DB_Graphics.cs`; `DesertBatflyGraphics` -> `DB_Graphics`.
+- R6-B8: `ThreatSignature/DesertBatflyThreatMemory.cs` -> `Threat/DB_ThreatMemory.cs`, including DB_ memory dimension/player/set/store identities.
+- R6-B9: `ThreatSignature/DesertBatflyThreatTactics.cs` -> `Threat/DB_ThreatTactics.cs`, including `DB_ThreatTacticalProfile`.
+- Temporary B7/B8/B9 migration workflows were removed after success.
+
+### Validation
+- B7 GitHub Actions run `34155488424`: SUCCESS.
+- B8 GitHub Actions run `34155529191`: SUCCESS.
+- B9 GitHub Actions run `34155584734`: SUCCESS.
+- Each batch passed exact source-equivalence checks permitting only intended identity substitutions.
+- Existing R5 and R6 retention audits passed after every batch and at closeout.
+- Threat save key remains `DCDesertBatflyThreatV1`; serialized marker remains `1`; decay constants remain 0.80/0.86.
+- Threat tactics retains no held-item memory training, Arbiter projectile-evade ownership, and `DB_FlightMotor` routing.
+- `git diff --check` passed.
+- Full Rain World/.NET Framework managed build and live-play validation remain unavailable and are not claimed as passing.
+
+### Self-review findings and fixes
+- No production behavior regression was found in B7-B9.
+- Two earlier closeout workflow attempts failed before job creation because of YAML multiline formatting; neither changed production code or progress files. This simple closeout replaces them.
+
+### Remaining Task14 requirements
+- R6 remains incomplete: Threat runtime/event/trace; Signals; Environment; remaining Social/Roost; Injury; Fear/Vengeance; Core; TravelNavigation responsibility-aware migration; Task09-Task13 naming cleanup; old-root/dead-code cleanup; final R6 naming/path guard.
+- Current inventory after B9: 11 root-level DesertBatfly*.cs files remain; 90 production/debug source lines match Task09-Task13 historical labels.
+- R7 performance/debug/full regression/final acceptance remains pending.
+
+### Blockers
+- Full managed build/tests require developer-local Rain World/BepInEx assemblies.
+- Final behavior/performance acceptance requires Rain World runtime.
+
+### Recommended next hour
+- Inspect `DesertBatflyThreatRuntime.cs` and `DesertBatflyThreatEvent.cs` against the migration manifest before any rename; do not mechanically rename split/partial-absorb owners.
+- If Threat runtime is too coupled, choose a smaller KEEP/RENAME leaf such as Environment exposure/profile and update guard paths without weakening assertions.
