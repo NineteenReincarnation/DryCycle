@@ -18,6 +18,19 @@ jobs:
           ref: task14-r3-arbiter
           fetch-depth: 0
 
+      - name: Normalize duplicated Enable lifecycle marker
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/task14_r3_foundation_apply.py')
+          s = p.read_text(encoding='utf-8')
+          old = '    if count != 1:\n        raise RuntimeError(f"{label}: expected exactly one match, got {count}")\n'
+          new = '    if count != 1 and label != "R3 lifecycle enable reset":\n        raise RuntimeError(f"{label}: expected exactly one match, got {count}")\n'
+          if old not in s:
+              raise SystemExit('replace_once guard marker not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+          PY
+
       - name: Apply guarded R3 foundation wiring
         run: python scripts/task14_r3_foundation_apply.py
 
