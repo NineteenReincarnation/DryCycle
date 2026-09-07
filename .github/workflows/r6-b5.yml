@@ -1,0 +1,22 @@
+name: R6 B5
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+      - run: |
+          mkdir -p src/Creatures/DesertBatfly/Presentation
+          git mv src/Creatures/DesertBatfly/DesertBatflySandBurst.cs src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs
+          sed -i 's/DesertBatflySandBurst/DB_SandBurst/g' src/Creatures/DesertBatfly/Presentation/DB_SandBurst.cs src/Creatures/DesertBatfly/DesertBatfly.cs
+          git diff --check
+          git config user.name github-actions-bot
+          git config user.email actions@github.com
+          git add -A
+          git commit -m 'R6 B5 migrate SandBurst presentation identity'
+          git push
