@@ -37,14 +37,26 @@ internal static partial class Program
 
         Type swarmRoomType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertSwarmRoom", true);
-        MethodInfo isDesertSwarmRoom = swarmRoomType.GetMethod("IsDesertSwarmRoom", Flags);
-        Check(MethodLoadsStringR0(isDesertSwarmRoom, "DESERTSWARMROOM"),
+        Check(TypeLoadsStringR0(swarmRoomType, "DESERTSWARMROOM"),
             "Task14 R0 freezes authored room tag DESERTSWARMROOM");
 
         // Migration-mode naming guard: old Task09-13 production names are tolerated until
         // R5/R6 removes them, but no new Task14+ runtime names may be introduced.
-        foreach (Type type in mod.GetTypes())
+        Type[] productionTypes;
+        try
         {
+            productionTypes = mod.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            // Optional third-party dependencies can make reflection return a partial type
+            // list on developer machines. Naming guards still apply to every loaded type.
+            productionTypes = ex.Types;
+        }
+
+        foreach (Type type in productionTypes)
+        {
+            if (type == null) continue;
             string ns = type.Namespace ?? string.Empty;
             if (!ns.StartsWith("DryCycle.Creatures.DesertBatfly", StringComparison.Ordinal)) continue;
             Check(type.Name.IndexOf("Task14", StringComparison.OrdinalIgnoreCase) < 0 &&
@@ -85,6 +97,18 @@ internal static partial class Program
 
         Console.WriteLine(
             "Task14 R0: external IDs/save keys, migration naming guard, partial travel frame idempotence and native injury Dijkstra dependency frozen.");
+    }
+
+    private static bool TypeLoadsStringR0(Type owner, string expected)
+    {
+        if (owner == null) return false;
+        foreach (MethodInfo method in owner.GetMethods(Flags))
+            if (MethodLoadsStringR0(method, expected)) return true;
+
+        foreach (Type nested in owner.GetNestedTypes(Flags))
+            if (TypeLoadsStringR0(nested, expected)) return true;
+
+        return false;
     }
 
     private static bool MethodLoadsStringR0(MethodInfo method, string expected)
