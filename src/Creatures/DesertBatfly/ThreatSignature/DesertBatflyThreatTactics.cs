@@ -56,9 +56,6 @@ internal readonly struct DesertBatflyThreatTacticalProfile
 /// </summary>
 internal static class DesertBatflyThreatTactics
 {
-    private const float IncomingProjectileRadius = 40f;
-    private const float IncomingProjectileDistance = 235f;
-
     internal static float AdjustFakeDiveChance(
         DesertBatfly bat,
         Player player,
@@ -182,48 +179,25 @@ internal static class DesertBatflyThreatTactics
         out Vector2 evadeGoal)
     {
         evadeGoal = default;
-        if (bat?.room?.physicalObjects == null || player == null || player.room != bat.room)
+        if (bat?.room == null || player == null || player.room != bat.room)
             return false;
 
-        Weapon best = null;
-        Vector2 bestVelocity = default;
-        float bestMiss = float.MaxValue;
-        for (int layer = 0; layer < bat.room.physicalObjects.Length; layer++)
-        {
-            var objects = bat.room.physicalObjects[layer];
-            for (int i = 0; i < objects.Count; i++)
-            {
-                if (objects[i] is not Weapon weapon || weapon.mode != Weapon.Mode.Thrown ||
-                    weapon.thrownBy != player || weapon.firstChunk == null ||
-                    weapon.slatedForDeletetion)
-                    continue;
+        int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
+        if (!DesertBatflyThreatRuntime.TryGetDebugState(
+                bat,
+                out DesertBatflyThreatDebugState threat) ||
+            threat.Cue.PlayerSlot != slot ||
+            !threat.Cue.ProjectileThreat ||
+            threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f)
+            return false;
 
-                Vector2 velocity = weapon.firstChunk.vel;
-                Vector2 delta = bat.mainBodyChunk.pos - weapon.firstChunk.pos;
-                if (velocity.sqrMagnitude < 16f ||
-                    delta.sqrMagnitude > IncomingProjectileDistance * IncomingProjectileDistance)
-                    continue;
-
-                float time = Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocity.sqrMagnitude);
-                if (time < 0f || time > 5f) continue;
-                Vector2 missVector = delta - velocity * time;
-                float miss = missVector.sqrMagnitude;
-                if (miss > IncomingProjectileRadius * IncomingProjectileRadius || miss >= bestMiss)
-                    continue;
-
-                best = weapon;
-                bestVelocity = velocity;
-                bestMiss = miss;
-            }
-        }
-
-        if (best == null) return false;
-        Vector2 projectileDirection = bestVelocity.normalized;
+        Vector2 projectileDirection = threat.Cue.ProjectileThreatDirection.normalized;
         Vector2 perpendicular = new Vector2(-projectileDirection.y, projectileDirection.x);
-        float sideDot = Vector2.Dot(bat.mainBodyChunk.pos - best.firstChunk.pos, perpendicular);
+        Vector2 playerToBat = bat.mainBodyChunk.pos - player.mainBodyChunk.pos;
+        float sideDot = Vector2.Dot(playerToBat, perpendicular);
         float side = Mathf.Abs(sideDot) > 1f
             ? Mathf.Sign(sideDot)
-            : StableSide(bat, DesertBatflyThreatRuntime.PlayerSlot(player));
+            : StableSide(bat, slot);
         Vector2 awayFromPlayer = Custom.DirVec(player.mainBodyChunk.pos, bat.mainBodyChunk.pos);
         evadeGoal = bat.mainBodyChunk.pos + perpendicular * side * 92f + awayFromPlayer * 34f;
         return true;
