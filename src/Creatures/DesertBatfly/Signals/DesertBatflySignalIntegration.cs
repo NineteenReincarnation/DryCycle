@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -13,6 +14,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Task12 never owns locomotion. Alarm reuses DesertBatflyAI.Threatened while suppressing
 /// its legacy re-broadcast. Intimidation keeps tier-0/direct experience, while historical
 /// tier-1+ Secondary/Chain fear is replaced by one bounded Task12 Alarm generation.
+/// Formal Harass/Roost social contagion consumes Task12 signals instead of spying on
+/// another bat's private AI state.
 /// </summary>
 internal static class DesertBatflySignalIntegration
 {
@@ -20,6 +23,17 @@ internal static class DesertBatflySignalIntegration
     private delegate void RaiseLocalAlarmDetour(RaiseLocalAlarmOrig orig, DesertBatflyAI self);
     private delegate Player FindSocialHarassTargetOrig(DesertBatflyAI self);
     private delegate Player FindSocialHarassTargetDetour(FindSocialHarassTargetOrig orig, DesertBatflyAI self);
+    private delegate DesertBatfly FindRoostSourceOrig(
+        DesertBatfly bat,
+        IReadOnlyList<DesertBatfly> roosting,
+        out int chainSize,
+        out float bond);
+    private delegate DesertBatfly FindRoostSourceDetour(
+        FindRoostSourceOrig orig,
+        DesertBatfly bat,
+        IReadOnlyList<DesertBatfly> roosting,
+        out int chainSize,
+        out float bond);
 
     private sealed class FearEventStamp
     {
@@ -31,6 +45,7 @@ internal static class DesertBatflySignalIntegration
 
     private static Hook alarmHook;
     private static Hook harassHook;
+    private static Hook roostHook;
     private static Hook receiveFearHook;
     private static Delegate receiveFearDetour;
 
@@ -49,7 +64,8 @@ internal static class DesertBatflySignalIntegration
     [ThreadStatic]
     private static int suppressAlarmEmission;
 
-    internal static bool Installed => alarmHook != null && harassHook != null && receiveFearHook != null;
+    internal static bool Installed =>
+        alarmHook != null && harassHook != null && roostHook != null && receiveFearHook != null;
 
     internal static void Enable()
     {
@@ -66,12 +82,18 @@ internal static class DesertBatflySignalIntegration
             aiDangerField = ai.GetField("danger", privateInstance);
             aiEscapeFromField = ai.GetField("escapeFrom", privateInstance);
 
-            if (raiseAlarm == null || findHarass == null || aiFlyField == null ||
+            Type social = typeof(DesertBatflySocialLife);
+            MethodInfo findRoost = social.GetMethod(
+                "FindRoostSource",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            if (raiseAlarm == null || findHarass == null || findRoost == null || aiFlyField == null ||
                 aiAttackerField == null || aiDangerField == null || aiEscapeFromField == null)
                 return;
 
             alarmHook = new Hook(raiseAlarm, (RaiseLocalAlarmDetour)RaiseLocalAlarmHook);
             harassHook = new Hook(findHarass, (FindSocialHarassTargetDetour)FindSocialHarassTargetHook);
+            roostHook = new Hook(findRoost, (FindRoostSourceDetour)FindRoostSourceHook);
 
             if (!InstallReceiveFearHook())
             {
@@ -94,10 +116,12 @@ internal static class DesertBatflySignalIntegration
         try { On.Fly.Grabbed -= FlyGrabbed; } catch { }
         try { On.LizardTongue.Update -= TongueUpdate; } catch { }
         try { receiveFearHook?.Dispose(); } catch { }
+        try { roostHook?.Dispose(); } catch { }
         try { harassHook?.Dispose(); } catch { }
         try { alarmHook?.Dispose(); } catch { }
         receiveFearHook = null;
         receiveFearDetour = null;
+        roostHook = null;
         harassHook = null;
         alarmHook = null;
         aiFlyField = null;
@@ -136,8 +160,6 @@ internal static class DesertBatflySignalIntegration
         suppressAlarmEmission++;
         try
         {
-            // Existing AI retains chain break, attack cancellation, retreat and Escape.
-            // The signal layer only provides indirect context and never writes velocity.
             receiver.DesertAI.Threatened(threat, false);
         }
         finally
@@ -183,7 +205,6 @@ internal static class DesertBatflySignalIntegration
             direction,
             Mathf.Lerp(0.58f, 0.92f, 1f - emitter.Personality.Nerve),
             "legacy RaiseLocalAlarm migrated to Task12 AlarmFlutter");
-        // Never call orig: it directly wrote every nearby bat's retreat/escapeFrom.
     }
 
     private static Player FindSocialHarassTargetHook(
@@ -213,6 +234,47 @@ internal static class DesertBatflySignalIntegration
         }
 
         return target;
+    }
+
+    private static DesertBatfly FindRoostSourceHook(
+        FindRoostSourceOrig orig,
+        DesertBatfly bat,
+        IReadOnlyList<DesertBatfly> roosting,
+        out int chainSize,
+        out float bond)
+    {
+        chainSize = 0;
+        bond = 0f;
+        if (bat == null || bat.room == null ||
+            !DesertBatflySignalRuntime.TryGetInfluence(bat, out DesertBatflySignalInfluence influence) ||
+            influence.RoostInterest < 0.16f)
+            return null;
+
+        DesertBatfly source = influence.RoostSource;
+        if (source == null || source == bat || source.room != bat.room || source.dead ||
+            !source.Consious || source.inShortcut || source.AI?.behavior != FlyAI.Behavior.Chain)
+            return null;
+
+        if (Vector2.Distance(bat.mainBodyChunk.pos, source.mainBodyChunk.pos) > 230f)
+            return null;
+
+        chainSize = ChainLength(source);
+        bond = Mathf.Max(
+            DesertBatflySocialBond.GetBondStrength(bat, source),
+            DesertBatflySocialBond.GetBondStrength(source, bat));
+        return source;
+    }
+
+    private static int ChainLength(Fly source)
+    {
+        Fly member = source?.FirstInChain();
+        int count = 0;
+        while (member != null && count < 16)
+        {
+            count++;
+            member = member.NextInChain();
+        }
+        return count;
     }
 
     private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
@@ -272,7 +334,7 @@ internal static class DesertBatflySignalIntegration
             p[3].ParameterType != typeof(int) || p[4].ParameterType != typeof(float))
             return false;
 
-        Type[] originalSignature =
+        Type origDelegateType = Expression.GetDelegateType(new[]
         {
             p[0].ParameterType,
             p[1].ParameterType,
@@ -281,9 +343,8 @@ internal static class DesertBatflySignalIntegration
             p[4].ParameterType,
             p[5].ParameterType,
             typeof(void)
-        };
-        Type origDelegateType = Expression.GetDelegateType(originalSignature);
-        Type[] detourSignature =
+        });
+        Type detourDelegateType = Expression.GetDelegateType(new[]
         {
             origDelegateType,
             p[0].ParameterType,
@@ -293,8 +354,7 @@ internal static class DesertBatflySignalIntegration
             p[4].ParameterType,
             p[5].ParameterType,
             typeof(void)
-        };
-        Type detourDelegateType = Expression.GetDelegateType(detourSignature);
+        });
 
         var dm = new DynamicMethod(
             "DryCycle_Task12_ReceiveFear",
@@ -314,12 +374,9 @@ internal static class DesertBatflySignalIntegration
         ILGenerator il = dm.GetILGenerator();
         Label indirect = il.DefineLabel();
 
-        // arg4 is tier because arg0 is the RuntimeDetour orig delegate.
         il.Emit(OpCodes.Ldarg_S, (byte)4);
         il.Emit(OpCodes.Brtrue_S, indirect);
 
-        // Direct witness: suppress legacy RaiseLocalAlarm while original ReceiveFear
-        // applies the genuine Fear/Trauma/PTSD consequence, then emit one Task12 root.
         il.Emit(OpCodes.Call, typeof(DesertBatflySignalIntegration).GetMethod(
             nameof(BeginDirectFear), BindingFlags.NonPublic | BindingFlags.Static));
         il.Emit(OpCodes.Ldarg_0);
@@ -328,8 +385,6 @@ internal static class DesertBatflySignalIntegration
         EmitFearHandlerCall(il);
         il.Emit(OpCodes.Ret);
 
-        // Historical tier1/2/3 Secondary/Chain fear is not executed. The Task12 Alarm
-        // generated by the first direct witness is the only indirect propagation path.
         il.MarkLabel(indirect);
         il.Emit(OpCodes.Ldarg_1);
         il.Emit(OpCodes.Ldarg_2);
@@ -397,7 +452,7 @@ internal static class DesertBatflySignalIntegration
             eventPosition,
             RWCustom.Custom.DirVec(witness.mainBodyChunk.pos, eventPosition),
             Mathf.Clamp01(0.62f + Mathf.Clamp(threatScale, 0f, 1.5f) * 0.20f),
-            "direct Intimidation witness emits the sole indirect Task12 Alarm generation");
+            "direct Intimidation witness emits sole indirect Task12 Alarm generation");
     }
 
     private static void HandleIndirectFear(
