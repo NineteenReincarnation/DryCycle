@@ -20,6 +20,7 @@ internal static class DesertBatflyHooks
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
+        DesertBatflyEnvironmentalDenseFogBridge.Enable();
         DesertBatflyEnvironmentalTask09Bridge.Enable();
         DesertBatflyEnvironmentalSurvivalBridge.Enable();
         DesertBatflyEnvironmentalIntegration.Enable();
@@ -37,8 +38,8 @@ internal static class DesertBatflyHooks
         On.Fly.ReportToFliesRoomAI += Report;
         On.Fly.NewRoom += FlyNewRoom;
         On.Fly.Grabbed += FlyGrabbed;
-        On.Fly.Burrowed += Burrow;
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
+        On.Fly.Burrowed += Burrow;
         On.FlyAI.Update += UpdateAI;
         On.FlyAI.UpdateThreats += Threats;
         On.FlyAI.IdleUpdate += Idle;
@@ -58,8 +59,8 @@ internal static class DesertBatflyHooks
         On.Fly.ReportToFliesRoomAI -= Report;
         On.Fly.NewRoom -= FlyNewRoom;
         On.Fly.Grabbed -= FlyGrabbed;
-        On.Fly.Burrowed -= Burrow;
         On.FliesRoomAI.FlyEmergeFromHive -= Emerge;
+        On.Fly.Burrowed -= Burrow;
         On.FlyAI.Update -= UpdateAI;
         On.FlyAI.UpdateThreats -= Threats;
         On.FlyAI.IdleUpdate -= Idle;
@@ -77,6 +78,7 @@ internal static class DesertBatflyHooks
         DesertBatflyEnvironmentalIntegration.Disable();
         DesertBatflyEnvironmentalSurvivalBridge.Disable();
         DesertBatflyEnvironmentalTask09Bridge.Disable();
+        DesertBatflyEnvironmentalDenseFogBridge.Disable();
         DesertBatflySignalRuntime.Reset();
         DesertBatflyEnvironmentalBehavior.Reset();
         DesertBatflyEnvironmentalRoomRuntime.Reset();
