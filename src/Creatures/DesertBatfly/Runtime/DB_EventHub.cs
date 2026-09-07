@@ -8,12 +8,13 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Authoritative semantic-event root for one Desert Batfly life.
 ///
 /// This type observes Rain World facts only. It does not choose behavior, write velocity,
-/// mutate persistent state, or know Task-number architecture. Domain systems subscribe to
-/// Damage/Capture/Mortality and remain responsible for their own reactions.
+/// mutate persistent CreatureState, or know Task-number architecture. Domain systems
+/// subscribe to Damage/Capture/Mortality and remain responsible for their own reactions.
 /// </summary>
 internal static class DB_EventHub
 {
     internal const int MortalityAttributionTicks = 260;
+    internal const int ConsumptionAttributionTicks = 8;
 
     internal static event Action<DB_DamageEvent> Damage;
     internal static event Action<DB_CaptureEvent> Capture;
@@ -47,9 +48,18 @@ internal static class DB_EventHub
     {
         internal Creature LastDamageInstigator;
         internal PhysicalObject LastDamageSource;
+        internal Creature.DamageType LastDamageType;
+        internal float LastDamageAmount;
+        internal float LastDamageStun;
         internal int LastDamageClock = int.MinValue;
         internal float LastThreatScale;
+
+        internal Player ExplicitConsumer;
+        internal int ExplicitConsumeClock = int.MinValue;
+
         internal readonly CaptureSession Capture = new();
+        internal int ViolenceDepth;
+        internal DB_MortalityEvent? PendingMortality;
         internal bool MortalityPublished;
 
         internal bool TryMarkMortality()
@@ -60,15 +70,9 @@ internal static class DB_EventHub
         }
     }
 
-    private sealed class TongueObservation
-    {
-        internal LizardTongue.State State;
-        internal PhysicalObject Owner;
-    }
-
     private static ConditionalWeakTable<DesertBatfly, VictimState> victims = new();
-    private static ConditionalWeakTable<LizardTongue, TongueObservation> tongues = new();
     private static bool enabled;
+    private static int nextSequence;
 
     internal static bool Enabled => enabled;
 
@@ -92,18 +96,44 @@ internal static class DB_EventHub
         On.Fly.Grabbed -= FlyGrabbed;
         On.LizardTongue.Update -= TongueUpdate;
         ResetState();
+
+        // The species lifecycle disables all consumers as well, but clearing delegates here
+        // guarantees a stale subscriber can never survive a full EventHub disable/re-enable.
+        Damage = null;
+        Capture = null;
+        Mortality = null;
     }
 
     internal static void ResetState()
     {
         victims = new ConditionalWeakTable<DesertBatfly, VictimState>();
-        tongues = new ConditionalWeakTable<LizardTongue, TongueObservation>();
+        nextSequence = 0;
+    }
+
+    /// <summary>
+    /// Records the explicit lethal action used by vanilla Fly.BitByPlayer. A grasp alone is
+    /// never mortality attribution: drowning/environmental death while held stays
+    /// unattributed unless a real damage or consume fact exists.
+    /// </summary>
+    internal static void RecordConsumptionAttribution(DesertBatfly victim, Player consumer)
+    {
+        if (victim == null || consumer == null || victim.dead || victim.slatedForDeletetion)
+            return;
+        VictimState state = StateFor(victim);
+        state.ExplicitConsumer = consumer;
+        state.ExplicitConsumeClock = Clock(victim);
     }
 
     internal static bool WithinAttributionWindow(int now, int then, int window)
     {
         return now != int.MinValue && then != int.MinValue && window >= 0 &&
                now >= then && now - then <= window;
+    }
+
+    private static int NextSequence()
+    {
+        nextSequence = nextSequence == int.MaxValue ? 1 : nextSequence + 1;
+        return nextSequence;
     }
 
     private static void CreatureViolence(
@@ -123,24 +153,44 @@ internal static class DB_EventHub
             return;
         }
 
+        VictimState state = StateFor(victim);
+        bool wasDead = victim.dead;
         PhysicalObject sourceObject = source?.owner;
         Creature instigator = ResolveInstigator(sourceObject);
         int clock = Clock(victim);
+        int sequence = NextSequence();
         Vector2 position = victim.mainBodyChunk?.pos ?? Vector2.zero;
         bool canAttributeMortality =
             instigator != null && damage > 0f && sourceObject is not Rock;
         float threatScale = ThreatScale(instigator, sourceObject);
 
-        VictimState state = StateFor(victim);
+        // Attribution facts must exist before vanilla damage runs because Creature.Violence
+        // may call Die() re-entrantly. The semantic Damage event itself is delayed until
+        // vanilla finishes so subscribers know whether this hit was actually lethal.
         if (canAttributeMortality)
         {
             state.LastDamageInstigator = instigator;
             state.LastDamageSource = sourceObject;
+            state.LastDamageType = type;
+            state.LastDamageAmount = Mathf.Max(0f, damage);
+            state.LastDamageStun = Mathf.Max(0f, stunBonus);
             state.LastDamageClock = clock;
             state.LastThreatScale = threatScale;
         }
 
+        state.ViolenceDepth++;
+        try
+        {
+            orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
+        }
+        finally
+        {
+            state.ViolenceDepth = Mathf.Max(0, state.ViolenceDepth - 1);
+        }
+
+        bool lethal = !wasDead && victim.dead;
         Dispatch(Damage, new DB_DamageEvent(
+            sequence,
             victim,
             instigator,
             sourceObject,
@@ -149,9 +199,12 @@ internal static class DB_EventHub
             stunBonus,
             position,
             clock,
-            canAttributeMortality));
+            canAttributeMortality,
+            lethal));
 
-        orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
+        // A Die() reached from inside Creature.Violence is buffered until after Damage is
+        // delivered. This gives every consumer one causal order: Damage -> Mortality.
+        FlushPendingMortality(state);
     }
 
     private static void CreatureDie(On.Creature.orig_Die orig, Creature self)
@@ -173,28 +226,41 @@ internal static class DB_EventHub
             DesertBatflyIntimidation.IsExtremeVengeanceActive(victim);
 
         ResolveMortalityAttribution(
-            victim,
             state,
             clock,
             out Creature killer,
             out PhysicalObject sourceObject,
+            out Creature.DamageType damageType,
+            out float damage,
+            out float stun,
             out float threatScale,
+            out bool wasConsumed,
             out DB_MortalityAttribution attribution);
 
         orig(self);
 
         if (wasDead || !victim.dead || !state.TryMarkMortality()) return;
 
-        Dispatch(Mortality, new DB_MortalityEvent(
+        var mortality = new DB_MortalityEvent(
+            NextSequence(),
             victim,
             killer,
             sourceObject,
+            damageType,
+            damage,
+            stun,
             deathPosition,
             chainWitnesses,
             threatScale,
             revengeFailed,
+            wasConsumed,
             clock,
-            attribution));
+            attribution);
+
+        if (state.ViolenceDepth > 0)
+            state.PendingMortality = mortality;
+        else
+            Dispatch(Mortality, mortality);
     }
 
     private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
@@ -220,10 +286,8 @@ internal static class DB_EventHub
             return;
         }
 
-        TongueObservation observation = tongues.GetOrCreateValue(self);
         LizardTongue.State beforeState = self.state;
         PhysicalObject beforeOwner = self.attached?.owner;
-
         orig(self);
 
         LizardTongue.State afterState = self.state;
@@ -234,9 +298,6 @@ internal static class DB_EventHub
             self.lizard != null &&
             (beforeState != LizardTongue.State.AttachedInSmallObject ||
              !ReferenceEquals(beforeOwner, afterOwner));
-
-        observation.State = afterState;
-        observation.Owner = afterOwner;
 
         if (enteredCapture)
             ReportCapture(victim, self.lizard, self, DB_CaptureKind.Tongue);
@@ -259,6 +320,7 @@ internal static class DB_EventHub
         state.Capture.Kind = kind;
 
         Dispatch(Capture, new DB_CaptureEvent(
+            NextSequence(),
             victim,
             captor,
             tongue,
@@ -294,50 +356,59 @@ internal static class DB_EventHub
     }
 
     private static void ResolveMortalityAttribution(
-        DesertBatfly victim,
         VictimState state,
         int clock,
         out Creature killer,
         out PhysicalObject sourceObject,
+        out Creature.DamageType damageType,
+        out float damage,
+        out float stun,
         out float threatScale,
+        out bool wasConsumed,
         out DB_MortalityAttribution attribution)
     {
         killer = null;
         sourceObject = null;
+        damageType = null;
+        damage = 0f;
+        stun = 0f;
         threatScale = 0.82f;
+        wasConsumed = false;
         attribution = DB_MortalityAttribution.Unattributed;
+
+        if (state?.ExplicitConsumer != null &&
+            WithinAttributionWindow(clock, state.ExplicitConsumeClock, ConsumptionAttributionTicks))
+        {
+            killer = state.ExplicitConsumer;
+            sourceObject = state.ExplicitConsumer;
+            threatScale = 0.90f;
+            wasConsumed = true;
+            attribution = DB_MortalityAttribution.ExplicitConsumption;
+            return;
+        }
 
         if (state != null && state.LastDamageInstigator != null &&
             WithinAttributionWindow(clock, state.LastDamageClock, MortalityAttributionTicks))
         {
             killer = state.LastDamageInstigator;
             sourceObject = state.LastDamageSource;
+            damageType = state.LastDamageType;
+            damage = state.LastDamageAmount;
+            stun = state.LastDamageStun;
             threatScale = state.LastThreatScale > 0f
                 ? state.LastThreatScale
                 : ThreatScale(killer, sourceObject);
             attribution = DB_MortalityAttribution.RecentDamage;
-            return;
         }
+    }
 
-        if (state?.Capture?.Captor is Creature captureOwner &&
-            CaptureStillActive(victim, state.Capture))
-        {
-            killer = captureOwner;
-            threatScale = captureOwner is Player ? 0.90f : ThreatScale(captureOwner, null);
-            attribution = DB_MortalityAttribution.ActiveCapture;
+    private static void FlushPendingMortality(VictimState state)
+    {
+        if (state == null || state.ViolenceDepth > 0 || !state.PendingMortality.HasValue)
             return;
-        }
-
-        if (victim?.grabbedBy == null) return;
-        for (int i = 0; i < victim.grabbedBy.Count; i++)
-        {
-            Creature grabber = victim.grabbedBy[i]?.grabber;
-            if (grabber == null || grabber is Fly) continue;
-            killer = grabber;
-            threatScale = grabber is Player ? 0.90f : ThreatScale(grabber, null);
-            attribution = DB_MortalityAttribution.ActiveCapture;
-            if (grabber is Lizard) return;
-        }
+        DB_MortalityEvent mortality = state.PendingMortality.Value;
+        state.PendingMortality = null;
+        Dispatch(Mortality, mortality);
     }
 
     private static Creature ResolveInstigator(PhysicalObject sourceObject)
@@ -394,12 +465,13 @@ internal enum DB_MortalityAttribution
 {
     Unattributed,
     RecentDamage,
-    ActiveCapture
+    ExplicitConsumption
 }
 
 internal readonly struct DB_DamageEvent
 {
     internal readonly DB_EventKind Kind;
+    internal readonly int Sequence;
     internal readonly DesertBatfly Victim;
     internal readonly Creature Instigator;
     internal readonly PhysicalObject SourceObject;
@@ -409,8 +481,10 @@ internal readonly struct DB_DamageEvent
     internal readonly Vector2 Position;
     internal readonly int Clock;
     internal readonly bool CanAttributeMortality;
+    internal readonly bool Lethal;
 
     internal DB_DamageEvent(
+        int sequence,
         DesertBatfly victim,
         Creature instigator,
         PhysicalObject sourceObject,
@@ -419,9 +493,11 @@ internal readonly struct DB_DamageEvent
         float stun,
         Vector2 position,
         int clock,
-        bool canAttributeMortality)
+        bool canAttributeMortality,
+        bool lethal)
     {
         Kind = DB_EventKind.Damage;
+        Sequence = Mathf.Max(1, sequence);
         Victim = victim;
         Instigator = instigator;
         SourceObject = sourceObject;
@@ -431,12 +507,14 @@ internal readonly struct DB_DamageEvent
         Position = position;
         Clock = clock;
         CanAttributeMortality = canAttributeMortality;
+        Lethal = lethal;
     }
 }
 
 internal readonly struct DB_CaptureEvent
 {
     internal readonly DB_EventKind Kind;
+    internal readonly int Sequence;
     internal readonly DesertBatfly Victim;
     internal readonly Creature Captor;
     internal readonly LizardTongue Tongue;
@@ -446,6 +524,7 @@ internal readonly struct DB_CaptureEvent
     internal readonly int SessionSerial;
 
     internal DB_CaptureEvent(
+        int sequence,
         DesertBatfly victim,
         Creature captor,
         LizardTongue tongue,
@@ -455,6 +534,7 @@ internal readonly struct DB_CaptureEvent
         int sessionSerial)
     {
         Kind = DB_EventKind.Capture;
+        Sequence = Mathf.Max(1, sequence);
         Victim = victim;
         Captor = captor;
         Tongue = tongue;
@@ -468,35 +548,50 @@ internal readonly struct DB_CaptureEvent
 internal readonly struct DB_MortalityEvent
 {
     internal readonly DB_EventKind Kind;
+    internal readonly int Sequence;
     internal readonly DesertBatfly Victim;
     internal readonly Creature Killer;
     internal readonly PhysicalObject SourceObject;
+    internal readonly Creature.DamageType DamageType;
+    internal readonly float Damage;
+    internal readonly float Stun;
     internal readonly Vector2 Position;
     internal readonly DesertBatfly[] ChainWitnesses;
     internal readonly float ThreatScale;
     internal readonly bool RevengeFailed;
+    internal readonly bool WasConsumed;
     internal readonly int Clock;
     internal readonly DB_MortalityAttribution Attribution;
 
     internal DB_MortalityEvent(
+        int sequence,
         DesertBatfly victim,
         Creature killer,
         PhysicalObject sourceObject,
+        Creature.DamageType damageType,
+        float damage,
+        float stun,
         Vector2 position,
         DesertBatfly[] chainWitnesses,
         float threatScale,
         bool revengeFailed,
+        bool wasConsumed,
         int clock,
         DB_MortalityAttribution attribution)
     {
         Kind = DB_EventKind.Mortality;
+        Sequence = Mathf.Max(1, sequence);
         Victim = victim;
         Killer = killer;
         SourceObject = sourceObject;
+        DamageType = damageType;
+        Damage = Mathf.Max(0f, damage);
+        Stun = Mathf.Max(0f, stun);
         Position = position;
         ChainWitnesses = chainWitnesses ?? Array.Empty<DesertBatfly>();
         ThreatScale = Mathf.Max(0f, threatScale);
         RevengeFailed = revengeFailed;
+        WasConsumed = wasConsumed;
         Clock = clock;
         Attribution = attribution;
     }
