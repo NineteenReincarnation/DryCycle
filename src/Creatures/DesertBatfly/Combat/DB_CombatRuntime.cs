@@ -421,7 +421,7 @@ internal sealed class DB_CombatRuntime
                         fakeChance *= Mathf.Lerp(0.8f, 0.48f, fly.DesertState.GrabMemoryStrength);
                     if (counter) fakeChance *= 0.82f;
                     if (target is Player learnedTarget)
-                        fakeChance = DesertBatflyThreatTactics.AdjustFakeDiveChance(
+                        fakeChance = DB_ThreatTactics.AdjustFakeDiveChance(
                             fly, learnedTarget, fakeChance);
 
                     if (!wantsRealAttack || Random.value < fakeChance)

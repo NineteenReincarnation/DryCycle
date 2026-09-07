@@ -14,6 +14,6 @@ internal static class DB_ProjectileEvadeExecutor
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
         if (!resolution.FinalGoal.HasValue) return false;
-        return DesertBatflyThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value);
+        return DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value);
     }
 }

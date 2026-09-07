@@ -1623,7 +1623,7 @@ internal static class DesertBatflyIntimidation
         // the frame and explicitly asks Threat Signature to refine the already-authorized
         // goal/speed before the single FlightMotor write boundary.
         if (TryGetVengeanceTarget(bat, out Creature vengeanceTarget) && vengeanceTarget is Player player)
-            goal = DesertBatflyThreatTactics.AdjustExtremeVengeanceGoal(bat, player, goal, ref speed);
+            goal = DB_ThreatTactics.AdjustExtremeVengeanceGoal(bat, player, goal, ref speed);
 
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
         Vector2 probe = bat.mainBodyChunk.pos + direction * 25f;

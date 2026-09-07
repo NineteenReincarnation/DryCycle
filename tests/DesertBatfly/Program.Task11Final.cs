@@ -7,7 +7,7 @@ internal static partial class Program
     private static void RunTask11Final()
     {
         Type tacticsType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatTactics", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type bridgeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", true);
         Type traceType = mod.GetType(

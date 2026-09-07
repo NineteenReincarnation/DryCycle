@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal readonly struct DesertBatflyThreatTacticalProfile
+internal readonly struct DB_ThreatTacticalProfile
 {
     internal readonly int PlayerSlot;
     internal readonly float Confidence;
@@ -19,7 +19,7 @@ internal readonly struct DesertBatflyThreatTacticalProfile
     internal readonly bool VisibleStartle;
     internal readonly bool VisibleShock;
 
-    internal DesertBatflyThreatTacticalProfile(
+    internal DB_ThreatTacticalProfile(
         int playerSlot,
         float confidence,
         float projectileRisk,
@@ -54,7 +54,7 @@ internal readonly struct DesertBatflyThreatTacticalProfile
 /// Threat Signature Memory. This class changes goals/probabilities only; it never owns Fly
 /// physics and never writes BodyChunk.vel.
 /// </summary>
-internal static class DesertBatflyThreatTactics
+internal static class DB_ThreatTactics
 {
     internal static float AdjustFakeDiveChance(
         DesertBatfly bat,
@@ -62,7 +62,7 @@ internal static class DesertBatflyThreatTactics
         float baseChance)
     {
         baseChance = Mathf.Clamp01(baseChance);
-        if (!TryProfile(bat, player, out DesertBatflyThreatTacticalProfile profile))
+        if (!TryProfile(bat, player, out DB_ThreatTacticalProfile profile))
             return baseChance;
 
         DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(
@@ -168,7 +168,7 @@ internal static class DesertBatflyThreatTactics
             return evade;
         }
 
-        if (!TryProfile(bat, player, out DesertBatflyThreatTacticalProfile profile) ||
+        if (!TryProfile(bat, player, out DB_ThreatTacticalProfile profile) ||
             profile.Confidence < 0.04f || profile.Caution < 0.04f)
             return baseGoal;
 
@@ -247,7 +247,7 @@ internal static class DesertBatflyThreatTactics
     internal static bool TryProfile(
         DesertBatfly bat,
         Player player,
-        out DesertBatflyThreatTacticalProfile profile)
+        out DB_ThreatTacticalProfile profile)
     {
         profile = default;
         if (bat?.DesertState == null || bat.room == null || player == null ||
@@ -295,7 +295,7 @@ internal static class DesertBatflyThreatTactics
             memory.RetreatTendency * bat.Personality.Temperament * bat.Personality.Nerve * 0.12f;
         caution = Mathf.Clamp01(caution - confidenceRelief);
 
-        profile = new DesertBatflyThreatTacticalProfile(
+        profile = new DB_ThreatTacticalProfile(
             slot,
             memory.Confidence,
             projectileRisk,
