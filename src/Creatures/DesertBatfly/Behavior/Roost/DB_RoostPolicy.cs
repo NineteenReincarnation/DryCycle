@@ -12,8 +12,9 @@ internal enum DB_RoostAnchorKind
 }
 
 /// <summary>
-/// Immutable local roost fact. Tile is the air-space anchor tile used by Fly chain logic;
-/// Spot is only the realized hang coordinate derived from that tile.
+/// Immutable local roost fact. Tile is the terrain/candidate tile that owns the anchor;
+/// Spot is only the realized hang coordinate derived from that tile. Consumers keep Tile
+/// instead of reconstructing legality from a world-space boundary coordinate.
 /// </summary>
 internal readonly struct DB_RoostAnchor
 {
@@ -32,8 +33,9 @@ internal readonly struct DB_RoostAnchor
 /// <summary>
 /// Canonical Desert Batfly local roost legality and anchor geometry policy.
 /// Native FlyAI.ChainTile remains authoritative for native Solid/Beam anchors; the only
-/// species extension is the underside of Rain World's one-way Floor terrain. Consumers keep
-/// the returned anchor tile instead of reconstructing legality from the world-space Spot.
+/// species extension is the underside of Rain World's one-way Floor terrain. The extension
+/// does not modify FlyAI.ChainTile and uses the Floor tile itself as the anchor owner because
+/// Rain World's one-way collision plane is the top edge of that tile.
 /// </summary>
 internal static class DB_RoostPolicy
 {
@@ -76,10 +78,10 @@ internal static class DB_RoostPolicy
             return true;
         }
 
-        // Desert Batfly extension: hang from the underside of a one-way Floor tile without
-        // changing FlyAI.ChainTile itself. Keep vanilla's five-tile solid/water clearance.
-        if (current.Terrain != Room.Tile.TerrainType.Air ||
-            above.Terrain != Room.Tile.TerrainType.Floor ||
+        // Desert Batfly extension: a Floor tile is itself traversable from below, while its
+        // one-way collision surface is ((tile.y + 1) * 20). Therefore the correct underside
+        // anchor is the Floor tile's top edge, not the top edge of the Air tile beneath it.
+        if (current.Terrain != Room.Tile.TerrainType.Floor ||
             !HasVanillaClearance(room, tile))
             return false;
 
@@ -95,7 +97,8 @@ internal static class DB_RoostPolicy
         if (!TryGetAnchor(fly, anchor.Tile, out DB_RoostAnchor current))
             return false;
 
-        return current.Kind == anchor.Kind;
+        return current.Kind == anchor.Kind &&
+               (current.Spot - anchor.Spot).sqrMagnitude <= 0.01f;
     }
 
     // Compatibility/read-only projection for callers that only need the realized coordinate.
