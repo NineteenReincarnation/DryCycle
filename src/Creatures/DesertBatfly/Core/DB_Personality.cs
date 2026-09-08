@@ -89,6 +89,21 @@ internal sealed class DB_Personality
 
     internal float SocialFearScale => Mathf.Lerp(0.72f, 1.48f, Conformity);
 
+    // Computed from the established personality axes: no extra random trait stream is added.
+    // Temperament drives raw struggle, Nerve drives effective escape attempts, and larger
+    // individuals are somewhat harder for the player to control.
+    internal float EscapeDrive => Mathf.Clamp01(
+        Temperament * 0.45f +
+        Nerve * 0.35f +
+        Mathf.InverseLerp(1f, 1.25f, Size) * 0.20f);
+
+    // Rescue willingness is social courage, not ordinary aggression. Conformity and Nerve lead,
+    // while Temperament contributes willingness to physically challenge the holder.
+    internal float RescueDrive => Mathf.Clamp01(
+        Conformity * 0.38f +
+        Nerve * 0.36f +
+        Temperament * 0.26f);
+
     internal bool CanSandSpit => SandSpitAffinity >= DB_Tuning.SandSpitTraitThreshold;
     internal float SandSpitDrive => Mathf.InverseLerp(
         DB_Tuning.SandSpitTraitThreshold,
@@ -154,4 +169,3 @@ internal sealed class DB_Personality
         }
     }
 }
-
