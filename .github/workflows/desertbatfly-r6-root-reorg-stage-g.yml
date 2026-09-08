@@ -1,0 +1,287 @@
+name: DesertBatfly R6 Root Reorg Stage G
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - '.github/workflows/desertbatfly-r6-root-reorg-stage-g.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move Vengeance declarations into its domain without changing shared state identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          fear='src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs'
+          vengeance='src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs'
+          test -f "$fear"
+          test -f "$vengeance"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+
+          fear_path = Path('src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs')
+          vengeance_path = Path('src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs')
+          fear = fear_path.read_text(encoding='utf-8')
+          vengeance = vengeance_path.read_text(encoding='utf-8')
+
+          if 'private sealed partial class State' in fear:
+              raise SystemExit('State is already partial; refusing duplicate B39 extraction')
+          if fear.count('private sealed class State') != 1:
+              raise SystemExit('expected exactly one shared State declaration before B39')
+
+          def take_exact(text, start_marker, end_marker, label, include_end=True):
+              start = text.find(start_marker)
+              if start < 0:
+                  raise ValueError(f'{label}: start marker not found')
+              end_start = text.find(end_marker, start)
+              if end_start < 0:
+                  raise ValueError(f'{label}: end marker not found')
+              end = end_start + (len(end_marker) if include_end else 0)
+              while end < len(text) and text[end] in '\r\n':
+                  end += 1
+              return start, end, text[start:end]
+
+          blocks = []
+
+          # Vengeance-only enums. EventKind stays in Fear because mortality/capture observation owns it.
+          for marker, label in [
+              ('    private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }', 'VengeanceMode'),
+              ('    private enum VengeanceParticipation { None, Avenger, Supporter }', 'VengeanceParticipation'),
+          ]:
+              start = fear.find(marker)
+              if start < 0:
+                  raise ValueError(f'{label}: declaration not found')
+              end = start + len(marker)
+              while end < len(fear) and fear[end] in '\r\n': end += 1
+              blocks.append((start, end, label, fear[start:end]))
+
+          # Keep the explanatory leader-cap comment attached to the Vengeance tuning block.
+          blocks.append((*take_exact(
+              fear,
+              '    // One event has one actual leader. The runtime group cap of three means the normal\n',
+              '    private const float GraspRescueChanceScale = 0.62f;',
+              'Vengeance constants'), 'Vengeance constants') if False else (0,0,'',''))
+          blocks.pop()
+          s,e,b = take_exact(
+              fear,
+              '    // One event has one actual leader. The runtime group cap of three means the normal\n',
+              '    private const float GraspRescueChanceScale = 0.62f;',
+              'Vengeance constants')
+          blocks.append((s,e,'Vengeance constants',b))
+
+          # Candidate scoring belongs exclusively to group arming.
+          s,e,b = take_exact(
+              fear,
+              '    private readonly struct FollowerCandidate\n',
+              '    }',
+              'FollowerCandidate')
+          # The first closing brace after this marker closes the constructor, not the struct.
+          # Re-locate with a brace matcher to guarantee the whole type moves.
+          def matching_brace(text, open_pos):
+              depth=0; i=open_pos; state='normal'
+              while i < len(text):
+                  c=text[i]; n=text[i+1] if i+1<len(text) else ''
+                  if state=='normal':
+                      if c=='/' and n=='/': state='line'; i+=2; continue
+                      if c=='/' and n=='*': state='block'; i+=2; continue
+                      if c=='"': state='string'; i+=1; continue
+                      if c=="'": state='char'; i+=1; continue
+                      if c=='{': depth+=1
+                      elif c=='}':
+                          depth-=1
+                          if depth==0: return i
+                      i+=1; continue
+                  if state=='line':
+                      if c=='\n': state='normal'
+                      i+=1; continue
+                  if state=='block':
+                      if c=='*' and n=='/': state='normal'; i+=2; continue
+                      i+=1; continue
+                  if state=='string':
+                      if c=='\\': i+=2; continue
+                      if c=='"': state='normal'
+                      i+=1; continue
+                  if state=='char':
+                      if c=='\\': i+=2; continue
+                      if c=="'": state='normal'
+                      i+=1; continue
+              raise ValueError('unmatched brace')
+
+          start = fear.find('    private readonly struct FollowerCandidate\n')
+          open_pos = fear.find('{', start)
+          close_pos = matching_brace(fear, open_pos)
+          end = close_pos + 1
+          while end < len(fear) and fear[end] in '\r\n': end += 1
+          blocks.append((start,end,'FollowerCandidate',fear[start:end]))
+
+          # Vengeance fields are moved into a second partial declaration of the SAME nested State.
+          state_fields_start = fear.find('        internal VengeanceMode Vengeance;\n')
+          state_fields_end_marker = '        internal bool SupportOnly;'
+          state_fields_end_start = fear.find(state_fields_end_marker, state_fields_start)
+          if state_fields_start < 0 or state_fields_end_start < 0:
+              raise ValueError('Vengeance State fields not found')
+          state_fields_end = state_fields_end_start + len(state_fields_end_marker)
+          while state_fields_end < len(fear) and fear[state_fields_end] in '\r\n': state_fields_end += 1
+          state_fields = fear[state_fields_start:state_fields_end]
+          blocks.append((state_fields_start,state_fields_end,'Vengeance State fields',state_fields))
+
+          # Blocks must be unique/non-overlapping. Capture hashes before source edits.
+          blocks.sort(key=lambda x:x[0])
+          last=-1
+          hashes={}
+          for start,end,label,block in blocks:
+              if start < last:
+                  raise ValueError(f'overlapping block: {label}')
+              if fear.count(block) != 1:
+                  raise ValueError(f'{label}: block is not unique')
+              last=end
+              hashes[label]=hashlib.sha256(block.encode('utf-8')).hexdigest()
+              print(label, hashes[label])
+
+          updated_fear=fear
+          for start,end,label,block in reversed(blocks):
+              if updated_fear[start:end] != block:
+                  raise ValueError(f'{label}: source changed during removal')
+              updated_fear = updated_fear[:start] + updated_fear[end:]
+
+          # This is the only declaration edit: the same State object becomes a partial nested class.
+          updated_fear = updated_fear.replace(
+              '    private sealed class State\n',
+              '    private sealed partial class State\n',
+              1)
+
+          # Insert declarations immediately after the Vengeance implementation partial opens.
+          partial_marker = 'internal static partial class DB_FearRuntime\n{\n'
+          insert_at = vengeance.find(partial_marker)
+          if insert_at < 0:
+              raise ValueError('Vengeance implementation partial marker not found')
+          insert_at += len(partial_marker)
+
+          moved_by_label={label:block for _,_,label,block in blocks}
+          state_partial = (
+              '    // Vengeance fields remain part of the exact same per-creature State object.\n'
+              '    // Splitting the declaration changes source ownership only, not lifetime or identity.\n'
+              '    private sealed partial class State\n'
+              '    {\n' + moved_by_label['Vengeance State fields'] + '    }\n\n'
+          )
+          declaration_payload = (
+              moved_by_label['VengeanceMode'] +
+              moved_by_label['VengeanceParticipation'] +
+              moved_by_label['Vengeance constants'] +
+              moved_by_label['FollowerCandidate'] +
+              state_partial
+          )
+          updated_vengeance = vengeance[:insert_at] + declaration_payload + vengeance[insert_at:]
+
+          # Byte-preservation checks for every moved declaration/field block.
+          for label,old_hash in hashes.items():
+              block=moved_by_label[label]
+              if label == 'Vengeance State fields':
+                  count=updated_vengeance.count(block)
+              else:
+                  count=updated_vengeance.count(block)
+              if count != 1:
+                  raise ValueError(f'{label}: expected exactly one moved copy, found {count}')
+              new_hash=hashlib.sha256(block.encode('utf-8')).hexdigest()
+              if new_hash != old_hash:
+                  raise ValueError(f'{label}: bytes changed during move')
+              if block in updated_fear:
+                  raise ValueError(f'{label}: duplicate remains in Fear source')
+
+          fear_path.write_text(updated_fear,encoding='utf-8')
+          vengeance_path.write_text(updated_vengeance,encoding='utf-8')
+          print('B39 declaration move complete with shared State identity preserved')
+          PY
+
+          # Shared lifetime invariants: one weak table, one logical State type, two partial declarations.
+          python3 - <<'PY'
+          from pathlib import Path
+          fear=Path('src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs').read_text(encoding='utf-8')
+          vengeance=Path('src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs').read_text(encoding='utf-8')
+          combined=fear+'\n'+vengeance
+          assert combined.count('ConditionalWeakTable<DB_Creature, State> states') == 1
+          assert combined.count('private sealed partial class State') == 2
+          assert fear.count('private sealed partial class State') == 1
+          assert vengeance.count('private sealed partial class State') == 1
+          assert 'internal bool Active;' in fear
+          assert 'internal FearMemory PlayerFear;' in fear
+          assert 'internal FearMemory PredatorFear;' in fear
+          assert 'internal VengeanceMode Vengeance;' in vengeance
+          assert 'internal VengeanceParticipation Role;' in vengeance
+          assert 'internal DB_Creature Leader;' in vengeance
+          assert 'internal bool SupportOnly;' in vengeance
+          assert 'internal int TraumaThreatScan;' in fear
+          assert 'internal int TraumaRetreatRefresh;' in fear
+          print('shared State ownership split invariant passed')
+          PY
+
+          # Cross-domain cancellation remains synchronous on that shared State instance.
+          grep -q 'memory.Strength >= VengeanceCollapseStrength' "$fear"
+          grep -q 'PersistentTraumaStrength(bat, threat) >= DB_Tuning.TraumaSevere' "$fear"
+          grep -q 'ClearVengeance(state);' "$fear"
+          grep -q 'private static void ClearVengeance(State state)' "$vengeance"
+
+          # Vengeance tuning and execution contracts are unchanged and physically colocated now.
+          for token in \
+            'MaxTrueAvengersPerEvent = 1' \
+            'VengeanceCollapseStrength = 0.84f' \
+            'VengeanceChargeMinSpeed = 12.5f' \
+            'VengeanceChargeMaxSpeed = 18f' \
+            'PlayerVengeanceDamageMin = 0.30f' \
+            'PlayerVengeanceDamageMax = 1.30f' \
+            'TongueRescueChanceMin = 0.18f' \
+            'TongueRescueChanceMax = 0.48f' \
+            'GraspRescueChanceScale = 0.62f' \
+            'DB_Tuning.SocialVengeanceGroupCap' \
+            'DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance)' \
+            'DB_SignalRuntime.EmitRally' \
+            'DB_FlightMotor.TrySteer'; do
+            grep -Fq "$token" "$vengeance"
+          done
+
+          # Fear-specific tuning remains in Fear; this guards accidental over-extraction.
+          for token in \
+            'DirectWitnessRadius = 340f' \
+            'ChainFearHops = 2' \
+            'DirectGain = 0.50f' \
+            'MemoryMinTicks = 800' \
+            'CorpseLifetimeTicks = 600' \
+            'TraumaThreatScanTicks = 20'; do
+            grep -Fq "$token" "$fear"
+          done
+
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,sys
+          pats=(re.compile(r'\bTask\s*[-_]?\s*\d+\b',re.I),re.compile(r'\bTask-number\b',re.I))
+          bad=[]
+          for p in Path('src/Creatures/DesertBatfly').rglob('*.cs'):
+              for n,l in enumerate(p.read_text(encoding='utf-8').splitlines(),1):
+                  if any(x.search(l) for x in pats): bad.append((p,n,l.strip()))
+          if bad:
+              for x in bad: print(f'{x[0]}:{x[1]}: {x[2]}')
+              sys.exit(1)
+          PY
+
+          test "$(find src/Creatures/DesertBatfly -maxdepth 1 -type f -name '*.cs' | wc -l)" -eq 0
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src
+          git commit -m 'R6 B39 colocate Vengeance declarations and shared-state fields [r6-b39-done]'
+          git push origin HEAD:task14-r6-b1-final
