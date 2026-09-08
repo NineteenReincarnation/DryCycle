@@ -1,7 +1,7 @@
 name: DesertBatfly R6 Architecture Guard
 
-# Long-lived read-only guard for the current R6 architecture baseline.
-# R6 remains open for additional planned work; this guard protects completed contracts.
+# Long-lived read-only guard for the closed R6 architecture baseline.
+# R7 may optimize or validate behavior, but R6 domain/ownership contracts remain protected here.
 on:
   push:
     branches:
