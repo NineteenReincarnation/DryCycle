@@ -8,7 +8,7 @@ using Watcher;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Save-backed Task 09 coordinator. It owns colony/individual ecology identity and
+/// Save-backed colony/individual ecology coordinator. It owns ecology identity and
 /// low-frequency cycle settlement; it never controls room-local flight velocity.
 /// </summary>
 internal static class DB_ColonyRuntime
@@ -237,8 +237,8 @@ internal static class DB_ColonyRuntime
                 colony = new DB_ColonyState(world.region.name, room.name, preferred);
                 colonies.Add(key, colony);
 
-                // First Task-09 bootstrap only. Once this ledger entry exists, an empty
-                // colony can recover only through slow background recovery or immigration.
+                // First ledger bootstrap only. Once this entry exists, an empty colony can
+                // recover only through slow background recovery or immigration.
                 if (physical == 0 && template != null)
                 {
                     for (int n = 0; n < preferred; n++)
@@ -381,7 +381,7 @@ internal static class DB_ColonyRuntime
 
     private static void ScheduleMigrationBatch(World world, DB_ColonyState source, int cycle)
     {
-        // Task09 remains the migration owner; Task13 only supplies a read-only timing veto.
+        // Travel remains the migration owner; environmental policy supplies only a read-only timing veto.
         if (DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)) return;
         if (!DB_MigrationPolicy.CanScheduleBatch(source)) return;
         CollectOwnedBats(source.RoomName, sourceMembersScratch);
