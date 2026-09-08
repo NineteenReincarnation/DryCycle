@@ -42,14 +42,14 @@ grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSp
 grep -q '^            bat,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
 ! grep -q '^            this,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
 ! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' src/Creatures/DesertBatfly/DesertBatfly.cs; then
+if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' src/Creatures/DesertBatfly/Core/DB_Creature.cs; then
   echo 'Creature shell regained SandSpit runtime ownership.' >&2
   exit 1
 fi
 
 grep -q 'internal sealed class DB_Runtime' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
-grep -q 'Runtime.BeforeVanillaUpdate()' src/Creatures/DesertBatfly/DesertBatfly.cs
-grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/DesertBatfly/DesertBatfly.cs
+grep -q 'Runtime.BeforeVanillaUpdate()' src/Creatures/DesertBatfly/Core/DB_Creature.cs
+grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/DesertBatfly/Core/DB_Creature.cs
 ! grep -q 'base.Update' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 ! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 
