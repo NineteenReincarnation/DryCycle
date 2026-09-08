@@ -1,0 +1,109 @@
+name: Task14 R6 B30 Roost policy extraction
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b30-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract shared roost policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          ai = Path('src/Creatures/DesertBatfly/DesertBatflyAI.cs')
+          text = ai.read_text(encoding='utf-8')
+          start = text.index('    private bool TryGetRoostSpot(IntVector2 tile, out Vector2 spot)')
+          end = text.index('    private void StopRoost(bool releaseWholeChain)')
+          text = text[:start] + text[end:]
+          text = text.replace('TryGetRoostSpot(tile, out _)', 'DB_RoostPolicy.TryGetSpot(fly, tile, out _)')
+          text = text.replace('TryGetRoostSpot(tile, out Vector2 candidate)', 'DB_RoostPolicy.TryGetSpot(fly, tile, out Vector2 candidate)')
+          text = text.replace('return TryGetRoostSpot(tile, out spot);', 'return DB_RoostPolicy.TryGetSpot(fly, tile, out spot);')
+          ai.write_text(text, encoding='utf-8')
+
+          lines = [
+              'using RWCustom;',
+              'using UnityEngine;',
+              '',
+              'namespace DryCycle.Creatures.DesertBatfly;',
+              '',
+              '/// <summary>',
+              '/// Pure local legality/anchor policy for native Fly chain roost spots.',
+              '/// It owns no reservation, state transition, movement or Chain/Hang execution.',
+              '/// </summary>',
+              'internal static class DB_RoostPolicy',
+              '{',
+              '    internal static bool TryGetSpot(DesertBatfly fly, IntVector2 tile, out Vector2 spot)',
+              '    {',
+              '        spot = default;',
+              '        if (fly?.room == null || fly.AI == null ||',
+              '            tile.x <= 0 || tile.x >= fly.room.TileWidth - 1 ||',
+              '            tile.y < 4 || tile.y >= fly.room.TileHeight - 1 ||',
+              '            !fly.AI.ChainTile(tile))',
+              '            return false;',
+              '',
+              '        Room.Tile current = fly.room.GetTile(tile);',
+              '        Room.Tile above = fly.room.GetTile(tile.x, tile.y + 1);',
+              '        Vector2 middle = fly.room.MiddleOfTile(tile);',
+              '',
+              '        if (current.horizontalBeam)',
+              '            spot = new Vector2(middle.x, middle.y - 4f);',
+              '        else if (above.verticalBeam && !current.verticalBeam)',
+              '            spot = middle + Vector2.up * 10f;',
+              '        else',
+              '            spot = middle + Vector2.up * 10f;',
+              '        return true;',
+              '    }',
+              '}',
+              ''
+          ]
+          Path('src/Creatures/DesertBatfly/Roost/DB_RoostPolicy.cs').write_text('\n'.join(lines), encoding='utf-8')
+          PY
+      - name: Validate Roost policy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ai=src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          policy=src/Creatures/DesertBatfly/Roost/DB_RoostPolicy.cs
+          test -f "$policy"
+          grep -q 'internal static class DB_RoostPolicy' "$policy"
+          grep -q 'internal static bool TryGetSpot' "$policy"
+          grep -q '!fly.AI.ChainTile(tile)' "$policy"
+          grep -q 'current.horizontalBeam' "$policy"
+          grep -q 'above.verticalBeam && !current.verticalBeam' "$policy"
+          test "$(grep -c 'DB_RoostPolicy.TryGetSpot' "$ai")" -ge 3
+          ! grep -q 'private bool TryGetRoostSpot' "$ai"
+          ! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$policy"
+          ! grep -n '\.localGoal[[:space:]]*=' "$policy"
+          ! grep -n 'ChangeBehavior' "$policy"
+          ! grep -n 'MovementMode' "$policy"
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b30-roost-policy.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B30 extract Roost policy [r6-b30-done]'
+          git push origin HEAD:task14-r6-b1-final
