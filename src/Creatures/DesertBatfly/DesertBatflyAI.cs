@@ -25,13 +25,15 @@ internal sealed class DesertBatflyAI
 
     private readonly DesertBatfly fly;
     private readonly DB_CombatRuntime combat;
+    private readonly DB_CreaturePerception perception;
     internal DB_CombatRuntime Combat => combat;
-    internal bool HasImmediateDanger => danger != null || retreat > 0 || Mode == Activity.Escape;
+    internal DB_CreaturePerception Perception => perception;
+    internal bool HasImmediateDanger => perception.Danger != null || retreat > 0 || Mode == Activity.Escape;
     internal Activity Mode { get; private set; }
     internal Creature Target => combat.Target;
+    internal bool RetreatActive => retreat > 0;
 
-    private Creature danger;
-    private int retreat, ticks, scan, pursuit;
+    private int retreat, ticks;
     private int recoverySearchCooldown;
     private bool hasRoost;
     private Vector2 escapeFrom, roost;
@@ -48,6 +50,7 @@ internal sealed class DesertBatflyAI
     {
         this.fly = fly;
         combat = new DB_CombatRuntime(this, fly);
+        perception = new DB_CreaturePerception(this, fly);
     }
 
     internal void TickMemory()
@@ -95,8 +98,8 @@ internal sealed class DesertBatflyAI
         if (Mode == Activity.Roost) StopRoost(false);
         CancelAttack();
         combat.Reset();
-        danger = null;
-        retreat = pursuit = 0;
+        perception.Reset();
+        retreat = 0;
         recoverySearchCooldown = 0;
         recoveryRoostTarget = null;
         hasRoost = false;
@@ -233,7 +236,7 @@ internal sealed class DesertBatflyAI
             reason);
     }
 
-    private void DisturbedByApproach(Creature source)
+    internal void DisturbedByApproach(Creature source)
     {
         // Perception only: record an escape fact. R3 ImmediateDanger owns the actual chain
         // release/steering later in the same FlyAI frame.
@@ -523,11 +526,7 @@ internal sealed class DesertBatflyAI
             return;
         }
 
-        if (++scan >= 8)
-        {
-            scan = 0;
-            ScanCreatures();
-        }
+        perception.UpdateScan();
 
         bool recoveryBurrow = fly.AI.behavior == FlyAI.Behavior.Burrow &&
                               fly.Injury.RecoveryState == DB_InjuryRecoveryState.Hive;
@@ -549,13 +548,13 @@ internal sealed class DesertBatflyAI
             return;
         }
 
-        if (danger != null && retreat <= 0)
+        if (perception.Danger != null && retreat <= 0)
         {
-            escapeFrom = danger.mainBodyChunk.pos;
+            escapeFrom = perception.Danger.mainBodyChunk.pos;
             retreat = Mathf.Max(retreat, DB_Tuning.ApproachRetreatTicks);
         }
 
-        if (danger != null || retreat > 0)
+        if (perception.Danger != null || retreat > 0)
         {
             recoveryRoostTarget = null;
             recoverySearchCooldown = 0;
@@ -564,7 +563,7 @@ internal sealed class DesertBatflyAI
             combat.ClearAttackState();
             combat.ClearTarget();
             SetMode(Activity.Escape);
-            if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
+            if (perception.Danger != null) escapeFrom = perception.Danger.mainBodyChunk.pos;
             return;
         }
 
@@ -621,7 +620,7 @@ internal sealed class DesertBatflyAI
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.ImmediateDanger) ||
             fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
             return false;
-        if (danger == null && retreat <= 0 && Mode != Activity.Escape)
+        if (perception.Danger == null && retreat <= 0 && Mode != Activity.Escape)
             return false;
 
         ClearRecoveryNavigation();
@@ -630,7 +629,7 @@ internal sealed class DesertBatflyAI
         combat.ClearAttackState();
         Target = null;
         SetMode(Activity.Escape);
-        if (danger != null) escapeFrom = danger.mainBodyChunk.pos;
+        if (perception.Danger != null) escapeFrom = perception.Danger.mainBodyChunk.pos;
 
         Vector2 goal = fly.mainBodyChunk.pos +
                        Custom.DirVec(escapeFrom, fly.mainBodyChunk.pos) * 160f +
@@ -705,103 +704,7 @@ internal sealed class DesertBatflyAI
     internal void AfterPhysics(bool eu)
         => combat.AfterPhysics(eu);
 
-    internal bool Valid(Creature creature)
-    {
-        return creature != null && !creature.dead &&
-               !creature.slatedForDeletetion && creature.room == fly.room &&
-               !creature.inShortcut && creature.grabbedBy.Count == 0 &&
-               (creature.abstractCreature.rippleLayer == fly.abstractCreature.rippleLayer ||
-                creature.abstractCreature.rippleBothSides ||
-                fly.abstractCreature.rippleBothSides);
-    }
-
-    private void ScanCreatures()
-    {
-        danger = null;
-        combat.BeginCandidateScan();
-
-        DB_RoomContext context = DB_RoomContext.For(fly.room);
-        var creatures = context?.Creatures;
-        if (creatures == null) return;
-
-        for (int i = 0; i < creatures.Count; i++)
-        {
-            Creature creature = creatures[i];
-            if (creature == fly || creature is DesertBatfly || !Valid(creature))
-                continue;
-
-            float distance = Vector2.Distance(fly.mainBodyChunk.pos, creature.mainBodyChunk.pos);
-            DB_VisibilityChannel channel = creature is Player
-                ? DB_VisibilityChannel.Player
-                : DB_VisibilityChannel.Creature;
-            if (distance > DB_Tuning.SightRange ||
-                !DB_VisibilityPolicy.CanObserve(
-                    fly, creature.mainBodyChunk.pos, DB_Tuning.SightRange, channel))
-                continue;
-
-            CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
-            CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(fly.Template);
-            bool predator = creature is not Player &&
-                (relation.type == CreatureTemplate.Relationship.Type.Afraid ||
-                 reverse.type == CreatureTemplate.Relationship.Type.Eats ||
-                 reverse.type == CreatureTemplate.Relationship.Type.Attacks);
-
-            if (predator)
-            {
-                float ordinaryThreatDistance = Mathf.Lerp(90f, 260f, Mathf.Clamp01(creature.TotalMass));
-                float nerveScale = Mathf.Lerp(1.15f, 0.58f, fly.Personality.Nerve);
-                float threatDistance = Mathf.Max(55f, ordinaryThreatDistance * nerveScale);
-                if (distance < threatDistance) danger = creature;
-            }
-
-            if (creature is Player player)
-            {
-                bool traumatized = IsTraumatizedPlayer(player);
-                bool remembered = !traumatized && IsRememberedPlayer(player);
-                if (remembered && !fly.Personality.Aggressive)
-                {
-                    float fearDistance = Mathf.Lerp(
-                        DB_Tuning.GrabFearMinDistance,
-                        DB_Tuning.GrabFearMaxDistance,
-                        fly.DesertState.GrabMemoryStrength);
-                    fearDistance *= Mathf.Lerp(1.12f, 0.72f, fly.Personality.Nerve);
-                    if (distance < fearDistance) danger = player;
-                }
-
-                float reactionDistance = Mathf.Lerp(125f, 78f, fly.Personality.Nerve);
-                float closingThreshold = Mathf.Lerp(2.1f, 4.4f, fly.Personality.Nerve);
-                int pursuitThreshold = Mathf.RoundToInt(Mathf.Lerp(16f, 44f, fly.Personality.Nerve));
-                if (remembered && DB_EnvironmentalPolicy.AggressionAuthorized(fly))
-                {
-                    reactionDistance *= 0.72f;
-                    closingThreshold *= 1.25f;
-                    pursuitThreshold = Mathf.RoundToInt(pursuitThreshold * 1.35f);
-                }
-
-                if (distance < reactionDistance)
-                {
-                    float closing = Vector2.Dot(
-                        player.mainBodyChunk.vel,
-                        Custom.DirVec(player.mainBodyChunk.pos, fly.mainBodyChunk.pos));
-                    if (closing > closingThreshold) pursuit += 8;
-                    else pursuit = Mathf.Max(0, pursuit - 4);
-                    if (pursuit >= pursuitThreshold)
-                    {
-                        DisturbedByApproach(player);
-                        pursuit = 0;
-                    }
-                }
-                else
-                {
-                    pursuit = Mathf.Max(0, pursuit - 2);
-                }
-            }
-
-            combat.ConsiderCandidate(creature, distance);
-        }
-
-        combat.CompleteCandidateScan(retreat > 0);
-    }
+    internal bool Valid(Creature creature) => perception.Valid(creature);
 
     internal bool IsRememberedPlayer(Player player)
     {
