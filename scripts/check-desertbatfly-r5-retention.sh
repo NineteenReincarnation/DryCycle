@@ -12,9 +12,9 @@ test "${#detours[@]}" -eq 0
 
 mapfile -t reflection < <(grep -RIl --include='*.cs' 'System.Reflection' src/Creatures/DesertBatfly | sort || true)
 test "${#reflection[@]}" -eq 3
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs'
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs'
-printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_RuntimePatch.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs'
+printf '%s\n' "${reflection[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs'
 
 for name in \
   DesertBatflyEnvironmentalDenseFogBridge \
@@ -32,15 +32,15 @@ for name in \
   ! grep -RIn --include='*.cs' "$name" src/Creatures/DesertBatfly
  done
 
-grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs
-grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRuntime.cs
-grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/Environment/DB_EnvironmentRoomRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/Colony/DB_ColonyRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
-grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/Travel/DB_RefugePolicy.cs
-! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
-! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/Environmental src/Creatures/DesertBatfly/Environment
+grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/World/DB_EnvironmentRuntime.cs
+grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/World/DB_EnvironmentRuntime.cs
+grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/World/DB_EnvironmentRoomRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/World/DB_ColonyRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/World/DB_RefugePolicy.cs
+grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/World/DB_RefugePolicy.cs
+! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World
+! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/World
 
 grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
 grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
@@ -54,8 +54,8 @@ grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBat
 
 mapfile -t runtime_patch_users < <(grep -RIl --include='*.cs' 'DB_RuntimePatch' src/Creatures/DesertBatfly | sort)
 test "${#runtime_patch_users[@]}" -eq 3
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs'
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs'
-printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_RuntimePatch.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs'
+printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs'
 
 echo 'R5 retention audit passed: no internal Bridge/RuntimeDetour debt; reflection is limited to Sandbox/Warp integration.'

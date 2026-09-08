@@ -5,14 +5,14 @@ cd "$ROOT"
 ./scripts/check-desertbatfly-r5-retention.sh
 
 for f in \
-  src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs \
-  src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs \
-  src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs \
-  src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs \
+  src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs \
+  src/Creatures/DesertBatfly/Integration/DB_RuntimePatch.cs \
+  src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs \
+  src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs \
   src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs \
-  src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs \
-  src/Creatures/DesertBatfly/Travel/DB_TravelIntent.cs \
-  src/Creatures/DesertBatfly/Travel/DB_TravelDebugState.cs \
+  src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs \
+  src/Creatures/DesertBatfly/World/DB_TravelIntent.cs \
+  src/Creatures/DesertBatfly/World/DB_TravelDebugState.cs \
   src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs \
   src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
@@ -25,7 +25,7 @@ for f in \
 ! grep -RIn --include='*.cs' -E 'DesertBatflyHooks|DesertBatflyRuntimePatch|DesertBatflySandbox|DesertBatflyWarpCompatibility|DesertBatflyTask(09|10|11|12|13)DebugSource|DesertBatflyDebugSource|DesertBatflyTravelNavigation|DesertBatflyTravelDebugState' src
 grep -q 'DB_RainWorldHooks.Enable()' src/Plugin.cs
 grep -q 'DB_RainWorldHooks.Disable()' src/Plugin.cs
-grep -q 'AIDebugRegistry.Register(new DB_EnvironmentDebugSource())' src/Creatures/DesertBatfly/Integration/RainWorld/DB_RainWorldHooks.cs
+grep -q 'AIDebugRegistry.Register(new DB_EnvironmentDebugSource())' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
 grep -q 'Register(new DB_ObservatorySource())' src/Debug/AIDebugger/Core/AIDebugRegistry.cs
 grep -q 'private readonly DB_ObservatorySource inner = new();' src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs
 grep -q 'private readonly DB_TravelDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs
@@ -33,9 +33,9 @@ grep -q 'private readonly DB_SocialDebugSource inner = new();' src/Debug/AIDebug
 grep -q 'private readonly DB_ThreatDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs
 grep -q 'private readonly DB_SignalDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs
 
-grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
-grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs
+grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
+grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
 
 grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
 grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
