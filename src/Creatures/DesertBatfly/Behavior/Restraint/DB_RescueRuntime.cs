@@ -38,17 +38,7 @@ internal sealed class DB_RescueRuntime
 
         if (Active)
         {
-            if (!CurrentAssignmentValid())
-            {
-                Cancel(false);
-                return;
-            }
-
-            // Do not occupy a rescue slot while this individual is physically incapable or
-            // under a stronger survival response. The victim remains discoverable by others.
-            if (bat.dead || !bat.Consious || bat.stun > 0 || bat.inShortcut ||
-                bat.Injury.BlocksCombat || bat.DesertAI.HasImmediateDanger ||
-                DB_FearRuntime.HasActiveFearSuppression(bat))
+            if (!CurrentAssignmentValid() || !CanConsiderRescue())
                 Cancel(false);
             return;
         }
@@ -245,9 +235,15 @@ internal sealed class DB_RescueRuntime
             bat.DesertAI.RestrainedByNonFly() || bat.DesertAI.HasImmediateDanger ||
             DB_FearRuntime.HasActiveFearSuppression(bat) || DB_VengeanceRuntime.IsActive(bat))
             return false;
-        if (DB_EnvironmentRuntime.TryGetInfluence(bat, out DB_EnvironmentInfluence environment) &&
-            environment.HardSurvival)
+
+        if (DB_TravelRuntime.CanOwnRealizedFrame(bat, out _))
             return false;
+
+        if (DB_EnvironmentRuntime.TryGetInfluence(bat, out DB_EnvironmentInfluence environment) &&
+            environment.Phase is DB_EnvironmentPhase.Preparation or
+                DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute)
+            return false;
+
         return true;
     }
 
