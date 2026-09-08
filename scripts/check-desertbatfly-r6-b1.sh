@@ -10,9 +10,9 @@ for f in \
   src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs \
   src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs \
   src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs \
-  src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs \
-  src/Creatures/DesertBatfly/World/DB_TravelIntent.cs \
-  src/Creatures/DesertBatfly/World/DB_TravelDebugState.cs \
+  src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs \
+  src/Creatures/DesertBatfly/World/Travel/DB_TravelIntent.cs \
+  src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs \
   src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs \
   src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
@@ -33,9 +33,9 @@ grep -q 'private readonly DB_SocialDebugSource inner = new();' src/Debug/AIDebug
 grep -q 'private readonly DB_ThreatDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs
 grep -q 'private readonly DB_SignalDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs
 
-grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
-grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
+grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
+grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
 
 grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
 grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs

@@ -32,15 +32,15 @@ for name in \
   ! grep -RIn --include='*.cs' "$name" src/Creatures/DesertBatfly
  done
 
-grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/World/DB_EnvironmentRuntime.cs
-grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/World/DB_EnvironmentRuntime.cs
-grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/World/DB_EnvironmentRoomRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/World/DB_ColonyRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs
-grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/World/DB_RefugePolicy.cs
-grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/World/DB_RefugePolicy.cs
-! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World
-! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/World
+grep -q 'ApplySecondaryLightRainMoisture(bat, state, tick)' src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRuntime.cs
+grep -q 'ApplyNativeHomeAndBurrow(bat, state.Influence)' src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRuntime.cs
+grep -q 'ObserveLocalShelterFailure(state)' src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRoomRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldSuppressNewMigration(world, source)' src/Creatures/DesertBatfly/World/Colony/DB_ColonyRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.ShouldRecallHomeForSandstorm' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
+grep -q 'DB_EnvironmentalPolicy.CanConsiderSandstormOutwardRefuge' src/Creatures/DesertBatfly/World/Travel/DB_RefugePolicy.cs
+grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/DesertBatfly/World/Travel/DB_RefugePolicy.cs
+! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World/Environment
+! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/World/Environment
 
 grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
 grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Signals/DB_SignalRuntime.cs
