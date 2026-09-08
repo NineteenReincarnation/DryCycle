@@ -764,7 +764,7 @@ internal static class DB_VengeanceRuntime
 
         DB_FlightMotor.TrySteer(
             bat,
-            DB_BehaviorOwner.Mode,
+            DB_BehaviorOwner.Vengeance,
             goal,
             speed,
             response: 0.28f);
