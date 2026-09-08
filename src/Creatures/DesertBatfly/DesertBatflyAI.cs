@@ -342,7 +342,7 @@ internal sealed class DesertBatflyAI
         IntVector2 tile = fly.room.GetTilePosition(target);
         return tile.x > 0 && tile.x < fly.room.TileWidth - 1 &&
                tile.y >= 4 && tile.y < fly.room.TileHeight - 1 &&
-               TryGetRoostSpot(tile, out _);
+               DB_RoostPolicy.TryGetSpot(fly, tile, out _);
     }
 
     private bool TryFindRecoveryRoost(out Vector2 spot)
@@ -361,7 +361,7 @@ internal sealed class DesertBatflyAI
             if (tile.x <= 0 || tile.x >= fly.room.TileWidth - 1 ||
                 tile.y < 4 || tile.y >= fly.room.TileHeight - 1)
                 continue;
-            if (!TryGetRoostSpot(tile, out Vector2 candidate) ||
+            if (!DB_RoostPolicy.TryGetSpot(fly, tile, out Vector2 candidate) ||
                 !Custom.DistLess(fly.mainBodyChunk.pos, candidate, 190f) ||
                 !fly.room.VisualContact(fly.mainBodyChunk.pos, candidate))
                 continue;
@@ -762,29 +762,7 @@ internal sealed class DesertBatflyAI
     private bool TryFindRoost(out Vector2 spot)
     {
         IntVector2 tile = fly.room.GetTilePosition(fly.mainBodyChunk.pos);
-        return TryGetRoostSpot(tile, out spot);
-    }
-
-    private bool TryGetRoostSpot(IntVector2 tile, out Vector2 spot)
-    {
-        spot = default;
-        if (fly.room == null || fly.AI == null ||
-            tile.x <= 0 || tile.x >= fly.room.TileWidth - 1 ||
-            tile.y < 4 || tile.y >= fly.room.TileHeight - 1 ||
-            !fly.AI.ChainTile(tile))
-            return false;
-
-        Room.Tile current = fly.room.GetTile(tile);
-        Room.Tile above = fly.room.GetTile(tile.x, tile.y + 1);
-        Vector2 middle = fly.room.MiddleOfTile(tile);
-
-        if (current.horizontalBeam)
-            spot = new Vector2(middle.x, middle.y - 4f);
-        else if (above.verticalBeam && !current.verticalBeam)
-            spot = middle + Vector2.up * 10f;
-        else
-            spot = middle + Vector2.up * 10f;
-        return true;
+        return DB_RoostPolicy.TryGetSpot(fly, tile, out spot);
     }
 
     private void StopRoost(bool releaseWholeChain)
