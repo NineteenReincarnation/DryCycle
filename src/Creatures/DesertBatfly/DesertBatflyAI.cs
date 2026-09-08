@@ -138,8 +138,8 @@ internal sealed class DesertBatflyAI
 
         if (emitAlarm)
             RaiseLocalAlarm(source, origin,
-                source == null ? "direct anonymous danger -> Task12 AlarmFlutter" :
-                    "direct threat -> Task12 AlarmFlutter");
+                source == null ? "direct anonymous danger -> AlarmFlutter" :
+                    "direct threat -> AlarmFlutter");
     }
 
     internal void PlayerGrabbed(Player player)
@@ -158,7 +158,7 @@ internal sealed class DesertBatflyAI
             SetMode(Activity.Escape);
         }
         RaiseLocalAlarm(player, player.mainBodyChunk.pos,
-            "direct player grab -> Task12 AlarmFlutter");
+            "direct player grab -> AlarmFlutter");
     }
 
     internal void PlayerReleased(Player player, float releaseSpeed)
