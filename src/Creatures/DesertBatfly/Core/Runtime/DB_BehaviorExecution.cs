@@ -80,6 +80,13 @@ internal static class DB_BehaviorExecution
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat))
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Combat");
+
+        // Companion rescue is a specialized Combat-domain action, not a second locomotion
+        // owner. It gets first execution choice inside Combat and still submits movement only
+        // through DB_FlightMotor under the same accepted PrimaryOwner.
+        if (bat.Rescue.Active)
+            return bat.Rescue.ApplyOwnedBehavior();
+
         if (!bat.DesertAI.Combat.TryExecuteOwned()) return false;
         DB_ThreatRuntime.ApplyOwnedTacticalModifier(bat);
         return true;
