@@ -196,7 +196,7 @@ internal static class DB_EnvironmentRoomRuntime
             state.ShelterFailureAccumulatedTicks = Mathf.Max(
                 0, state.ShelterFailureAccumulatedTicks - elapsed * 3);
             state.ShelterFailureSeverity = 0f;
-            state.ShelterFailureReason = "no serious active Task13 shelter demand";
+            state.ShelterFailureReason = "no serious active environmental shelter demand";
             return;
         }
 
