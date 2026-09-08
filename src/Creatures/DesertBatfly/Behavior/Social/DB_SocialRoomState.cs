@@ -7,7 +7,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Room-scoped, non-persistent cache/reservation layer for Task 10.
+/// Room-scoped, non-persistent cache/reservation layer for neutral social behavior.
 /// Candidate discovery is refreshed once per room every 20 ticks; individual bats never
 /// perform an all-bats scan every frame. Reservations are deliberately temporary and die
 /// with the Room instance.
