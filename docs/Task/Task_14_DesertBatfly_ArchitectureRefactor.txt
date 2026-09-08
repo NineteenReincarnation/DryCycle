@@ -7,7 +7,7 @@ Status: 【R0-R5 已完成 / R6 持续实施中】
 Priority: Critical / project-wide structural maintenance
 
 Related project principle:
-- docs/项目原则/DryCycle_项目结构与代码原则.txt
+- docs/项目原则/DryCycle_项目结构与代码原则.md
 
 ======================================================================
 0. 任务定位
@@ -43,7 +43,7 @@ Related project principle:
 
 本任务遵循：
 
-    docs/项目原则/DryCycle_项目结构与代码原则.txt
+    docs/项目原则/DryCycle_项目结构与代码原则.md
 
 如果本任务某处旧表述与项目原则冲突，按以下优先级处理：
 
@@ -54,10 +54,11 @@ Related project principle:
 
 特别说明：
 
-- 文件行数不是 Definition of Done；
-- 不设置 500/800/1200 行的强制拆分阈值；
-- 大文件只触发职责审查；
-- 拆分依据必须是职责、内聚、变更耦合、生命周期、可测试性和认知负担；
+- 文件 KB、字节数和行数不参与架构判断，也不是 Review Trigger；
+- 不设置任何基于源码体积的拆分、合并或审查阈值；
+- 拆分依据只能是职责、内聚、变更耦合、生命周期、可测试性、状态/行为所有权和认知负担；
+- 高度内聚的完整领域实现不因文件较长而拆分；
+- 即使文件很短，只要存在多个独立修改理由，也必须审查职责边界；
 - 禁止为了让文件变短制造大量 Part/Helper/Utils 碎片。
 
 

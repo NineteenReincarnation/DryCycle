@@ -9,7 +9,7 @@ Authoritative pre-refactor main baseline:
 
 Related:
 - docs/Task/Task_14_DesertBatfly_ArchitectureRefactor.txt
-- docs/项目原则/DryCycle_项目结构与代码原则.txt
+- docs/项目原则/DryCycle_项目结构与代码原则.md
 - docs/Discussion/Task_14_DB_MigrationManifest.txt
 
 ======================================================================

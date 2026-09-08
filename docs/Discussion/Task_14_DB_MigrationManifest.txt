@@ -9,7 +9,7 @@ Baseline main:
 Related:
 - docs/Task/Task_14_DesertBatfly_ArchitectureRefactor.txt
 - docs/Discussion/Task_14_R0_BaselineFreeze.txt
-- docs/项目原则/DryCycle_项目结构与代码原则.txt
+- docs/项目原则/DryCycle_项目结构与代码原则.md
 
 ======================================================================
 0. 文档定位
