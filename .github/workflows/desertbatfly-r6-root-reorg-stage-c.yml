@@ -1,0 +1,243 @@
+name: DesertBatfly R6 Root Reorg Stage C
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - '.github/workflows/desertbatfly-r6-root-reorg-stage-c.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move Vengeance implementation methods verbatim
+        shell: bash
+        run: |
+          set -euo pipefail
+          fear='src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs'
+          vengeance='src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs'
+          test -f "$fear"
+          test -f "$vengeance"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+          import sys
+
+          fear_path = Path('src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs')
+          vengeance_path = Path('src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs')
+          fear = fear_path.read_text(encoding='utf-8')
+          vengeance = vengeance_path.read_text(encoding='utf-8')
+
+          method_names = [
+              'IsExtremeVengeanceActive',
+              'IsVengeanceAvenger',
+              'TryGetVengeanceTarget',
+              'ExecuteVengeanceOwned',
+              'ArmVengeanceGroup',
+              'ArmVengeance',
+              'UpdateVengeance',
+              'TryVengeanceContact',
+              'TryRescueVictim',
+              'RescueStillPossible',
+              'ContinueOrWithdraw',
+              'StartWithdraw',
+              'CombatDrive',
+              'TryGetVengeanceState',
+              'ClearVengeance',
+              'StableEvent01',
+              'OrbitOffset',
+              'ForceFlight',
+          ]
+
+          if 'internal static partial class DB_FearRuntime' in fear:
+              raise SystemExit('Fear runtime is already partial; refusing a second extraction')
+          if 'internal static class DB_FearRuntime' not in fear:
+              raise SystemExit('Fear runtime declaration not found')
+          if 'internal static partial class DB_FearRuntime' in vengeance:
+              raise SystemExit('Vengeance implementation partial already exists')
+
+          # C#-aware brace matcher sufficient for method bodies. It ignores braces inside
+          # comments, strings, verbatim strings and chars, so interpolated/debug text cannot
+          # accidentally truncate a moved method.
+          def matching_brace(text, open_pos):
+              depth = 0
+              i = open_pos
+              state = 'normal'
+              while i < len(text):
+                  c = text[i]
+                  n = text[i + 1] if i + 1 < len(text) else ''
+                  if state == 'normal':
+                      if c == '/' and n == '/': state = 'line'; i += 2; continue
+                      if c == '/' and n == '*': state = 'block'; i += 2; continue
+                      if c == '@' and n == '"': state = 'verbatim'; i += 2; continue
+                      if c == '$' and n == '@' and i + 2 < len(text) and text[i+2] == '"': state = 'verbatim'; i += 3; continue
+                      if c == '@' and n == '$' and i + 2 < len(text) and text[i+2] == '"': state = 'verbatim'; i += 3; continue
+                      if c == '$' and n == '"': state = 'string'; i += 2; continue
+                      if c == '"': state = 'string'; i += 1; continue
+                      if c == "'": state = 'char'; i += 1; continue
+                      if c == '{':
+                          depth += 1
+                      elif c == '}':
+                          depth -= 1
+                          if depth == 0:
+                              return i
+                      i += 1
+                      continue
+                  if state == 'line':
+                      if c == '\n': state = 'normal'
+                      i += 1; continue
+                  if state == 'block':
+                      if c == '*' and n == '/': state = 'normal'; i += 2; continue
+                      i += 1; continue
+                  if state == 'string':
+                      if c == '\\': i += 2; continue
+                      if c == '"': state = 'normal'
+                      i += 1; continue
+                  if state == 'verbatim':
+                      if c == '"' and n == '"': i += 2; continue
+                      if c == '"': state = 'normal'
+                      i += 1; continue
+                  if state == 'char':
+                      if c == '\\': i += 2; continue
+                      if c == "'": state = 'normal'
+                      i += 1; continue
+              raise ValueError(f'unmatched brace at {open_pos}')
+
+          def locate_method(text, name):
+              # Find the declaration line, allowing multiline return signatures but requiring
+              # the method name to occur at class-member indentation and be followed by '('.
+              pat = re.compile(rf'(?m)^    (?:internal|private)\s+(?:static\s+)?[^\n]*\b{re.escape(name)}\s*\(')
+              matches = list(pat.finditer(text))
+              if len(matches) != 1:
+                  raise ValueError(f'{name}: expected one declaration, found {len(matches)}')
+              start = matches[0].start()
+              open_pos = text.find('{', matches[0].end())
+              semicolon_pos = text.find(';', matches[0].end())
+              if open_pos < 0 or (semicolon_pos >= 0 and semicolon_pos < open_pos):
+                  raise ValueError(f'{name}: expected block body')
+              end = matching_brace(text, open_pos) + 1
+              # Preserve following newline(s) but not comments belonging to the next member.
+              while end < len(text) and text[end] in '\r\n':
+                  end += 1
+              return start, end, text[start:end]
+
+          blocks = []
+          for name in method_names:
+              start, end, block = locate_method(fear, name)
+              blocks.append((start, end, name, block))
+
+          # Ensure no blocks overlap and capture exact byte hashes before touching source.
+          blocks.sort()
+          last = -1
+          hashes = {}
+          for start, end, name, block in blocks:
+              if start < last:
+                  raise ValueError(f'overlapping extraction at {name}')
+              last = end
+              hashes[name] = hashlib.sha256(block.encode('utf-8')).hexdigest()
+              print(f'{name}: {hashes[name]}')
+
+          # Remove from end to start so source offsets stay valid.
+          updated_fear = fear
+          for start, end, name, block in reversed(blocks):
+              if updated_fear[start:end] != block:
+                  raise ValueError(f'{name}: source changed during extraction')
+              updated_fear = updated_fear[:start] + updated_fear[end:]
+
+          updated_fear = updated_fear.replace(
+              'internal static class DB_FearRuntime',
+              'internal static partial class DB_FearRuntime',
+              1)
+
+          moved_text = ''.join(block for _, _, _, block in blocks)
+          partial = (
+              '\n/// <summary>\n'
+              '/// Shared-state implementation half for Extreme Vengeance. This remains a partial\n'
+              '/// of DB_FearRuntime so fear collapse, trauma and vengeance cancellation continue to\n'
+              '/// mutate the same State instance during the behavior-preserving migration.\n'
+              '/// External callers must use DB_VengeanceRuntime.\n'
+              '/// </summary>\n'
+              'internal static partial class DB_FearRuntime\n'
+              '{\n' + moved_text + '}\n'
+          )
+          updated_vengeance = vengeance.rstrip() + '\n' + partial
+
+          # Byte-for-byte postcondition for every moved method body/declaration block.
+          for name in method_names:
+              _, _, block = locate_method(updated_vengeance, name)
+              digest = hashlib.sha256(block.encode('utf-8')).hexdigest()
+              if digest != hashes[name]:
+                  raise ValueError(f'{name}: moved block changed bytes')
+              if re.search(rf'(?m)^    (?:internal|private)\s+(?:static\s+)?[^\n]*\b{re.escape(name)}\s*\(', updated_fear):
+                  raise ValueError(f'{name}: duplicate remains in Fear file')
+
+          fear_path.write_text(updated_fear, encoding='utf-8')
+          vengeance_path.write_text(updated_vengeance, encoding='utf-8')
+          print(f'moved {len(method_names)} Vengeance methods verbatim')
+          PY
+
+          # Structural invariants: one shared state lifecycle, no duplicate Vengeance state table.
+          grep -q 'internal static partial class DB_FearRuntime' "$fear"
+          grep -q 'internal static partial class DB_FearRuntime' "$vengeance"
+          [ "$(git grep -n 'ConditionalWeakTable<DesertBatfly, State> states' -- 'src/Creatures/DesertBatfly/**/*.cs' | wc -l)" -eq 1 ]
+          [ "$(git grep -n 'private sealed class State' -- 'src/Creatures/DesertBatfly/Behavior/Fear/*.cs' 'src/Creatures/DesertBatfly/Behavior/Vengeance/*.cs' | wc -l)" -eq 1 ]
+
+          # Fear side must still perform synchronous Vengeance collapse through the same private method.
+          grep -q 'memory.Strength >= VengeanceCollapseStrength' "$fear"
+          grep -q 'PersistentTraumaStrength(bat, threat) >= DB_Tuning.TraumaSevere' "$fear"
+          grep -q 'ClearVengeance(state);' "$fear"
+          grep -q 'EnforcePersistentTrauma(bat, state);' "$fear"
+
+          # Vengeance execution is still arbitration-owned and keeps core semantics/tuning.
+          grep -q 'DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance)' "$vengeance"
+          grep -q 'DB_Tuning.SocialVengeanceGroupCap' "$vengeance"
+          grep -q 'DB_SignalRuntime.EmitRally' "$vengeance"
+          grep -q 'TryVengeanceContact' "$vengeance"
+          grep -q 'TryRescueVictim' "$vengeance"
+          grep -q 'ForceFlight' "$vengeance"
+          grep -q 'DB_FlightMotor.TrySteer' "$vengeance"
+
+          # Public domain boundary remains the only external Vengeance API.
+          leftovers="$(git grep -n -E 'DB_FearRuntime\.(IsExtremeVengeanceActive|IsVengeanceAvenger|TryGetVengeanceTarget|ExecuteVengeanceOwned)' -- 'src/**/*.cs' 'tests/**/*.cs' || true)"
+          filtered="$(printf '%s\n' "$leftovers" | grep -v '^src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs:' || true)"
+          if [ -n "$filtered" ]; then
+            printf '%s\n' "$filtered"
+            echo 'external Vengeance API bypass remains after extraction' >&2
+            exit 1
+          fi
+
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+          patterns = (
+              re.compile(r'\bTask\s*[-_]?\s*\d+\b', re.IGNORECASE),
+              re.compile(r'\bTask-number\b', re.IGNORECASE),
+          )
+          bad = []
+          for path in sorted(Path('src/Creatures/DesertBatfly').rglob('*.cs')):
+              for no, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if any(p.search(line) for p in patterns):
+                      bad.append((path, no, line.strip()))
+          if bad:
+              for row in bad: print(f'{row[0]}:{row[1]}: {row[2]}')
+              sys.exit(1)
+          PY
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src scripts
+          git commit -m 'R6 B35c extract Vengeance implementation methods [r6-b35c-done]'
+          git push origin HEAD:task14-r6-b1-final
