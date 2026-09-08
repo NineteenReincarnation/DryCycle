@@ -4,16 +4,16 @@ using System.Reflection;
 internal static partial class Program
 {
     // Historical entry-point name is kept only because Program.cs invokes it.
-    // This guard requires the rejected Task 02 runtime types and API surfaces to remain
+    // This guard requires the rejected rejected social-role design runtime types and API surfaces to remain
     // physically absent. Any compatibility shell is considered a regression.
-    private static void RunRoleDistribution()
+    private static void RunRejectedSocialRoles()
     {
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
-            "rejected Task 02 runtime class is physically removed");
+            "rejected rejected social-role design runtime class is physically removed");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null,
-            "rejected Task 02 score type is physically removed");
+            "rejected rejected social-role design score type is physically removed");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
-            "rejected Task 02 enum is physically removed");
+            "rejected rejected social-role design enum is physically removed");
 
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Check(ai.GetField("Roles", Flags) == null && ai.GetProperty("Roles", Flags) == null,
@@ -29,30 +29,30 @@ internal static partial class Program
         Check(traceFrame.GetField("Role", Flags) == null && traceFrame.GetProperty("Role", Flags) == null,
             "AI Observatory trace frame has no rejected Role slot");
 
-        Console.WriteLine("Task 02 social roles: runtime types, AI API, fear API and Observatory Role slot are physically absent.");
+        Console.WriteLine("rejected social-role design social roles: runtime types, AI API, fear API and Observatory Role slot are physically absent.");
     }
 
-    // Program.cs historically ended by calling RunRoleIntegration from the removed
-    // Task-02 test file. Keep the old entry-point name only as a neutral regression
+    // Program.cs historically ended by calling RunRegressionSuites from the removed
+    // rejected social-role design test file. Keep the old entry-point name only as a neutral regression
     // dispatcher; it runs current accepted task suites and contains no role implementation.
-    private static void RunRoleIntegration()
+    private static void RunRegressionSuites()
     {
-        RunTask09();
-        RunTask10();
-        RunTask10Guards();
-        RunTask11();
-        RunTask11Final();
-        RunTask11EventSemantics();
-        RunTask12();
-        RunTask13();
-        RunTask13Rain();
-        RunTask14R0();
-        RunTask14R1();
-        RunTask14R2();
-        RunTask14R3();
-        RunTask14R4();
-        RunTask14R5();
-        RunTask14R5Retention();
-        RunTask14R6();
+        RunTravelColony();
+        RunSocial();
+        RunSocialGuards();
+        RunThreat();
+        RunThreatTactics();
+        RunThreatEventSemantics();
+        RunSignals();
+        RunEnvironment();
+        RunEnvironmentRain();
+        RunArchitectureBaseline();
+        RunArchitectureEvents();
+        RunArchitecturePerception();
+        RunArchitectureArbiter();
+        RunArchitectureFlightMotor();
+        RunArchitectureBridgeCleanup();
+        RunArchitectureRetention();
+        RunArchitectureDomainMigration();
     }
 }

@@ -6,7 +6,7 @@ using UnityEngine;
 
 internal static partial class Program
 {
-    private static void RunTask10()
+    private static void RunSocial()
     {
         Type socialType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
         Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialMode", true);
@@ -28,11 +28,11 @@ internal static partial class Program
         };
         string[] actualModes = Enum.GetNames(socialModeType);
         Check(expectedModes.All(name => actualModes.Contains(name)),
-            "Task10 exposes all seven temporary social interactions plus None");
+            "Social exposes all seven temporary social interactions plus None");
         Check(!actualModes.Contains("Sentinel") && !actualModes.Contains("Bully") &&
               !actualModes.Contains("Opportunist") && !actualModes.Contains("Leader") &&
               !actualModes.Contains("Follower"),
-            "Task10 social modes are temporary interactions, never rejected social roles");
+            "Social social modes are temporary interactions, never rejected social roles");
 
         object lowConformity = Activator.CreateInstance(personalityType, Flags, null, new object[] { 101 }, null);
         object highConformity = null;
@@ -46,7 +46,7 @@ internal static partial class Program
                 break;
             }
         }
-        Check(highConformity != null, "Task10 test found a stable high-Conformity personality seed");
+        Check(highConformity != null, "Social test found a stable high-Conformity personality seed");
 
         MethodInfo drivePerTick = socialType.GetMethod("SocialDrivePerTick", Flags);
         MethodInfo threshold = socialType.GetMethod("StartThreshold", Flags);
@@ -54,35 +54,35 @@ internal static partial class Program
         float highDrive = (float)drivePerTick.Invoke(null, new[] { highConformity });
         float highThreshold = (float)threshold.Invoke(null, new[] { highConformity });
         Check(lowDrive > 0f && highDrive > 0f,
-            "Task10 eligible neutral flight accumulates positive SocialDrive");
+            "Social eligible neutral flight accumulates positive SocialDrive");
         Check(highDrive > lowDrive * 0.70f,
-            "Task10 SocialDrive remains gradual instead of a zero/one trigger");
+            "Social SocialDrive remains gradual instead of a zero/one trigger");
         Check(highThreshold >= 0.46f && highThreshold <= 0.78f,
-            "Task10 interaction threshold stays in bounded neutral-life range");
+            "Social interaction threshold stays in bounded neutral-life range");
 
         MethodInfo priority = socialType.GetMethod("PriorityAllowsSocialFlags", Flags);
         Check((bool)priority.Invoke(null, new object[] { false, false, false, false, false, false, false }),
-            "Task10 neutral eligibility accepts an unclaimed neutral frame");
+            "Social neutral eligibility accepts an unclaimed neutral frame");
         Check(!(bool)priority.Invoke(null, new object[] { true, false, false, false, false, false, false }),
-            "Task10 immediate danger blocks social life");
+            "Social immediate danger blocks social life");
         Check(!(bool)priority.Invoke(null, new object[] { false, true, false, false, false, false, false }),
-            "Task10 Task09 travel blocks social life");
+            "Social Travel/Colony travel blocks social life");
         Check(!(bool)priority.Invoke(null, new object[] { false, false, true, false, false, false, false }),
-            "Task10 severe injury blocks ordinary social life");
+            "Social severe injury blocks ordinary social life");
         Check(!(bool)priority.Invoke(null, new object[] { false, false, false, true, false, false, false }),
-            "Task10 stable Chain/Roost is not interrupted by social life");
+            "Social stable Chain/Roost is not interrupted by social life");
         Check(!(bool)priority.Invoke(null, new object[] { false, false, false, false, true, false, false }),
-            "Task10 Drop/Passive is not forced back into social flight");
+            "Social Drop/Passive is not forced back into social flight");
         Check(!(bool)priority.Invoke(null, new object[] { false, false, false, false, false, true, false }),
-            "Task10 formal attack blocks neutral social life");
+            "Social formal attack blocks neutral social life");
 
         MethodInfo preference = socialType.GetMethod("PartnerPreference", Flags);
         float stranger = (float)preference.Invoke(null, new object[] { 0.7f, 0.6f, 0f, 0.4f });
         float bonded = (float)preference.Invoke(null, new object[] { 0.7f, 0.6f, 1f, 0.4f });
         Check(bonded > stranger && bonded - stranger <= 0.30f,
-            "Task10 SocialBond is a real but weak partner preference bonus");
+            "Social SocialBond is a real but weak partner preference bonus");
         Check(stranger > 0f,
-            "Task10 strangers can still interact without a SocialBond hard requirement");
+            "Social strangers can still interact without a SocialBond hard requirement");
 
         MethodInfo pairSide = socialType.GetMethod("StablePairSide", Flags);
         var idA = new EntityID(5, 101);
@@ -90,37 +90,37 @@ internal static partial class Program
         int sideAB = (int)pairSide.Invoke(null, new object[] { idA, idB });
         int sideBA = (int)pairSide.Invoke(null, new object[] { idB, idA });
         Check((sideAB == -1 || sideAB == 1) && sideAB == sideBA,
-            "Task10 pair hash is stable independent of caller order; runtime assigns the partner the opposite side");
+            "Social pair hash is stable independent of caller order; runtime assigns the partner the opposite side");
 
         MethodInfo companionOffset = socialType.GetMethod("CompanionOffset", Flags);
         Vector2 leftOffset = (Vector2)companionOffset.Invoke(null, new object[] { -1, 0.5f });
         Vector2 rightOffset = (Vector2)companionOffset.Invoke(null, new object[] { 1, 0.5f });
         Check(leftOffset.x < 0f && rightOffset.x > 0f &&
               Mathf.Abs(leftOffset.x) > Mathf.Abs(leftOffset.y) * 4f,
-            "Task10 CompanionDrift has a dominant horizontal offset instead of vertical stacking");
+            "Social CompanionDrift has a dominant horizontal offset instead of vertical stacking");
 
         FieldInfo separationX = socialType.GetField("GroupSeparationXWeight", Flags);
         FieldInfo separationY = socialType.GetField("GroupSeparationYWeight", Flags);
         Check((float)separationX.GetValue(null) > (float)separationY.GetValue(null) * 3f,
-            "Task10 GroupDrift separation is explicitly horizontal-biased");
+            "Social GroupDrift separation is explicitly horizontal-biased");
 
         Type roomStateType = roomRuntimeType.GetNestedType("RoomState", Flags);
         Check(roomRuntimeType.GetNestedType("Reservation", Flags) != null && roomStateType != null,
-            "Task10 has explicit room-scoped reservation/candidate-cache structures");
+            "Social has explicit room-scoped reservation/candidate-cache structures");
         Check(roomStateType.GetProperty("Roosting", Flags) != null &&
               roomStateType.GetMethod("CountRoostingNear", Flags) != null,
-            "Task10 caches roosting bats at room scope instead of rescanning the flock for every roost tile");
+            "Social caches roosting bats at room scope instead of rescanning the flock for every roost tile");
         MethodInfo removeGroupMember = roomStateType.GetMethod("RemoveGroupMember", Flags);
         Check(removeGroupMember != null && removeGroupMember.ReturnType == typeof(bool),
-            "Task10 group removal reports whether the microflock remains valid for synchronous cleanup");
+            "Social group removal reports whether the microflock remains valid for synchronous cleanup");
         Check(socialType.GetMethod("CancelForPriority", Flags) != null &&
               socialType.GetMethod("Reset", Flags) != null,
-            "Task10 exposes cleanup hooks for death/travel/disable lifecycle");
+            "Social exposes cleanup hooks for death/travel/disable lifecycle");
 
         MethodInfo socialSteer = socialType.GetMethod("SocialSteer", Flags);
-        Check(socialSteer != null, "Task10 has one centralized neutral social steering bridge");
+        Check(socialSteer != null, "Social has one centralized neutral social steering bridge");
         Check(!MethodWritesField(socialSteer, typeof(BodyChunk), "vel"),
-            "Task10 SocialSteer never writes BodyChunk.vel; vanilla BatFlight owns flight physics");
+            "Social SocialSteer never writes BodyChunk.vel; vanilla BatFlight owns flight physics");
 
         foreach (string field in new[]
         {
@@ -129,7 +129,7 @@ internal static partial class Program
             "DecisionReason", "CandidateCount", "RoostTarget", "NegotiationSide"
         })
             Check(socialDebugType.GetField(field, Flags) != null,
-                "Task10 debug state exposes " + field);
+                "Social debug state exposes " + field);
 
         foreach (string forbidden in new[]
         {
@@ -137,15 +137,15 @@ internal static partial class Program
         })
         {
             Check(stateType.GetField(forbidden, Flags) == null && stateType.GetProperty(forbidden, Flags) == null,
-                "Task10 realized-only state is not persisted in DB_State: " + forbidden);
+                "Social realized-only state is not persisted in DB_State: " + forbidden);
         }
 
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
-            "Task10 does not revive any rejected Task02 social-role runtime type");
+            "Social does not revive any rejected rejected social-role design social-role runtime type");
 
-        Console.WriteLine("Task 10: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");
+        Console.WriteLine("Social: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");
     }
 
     private static bool MethodWritesField(MethodInfo method, Type declaringType, string fieldName)

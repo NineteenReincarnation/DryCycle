@@ -3,7 +3,7 @@ using System.Reflection;
 
 internal static partial class Program
 {
-    private static void RunTask14R6()
+    private static void RunArchitectureDomainMigration()
     {
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type runtimePatch = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RuntimePatch", true);
@@ -40,6 +40,6 @@ internal static partial class Program
               signal.GetField("inner", Flags)?.FieldType == threat &&
               environment.GetField("inner", Flags)?.FieldType == signal,
             "R6 B1 preserves Observatory enrichment order");
-        Console.WriteLine("Task14 R6 B1 retention checks pass.");
+        Console.WriteLine("Architecture domain migration B1 retention checks pass.");
     }
 }

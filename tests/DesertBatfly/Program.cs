@@ -97,7 +97,7 @@ internal static partial class Program
         Check(trueAvengers >= 450 && trueAvengers <= 550, "true-avenger rate remains approximately five percent");
         Console.WriteLine($"Personality: 10,000 repeatable seeds, {sandSpitters} sand spitters, {trueAvengers} true avengers; Conformity stable and bounded.");
 
-        RunRoleDistribution();
+        RunRejectedSocialRoles();
 
         var creature = Bare<AbstractCreature>();
         creature.creatureTemplate = Bare<CreatureTemplate>();
@@ -356,7 +356,7 @@ internal static partial class Program
         room.Tiles[15, 7].Terrain = Room.Tile.TerrainType.Solid;
         Check(!Path(300f, Vector2.up), "blocked exit corridor rejected");
         Console.WriteLine("Emergence: actual TerrainManager/TerrainCurve collision, full path, outward normal, obstruction and sand margin.");
-        RunRoleIntegration();
+        RunRegressionSuites();
     }
 
     private static T Bare<T>() => (T)FormatterServices.GetUninitializedObject(typeof(T));

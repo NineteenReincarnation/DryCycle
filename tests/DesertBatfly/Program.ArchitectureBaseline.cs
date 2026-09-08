@@ -5,43 +5,43 @@ using System.Runtime.Serialization;
 
 internal static partial class Program
 {
-    private static void RunTask14R0()
+    private static void RunArchitectureBaseline()
     {
         // R0 protects external/game-visible identities before DB_ source renaming begins.
         Type definitionType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_Definition", true);
         var creatureType = (CreatureTemplate.Type)definitionType.GetField("CreatureType", Flags).GetValue(null);
         Check(creatureType != null && creatureType.value == "DesertBatfly",
-            "Task14 R0 freezes CreatureTemplate.Type value DesertBatfly");
+            "Architecture baseline freezes CreatureTemplate.Type value DesertBatfly");
 
         Type sandboxType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_Sandbox", true);
         Check((string)sandboxType.GetField("UnlockValue", Flags).GetRawConstantValue() == "DesertBatfly",
-            "Task14 R0 freezes sandbox unlock value DesertBatfly");
+            "Architecture baseline freezes sandbox unlock value DesertBatfly");
 
         Type stateType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check((string)stateType.GetField("SaveKey", Flags).GetRawConstantValue() == "DCDesertBatflyV1",
-            "Task14 R0 freezes primary Desert Batfly save key");
+            "Architecture baseline freezes primary Desert Batfly save key");
 
         Type threatStoreType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Check((string)threatStoreType.GetField("SaveKey", Flags).GetRawConstantValue() == "DCDesertBatflyThreatV1",
-            "Task14 R0 freezes Threat Signature save key");
+            "Architecture baseline freezes Threat Signature save key");
 
         Type colonyRuntimeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ColonyRuntime", true);
         Check((string)colonyRuntimeType.GetField("SavePrefix", Flags).GetRawConstantValue() == "DCBATCOLONY09<svB>" &&
               (string)colonyRuntimeType.GetField("PayloadVersion", Flags).GetRawConstantValue() == "V1",
-            "Task14 R0 freezes colony ledger prefix/version even though its historical 09 remains external data");
+            "Architecture baseline freezes colony ledger prefix/version even though its historical 09 remains external data");
 
         Type swarmRoomType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SwarmRoom", true);
         Check(TypeLoadsStringR0(swarmRoomType, "DESERTSWARMROOM"),
-            "Task14 R0 freezes authored room tag DESERTSWARMROOM");
+            "Architecture baseline freezes authored room tag DESERTSWARMROOM");
 
-        // Migration-mode naming guard: old Task09-13 production names are tolerated until
-        // R5/R6 removes them, but no new Task14+ runtime names may be introduced.
+        // Migration-mode naming guard: old Travel/Colony-13 production names are tolerated until
+        // R5/R6 removes them, but no new Architecture refactor+ runtime names may be introduced.
         Type[] productionTypes;
         try
         {
@@ -62,9 +62,9 @@ internal static partial class Program
             Check(type.Name.IndexOf("Task14", StringComparison.OrdinalIgnoreCase) < 0 &&
                   type.Name.IndexOf("Task15", StringComparison.OrdinalIgnoreCase) < 0 &&
                   type.Name.IndexOf("Task16", StringComparison.OrdinalIgnoreCase) < 0,
-                "Task14 R0 prevents new task-number production types: " + type.FullName);
+                "Architecture baseline prevents new task-number production types: " + type.FullName);
             Check(!type.Name.StartsWith("DB_Task", StringComparison.Ordinal),
-                "Task14 R0 forbids combining DB_ source prefix with TaskXX architecture names: " + type.FullName);
+                "Architecture baseline forbids combining DB_ source prefix with TaskXX architecture names: " + type.FullName);
         }
 
         // Hidden-bug baseline guard 1: the already-existing room-progress frame stamp is
@@ -83,7 +83,7 @@ internal static partial class Program
         tickRoomProgress.Invoke(null, new[] { intent, (object)77 });
         int twice = (int)intentType.GetField("SameRoomTravelTicks", Flags).GetValue(intent);
         Check(once == 11 && twice == once,
-            "Task14 R0 preserves existing same-frame idempotence for realized room-progress ticks");
+            "Architecture baseline preserves existing same-frame idempotence for realized room-progress ticks");
 
         // Hidden-bug baseline guard 2: injury recovery must continue using Rain World's
         // native FlyAI Dijkstra helper. R4 will fix the wrong seed/localGoal semantics and
@@ -93,10 +93,10 @@ internal static partial class Program
         MethodInfo recoveryHive = aiType.GetMethod("TryDriveRecoveryHive", Flags);
         Check(recoveryHive != null &&
               MethodCallOffset(recoveryHive, typeof(FlyAI), "ProgressLocalGoalAlongDijkstraMap") >= 0,
-            "Task14 R0 freezes native FlyAI Dijkstra ownership for severe-injury hive recovery");
+            "Architecture baseline freezes native FlyAI Dijkstra ownership for severe-injury hive recovery");
 
         Console.WriteLine(
-            "Task14 R0: external IDs/save keys, migration naming guard, partial travel frame idempotence and native injury Dijkstra dependency frozen.");
+            "Architecture baseline: external IDs/save keys, migration naming guard, partial travel frame idempotence and native injury Dijkstra dependency frozen.");
     }
 
     private static bool TypeLoadsStringR0(Type owner, string expected)

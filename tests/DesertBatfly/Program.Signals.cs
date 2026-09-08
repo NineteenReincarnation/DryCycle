@@ -5,7 +5,7 @@ using System.Reflection.Emit;
 
 internal static partial class Program
 {
-    private static void RunTask12()
+    private static void RunSignals()
     {
         Type kind = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalKind", true);
         string[] names = Enum.GetNames(kind);
@@ -15,7 +15,7 @@ internal static partial class Program
             "RoostCall", "HarassSignal", "SafeSignal"
         };
         Check(names.Length == expected.Length && expected.All(n => names.Contains(n)),
-            "Task12 V1 exposes exactly six accepted signal kinds");
+            "Signals V1 exposes exactly six accepted signal kinds");
 
         Type packet = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalPacket", true);
         foreach (string field in new[]
@@ -23,7 +23,7 @@ internal static partial class Program
                      "Generation", "Kind", "Emitter", "Subject", "Threat", "PlayerTarget",
                      "Origin", "Direction", "Hop", "CreatedTick", "ExpiresTick", "Intensity"
                  })
-            Check(packet.GetField(field, Flags) != null, "Task12 signal packet contains " + field);
+            Check(packet.GetField(field, Flags) != null, "Signals signal packet contains " + field);
 
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalRoomRuntime", true);
@@ -38,48 +38,48 @@ internal static partial class Program
         Type eventConsumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
 
         Check((int)runtime.GetField("MaxAlarmHop", Flags).GetRawConstantValue() == 2,
-            "Task12 Alarm relay is capped at two hops");
+            "Signals Alarm relay is capped at two hops");
         Check((int)roomRuntime.GetField("ActiveSignalCap", Flags).GetRawConstantValue() == 24,
-            "Task12 room signal storage is capped at 24 packets");
+            "Signals room signal storage is capped at 24 packets");
         Check((int)roomRuntime.GetField("AlarmRootMergeTicks", Flags).GetRawConstantValue() == 14,
-            "Task12 urgent root dedupe has a bounded merge window");
+            "Signals urgent root dedupe has a bounded merge window");
 
         Type receiverState = runtime.GetNestedType("ReceiverState", Flags);
         FieldInfo generations = receiverState?.GetField("Generations", Flags);
         Check(generations != null && generations.FieldType == typeof(int[]),
-            "Task12 receiver generation history is a fixed integer ring, not an unbounded dictionary");
+            "Signals receiver generation history is a fixed integer ring, not an unbounded dictionary");
         Check((int)runtime.GetField("GenerationHistorySize", Flags).GetRawConstantValue() == 12,
-            "Task12 receiver generation ring remains fixed at 12 entries");
+            "Signals receiver generation ring remains fixed at 12 entries");
 
         Type roomState = roomRuntime.GetNestedType("RoomState", Flags);
         Check(roomState?.GetMethod("DeliverUrgent", Flags) != null &&
               roomState.GetMethod("AddOrRefresh", Flags) != null &&
               roomState.GetMethod("Prune", Flags) != null,
-            "Task12 room runtime owns bounded urgent delivery, merge and expiry cleanup");
+            "Signals room runtime owns bounded urgent delivery, merge and expiry cleanup");
 
         MethodInfo response = runtime.GetMethod("ResponseStrength", Flags);
         MethodInfo receive = runtime.GetMethod("ReceivePacket", Flags);
         MethodInfo perceive = runtime.GetMethod("TryPerceive", Flags);
         MethodInfo safe = runtime.GetMethod("CanAcceptSafe", Flags);
         Check(response != null && receive != null && perceive != null && safe != null,
-            "Task12 has explicit response, perception and Safe acceptance gates");
+            "Signals has explicit response, perception and Safe acceptance gates");
 
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalVengeanceBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalThreatBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalAcuteBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalDirectWitnessBridge", false) == null,
-            "Task12 R5 retires all internal Reflection/RuntimeDetour signal integration layers");
+            "Signals R5 retires all internal Reflection/RuntimeDetour signal integration layers");
 
         Check(runtime.GetMethod("ApplyAlarm", Flags) != null &&
               runtime.GetMethod("EmitAcuteAlarm", Flags) != null &&
               runtime.GetMethod("EmitRally", Flags) != null &&
               ai.GetMethod("ThreatenedAt", Flags) != null &&
               socialBond.GetMethod("IsDirectDeathWitness", Flags) != null,
-            "Task12 direct APIs own anonymous alarm escape, acute roots, Rally and grief witness boundaries");
+            "Signals direct APIs own anonymous alarm escape, acute roots, Rally and grief witness boundaries");
         Check(combat.GetMethod("FindSocialHarassTarget", Flags) != null &&
               social.GetMethod("FindRoostSource", Flags) != null,
-            "Task12 Harass/Roost influence is consumed directly by Combat and Social owners");
+            "Signals Harass/Roost influence is consumed directly by Combat and Social owners");
 
         MethodInfo reportExplosion = threatRuntime.GetMethod("ReportExplosion", Flags);
         MethodInfo startle = threatRuntime.GetMethod("BroadcastStartle", Flags);
@@ -90,51 +90,51 @@ internal static partial class Program
         Check(MethodCallOffset(reportExplosion, runtime, "EmitAcuteAlarm") >= 0 &&
               MethodCallOffset(startle, runtime, "EmitAcuteAlarm") >= 0 &&
               MethodCallOffset(mass, runtime, "EmitAcuteAlarm") >= 0,
-            "Task11 acute events explicitly emit one Task12 root at the real event position");
+            "Threat acute events explicitly emit one Signals root at the real event position");
         Check(MethodCallOffset(receiveFear, runtime, "EmitAlarm") >= 0 &&
               MethodCallOffset(armVengeance, runtime, "EmitRally") >= 0 &&
               MethodCallOffset(captureConsumer, runtime, "EmitDistress") >= 0,
-            "fear, Vengeance and capture semantics publish through direct Task12 APIs");
+            "fear, Vengeance and capture semantics publish through direct Signals APIs");
 
-        Check(!TypeCallsTask12Forbidden(runtime) && !TypeCallsTask12Forbidden(socialBond),
-            "Task12 signal data path never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
+        Check(!TypeCallsSignalForbidden(runtime) && !TypeCallsSignalForbidden(socialBond),
+            "Signals signal data path never reads input, writes ThreatSignature evidence or directly owns BodyChunk velocity");
 
         Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check(state.GetFields(Flags).All(f => f.Name.IndexOf("Signal", StringComparison.OrdinalIgnoreCase) < 0),
-            "Task12 realized signal state is not persisted in DB_State");
+            "Signals realized signal state is not persisted in DB_State");
 
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
-        int task11 = MethodCallOffset(updateAI, threatRuntime, "Update");
-        int task12 = MethodCallOffset(updateAI, runtime, "Update");
-        int task10 = MethodCallOffset(updateAI, social, "Update");
-        Check(task11 >= 0 && task12 > task11 && task10 > task12,
-            "realized pipeline stays Task11 threat context -> Task12 signal information -> Task10 neutral social life");
+        int threatStage = MethodCallOffset(updateAI, threatRuntime, "Update");
+        int signalStage = MethodCallOffset(updateAI, runtime, "Update");
+        int socialStage = MethodCallOffset(updateAI, social, "Update");
+        Check(threatStage >= 0 && signalStage > threatStage && socialStage > signalStage,
+            "realized pipeline stays Threat threat context -> Signals signal information -> Social neutral social life");
 
         MethodInfo draw = graphics.GetMethod("DrawSprites", Flags);
-        Check(MethodCallsTask12(draw, runtime, "TryGetDisplay"),
-            "Task12 signal display is visible through DB_Graphics without a new movement controller");
+        Check(MethodCallsSignal(draw, runtime, "TryGetDisplay"),
+            "Signals signal display is visible through DB_Graphics without a new movement controller");
 
         Type debug = mod.GetType("DryCycle.Debugging.AI.DB_SignalDebugSource", true);
         Check(debug != null,
-            "Task12 Observatory source exists for generation/hop/perception/influence inspection");
+            "Signals Observatory source exists for generation/hop/perception/influence inspection");
 
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
-            "Task12 does not restore rejected Task02 social role runtime");
+            "Signals does not restore rejected rejected social-role design social role runtime");
 
         Check(intimidation.GetNestedType("SocialRole", Flags) == null &&
               intimidation.GetNestedType("VengeanceParticipation", Flags) != null,
-            "Task12 terminology keeps vengeance participation separate from rejected Task02 SocialRole");
+            "Signals terminology keeps vengeance participation separate from rejected rejected social-role design SocialRole");
 
         Console.WriteLine(
-            "Task 12 signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Task11 read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");
+            "Signals signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Threat read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");
     }
 
-    private static bool MethodCallsTask12(MethodInfo caller, Type targetType, string targetName) =>
+    private static bool MethodCallsSignal(MethodInfo caller, Type targetType, string targetName) =>
         MethodCallOffset(caller, targetType, targetName) >= 0;
 
-    private static bool TypeCallsTask12Forbidden(Type type)
+    private static bool TypeCallsSignalForbidden(Type type)
     {
         foreach (MethodInfo method in type.GetMethods(
                      BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static |
@@ -161,7 +161,7 @@ internal static partial class Program
                     try
                     {
                         MethodBase called = method.Module.ResolveMethod(BitConverter.ToInt32(il, operandOffset));
-                        if (ForbiddenTask12Call(called)) return true;
+                        if (ForbiddenSignalCall(called)) return true;
                     }
                     catch (ArgumentException) { }
                 }
@@ -180,7 +180,7 @@ internal static partial class Program
         return false;
     }
 
-    private static bool ForbiddenTask12Call(MethodBase called)
+    private static bool ForbiddenSignalCall(MethodBase called)
     {
         if (called == null) return false;
         string owner = called.DeclaringType?.FullName ?? string.Empty;

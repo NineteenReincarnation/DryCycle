@@ -3,7 +3,7 @@ using System.Reflection;
 
 internal static partial class Program
 {
-    private static void RunTask14R5Retention()
+    private static void RunArchitectureRetention()
     {
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
@@ -32,7 +32,7 @@ internal static partial class Program
                      "DesertBatflyThreatVengeanceBridge",
                      "DesertBatflyEnvironmentalIntegration",
                      "DesertBatflyEnvironmentalSocialBridge",
-                     "DesertBatflyEnvironmentalTask09Bridge",
+                     "DesertBatflyEnvironmentalTravel/ColonyBridge",
                      "DesertBatflyEnvironmentalSurvivalBridge",
                      "DesertBatflySignalIntegration",
                      "DesertBatflySignalAcuteBridge",
@@ -46,7 +46,7 @@ internal static partial class Program
         // B1: tactical semantics moved to the real Vengeance owner.
         Check(MethodCallOffset(intimidation.GetMethod("ForceFlight", Flags), tactics,
                   "AdjustExtremeVengeanceGoal") >= 0,
-            "R5 retention B1: Vengeance still consumes Task11 tactical geometry directly");
+            "R5 retention B1: Vengeance still consumes Threat tactical geometry directly");
 
         // B2: Environmental integration was deleted only after every consumer gained a
         // direct read-only policy path.
@@ -59,14 +59,14 @@ internal static partial class Program
                   "RoostChanceScale") >= 0 &&
               MethodCallOffset(ai.GetMethod("ExecuteRoostOwned", Flags), policy,
                   "AdjustRoostDuration") >= 0,
-            "R5 retention B2: Roost chance/duration still consume Task13 policy");
+            "R5 retention B2: Roost chance/duration still consume Environment policy");
         Check(MethodCallOffset(social.GetMethod("RefreshState", Flags), policy,
                   "SocialDriveScale") >= 0 &&
               MethodCallOffset(social.GetMethod("TryScheduleInteraction", Flags), policy,
                   "GroupCohesionScale") >= 0,
-            "R5 retention B2: neutral social drive/group cohesion still consume Task13 policy");
+            "R5 retention B2: neutral social drive/group cohesion still consume Environment policy");
 
-        // B3: the two removed Environment bridges are now on active R3/Task09 paths.
+        // B3: the two removed Environment bridges are now on active R3/Travel/Colony paths.
         Check(MethodCallOffset(behavior.GetMethod("RefreshInfluence", Flags), behavior,
                   "ApplySecondaryLightRainMoisture") >= 0,
             "R5 retention B3: secondary LightRain moisture remains on live RefreshInfluence path");
@@ -78,19 +78,19 @@ internal static partial class Program
             "R5 retention B3: LocalShelterFailure remains sampled by room runtime");
         Check(MethodCallOffset(colony.GetMethod("ScheduleMigrationBatch", Flags), policy,
                   "ShouldSuppressNewMigration") >= 0,
-            "R5 retention B3: Task09 migration start still consumes Task13 timing veto");
+            "R5 retention B3: Travel/Colony migration start still consumes Environment timing veto");
         Check(MethodCallOffset(travel.GetMethod("EvaluateColonyWeather", Flags), policy,
                   "ShouldRecallHomeForSandstorm") >= 0,
-            "R5 retention B3: Task09 still performs early Sandstorm Home recall");
+            "R5 retention B3: Travel/Colony still performs early Sandstorm Home recall");
         MethodInfo findRefuge = refuge.GetMethod("TryFindEmergencyRefuge", Flags);
         Check(MethodCallOffset(findRefuge, policy, "CanConsiderSandstormOutwardRefuge") >= 0 &&
               MethodCallOffset(findRefuge, policy, "AcceptSandstormEmergencyRefuge") >= 0,
             "R5 retention B3: narrow Sandstorm outward-refuge exception remains filtered");
 
-        // B4: Task12 detours were folded into explicit owners. Preserve both behavior and
+        // B4: Signals detours were folded into explicit owners. Preserve both behavior and
         // the subtle thresholds/order that existed before deletion.
         Check(MethodCallOffset(ai.GetMethod("RaiseLocalAlarm", Flags), signal, "EmitAlarm") >= 0,
-            "R5 retention B4: AI local alarm still enters Task12 explicitly");
+            "R5 retention B4: AI local alarm still enters Signals explicitly");
         Check(MethodCallOffset(signal.GetMethod("ReceivePacket", Flags), signal, "ApplyAlarm") >= 0,
             "R5 retention B4: received Alarm still applies bounded Escape through SignalRuntime");
         Check(Math.Abs(Convert.ToSingle(signal.GetField("ThreatAlarmEscapeThreshold", Flags)
@@ -100,7 +100,7 @@ internal static partial class Program
             "R5 retention B4: concrete/anonymous Alarm escape thresholds remain 0.30/0.34");
         Type threatMemory = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatMemoryStore", true);
         Check(MethodCallOffset(signal.GetMethod("ResponseStrength", Flags), threatMemory, "For") >= 0,
-            "R5 retention B4: Signal response still reads only receiver-owned Task11 memory");
+            "R5 retention B4: Signal response still reads only receiver-owned Threat memory");
         Check(MethodCallOffset(threat.GetMethod("ReportExplosion", Flags), signal, "EmitAcuteAlarm") >= 0 &&
               MethodCallOffset(threat.GetMethod("BroadcastStartle", Flags), signal, "EmitAcuteAlarm") >= 0 &&
               MethodCallOffset(threat.GetMethod("BroadcastMassCasualty", Flags), signal, "EmitAcuteAlarm") >= 0,
@@ -117,7 +117,7 @@ internal static partial class Program
             "R5 retention B4: Combat still consumes HarassSignal interest");
         Check(MethodCallOffset(social.GetMethod("FindRoostSource", Flags), signal,
                   "TryGetInfluence") >= 0,
-            "R5 retention B4: Task10 still consumes RoostCall interest");
+            "R5 retention B4: Social still consumes RoostCall interest");
         Check(MethodCallOffset(bond.GetMethod("OnBondPartnerDeath", Flags), bond,
                   "IsDirectDeathWitness") >= 0,
             "R5 retention B4: persistent grief still requires direct death witness");
@@ -143,6 +143,6 @@ internal static partial class Program
             "R5 retention B5: retained integrations remain wired into species lifecycle");
 
         Console.WriteLine(
-            "Task14 R5 retention: B1-B4 deleted adapter semantics remain reachable from direct owners; B5 keeps only Sandbox/Warp reflection integration.");
+            "Architecture bridge retention: B1-B4 deleted adapter semantics remain reachable from direct owners; B5 keeps only Sandbox/Warp reflection integration.");
     }
 }

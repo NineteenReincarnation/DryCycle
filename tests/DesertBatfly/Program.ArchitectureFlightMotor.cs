@@ -3,7 +3,7 @@ using System.Reflection;
 
 internal static partial class Program
 {
-    private static void RunTask14R4()
+    private static void RunArchitectureFlightMotor()
     {
         Type motor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
         Type fog = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FogGoalModifier", true);
@@ -35,10 +35,10 @@ internal static partial class Program
               motor.GetMethod("ApplyPostPhysics", Flags) != null &&
               motor.GetMethod("TryGetIntent", Flags) != null &&
               motor.GetMethod("TryGetDebugState", Flags) != null,
-            "Task14 R4 FlightMotor exposes active steer, native guide, same-owner retarget and final modifier surfaces");
+            "Architecture flight motor FlightMotor exposes active steer, native guide, same-owner retarget and final modifier surfaces");
         Check(fog.GetMethod("ModifyGoal", Flags) != null &&
               fog.GetMethod("Reset", Flags) != null && fog.GetMethod("Forget", Flags) != null,
-            "Task14 R4 Fog uncertainty is an explicit goal modifier with lifecycle ownership");
+            "Architecture flight motor Fog uncertainty is an explicit goal modifier with lifecycle ownership");
         Check(MethodCallOffset(motor.GetMethod("TrySteer", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
               MethodCallOffset(motor.GetMethod("TryGuideNative", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
               MethodCallOffset(motor.GetMethod("TryRetarget", Flags), arbiter, "IsPrimaryOwner") >= 0,
@@ -46,9 +46,9 @@ internal static partial class Program
         Check(injury.GetField("NominalFlightSpeed", Flags) == null &&
               injury.GetMethod("ApplyFlight", Flags) == null &&
               injury.GetMethod("ModifyFlight", Flags) != null,
-            "Task14 R4 Injury stays a pure flight modifier");
+            "Architecture flight motor Injury stays a pure flight modifier");
         Check(MethodCallOffset(creature.GetMethod("Update", Flags), motor, "ApplyPostPhysics") >= 0,
-            "Task14 R4 creature final injury pass goes through DB_FlightMotor");
+            "Architecture flight motor creature final injury pass goes through DB_FlightMotor");
         Check(MethodCallOffset(ai.GetMethod("SteerOwned", Flags), motor, "TrySteer") >= 0 &&
               MethodCallOffset(ai.GetMethod("TryDriveRecoveryHive", Flags), motor, "TrySteer") >= 0,
             "core species steering and InjuryRecovery use FlightMotor");
@@ -67,46 +67,46 @@ internal static partial class Program
         Check(MethodCallOffset(survival.GetMethod("ApplyNativeHomeAndBurrow", Flags), motor, "TryGuideNative") >= 0,
             "same-room environmental Home retreat uses FlightMotor while native Burrow stays special physics");
         Check(Enum.IsDefined(special, "NativeBurrow") && Enum.IsDefined(special, "NativeChain"),
-            "Task14 R4 explicitly classifies native Burrow and Chain as special-physics owners");
+            "Architecture flight motor explicitly classifies native Burrow and Chain as special-physics owners");
         Check(combatRuntime.GetProperty("Target", Flags) != null &&
               combatRuntime.GetMethod("BeginCandidateScan", Flags) != null &&
               combatRuntime.GetMethod("ConsiderCandidate", Flags) != null &&
               combatRuntime.GetMethod("CompleteCandidateScan", Flags) != null &&
               combatRuntime.GetMethod("PrepareSelection", Flags) != null &&
               combatRuntime.GetMethod("ArmRetaliation", Flags) != null,
-            "Task14 R4 Combat runtime owns target scan/motivation and retaliation preparation");
+            "Architecture flight motor Combat runtime owns target scan/motivation and retaliation preparation");
         Check(ai.GetMethod("CanHarass", Flags) == null &&
               ai.GetMethod("FindSocialHarassTarget", Flags) == null &&
               ai.GetMethod("ArmRetaliation", Flags) == null,
-            "Task14 R4 old AI shell no longer owns Harass target selection or retaliation preparation");
+            "Architecture flight motor old AI shell no longer owns Harass target selection or retaliation preparation");
         Check(combatRuntime.GetMethod("TryExecuteOwned", Flags) != null &&
               combatRuntime.GetMethod("AfterPhysics", Flags) != null &&
               combatRuntime.GetProperty("FormalAttack", Flags) != null,
-            "Task14 R4 Combat runtime owns formal phase execution, contact physics and formal-attack state");
+            "Architecture flight motor Combat runtime owns formal phase execution, contact physics and formal-attack state");
         Check(MethodCallOffset(combatExecutor.GetMethod("TryExecute", Flags), combatRuntime, "TryExecuteOwned") >= 0,
-            "Task14 R4 Combat executor calls DB_CombatRuntime rather than old AI state-machine implementation");
+            "Architecture flight motor Combat executor calls DB_CombatRuntime rather than old AI state-machine implementation");
         Check(MethodCallOffset(creature.GetMethod("Update", Flags), combatRuntime, "AfterPhysics") >= 0,
-            "Task14 R4 post-physics Attach/Interfere execution calls DB_CombatRuntime directly");
+            "Architecture flight motor post-physics Attach/Interfere execution calls DB_CombatRuntime directly");
         Check(ai.GetMethod("FindContact", Flags) == null && ai.GetMethod("AcquireSlot", Flags) == null &&
               ai.GetMethod("UpdateInterference", Flags) == null && ai.GetMethod("Finish", Flags) == null,
-            "Task14 R4 old AI shell no longer owns combat contact/slot/finish implementation");
+            "Architecture flight motor old AI shell no longer owns combat contact/slot/finish implementation");
         Check(motorDebug.GetField("Owner", Flags) != null &&
               motorDebug.GetField("Goal", Flags) != null &&
               motorDebug.GetField("NominalSpeed", Flags) != null &&
               motorDebug.GetField("PostPhysicsVelocity", Flags) != null,
-            "Task14 R4 FlightMotor exposes owner/goal/speed/post-injury debug state");
+            "Architecture flight motor FlightMotor exposes owner/goal/speed/post-injury debug state");
         Check(debugSource.GetMethod("BuildFlightMotorSection", Flags) != null,
-            "Task14 R4 Observatory exposes FlightMotor intent and special-physics boundary");
+            "Architecture flight motor Observatory exposes FlightMotor intent and special-physics boundary");
         Check(debugSource.GetField("MemoryField", Flags) == null &&
               debugSource.GetField("InterestField", Flags) == null &&
               debugSource.GetField("UnseenField", Flags) == null &&
               debugSource.GetField("HasSlotField", Flags) == null,
-            "Task14 R4 Observatory no longer reflects Combat fields from the old AI shell");
+            "Architecture flight motor Observatory no longer reflects Combat fields from the old AI shell");
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("Disable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
             "FlightMotor/Fog transient state follows species lifecycle");
 
-        Console.WriteLine("Task14 R4 code-side complete: single ordinary FlightMotor boundary, Combat extraction, Observatory motor/debug migration and source writer audit are all guarded; live validation is deferred to final refactor acceptance.");
+        Console.WriteLine("Architecture flight motor code-side complete: single ordinary FlightMotor boundary, Combat extraction, Observatory motor/debug migration and source writer audit are all guarded; live validation is deferred to final refactor acceptance.");
     }
 }

@@ -4,7 +4,7 @@ using System.Runtime.Serialization;
 
 internal static partial class Program
 {
-    private static void RunTask11EventSemantics()
+    private static void RunThreatEventSemantics()
     {
         Type registry = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatClassifier", true);
@@ -13,7 +13,7 @@ internal static partial class Program
         MethodInfo classify = registry.GetMethod("Classify", Flags);
         MethodInfo firecrackerEvent = registry.GetMethod("FirecrackerStartleEvidence", Flags);
         Check(classify != null && firecrackerEvent != null,
-            "Task11 threat adapter exposes event classification and explicit firecracker-startle evidence");
+            "Threat threat adapter exposes event classification and explicit firecracker-startle evidence");
 
         Assembly gameAssembly = typeof(Spear).Assembly;
         Type electricSpearType = gameAssembly.GetType("MoreSlugcats.ElectricSpear", true);
@@ -69,6 +69,6 @@ internal static partial class Program
             "real explosive-spear explosion can train projectile/piercing/explosion/area-denial together");
 
         Console.WriteLine(
-            "Task 11 event semantics: visible-item cues are separated from persistent Shock/Startle/Explosion evidence; real events train the corresponding dimensions.");
+            "Threat event semantics: visible-item cues are separated from persistent Shock/Startle/Explosion evidence; real events train the corresponding dimensions.");
     }
 }

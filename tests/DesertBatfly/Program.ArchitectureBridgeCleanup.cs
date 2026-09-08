@@ -3,7 +3,7 @@ using System.Reflection;
 
 internal static partial class Program
 {
-    private static void RunTask14R5()
+    private static void RunArchitectureBridgeCleanup()
     {
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
@@ -39,25 +39,25 @@ internal static partial class Program
             "R5 explicit environmental policy replaces mutation/detour based cross-domain behavior");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalTask09Bridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", false) == null,
-            "R5 B3 physically removes Task09 and Survival RuntimeDetour bridges");
+            "R5 B3 physically removes Travel/Colony and Survival RuntimeDetour bridges");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalVengeanceBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalThreatBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalAcuteBridge", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalDirectWitnessBridge", false) == null,
-            "R5 B4 physically removes the Task12 internal detour hub and four signal bridges");
+            "R5 B4 physically removes the Signals internal detour hub and four signal bridges");
 
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null &&
               behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
-            "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Task13 owners");
+            "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Environment owners");
 
         Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Check(signalRuntime.GetMethod("EmitAcuteAlarm", Flags) != null &&
               signalRuntime.GetMethod("EmitRally", Flags) != null,
             "R5 B4 replaces signal detours with direct domain APIs");
 
-        Console.WriteLine("Task14 R5 B4: Environment and Signal internal detours are retired; direct domain APIs preserve cross-domain behavior.");
+        Console.WriteLine("Architecture bridge cleanup B4: Environment and Signal internal detours are retired; direct domain APIs preserve cross-domain behavior.");
     }
 }
