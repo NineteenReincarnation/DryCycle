@@ -1,0 +1,26 @@
+name: Post Task14 Compile Diagnose
+on:
+  push:
+    branches:
+      - diag/post-task14-compile
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate stale semantic references
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo '=== DryCycle.Creatures.DB_Creature ==='
+          grep -RIn --include='*.cs' -F 'DryCycle.Creatures.DB_Creature' . || true
+          echo '=== HasSevereWingInjury ==='
+          grep -RIn --include='*.cs' -F 'HasSevereWingInjury' . || true
+          echo '=== suspect spot declarations ==='
+          grep -RIn --include='*.cs' -E 'Vector2[[:space:]]+spot;|out[[:space:]]+Vector2[[:space:]]+spot' src || true
+          echo '=== suspect target declarations ==='
+          grep -RIn --include='*.cs' -E 'Vector2[[:space:]]+target;|out[[:space:]]+[^,;)]*[[:space:]]+target' src || true
+          echo '=== suspect victim pattern vars ==='
+          grep -RIn --include='*.cs' -E 'is[[:space:]]+DB_Creature[[:space:]]+victim|out[[:space:]]+DB_Creature[[:space:]]+victim' src || true
