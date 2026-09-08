@@ -512,7 +512,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardCenter = explosion.pos;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 220);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "acute explosion");
+            DB_SocialRuntime.CancelForPriority(bat, "acute explosion");
             if (!DB_VengeanceRuntime.IsActive(bat))
                 bat.DesertAI.ThreatenedAt(player, explosion.pos, false, false);
 
@@ -562,7 +562,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardCenter = position;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 110);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "acute startle");
+            DB_SocialRuntime.CancelForPriority(bat, "acute startle");
             if (!DB_VengeanceRuntime.IsActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
 
@@ -593,7 +593,7 @@ internal static class DesertBatflyThreatRuntime
             RuntimeState state = StateFor(bat);
             state.AcuteMassCasualtyTimer = Mathf.Max(state.AcuteMassCasualtyTimer, 300);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "acute mass casualty");
+            DB_SocialRuntime.CancelForPriority(bat, "acute mass casualty");
             if (!DB_VengeanceRuntime.IsActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
         }
@@ -733,7 +733,7 @@ internal static class DesertBatflyThreatRuntime
         {
             // Real trajectory is a current-frame Arbiter fact. Do not pre-promote it into
             // DesertAI Escape here or ImmediateDanger would starve ProjectileEvade.
-            DesertBatflySocialLife.CancelForPriority(bat, "incoming projectile");
+            DB_SocialRuntime.CancelForPriority(bat, "incoming projectile");
             state.ModifierReason = "real incoming projectile queued for R3 arbitration";
         }
     }
@@ -762,7 +762,7 @@ internal static class DesertBatflyThreatRuntime
 
         float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
         if (distance < Mathf.Lerp(170f, 260f, heldRisk))
-            DesertBatflySocialLife.CancelForPriority(bat, "learned held-item caution");
+            DB_SocialRuntime.CancelForPriority(bat, "learned held-item caution");
 
         if (heldRisk >= 0.72f && distance < 155f &&
             !DB_VengeanceRuntime.IsActive(bat) &&
@@ -878,7 +878,7 @@ internal static class DesertBatflyThreatRuntime
             return;
 
         state.PursuitDisengageExtended = true;
-        DesertBatflySocialLife.CancelForPriority(bat, "learned pursuit disengage");
+        DB_SocialRuntime.CancelForPriority(bat, "learned pursuit disengage");
         bat.DesertAI.Threatened(player, false);
         state.ModifierReason = "learned pursuer: extended disengage";
     }

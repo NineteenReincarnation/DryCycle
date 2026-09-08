@@ -373,7 +373,7 @@ internal static class DB_BehaviorArbiter
                 preserveGoal: true,
                 commitment: 0.82f));
 
-        if (frame.HasSocialState && frame.Social.Mode != DesertBatflySocialMode.None)
+        if (frame.HasSocialState && frame.Social.Mode != DB_SocialMode.None)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.Social,
                 DB_BehaviorKind.Social,

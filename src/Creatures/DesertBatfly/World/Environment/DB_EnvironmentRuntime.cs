@@ -582,7 +582,7 @@ internal static class DB_EnvironmentRuntime
         if (influence.Phase == DB_EnvironmentPhase.Calm) return;
 
         if (influence.SuppressesNeutralSocial)
-            DesertBatflySocialLife.CancelForPriority(bat, "environmental survival priority");
+            DB_SocialRuntime.CancelForPriority(bat, "environmental survival priority");
 
         if (influence.PreferredShelterPoint is not Vector2 shelterPoint) return;
         if (influence.ShelterDrive < 0.28f && !influence.HardSurvival) return;
@@ -733,7 +733,7 @@ internal static class DB_EnvironmentRuntime
         bool onHiveTile = bat.room.GetTile(bat.mainBodyChunk.pos).hive;
         if (onHiveTile && burrow)
         {
-            DesertBatflySocialLife.CancelForPriority(bat, "environmental Burrow priority");
+            DB_SocialRuntime.CancelForPriority(bat, "environmental Burrow priority");
             bat.DesertAI.CancelAttack();
             bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
             bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
@@ -745,7 +745,7 @@ internal static class DB_EnvironmentRuntime
         if (!seekHome && influence.BurrowDrive < 0.45f) return false;
         if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return false;
 
-        DesertBatflySocialLife.CancelForPriority(bat, "same-room Home/Hive environmental retreat");
+        DB_SocialRuntime.CancelForPriority(bat, "same-room Home/Hive environmental retreat");
         if (influence.HardSurvival) bat.DesertAI.CancelAttack();
         bat.AI.leaveRoomDijkstra = -1;
         bat.AI.followingDijkstraMap = bestMap;

@@ -139,7 +139,7 @@ internal static class DB_ThreatTactics
         if (!DB_FlightMotor.TryGuideNative(
                 bat, DB_BehaviorOwner.ImmediateProjectileEvade, evade, 9f))
             return false;
-        DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateProjectileEvade");
+        DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateProjectileEvade");
         TraceAdjustment(
             bat,
             "ThreatEvadeStarted",

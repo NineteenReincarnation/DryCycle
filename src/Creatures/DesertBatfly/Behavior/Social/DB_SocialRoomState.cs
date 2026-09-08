@@ -12,18 +12,18 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// perform an all-bats scan every frame. Reservations are deliberately temporary and die
 /// with the Room instance.
 /// </summary>
-internal static class DesertBatflySocialRoomRuntime
+internal static class DB_SocialRoomRuntime
 {
     internal sealed class Reservation
     {
         internal readonly RoomState Owner;
         internal readonly int Id;
-        internal readonly DesertBatflySocialMode Mode;
+        internal readonly DB_SocialMode Mode;
         internal readonly List<DB_Creature> Members;
         internal readonly DB_Creature Anchor;
         internal bool Active = true;
 
-        internal Reservation(RoomState owner, int id, DesertBatflySocialMode mode,
+        internal Reservation(RoomState owner, int id, DB_SocialMode mode,
             List<DB_Creature> members, DB_Creature anchor = null)
         {
             Owner = owner;
@@ -101,7 +101,7 @@ internal static class DesertBatflySocialRoomRuntime
         }
 
         internal bool TryReservePair(DB_Creature a, DB_Creature b,
-            DesertBatflySocialMode mode, out Reservation token)
+            DB_SocialMode mode, out Reservation token)
         {
             token = null;
             Refresh();
@@ -131,12 +131,12 @@ internal static class DesertBatflySocialRoomRuntime
             }
             if (members.Count < 3) return false;
 
-            token = Create(DesertBatflySocialMode.GroupDrift, members);
+            token = Create(DB_SocialMode.GroupDrift, members);
             return true;
         }
 
         internal bool TryReserveInvitation(DB_Creature target, DB_Creature source,
-            DesertBatflySocialMode mode, int invitationCap, out Reservation token)
+            DB_SocialMode mode, int invitationCap, out Reservation token)
         {
             token = null;
             Refresh();
@@ -159,7 +159,7 @@ internal static class DesertBatflySocialRoomRuntime
             {
                 Reservation token = reservations[i];
                 if (token.Active && token.Anchor == source &&
-                    token.Mode is DesertBatflySocialMode.RoostInvitation or DesertBatflySocialMode.ChainSocialization)
+                    token.Mode is DB_SocialMode.RoostInvitation or DB_SocialMode.ChainSocialization)
                     count++;
             }
             return count;
@@ -172,7 +172,7 @@ internal static class DesertBatflySocialRoomRuntime
         internal bool RemoveGroupMember(Reservation token, DB_Creature member)
         {
             if (token == null || !token.Active || token.Owner != this ||
-                token.Mode != DesertBatflySocialMode.GroupDrift || member == null)
+                token.Mode != DB_SocialMode.GroupDrift || member == null)
                 return false;
 
             for (int i = token.Members.Count - 1; i >= 0; i--)
@@ -218,7 +218,7 @@ internal static class DesertBatflySocialRoomRuntime
             reservations.Remove(token);
         }
 
-        private Reservation Create(DesertBatflySocialMode mode, List<DB_Creature> members,
+        private Reservation Create(DB_SocialMode mode, List<DB_Creature> members,
             DB_Creature anchor = null)
         {
             var token = new Reservation(this, ++tokenSerial, mode, members, anchor);
@@ -261,7 +261,7 @@ internal static class DesertBatflySocialRoomRuntime
                     continue;
                 }
 
-                if (token.Mode == DesertBatflySocialMode.GroupDrift)
+                if (token.Mode == DB_SocialMode.GroupDrift)
                 {
                     for (int m = token.Members.Count - 1; m >= 0; m--)
                     {

@@ -34,7 +34,7 @@ internal static class DB_EventConsumers
         DB_Creature victim = capture.Victim;
         if (victim == null || victim.dead) return;
 
-        DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
+        DB_SocialRuntime.CancelForPriority(victim, "semantic capture event");
 
         if (capture.Captor is Lizard predator &&
             DB_FearRuntime.IsSupportedLethalThreat(predator))
@@ -92,7 +92,7 @@ internal static class DB_EventConsumers
         // Generic lifecycle consumers share the canonical killer. ThreatRuntime deliberately
         // clears its own realized state only after it has processed this same MortalityEvent,
         // so subscriber order cannot erase counter-kill / kill evidence prematurely.
-        DesertBatflySocialLife.CancelForPriority(victim, "death");
+        DB_SocialRuntime.CancelForPriority(victim, "death");
         DB_SignalRuntime.Forget(victim);
         DB_ColonyRuntime.ReportDeath(victim, mortality.Killer);
         DB_EnvironmentRuntime.Forget(victim);

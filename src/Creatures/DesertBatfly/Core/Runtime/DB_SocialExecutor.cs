@@ -13,6 +13,6 @@ internal static class DB_SocialExecutor
             return false;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
             return false;
-        return DesertBatflySocialLife.ApplyOwnedBehavior(bat);
+        return DB_SocialRuntime.ApplyOwnedBehavior(bat);
     }
 }

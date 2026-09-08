@@ -21,7 +21,7 @@ internal static class DB_RainWorldHooks
         DB_FlightMotor.Reset();
         DB_FearRuntime.Reset();
         DB_RefugePolicy.Reset();
-        DesertBatflySocialLife.Reset();
+        DB_SocialRuntime.Reset();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
@@ -73,7 +73,7 @@ internal static class DB_RainWorldHooks
         DB_SignalRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
-        DesertBatflySocialLife.Reset();
+        DB_SocialRuntime.Reset();
         DB_PlatformRoostRuntime.Disable();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
@@ -116,7 +116,7 @@ internal static class DB_RainWorldHooks
     {
         if (self is DB_Creature desert)
         {
-            DesertBatflySocialLife.CancelForPriority(desert, "room transition");
+            DB_SocialRuntime.CancelForPriority(desert, "room transition");
             DB_SignalRuntime.Forget(desert);
             DesertBatflyThreatRuntime.Forget(desert);
             DB_EnvironmentRuntime.Forget(desert);
@@ -130,7 +130,7 @@ internal static class DB_RainWorldHooks
     private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
     {
         if (self is DB_Creature desert)
-            DesertBatflySocialLife.CancelForPriority(desert, "grabbed / restraint");
+            DB_SocialRuntime.CancelForPriority(desert, "grabbed / restraint");
         orig(self, grasp);
     }
 
@@ -138,7 +138,7 @@ internal static class DB_RainWorldHooks
     {
         if (self is DB_Creature desert)
         {
-            DesertBatflySocialLife.CancelForPriority(desert, "burrow priority");
+            DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
             DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
         }
@@ -153,7 +153,7 @@ internal static class DB_RainWorldHooks
             return;
         }
 
-        DesertBatflySocialLife.CancelForPriority(desert, "emergence priority");
+        DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
@@ -174,14 +174,14 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DesertBatflyThreatRuntime.RefreshState(desert);
-        DesertBatflySocialLife.RefreshState(desert);
+        DB_SocialRuntime.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
 
         if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or
             DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
         {
-            DesertBatflySocialLife.CancelForPriority(desert, $"R3 PrimaryOwner={ownership.PrimaryOwner}");
+            DB_SocialRuntime.CancelForPriority(desert, $"R3 PrimaryOwner={ownership.PrimaryOwner}");
             CompleteR3Frame(desert, ownership);
             return;
         }
@@ -221,7 +221,7 @@ internal static class DB_RainWorldHooks
         {
             if (DB_TravelRuntime.TryDriveRealized(desert))
             {
-                DesertBatflySocialLife.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
+                DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
                 desert.DesertAI.CancelAttack();
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -365,7 +365,7 @@ internal static class DB_RainWorldHooks
         DesertBatflyThreatRuntime.CommitFrame(desert);
         DB_ThreatTrace.Sample(desert);
         DB_SignalRuntime.Update(desert);
-        DesertBatflySocialLife.SampleTrace(desert);
+        DB_SocialRuntime.SampleTrace(desert);
         DB_Trace.Sample(desert);
         if (desert.abstractCreature != null && AIDebugTrace.IsWatched(desert.abstractCreature))
             AIDebugTrace.RecordChange(
@@ -396,8 +396,8 @@ internal static class DB_RainWorldHooks
         orig(self);
         if (self.fly is not DB_Creature desert) return;
 
-        DesertBatflySocialRoomRuntime.RoomState socialRoom =
-            DesertBatflySocialRoomRuntime.For(self.room);
+        DB_SocialRoomRuntime.RoomState socialRoom =
+            DB_SocialRoomRuntime.For(self.room);
         if (socialRoom?.IsReserved(desert) == true)
             return;
 
@@ -423,11 +423,11 @@ internal static class DB_RainWorldHooks
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
-            DesertBatflySocialLife.CancelForPriority(desert, "R3 Travel owns enclosing AI frame");
+            DB_SocialRuntime.CancelForPriority(desert, "R3 Travel owns enclosing AI frame");
             return;
         }
 
-        DesertBatflySocialLife.CancelForPriority(desert, "rain priority");
+        DB_SocialRuntime.CancelForPriority(desert, "rain priority");
         if (self.room.hives.Length > 0)
         {
             orig(self);

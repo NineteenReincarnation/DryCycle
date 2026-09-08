@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DesertBatflySocialMode
+internal enum DB_SocialMode
 {
     None,
     CompanionDrift,
@@ -19,36 +19,36 @@ internal enum DesertBatflySocialMode
     ChainSocialization
 }
 
-internal readonly struct DesertBatflySocialDebugState
+internal readonly struct DB_SocialDebugState
 {
     internal readonly bool Eligible;
     internal readonly float SocialDrive;
     internal readonly int SocialCooldown;
-    internal readonly DesertBatflySocialMode Mode;
+    internal readonly DB_SocialMode Mode;
     internal readonly int InteractionTicks;
     internal readonly int Duration;
     internal readonly string Partner;
     internal readonly string Anchor;
     internal readonly int MicroFlockId;
     internal readonly int MicroFlockSize;
-    internal readonly DesertBatflySocialMode LastInteractionType;
+    internal readonly DB_SocialMode LastInteractionType;
     internal readonly string DecisionReason;
     internal readonly int CandidateCount;
     internal readonly Vector2? RoostTarget;
     internal readonly int NegotiationSide;
 
-    internal DesertBatflySocialDebugState(
+    internal DB_SocialDebugState(
         bool eligible,
         float socialDrive,
         int socialCooldown,
-        DesertBatflySocialMode mode,
+        DB_SocialMode mode,
         int interactionTicks,
         int duration,
         string partner,
         string anchor,
         int microFlockId,
         int microFlockSize,
-        DesertBatflySocialMode lastInteractionType,
+        DB_SocialMode lastInteractionType,
         string decisionReason,
         int candidateCount,
         Vector2? roostTarget,
@@ -78,7 +78,7 @@ internal readonly struct DesertBatflySocialDebugState
 /// their existing systems. This layer only chooses temporary neutral local goals; vanilla
 /// Fly.BatFlight remains the locomotion implementation.
 /// </summary>
-internal static class DesertBatflySocialLife
+internal static class DB_SocialRuntime
 {
     private const int ScanIntervalMin = 16;
     private const int ScanIntervalMax = 30;
@@ -107,7 +107,7 @@ internal static class DesertBatflySocialLife
     {
         internal float Drive;
         internal int Cooldown;
-        internal DesertBatflySocialMode Mode;
+        internal DB_SocialMode Mode;
         internal PairRole Role;
         internal int Ticks;
         internal int Duration;
@@ -115,8 +115,8 @@ internal static class DesertBatflySocialLife
         internal int ScanSerial;
         internal DB_Creature Partner;
         internal DB_Creature Anchor;
-        internal DesertBatflySocialRoomRuntime.Reservation Token;
-        internal DesertBatflySocialMode LastMode;
+        internal DB_SocialRoomRuntime.Reservation Token;
+        internal DB_SocialMode LastMode;
         internal long LastPartnerKey = long.MinValue;
         internal string DecisionReason = "initial neutral state";
         internal int CandidateCount;
@@ -128,11 +128,11 @@ internal static class DesertBatflySocialLife
 
     private readonly struct Choice
     {
-        internal readonly DesertBatflySocialMode Mode;
+        internal readonly DB_SocialMode Mode;
         internal readonly DB_Creature Partner;
         internal readonly float Weight;
 
-        internal Choice(DesertBatflySocialMode mode, DB_Creature partner, float weight)
+        internal Choice(DB_SocialMode mode, DB_Creature partner, float weight)
         {
             Mode = mode;
             Partner = partner;
@@ -145,7 +145,7 @@ internal static class DesertBatflySocialLife
     internal static void Reset()
     {
         states = new ConditionalWeakTable<DB_Creature, State>();
-        DesertBatflySocialRoomRuntime.Reset();
+        DB_SocialRoomRuntime.Reset();
     }
 
     internal static void Update(DB_Creature bat)
@@ -160,14 +160,14 @@ internal static class DesertBatflySocialLife
         State state = states.GetValue(bat, CreateState);
         if (state.Cooldown > 0) state.Cooldown--;
 
-        if (state.LastRoom != null && state.LastRoom != bat.room && state.Mode != DesertBatflySocialMode.None)
+        if (state.LastRoom != null && state.LastRoom != bat.room && state.Mode != DB_SocialMode.None)
             CancelForPriorityState(bat, state, "room transition");
         state.LastRoom = bat.room;
 
         string block = PriorityBlockReason(bat);
         if (block != null)
         {
-            if (state.Mode != DesertBatflySocialMode.None)
+            if (state.Mode != DB_SocialMode.None)
                 CancelForPriorityState(bat, state, block);
             state.Drive = Mathf.Max(0f, state.Drive - 0.0015f);
             state.DecisionReason = block;
@@ -177,7 +177,7 @@ internal static class DesertBatflySocialLife
         // Active interaction timers and all SocialSteer/roost-join writes are advanced only
         // by ApplyOwnedBehavior after Arbiter selected Social. Preemption therefore cannot
         // progress a social interaction in the background.
-        if (state.Mode != DesertBatflySocialMode.None) return;
+        if (state.Mode != DB_SocialMode.None) return;
 
         float traumaScale = Mathf.Lerp(
             1f,
@@ -186,7 +186,7 @@ internal static class DesertBatflySocialLife
         state.Drive = Mathf.Clamp01(state.Drive + SocialDrivePerTick(bat.Personality) * traumaScale *
             DB_EnvironmentalPolicy.SocialDriveScale(bat));
 
-        DesertBatflySocialRoomRuntime.RoomState roomState = DesertBatflySocialRoomRuntime.For(bat.room);
+        DB_SocialRoomRuntime.RoomState roomState = DB_SocialRoomRuntime.For(bat.room);
         if (roomState == null) return;
         IReadOnlyList<DB_Creature> candidates = roomState.Candidates;
         state.CandidateCount = Mathf.Max(0, candidates.Count - 1);
@@ -237,7 +237,7 @@ internal static class DesertBatflySocialLife
     internal static bool ApplyOwnedBehavior(DB_Creature bat)
     {
         if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social) ||
-            !states.TryGetValue(bat, out State state) || state.Mode == DesertBatflySocialMode.None)
+            !states.TryGetValue(bat, out State state) || state.Mode == DB_SocialMode.None)
             return false;
         UpdateActive(bat, state);
         return true;
@@ -245,19 +245,19 @@ internal static class DesertBatflySocialLife
 
     internal static void CancelForPriority(DB_Creature bat, string reason)
     {
-        if (bat == null || !states.TryGetValue(bat, out State state) || state.Mode == DesertBatflySocialMode.None)
+        if (bat == null || !states.TryGetValue(bat, out State state) || state.Mode == DB_SocialMode.None)
             return;
         CancelForPriorityState(bat, state, string.IsNullOrEmpty(reason) ? "higher priority" : reason);
     }
 
-    internal static bool TryGetDebugState(DB_Creature bat, out DesertBatflySocialDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_SocialDebugState debug)
     {
         debug = default;
         if (bat == null || !states.TryGetValue(bat, out State state)) return false;
-        int groupSize = state.Token?.Active == true && state.Token.Mode == DesertBatflySocialMode.GroupDrift
+        int groupSize = state.Token?.Active == true && state.Token.Mode == DB_SocialMode.GroupDrift
             ? state.Token.Members.Count
             : 0;
-        debug = new DesertBatflySocialDebugState(
+        debug = new DB_SocialDebugState(
             PriorityBlockReason(bat) == null,
             state.Drive,
             state.Cooldown,
@@ -266,7 +266,7 @@ internal static class DesertBatflySocialLife
             state.Duration,
             Id(state.Partner),
             Id(state.Anchor),
-            state.Token?.Active == true && state.Token.Mode == DesertBatflySocialMode.GroupDrift ? state.Token.Id : 0,
+            state.Token?.Active == true && state.Token.Mode == DB_SocialMode.GroupDrift ? state.Token.Id : 0,
             groupSize,
             state.LastMode,
             state.DecisionReason,
@@ -279,7 +279,7 @@ internal static class DesertBatflySocialLife
     internal static void SampleTrace(DB_Creature bat)
     {
         if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature) ||
-            !TryGetDebugState(bat, out DesertBatflySocialDebugState social))
+            !TryGetDebugState(bat, out DB_SocialDebugState social))
             return;
 
         float driveBucket = Mathf.Round(social.SocialDrive * 20f) / 20f;
@@ -321,8 +321,8 @@ internal static class DesertBatflySocialLife
 
     internal static int StablePairSide(EntityID a, EntityID b)
     {
-        long ka = DesertBatflySocialRoomRuntime.Key(a);
-        long kb = DesertBatflySocialRoomRuntime.Key(b);
+        long ka = DB_SocialRoomRuntime.Key(a);
+        long kb = DB_SocialRoomRuntime.Key(b);
         long low = Math.Min(ka, kb);
         long high = Math.Max(ka, kb);
         unchecked
@@ -412,7 +412,7 @@ internal static class DesertBatflySocialLife
     private static void TryScheduleInteraction(
         DB_Creature bat,
         State state,
-        DesertBatflySocialRoomRuntime.RoomState roomState,
+        DB_SocialRoomRuntime.RoomState roomState,
         IReadOnlyList<DB_Creature> candidates,
         float activeRatio)
     {
@@ -441,9 +441,9 @@ internal static class DesertBatflySocialLife
                 bond,
                 Mathf.InverseLerp(55f, SocialRange, distance)) *
                 (0.65f + state.Drive * 0.55f) *
-                RepeatScale(state, DesertBatflySocialMode.CompanionDrift, other);
+                RepeatScale(state, DB_SocialMode.CompanionDrift, other);
             if (companionWeight > companion.Weight)
-                companion = new Choice(DesertBatflySocialMode.CompanionDrift, other, companionWeight);
+                companion = new Choice(DB_SocialMode.CompanionDrift, other, companionWeight);
 
             Vector2 relativeVelocity = other.mainBodyChunk.vel - bat.mainBodyChunk.vel;
             float closing = distance > 0.01f ? -Vector2.Dot(delta / distance, relativeVelocity) : 0f;
@@ -451,9 +451,9 @@ internal static class DesertBatflySocialLife
             {
                 float passWeight = (0.30f + Mathf.Clamp01(closing / 6f) * 0.45f +
                     bat.Personality.Nerve * 0.16f + (1f - bat.Personality.Conformity) * 0.10f) *
-                    RepeatScale(state, DesertBatflySocialMode.PassBy, other);
+                    RepeatScale(state, DB_SocialMode.PassBy, other);
                 if (passWeight > passBy.Weight)
-                    passBy = new Choice(DesertBatflySocialMode.PassBy, other, passWeight);
+                    passBy = new Choice(DB_SocialMode.PassBy, other, passWeight);
             }
 
             if (CanPlayChase(bat) && CanPlayChase(other) &&
@@ -462,9 +462,9 @@ internal static class DesertBatflySocialLife
             {
                 float chaseWeight = (0.04f + bat.Personality.AggressionDrive * 0.62f +
                     bat.Personality.Nerve * 0.22f) * (0.55f + state.Drive * 0.55f) *
-                    RepeatScale(state, DesertBatflySocialMode.SocialChase, other);
+                    RepeatScale(state, DB_SocialMode.SocialChase, other);
                 if (chaseWeight > chase.Weight)
-                    chase = new Choice(DesertBatflySocialMode.SocialChase, other, chaseWeight);
+                    chase = new Choice(DB_SocialMode.SocialChase, other, chaseWeight);
             }
 
             if (distance <= 220f && state.GroupScratch.Count < GroupMax && !roomState.IsReserved(other))
@@ -485,9 +485,9 @@ internal static class DesertBatflySocialLife
         DB_Creature roostSource = FindRoostSource(bat, roosting, out int chainSize, out float roostBond);
         if (roostSource != null)
         {
-            DesertBatflySocialMode mode = chainSize >= 2
-                ? DesertBatflySocialMode.ChainSocialization
-                : DesertBatflySocialMode.RoostInvitation;
+            DB_SocialMode mode = chainSize >= 2
+                ? DB_SocialMode.ChainSocialization
+                : DB_SocialMode.RoostInvitation;
             float weight = (0.08f + bat.Personality.RoostAffinity * 0.52f +
                 bat.Personality.Conformity * 0.24f + (1f - bat.Personality.Temperament) * 0.10f +
                 roostBond * 0.20f + Mathf.Clamp01(chainSize / 4f) * 0.12f) *
@@ -498,7 +498,7 @@ internal static class DesertBatflySocialLife
         float groupWeight = state.GroupScratch.Count >= GroupMin
             ? (0.10f + bat.Personality.Conformity * 0.62f +
                 (1f - bat.Personality.Temperament) * 0.20f + state.Drive * 0.18f) *
-                RepeatScale(state, DesertBatflySocialMode.GroupDrift, null)
+                RepeatScale(state, DB_SocialMode.GroupDrift, null)
             : 0f;
         float capScale = activeRatio <= 0.50f
             ? 1f
@@ -544,7 +544,7 @@ internal static class DesertBatflySocialLife
     private static bool TryStartPositionNegotiation(
         DB_Creature bat,
         State state,
-        DesertBatflySocialRoomRuntime.RoomState roomState,
+        DB_SocialRoomRuntime.RoomState roomState,
         IReadOnlyList<DB_Creature> candidates)
     {
         if (state.Cooldown > 0) return false;
@@ -569,7 +569,7 @@ internal static class DesertBatflySocialLife
             }
         }
         if (best == null ||
-            !roomState.TryReservePair(bat, best, DesertBatflySocialMode.PositionNegotiation, out var token))
+            !roomState.TryReservePair(bat, best, DB_SocialMode.PositionNegotiation, out var token))
             return false;
 
         int side = StablePairSide(bat.abstractCreature.ID, best.abstractCreature.ID);
@@ -577,24 +577,24 @@ internal static class DesertBatflySocialLife
             token,
             bat,
             best,
-            DesertBatflySocialMode.PositionNegotiation,
+            DB_SocialMode.PositionNegotiation,
             PairRole.PassA,
             PairRole.PassB,
             StableInt(bat.Personality.VisualSeed ^ best.Personality.VisualSeed, 0x1221, 20, 51),
             side);
-        TraceStart(bat, DesertBatflySocialMode.PositionNegotiation, best, "predicted close-spacing conflict");
+        TraceStart(bat, DB_SocialMode.PositionNegotiation, best, "predicted close-spacing conflict");
         return true;
     }
 
     private static void StartCompanion(
         DB_Creature initiator,
         DB_Creature partner,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
-        if (!roomState.TryReservePair(initiator, partner, DesertBatflySocialMode.CompanionDrift, out var token))
+        if (!roomState.TryReservePair(initiator, partner, DB_SocialMode.CompanionDrift, out var token))
             return;
-        long a = DesertBatflySocialRoomRuntime.Key(initiator);
-        long b = DesertBatflySocialRoomRuntime.Key(partner);
+        long a = DB_SocialRoomRuntime.Key(initiator);
+        long b = DB_SocialRoomRuntime.Key(partner);
         DB_Creature anchor = a <= b ? partner : initiator;
         DB_Creature companion = anchor == initiator ? partner : initiator;
         float bond = Mathf.Max(
@@ -609,42 +609,42 @@ internal static class DesertBatflySocialLife
             token,
             anchor,
             companion,
-            DesertBatflySocialMode.CompanionDrift,
+            DB_SocialMode.CompanionDrift,
             PairRole.Anchor,
             PairRole.Companion,
             duration,
             StablePairSide(anchor.abstractCreature.ID, companion.abstractCreature.ID));
-        TraceStart(initiator, DesertBatflySocialMode.CompanionDrift, partner,
+        TraceStart(initiator, DB_SocialMode.CompanionDrift, partner,
             $"conformity/bond neutral pairing; bond={bond:0.00}");
     }
 
     private static void StartPassBy(
         DB_Creature initiator,
         DB_Creature partner,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
-        if (!roomState.TryReservePair(initiator, partner, DesertBatflySocialMode.PassBy, out var token))
+        if (!roomState.TryReservePair(initiator, partner, DB_SocialMode.PassBy, out var token))
             return;
         int side = StablePairSide(initiator.abstractCreature.ID, partner.abstractCreature.ID);
         AssignPair(
             token,
             initiator,
             partner,
-            DesertBatflySocialMode.PassBy,
+            DB_SocialMode.PassBy,
             PairRole.PassA,
             PairRole.PassB,
             StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x4553, 20, 49),
             side);
-        TraceStart(initiator, DesertBatflySocialMode.PassBy, partner, "closing trajectories / greeting pass");
+        TraceStart(initiator, DB_SocialMode.PassBy, partner, "closing trajectories / greeting pass");
     }
 
     private static void StartChase(
         DB_Creature initiator,
         DB_Creature partner,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
         if (!CanPlayChase(initiator) || !CanPlayChase(partner) ||
-            !roomState.TryReservePair(initiator, partner, DesertBatflySocialMode.SocialChase, out var token))
+            !roomState.TryReservePair(initiator, partner, DB_SocialMode.SocialChase, out var token))
             return;
         DB_Creature chaser = initiator.Personality.Temperament >= partner.Personality.Temperament
             ? initiator
@@ -654,18 +654,18 @@ internal static class DesertBatflySocialLife
             token,
             chaser,
             chased,
-            DesertBatflySocialMode.SocialChase,
+            DB_SocialMode.SocialChase,
             PairRole.Chaser,
             PairRole.Chased,
             StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x6715, 40, 121),
             StablePairSide(chaser.abstractCreature.ID, chased.abstractCreature.ID));
-        TraceStart(chaser, DesertBatflySocialMode.SocialChase, chased, "temperament/nerve play chase");
+        TraceStart(chaser, DB_SocialMode.SocialChase, chased, "temperament/nerve play chase");
     }
 
     private static void StartGroup(
         DB_Creature initiator,
         State state,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
         if (!roomState.TryReserveGroup(state.GroupScratch, out var token)) return;
         int duration = StableInt(initiator.Personality.VisualSeed, state.ScanSerial * 17 + 0x7123, 120, 321);
@@ -675,7 +675,7 @@ internal static class DesertBatflySocialLife
             State memberState = states.GetValue(member, CreateState);
             BeginState(
                 memberState,
-                DesertBatflySocialMode.GroupDrift,
+                DB_SocialMode.GroupDrift,
                 PairRole.GroupMember,
                 token,
                 duration,
@@ -684,19 +684,19 @@ internal static class DesertBatflySocialLife
                 StablePairSide(member.abstractCreature.ID, initiator.abstractCreature.ID));
             TraceGroupEvent(member, "MicroFlockJoined", token, "microflock reservation joined");
         }
-        TraceStart(initiator, DesertBatflySocialMode.GroupDrift, null,
+        TraceStart(initiator, DB_SocialMode.GroupDrift, null,
             $"microflock created; size={token.Members.Count}, id={token.Id}");
     }
 
     private static void StartRoostInvitation(
         DB_Creature target,
         DB_Creature source,
-        DesertBatflySocialMode mode,
+        DB_SocialMode mode,
         State state,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
         Vector2 spot;
-        bool hasTarget = mode == DesertBatflySocialMode.ChainSocialization &&
+        bool hasTarget = mode == DB_SocialMode.ChainSocialization &&
             TryGetChainApproachTarget(target, source, out spot);
         if (!hasTarget)
             hasTarget = TryFindSocialRoost(target, source, roomState, out spot);
@@ -727,10 +727,10 @@ internal static class DesertBatflySocialLife
     }
 
     private static void AssignPair(
-        DesertBatflySocialRoomRuntime.Reservation token,
+        DB_SocialRoomRuntime.Reservation token,
         DB_Creature a,
         DB_Creature b,
-        DesertBatflySocialMode mode,
+        DB_SocialMode mode,
         PairRole roleA,
         PairRole roleB,
         int duration,
@@ -740,7 +740,7 @@ internal static class DesertBatflySocialLife
         State sb = states.GetValue(b, CreateState);
         BeginState(sa, mode, roleA, token, duration, b, roleA == PairRole.Anchor ? a : null, sideA);
         BeginState(sb, mode, roleB, token, duration, a, roleB == PairRole.Anchor ? b : null, -sideA);
-        if (mode == DesertBatflySocialMode.CompanionDrift)
+        if (mode == DB_SocialMode.CompanionDrift)
         {
             if (roleA == PairRole.Companion) sa.Anchor = b;
             if (roleB == PairRole.Companion) sb.Anchor = a;
@@ -751,9 +751,9 @@ internal static class DesertBatflySocialLife
 
     private static void BeginState(
         State state,
-        DesertBatflySocialMode mode,
+        DB_SocialMode mode,
         PairRole role,
-        DesertBatflySocialRoomRuntime.Reservation token,
+        DB_SocialRoomRuntime.Reservation token,
         int duration,
         DB_Creature partner,
         DB_Creature anchor,
@@ -793,23 +793,23 @@ internal static class DesertBatflySocialLife
 
         switch (state.Mode)
         {
-            case DesertBatflySocialMode.CompanionDrift:
+            case DB_SocialMode.CompanionDrift:
                 UpdateCompanion(bat, state);
                 break;
-            case DesertBatflySocialMode.PassBy:
+            case DB_SocialMode.PassBy:
                 UpdatePassBy(bat, state, false);
                 break;
-            case DesertBatflySocialMode.PositionNegotiation:
+            case DB_SocialMode.PositionNegotiation:
                 UpdatePassBy(bat, state, true);
                 break;
-            case DesertBatflySocialMode.SocialChase:
+            case DB_SocialMode.SocialChase:
                 UpdateChase(bat, state);
                 break;
-            case DesertBatflySocialMode.GroupDrift:
+            case DB_SocialMode.GroupDrift:
                 UpdateGroup(bat, state);
                 break;
-            case DesertBatflySocialMode.RoostInvitation:
-            case DesertBatflySocialMode.ChainSocialization:
+            case DB_SocialMode.RoostInvitation:
+            case DB_SocialMode.ChainSocialization:
                 UpdateRoostInvitation(bat, state);
                 break;
         }
@@ -919,7 +919,7 @@ internal static class DesertBatflySocialLife
 
     private static void UpdateGroup(DB_Creature bat, State state)
     {
-        DesertBatflySocialRoomRuntime.Reservation token = state.Token;
+        DB_SocialRoomRuntime.Reservation token = state.Token;
         if (token == null || !token.Active || token.Members.Count < GroupMin)
         {
             CancelState(bat, state, "microflock dissolved below three members", token?.Active == true);
@@ -999,9 +999,9 @@ internal static class DesertBatflySocialLife
             return;
         }
 
-        DesertBatflySocialRoomRuntime.RoomState roomState = state.Token?.Owner;
+        DB_SocialRoomRuntime.RoomState roomState = state.Token?.Owner;
         Vector2 target;
-        bool approachingChain = state.Mode == DesertBatflySocialMode.ChainSocialization &&
+        bool approachingChain = state.Mode == DB_SocialMode.ChainSocialization &&
             TryGetChainApproachTarget(bat, source, out target);
         if (!approachingChain)
         {
@@ -1084,7 +1084,7 @@ internal static class DesertBatflySocialLife
     private static bool TryFindSocialRoost(
         DB_Creature bat,
         DB_Creature source,
-        DesertBatflySocialRoomRuntime.RoomState roomState,
+        DB_SocialRoomRuntime.RoomState roomState,
         out Vector2 spot)
     {
         spot = default;
@@ -1236,13 +1236,13 @@ internal static class DesertBatflySocialLife
     private static bool CanBePartner(
         DB_Creature source,
         DB_Creature candidate,
-        DesertBatflySocialRoomRuntime.RoomState roomState)
+        DB_SocialRoomRuntime.RoomState roomState)
     {
         if (!IsNeutralCandidate(candidate) || candidate == source || candidate.room != source.room ||
             roomState.IsReserved(candidate))
             return false;
         if (states.TryGetValue(candidate, out State candidateState) &&
-            (candidateState.Mode != DesertBatflySocialMode.None || candidateState.Cooldown > 0))
+            (candidateState.Mode != DB_SocialMode.None || candidateState.Cooldown > 0))
             return false;
         if (!DB_EnvironmentalPolicy.WithinActivityRange(source, candidate, SocialRange))
             return false;
@@ -1251,7 +1251,7 @@ internal static class DesertBatflySocialLife
 
     private static bool IsNeutralCandidate(DB_Creature bat)
     {
-        if (!DesertBatflySocialRoomRuntime.ValidMember(bat) || !bat.Consious || bat.AI == null || bat.DesertAI == null)
+        if (!DB_SocialRoomRuntime.ValidMember(bat) || !bat.Consious || bat.AI == null || bat.DesertAI == null)
             return false;
         if (DB_TravelRuntime.HasIntent(bat.abstractCreature) ||
             bat.DesertAI.HasImmediateDanger ||
@@ -1288,7 +1288,7 @@ internal static class DesertBatflySocialLife
 
     private static void FinishToken(DB_Creature bat, State state, string reason, bool preserveRoost = false)
     {
-        DesertBatflySocialRoomRuntime.Reservation token = state.Token;
+        DB_SocialRoomRuntime.Reservation token = state.Token;
         if (token == null)
         {
             FinalizeParticipant(bat, state, reason, true);
@@ -1300,9 +1300,9 @@ internal static class DesertBatflySocialLife
         {
             DB_Creature member = token.Members[i];
             if (member == null || !states.TryGetValue(member, out State memberState)) continue;
-            DesertBatflySocialMode completed = memberState.Mode;
+            DB_SocialMode completed = memberState.Mode;
             FinalizeParticipant(member, memberState, reason, true);
-            if (completed == DesertBatflySocialMode.GroupDrift)
+            if (completed == DB_SocialMode.GroupDrift)
                 TraceGroupEvent(member, "MicroFlockLeft", token, reason);
         }
         if (preserveRoost && bat?.AI?.behavior == FlyAI.Behavior.Chain &&
@@ -1312,7 +1312,7 @@ internal static class DesertBatflySocialLife
 
     private static void CancelForPriorityState(DB_Creature bat, State state, string reason)
     {
-        if (state.Mode == DesertBatflySocialMode.GroupDrift && state.Token?.Active == true)
+        if (state.Mode == DB_SocialMode.GroupDrift && state.Token?.Active == true)
         {
             LeaveGroupParticipant(bat, state, reason);
             return;
@@ -1322,8 +1322,8 @@ internal static class DesertBatflySocialLife
 
     private static void LeaveGroupParticipant(DB_Creature bat, State state, string reason)
     {
-        DesertBatflySocialRoomRuntime.Reservation token = state.Token;
-        if (token == null || !token.Active || token.Mode != DesertBatflySocialMode.GroupDrift)
+        DB_SocialRoomRuntime.Reservation token = state.Token;
+        if (token == null || !token.Active || token.Mode != DB_SocialMode.GroupDrift)
         {
             FinalizeParticipant(bat, state, reason, false);
             return;
@@ -1338,7 +1338,7 @@ internal static class DesertBatflySocialLife
 
     private static void CancelState(DB_Creature bat, State state, string reason, bool releaseToken)
     {
-        DesertBatflySocialRoomRuntime.Reservation token = state.Token;
+        DB_SocialRoomRuntime.Reservation token = state.Token;
         if (releaseToken && token?.Active == true)
         {
             token.Owner.Release(token);
@@ -1346,9 +1346,9 @@ internal static class DesertBatflySocialLife
             {
                 DB_Creature member = token.Members[i];
                 if (member == null || !states.TryGetValue(member, out State memberState)) continue;
-                DesertBatflySocialMode cancelled = memberState.Mode;
+                DB_SocialMode cancelled = memberState.Mode;
                 FinalizeParticipant(member, memberState, reason, false);
-                if (cancelled == DesertBatflySocialMode.GroupDrift)
+                if (cancelled == DB_SocialMode.GroupDrift)
                     TraceGroupEvent(member, "MicroFlockLeft", token, reason);
             }
             return;
@@ -1358,7 +1358,7 @@ internal static class DesertBatflySocialLife
     }
 
     private static void FinalizeReleasedGroup(
-        DesertBatflySocialRoomRuntime.Reservation token,
+        DB_SocialRoomRuntime.Reservation token,
         string reason)
     {
         if (token == null) return;
@@ -1366,7 +1366,7 @@ internal static class DesertBatflySocialLife
         {
             DB_Creature member = token.Members[i];
             if (member == null || !states.TryGetValue(member, out State memberState) ||
-                memberState.Mode != DesertBatflySocialMode.GroupDrift)
+                memberState.Mode != DB_SocialMode.GroupDrift)
                 continue;
             FinalizeParticipant(member, memberState, reason, false);
             TraceGroupEvent(member, "MicroFlockLeft", token, reason);
@@ -1379,10 +1379,10 @@ internal static class DesertBatflySocialLife
         string reason,
         bool completed)
     {
-        DesertBatflySocialMode mode = state.Mode;
+        DB_SocialMode mode = state.Mode;
         state.LastMode = mode;
         state.LastPartnerKey = state.Partner != null
-            ? DesertBatflySocialRoomRuntime.Key(state.Partner)
+            ? DB_SocialRoomRuntime.Key(state.Partner)
             : long.MinValue;
         state.Drive = completed
             ? Mathf.Clamp01(state.Drive * 0.22f)
@@ -1401,7 +1401,7 @@ internal static class DesertBatflySocialLife
 
     private static void EndStateOnly(State state, string reason)
     {
-        state.Mode = DesertBatflySocialMode.None;
+        state.Mode = DB_SocialMode.None;
         state.Role = PairRole.None;
         state.Token = null;
         state.Ticks = 0;
@@ -1413,22 +1413,22 @@ internal static class DesertBatflySocialLife
         state.DecisionReason = reason;
     }
 
-    private static int SocialCooldown(DB_Creature bat, DesertBatflySocialMode mode, bool completed)
+    private static int SocialCooldown(DB_Creature bat, DB_SocialMode mode, bool completed)
     {
         int salt = (int)mode * 193 + (completed ? 0x71 : 0x35);
-        int min = mode == DesertBatflySocialMode.SocialChase ? 220 : 120;
-        int max = mode == DesertBatflySocialMode.SocialChase ? 401 : 321;
+        int min = mode == DB_SocialMode.SocialChase ? 220 : 120;
+        int max = mode == DB_SocialMode.SocialChase ? 401 : 321;
         int value = StableInt(bat?.Personality?.VisualSeed ?? 0, salt, min, max);
         if (bat != null)
             value = Mathf.RoundToInt(value * Mathf.Lerp(1.10f, 0.90f, bat.Personality.Conformity));
         return Mathf.Clamp(value, 90, 420);
     }
 
-    private static float RepeatScale(State state, DesertBatflySocialMode mode, DB_Creature partner)
+    private static float RepeatScale(State state, DB_SocialMode mode, DB_Creature partner)
     {
         float scale = state.LastMode == mode ? 0.38f : 1f;
-        if (partner != null && state.LastPartnerKey == DesertBatflySocialRoomRuntime.Key(partner))
-            scale *= mode == DesertBatflySocialMode.SocialChase ? 0.25f : 0.55f;
+        if (partner != null && state.LastPartnerKey == DB_SocialRoomRuntime.Key(partner))
+            scale *= mode == DB_SocialMode.SocialChase ? 0.25f : 0.55f;
         return scale;
     }
 
@@ -1450,7 +1450,7 @@ internal static class DesertBatflySocialLife
 
     private static void TraceStart(
         DB_Creature bat,
-        DesertBatflySocialMode mode,
+        DB_SocialMode mode,
         DB_Creature partner,
         string reason)
     {
@@ -1462,13 +1462,13 @@ internal static class DesertBatflySocialLife
             "SocialInteractionStarted", mode, details);
         string specific = mode switch
         {
-            DesertBatflySocialMode.CompanionDrift => "CompanionDriftStarted",
-            DesertBatflySocialMode.PassBy => "PassByStarted",
-            DesertBatflySocialMode.SocialChase => "SocialChaseStarted",
-            DesertBatflySocialMode.GroupDrift => "MicroFlockCreated",
-            DesertBatflySocialMode.RoostInvitation => "RoostInvitationAccepted",
-            DesertBatflySocialMode.PositionNegotiation => "PositionNegotiationStarted",
-            DesertBatflySocialMode.ChainSocialization => "RoostInvitationAccepted",
+            DB_SocialMode.CompanionDrift => "CompanionDriftStarted",
+            DB_SocialMode.PassBy => "PassByStarted",
+            DB_SocialMode.SocialChase => "SocialChaseStarted",
+            DB_SocialMode.GroupDrift => "MicroFlockCreated",
+            DB_SocialMode.RoostInvitation => "RoostInvitationAccepted",
+            DB_SocialMode.PositionNegotiation => "PositionNegotiationStarted",
+            DB_SocialMode.ChainSocialization => "RoostInvitationAccepted",
             _ => "SocialInteractionStarted"
         };
         if (specific != "SocialInteractionStarted")
@@ -1478,7 +1478,7 @@ internal static class DesertBatflySocialLife
     private static void TraceGroupEvent(
         DB_Creature bat,
         string key,
-        DesertBatflySocialRoomRuntime.Reservation token,
+        DB_SocialRoomRuntime.Reservation token,
         string reason)
     {
         if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;

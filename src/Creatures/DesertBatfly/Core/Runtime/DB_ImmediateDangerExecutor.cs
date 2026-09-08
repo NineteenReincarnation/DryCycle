@@ -8,7 +8,7 @@ internal static class DB_ImmediateDangerExecutor
         if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.ImmediateDanger ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateDanger))
             return false;
-        DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateDanger");
+        DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateDanger");
         return bat.DesertAI.ExecuteImmediateDangerOwned();
     }
 }

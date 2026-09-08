@@ -13,7 +13,7 @@ internal static class DB_InjuryRecoveryExecutor
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.InjuryRecovery))
             return false;
 
-        DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=InjuryRecovery");
+        DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=InjuryRecovery");
         bat.DesertAI.CancelPhysicalAttack();
         return bat.DesertAI.ExecuteInjuryRecoveryOwned();
     }

@@ -19,43 +19,43 @@ internal sealed class DB_SocialDebugSource : IAIDebugSource
         if (snapshot == null || creature?.realizedCreature is not DB_Creature bat)
             return snapshot;
 
-        bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
-            bat, out DesertBatflySocialDebugState social);
+        bool hasSocial = DB_SocialRuntime.TryGetDebugState(
+            bat, out DB_SocialDebugState social);
 
         var section = new AIDebugSection("Social Neutral Social Life / 中性社会生活")
-            .Add("Social eligible / 可社交", "DesertBatflySocialLife.Eligible",
+            .Add("Social eligible / 可社交", "DB_SocialRuntime.Eligible",
                 hasSocial && social.Eligible)
-            .Add("Social drive / 社交驱动", "DesertBatflySocialLife.SocialDrive",
+            .Add("Social drive / 社交驱动", "DB_SocialRuntime.SocialDrive",
                 hasSocial ? social.SocialDrive : 0f)
-            .Add("Social cooldown / 社交冷却", "DesertBatflySocialLife.SocialCooldown",
+            .Add("Social cooldown / 社交冷却", "DB_SocialRuntime.SocialCooldown",
                 hasSocial ? social.SocialCooldown : 0)
-            .Add("Social mode / 当前互动", "DesertBatflySocialLife.Mode",
+            .Add("Social mode / 当前互动", "DB_SocialRuntime.Mode",
                 hasSocial ? social.Mode.ToString() : "None")
-            .Add("Interaction ticks / 互动进度", "DesertBatflySocialLife.InteractionTicks",
+            .Add("Interaction ticks / 互动进度", "DB_SocialRuntime.InteractionTicks",
                 hasSocial ? $"{social.InteractionTicks}/{social.Duration}" : "0/0")
-            .Add("Temporary partner / 临时伙伴", "DesertBatflySocialLife.Partner",
+            .Add("Temporary partner / 临时伙伴", "DB_SocialRuntime.Partner",
                 hasSocial ? social.Partner : "—")
-            .Add("Temporary anchor / 临时锚点", "DesertBatflySocialLife.Anchor",
+            .Add("Temporary anchor / 临时锚点", "DB_SocialRuntime.Anchor",
                 hasSocial ? social.Anchor : "—")
-            .Add("MicroFlock / 微群", "DesertBatflySocialLife.MicroFlock",
+            .Add("MicroFlock / 微群", "DB_SocialRuntime.MicroFlock",
                 hasSocial && social.MicroFlockId != 0
                     ? $"id={social.MicroFlockId}, size={social.MicroFlockSize}"
                     : "—")
-            .Add("Last interaction / 上次互动", "DesertBatflySocialLife.LastInteractionType",
+            .Add("Last interaction / 上次互动", "DB_SocialRuntime.LastInteractionType",
                 hasSocial ? social.LastInteractionType.ToString() : "None")
-            .Add("Decision reason / 决策原因", "DesertBatflySocialLife.DecisionReason",
+            .Add("Decision reason / 决策原因", "DB_SocialRuntime.DecisionReason",
                 hasSocial && !string.IsNullOrEmpty(social.DecisionReason) ? social.DecisionReason : "—")
-            .Add("Candidate count / 候选数量", "DesertBatflySocialLife.CandidateCount",
+            .Add("Candidate count / 候选数量", "DB_SocialRuntime.CandidateCount",
                 hasSocial ? social.CandidateCount : 0)
-            .Add("Roost target / 倒挂目标", "DesertBatflySocialLife.RoostTarget",
+            .Add("Roost target / 倒挂目标", "DB_SocialRuntime.RoostTarget",
                 hasSocial && social.RoostTarget.HasValue ? social.RoostTarget.Value.ToString() : "—")
-            .Add("Negotiation side / 协商方向", "DesertBatflySocialLife.NegotiationSide",
+            .Add("Negotiation side / 协商方向", "DB_SocialRuntime.NegotiationSide",
                 hasSocial ? social.NegotiationSide : 0);
         snapshot.Sections.Add(section);
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Social social / 中性社会互动",
-            hasSocial && social.Mode != DesertBatflySocialMode.None
+            hasSocial && social.Mode != DB_SocialMode.None
                 ? AIDebugDecisionState.Active
                 : hasSocial && !social.Eligible
                     ? AIDebugDecisionState.Blocked
@@ -63,7 +63,7 @@ internal sealed class DB_SocialDebugSource : IAIDebugSource
             hasSocial
                 ? $"{social.Mode}; drive={social.SocialDrive:0.00}; cooldown={social.SocialCooldown}; {social.DecisionReason}"
                 : "no realized Social state",
-            "DesertBatflySocialLife"));
+            "DB_SocialRuntime"));
 
         return snapshot;
     }

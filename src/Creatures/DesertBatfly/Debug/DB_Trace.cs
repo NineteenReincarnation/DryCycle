@@ -21,9 +21,9 @@ internal static class DB_Trace
 
         bool hasTravel = DB_TravelRuntime.TryGetDebugState(
             bat.abstractCreature, out DB_TravelDebugState travel);
-        bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
-            bat, out DesertBatflySocialDebugState social) &&
-            social.Mode != DesertBatflySocialMode.None;
+        bool hasSocial = DB_SocialRuntime.TryGetDebugState(
+            bat, out DB_SocialDebugState social) &&
+            social.Mode != DB_SocialMode.None;
         string suppression = Suppression(bat, hasTravel, travel);
         string modeReason = ModeReason(bat, suppression, hasTravel, travel, hasSocial, social);
         string controlOwner = ControlOwner(bat, suppression, hasTravel, travel, hasSocial, social);
@@ -118,7 +118,7 @@ internal static class DB_Trace
         bool hasTravel,
         in DB_TravelDebugState travel,
         bool hasSocial,
-        in DesertBatflySocialDebugState social)
+        in DB_SocialDebugState social)
     {
         switch (suppression)
         {
@@ -175,7 +175,7 @@ internal static class DB_Trace
         bool hasTravel,
         in DB_TravelDebugState travel,
         bool hasSocial,
-        in DesertBatflySocialDebugState social)
+        in DB_SocialDebugState social)
     {
         switch (suppression)
         {

@@ -258,7 +258,7 @@ internal static class DB_SignalRuntime
                 state.AlarmThreat = packet.Threat;
                 state.LastAlarmTick = receiver.room.game?.clock ?? 0;
                 state.LastDecision = "accepted AlarmFlutter as short-term danger context";
-                DesertBatflySocialLife.CancelForPriority(receiver, "AlarmFlutter priority");
+                DB_SocialRuntime.CancelForPriority(receiver, "AlarmFlutter priority");
                 ApplyAlarm(receiver, packet, response);
                 relayAlarm = packet.Hop < MaxAlarmHop && ShouldRelayAlarm(receiver, packet, response);
                 break;
@@ -268,7 +268,7 @@ internal static class DB_SignalRuntime
                 state.DistressSource = packet.Subject ?? packet.Emitter;
                 state.LastDecision = "accepted DistressCall; existing rescue/vengeance systems retain authority";
                 if (response >= 0.38f)
-                    DesertBatflySocialLife.CancelForPriority(receiver, "DistressCall priority");
+                    DB_SocialRuntime.CancelForPriority(receiver, "DistressCall priority");
                 break;
 
             case DB_SignalKind.RallySignal:

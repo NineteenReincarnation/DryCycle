@@ -119,7 +119,7 @@ internal readonly struct DB_FrameContext
     internal readonly DB_EnvironmentInfluence EnvironmentInfluence;
     internal readonly DB_ThreatFrameSummary Threat;
     internal readonly bool HasSocialState;
-    internal readonly DesertBatflySocialDebugState Social;
+    internal readonly DB_SocialDebugState Social;
     internal readonly DB_RoostFrameSummary Roost;
     internal readonly bool VengeanceActive;
     internal readonly Creature VengeanceTarget;
@@ -171,7 +171,7 @@ internal readonly struct DB_FrameContext
         in DB_EnvironmentInfluence environmentInfluence,
         in DB_ThreatFrameSummary threat,
         bool hasSocialState,
-        in DesertBatflySocialDebugState social,
+        in DB_SocialDebugState social,
         in DB_RoostFrameSummary roost,
         bool vengeanceActive,
         Creature vengeanceTarget,
@@ -348,8 +348,8 @@ internal static class DB_FrameContextRuntime
             acuteThreat,
             hasThreat ? threatDebug.HazardCenter : null);
 
-        bool hasSocial = DesertBatflySocialLife.TryGetDebugState(
-            bat, out DesertBatflySocialDebugState social);
+        bool hasSocial = DB_SocialRuntime.TryGetDebugState(
+            bat, out DB_SocialDebugState social);
 
         bool hasTravel = DB_TravelRuntime.TryGetDebugState(
             bat.abstractCreature, out DB_TravelDebugState travelDebug);
