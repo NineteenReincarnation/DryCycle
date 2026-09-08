@@ -26,15 +26,15 @@ internal static partial class Program
             Check(packet.GetField(field, Flags) != null, "Signals signal packet contains " + field);
 
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
-        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalRoomRuntime", true);
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
+        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRoomRuntime", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
         Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Graphics", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
-        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type eventConsumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
 
         Check((int)runtime.GetField("MaxAlarmHop", Flags).GetRawConstantValue() == 2,
@@ -63,13 +63,6 @@ internal static partial class Program
         MethodInfo safe = runtime.GetMethod("CanAcceptSafe", Flags);
         Check(response != null && receive != null && perceive != null && safe != null,
             "Signals has explicit response, perception and Safe acceptance gates");
-
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalVengeanceBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalThreatBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalAcuteBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalDirectWitnessBridge", false) == null,
-            "Signals R5 retires all internal Reflection/RuntimeDetour signal integration layers");
 
         Check(runtime.GetMethod("ApplyAlarm", Flags) != null &&
               runtime.GetMethod("EmitAcuteAlarm", Flags) != null &&
@@ -121,11 +114,11 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
-            "Signals does not restore rejected rejected social-role design social role runtime");
+            "Signals does not restore rejected social-role design social role runtime");
 
         Check(intimidation.GetNestedType("SocialRole", Flags) == null &&
               intimidation.GetNestedType("VengeanceParticipation", Flags) != null,
-            "Signals terminology keeps vengeance participation separate from rejected rejected social-role design SocialRole");
+            "Signals terminology keeps vengeance participation separate from rejected social-role design SocialRole");
 
         Console.WriteLine(
             "Signals signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Threat read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");

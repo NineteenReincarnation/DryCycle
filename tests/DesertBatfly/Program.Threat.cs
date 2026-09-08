@@ -23,11 +23,11 @@ internal static partial class Program
         Type adapterType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatClassifier", true);
         Type runtimeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type cueType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatCue", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatCue", true);
         Type debugType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatDebugState", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatDebugState", true);
         Type stateType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_State", true);
 
@@ -208,7 +208,7 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
-            "Threat does not revive rejected rejected social-role design social roles");
+            "Threat does not revive rejected social-role design social roles");
 
         Console.WriteLine(
             "Threat: twelve-dimensional memory, four-player isolation, saturating learning/decay, built-in threat tags, independent save key, room cues, non-persistent acute state, vanilla flight ownership and debug shape verified.");

@@ -18,13 +18,13 @@ internal static partial class Program
         Type ai = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type threat = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type tactics = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type signalRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type signalRoomRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureSignalRoomRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_SignalRoomRuntime", true);
         Type environmentRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Type swarmRoom = mod.GetType(
@@ -139,12 +139,6 @@ internal static partial class Program
               MethodCallOffset(signalPerceive, visibility, "EffectiveRange") >= 0 &&
               MethodCallOffset(signalPerceive, visibility, "CanObserve") >= 0,
             "Architecture shared perception Signals visual signal perception uses the central visibility authority while acoustic fallback stays local");
-
-        Check(mod.GetType(
-                  "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSignalBridge", false) == null &&
-              mod.GetType(
-                  "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalThreatBridge", false) == null,
-            "Architecture shared perception removes obsolete internal visual Signal/Threat detour bridges");
 
         MethodInfo updateRoom = hooks.GetMethod("UpdateRoom", Flags);
         int swarmUpdate = MethodCallOffset(updateRoom, swarmRoom, "UpdateRoom");

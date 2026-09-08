@@ -6,20 +6,12 @@ internal static partial class Program
 {
     private static void RunThreatTactics()
     {
-        Type tacticsType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
-        Type bridgeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", true);
-        Type traceType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_ThreatTrace", true);
-        Type threatRuntimeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
-        Type socialLifeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
-        Type aiType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_AI", true);
-        Type hooksType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
+        Type tacticsType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
+        Type threatRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
+        Type vengeanceType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
+        Type motorType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
+        Type arbiterType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
+        Type weaponPerceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
 
         MethodInfo learnedFakeDive = tacticsType.GetMethod("LearnedFakeDiveChance", Flags);
         Check(learnedFakeDive != null,
@@ -47,99 +39,44 @@ internal static partial class Program
         });
 
         Check(Math.Abs(baseline - 0.30f) < 0.0001f,
-            "Threat with no learned evidence leaves vanilla/personality FakeDive chance unchanged");
+            "Threat with no learned evidence leaves personality FakeDive chance unchanged");
         Check(learned > baseline && learned < 1f,
-            "high projectile/piercing/counter-kill memory increases probe/FakeDive weight without forcing it");
+            "learned projectile/piercing/counter-kill evidence increases probe weight without forcing it");
         Check(visibleSpear > learned,
-            "a currently visible Spear strengthens learned FakeDive caution without training memory by itself");
+            "a currently visible Spear strengthens learned caution without training memory by itself");
         Check(lowNerve > highNerve,
             "Threat personality modulation makes low-Nerve bats more cautious than high-Nerve bats");
 
         MethodInfo adjustFakeDive = tacticsType.GetMethod("AdjustFakeDiveChance", Flags);
-        MethodInfo ordinaryProjectileEvade = tacticsType.GetMethod("TryApplyOrdinaryProjectileEvade", Flags);
+        MethodInfo ordinaryEvade = tacticsType.GetMethod("TryApplyOrdinaryProjectileEvade", Flags);
+        MethodInfo applyEvade = tacticsType.GetMethod("ApplyProjectileEvadeOwned", Flags);
         MethodInfo adjustVengeance = tacticsType.GetMethod("AdjustExtremeVengeanceGoal", Flags);
-        MethodInfo projectileEvade = tacticsType.GetMethod("TryIncomingProjectileEvade", Flags);
-        Check(adjustFakeDive != null && ordinaryProjectileEvade != null &&
-              adjustVengeance != null && projectileEvade != null,
-            "Threat exposes ordinary attack, ordinary real-projectile evade and Extreme Vengeance tactical entry points");
+        MethodInfo projectileGeometry = tacticsType.GetMethod("TryIncomingProjectileEvade", Flags);
+        MethodInfo tryProfile = tacticsType.GetMethod("TryProfile", Flags);
+        Check(adjustFakeDive != null && ordinaryEvade != null && applyEvade != null &&
+              adjustVengeance != null && projectileGeometry != null && tryProfile != null,
+            "Threat exposes current attack weighting, projectile evade and Vengeance geometry entry points");
+
         Check(!MethodWritesField(adjustFakeDive, typeof(BodyChunk), "vel") &&
-              !MethodWritesField(ordinaryProjectileEvade, typeof(BodyChunk), "vel") &&
+              !MethodWritesField(ordinaryEvade, typeof(BodyChunk), "vel") &&
+              !MethodWritesField(applyEvade, typeof(BodyChunk), "vel") &&
               !MethodWritesField(adjustVengeance, typeof(BodyChunk), "vel") &&
-              !MethodWritesField(projectileEvade, typeof(BodyChunk), "vel"),
-            "Threat tactical helpers never become a second BodyChunk velocity locomotion system");
-        Check(MethodCallsThreat(ordinaryProjectileEvade, tacticsType, "TryIncomingProjectileEvade"),
-            "ordinary real-projectile response reuses the same validated trajectory/side-step geometry as Vengeance");
+              !MethodWritesField(projectileGeometry, typeof(BodyChunk), "vel"),
+            "Threat tactics never become a parallel BodyChunk velocity locomotion system");
+        Check(MethodCallsThreat(ordinaryEvade, threatRuntimeType, "TryGetDebugState") &&
+              MethodCallsThreat(ordinaryEvade, vengeanceType, "IsActive") &&
+              MethodCallsThreat(ordinaryEvade, tacticsType, "ApplyProjectileEvadeOwned"),
+            "ordinary projectile response consumes current Threat facts, preserves Vengeance priority and enters the owner-gated evade path");
+        Check(MethodCallsThreat(applyEvade, arbiterType, "IsPrimaryOwner") &&
+              MethodCallsThreat(applyEvade, motorType, "TryGuideNative"),
+            "projectile evade requires same-frame ownership and submits movement through FlightMotor");
+        Check(MethodCallsThreat(tryProfile, weaponPerceptionType, "TryObserveHeldThreats"),
+            "Threat tactical profile uses shared held-item perception rather than a private scan");
         Check(!TypeCallsForbiddenThreatInput(tacticsType),
-            "Threat shared tactics never read player input/controller state or hidden intent");
-
-        MethodInfo aiUpdate = aiType.GetMethod("Update", Flags);
-        Check(MethodCallsThreat(aiUpdate, tacticsType, "AdjustFakeDiveChance"),
-            "ordinary DB_AI attack selection actually consumes learned FakeDive weighting");
-
-        MethodInfo tryInjuryRecovery = aiType.GetMethod("TryInjuryRecovery", Flags);
-        MethodInfo canHarass = aiType.GetMethod("CanHarass", Flags);
-        MethodInfo acquireSlot = aiType.GetMethod("AcquireSlot", Flags);
-        MethodInfo armRetaliation = aiType.GetMethod("ArmRetaliation", Flags);
-        MethodInfo traumatizedPlayer = aiType.GetMethod("IsTraumatizedPlayer", Flags);
-        int injuryOffset = MethodCallOffset(aiUpdate, aiType, "TryInjuryRecovery");
-        int fakeDiveOffset = MethodCallOffset(aiUpdate, tacticsType, "AdjustFakeDiveChance");
-        Check(tryInjuryRecovery != null && injuryOffset >= 0 && fakeDiveOffset > injuryOffset,
-            "Severe Injury recovery is evaluated before Threat learned attack weighting");
-        Check(traumatizedPlayer != null &&
-              MethodCallsThreat(canHarass, aiType, "IsTraumatizedPlayer") &&
-              MethodCallsThreat(acquireSlot, aiType, "IsTraumatizedPlayer") &&
-              MethodCallsThreat(armRetaliation, aiType, "IsTraumatizedPlayer"),
-            "strong player-specific Trauma/PTSD still vetoes ordinary harass, attack-slot acquisition and retaliation");
-
-        MethodInfo bridgeHook = bridgeType.GetMethod("ForceFlightHook", Flags);
-        MethodInfo bridgeUpdateHook = bridgeType.GetMethod("IntimidationUpdateHook", Flags);
-        MethodInfo markTravelOwnedFrame = bridgeType.GetMethod("MarkTravelOwnedFrame", Flags);
-        Check(bridgeType.GetMethod("Enable", Flags) != null &&
-              bridgeType.GetMethod("Disable", Flags) != null &&
-              bridgeType.GetProperty("Installed", Flags) != null,
-            "Threat Extreme Vengeance bridge has explicit lifecycle and install status");
-        Check(bridgeHook != null &&
-              MethodCallsThreat(bridgeHook, tacticsType, "AdjustExtremeVengeanceGoal"),
-            "Extreme Vengeance ForceFlight bridge consumes the same per-player learned tactical profile");
-        Check(!MethodWritesField(bridgeHook, typeof(BodyChunk), "vel"),
-            "Threat Vengeance bridge only changes ForceFlight arguments; original Intimidation owns velocity");
-        Check(bridgeUpdateHook != null && markTravelOwnedFrame != null,
-            "Threat Vengeance bridge exposes exact-frame Travel/Colony suspension without deleting Vengeance memory");
-        Check(!MethodWritesField(bridgeUpdateHook, typeof(BodyChunk), "vel") &&
-              !MethodWritesField(markTravelOwnedFrame, typeof(BodyChunk), "vel"),
-            "Travel/Colony/Vengeance priority bridge never takes over physical locomotion");
-        Check(!TypeCallsForbiddenThreatInput(bridgeType),
-            "Threat Vengeance bridge does not inspect input or predict future attacks");
-
-        MethodInfo traceSample = traceType.GetMethod("Sample", Flags);
-        Check(traceSample != null,
-            "Threat has a watched-only Threat Signature trace sampler");
-        MethodInfo hookUpdateAI = hooksType.GetMethod("UpdateAI", Flags);
-        MethodInfo hookRain = hooksType.GetMethod("Rain", Flags);
-        Check(MethodCallsThreat(hookUpdateAI, traceType, "Sample"),
-            "Threat threat trace is sampled in the realized AI pipeline before neutral Social social life");
-        Check(MethodCallsThreat(hooksType.GetMethod("Enable", Flags), bridgeType, "Enable") &&
-              MethodCallsThreat(hooksType.GetMethod("Disable", Flags), bridgeType, "Disable"),
-            "Threat Vengeance bridge installs/uninstalls with DesertBatfly lifecycle");
-        Check(MethodCallsThreat(hookUpdateAI, bridgeType, "MarkTravelOwnedFrame") &&
-              MethodCallsThreat(hookRain, bridgeType, "MarkTravelOwnedFrame"),
-            "Travel/Colony marks only successfully-owned realized frames so later Intimidation/Vengeance cannot steal them back");
-
-        int threatUpdateOffset = MethodCallOffset(hookUpdateAI, threatRuntimeType, "Update");
-        int ordinaryEvadeOffset = MethodCallOffset(hookUpdateAI, tacticsType, "TryApplyOrdinaryProjectileEvade");
-        int traceOffset = MethodCallOffset(hookUpdateAI, traceType, "Sample");
-        int socialOffset = MethodCallOffset(hookUpdateAI, socialLifeType, "Update");
-        Check(threatUpdateOffset >= 0 && ordinaryEvadeOffset > threatUpdateOffset &&
-              traceOffset > ordinaryEvadeOffset && socialOffset > ordinaryEvadeOffset,
-            "real projectile cue is detected first, then ordinary lateral evade owns localGoal before Trace and neutral Social");
-
-        Type rejectedRole = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false);
-        Check(rejectedRole == null,
-            "Threat final combat integration still does not restore rejected rejected social-role design roles");
+            "Threat tactics never inspect player input/controller state or hidden intent");
 
         Console.WriteLine(
-            "Threat final tactics: learned FakeDive weighting, ordinary real-projectile lateral evade, Severe Injury/PTSD priority guards, Extreme Vengeance geometry, exact-frame Travel/Colony priority, velocity ownership and Trace lifecycle verified.");
+            "Threat tactics: learned FakeDive weighting, shared perception, current Threat facts, Vengeance priority, owner-gated projectile evade and FlightMotor ownership verified.");
     }
 
     private static bool MethodCallsThreat(MethodInfo caller, Type targetType, string targetName) =>

@@ -4,16 +4,16 @@ using System.Reflection;
 internal static partial class Program
 {
     // Historical entry-point name is kept only because Program.cs invokes it.
-    // This guard requires the rejected rejected social-role design runtime types and API surfaces to remain
+    // This guard requires the rejected social-role design runtime types and API surfaces to remain
     // physically absent. Any compatibility shell is considered a regression.
     private static void RunRejectedSocialRoles()
     {
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
-            "rejected rejected social-role design runtime class is physically removed");
+            "rejected social-role design runtime class is physically removed");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null,
-            "rejected rejected social-role design score type is physically removed");
+            "rejected social-role design score type is physically removed");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
-            "rejected rejected social-role design enum is physically removed");
+            "rejected social-role design enum is physically removed");
 
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Check(ai.GetField("Roles", Flags) == null && ai.GetProperty("Roles", Flags) == null,

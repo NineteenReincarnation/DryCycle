@@ -6,13 +6,13 @@ internal static partial class Program
 {
     private static void RunSocialGuards()
     {
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
 
         Check(!TypeCallsForbiddenSocialMethod(social),
             "Social neutral social layer does not call Random/combat/trauma/damage APIs");
 
         Type roomRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoomRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_SocialRoomRuntime", true);
         Type roomState = roomRuntime.GetNestedType("RoomState", Flags);
         FieldInfo refreshInterval = roomState?.GetField("RefreshInterval", Flags);
         Check(refreshInterval != null && (int)refreshInterval.GetRawConstantValue() == 20,

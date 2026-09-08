@@ -40,8 +40,7 @@ internal static partial class Program
         Check(TypeLoadsStringR0(swarmRoomType, "DESERTSWARMROOM"),
             "Architecture baseline freezes authored room tag DESERTSWARMROOM");
 
-        // Migration-mode naming guard: old Travel/Colony-13 production names are tolerated until
-        // R5/R6 removes them, but no new Architecture refactor+ runtime names may be introduced.
+        // Domain naming guard: production types may not encode development-task numbers.
         Type[] productionTypes;
         try
         {
@@ -59,12 +58,10 @@ internal static partial class Program
             if (type == null) continue;
             string ns = type.Namespace ?? string.Empty;
             if (!ns.StartsWith("DryCycle.Creatures.DesertBatfly", StringComparison.Ordinal)) continue;
-            Check(type.Name.IndexOf("Task14", StringComparison.OrdinalIgnoreCase) < 0 &&
-                  type.Name.IndexOf("Task15", StringComparison.OrdinalIgnoreCase) < 0 &&
-                  type.Name.IndexOf("Task16", StringComparison.OrdinalIgnoreCase) < 0,
-                "Architecture baseline prevents new task-number production types: " + type.FullName);
-            Check(!type.Name.StartsWith("DB_Task", StringComparison.Ordinal),
-                "Architecture baseline forbids combining DB_ source prefix with TaskXX architecture names: " + type.FullName);
+            Check(!System.Text.RegularExpressions.Regex.IsMatch(
+                    type.Name,
+                    @"(?i)task[\s_-]*[0-9]+"),
+                "Architecture baseline prevents development-task numbers in production type names: " + type.FullName);
         }
 
         // Hidden-bug baseline guard 1: the already-existing room-progress frame stamp is

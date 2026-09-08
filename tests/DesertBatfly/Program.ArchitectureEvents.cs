@@ -146,7 +146,7 @@ internal static partial class Program
             "Architecture event foundation Colony and Intimidation consume the same canonical MortalityEvent killer");
 
         Type threatRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type threatState = threatRuntime.GetNestedType("RuntimeState", Flags);
         Check(threatRuntime.GetMethod("DamageEvent", Flags) != null &&
               threatRuntime.GetMethod("CaptureEvent", Flags) != null &&
@@ -166,17 +166,17 @@ internal static partial class Program
         Check(MethodCallOffset(threatRuntime.GetMethod("MortalityEvent", Flags), threatRuntime, "Forget") >= 0,
             "Architecture event foundation ThreatRuntime clears its own transient state only after consuming canonical mortality");
 
-        Type signalIntegration = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", true);
-        MethodInfo signalEnable = signalIntegration.GetMethod("Enable", Flags);
-        MethodInfo signalDisable = signalIntegration.GetMethod("Disable", Flags);
-        Check(signalIntegration.GetMethod("FlyGrabbed", Flags) == null &&
-              signalIntegration.GetMethod("TongueUpdate", Flags) == null &&
-              signalIntegration.GetMethod("CaptureEvent", Flags) != null,
-            "Architecture event foundation Signals signals no longer observe raw grasp/tongue roots independently");
-        Check(MethodCallOffset(signalEnable, hub, "add_Capture") >= 0 &&
-              MethodCallOffset(signalDisable, hub, "remove_Capture") >= 0,
-            "Architecture event foundation Signals capture signals subscribe to the canonical CaptureEvent lifecycle");
+        Type signalRuntime = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
+        MethodInfo consumerEnable = consumers.GetMethod("Enable", Flags);
+        MethodInfo consumerDisable = consumers.GetMethod("Disable", Flags);
+        Check(captureConsumer != null &&
+              MethodCallOffset(captureConsumer, signalRuntime, "EmitDistress") >= 0 &&
+              MethodCallOffset(captureConsumer, signalRuntime, "EmitAlarm") >= 0,
+            "Architecture event foundation canonical CaptureEvent directly publishes Distress/Alarm through SignalRuntime");
+        Check(MethodCallOffset(consumerEnable, hub, "add_Capture") >= 0 &&
+              MethodCallOffset(consumerDisable, hub, "remove_Capture") >= 0,
+            "Architecture event foundation event consumers own the canonical CaptureEvent subscription lifecycle");
 
         Type corpseWarnings = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_CorpseWarningRuntime", true);

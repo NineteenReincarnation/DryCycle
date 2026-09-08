@@ -8,10 +8,10 @@ internal static partial class Program
 {
     private static void RunSocial()
     {
-        Type socialType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
-        Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialMode", true);
-        Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialDebugState", true);
-        Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoomRuntime", true);
+        Type socialType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
+        Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialMode", true);
+        Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialDebugState", true);
+        Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRoomRuntime", true);
         Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Personality", true);
         Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
 
@@ -143,7 +143,7 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
-            "Social does not revive any rejected rejected social-role design social-role runtime type");
+            "Social does not revive any rejected social-role design social-role runtime type");
 
         Console.WriteLine("Social: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");
     }

@@ -23,10 +23,10 @@ internal static partial class Program
         Type fearExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearExecutor", true);
         Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
         Type roostExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostExecutor", true);
-        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
-        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
+        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
 
@@ -112,24 +112,18 @@ internal static partial class Program
         Check(intimidation.GetMethod("TryGetVengeanceTarget", Flags) != null,
             "Architecture arbitration Vengeance target is readable through an explicit API instead of sibling reflection");
 
-        Type vengeanceBridge = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", true);
-        Check(vengeanceBridge.GetField("statesField", Flags) == null &&
-              vengeanceBridge.GetField("tryGetValue", Flags) == null &&
-              vengeanceBridge.GetField("vengeanceTargetField", Flags) == null &&
-              vengeanceBridge.GetField("travelFrames", Flags) == null,
-            "Architecture arbitration removes private Intimidation reflection and parallel Travel frame stamps");
-        Check(vengeanceBridge.GetMethod("IntimidationUpdateHook", Flags) == null &&
-              vengeanceBridge.GetField("intimidationUpdateHook", Flags) == null &&
-              MethodCallOffset(vengeanceBridge.GetMethod("ForceFlightHook", Flags), intimidation, "TryGetVengeanceTarget") >= 0,
-            "Architecture arbitration Vengeance bridge is tactic-only and no longer intercepts state lifecycle");
+        Type vengeanceRuntime = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
+        Check(vengeanceRuntime.GetMethod("IsActive", Flags) != null &&
+              vengeanceRuntime.GetMethod("IsAvenger", Flags) != null &&
+              vengeanceRuntime.GetMethod("TryGetTarget", Flags) != null &&
+              vengeanceRuntime.GetMethod("ExecuteOwned", Flags) != null,
+            "Architecture arbitration exposes Vengeance through a formal domain runtime rather than an internal bridge");
+        Check(MethodCallOffset(vengeanceExecutor.GetMethod("TryExecute", Flags), vengeanceRuntime, "ExecuteOwned") >= 0,
+            "Architecture arbitration Vengeance executor enters the formal Vengeance runtime");
         Check(intimidation.GetMethod("UpdateState", Flags) != null &&
-              intimidation.GetMethod("ExecuteVengeanceOwned", Flags) != null &&
-              MethodCallOffset(intimidation.GetMethod("ExecuteVengeanceOwned", Flags), arbiter, "IsPrimaryOwner") >= 0 &&
-              MethodCallOffset(intimidation.GetMethod("ForceFlight", Flags), arbiter, "IsPrimaryOwner") >= 0,
-            "Architecture arbitration Vengeance state tick is split from owner-gated movement/contact execution");
-        Check(MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
-            "Architecture arbitration refreshes Vengeance/fear facts before FlyAI arbitration");
+              MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
+            "Architecture arbitration refreshes fear and shared vengeance facts before FlyAI arbitration");
         Check(environmentBehavior.GetMethod("RefreshInfluence", Flags) != null &&
               environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags) != null &&
               MethodCallOffset(environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0,

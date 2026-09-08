@@ -6,27 +6,22 @@ internal static partial class Program
     private static void RunArchitectureBridgeCleanup()
     {
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
-        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
+        Type fear = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
-
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalDenseFogBridge", false) == null,
-            "R5 removes behavior-neutral DenseFog RuntimeDetour shim");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalVengeanceBridge", false) == null,
-            "R5 removes hard-survival Vengeance detour; Arbiter owns preemption");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", false) == null,
-            "R5 removes Threat/Vengeance ForceFlight RuntimeDetour");
-
-        MethodInfo forceFlight = intimidation.GetMethod("ForceFlight", Flags);
-        Check(forceFlight != null &&
-              MethodCallOffset(forceFlight, tactics, "AdjustExtremeVengeanceGoal") >= 0,
-            "R5 Vengeance explicitly consumes Threat tactical geometry through formal API");
-
-        Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), intimidation, "Reset") >= 0,
-            "R5 species lifecycle remains wired after deleting obsolete bridges");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalIntegration", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSocialBridge", false) == null,
-            "R5 removes Environment Reflection/RuntimeDetour integration and social bridge");
         Type policy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
+        Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
+        Type roomEnvironment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
+        Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
+        Type consumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
+        Type hub = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventHub", true);
+
+        Check(fear.GetMethod("UpdateState", Flags) != null &&
+              vengeance.GetMethod("TryGetTarget", Flags) != null &&
+              vengeance.GetMethod("ExecuteOwned", Flags) != null &&
+              tactics.GetMethod("AdjustExtremeVengeanceGoal", Flags) != null,
+            "Architecture bridge cleanup keeps Fear, Vengeance and Threat tactics connected through explicit domain APIs");
+
         Check(policy.GetMethod("AggressionAuthorized", Flags) != null &&
               policy.GetMethod("CombatMotivation", Flags) != null &&
               policy.GetMethod("AllowsHarassCandidate", Flags) != null &&
@@ -36,28 +31,24 @@ internal static partial class Program
               policy.GetMethod("ShouldRecallHomeForSandstorm", Flags) != null &&
               policy.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
               policy.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
-            "R5 explicit environmental policy replaces mutation/detour based cross-domain behavior");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalTask09Bridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", false) == null,
-            "R5 B3 physically removes Travel/Colony and Survival RuntimeDetour bridges");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalVengeanceBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalThreatBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalAcuteBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalDirectWitnessBridge", false) == null,
-            "R5 B4 physically removes the Signals internal detour hub and four signal bridges");
+            "Architecture bridge cleanup exposes environmental cross-domain decisions through one explicit policy API");
 
-        Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
-        Type behavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
-        Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null &&
-              behavior.GetMethod("ApplyOwnedBehavior", Flags) != null,
-            "R5 B3 keeps LocalShelterFailure and same-room survival in their direct Environment owners");
+        Check(environment.GetMethod("RefreshInfluence", Flags) != null &&
+              environment.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              environment.GetMethod("ApplyNativeHomeAndBurrow", Flags) != null &&
+              roomEnvironment.GetMethod("TryGetShelterFailureDebug", Flags) != null,
+            "Architecture bridge cleanup keeps same-room survival and shelter failure in direct Environment owners");
 
-        Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
-        Check(signalRuntime.GetMethod("EmitAcuteAlarm", Flags) != null &&
-              signalRuntime.GetMethod("EmitRally", Flags) != null,
-            "R5 B4 replaces signal detours with direct domain APIs");
+        Check(signals.GetMethod("EmitAcuteAlarm", Flags) != null &&
+              signals.GetMethod("EmitRally", Flags) != null &&
+              signals.GetMethod("EmitDistress", Flags) != null,
+            "Architecture bridge cleanup keeps signal roots on explicit SignalRuntime APIs");
+        Check(MethodCallOffset(consumers.GetMethod("Enable", Flags), hub, "add_Capture") >= 0 &&
+              MethodCallOffset(consumers.GetMethod("Disable", Flags), hub, "remove_Capture") >= 0,
+            "Architecture bridge cleanup canonical semantic-event consumers own their lifecycle directly");
+        Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), fear, "Reset") >= 0,
+            "Architecture bridge cleanup species lifecycle remains wired to direct domain owners");
 
-        Console.WriteLine("Architecture bridge cleanup B4: Environment and Signal internal detours are retired; direct domain APIs preserve cross-domain behavior.");
+        Console.WriteLine("Architecture bridge cleanup: direct domain APIs replace internal detour/bridge integration while preserving behavior contracts.");
     }
 }

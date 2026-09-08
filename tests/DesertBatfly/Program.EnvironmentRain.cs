@@ -79,10 +79,10 @@ internal static partial class Program
         Check(Resolve("DeathRain", Sample("DEATHRAIN", 0.70f, 0.90f, 1f, 1f, 0)) == "Acute",
             "Environment DeathRain enters Acute only under material lethal danger");
 
-        Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", true);
-        Check(survivalBridge.GetMethod("ShouldSeekHome", Flags) != null &&
-              survivalBridge.GetMethod("ShouldBurrow", Flags) != null,
-            "Environment DeathRain local Home/Burrow pressure feeds the existing native FlyAI survival bridge");
+        MethodInfo nativeSurvival = behavior.GetMethod("ApplyNativeHomeAndBurrow", Flags);
+        Check(nativeSurvival != null &&
+              MethodCallOffset(behavior.GetMethod("ApplyOwnedBehavior", Flags), behavior, "ApplyNativeHomeAndBurrow") >= 0,
+            "Environment DeathRain local Home/Burrow pressure is executed by the direct Environment owner");
 
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         MethodInfo weatherQuality = roomRuntime.GetMethod("WeatherQuality", Flags);

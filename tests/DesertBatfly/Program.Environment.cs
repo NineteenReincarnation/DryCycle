@@ -105,14 +105,8 @@ internal static partial class Program
         Check(resolvedFogPhase.ToString() == "Advisory",
             "ordinary Fog has a hard Advisory ceiling; DenseFog owns shelter/displacement escalation");
 
-        Check(mod.GetType(
-                "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalDenseFogBridge", false) == null,
-            "Environment DenseFog behavior-neutral RuntimeDetour shim is retired in R5");
 
         Type environmentalPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalTask09Bridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", false) == null,
-            "Environment R5 retires Travel/Colony/native-survival RuntimeDetour bridges");
         Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null,
             "Environment realized-room runtime owns LocalShelterFailure evidence directly");
         Check((int)roomRuntime.GetField("ShelterFailureMinTicks", Flags).GetRawConstantValue() >= 300 &&
@@ -134,16 +128,9 @@ internal static partial class Program
 
         Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
         Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSignalBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalThreatBridge", false) == null,
-            "Environment visual signal/threat bridges are retired after R2 central perception adoption");
         Check(visibilityPolicy.GetMethod("CanObserve", Flags) != null &&
               weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null,
             "Environment Fog/DenseFog visibility and close projectile recognition now use shared R2 perception policy");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalVengeanceBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSocialBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalIntegration", false) == null,
-            "Environment R5 retires internal Environment RuntimeDetour integration layers");
         Check(environmentalPolicy.GetMethod("AggressionAuthorized", Flags) != null &&
               environmentalPolicy.GetMethod("CombatMotivation", Flags) != null &&
               environmentalPolicy.GetMethod("AllowsHarassCandidate", Flags) != null &&
@@ -165,9 +152,9 @@ internal static partial class Program
         Check(Enum.GetNames(signalKind).Length == 6,
             "Environment does not add weather signal kinds to Signals V1");
 
-        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
         int threatStage = MethodCallOffset(updateAI, threat, "Update");
         int signalStage = MethodCallOffset(updateAI, signals, "Update");
@@ -200,7 +187,7 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
-            "Environment does not restore rejected rejected social-role design role runtime");
+            "Environment does not restore rejected social-role design role runtime");
 
         Console.WriteLine(
             "Environment environment: six phases, DryCycle-only source boundary, bounded anchors, Fog ceiling, severe DenseFog temporary Travel/Colony handoff, Heat axes, Sandstorm Home-retention policy, native Home/Burrow, pipeline, persistence and forbidden-ownership guards verified.");
