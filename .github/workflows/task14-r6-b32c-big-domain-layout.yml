@@ -38,15 +38,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           mapping = {
-              'src/Creatures/DesertBatfly/Combat/': 'src/Creatures/DesertBatfly/Behavior/Combat/',
-              'src/Creatures/DesertBatfly/Injury/': 'src/Creatures/DesertBatfly/Behavior/Injury/',
-              'src/Creatures/DesertBatfly/Perception/': 'src/Creatures/DesertBatfly/Behavior/Perception/',
-              'src/Creatures/DesertBatfly/Roost/': 'src/Creatures/DesertBatfly/Behavior/Roost/',
-              'src/Creatures/DesertBatfly/Signals/': 'src/Creatures/DesertBatfly/Behavior/Signals/',
-              'src/Creatures/DesertBatfly/Social/': 'src/Creatures/DesertBatfly/Behavior/Social/',
-              'src/Creatures/DesertBatfly/Threat/': 'src/Creatures/DesertBatfly/Behavior/Threat/',
-              'src/Creatures/DesertBatfly/ThreatSignature/': 'src/Creatures/DesertBatfly/Behavior/ThreatSignature/',
-              'src/Creatures/DesertBatfly/Runtime/': 'src/Creatures/DesertBatfly/Core/Runtime/',
+              'src/Creatures/DesertBatfly/Combat': 'src/Creatures/DesertBatfly/Behavior/Combat',
+              'src/Creatures/DesertBatfly/Injury': 'src/Creatures/DesertBatfly/Behavior/Injury',
+              'src/Creatures/DesertBatfly/Perception': 'src/Creatures/DesertBatfly/Behavior/Perception',
+              'src/Creatures/DesertBatfly/Roost': 'src/Creatures/DesertBatfly/Behavior/Roost',
+              'src/Creatures/DesertBatfly/Signals': 'src/Creatures/DesertBatfly/Behavior/Signals',
+              'src/Creatures/DesertBatfly/Social': 'src/Creatures/DesertBatfly/Behavior/Social',
+              'src/Creatures/DesertBatfly/ThreatSignature': 'src/Creatures/DesertBatfly/Behavior/ThreatSignature',
+              'src/Creatures/DesertBatfly/Threat': 'src/Creatures/DesertBatfly/Behavior/Threat',
+              'src/Creatures/DesertBatfly/Runtime': 'src/Creatures/DesertBatfly/Core/Runtime',
           }
           for name in ['scripts/check-desertbatfly-r5-retention.sh', 'scripts/check-desertbatfly-r6-b1.sh']:
               p = Path(name)
@@ -62,25 +62,20 @@ jobs:
           set -euo pipefail
           root=src/Creatures/DesertBatfly
 
-          # First-level project domains.
           for dir in Core Behavior World Presentation Integration Debug; do test -d "$root/$dir"; done
 
-          # Behavior keeps meaningful subdomains instead of flattening them.
           for dir in Combat Injury Perception Roost Signals Social Threat ThreatSignature; do
             test -d "$root/Behavior/$dir"
             test ! -d "$root/$dir"
           done
 
-          # Runtime is infrastructure under Core, not another root-level domain.
           test -d "$root/Core/Runtime"
           test ! -d "$root/Runtime"
           test -f "$root/Core/Runtime/DB_Runtime.cs"
           test -f "$root/Core/Runtime/DB_FlightMotor.cs"
 
-          # World keeps semantic subdomains.
           for dir in Colony Environment Travel; do test -d "$root/World/$dir"; done
 
-          # Integration remains intentionally flat because DB_ filenames already distinguish roles.
           test -f "$root/Integration/DB_RainWorldHooks.cs"
           test -f "$root/Integration/DB_RuntimePatch.cs"
           test -f "$root/Integration/DB_Sandbox.cs"
@@ -95,13 +90,13 @@ jobs:
           git grep -q 'DESERTSWARMROOM' -- src tests
           git diff --check
 
-          # B32c production source is strictly path-only.
           if git diff --cached --numstat -- src/Creatures/DesertBatfly | awk '$1 != "0" || $2 != "0" { bad=1 } END { exit bad }'; then :; else
             echo 'Production DesertBatfly source changed during path-only B32c.' >&2
             exit 1
           fi
-          git diff --cached --summary | grep -q 'rename src/Creatures/DesertBatfly/Combat/'
-          git diff --cached --summary | grep -q 'rename src/Creatures/DesertBatfly/Runtime/'
+
+          git diff --cached --name-status -- src/Creatures/DesertBatfly | grep -q 'Behavior/Combat/'
+          git diff --cached --name-status -- src/Creatures/DesertBatfly | grep -q 'Core/Runtime/'
 
       - name: Commit and remove workflow
         shell: bash
