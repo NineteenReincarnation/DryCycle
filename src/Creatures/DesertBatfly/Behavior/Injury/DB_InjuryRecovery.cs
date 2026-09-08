@@ -231,7 +231,9 @@ internal sealed class DB_InjuryRecovery
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery)) return;
         recoveryRoostTarget = anchor;
-        brain.SetRecoveryRoostClaim(anchor);
+        // DB_AI owns only the committed hang coordinate here. Recovery keeps the canonical
+        // anchor tile/kind and performs all legality revalidation before committing the spot.
+        brain.SetRecoveryRoostClaim(anchor.Spot);
         fly.AI.followingDijkstraMap = -1;
         fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
         fly.burrowOrHangSpot = anchor.Spot;
