@@ -1,5 +1,6 @@
 name: DesertBatfly R6 Task-Term Guard
 
+# Permanent architecture guard: production DesertBatfly code uses domain terminology only.
 on:
   push:
     branches:
