@@ -553,9 +553,9 @@ internal static class DB_EnvironmentRuntime
                 radiusMultiplier = Mathf.Lerp(0.34f, 0.14f, phaseSeverity);
                 damagePermission = false;
 
-                // Task09 owns pre-onset cross-room safety. Once this room is the accepted
-                // survival room, Task13 must actually drive native Home/Hive/Burrow instead
-                // of merely setting HardSurvival with zero Home/Burrow pressure.
+                // Cross-room travel owns pre-onset safety. Once this room is the accepted
+                // survival room, the environment runtime must actually drive native
+                // Home/Hive/Burrow instead of merely setting HardSurvival with zero pressure.
                 hardSurvival = context.Phase is DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute;
                 if (hardSurvival && rainExposure > 0.55f)
                 {
@@ -563,8 +563,8 @@ internal static class DB_EnvironmentRuntime
                     burrow = Mathf.Max(burrow, 0.82f);
                 }
                 reason = hardSurvival
-                    ? "DeathRain: hard local Home/Roost/Burrow survival; Task09 retains cross-room ownership"
-                    : "DeathRain: pre-onset local contraction while Task09 handles refuge travel";
+                    ? "DeathRain: hard local Home/Roost/Burrow survival; travel retains cross-room ownership"
+                    : "DeathRain: pre-onset local contraction while travel handles refuge routing";
                 break;
             }
         }
@@ -582,7 +582,7 @@ internal static class DB_EnvironmentRuntime
         if (influence.Phase == DB_EnvironmentPhase.Calm) return;
 
         if (influence.SuppressesNeutralSocial)
-            DesertBatflySocialLife.CancelForPriority(bat, "Task13 environmental priority");
+            DesertBatflySocialLife.CancelForPriority(bat, "environmental survival priority");
 
         if (influence.PreferredShelterPoint is not Vector2 shelterPoint) return;
         if (influence.ShelterDrive < 0.28f && !influence.HardSurvival) return;
@@ -733,7 +733,7 @@ internal static class DB_EnvironmentRuntime
         bool onHiveTile = bat.room.GetTile(bat.mainBodyChunk.pos).hive;
         if (onHiveTile && burrow)
         {
-            DesertBatflySocialLife.CancelForPriority(bat, "Task13 environmental Burrow priority");
+            DesertBatflySocialLife.CancelForPriority(bat, "environmental Burrow priority");
             bat.DesertAI.CancelAttack();
             bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
             bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
@@ -745,7 +745,7 @@ internal static class DB_EnvironmentRuntime
         if (!seekHome && influence.BurrowDrive < 0.45f) return false;
         if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return false;
 
-        DesertBatflySocialLife.CancelForPriority(bat, "Task13 same-room Home/Hive retreat");
+        DesertBatflySocialLife.CancelForPriority(bat, "same-room Home/Hive environmental retreat");
         if (influence.HardSurvival) bat.DesertAI.CancelAttack();
         bat.AI.leaveRoomDijkstra = -1;
         bat.AI.followingDijkstraMap = bestMap;
