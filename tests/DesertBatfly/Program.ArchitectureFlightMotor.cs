@@ -16,14 +16,14 @@ internal static partial class Program
         Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type survival = environment;
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
-        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);
         Type frame = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
-        Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
+        Type behaviorExecution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
         Type motorDebug = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotorDebugState", true);
         Type debugSource = mod.GetType("DryCycle.Debugging.AI.DB_ObservatorySource", true);
 
@@ -83,7 +83,7 @@ internal static partial class Program
               combatRuntime.GetMethod("AfterPhysics", Flags) != null &&
               combatRuntime.GetProperty("FormalAttack", Flags) != null,
             "Architecture flight motor Combat runtime owns formal phase execution, contact physics and formal-attack state");
-        Check(MethodCallOffset(combatExecutor.GetMethod("TryExecute", Flags), combatRuntime, "TryExecuteOwned") >= 0,
+        Check(MethodCallOffset(behaviorExecution.GetMethod("TryCombat", Flags), combatRuntime, "TryExecuteOwned") >= 0,
             "Architecture flight motor Combat executor calls DB_CombatRuntime rather than old AI state-machine implementation");
         Check(MethodCallOffset(creature.GetMethod("Update", Flags), combatRuntime, "AfterPhysics") >= 0,
             "Architecture flight motor post-physics Attach/Interfere execution calls DB_CombatRuntime directly");

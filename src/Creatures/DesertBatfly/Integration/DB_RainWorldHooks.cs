@@ -195,7 +195,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.ImmediateDanger)
         {
-            if (DB_ImmediateDangerExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryImmediateDanger(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -207,7 +207,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.InjuryRecovery)
         {
-            if (DB_InjuryRecoveryExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryInjuryRecovery(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -233,7 +233,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.EnvironmentHardSurvival)
         {
-            if (DB_EnvironmentExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryEnvironment(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -245,7 +245,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.FearResponse)
         {
-            if (DB_FearExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryFear(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -257,7 +257,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Vengeance)
         {
-            if (DB_VengeanceExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryVengeance(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -269,7 +269,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.EnvironmentLocalSurvival)
         {
-            if (DB_EnvironmentExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryEnvironment(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -281,7 +281,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade)
         {
-            if (DB_ProjectileEvadeExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryProjectileEvade(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -293,7 +293,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Combat)
         {
-            if (DB_CombatExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryCombat(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -305,7 +305,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Roost)
         {
-            if (DB_RoostExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TryRoost(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -317,7 +317,7 @@ internal static class DB_RainWorldHooks
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Social)
         {
-            if (DB_SocialExecutor.TryExecute(desert, ownership))
+            if (DB_BehaviorExecution.TrySocial(desert, ownership))
             {
                 CompleteR3Frame(desert, ownership);
                 return;

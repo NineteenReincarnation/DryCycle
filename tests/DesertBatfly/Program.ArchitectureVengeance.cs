@@ -48,8 +48,8 @@ internal static partial class Program
               fear.GetMethod("TryDeactivateAfterVengeance", Flags) != null,
             "Fear exposes only the narrow single-host state contract required by Vengeance");
 
-        Type executor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceExecutor", true);
-        Check(MethodCallOffset(executor.GetMethod("TryExecute", Flags), vengeance, "ExecuteOwned") >= 0,
+        Type behaviorExecution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
+        Check(MethodCallOffset(behaviorExecution.GetMethod("TryVengeance", Flags), vengeance, "ExecuteOwned") >= 0,
             "Vengeance executor enters the formal Vengeance owner directly");
         Type motor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
         MethodInfo forceFlight = vengeance.GetMethod("ForceFlight", Flags);

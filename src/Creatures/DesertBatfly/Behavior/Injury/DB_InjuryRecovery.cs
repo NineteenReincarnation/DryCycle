@@ -38,7 +38,7 @@ internal sealed class DB_InjuryRecovery
         {
             ClearNavigation();
             injury.SetRecovery(DB_InjuryRecoveryState.None, null, "recovered below severe threshold");
-            if (Mode == DB_AI.Activity.InjuryRecovery) brain.SetMode(DB_AI.Activity.Flight);
+            if (brain.Mode == DB_AI.Activity.InjuryRecovery) brain.SetMode(DB_AI.Activity.Flight);
             return false;
         }
 

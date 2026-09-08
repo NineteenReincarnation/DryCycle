@@ -14,15 +14,7 @@ internal static partial class Program
         Type proposal = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorProposal", true);
         Type resolution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorResolution", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
-        Type injuryExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecoveryExecutor", true);
-        Type vengeanceExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceExecutor", true);
-        Type environmentExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExecutor", true);
-        Type socialExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialExecutor", true);
-        Type projectileExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ProjectileEvadeExecutor", true);
-        Type immediateDangerExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ImmediateDangerExecutor", true);
-        Type fearExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearExecutor", true);
-        Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
-        Type roostExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostExecutor", true);
+        Type behaviorExecution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
         Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
@@ -109,17 +101,17 @@ internal static partial class Program
             "Architecture arbitration Travel exposes a non-destructive proposal eligibility query");
 
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
-        Check(intimidation.GetMethod("TryGetVengeanceTarget", Flags) != null,
-            "Architecture arbitration Vengeance target is readable through an explicit API instead of sibling reflection");
-
         Type vengeanceRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
+        Check(vengeanceRuntime.GetMethod("TryGetTarget", Flags) != null,
+            "Architecture arbitration Vengeance target is readable through its formal owner API instead of sibling reflection");
+
         Check(vengeanceRuntime.GetMethod("IsActive", Flags) != null &&
               vengeanceRuntime.GetMethod("IsAvenger", Flags) != null &&
               vengeanceRuntime.GetMethod("TryGetTarget", Flags) != null &&
               vengeanceRuntime.GetMethod("ExecuteOwned", Flags) != null,
             "Architecture arbitration exposes Vengeance through a formal domain runtime rather than an internal bridge");
-        Check(MethodCallOffset(vengeanceExecutor.GetMethod("TryExecute", Flags), vengeanceRuntime, "ExecuteOwned") >= 0,
+        Check(MethodCallOffset(behaviorExecution.GetMethod("TryVengeance", Flags), vengeanceRuntime, "ExecuteOwned") >= 0,
             "Architecture arbitration Vengeance executor enters the formal Vengeance runtime");
         Check(intimidation.GetMethod("UpdateState", Flags) != null &&
               MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
@@ -168,17 +160,17 @@ internal static partial class Program
               MethodCallOffset(updateAI, environmentBehavior, "RefreshInfluence") >= 0 &&
               MethodCallOffset(updateAI, desertAI, "RefreshDecisionState") >= 0 &&
               MethodCallOffset(updateAI, threatRuntime, "RefreshState") >= 0 &&
-              MethodCallOffset(updateAI, immediateDangerExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, fearExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, injuryExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryImmediateDanger") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryFear") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryInjuryRecovery") >= 0 &&
               MethodCallOffset(updateAI, travel, "TryDriveRealized") >= 0 &&
-              MethodCallOffset(updateAI, environmentExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, vengeanceExecutor, "TryExecute") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryEnvironment") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryVengeance") >= 0 &&
               MethodCallOffset(updateAI, socialLife, "RefreshState") >= 0 &&
-              MethodCallOffset(updateAI, projectileExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, combatExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, roostExecutor, "TryExecute") >= 0 &&
-              MethodCallOffset(updateAI, socialExecutor, "TryExecute") >= 0,
+              MethodCallOffset(updateAI, behaviorExecution, "TryProjectileEvade") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryCombat") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryRoost") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TrySocial") >= 0,
             "Architecture arbitration all ordinary locomotion domains enter through central owner resolution");
         Check(MethodCallOffset(updateAI, threatTactics, "TryApplyOrdinaryProjectileEvade") < 0 &&
               MethodCallOffset(updateAI, desertAI, "Update") < 0,
@@ -186,7 +178,7 @@ internal static partial class Program
         MethodInfo executeNativeOwned = hooks.GetMethod("ExecuteNativeOwned", Flags);
         Check(executeNativeOwned != null && MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0,
             "Architecture arbitration vanilla FlyAI.Update is itself restricted to an accepted NativeSpecial/Ordinary/Fallback owner");
-        Check(injuryExecutor.GetMethod("TryExecute", Flags) != null &&
+        Check(behaviorExecution.GetMethod("TryInjuryRecovery", Flags) != null &&
               desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
               desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
             "Architecture arbitration severe injury movement has one explicit owner-gated executor surface");

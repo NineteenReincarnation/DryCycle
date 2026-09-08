@@ -84,8 +84,7 @@ jobs:
           if (src / 'Behavior' / 'ThreatSignature').exists():
               failures.append('retired Behavior/ThreatSignature directory exists')
 
-          # Keep the tree compact: a leaf directory with only one C# file adds no useful
-          # grouping boundary. Move that file up one level instead of retaining a shell folder.
+          # Keep the tree compact when a leaf directory has no independent domain role.
           for directory in sorted(p for p in src.rglob('*') if p.is_dir()):
               child_dirs = [p for p in directory.iterdir() if p.is_dir()]
               cs_files = [p for p in directory.iterdir() if p.is_file() and p.suffix == '.cs']
@@ -95,15 +94,24 @@ jobs:
 
           required = {
               'DB_Creature', 'DB_AI', 'DB_Runtime', 'DB_EventHub', 'DB_RoomContext',
-              'DB_FrameContext', 'DB_BehaviorArbiter', 'DB_FlightMotor', 'DB_CombatRuntime',
-              'DB_Injury', 'DB_FearRuntime', 'DB_VengeanceRuntime', 'DB_SocialRuntime',
-              'DB_SocialRoomRuntime', 'DB_ThreatRuntime', 'DB_SignalRuntime',
+              'DB_FrameContext', 'DB_BehaviorArbiter', 'DB_BehaviorExecution', 'DB_FlightMotor',
+              'DB_CombatRuntime', 'DB_Injury', 'DB_FearRuntime', 'DB_VengeanceRuntime',
+              'DB_SocialRuntime', 'DB_SocialRoomRuntime', 'DB_ThreatRuntime', 'DB_SignalRuntime',
               'DB_SignalRoomRuntime', 'DB_EnvironmentRuntime', 'DB_EnvironmentRoomRuntime',
               'DB_TravelRuntime', 'DB_ColonyRuntime', 'DB_RainWorldHooks', 'DB_RuntimePatch',
               'DB_Sandbox', 'DB_WarpCompatibility'
           }
           for name in sorted(required - declared):
               failures.append(f'missing formal production owner: {name}')
+
+          retired_executors = {
+              'DB_CombatExecutor', 'DB_EnvironmentExecutor', 'DB_FearExecutor',
+              'DB_ImmediateDangerExecutor', 'DB_InjuryRecoveryExecutor',
+              'DB_ProjectileEvadeExecutor', 'DB_RoostExecutor',
+              'DB_SocialExecutor', 'DB_VengeanceExecutor'
+          }
+          for name in sorted(retired_executors & declared):
+              failures.append(f'retired stateless executor shell returned: {name}')
 
           positive = re.compile(
               r'mod\.GetType\("DryCycle\.Creatures\.DesertBatfly\.(DB_[A-Za-z0-9_]+)"\s*,\s*true\)')
@@ -115,8 +123,16 @@ jobs:
 
           fear_path = src / 'Behavior' / 'DB_FearRuntime.cs'
           vengeance_path = src / 'Behavior' / 'DB_VengeanceRuntime.cs'
+          ai_path = src / 'Behavior' / 'DB_AI.cs'
+          injury_recovery_path = src / 'Behavior' / 'Injury' / 'DB_InjuryRecovery.cs'
+          execution_path = src / 'Core' / 'Runtime' / 'DB_BehaviorExecution.cs'
+          hooks_path = src / 'Integration' / 'DB_RainWorldHooks.cs'
           fear = fear_path.read_text(encoding='utf-8')
           vengeance = vengeance_path.read_text(encoding='utf-8')
+          ai = ai_path.read_text(encoding='utf-8')
+          injury_recovery = injury_recovery_path.read_text(encoding='utf-8')
+          execution = execution_path.read_text(encoding='utf-8')
+          hooks = hooks_path.read_text(encoding='utf-8')
 
           if 'partial class DB_FearRuntime' in fear or 'partial class DB_FearRuntime' in vengeance:
               failures.append('partial DB_FearRuntime Vengeance implementation returned')
@@ -138,9 +154,58 @@ jobs:
               if token not in vengeance:
                   failures.append('Vengeance formal ownership missing: ' + token)
 
+          joined = '\n'.join(production_text)
+          if 'DB_BehaviorOwner.Mode' in joined:
+              failures.append('invalid generic Mode owner returned; domain execution must use a concrete DB_BehaviorOwner')
+          if re.search(r'^\s*recoveryRoostTarget\s*=\s*null\s*;', ai, re.MULTILINE) or \
+             re.search(r'^\s*recoverySearchCooldown\s*=\s*0\s*;', ai, re.MULTILINE):
+              failures.append('DB_AI directly mutates DB_InjuryRecovery-owned navigation state')
+          if 'injuryRecovery.ClearLocalTarget();' not in ai:
+              failures.append('DB_AI danger transition no longer clears InjuryRecovery through its owner API')
+          if 'if (brain.Mode == DB_AI.Activity.InjuryRecovery)' not in injury_recovery:
+              failures.append('DB_InjuryRecovery no longer reads activity through its owning DB_AI instance')
+
+          execution_tokens = (
+              'internal static class DB_BehaviorExecution',
+              'ExecuteImmediateDangerOwned()',
+              'ExecuteInjuryRecoveryOwned()',
+              'DB_EnvironmentRuntime.ApplyOwnedBehavior(bat)',
+              'ExecuteFearOwned(resolution)',
+              'DB_VengeanceRuntime.ExecuteOwned(bat)',
+              'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)',
+              'bat.DesertAI.Combat.TryExecuteOwned()',
+              'DB_ThreatRuntime.ApplyOwnedTacticalModifier(bat)',
+              'ExecuteRoostOwned()',
+              'DB_SocialRuntime.ApplyOwnedBehavior(bat)'
+          )
+          for token in execution_tokens:
+              if token not in execution:
+                  failures.append('consolidated behavior execution contract missing: ' + token)
+          for old in retired_executors:
+              if old in joined or any(old in p.read_text(encoding='utf-8') for p in test_files):
+                  failures.append(f'stale executor identity remains in production/tests: {old}')
+
+          # Preserve the established owner execution order. Consolidation may change routing
+          # identity, but it must not reorder gameplay precedence or fallback behavior.
+          owner_order = (
+              'PrimaryOwner == DB_BehaviorOwner.ImmediateDanger',
+              'PrimaryOwner == DB_BehaviorOwner.InjuryRecovery',
+              'PrimaryOwner == DB_BehaviorOwner.Travel',
+              'PrimaryOwner == DB_BehaviorOwner.EnvironmentHardSurvival',
+              'PrimaryOwner == DB_BehaviorOwner.FearResponse',
+              'PrimaryOwner == DB_BehaviorOwner.Vengeance',
+              'PrimaryOwner == DB_BehaviorOwner.EnvironmentLocalSurvival',
+              'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
+              'PrimaryOwner == DB_BehaviorOwner.Combat',
+              'PrimaryOwner == DB_BehaviorOwner.Roost',
+              'PrimaryOwner == DB_BehaviorOwner.Social'
+          )
+          positions = [hooks.find(token) for token in owner_order]
+          if any(position < 0 for position in positions) or positions != sorted(positions):
+              failures.append('DB_RainWorldHooks behavior owner execution order changed')
+
           definition = (src / 'Core' / 'DB_Definition.cs').read_text(encoding='utf-8')
           sandbox = (src / 'Integration' / 'DB_Sandbox.cs').read_text(encoding='utf-8')
-          joined = '\n'.join(production_text)
           if 'CreatureType = new("DesertBatfly", true);' not in definition:
               failures.append('CreatureTemplate external identity changed')
           if 'UnlockValue = "DesertBatfly";' not in sandbox:

@@ -125,7 +125,7 @@ internal static class DB_VengeanceRuntime
 
     internal static bool ExecuteOwned(DB_Creature bat)
     {
-        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Mode) ||
+        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance) ||
             !DB_FearRuntime.TryGetVengeanceState(bat, out State state) || !state.Active ||
             state.Mode == Mode.None)
             return false;
@@ -744,7 +744,7 @@ internal static class DB_VengeanceRuntime
         float speed)
     {
         if (bat?.room == null ||
-            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Mode))
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
             return;
 
         // R5: threat tactics are modifiers, not an internal RuntimeDetour. Vengeance owns

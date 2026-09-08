@@ -349,8 +349,7 @@ internal sealed class DB_AI
 
         if (perception.Danger != null || retreat > 0)
         {
-            recoveryRoostTarget = null;
-            recoverySearchCooldown = 0;
+            injuryRecovery.ClearLocalTarget();
             fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "danger / escape");
             hasRoost = false;
             combat.ClearAttackState();
@@ -380,7 +379,7 @@ internal sealed class DB_AI
 
         if (Mode == Activity.Escape) SetMode(Activity.Flight);
 
-        // Severe recovery itself is executed only by DB_InjuryRecoveryExecutor. A milder
+        // Severe recovery itself is executed only by DB_BehaviorExecution. A milder
         // injury may still suppress combat and allow a normal roost proposal.
         if (fly.Injury.BlocksCombat)
         {
@@ -546,7 +545,7 @@ internal sealed class DB_AI
             return;
         if (!TryFindRoost(out Vector2 spot)) return;
 
-        // State/proposal preparation only. DB_RoostExecutor performs the Chain/Hang writes.
+        // State/proposal preparation only. DB_BehaviorExecution performs the Chain/Hang writes.
         roost = spot;
         hasRoost = true;
         SetMode(Activity.Roost);
