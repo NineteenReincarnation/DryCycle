@@ -6,7 +6,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// High-level cross-room travel state for Task 09. It owns destination/room route only.
+/// High-level cross-room travel state. It owns destination/room route only.
 /// Realized room-local movement is still FlyAI.LeaveRoom/AImap/shortcut; no travel code
 /// writes body velocity or maintains a second tile pathfinder.
 /// </summary>
@@ -630,8 +630,8 @@ internal static class DB_TravelRuntime
         if (intent.RefugeGoalRefresh > 0) return true;
         intent.RefugeGoalRefresh = RefugeGoalRefreshTicks;
 
-        // Prefer an authored/native abstract node. Route planning remains Task09-era native
-        // Dijkstra semantics; R4 only centralizes the realized localGoal write.
+        // Prefer an authored/native abstract node. Route planning retains native Dijkstra
+        // semantics; FlightMotor only centralizes the realized localGoal write.
         if (intent.RefugeNode >= 0 && bat.room.abstractRoom?.nodes != null &&
             intent.RefugeNode < bat.room.abstractRoom.nodes.Length)
         {
