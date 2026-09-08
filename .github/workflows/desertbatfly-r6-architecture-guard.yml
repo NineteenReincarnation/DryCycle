@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - task14-r6-b1-final
+      - task14-r6-b46-flatten-single-file-folders
     paths:
       - 'src/Creatures/DesertBatfly/**'
       - 'tests/DesertBatfly/**'
@@ -84,6 +85,15 @@ jobs:
           if (src / 'Behavior' / 'ThreatSignature').exists():
               failures.append('retired Behavior/ThreatSignature directory exists')
 
+          # Keep the tree compact: a leaf directory with only one C# file adds no useful
+          # grouping boundary. Move that file up one level instead of retaining a shell folder.
+          for directory in sorted(p for p in src.rglob('*') if p.is_dir()):
+              child_dirs = [p for p in directory.iterdir() if p.is_dir()]
+              cs_files = [p for p in directory.iterdir() if p.is_file() and p.suffix == '.cs']
+              other_files = [p for p in directory.iterdir() if p.is_file() and p.suffix != '.cs']
+              if not child_dirs and not other_files and len(cs_files) == 1:
+                  failures.append(f'redundant single-file leaf directory: {directory} -> move {cs_files[0].name} up one level')
+
           required = {
               'DB_Creature', 'DB_AI', 'DB_Runtime', 'DB_EventHub', 'DB_RoomContext',
               'DB_FrameContext', 'DB_BehaviorArbiter', 'DB_FlightMotor', 'DB_CombatRuntime',
@@ -104,8 +114,8 @@ jobs:
                   if name not in declared:
                       failures.append(f'stale positive managed reflection target {name}: {path}')
 
-          fear_path = src / 'Behavior' / 'Fear' / 'DB_FearRuntime.cs'
-          vengeance_path = src / 'Behavior' / 'Vengeance' / 'DB_VengeanceRuntime.cs'
+          fear_path = src / 'Behavior' / 'DB_FearRuntime.cs'
+          vengeance_path = src / 'Behavior' / 'DB_VengeanceRuntime.cs'
           fear = fear_path.read_text(encoding='utf-8')
           vengeance = vengeance_path.read_text(encoding='utf-8')
 
