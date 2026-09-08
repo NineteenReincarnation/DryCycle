@@ -1,0 +1,162 @@
+name: Task14 R6 B31 InjuryRecovery extraction
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: "!contains(github.event.head_commit.message, '[r6-b31-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract InjuryRecovery domain runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          ai = Path('src/Creatures/DesertBatfly/DesertBatflyAI.cs')
+          text = ai.read_text(encoding='utf-8')
+          start = text.index('    internal bool ExecuteInjuryRecoveryOwned()')
+          end = text.index('    internal void CancelAttack()')
+          block = textwrap.dedent(text[start:end]).rstrip()
+
+          block = block.replace('internal bool ExecuteInjuryRecoveryOwned()', 'internal bool ExecuteOwned()', 1)
+          block = block.replace('ClearRecoveryNavigation()', 'ClearNavigation()')
+          block = block.replace('private void ClearNavigation()', 'internal void ClearNavigation()', 1)
+          block = block.replace('CancelPhysicalAttack()', 'brain.CancelPhysicalAttack()')
+          block = block.replace('RestrainedByNonFly()', 'brain.RestrainedByNonFly()')
+          block = block.replace('HasImmediateDanger', 'brain.HasImmediateDanger')
+          block = block.replace('SteerOwned(', 'brain.SteerOwned(')
+          block = block.replace('SetMode(', 'brain.SetMode(')
+          block = block.replace('Activity.', 'DesertBatflyAI.Activity.')
+          block = block.replace('hasRoost = false;', 'brain.ClearRoostClaim();')
+          old_claim = '    recoveryRoostTarget = spot;\n    roost = spot;\n    hasRoost = true;'
+          new_claim = '    recoveryRoostTarget = spot;\n    brain.SetRecoveryRoostClaim(spot);'
+          if old_claim not in block:
+              raise SystemExit('Recovery roost claim marker missing')
+          block = block.replace(old_claim, new_claim, 1)
+          block = block.replace('fly.burrowOrHangSpot = roost;', 'fly.burrowOrHangSpot = spot;')
+
+          header = [
+              'using RWCustom;',
+              'using UnityEngine;',
+              '',
+              'namespace DryCycle.Creatures.DesertBatfly;',
+              '',
+              '/// <summary>',
+              '/// Severe-injury local recovery owner. It searches legal local roosts, drives the',
+              '/// native hive Dijkstra fallback and performs the owned low-risk recovery steering.',
+              '/// Cross-room travel remains Task09/DB_TravelRuntime authority.',
+              '/// </summary>',
+              'internal sealed class DB_InjuryRecovery',
+              '{',
+              '    private readonly DesertBatflyAI brain;',
+              '    private readonly DesertBatfly fly;',
+              '    private int recoverySearchCooldown;',
+              '    private Vector2? recoveryRoostTarget;',
+              '',
+              '    internal DB_InjuryRecovery(DesertBatflyAI brain, DesertBatfly fly)',
+              '    {',
+              '        this.brain = brain;',
+              '        this.fly = fly;',
+              '    }',
+              '',
+              '    internal void ClearLocalTarget()',
+              '    {',
+              '        recoveryRoostTarget = null;',
+              '        recoverySearchCooldown = 0;',
+              '    }',
+              '',
+              '    internal void ResetRoom() => ClearLocalTarget();',
+              ''
+          ]
+          recovery_text = '\n'.join(header) + textwrap.indent(block, '    ') + '\n}\n'
+          Path('src/Creatures/DesertBatfly/Injury/DB_InjuryRecovery.cs').write_text(
+              recovery_text, encoding='utf-8')
+
+          replacement = (
+              '    internal bool ExecuteInjuryRecoveryOwned() => injuryRecovery.ExecuteOwned();\n\n'
+              '    internal void SetRecoveryRoostClaim(Vector2 spot)\n'
+              '    {\n'
+              '        roost = spot;\n'
+              '        hasRoost = true;\n'
+              '    }\n\n'
+              '    internal void ClearRoostClaim() => hasRoost = false;\n\n'
+          )
+          text = text[:start] + replacement + text[end:]
+          text = text.replace(
+              '    private readonly DB_CreaturePerception perception;\n',
+              '    private readonly DB_CreaturePerception perception;\n    private readonly DB_InjuryRecovery injuryRecovery;\n', 1)
+          text = text.replace('    private int recoverySearchCooldown;\n', '', 1)
+          text = text.replace('    private Vector2? recoveryRoostTarget;\n', '', 1)
+          text = text.replace(
+              '        perception = new DB_CreaturePerception(this, fly);\n',
+              '        perception = new DB_CreaturePerception(this, fly);\n        injuryRecovery = new DB_InjuryRecovery(this, fly);\n', 1)
+          reset_pair = '        recoverySearchCooldown = 0;\n        recoveryRoostTarget = null;\n'
+          if reset_pair not in text:
+              raise SystemExit('ResetRoom recovery state marker missing')
+          text = text.replace(reset_pair, '        injuryRecovery.ResetRoom();\n', 1)
+          local_pair = '                recoveryRoostTarget = null;\n                recoverySearchCooldown = 0;\n'
+          local_count = text.count(local_pair)
+          if local_count < 2:
+              raise SystemExit(f'Expected migrated local recovery clears, found {local_count}')
+          text = text.replace(local_pair, '                injuryRecovery.ClearLocalTarget();\n')
+          text = text.replace('ClearRecoveryNavigation();', 'injuryRecovery.ClearNavigation();')
+          ai.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate InjuryRecovery ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          ai=src/Creatures/DesertBatfly/DesertBatflyAI.cs
+          recovery=src/Creatures/DesertBatfly/Injury/DB_InjuryRecovery.cs
+          test -f "$recovery"
+          grep -q 'internal sealed class DB_InjuryRecovery' "$recovery"
+          grep -q 'internal bool ExecuteOwned()' "$recovery"
+          grep -q 'internal void ClearNavigation()' "$recovery"
+          grep -q 'private bool TryFindRecoveryRoost' "$recovery"
+          grep -q 'private bool TryDriveRecoveryHive' "$recovery"
+          grep -q 'private Vector2 ClosestHivePoint' "$recovery"
+          grep -q 'private void BeginRecoveryRoost' "$recovery"
+          grep -q 'DB_RoostPolicy.TryGetSpot' "$recovery"
+          grep -q 'ExitDistanceForCreature' "$recovery"
+          grep -q 'DB_FlightMotor.TrySteer' "$recovery"
+          grep -q 'brain.SetRecoveryRoostClaim(spot)' "$recovery"
+          grep -q 'brain.ClearRoostClaim()' "$recovery"
+          grep -q 'private readonly DB_InjuryRecovery injuryRecovery' "$ai"
+          grep -q 'injuryRecovery = new DB_InjuryRecovery(this, fly)' "$ai"
+          grep -q 'ExecuteInjuryRecoveryOwned() => injuryRecovery.ExecuteOwned()' "$ai"
+          ! grep -n -E 'recoverySearchCooldown|recoveryRoostTarget|TryFindRecoveryRoost|TryDriveRecoveryHive|ClosestHivePoint|BeginRecoveryRoost|RecoveryRoostTargetValid' "$ai"
+          ! grep -n -E '(^|[^.])\b(SetMode|SteerOwned|CancelPhysicalAttack|RestrainedByNonFly)\(' "$recovery"
+          ! grep -n '\broost\b' "$recovery"
+          ! grep -n 'LeaveRoom' "$recovery"
+          test "$(grep -c 'mainBodyChunk.vel \*= 0.5f' "$recovery")" -eq 1
+          ! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$recovery"
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git diff --check
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b31-injury-recovery.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B31 extract InjuryRecovery runtime [r6-b31-done]'
+          git push origin HEAD:task14-r6-b1-final
