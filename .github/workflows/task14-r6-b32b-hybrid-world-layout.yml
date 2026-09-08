@@ -1,0 +1,148 @@
+name: Task14 R6 B32b hybrid World layout
+
+on:
+  push:
+    branches: [ task14-r6-b1-final ]
+
+permissions:
+  contents: write
+
+jobs:
+  reorganize:
+    if: "!contains(github.event.head_commit.message, '[r6-b32b-done]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: task14-r6-b1-final
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build hybrid World layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=src/Creatures/DesertBatfly
+          mkdir -p "$root/World/Colony" "$root/World/Environment" "$root/World/Travel"
+
+          for name in \
+            DB_ColonyRuntime.cs \
+            DB_ColonyState.cs \
+            DB_MigrationPolicy.cs \
+            DB_SwarmRoom.cs; do
+            git mv "$root/World/$name" "$root/World/Colony/$name"
+          done
+
+          for name in \
+            DB_EnvironmentContracts.cs \
+            DB_EnvironmentExposure.cs \
+            DB_EnvironmentProfile.cs \
+            DB_EnvironmentRoomRuntime.cs \
+            DB_EnvironmentRuntime.cs \
+            DB_EnvironmentalPolicy.cs \
+            DB_ShelterAnchor.cs \
+            DB_WeatherEcology.cs; do
+            git mv "$root/World/$name" "$root/World/Environment/$name"
+          done
+
+          for name in \
+            DB_RefugePolicy.cs \
+            DB_TravelDebugState.cs \
+            DB_TravelIntent.cs \
+            DB_TravelRuntime.cs \
+            DB_WorldRoutePlanner.cs; do
+            git mv "$root/World/$name" "$root/World/Travel/$name"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+              Path('scripts/check-desertbatfly-r5-retention.sh'),
+              Path('scripts/check-desertbatfly-r6-b1.sh'),
+          ]
+          mapping = {
+              'src/Creatures/DesertBatfly/World/DB_ColonyRuntime.cs': 'src/Creatures/DesertBatfly/World/Colony/DB_ColonyRuntime.cs',
+              'src/Creatures/DesertBatfly/World/DB_ColonyState.cs': 'src/Creatures/DesertBatfly/World/Colony/DB_ColonyState.cs',
+              'src/Creatures/DesertBatfly/World/DB_MigrationPolicy.cs': 'src/Creatures/DesertBatfly/World/Colony/DB_MigrationPolicy.cs',
+              'src/Creatures/DesertBatfly/World/DB_SwarmRoom.cs': 'src/Creatures/DesertBatfly/World/Colony/DB_SwarmRoom.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentContracts.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentContracts.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentExposure.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentExposure.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentProfile.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentProfile.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentRoomRuntime.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRoomRuntime.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentRuntime.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRuntime.cs',
+              'src/Creatures/DesertBatfly/World/DB_EnvironmentalPolicy.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentalPolicy.cs',
+              'src/Creatures/DesertBatfly/World/DB_ShelterAnchor.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_ShelterAnchor.cs',
+              'src/Creatures/DesertBatfly/World/DB_WeatherEcology.cs': 'src/Creatures/DesertBatfly/World/Environment/DB_WeatherEcology.cs',
+              'src/Creatures/DesertBatfly/World/DB_RefugePolicy.cs': 'src/Creatures/DesertBatfly/World/Travel/DB_RefugePolicy.cs',
+              'src/Creatures/DesertBatfly/World/DB_TravelDebugState.cs': 'src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs',
+              'src/Creatures/DesertBatfly/World/DB_TravelIntent.cs': 'src/Creatures/DesertBatfly/World/Travel/DB_TravelIntent.cs',
+              'src/Creatures/DesertBatfly/World/DB_TravelRuntime.cs': 'src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs',
+              'src/Creatures/DesertBatfly/World/DB_WorldRoutePlanner.cs': 'src/Creatures/DesertBatfly/World/Travel/DB_WorldRoutePlanner.cs',
+          }
+          for p in files:
+              s = p.read_text(encoding='utf-8')
+              for old, new in mapping.items():
+                  s = s.replace(old, new)
+              p.write_text(s, encoding='utf-8')
+
+          # Restore ownership-sensitive R5 guards to domain directories now that World has subdomains again.
+          p = Path('scripts/check-desertbatfly-r5-retention.sh')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World\n! grep -RIn --include='*.cs' 'new DB_TravelIntent\\|RequestPermanentMigration\\|ConvertToReturnHome' src/Creatures/DesertBatfly/World",
+                        "! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World/Environment\n! grep -RIn --include='*.cs' 'new DB_TravelIntent\\|RequestPermanentMigration\\|ConvertToReturnHome' src/Creatures/DesertBatfly/World/Environment")
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate hybrid layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=src/Creatures/DesertBatfly
+
+          test -d "$root/World/Colony"
+          test -d "$root/World/Environment"
+          test -d "$root/World/Travel"
+          test -z "$(find "$root/World" -maxdepth 1 -type f -name '*.cs' -print -quit)"
+
+          test -f "$root/World/Colony/DB_ColonyRuntime.cs"
+          test -f "$root/World/Colony/DB_MigrationPolicy.cs"
+          test -f "$root/World/Environment/DB_EnvironmentRuntime.cs"
+          test -f "$root/World/Environment/DB_WeatherEcology.cs"
+          test -f "$root/World/Travel/DB_TravelRuntime.cs"
+          test -f "$root/World/Travel/DB_WorldRoutePlanner.cs"
+
+          # Keep the intentionally flattened Integration directory.
+          test -f "$root/Integration/DB_RainWorldHooks.cs"
+          test -f "$root/Integration/DB_RuntimePatch.cs"
+          test -f "$root/Integration/DB_Sandbox.cs"
+          test -f "$root/Integration/DB_WarpCompatibility.cs"
+          test -z "$(find "$root/Integration" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+
+          # Existing small semantic domains stay intact.
+          for dir in Combat Injury Perception Roost Runtime Signals Social Threat ThreatSignature; do test -d "$root/$dir"; done
+
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+          git grep -q 'DCDesertBatflyV1' -- src tests
+          git grep -q 'DCDesertBatflyThreatV1' -- src tests
+          git grep -q 'DCBATCOLONY09<svB>' -- src tests
+          git grep -q 'DESERTSWARMROOM' -- src tests
+          git diff --check
+
+          # Production C# changes in B32b are path-only.
+          if git diff --cached --numstat -- src/Creatures/DesertBatfly | awk '$1 != "0" || $2 != "0" { bad=1 } END { exit bad }'; then :; else
+            echo 'Production DesertBatfly source changed during path-only B32b.' >&2
+            exit 1
+          fi
+          git diff --cached --summary | grep -q 'rename src/Creatures/DesertBatfly/World/'
+
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/task14-r6-b32b-hybrid-world-layout.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R6 B32b adopt hybrid World layout [r6-b32b-done]'
+          git push origin HEAD:task14-r6-b1-final
