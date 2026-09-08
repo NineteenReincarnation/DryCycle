@@ -34,6 +34,7 @@ internal sealed class DB_CreaturePerception
         scan = 0;
         ScanCreatures();
     }
+
     internal bool Valid(Creature creature)
     {
         return creature != null && !creature.dead &&
@@ -94,7 +95,7 @@ internal sealed class DB_CreaturePerception
                         DB_Tuning.GrabFearMaxDistance,
                         fly.DesertState.GrabMemoryStrength);
                     fearDistance *= Mathf.Lerp(1.12f, 0.72f, fly.Personality.Nerve);
-                    if (distance < fearDistance) danger = player;
+                    if (distance < fearDistance) Danger = player;
                 }
 
                 float reactionDistance = Mathf.Lerp(125f, 78f, fly.Personality.Nerve);
