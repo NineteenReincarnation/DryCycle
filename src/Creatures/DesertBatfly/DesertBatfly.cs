@@ -16,10 +16,10 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
     internal World world => abstractCreature?.world;
 
     private int mealFood = 2;
-    private int socialSampleTicks;
     private bool runningVanillaUpdate;
     private bool resolvingRockViolence;
     internal readonly DB_SandSpitRuntime SandSpit;
+    internal readonly DB_Runtime Runtime;
     internal bool SandSpitWindingUp => SandSpit.WindingUp;
     internal int SandSpitWindupRemaining => SandSpit.WindupRemaining;
 
@@ -35,6 +35,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         DesertAI = new DesertBatflyAI(this);
         Emergence = new DB_Emergence(this);
         SandSpit = new DB_SandSpitRuntime(this);
+        Runtime = new DB_Runtime(this);
     }
 
     public override void InitiateGraphicsModule()
@@ -59,34 +60,12 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     public override void Update(bool eu)
     {
-        Injury.Tick();
-        Vector2 previousFlightVelocity = mainBodyChunk?.vel ?? Vector2.zero;
-        SandSpit.PreUpdate();
-        if (!dead)
-        {
-            DesertState.TickTrauma();
-            DesertState.TickGrief();
-            if (++socialSampleTicks >= 180)
-            {
-                socialSampleTicks = 0;
-                DB_SocialBond.SampleChain(this);
-            }
-        }
-
+        Vector2 previousFlightVelocity = Runtime.BeforeVanillaUpdate();
         if (room == null)
         {
             base.Update(eu);
             return;
         }
-
-        SandSpit.UpdateHeldStruggle();
-
-        DesertState.Thirst = Mathf.Clamp01(
-            DesertState.Thirst + (dead ? 0f : DB_Tuning.ThirstPerTick));
-        if (DesertState.Cooldown > 0) DesertState.Cooldown--;
-        DesertAI.TickMemory();
-        if (!dead)
-            DesertBatflyIntimidation.UpdateState(this);
 
         Room currentRoom = room;
         FliesRoomAI original = currentRoom.fliesRoomAi;
@@ -104,16 +83,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
             currentRoom.fliesRoomAi = original;
         }
 
-        // Vengeance state/fear was refreshed before base.Update so the R3 arbiter saw the
-        // current facts. Movement itself can only have run through DB_VengeanceExecutor.
-        bool extremeVengeance = !dead && DesertBatflyIntimidation.IsExtremeVengeanceActive(this);
-        if (extremeVengeance) DesertAI.CancelAttack();
-
-        if (room == null) return;
-        Emergence.Update(eu);
-        if (!extremeVengeance)
-            DesertAI.Combat.AfterPhysics(eu);
-        DB_FlightMotor.ApplyPostPhysics(this, previousFlightVelocity);
+        Runtime.AfterVanillaUpdate(eu, previousFlightVelocity);
     }
 
     public override void Stun(int ticks)
