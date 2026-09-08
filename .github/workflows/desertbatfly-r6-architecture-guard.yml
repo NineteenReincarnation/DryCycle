@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - task14-r6-b1-final
-      - task14-r6-b46-flatten-single-file-folders
     paths:
       - 'src/Creatures/DesertBatfly/**'
       - 'tests/DesertBatfly/**'
