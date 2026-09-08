@@ -19,6 +19,8 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     private bool runningVanillaUpdate;
     private bool resolvingRockViolence;
     internal readonly DB_SandSpitRuntime SandSpit;
+    internal readonly DB_RestraintRuntime Restraint;
+    internal readonly DB_RescueRuntime Rescue;
     internal readonly DB_Runtime Runtime;
     internal bool SandSpitWindingUp => SandSpit.WindingUp;
     internal int SandSpitWindupRemaining => SandSpit.WindupRemaining;
@@ -35,6 +37,8 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         DesertAI = new DB_AI(this);
         Emergence = new DB_Emergence(this);
         SandSpit = new DB_SandSpitRuntime(this);
+        Restraint = new DB_RestraintRuntime(this);
+        Rescue = new DB_RescueRuntime(this);
         Runtime = new DB_Runtime(this);
     }
 
@@ -46,6 +50,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     public override void NewRoom(Room newRoom)
     {
         injury?.ClearTransient();
+        Rescue.ClearTransient();
         DesertAI?.ResetRoom();
         base.NewRoom(newRoom);
     }
@@ -143,7 +148,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     {
         if (grasp?.grabber is Player player)
         {
-            if (SandSpit.BeginPlayerHold(player))
+            if (Restraint.BeginPlayerHold(player, grasp))
                 DesertAI.PlayerGrabbed(player);
         }
         else if (grasp?.grabber != null && grasp.grabber is not Fly)
@@ -199,7 +204,8 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
             return;
 
         bool wasDead = dead;
-        SandSpit.ClearTransient();
+        Rescue.ClearTransient();
+        Restraint.ClearTransient();
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
         base.Die();
@@ -213,7 +219,8 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     public override void Destroy()
     {
         injury?.ClearTransient();
-        SandSpit.ClearTransient();
+        Rescue.ClearTransient();
+        Restraint.ClearTransient();
         DesertAI?.CancelAttack();
         DB_FearRuntime.Forget(this);
         base.Destroy();
