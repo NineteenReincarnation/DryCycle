@@ -1,0 +1,188 @@
+name: DesertBatfly R6 Root Reorg Stage D
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - '.github/workflows/desertbatfly-r6-root-reorg-stage-d.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move DesertBatflyAI to DB_AI without behavior edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          old='src/Creatures/DesertBatfly/DesertBatflyAI.cs'
+          new='src/Creatures/DesertBatfly/Behavior/DB_AI.cs'
+          test -f "$old"
+          test ! -e "$new"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+
+          old_path = Path('src/Creatures/DesertBatfly/DesertBatflyAI.cs')
+          new_path = Path('src/Creatures/DesertBatfly/Behavior/DB_AI.cs')
+          original_ai = old_path.read_text(encoding='utf-8')
+          expected_ai = re.sub(r'\bDesertBatflyAI\b', 'DB_AI', original_ai)
+          original_ai_hash = hashlib.sha256(original_ai.encode()).hexdigest()
+          expected_ai_hash = hashlib.sha256(expected_ai.encode()).hexdigest()
+          print('AI source before:', original_ai_hash)
+          print('AI expected after token-only rename:', expected_ai_hash)
+
+          # Capture every source/test file before migration. Every changed C# file is allowed
+          # exactly one transformation: the internal type token DesertBatflyAI -> DB_AI.
+          snapshots = {}
+          for root in (Path('src'), Path('tests')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*.cs'):
+                  snapshots[path.resolve()] = path.read_text(encoding='utf-8')
+
+          new_path.parent.mkdir(parents=True, exist_ok=True)
+          old_path.rename(new_path)
+
+          changed = []
+          for root in (Path('src'), Path('tests')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*.cs'):
+                  text = path.read_text(encoding='utf-8')
+                  updated = re.sub(r'\bDesertBatflyAI\b', 'DB_AI', text)
+                  if updated != text:
+                      path.write_text(updated, encoding='utf-8')
+                      changed.append(path.as_posix())
+
+          # Architecture/retention scripts are internal references too; migrate their type/path
+          # assertions rather than weakening them.
+          for path in Path('scripts').rglob('*'):
+              if not path.is_file():
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              updated = text.replace(
+                  'src/Creatures/DesertBatfly/DesertBatflyAI.cs',
+                  'src/Creatures/DesertBatfly/Behavior/DB_AI.cs')
+              updated = re.sub(r'\bDesertBatflyAI\b', 'DB_AI', updated)
+              if updated != text:
+                  path.write_text(updated, encoding='utf-8')
+                  print('updated internal script reference:', path)
+
+          # The moved AI file must be byte-for-byte equal to the old file after only the
+          # approved type-token substitution.
+          actual_ai = new_path.read_text(encoding='utf-8')
+          if actual_ai != expected_ai:
+              raise SystemExit('DB_AI.cs differs from token-only expected transform')
+
+          # Verify every other changed C# file also equals exactly old.replace(token).
+          for path in list(Path('src').rglob('*.cs')) + list(Path('tests').rglob('*.cs')):
+              resolved = path.resolve()
+              if path == new_path:
+                  continue
+              before = snapshots.get(resolved)
+              if before is None:
+                  continue
+              expected = re.sub(r'\bDesertBatflyAI\b', 'DB_AI', before)
+              actual = path.read_text(encoding='utf-8')
+              if actual != expected:
+                  raise SystemExit(f'unapproved edit while migrating AI identity: {path}')
+
+          print('C# callsites migrated:', len(changed))
+          for path in changed:
+              print(path)
+          PY
+
+          test ! -e "$old"
+          test -f "$new"
+          grep -q 'internal sealed class DB_AI' "$new"
+          grep -q 'internal enum Activity' "$new"
+          grep -q 'internal DB_AI(DesertBatfly fly)' "$new"
+
+          # No historical internal AI identity may remain in production/tests/scripts.
+          if grep -RIn --include='*.cs' --include='*.sh' 'DesertBatflyAI' src tests scripts; then
+            echo 'old DesertBatflyAI identity remains' >&2
+            exit 1
+          fi
+
+          # Critical state-machine/domain ownership surfaces are retained.
+          for token in \
+            'DB_CombatRuntime' \
+            'DB_CreaturePerception' \
+            'DB_InjuryRecovery' \
+            'ThreatenedAt' \
+            'PlayerGrabbed' \
+            'PlayerReleased' \
+            'RefreshDecisionState' \
+            'ExecuteInjuryRecoveryOwned' \
+            'SetMode' \
+            'BreakHangChain'; do
+            grep -q "$token" "$new"
+          done
+
+          # All original Activity states must remain exactly present after the identity move.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path('src/Creatures/DesertBatfly/Behavior/DB_AI.cs').read_text(encoding='utf-8')
+          m = re.search(r'internal enum Activity\s*\{([^}]*)\}', text, re.S)
+          assert m, 'Activity enum missing'
+          names = [x.strip() for x in m.group(1).split(',') if x.strip()]
+          expected = [
+              'Flight','Observe','Approach','Circle','FakeDive','Dive','Attach',
+              'RetaliationCharge','Interfere','Escape','Cooldown','Roost','InjuryRecovery'
+          ]
+          assert names == expected, (names, expected)
+          print('Activity enum preserved:', ', '.join(names))
+          PY
+
+          # Debug reflection must now bind the real renamed type rather than stale string/type refs.
+          grep -q 'typeof(DB_AI)' src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs
+          grep -q 'typeof(DB_AI)' src/Debug/AIDebugger/Core/Recorder/AIDebugRichProviders.cs
+
+          # Fear/Vengeance split from B35 must stay intact while AI identity moves.
+          grep -q 'internal static partial class DB_FearRuntime' src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs
+          grep -q 'internal static class DB_VengeanceRuntime' src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
+          grep -q 'DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance)' src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
+
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+          patterns = (
+              re.compile(r'\bTask\s*[-_]?\s*\d+\b', re.IGNORECASE),
+              re.compile(r'\bTask-number\b', re.IGNORECASE),
+          )
+          bad=[]
+          for path in sorted(Path('src/Creatures/DesertBatfly').rglob('*.cs')):
+              for no,line in enumerate(path.read_text(encoding='utf-8').splitlines(),1):
+                  if any(p.search(line) for p in patterns): bad.append((path,no,line.strip()))
+          if bad:
+              for row in bad: print(f'{row[0]}:{row[1]}: {row[2]}')
+              sys.exit(1)
+          PY
+
+          echo 'Root production files after AI move:'
+          find src/Creatures/DesertBatfly -maxdepth 1 -type f -name '*.cs' -printf '%f\n' | sort
+          test "$(find src/Creatures/DesertBatfly -maxdepth 1 -type f -name '*.cs' | wc -l)" -eq 1
+          test -f src/Creatures/DesertBatfly/DesertBatfly.cs
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests scripts
+          git commit -m 'R6 B36 move AI coordinator to DB_AI [r6-b36-done]'
+          git push origin HEAD:task14-r6-b1-final
