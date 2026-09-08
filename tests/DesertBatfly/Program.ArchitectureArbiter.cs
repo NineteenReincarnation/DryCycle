@@ -123,7 +123,7 @@ internal static partial class Program
             "Architecture arbitration Vengeance executor enters the formal Vengeance runtime");
         Check(intimidation.GetMethod("UpdateState", Flags) != null &&
               MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
-            "Architecture arbitration refreshes fear and shared vengeance facts before FlyAI arbitration");
+            "Architecture arbitration refreshes Fear state before FlyAI arbitration; Vengeance facts live in the embedded domain state");
         Check(environmentBehavior.GetMethod("RefreshInfluence", Flags) != null &&
               environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags) != null &&
               MethodCallOffset(environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0,

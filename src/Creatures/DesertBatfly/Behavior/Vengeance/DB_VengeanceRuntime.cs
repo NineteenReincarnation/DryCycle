@@ -1,45 +1,23 @@
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Formal Extreme Vengeance domain boundary.
+/// Extreme Vengeance domain runtime.
 ///
-/// Fear and Vengeance intentionally still share one runtime state lifecycle during the
-/// behavior-preserving migration: fear collapse and persistent trauma must be able to
-/// cancel an armed vengeance state synchronously. External domains use this type for
-/// Vengeance facts/execution; DB_FearRuntime remains the shared-state owner until that
-/// coupling is extracted with dedicated state-contract tests.
+/// Vengeance owns its state machine, participation model, rescue/contact behavior and
+/// FlightMotor execution. Its State object is embedded inside the single per-bat Fear
+/// host so fear collapse, persistent trauma, Reset and Forget remain synchronous without
+/// a second weak table or duplicated lifecycle.
 /// </summary>
 internal static class DB_VengeanceRuntime
 {
-    internal static bool IsActive(DB_Creature bat)
-        => DB_FearRuntime.IsExtremeVengeanceActive(bat);
-
-    internal static bool IsAvenger(DB_Creature bat)
-        => DB_FearRuntime.IsVengeanceAvenger(bat);
-
-    internal static bool TryGetTarget(DB_Creature bat, out Creature target)
-        => DB_FearRuntime.TryGetVengeanceTarget(bat, out target);
-
-    internal static bool ExecuteOwned(DB_Creature bat)
-        => DB_FearRuntime.ExecuteVengeanceOwned(bat);
-}
-
-/// <summary>
-/// Shared-state implementation half for Extreme Vengeance. This remains a partial
-/// of DB_FearRuntime so fear collapse, trauma and vengeance cancellation continue to
-/// mutate the same State instance during the behavior-preserving migration.
-/// External callers must use DB_VengeanceRuntime.
-/// </summary>
-internal static partial class DB_FearRuntime
-{
-    private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
-    private enum VengeanceParticipation { None, Avenger, Supporter }
+    internal enum Mode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
+    internal enum Participation { None, Avenger, Supporter }
 
     // One event has one actual leader. The runtime group cap of three means the normal
     // social form remains one true avenger plus zero, one or two followers even if
     // additional deaths/captures occur before the first group has finished withdrawing.
     private const int MaxTrueAvengersPerEvent = 1;
-    private const float VengeanceCollapseStrength = 0.84f;
+    internal const float CollapseStrength = 0.84f;
     private const int VengeanceCaptureDelayMin = 12;
     private const int VengeanceCaptureDelayMax = 30;
     private const int VengeanceKillDelayMin = 70;
@@ -85,10 +63,10 @@ internal static partial class DB_FearRuntime
 
     // Vengeance fields remain part of the exact same per-creature State object.
     // Splitting the declaration changes source ownership only, not lifetime or identity.
-    private sealed partial class State
+    internal sealed class State
     {
-        internal VengeanceMode Vengeance;
-        internal VengeanceParticipation Role;
+        internal Mode Mode;
+        internal Participation Role;
         internal Creature VengeanceTarget;
         internal DB_Creature Leader;
         internal DB_Creature RescueVictim;
@@ -101,55 +79,73 @@ internal static partial class DB_FearRuntime
         internal bool RescueAttempted;
         internal bool WasRescuePlan;
         internal bool SupportOnly;
+        internal bool Active => Mode != DB_VengeanceRuntime.Mode.None;
 
     }
 
-    internal static bool IsExtremeVengeanceActive(DB_Creature bat)
+    internal static bool ControlsMovement(State state)
     {
-        return bat != null && states.TryGetValue(bat, out State state) &&
-               state.Active && state.Vengeance != VengeanceMode.None;
+        return state?.Mode is Mode.Observe or Mode.Circle or Mode.Feint or
+            Mode.RescueCharge or Mode.Charge or Mode.Withdraw;
     }
 
-    internal static bool IsVengeanceAvenger(DB_Creature bat)
+    internal static bool IsSupporterFor(State state, Creature threat)
     {
-        return bat != null && states.TryGetValue(bat, out State state) && state.Active &&
-               state.Vengeance != VengeanceMode.None &&
-               state.Role == VengeanceParticipation.Avenger;
+        return state != null && state.Active && state.Role == Participation.Supporter &&
+               state.VengeanceTarget == threat;
     }
 
-    internal static bool TryGetVengeanceTarget(DB_Creature bat, out Creature target)
+    internal static bool TargetMatches(State state, Creature threat)
+    {
+        return state != null && state.Active && state.VengeanceTarget == threat;
+    }
+
+    internal static bool IsActive(DB_Creature bat)
+    {
+        return bat != null && DB_FearRuntime.TryGetVengeanceState(bat, out State state) &&
+               state.Active && state.Mode != Mode.None;
+    }
+
+    internal static bool IsAvenger(DB_Creature bat)
+    {
+        return bat != null && DB_FearRuntime.TryGetVengeanceState(bat, out State state) && state.Active &&
+               state.Mode != Mode.None &&
+               state.Role == Participation.Avenger;
+    }
+
+    internal static bool TryGetTarget(DB_Creature bat, out Creature target)
     {
         target = null;
-        if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active ||
-            state.Vengeance == VengeanceMode.None || state.VengeanceTarget == null)
+        if (bat == null || !DB_FearRuntime.TryGetVengeanceState(bat, out State state) || !state.Active ||
+            state.Mode == Mode.None || state.VengeanceTarget == null)
             return false;
         target = state.VengeanceTarget;
         return true;
     }
 
-    internal static bool ExecuteVengeanceOwned(DB_Creature bat)
+    internal static bool ExecuteOwned(DB_Creature bat)
     {
-        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance) ||
-            !states.TryGetValue(bat, out State state) || !state.Active ||
-            state.Vengeance == VengeanceMode.None)
+        if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Mode) ||
+            !DB_FearRuntime.TryGetVengeanceState(bat, out State state) || !state.Active ||
+            state.Mode == Mode.None)
             return false;
 
         UpdateVengeance(bat, state);
-        TryDeactivate(bat, state);
+        DB_FearRuntime.TryDeactivateAfterVengeance(bat);
         return true;
     }
 
-    private static void ArmVengeanceGroup(
+    internal static void ArmGroup(
         List<DB_Creature> trueCandidates,
         List<DB_Creature> bats,
         int[] tier,
         DB_Creature victim,
         Creature threat,
-        EventKind kind,
+        DB_FearRuntime.EventKind kind,
         LizardTongue rescueTongue,
         bool suppressNewVengeance)
     {
-        if (suppressNewVengeance || !ValidThreat(threat, victim?.room))
+        if (suppressNewVengeance || !DB_FearRuntime.ValidThreat(threat, victim?.room))
             return;
 
         List<DB_Creature> leaders = new(MaxTrueAvengersPerEvent);
@@ -160,14 +156,14 @@ internal static partial class DB_FearRuntime
         for (int i = 0; i < bats.Count; i++)
         {
             DB_Creature bat = bats[i];
-            if (!TryGetVengeanceState(bat, out State social) ||
-                social.Vengeance == VengeanceMode.None ||
+            if (!TryGetState(bat, out State social) ||
+                social.Mode == Mode.None ||
                 social.VengeanceTarget != threat ||
-                social.Role == VengeanceParticipation.None)
+                social.Role == Participation.None)
                 continue;
 
             participants++;
-            if (existingLeader == null && social.Role == VengeanceParticipation.Avenger)
+            if (existingLeader == null && social.Role == Participation.Avenger)
             {
                 existingLeader = bat;
                 existingLeaderState = social;
@@ -177,7 +173,7 @@ internal static partial class DB_FearRuntime
         if (existingLeader != null)
         {
             leaders.Add(existingLeader);
-            if (existingLeaderState.Vengeance == VengeanceMode.Withdraw)
+            if (existingLeaderState.Mode == Mode.Withdraw)
                 return;
         }
 
@@ -199,10 +195,10 @@ internal static partial class DB_FearRuntime
             {
                 DB_Creature bat = trueCandidates[i];
                 if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat)) continue;
-                State state = StateFor(bat);
-                FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
-                float trauma = PersistentTraumaStrength(bat, threat);
-                if (fear.Strength >= VengeanceCollapseStrength ||
+                State state = DB_FearRuntime.VengeanceStateFor(bat);
+                float fearStrength = DB_FearRuntime.FearStrengthForVengeance(bat, threat);
+                float trauma = DB_FearRuntime.PersistentTraumaStrength(bat, threat);
+                if (fearStrength >= CollapseStrength ||
                     trauma >= DB_Tuning.TraumaAggressionBlock)
                     continue;
 
@@ -232,10 +228,10 @@ internal static partial class DB_FearRuntime
             DB_Creature bat = bats[i];
             if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
                 bat.Personality.Conformity < DB_Tuning.SocialFollowerMinConformity ||
-                IsExtremeVengeanceActive(bat))
+                IsActive(bat))
                 continue;
 
-            float trauma = PersistentTraumaStrength(bat, threat);
+            float trauma = DB_FearRuntime.PersistentTraumaStrength(bat, threat);
             if (trauma >= DB_Tuning.TraumaAggressionBlock) continue;
 
             DB_Creature bestLeader = null;
@@ -260,14 +256,14 @@ internal static partial class DB_FearRuntime
             }
             if (bestLeader == null) continue;
 
-            State batState = StateFor(bat);
-            FearMemory fear = threat is Player ? batState.PlayerFear : batState.PredatorFear;
+            State batState = DB_FearRuntime.VengeanceStateFor(bat);
+            float fearStrength = DB_FearRuntime.FearStrengthForVengeance(bat, threat);
             float score =
                 bat.Personality.Conformity * 0.50f +
                 bat.Personality.Temperament * 0.20f +
                 bat.Personality.Nerve * 0.15f +
                 bestLeaderDrive * 0.15f -
-                fear.Strength * 0.28f -
+                fearStrength * 0.28f -
                 trauma * 0.65f + DB_SocialBond.Motivation(bat, victim, threat);
 
             if (score < 0.44f) continue;
@@ -283,7 +279,7 @@ internal static partial class DB_FearRuntime
              participants < DB_Tuning.SocialVengeanceGroupCap; i++)
         {
             FollowerCandidate follower = followers[i];
-            State state = StateFor(follower.Bat);
+            State state = DB_FearRuntime.VengeanceStateFor(follower.Bat);
             float commitment = Mathf.Clamp01(
                 Mathf.InverseLerp(0.44f, 0.90f, follower.Score));
             bool supportOnly = follower.Score < 0.66f ||
@@ -312,7 +308,7 @@ internal static partial class DB_FearRuntime
         DB_Creature bat,
         State state,
         Creature threat,
-        EventKind kind,
+        DB_FearRuntime.EventKind kind,
         DB_Creature victim,
         LizardTongue rescueTongue,
         float drive,
@@ -321,10 +317,10 @@ internal static partial class DB_FearRuntime
         DB_Creature leader)
     {
         float rage = Mathf.Clamp01(Mathf.Lerp(0.58f, 1f, drive) + DB_SocialBond.Motivation(bat, victim, threat));
-        if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
+        if (state.Mode != Mode.None && state.VengeanceTarget == threat)
         {
             state.Rage = Mathf.Max(state.Rage, rage);
-            if (state.Role == VengeanceParticipation.Avenger)
+            if (state.Role == Participation.Avenger)
             {
                 state.PassesRemaining = Mathf.Max(
                     state.PassesRemaining,
@@ -337,23 +333,23 @@ internal static partial class DB_FearRuntime
 
         state.VengeanceTarget = threat;
         state.Leader = leader;
-        state.RescueVictim = kind == EventKind.PredatorCapture ? victim : null;
-        state.RescueTongue = kind == EventKind.PredatorCapture ? rescueTongue : null;
+        state.RescueVictim = kind == DB_FearRuntime.EventKind.PredatorCapture ? victim : null;
+        state.RescueTongue = kind == DB_FearRuntime.EventKind.PredatorCapture ? rescueTongue : null;
         state.RescueAttempted = false;
-        state.WasRescuePlan = kind == EventKind.PredatorCapture;
+        state.WasRescuePlan = kind == DB_FearRuntime.EventKind.PredatorCapture;
         state.Rage = rage;
         state.DamageScale = damageScale;
         state.SupportOnly = supportOnly;
         state.PassesRemaining = supportOnly
             ? 0
             : (leader == null && drive > 0.70f ? 2 : 1);
-        state.Role = leader == null ? VengeanceParticipation.Avenger : VengeanceParticipation.Supporter;
-        state.Vengeance = VengeanceMode.Waiting;
+        state.Role = leader == null ? Participation.Avenger : Participation.Supporter;
+        state.Mode = Mode.Waiting;
 
-        int minDelay = kind == EventKind.PredatorCapture
+        int minDelay = kind == DB_FearRuntime.EventKind.PredatorCapture
             ? VengeanceCaptureDelayMin
             : VengeanceKillDelayMin;
-        int maxDelay = kind == EventKind.PredatorCapture
+        int maxDelay = kind == DB_FearRuntime.EventKind.PredatorCapture
             ? VengeanceCaptureDelayMax
             : VengeanceKillDelayMax;
         int socialDelay = leader == null
@@ -362,54 +358,54 @@ internal static partial class DB_FearRuntime
         state.VengeanceTimer = Mathf.RoundToInt(
             Mathf.Lerp(maxDelay, minDelay, drive)) + socialDelay;
 
-        // Deliver synchronously before ArmVengeanceGroup scores followers so Rally
+        // Deliver synchronously before ArmGroup scores followers so Rally
         // interest can participate in SocialBond.Motivation without a detour around this method.
-        if (state.Role == VengeanceParticipation.Avenger && !supportOnly && leader == null)
+        if (state.Role == Participation.Avenger && !supportOnly && leader == null)
             DB_SignalRuntime.EmitRally(
                 bat, threat, drive, "new Avenger armed -> immediate RallySignal");
     }
 
     private static void UpdateVengeance(DB_Creature bat, State state)
     {
-        if (state.Vengeance == VengeanceMode.None) return;
+        if (state.Mode == Mode.None) return;
 
         Creature target = state.VengeanceTarget;
-        if (!ValidThreat(target, bat.room))
+        if (!DB_FearRuntime.ValidThreat(target, bat.room))
         {
-            ClearVengeance(state);
+            Clear(state);
             return;
         }
 
-        if (state.Role == VengeanceParticipation.Supporter)
+        if (state.Role == Participation.Supporter)
         {
             if (state.Leader == null || state.Leader.dead || state.Leader.room != bat.room)
             {
-                AddTrauma(
+                DB_FearRuntime.AddTrauma(
                     bat,
                     target,
                     Mathf.Lerp(0.05f, 0.14f, bat.Personality.Conformity));
-                ClearVengeance(state);
+                Clear(state);
                 bat.DesertAI.Threatened(target, false);
                 return;
             }
 
-            if (!TryGetVengeanceState(state.Leader, out State leaderState) ||
-                leaderState.Role != VengeanceParticipation.Avenger ||
+            if (!TryGetState(state.Leader, out State leaderState) ||
+                leaderState.Role != Participation.Avenger ||
                 leaderState.VengeanceTarget != target)
             {
-                if (state.Vengeance != VengeanceMode.Withdraw)
+                if (state.Mode != Mode.Withdraw)
                     StartWithdraw(state, CombatDrive(bat, state));
             }
-            else if (leaderState.Vengeance == VengeanceMode.Withdraw &&
-                     state.Vengeance != VengeanceMode.Withdraw)
+            else if (leaderState.Mode == Mode.Withdraw &&
+                     state.Mode != Mode.Withdraw)
             {
                 StartWithdraw(state, CombatDrive(bat, state));
             }
         }
 
-        if (PersistentTraumaStrength(bat, target) >= DB_Tuning.TraumaSevere)
+        if (DB_FearRuntime.PersistentTraumaStrength(bat, target) >= DB_Tuning.TraumaSevere)
         {
-            ClearVengeance(state);
+            Clear(state);
             bat.DesertAI.Threatened(target, false);
             return;
         }
@@ -417,18 +413,18 @@ internal static partial class DB_FearRuntime
         float drive = CombatDrive(bat, state);
         Vector2 head = target.mainBodyChunk.pos;
 
-        switch (state.Vengeance)
+        switch (state.Mode)
         {
-            case VengeanceMode.Waiting:
+            case Mode.Waiting:
                 if (--state.VengeanceTimer > 0) return;
                 if (state.WasRescuePlan && RescueStillPossible(state, target))
                 {
-                    state.Vengeance = VengeanceMode.RescueCharge;
+                    state.Mode = Mode.RescueCharge;
                     state.VengeanceTimer = 0;
                 }
                 else
                 {
-                    state.Vengeance = VengeanceMode.Observe;
+                    state.Mode = Mode.Observe;
                     state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
                         VengeanceObserveMaxTicks,
                         VengeanceObserveMinTicks,
@@ -436,14 +432,14 @@ internal static partial class DB_FearRuntime
                 }
                 break;
 
-            case VengeanceMode.Observe:
+            case Mode.Observe:
                 ForceFlight(
                     bat,
                     head + OrbitOffset(bat, 150f, 80f),
                     Mathf.Lerp(6.5f, 8.5f, drive));
                 if (--state.VengeanceTimer <= 0)
                 {
-                    state.Vengeance = VengeanceMode.Circle;
+                    state.Mode = Mode.Circle;
                     state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
                         VengeanceCircleMaxTicks,
                         VengeanceCircleMinTicks,
@@ -451,19 +447,19 @@ internal static partial class DB_FearRuntime
                 }
                 break;
 
-            case VengeanceMode.Circle:
+            case Mode.Circle:
                 ForceFlight(
                     bat,
                     head + OrbitOffset(bat, 105f, 60f),
                     Mathf.Lerp(7.5f, 10f, drive));
                 if (--state.VengeanceTimer <= 0)
                 {
-                    state.Vengeance = VengeanceMode.Feint;
+                    state.Mode = Mode.Feint;
                     state.VengeanceTimer = VengeanceFeintTicks;
                 }
                 break;
 
-            case VengeanceMode.Feint:
+            case Mode.Feint:
             {
                 float distance = Vector2.Distance(bat.mainBodyChunk.pos, head);
                 Vector2 goal = distance < 58f
@@ -480,14 +476,14 @@ internal static partial class DB_FearRuntime
                     }
                     else
                     {
-                        state.Vengeance = VengeanceMode.Charge;
+                        state.Mode = Mode.Charge;
                         state.VengeanceTimer = VengeanceChargeTimeout;
                     }
                 }
                 break;
             }
 
-            case VengeanceMode.RescueCharge:
+            case Mode.RescueCharge:
                 ForceFlight(
                     bat,
                     head + target.mainBodyChunk.vel * 0.95f,
@@ -495,7 +491,7 @@ internal static partial class DB_FearRuntime
                 state.VengeanceTimer++;
                 if (TryVengeanceContact(bat, state, target, true))
                 {
-                    if (state.Vengeance == VengeanceMode.RescueCharge)
+                    if (state.Mode == Mode.RescueCharge)
                         ContinueOrWithdraw(state, target, drive);
                 }
                 else if (state.VengeanceTimer > VengeanceChargeTimeout)
@@ -505,7 +501,7 @@ internal static partial class DB_FearRuntime
                 }
                 break;
 
-            case VengeanceMode.Charge:
+            case Mode.Charge:
                 ForceFlight(
                     bat,
                     head + target.mainBodyChunk.vel * 1.05f,
@@ -513,7 +509,7 @@ internal static partial class DB_FearRuntime
                 state.VengeanceTimer--;
                 if (TryVengeanceContact(bat, state, target, false))
                 {
-                    if (state.Vengeance == VengeanceMode.Charge)
+                    if (state.Mode == Mode.Charge)
                         ContinueOrWithdraw(state, target, drive);
                 }
                 else if (state.VengeanceTimer <= 0)
@@ -523,14 +519,14 @@ internal static partial class DB_FearRuntime
                 }
                 break;
 
-            case VengeanceMode.Withdraw:
+            case Mode.Withdraw:
                 ForceFlight(
                     bat,
                     bat.mainBodyChunk.pos +
                     Custom.DirVec(head, bat.mainBodyChunk.pos) * 190f + Vector2.up * 65f,
                     Mathf.Lerp(8f, 10.5f, drive));
                 if (--state.VengeanceTimer <= 0)
-                    ClearVengeance(state);
+                    Clear(state);
                 break;
         }
     }
@@ -587,7 +583,7 @@ internal static partial class DB_FearRuntime
         State state,
         Creature target)
     {
-        if (state.RescueAttempted || target is not Lizard lizard || !IsPeach(lizard) ||
+        if (state.RescueAttempted || target is not Lizard lizard || !DB_FearRuntime.IsPeach(lizard) ||
             state.RescueVictim == null || state.RescueVictim.dead ||
             state.RescueVictim.room != lizard.room)
             return false;
@@ -597,7 +593,7 @@ internal static partial class DB_FearRuntime
         float chance = Mathf.Lerp(TongueRescueChanceMin, TongueRescueChanceMax, drive) *
                        Mathf.Lerp(0.92f, 1.10f, bat.Personality.Nerve) *
                        Mathf.Lerp(0.90f, 1.08f, state.Rage);
-        if (state.Role == VengeanceParticipation.Supporter)
+        if (state.Role == Participation.Supporter)
             chance *= Mathf.Lerp(0.72f, 0.96f, state.Commitment);
 
         DB_Creature victim = state.RescueVictim;
@@ -629,7 +625,7 @@ internal static partial class DB_FearRuntime
 
     private static bool RescueStillPossible(State state, Creature target)
     {
-        if (target is not Lizard lizard || !IsPeach(lizard) ||
+        if (target is not Lizard lizard || !DB_FearRuntime.IsPeach(lizard) ||
             state.RescueVictim == null || state.RescueVictim.dead ||
             state.RescueVictim.room != lizard.room)
             return false;
@@ -652,10 +648,10 @@ internal static partial class DB_FearRuntime
         state.RescueTongue = null;
         state.WasRescuePlan = false;
 
-        if (state.Role == VengeanceParticipation.Avenger && state.PassesRemaining > 0 &&
+        if (state.Role == Participation.Avenger && state.PassesRemaining > 0 &&
             target != null && !target.dead)
         {
-            state.Vengeance = VengeanceMode.Circle;
+            state.Mode = Mode.Circle;
             state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
                 VengeanceCircleMaxTicks,
                 VengeanceCircleMinTicks,
@@ -668,7 +664,7 @@ internal static partial class DB_FearRuntime
 
     private static void StartWithdraw(State state, float drive)
     {
-        state.Vengeance = VengeanceMode.Withdraw;
+        state.Mode = Mode.Withdraw;
         state.VengeanceTimer = Mathf.RoundToInt(Mathf.Lerp(
             VengeanceWithdrawMaxTicks,
             VengeanceWithdrawMinTicks,
@@ -677,24 +673,24 @@ internal static partial class DB_FearRuntime
 
     private static float CombatDrive(DB_Creature bat, State state)
     {
-        return state.Role == VengeanceParticipation.Supporter
+        return state.Role == Participation.Supporter
             ? Mathf.Lerp(0.38f, 0.72f, state.Commitment)
             : bat.Personality.VengeanceDrive;
     }
 
-    private static bool TryGetVengeanceState(
+    internal static bool TryGetState(
         DB_Creature bat,
         out State state)
     {
         state = null;
-        return bat != null && states.TryGetValue(bat, out state) && state.Active;
+        return bat != null && DB_FearRuntime.TryGetVengeanceState(bat, out state);
     }
 
-    private static void ClearVengeance(State state)
+    internal static void Clear(State state)
     {
         if (state == null) return;
-        state.Vengeance = VengeanceMode.None;
-        state.Role = VengeanceParticipation.None;
+        state.Mode = Mode.None;
+        state.Role = Participation.None;
         state.VengeanceTarget = null;
         state.Leader = null;
         state.RescueVictim = null;
@@ -713,13 +709,13 @@ internal static partial class DB_FearRuntime
         DB_Creature bat,
         DB_Creature victim,
         Creature threat,
-        EventKind kind)
+        DB_FearRuntime.EventKind kind)
     {
         unchecked
         {
             uint x = (uint)bat.Personality.VisualSeed;
             x ^= (uint)(victim?.Personality.VisualSeed ?? 0) * 0x9E3779B9u;
-            x ^= (uint)ThreatIdentity(threat) * 0x85EBCA6Bu;
+            x ^= (uint)DB_FearRuntime.ThreatIdentity(threat) * 0x85EBCA6Bu;
             x ^= (uint)((int)kind + 1) * 0xC2B2AE35u;
             x ^= x >> 16;
             x *= 0x7FEB352Du;
@@ -748,13 +744,13 @@ internal static partial class DB_FearRuntime
         float speed)
     {
         if (bat?.room == null ||
-            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Mode))
             return;
 
         // R5: threat tactics are modifiers, not an internal RuntimeDetour. Vengeance owns
         // the frame and explicitly asks Threat Signature to refine the already-authorized
         // goal/speed before the single FlightMotor write boundary.
-        if (TryGetVengeanceTarget(bat, out Creature vengeanceTarget) && vengeanceTarget is Player player)
+        if (TryGetTarget(bat, out Creature vengeanceTarget) && vengeanceTarget is Player player)
             goal = DB_ThreatTactics.AdjustExtremeVengeanceGoal(bat, player, goal, ref speed);
 
         Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, goal);
@@ -768,7 +764,7 @@ internal static partial class DB_FearRuntime
 
         DB_FlightMotor.TrySteer(
             bat,
-            DB_BehaviorOwner.Vengeance,
+            DB_BehaviorOwner.Mode,
             goal,
             speed,
             response: 0.28f);

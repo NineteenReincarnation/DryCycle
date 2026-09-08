@@ -18,9 +18,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Persistent trauma is kept in DB_State, not this weak table. This class owns only
 /// realized runtime steering and fixed-size fear state; there is no per-frame observer graph.
 /// </summary>
-internal static partial class DB_FearRuntime
+internal static class DB_FearRuntime
 {
-    private enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
+    internal enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
     private const float DirectWitnessRadius = 340f;
     private const float SecondaryAlarmRadius = 180f;
     private const float ChainFearRadius = 150f;
@@ -71,9 +71,10 @@ internal static partial class DB_FearRuntime
         internal bool Active => MemoryTicks > 0 && Strength > 0f;
     }
 
-    private sealed partial class State
+    private sealed class State
     {
         internal bool Active;
+        internal readonly DB_VengeanceRuntime.State Vengeance = new();
         internal FearMemory PlayerFear;
         internal FearMemory PredatorFear;
 
@@ -212,17 +213,15 @@ internal static partial class DB_FearRuntime
 
         if (bat.dead || !bat.Consious || bat.room == null || bat.inShortcut || RestrainedByNonFly(bat))
         {
-            ClearVengeance(state);
+            DB_VengeanceRuntime.Clear(state.Vengeance);
             TryDeactivate(bat, state);
             return;
         }
 
-        if (bat.Injury.BlocksCombat) ClearVengeance(state);
+        if (bat.Injury.BlocksCombat) DB_VengeanceRuntime.Clear(state.Vengeance);
         EnforcePersistentTrauma(bat, state);
 
-        bool vengeanceControlsMovement = state.Vengeance is
-            VengeanceMode.Observe or VengeanceMode.Circle or VengeanceMode.Feint or
-            VengeanceMode.RescueCharge or VengeanceMode.Charge or VengeanceMode.Withdraw;
+        bool vengeanceControlsMovement = DB_VengeanceRuntime.ControlsMovement(state.Vengeance);
 
         if (!vengeanceControlsMovement)
         {
@@ -331,11 +330,11 @@ internal static partial class DB_FearRuntime
         Room room = victim?.room;
         if (room == null || !ValidThreat(threat, room)) return;
 
-        bool victimHadState = TryGetVengeanceState(victim, out State victimState);
-        bool victimWasLeader = victimHadState && victimState.Role == VengeanceParticipation.Avenger &&
-                               victimState.Vengeance != VengeanceMode.None;
-        bool victimWasFollower = victimHadState && victimState.Role == VengeanceParticipation.Supporter &&
-                                 victimState.Vengeance != VengeanceMode.None;
+        bool victimHadState = DB_VengeanceRuntime.TryGetState(victim, out DB_VengeanceRuntime.State victimState);
+        bool victimWasLeader = victimHadState && victimState.Role == DB_VengeanceRuntime.Participation.Avenger &&
+                               victimState.Active;
+        bool victimWasFollower = victimHadState && victimState.Role == DB_VengeanceRuntime.Participation.Supporter &&
+                                 victimState.Active;
         DB_Creature victimLeader = victimWasFollower ? victimState.Leader : null;
 
         bool suppressNewVengeance = revengeFailed || victimWasLeader;
@@ -357,8 +356,8 @@ internal static partial class DB_FearRuntime
             for (int i = 0; i < bats.Count; i++)
             {
                 DB_Creature bat = bats[i];
-                if (!TryGetVengeanceState(bat, out State follower) ||
-                    follower.Role != VengeanceParticipation.Supporter || follower.Leader != victim ||
+                if (!DB_VengeanceRuntime.TryGetState(bat, out DB_VengeanceRuntime.State follower) ||
+                    follower.Role != DB_VengeanceRuntime.Participation.Supporter || follower.Leader != victim ||
                     follower.VengeanceTarget != threat)
                     continue;
 
@@ -366,7 +365,7 @@ internal static partial class DB_FearRuntime
                     bat,
                     threat,
                     Mathf.Lerp(0.30f, 0.55f, bat.Personality.Conformity) * threatScale);
-                ClearVengeance(follower);
+                DB_VengeanceRuntime.Clear(follower);
                 bat.DesertAI.Threatened(threat, false);
             }
         }
@@ -375,8 +374,8 @@ internal static partial class DB_FearRuntime
             for (int i = 0; i < bats.Count; i++)
             {
                 DB_Creature bat = bats[i];
-                if (!TryGetVengeanceState(bat, out State social) ||
-                    social.Role != VengeanceParticipation.Supporter || social.Leader != victimLeader ||
+                if (!DB_VengeanceRuntime.TryGetState(bat, out DB_VengeanceRuntime.State social) ||
+                    social.Role != DB_VengeanceRuntime.Participation.Supporter || social.Leader != victimLeader ||
                     social.VengeanceTarget != threat)
                     continue;
 
@@ -447,7 +446,7 @@ internal static partial class DB_FearRuntime
             ReceiveFear(bats[i], threat, eventPosition, tier[i], threatScale, kind);
         }
 
-        ArmVengeanceGroup(
+        DB_VengeanceRuntime.ArmGroup(
             trueCandidates,
             bats,
             tier,
@@ -461,7 +460,7 @@ internal static partial class DB_FearRuntime
         for (int i = 0; i < bats.Count; i++)
         {
             if (tier[i] < 0 || !DB_SocialBond.CanRespond(bats[i])) continue;
-            if (tier[i] <= 1 && !IsExtremeVengeanceActive(bats[i]))
+            if (tier[i] <= 1 && !DB_VengeanceRuntime.IsActive(bats[i]))
             {
                 if (previousEscape != null && Vector2.Distance(previousEscape.mainBodyChunk.pos,
                     bats[i].mainBodyChunk.pos) <= 120f)
@@ -516,8 +515,7 @@ internal static partial class DB_FearRuntime
         float socialScale = tier == 0
             ? Mathf.Lerp(0.92f, 1.10f, bat.Personality.Conformity)
             : bat.Personality.SocialFearScale;
-        bool followingThisThreat = state.Role == VengeanceParticipation.Supporter &&
-                                   state.VengeanceTarget == threat;
+        bool followingThisThreat = DB_VengeanceRuntime.IsSupporterFor(state.Vengeance, threat);
         if (followingThisThreat)
             socialScale *= Mathf.Lerp(1.22f, 1.90f, bat.Personality.Conformity);
 
@@ -572,11 +570,11 @@ internal static partial class DB_FearRuntime
             traumaGain *= Mathf.Lerp(1.45f, 2.25f, bat.Personality.Conformity);
         AddTrauma(bat, threat, traumaGain);
 
-        if (state.VengeanceTarget == threat &&
-            (memory.Strength >= VengeanceCollapseStrength ||
+        if (DB_VengeanceRuntime.TargetMatches(state.Vengeance, threat) &&
+            (memory.Strength >= DB_VengeanceRuntime.CollapseStrength ||
              PersistentTraumaStrength(bat, threat) >= DB_Tuning.TraumaSevere))
         {
-            ClearVengeance(state);
+            DB_VengeanceRuntime.Clear(state.Vengeance);
         }
 
         bat.DesertAI.ThreatenedAt(threat, eventPosition, false, false);
@@ -707,8 +705,8 @@ internal static partial class DB_FearRuntime
         float strength = PersistentTraumaStrength(bat, threat);
         if (strength < DB_Tuning.TraumaAggressionBlock) return;
 
-        if (state.VengeanceTarget == threat)
-            ClearVengeance(state);
+        if (DB_VengeanceRuntime.TargetMatches(state.Vengeance, threat))
+            DB_VengeanceRuntime.Clear(state.Vengeance);
         bat.DesertAI.SuppressHostility(threat);
 
         float fearDistance = Mathf.Lerp(
@@ -794,7 +792,7 @@ internal static partial class DB_FearRuntime
         }
     }
 
-    private static float PersistentTraumaStrength(
+    internal static float PersistentTraumaStrength(
         DB_Creature bat,
         Creature threat)
     {
@@ -820,6 +818,36 @@ internal static partial class DB_FearRuntime
         }
 
         return 0f;
+    }
+
+    internal static DB_VengeanceRuntime.State VengeanceStateFor(DB_Creature bat)
+    {
+        return StateFor(bat).Vengeance;
+    }
+
+    internal static bool TryGetVengeanceState(
+        DB_Creature bat,
+        out DB_VengeanceRuntime.State vengeance)
+    {
+        vengeance = null;
+        if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active)
+            return false;
+        vengeance = state.Vengeance;
+        return true;
+    }
+
+    internal static float FearStrengthForVengeance(DB_Creature bat, Creature threat)
+    {
+        if (bat == null || threat == null || !states.TryGetValue(bat, out State state) || !state.Active)
+            return 0f;
+        FearMemory memory = threat is Player ? state.PlayerFear : state.PredatorFear;
+        return memory.Active && memory.Identity == ThreatIdentity(threat) ? memory.Strength : 0f;
+    }
+
+    internal static void TryDeactivateAfterVengeance(DB_Creature bat)
+    {
+        if (bat != null && states.TryGetValue(bat, out State state))
+            TryDeactivate(bat, state);
     }
 
     private static void TickMemory(ref FearMemory memory)
@@ -849,7 +877,7 @@ internal static partial class DB_FearRuntime
     private static void TryDeactivate(DB_Creature bat, State state)
     {
         if (state == null || !state.Active || state.PlayerFear.Active ||
-            state.PredatorFear.Active || state.Vengeance != VengeanceMode.None ||
+            state.PredatorFear.Active || state.Vengeance.Active ||
             bat.DesertState.HasTrauma)
             return;
 
@@ -863,7 +891,7 @@ internal static partial class DB_FearRuntime
                Mathf.Lerp(1.10f, 0.70f, bat.Personality.Nerve);
     }
 
-    private static int ThreatIdentity(Creature threat)
+    internal static int ThreatIdentity(Creature threat)
     {
         if (threat is Player player)
             return player.playerState?.playerNumber ?? 0;
@@ -881,13 +909,13 @@ internal static partial class DB_FearRuntime
         return false;
     }
 
-    private static bool ValidThreat(Creature threat, Room room)
+    internal static bool ValidThreat(Creature threat, Room room)
     {
         return threat != null && room != null && !threat.dead &&
                !threat.slatedForDeletetion && threat.room == room && !threat.inShortcut;
     }
 
-    private static bool IsPeach(Creature creature)
+    internal static bool IsPeach(Creature creature)
     {
         return ModManager.Watcher && creature is Lizard lizard &&
                lizard.Template != null &&

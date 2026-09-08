@@ -54,5 +54,6 @@ internal static partial class Program
         RunArchitectureBridgeCleanup();
         RunArchitectureRetention();
         RunArchitectureDomainMigration();
+        RunArchitectureVengeance();
     }
 }
