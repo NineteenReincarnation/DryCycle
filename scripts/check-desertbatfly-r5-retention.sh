@@ -47,7 +47,8 @@ grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Behavior
 grep -q 'DB_ThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
 test "$(grep -c 'DB_SignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/Behavior/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
 grep -q 'DB_SignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Core/Runtime/DB_EventConsumers.cs
-grep -q 'DB_SignalRuntime.EmitRally' src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs
+# Rally is a Vengeance-domain action: it must remain on the arming path after the Fear/Vengeance split.
+grep -q 'DB_SignalRuntime.EmitRally' src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
 grep -q 'IsDirectDeathWitness(observer, victim, killer)' src/Creatures/DesertBatfly/Behavior/Social/DB_SocialBond.cs
 ! grep -RIn --include='*.cs' 'DB_ThreatMemoryStore.AddEvidence' src/Creatures/DesertBatfly/Behavior/Signals
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/Behavior/Signals
