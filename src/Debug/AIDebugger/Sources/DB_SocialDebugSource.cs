@@ -16,7 +16,7 @@ internal sealed class DB_SocialDebugSource : IAIDebugSource
     public AIDebugSnapshot Capture(AbstractCreature creature, RainWorldGame game)
     {
         AIDebugSnapshot snapshot = inner.Capture(creature, game);
-        if (snapshot == null || creature?.realizedCreature is not DesertBatfly bat)
+        if (snapshot == null || creature?.realizedCreature is not DB_Creature bat)
             return snapshot;
 
         bool hasSocial = DesertBatflySocialLife.TryGetDebugState(

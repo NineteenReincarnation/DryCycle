@@ -97,7 +97,7 @@ internal static class DB_RainWorldHooks
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)
     {
-        if (self is DesertBatfly desert)
+        if (self is DB_Creature desert)
         {
             if (room?.world != null)
             {
@@ -114,7 +114,7 @@ internal static class DB_RainWorldHooks
 
     private static void FlyNewRoom(On.Fly.orig_NewRoom orig, Fly self, Room room)
     {
-        if (self is DesertBatfly desert)
+        if (self is DB_Creature desert)
         {
             DesertBatflySocialLife.CancelForPriority(desert, "room transition");
             DB_SignalRuntime.Forget(desert);
@@ -129,14 +129,14 @@ internal static class DB_RainWorldHooks
 
     private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
     {
-        if (self is DesertBatfly desert)
+        if (self is DB_Creature desert)
             DesertBatflySocialLife.CancelForPriority(desert, "grabbed / restraint");
         orig(self, grasp);
     }
 
     private static void Burrow(On.Fly.orig_Burrowed orig, Fly self)
     {
-        if (self is DesertBatfly desert)
+        if (self is DB_Creature desert)
         {
             DesertBatflySocialLife.CancelForPriority(desert, "burrow priority");
             DB_SignalRuntime.Forget(desert);
@@ -147,7 +147,7 @@ internal static class DB_RainWorldHooks
 
     private static void Emerge(On.FliesRoomAI.orig_FlyEmergeFromHive orig, FliesRoomAI self, Fly fly)
     {
-        if (fly is not DesertBatfly desert)
+        if (fly is not DB_Creature desert)
         {
             orig(self, fly);
             return;
@@ -163,7 +163,7 @@ internal static class DB_RainWorldHooks
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly desert)
+        if (self.fly is not DB_Creature desert)
         {
             orig(self);
             return;
@@ -344,7 +344,7 @@ internal static class DB_RainWorldHooks
     private static bool ExecuteNativeOwned(
         On.FlyAI.orig_Update orig,
         FlyAI self,
-        DesertBatfly desert,
+        DB_Creature desert,
         in DB_BehaviorResolution ownership)
     {
         if (orig == null || self == null || desert == null) return false;
@@ -358,7 +358,7 @@ internal static class DB_RainWorldHooks
     }
 
     private static void CompleteR3Frame(
-        DesertBatfly desert,
+        DB_Creature desert,
         in DB_BehaviorResolution ownership)
     {
         if (desert == null) return;
@@ -376,7 +376,7 @@ internal static class DB_RainWorldHooks
                 ownership.Reason);
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly fly)
+    private static bool RestrainedByNonFly(DB_Creature fly)
     {
         for (int i = 0; i < fly.grabbedBy.Count; i++)
         {
@@ -388,13 +388,13 @@ internal static class DB_RainWorldHooks
 
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly) orig(self);
+        if (self.fly is not DB_Creature) orig(self);
     }
 
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)
     {
         orig(self);
-        if (self.fly is not DesertBatfly desert) return;
+        if (self.fly is not DB_Creature desert) return;
 
         DesertBatflySocialRoomRuntime.RoomState socialRoom =
             DesertBatflySocialRoomRuntime.For(self.room);
@@ -412,7 +412,7 @@ internal static class DB_RainWorldHooks
 
     private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly desert)
+        if (self.fly is not DB_Creature desert)
         {
             orig(self);
             return;
@@ -439,7 +439,7 @@ internal static class DB_RainWorldHooks
 
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
     {
-        if (self.fly is not DesertBatfly ||
+        if (self.fly is not DB_Creature ||
             !DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom) ||
             self.room.hives.Length == 0)
         {
@@ -474,7 +474,7 @@ internal static class DB_RainWorldHooks
         IPlayerEdible edible)
     {
         int value = orig(name, edible);
-        if (edible is not DesertBatfly || value <= 0) return value;
+        if (edible is not DB_Creature || value <= 0) return value;
         return value < edible.FoodPoints * 4 ? 4 : 8;
     }
 }

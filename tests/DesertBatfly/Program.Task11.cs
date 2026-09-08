@@ -23,11 +23,11 @@ internal static partial class Program
         Type adapterType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatClassifier", true);
         Type runtimeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type cueType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatCue", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatCue", true);
         Type debugType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatDebugState", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatDebugState", true);
         Type stateType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_State", true);
 
@@ -205,9 +205,9 @@ internal static partial class Program
             Check(debugType.GetField(field, Flags) != null,
                 "Task11 debug state exposes " + field);
 
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null &&
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
             "Task11 does not revive rejected Task02 social roles");
 
         Console.WriteLine(

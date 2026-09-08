@@ -13,7 +13,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal sealed class DB_CombatRuntime
 {
     private readonly DB_AI ai;
-    private readonly DesertBatfly fly;
+    private readonly DB_Creature fly;
 
     private Creature target;
     private Creature attacker;
@@ -33,7 +33,7 @@ internal sealed class DB_CombatRuntime
     private Vector2 retaliationDirection;
     private BodyChunk attachedChunk;
 
-    internal DB_CombatRuntime(DB_AI ai, DesertBatfly fly)
+    internal DB_CombatRuntime(DB_AI ai, DB_Creature fly)
     {
         this.ai = ai;
         this.fly = fly;
@@ -123,7 +123,7 @@ internal sealed class DB_CombatRuntime
 
     internal void RecordAttacker(Creature source, float retaliationStrength = 0f)
     {
-        if (source == null || source == fly || source is DesertBatfly) return;
+        if (source == null || source == fly || source is DB_Creature) return;
         attacker = source;
         memory = Mathf.Max(memory, DB_Tuning.AttackerMemory);
         if (retaliationStrength > 0f && source is Player player)
@@ -304,7 +304,7 @@ internal sealed class DB_CombatRuntime
 
     private bool CanHarass(Creature creature)
     {
-        if (creature == fly || creature is DesertBatfly || !ai.Valid(creature)) return false;
+        if (creature == fly || creature is DB_Creature || !ai.Valid(creature)) return false;
         if (!GriefAllowsHarass()) return false;
         if (creature is Player player)
             return !ai.IsTraumatizedPlayer(player) &&
@@ -681,7 +681,7 @@ internal sealed class DB_CombatRuntime
         {
             for (int i = 0; i < bats.Count; i++)
             {
-                DesertBatfly other = bats[i];
+                DB_Creature other = bats[i];
                 if (other == null || other == fly || !other.Consious ||
                     other.grabbedBy.Count != 0 || other.DesertAI.Target != target ||
                     !other.DesertAI.FormalAttack)

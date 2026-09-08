@@ -23,7 +23,7 @@ internal sealed class DB_RoomContext
 
     private readonly Room room;
     private readonly List<Creature> creatures = new(32);
-    private readonly List<DesertBatfly> bats = new(24);
+    private readonly List<DB_Creature> bats = new(24);
     private readonly List<Player> players = new(4);
     private readonly List<Weapon> weapons = new(16);
     private readonly List<Weapon> thrownWeapons = new(12);
@@ -38,7 +38,7 @@ internal sealed class DB_RoomContext
         get { PruneCreatures(); return creatures; }
     }
 
-    internal IReadOnlyList<DesertBatfly> Bats
+    internal IReadOnlyList<DB_Creature> Bats
     {
         get { PruneBats(); return bats; }
     }
@@ -97,7 +97,7 @@ internal sealed class DB_RoomContext
         return null;
     }
 
-    internal bool Contains(DesertBatfly bat)
+    internal bool Contains(DB_Creature bat)
     {
         if (bat == null) return false;
         PruneBats();
@@ -144,7 +144,7 @@ internal sealed class DB_RoomContext
             if (!CurrentCreature(creature)) continue;
 
             creatures.Add(creature);
-            if (creature is DesertBatfly bat && !bat.dead)
+            if (creature is DB_Creature bat && !bat.dead)
                 bats.Add(bat);
             if (creature is Player player && !player.dead)
                 players.Add(player);
@@ -188,7 +188,7 @@ internal sealed class DB_RoomContext
     {
         for (int i = bats.Count - 1; i >= 0; i--)
         {
-            DesertBatfly bat = bats[i];
+            DB_Creature bat = bats[i];
             if (!CurrentCreature(bat) || bat.dead) bats.RemoveAt(i);
         }
     }

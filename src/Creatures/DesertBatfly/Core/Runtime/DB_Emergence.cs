@@ -6,13 +6,13 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 internal sealed class DB_Emergence
 {
-    private readonly DesertBatfly fly;
+    private readonly DB_Creature fly;
     private Vector2 surface, normal;
     private int age;
     internal bool Active { get; private set; }
     internal float Progress => !Active ? 1f : Mathf.Clamp01((age - 12f) / (DB_Tuning.EmergenceTicks - 12f));
 
-    internal DB_Emergence(DesertBatfly fly) { this.fly = fly; }
+    internal DB_Emergence(DB_Creature fly) { this.fly = fly; }
 
     internal void Begin(Vector2 point, Vector2 outward)
     {

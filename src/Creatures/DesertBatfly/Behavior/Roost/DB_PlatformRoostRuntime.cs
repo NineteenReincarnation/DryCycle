@@ -44,7 +44,7 @@ internal static class DB_PlatformRoostRuntime
             return true;
         }
 
-        if (self?.fly is not DesertBatfly || self.room == null)
+        if (self?.fly is not DB_Creature || self.room == null)
         {
             return false;
         }

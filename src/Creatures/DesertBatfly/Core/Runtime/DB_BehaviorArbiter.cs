@@ -20,14 +20,14 @@ internal static class DB_BehaviorArbiter
         internal readonly List<DB_BehaviorRejection> Rejected = new(16);
     }
 
-    private static ConditionalWeakTable<DesertBatfly, State> states = new();
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, State>();
+        states = new ConditionalWeakTable<DB_Creature, State>();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) states.Remove(bat);
     }
@@ -56,7 +56,7 @@ internal static class DB_BehaviorArbiter
     };
 
     internal static DB_BehaviorResolution ResolveFrame(
-        DesertBatfly bat,
+        DB_Creature bat,
         DB_BehaviorOwner excludedOwner = DB_BehaviorOwner.None,
         string excludedReason = null)
     {
@@ -116,7 +116,7 @@ internal static class DB_BehaviorArbiter
         return state.Resolution;
     }
 
-    internal static bool TryGetResolution(DesertBatfly bat, out DB_BehaviorResolution resolution)
+    internal static bool TryGetResolution(DB_Creature bat, out DB_BehaviorResolution resolution)
     {
         resolution = default;
         if (bat == null || !states.TryGetValue(bat, out State state) || !state.Resolution.Resolved)
@@ -125,14 +125,14 @@ internal static class DB_BehaviorArbiter
         return true;
     }
 
-    internal static bool IsPrimaryOwner(DesertBatfly bat, DB_BehaviorOwner owner)
+    internal static bool IsPrimaryOwner(DB_Creature bat, DB_BehaviorOwner owner)
     {
         if (bat?.room == null || !states.TryGetValue(bat, out State state)) return false;
         int clock = bat.room.game?.clock ?? int.MinValue;
         return state.Clock == clock && state.Resolution.PrimaryOwner == owner;
     }
 
-    internal static bool TryGetDebugState(DesertBatfly bat, out DB_BehaviorArbiterDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_BehaviorArbiterDebugState debug)
     {
         debug = default;
         if (bat == null || !states.TryGetValue(bat, out State state) || !state.Resolution.Resolved)
@@ -183,7 +183,7 @@ internal static class DB_BehaviorArbiter
         in DB_FrameContext frame,
         List<DB_BehaviorProposal> proposals)
     {
-        DesertBatfly bat = frame.Bat;
+        DB_Creature bat = frame.Bat;
         DB_AI ai = bat?.DesertAI;
 
         if (frame.Dead || !frame.Conscious)

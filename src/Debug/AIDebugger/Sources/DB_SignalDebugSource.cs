@@ -12,7 +12,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
     public AIDebugSnapshot Capture(AbstractCreature creature, RainWorldGame game)
     {
         AIDebugSnapshot snapshot = inner.Capture(creature, game);
-        if (snapshot == null || creature?.realizedCreature is not DesertBatfly bat)
+        if (snapshot == null || creature?.realizedCreature is not DB_Creature bat)
             return snapshot;
 
         bool hasSignal = DB_SignalRuntime.TryGetDebugState(
@@ -84,7 +84,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
         return snapshot;
     }
 
-    private static DB_SignalPacket FindSignalPacket(DesertBatfly bat, int generation)
+    private static DB_SignalPacket FindSignalPacket(DB_Creature bat, int generation)
     {
         DesertBatflySignalRoomRuntime.RoomState room =
             DesertBatflySignalRoomRuntime.For(bat?.room);
@@ -109,7 +109,7 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
         _ => "None"
     };
 
-    private static string EntityLabel(DesertBatfly bat)
+    private static string EntityLabel(DB_Creature bat)
     {
         if (bat?.abstractCreature == null) return "— / expired";
         return bat.abstractCreature.ID.ToString();

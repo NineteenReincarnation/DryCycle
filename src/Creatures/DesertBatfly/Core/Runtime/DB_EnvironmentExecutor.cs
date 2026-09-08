@@ -6,7 +6,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal static class DB_EnvironmentExecutor
 {
-    internal static bool TryExecute(DesertBatfly bat, in DB_BehaviorResolution resolution)
+    internal static bool TryExecute(DB_Creature bat, in DB_BehaviorResolution resolution)
     {
         if (bat == null || resolution.PrimaryOwner is not (
                 DB_BehaviorOwner.EnvironmentHardSurvival or DB_BehaviorOwner.EnvironmentLocalSurvival))

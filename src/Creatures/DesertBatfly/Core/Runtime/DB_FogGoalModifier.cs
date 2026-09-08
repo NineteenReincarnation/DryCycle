@@ -16,16 +16,16 @@ internal static class DB_FogGoalModifier
         internal int WeatherOrdinal = -1;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, State> states = new();
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
 
-    internal static void Reset() => states = new ConditionalWeakTable<DesertBatfly, State>();
+    internal static void Reset() => states = new ConditionalWeakTable<DB_Creature, State>();
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) states.Remove(bat);
     }
 
-    internal static Vector2 ModifyGoal(DesertBatfly bat, DB_BehaviorOwner owner, Vector2 goal)
+    internal static Vector2 ModifyGoal(DB_Creature bat, DB_BehaviorOwner owner, Vector2 goal)
     {
         if (bat?.room == null || owner is not (
                 DB_BehaviorOwner.EnvironmentHardSurvival or DB_BehaviorOwner.EnvironmentLocalSurvival) ||

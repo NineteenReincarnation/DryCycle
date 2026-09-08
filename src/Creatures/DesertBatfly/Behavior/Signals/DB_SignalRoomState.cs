@@ -45,8 +45,8 @@ internal static class DesertBatflySignalRoomRuntime
         internal DB_SignalPacket AddOrRefresh(
             Room room,
             DB_SignalKind kind,
-            DesertBatfly emitter,
-            DesertBatfly subject,
+            DB_Creature emitter,
+            DB_Creature subject,
             Creature threat,
             Player target,
             Vector2 origin,
@@ -165,7 +165,7 @@ internal static class DesertBatflySignalRoomRuntime
 
                 foreach (Fly member in DB_SwarmRoom.For(room).Hive.flies)
                 {
-                    if (member is not DesertBatfly receiver || receiver == packet.Emitter ||
+                    if (member is not DB_Creature receiver || receiver == packet.Emitter ||
                         receiver.dead || receiver.slatedForDeletetion || !receiver.Consious ||
                         receiver.room != room || receiver.inShortcut)
                         continue;

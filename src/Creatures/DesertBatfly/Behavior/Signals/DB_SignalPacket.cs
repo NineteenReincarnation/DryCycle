@@ -6,8 +6,8 @@ internal sealed class DB_SignalPacket
 {
     internal readonly int Generation;
     internal readonly DB_SignalKind Kind;
-    internal readonly DesertBatfly Emitter;
-    internal readonly DesertBatfly Subject;
+    internal readonly DB_Creature Emitter;
+    internal readonly DB_Creature Subject;
     internal readonly Creature Threat;
     internal readonly Player PlayerTarget;
     internal readonly Vector2 Origin;
@@ -20,8 +20,8 @@ internal sealed class DB_SignalPacket
     internal DB_SignalPacket(
         int generation,
         DB_SignalKind kind,
-        DesertBatfly emitter,
-        DesertBatfly subject,
+        DB_Creature emitter,
+        DB_Creature subject,
         Creature threat,
         Player playerTarget,
         Vector2 origin,

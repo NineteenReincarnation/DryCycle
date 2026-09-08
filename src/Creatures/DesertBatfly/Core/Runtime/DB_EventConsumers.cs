@@ -31,7 +31,7 @@ internal static class DB_EventConsumers
 
     private static void OnCapture(DB_CaptureEvent capture)
     {
-        DesertBatfly victim = capture.Victim;
+        DB_Creature victim = capture.Victim;
         if (victim == null || victim.dead) return;
 
         DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
@@ -81,7 +81,7 @@ internal static class DB_EventConsumers
 
     private static void OnMortality(DB_MortalityEvent mortality)
     {
-        DesertBatfly victim = mortality.Victim;
+        DB_Creature victim = mortality.Victim;
         if (victim == null || !victim.dead) return;
 
         // Intimidation may add a finite CorpseWarning while reacting to this mortality.
@@ -126,7 +126,7 @@ internal static class DB_EventConsumers
             // but no synthetic predator/player fear wave is invented.
             foreach (Fly member in DB_SwarmRoom.For(victim.room).Hive.flies)
             {
-                if (member is not DesertBatfly observer || observer == victim) continue;
+                if (member is not DB_Creature observer || observer == victim) continue;
                 if (System.Array.IndexOf(mortality.ChainWitnesses, observer) < 0 &&
                     (Vector2.Distance(observer.mainBodyChunk.pos, mortality.Position) > 180f ||
                      !victim.room.VisualContact(observer.mainBodyChunk.pos, mortality.Position)))

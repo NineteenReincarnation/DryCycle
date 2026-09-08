@@ -10,10 +10,10 @@ internal static partial class Program
         Type sandbox = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Sandbox", true);
         Type warp = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WarpCompatibility", true);
 
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyHooks", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRuntimePatch", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySandbox", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyWarpCompatibility", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureHooks", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRuntimePatch", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSandbox", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureWarpCompatibility", false) == null,
             "R6 B1 retires old Integration type identities");
 
         MethodInfo modsInit = hooks.GetMethod("RainWorld_OnModsInit", Flags);

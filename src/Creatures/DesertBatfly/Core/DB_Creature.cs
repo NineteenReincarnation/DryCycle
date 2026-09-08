@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertBatfly : Fly, IPlayerEdible
+internal sealed class DB_Creature : Fly, IPlayerEdible
 {
     private const float RockSurvivalHealthFloor = 0.01f;
 
@@ -25,7 +25,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     int IPlayerEdible.FoodPoints => mealFood;
 
-    internal DesertBatfly(AbstractCreature creature, World world) : base(creature, world)
+    internal DB_Creature(AbstractCreature creature, World world) : base(creature, world)
     {
         mainBodyChunk.rad = DB_Tuning.Radius * Personality.Size;
         mainBodyChunk.mass = DB_Tuning.Mass * Personality.Size;

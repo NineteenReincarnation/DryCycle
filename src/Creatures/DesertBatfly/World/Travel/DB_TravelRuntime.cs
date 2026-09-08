@@ -54,7 +54,7 @@ internal static class DB_TravelRuntime
     /// veto: once the current blocker clears, the arbiter may select Travel and the existing
     /// executor is allowed to resume/replan normally.
     /// </summary>
-    internal static bool CanOwnRealizedFrame(DesertBatfly bat, out string reason)
+    internal static bool CanOwnRealizedFrame(DB_Creature bat, out string reason)
     {
         reason = "no active realized travel intent";
         if (bat?.abstractCreature == null || bat.AI == null || bat.room == null ||
@@ -160,7 +160,7 @@ internal static class DB_TravelRuntime
             if (intent.Purpose == DB_TravelPurpose.EmergencyRefuge && intent.WaitingAtRefuge)
                 continue;
 
-            if (creature.realizedCreature is DesertBatfly realized)
+            if (creature.realizedCreature is DB_Creature realized)
             {
                 TryEmergeForTravel(realized, intent);
                 continue;
@@ -209,7 +209,7 @@ internal static class DB_TravelRuntime
         }
     }
 
-    internal static bool TryDriveRealized(DesertBatfly bat)
+    internal static bool TryDriveRealized(DB_Creature bat)
     {
         if (bat?.abstractCreature == null || bat.AI == null || bat.room == null ||
             bat.dead || !bat.Consious || bat.inShortcut)
@@ -621,7 +621,7 @@ internal static class DB_TravelRuntime
         }
     }
 
-    private static bool HoldAtRefuge(DesertBatfly bat, DB_TravelIntent intent)
+    private static bool HoldAtRefuge(DB_Creature bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null) return false;
         intent.Suspended = false;
@@ -665,7 +665,7 @@ internal static class DB_TravelRuntime
         return true;
     }
 
-    private static void TryEmergeForTravel(DesertBatfly bat, DB_TravelIntent intent)
+    private static void TryEmergeForTravel(DB_Creature bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null || !bat.DesertState.InHive) return;
         try
@@ -770,7 +770,7 @@ internal static class DB_TravelRuntime
         return intent.Route.Rooms[intent.Route.Rooms.Length - 1] == roomIndex;
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly bat)
+    private static bool RestrainedByNonFly(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)

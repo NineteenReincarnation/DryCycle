@@ -31,14 +31,14 @@ internal sealed class DB_Graphics : FlyGraphics
     }
 
     private const int VanillaSpriteCount = 4;
-    private readonly DesertBatfly desert;
+    private readonly DB_Creature desert;
     private readonly PatternMark[] patterns;
     private readonly float[] spikeLengths;
     private Color bodyColor, wingColor, darkMark, warmMark;
     private int PatternStart => VanillaSpriteCount;
     private int SpikeStart => PatternStart + patterns.Length;
 
-    internal DB_Graphics(DesertBatfly owner) : base(owner)
+    internal DB_Graphics(DB_Creature owner) : base(owner)
     {
         desert = owner;
 

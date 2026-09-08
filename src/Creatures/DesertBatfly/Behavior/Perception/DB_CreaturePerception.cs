@@ -11,13 +11,13 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal sealed class DB_CreaturePerception
 {
     private readonly DB_AI brain;
-    private readonly DesertBatfly fly;
+    private readonly DB_Creature fly;
     private int scan, pursuit;
 
     internal Creature Danger { get; private set; }
     internal bool IsScanFrame => scan == 0;
 
-    internal DB_CreaturePerception(DB_AI brain, DesertBatfly fly)
+    internal DB_CreaturePerception(DB_AI brain, DB_Creature fly)
     {
         this.brain = brain;
         this.fly = fly;
@@ -60,7 +60,7 @@ internal sealed class DB_CreaturePerception
         for (int i = 0; i < creatures.Count; i++)
         {
             Creature creature = creatures[i];
-            if (creature == fly || creature is DesertBatfly || !Valid(creature))
+            if (creature == fly || creature is DB_Creature || !Valid(creature))
                 continue;
 
             float distance = Vector2.Distance(fly.mainBodyChunk.pos, creature.mainBodyChunk.pos);

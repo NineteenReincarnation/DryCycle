@@ -9,7 +9,7 @@ internal enum DB_InjuryRecoveryState { None, Roost, Hive, SafeFlight }
 // Four separate layers: native health, two persisted wings, temporary shock, existing trauma.
 internal sealed class DB_Injury
 {
-    private readonly DesertBatfly bat;
+    private readonly DB_Creature bat;
     private int eventSerial, shockTicks, recoverySample, impulseGrace;
     private Lizard capturePredator;
     private bool capturePending;
@@ -58,7 +58,7 @@ internal sealed class DB_Injury
     internal float WingAmplitude(int side) => 1f - 0.48f * (side == 0 ? State.LeftWingInjury : State.RightWingInjury);
     internal float BodyTilt => WingBias * 9f;
 
-    internal DB_Injury(DesertBatfly bat) { this.bat = bat; }
+    internal DB_Injury(DB_Creature bat) { this.bat = bat; }
 
     internal void ApplyShock(float gain)
     {

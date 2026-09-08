@@ -24,7 +24,7 @@ internal static class DB_VisibilityPolicy
     internal const float CloseProjectileFloor = 90f;
 
     internal static bool CanObserve(
-        DesertBatfly observer,
+        DB_Creature observer,
         Vector2 targetPosition,
         float baseRange,
         DB_VisibilityChannel channel,

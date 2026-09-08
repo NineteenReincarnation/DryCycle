@@ -23,7 +23,7 @@ internal sealed class DB_AI
         InjuryRecovery
     }
 
-    private readonly DesertBatfly fly;
+    private readonly DB_Creature fly;
     private readonly DB_CombatRuntime combat;
     private readonly DB_CreaturePerception perception;
     private readonly DB_InjuryRecovery injuryRecovery;
@@ -45,7 +45,7 @@ internal sealed class DB_AI
     internal int CombatRetaliationCharges => combat.RetaliationCharges;
     internal int CombatRetaliationRecovery => combat.RetaliationRecovery;
 
-    internal DB_AI(DesertBatfly fly)
+    internal DB_AI(DB_Creature fly)
     {
         this.fly = fly;
         combat = new DB_CombatRuntime(this, fly);
@@ -123,7 +123,7 @@ internal sealed class DB_AI
     {
         injuryRecovery.ClearNavigation();
         fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "immediate threat / escape");
-        if (source != null && source != fly && source is not DesertBatfly)
+        if (source != null && source != fly && source is not DB_Creature)
             combat.RecordAttacker(source, directAttack ? 1f : 0f);
         escapeFrom = origin;
 
@@ -610,7 +610,7 @@ internal sealed class DB_AI
             }
             member.movMode = Fly.MovementMode.BatFlight;
 
-            if (member is DesertBatfly desert)
+            if (member is DB_Creature desert)
             {
                 DB_AI brain = desert.DesertAI;
                 brain.hasRoost = false;

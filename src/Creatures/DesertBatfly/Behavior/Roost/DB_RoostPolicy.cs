@@ -9,7 +9,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal static class DB_RoostPolicy
 {
-    internal static bool TryGetSpot(DesertBatfly fly, IntVector2 tile, out Vector2 spot)
+    internal static bool TryGetSpot(DB_Creature fly, IntVector2 tile, out Vector2 spot)
     {
         spot = default;
         if (fly?.room == null || fly.AI == null ||

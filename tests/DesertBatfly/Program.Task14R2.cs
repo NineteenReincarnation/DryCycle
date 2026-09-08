@@ -18,13 +18,13 @@ internal static partial class Program
         Type ai = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type threat = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type tactics = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type signalRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type signalRoomRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySignalRoomRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureSignalRoomRuntime", true);
         Type environmentRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
         Type swarmRoom = mod.GetType(
@@ -141,9 +141,9 @@ internal static partial class Program
             "Task14 R2 Task12 visual signal perception uses the central visibility authority while acoustic fallback stays local");
 
         Check(mod.GetType(
-                  "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", false) == null &&
+                  "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSignalBridge", false) == null &&
               mod.GetType(
-                  "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalThreatBridge", false) == null,
+                  "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalThreatBridge", false) == null,
             "Task14 R2 removes obsolete internal visual Signal/Threat detour bridges");
 
         MethodInfo updateRoom = hooks.GetMethod("UpdateRoom", Flags);

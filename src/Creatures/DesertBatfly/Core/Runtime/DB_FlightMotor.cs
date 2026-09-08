@@ -41,15 +41,15 @@ internal static class DB_FlightMotor
         internal Vector2 PostPhysicsVelocity;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, State> states = new();
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, State>();
+        states = new ConditionalWeakTable<DB_Creature, State>();
         DB_FogGoalModifier.Reset();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat == null) return;
         states.Remove(bat);
@@ -57,7 +57,7 @@ internal static class DB_FlightMotor
     }
 
     internal static bool TrySteer(
-        DesertBatfly bat,
+        DB_Creature bat,
         DB_BehaviorOwner owner,
         Vector2 goal,
         float nominalSpeed,
@@ -119,7 +119,7 @@ internal static class DB_FlightMotor
     /// DB_FlightMotor the single Desert Batfly localGoal write boundary.
     /// </summary>
     internal static bool TryGuideNative(
-        DesertBatfly bat,
+        DB_Creature bat,
         DB_BehaviorOwner owner,
         Vector2 goal,
         float nominalSpeed = 0f)
@@ -152,7 +152,7 @@ internal static class DB_FlightMotor
     /// Same-owner tactical goal adjustment after an owner has already submitted its base intent.
     /// It never changes ownership or injects a second velocity controller.
     /// </summary>
-    internal static bool TryRetarget(DesertBatfly bat, DB_BehaviorOwner owner, Vector2 goal)
+    internal static bool TryRetarget(DB_Creature bat, DB_BehaviorOwner owner, Vector2 goal)
     {
         if (bat?.room == null || bat.AI == null ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, owner))
@@ -174,7 +174,7 @@ internal static class DB_FlightMotor
     /// Final R4 injury-flight pass. This does not choose a goal; it only modifies the velocity
     /// produced by the selected owner/native Fly physics using the pure Injury modifier math.
     /// </summary>
-    internal static void ApplyPostPhysics(DesertBatfly bat, Vector2 previousVelocity)
+    internal static void ApplyPostPhysics(DB_Creature bat, Vector2 previousVelocity)
     {
         if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||
             bat.inShortcut || bat.grabbedBy.Count > 0 || bat.Emergence?.Active == true ||
@@ -197,7 +197,7 @@ internal static class DB_FlightMotor
         }
     }
 
-    internal static bool TryGetDebugState(DesertBatfly bat, out DB_FlightMotorDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_FlightMotorDebugState debug)
     {
         debug = default;
         if (bat?.room == null || !states.TryGetValue(bat, out State state)) return false;
@@ -208,7 +208,7 @@ internal static class DB_FlightMotor
     }
 
     internal static bool TryGetIntent(
-        DesertBatfly bat,
+        DB_Creature bat,
         out DB_BehaviorOwner owner,
         out Vector2 goal,
         out float nominalSpeed)

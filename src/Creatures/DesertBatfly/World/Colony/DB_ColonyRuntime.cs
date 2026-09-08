@@ -163,7 +163,7 @@ internal static class DB_ColonyRuntime
         RefreshPopulationCounts(creature.world);
     }
 
-    internal static void ReportDeath(DesertBatfly victim, Creature killer)
+    internal static void ReportDeath(DB_Creature victim, Creature killer)
     {
         if (victim?.abstractCreature == null || victim.world == null) return;
         EnsureWorld(victim.world);
@@ -405,7 +405,7 @@ internal static class DB_ColonyRuntime
             float capability = AbstractPhysicalCapability(state);
             bool severe = state.WingMean >= 0.60f ||
                           Mathf.Max(state.LeftWingInjury, state.RightWingInjury) >= 0.82f;
-            bool recovering = creature.realizedCreature is DesertBatfly realized && realized.Injury.IsRecovering;
+            bool recovering = creature.realizedCreature is DB_Creature realized && realized.Injury.IsRecovering;
             float bondAtHome = BondPartnerOwnedBy(state.SocialBondTarget, source.RoomName)
                 ? state.SocialBondStrength : state.SocialBondStrength * 0.25f;
             float score = DB_MigrationPolicy.IndividualPropensity(

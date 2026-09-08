@@ -14,11 +14,11 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
     private static readonly FieldInfo EscapeFromField = typeof(DB_AI).GetField("escapeFrom", PrivateInstance);
 
     public int Priority => 1000;
-    public bool CanInspect(AbstractCreature creature) => creature?.realizedCreature is DesertBatfly;
+    public bool CanInspect(AbstractCreature creature) => creature?.realizedCreature is DB_Creature;
 
     public AIDebugSnapshot Capture(AbstractCreature creature, RainWorldGame game)
     {
-        if (creature?.realizedCreature is not DesertBatfly bat) return null;
+        if (creature?.realizedCreature is not DB_Creature bat) return null;
 
         DB_AI ai = bat.DesertAI;
         DB_State state = bat.DesertState;
@@ -127,7 +127,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         return snapshot;
     }
 
-    private static void BuildArbiterSection(AIDebugSnapshot snapshot, DesertBatfly bat)
+    private static void BuildArbiterSection(AIDebugSnapshot snapshot, DB_Creature bat)
     {
         var section = new AIDebugSection("section.arbiter");
         if (bat?.room == null ||
@@ -169,7 +169,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Sections.Add(section);
     }
 
-    private static void BuildFlightMotorSection(AIDebugSnapshot snapshot, DesertBatfly bat)
+    private static void BuildFlightMotorSection(AIDebugSnapshot snapshot, DB_Creature bat)
     {
         var section = new AIDebugSection("section.flight_motor");
         if (bat?.room == null || !DB_FlightMotor.TryGetDebugState(bat, out DB_FlightMotorDebugState motor))
@@ -199,7 +199,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Sections.Add(section);
     }
 
-    private static void BuildDecisionStack(AIDebugSnapshot snapshot, DesertBatfly bat)
+    private static void BuildDecisionStack(AIDebugSnapshot snapshot, DB_Creature bat)
     {
         DB_Injury injury = bat.Injury;
         bool restrained = RestrainedByNonFly(bat);
@@ -291,7 +291,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             AIDebugFormat.Value(bat.AI?.localGoal), "FlyAI.localGoal"));
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly bat)
+    private static bool RestrainedByNonFly(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -303,11 +303,11 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         return false;
     }
 
-    private static float ActiveTrauma(DesertBatfly bat) => Mathf.Max(
+    private static float ActiveTrauma(DB_Creature bat) => Mathf.Max(
         bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
         bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
 
-    private static string ControlOwner(DesertBatfly bat)
+    private static string ControlOwner(DB_Creature bat)
     {
         if (bat == null) return "R3 / unresolved";
         if (!DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution))

@@ -9,10 +9,10 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_Runtime
 {
-    private readonly DesertBatfly bat;
+    private readonly DB_Creature bat;
     private int socialSampleTicks;
 
-    internal DB_Runtime(DesertBatfly bat)
+    internal DB_Runtime(DB_Creature bat)
     {
         this.bat = bat;
     }

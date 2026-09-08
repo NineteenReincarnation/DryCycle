@@ -8,7 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_SandSpitRuntime
 {
-    private readonly DesertBatfly bat;
+    private readonly DB_Creature bat;
     private Player playerHolder;
     private float sandStruggleMeter, sandSpitThreshold;
     private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
@@ -16,7 +16,7 @@ internal sealed class DB_SandSpitRuntime
     internal bool WindingUp => sandSpitWindup > 0;
     internal int WindupRemaining => sandSpitWindup;
 
-    internal DB_SandSpitRuntime(DesertBatfly bat)
+    internal DB_SandSpitRuntime(DB_Creature bat)
     {
         this.bat = bat;
         PrepareNextSandThreshold();

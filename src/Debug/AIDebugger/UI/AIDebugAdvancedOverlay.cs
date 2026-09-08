@@ -10,8 +10,8 @@ namespace DryCycle.Debugging.AI;
 internal static class AIDebugAdvancedOverlay
 {
     private static readonly List<AIDebugCandidate> CandidateScratch = new(64);
-    private static readonly List<DesertBatfly> AttackersScratch = new(4);
-    private static readonly List<DesertBatfly> WaitingScratch = new(8);
+    private static readonly List<DB_Creature> AttackersScratch = new(4);
+    private static readonly List<DB_Creature> WaitingScratch = new(8);
 
     internal static void Draw(RainWorldGame game, AbstractCreature selected, bool frozen,
         AIDebugTraceFrame frozenFrame)
@@ -37,7 +37,7 @@ internal static class AIDebugAdvancedOverlay
             if (AIDebugSettings.OverlayAImap) DrawAImap(draw, camera, selected);
             if (AIDebugSettings.OverlayPhysics) DrawPhysics(draw, camera, realized);
             if (AIDebugSettings.OverlayMovement) DrawMovement(draw, camera, realized);
-            if (realized is DesertBatfly bat)
+            if (realized is DB_Creature bat)
             {
                 if (AIDebugSettings.OverlaySocial) DrawDesertSocial(draw, camera, bat);
                 if (AIDebugSettings.OverlayCombat) DrawDesertCombat(draw, camera, bat);
@@ -98,7 +98,7 @@ internal static class AIDebugAdvancedOverlay
         Num.Vector2 p = World(camera, creature.mainBodyChunk.pos);
         Arrow(draw, p, World(camera, creature.mainBodyChunk.pos + creature.mainBodyChunk.vel * 12f), velocity, 1.8f);
 
-        if (creature is DesertBatfly bat && bat.AI != null)
+        if (creature is DB_Creature bat && bat.AI != null)
         {
             uint local = Col(0.20f, 0.78f, 0.96f, 0.95f);
             Num.Vector2 g = World(camera, bat.AI.localGoal);
@@ -163,7 +163,7 @@ internal static class AIDebugAdvancedOverlay
         }
     }
 
-    private static void DrawDesertSocial(ImDrawListPtr draw, RoomCamera camera, DesertBatfly bat)
+    private static void DrawDesertSocial(ImDrawListPtr draw, RoomCamera camera, DB_Creature bat)
     {
         if (bat.room == null || bat.mainBodyChunk == null ||
             !DB_SwarmRoom.TryGet(bat.room, out DB_SwarmRoom colony)) return;
@@ -186,7 +186,7 @@ internal static class AIDebugAdvancedOverlay
         {
             AbstractCreature abs = bat.room.abstractRoom.creatures[i];
             if (abs == null || abs.ID.spawner != targetId.spawner || abs.ID.number != targetId.number ||
-                abs.realizedCreature is not DesertBatfly partner || partner.mainBodyChunk == null)
+                abs.realizedCreature is not DB_Creature partner || partner.mainBodyChunk == null)
                 continue;
 
             Num.Vector2 from = World(camera, bat.mainBodyChunk.pos);
@@ -199,7 +199,7 @@ internal static class AIDebugAdvancedOverlay
         }
     }
 
-    private static void DrawDesertCombat(ImDrawListPtr draw, RoomCamera camera, DesertBatfly selected)
+    private static void DrawDesertCombat(ImDrawListPtr draw, RoomCamera camera, DB_Creature selected)
     {
         Creature target = selected.DesertAI.Target;
         if (target?.room != selected.room || target.mainBodyChunk == null ||
@@ -209,7 +209,7 @@ internal static class AIDebugAdvancedOverlay
         WaitingScratch.Clear();
         foreach (AbstractCreature abs in selected.room.abstractRoom.creatures)
         {
-            if (abs?.realizedCreature is not DesertBatfly bat || bat.DesertAI.Target != target ||
+            if (abs?.realizedCreature is not DB_Creature bat || bat.DesertAI.Target != target ||
                 bat.mainBodyChunk == null) continue;
             if (bat.DesertAI.FormalAttack) AttackersScratch.Add(bat);
             else WaitingScratch.Add(bat);

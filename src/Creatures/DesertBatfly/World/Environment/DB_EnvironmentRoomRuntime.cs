@@ -110,7 +110,7 @@ internal static class DB_EnvironmentRoomRuntime
     }
 
     internal static bool TryChooseAnchor(
-        DesertBatfly bat,
+        DB_Creature bat,
         DB_EnvironmentWeather weather,
         float roostPreference,
         out DB_ShelterAnchor anchor,
@@ -514,7 +514,7 @@ internal static class DB_EnvironmentRoomRuntime
         var flies = DB_SwarmRoom.For(room).Hive.flies;
         for (int i = 0; i < flies.Count; i++)
         {
-            if (flies[i] is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion || bat.room != room)
+            if (flies[i] is not DB_Creature bat || bat.dead || bat.slatedForDeletetion || bat.room != room)
                 continue;
             for (int n = 0; n < state.Anchors.Count; n++)
             {

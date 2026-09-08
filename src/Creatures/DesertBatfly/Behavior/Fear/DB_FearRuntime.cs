@@ -117,8 +117,8 @@ internal static partial class DB_FearRuntime
         internal VengeanceMode Vengeance;
         internal VengeanceParticipation Role;
         internal Creature VengeanceTarget;
-        internal DesertBatfly Leader;
-        internal DesertBatfly RescueVictim;
+        internal DB_Creature Leader;
+        internal DB_Creature RescueVictim;
         internal LizardTongue RescueTongue;
         internal float Rage;
         internal float Commitment;
@@ -141,11 +141,11 @@ internal static partial class DB_FearRuntime
 
     private readonly struct FollowerCandidate
     {
-        internal readonly DesertBatfly Bat;
-        internal readonly DesertBatfly Leader;
+        internal readonly DB_Creature Bat;
+        internal readonly DB_Creature Leader;
         internal readonly float Score;
 
-        internal FollowerCandidate(DesertBatfly bat, DesertBatfly leader, float score)
+        internal FollowerCandidate(DB_Creature bat, DB_Creature leader, float score)
         {
             Bat = bat;
             Leader = leader;
@@ -155,7 +155,7 @@ internal static partial class DB_FearRuntime
 
     private sealed class CorpseWarning : UpdatableAndDeletable
     {
-        private readonly DesertBatfly victim;
+        private readonly DB_Creature victim;
         private readonly Creature killer;
         private readonly Vector2 deathPosition;
         private readonly float threatScale;
@@ -163,7 +163,7 @@ internal static partial class DB_FearRuntime
 
         internal CorpseWarning(
             Room room,
-            DesertBatfly victim,
+            DB_Creature victim,
             Creature killer,
             Vector2 deathPosition,
             float threatScale)
@@ -191,7 +191,7 @@ internal static partial class DB_FearRuntime
 
             foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
             {
-                if (other is not DesertBatfly bat || bat == victim || bat.dead ||
+                if (other is not DB_Creature bat || bat == victim || bat.dead ||
                     bat.room != room || !bat.Consious ||
                     !Custom.DistLess(bat.mainBodyChunk.pos, deathPosition, CorpseReminderRadius) ||
                     !room.VisualContact(bat.mainBodyChunk.pos, deathPosition))
@@ -202,18 +202,18 @@ internal static partial class DB_FearRuntime
         }
     }
 
-    private static ConditionalWeakTable<DesertBatfly, State> states = new();
-    private static ConditionalWeakTable<DesertBatfly, CaptureStamp> captureStamps = new();
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
+    private static ConditionalWeakTable<DB_Creature, CaptureStamp> captureStamps = new();
     private static int activeStates;
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, State>();
-        captureStamps = new ConditionalWeakTable<DesertBatfly, CaptureStamp>();
+        states = new ConditionalWeakTable<DB_Creature, State>();
+        captureStamps = new ConditionalWeakTable<DB_Creature, CaptureStamp>();
         activeStates = 0;
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat == null) return;
         if (states.TryGetValue(bat, out State state) && state.Active)
@@ -232,7 +232,7 @@ internal static partial class DB_FearRuntime
     /// changes Vengeance commitment; consumers no longer reflect into this runtime.
     /// </summary>
     // Read-only: fear checks must never create a morale state, especially for corpses.
-    internal static bool HasActiveFearSuppression(DesertBatfly bat)
+    internal static bool HasActiveFearSuppression(DB_Creature bat)
     {
         if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active) return false;
         return state.PlayerFear.ShockTicks > 0 || state.PredatorFear.ShockTicks > 0 ||
@@ -240,25 +240,25 @@ internal static partial class DB_FearRuntime
             (state.PredatorFear.Active && (state.PredatorFear.Strength >= 0.10f || state.PredatorFear.CorpseReminderCooldown > 0));
     }
 
-    internal static DesertBatfly[] SnapshotChainWitnesses(DesertBatfly victim)
+    internal static DB_Creature[] SnapshotChainWitnesses(DB_Creature victim)
     {
         if (victim?.AI == null || victim.AI.behavior != FlyAI.Behavior.Chain)
-            return Array.Empty<DesertBatfly>();
+            return Array.Empty<DB_Creature>();
 
-        List<DesertBatfly> result = new(6);
+        List<DB_Creature> result = new(6);
         Fly member = victim.FirstInChain();
         int guard = 0;
         while (member != null && guard++ < 32)
         {
             Fly next = member.NextInChain();
-            if (member is DesertBatfly bat && bat != victim)
+            if (member is DB_Creature bat && bat != victim)
                 result.Add(bat);
             member = next;
         }
-        return result.Count == 0 ? Array.Empty<DesertBatfly>() : result.ToArray();
+        return result.Count == 0 ? Array.Empty<DB_Creature>() : result.ToArray();
     }
 
-    internal static void UpdateState(DesertBatfly bat)
+    internal static void UpdateState(DB_Creature bat)
     {
         if (bat == null) return;
 
@@ -302,13 +302,13 @@ internal static partial class DB_FearRuntime
     }
 
     // Compatibility/readability surface: state tick only, never Vengeance locomotion.
-    internal static void Update(DesertBatfly bat) => UpdateState(bat);
+    internal static void Update(DB_Creature bat) => UpdateState(bat);
 
     internal static void BroadcastPlayerKill(
-        DesertBatfly victim,
+        DB_Creature victim,
         Player killer,
         Vector2 deathPosition,
-        DesertBatfly[] chainWitnesses,
+        DB_Creature[] chainWitnesses,
         float threatScale,
         bool revengeFailed = false)
     {
@@ -324,7 +324,7 @@ internal static partial class DB_FearRuntime
     }
 
     internal static void BroadcastPredatorCapture(
-        DesertBatfly victim,
+        DB_Creature victim,
         Lizard predator,
         LizardTongue tongue)
     {
@@ -342,7 +342,7 @@ internal static partial class DB_FearRuntime
         stamp.PredatorIdentity = identity;
         stamp.Clock = clock;
 
-        DesertBatfly[] chainWitnesses = SnapshotChainWitnesses(victim);
+        DB_Creature[] chainWitnesses = SnapshotChainWitnesses(victim);
         BroadcastThreatEvent(
             victim,
             predator,
@@ -355,10 +355,10 @@ internal static partial class DB_FearRuntime
     }
 
     internal static void BroadcastPredatorKill(
-        DesertBatfly victim,
+        DB_Creature victim,
         Lizard predator,
         Vector2 deathPosition,
-        DesertBatfly[] chainWitnesses,
+        DB_Creature[] chainWitnesses,
         float threatScale,
         bool revengeFailed = false)
     {
@@ -385,10 +385,10 @@ internal static partial class DB_FearRuntime
     }
 
     private static void BroadcastThreatEvent(
-        DesertBatfly victim,
+        DB_Creature victim,
         Creature threat,
         Vector2 eventPosition,
-        DesertBatfly[] chainWitnesses,
+        DB_Creature[] chainWitnesses,
         float threatScale,
         EventKind kind,
         LizardTongue rescueTongue,
@@ -402,17 +402,17 @@ internal static partial class DB_FearRuntime
                                victimState.Vengeance != VengeanceMode.None;
         bool victimWasFollower = victimHadState && victimState.Role == VengeanceParticipation.Supporter &&
                                  victimState.Vengeance != VengeanceMode.None;
-        DesertBatfly victimLeader = victimWasFollower ? victimState.Leader : null;
+        DB_Creature victimLeader = victimWasFollower ? victimState.Leader : null;
 
         bool suppressNewVengeance = revengeFailed || victimWasLeader;
         if (suppressNewVengeance)
             threatScale = Mathf.Min(1.35f, threatScale * 1.28f);
 
-        List<DesertBatfly> bats = new(
+        List<DB_Creature> bats = new(
             DB_Tuning.HivePopulation + DB_Tuning.CurvePopulation);
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (other is DesertBatfly bat && bat != victim && !bat.dead &&
+            if (other is DB_Creature bat && bat != victim && !bat.dead &&
                 bat.room == room && bat.Consious)
                 bats.Add(bat);
         }
@@ -422,7 +422,7 @@ internal static partial class DB_FearRuntime
         {
             for (int i = 0; i < bats.Count; i++)
             {
-                DesertBatfly bat = bats[i];
+                DB_Creature bat = bats[i];
                 if (!TryGetVengeanceState(bat, out State follower) ||
                     follower.Role != VengeanceParticipation.Supporter || follower.Leader != victim ||
                     follower.VengeanceTarget != threat)
@@ -440,7 +440,7 @@ internal static partial class DB_FearRuntime
         {
             for (int i = 0; i < bats.Count; i++)
             {
-                DesertBatfly bat = bats[i];
+                DB_Creature bat = bats[i];
                 if (!TryGetVengeanceState(bat, out State social) ||
                     social.Role != VengeanceParticipation.Supporter || social.Leader != victimLeader ||
                     social.VengeanceTarget != threat)
@@ -457,11 +457,11 @@ internal static partial class DB_FearRuntime
         for (int i = 0; i < tier.Length; i++) tier[i] = -1;
         List<int> frontier = new(bats.Count);
         List<int> next = new(bats.Count);
-        List<DesertBatfly> trueCandidates = new(4);
+        List<DB_Creature> trueCandidates = new(4);
 
         for (int i = 0; i < bats.Count; i++)
         {
-            DesertBatfly bat = bats[i];
+            DB_Creature bat = bats[i];
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, eventPosition);
             bool sameChain = WasChainWitness(chainWitnesses, bat);
             bool directVisual = distance <= DirectWitnessRadius &&
@@ -488,7 +488,7 @@ internal static partial class DB_FearRuntime
             float radius = ChainFearRadius * (hop == 0 ? 1f : 0.82f);
             for (int f = 0; f < frontier.Count; f++)
             {
-                DesertBatfly source = bats[frontier[f]];
+                DB_Creature source = bats[frontier[f]];
                 for (int i = 0; i < bats.Count; i++)
                 {
                     if (tier[i] >= 0 || bats[i] == source) continue;
@@ -523,7 +523,7 @@ internal static partial class DB_FearRuntime
             rescueTongue,
             suppressNewVengeance);
 
-        DesertBatfly previousEscape = null;
+        DB_Creature previousEscape = null;
         for (int i = 0; i < bats.Count; i++)
         {
             if (tier[i] < 0 || !DB_SocialBond.CanRespond(bats[i])) continue;
@@ -541,7 +541,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static void ReceiveFear(
-        DesertBatfly bat,
+        DB_Creature bat,
         Creature threat,
         Vector2 eventPosition,
         int tier,
@@ -655,7 +655,7 @@ internal static partial class DB_FearRuntime
             "direct Intimidation witness emits sole indirect Alarm generation");
     }
 
-    private static void TraceIndirectFearSuppressed(DesertBatfly bat, int tier)
+    private static void TraceIndirectFearSuppressed(DB_Creature bat, int tier)
     {
         if (bat?.abstractCreature == null ||
             !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(bat.abstractCreature))
@@ -669,7 +669,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static void ReceiveCorpseReminder(
-        DesertBatfly bat,
+        DB_Creature bat,
         Creature threat,
         Vector2 deathPosition,
         float threatScale)
@@ -705,7 +705,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static void EnforceFear(
-        DesertBatfly bat,
+        DB_Creature bat,
         ref FearMemory memory,
         bool isPlayer)
     {
@@ -750,7 +750,7 @@ internal static partial class DB_FearRuntime
         bat.DesertAI.Threatened(threat, false);
     }
 
-    private static void EnforcePersistentTrauma(DesertBatfly bat, State state)
+    private static void EnforcePersistentTrauma(DB_Creature bat, State state)
     {
         DB_State persistent = bat.DesertState;
         if (!persistent.HasTrauma) return;
@@ -793,7 +793,7 @@ internal static partial class DB_FearRuntime
         bat.DesertAI.SuppressHostility(threat);
     }
 
-    private static Creature ResolveStrongestTraumaThreat(DesertBatfly bat)
+    private static Creature ResolveStrongestTraumaThreat(DB_Creature bat)
     {
         Creature best = null;
         float bestStrength = 0f;
@@ -810,7 +810,7 @@ internal static partial class DB_FearRuntime
     }
 
     internal static void AddTrauma(
-        DesertBatfly bat,
+        DB_Creature bat,
         Creature threat,
         float gain)
     {
@@ -861,7 +861,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static float PersistentTraumaStrength(
-        DesertBatfly bat,
+        DB_Creature bat,
         Creature threat)
     {
         if (bat == null || threat == null) return 0f;
@@ -901,7 +901,7 @@ internal static partial class DB_FearRuntime
             memory = default;
     }
 
-    private static State StateFor(DesertBatfly bat)
+    private static State StateFor(DB_Creature bat)
     {
         State state = states.GetValue(bat, _ => new State());
         if (!state.Active)
@@ -912,7 +912,7 @@ internal static partial class DB_FearRuntime
         return state;
     }
 
-    private static void TryDeactivate(DesertBatfly bat, State state)
+    private static void TryDeactivate(DB_Creature bat, State state)
     {
         if (state == null || !state.Active || state.PlayerFear.Active ||
             state.PredatorFear.Active || state.Vengeance != VengeanceMode.None ||
@@ -923,7 +923,7 @@ internal static partial class DB_FearRuntime
         activeStates = Mathf.Max(0, activeStates - 1);
     }
 
-    private static float CautionFactor(DesertBatfly bat)
+    private static float CautionFactor(DB_Creature bat)
     {
         return Mathf.Lerp(1.18f, 0.62f, bat.Personality.Temperament) *
                Mathf.Lerp(1.10f, 0.70f, bat.Personality.Nerve);
@@ -937,8 +937,8 @@ internal static partial class DB_FearRuntime
     }
 
     private static bool WasChainWitness(
-        DesertBatfly[] witnesses,
-        DesertBatfly bat)
+        DB_Creature[] witnesses,
+        DB_Creature bat)
     {
         if (witnesses == null || witnesses.Length == 0 || bat == null)
             return false;
@@ -960,7 +960,7 @@ internal static partial class DB_FearRuntime
                lizard.Template.type == WatcherEnums.CreatureTemplateType.PeachLizard;
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly bat)
+    private static bool RestrainedByNonFly(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)

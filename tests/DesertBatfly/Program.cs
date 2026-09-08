@@ -173,7 +173,7 @@ internal static partial class Program
         for (int i = 0; i < griefTicks; i++) bonds.TickGrief();
         Check(bonds.GriefTicks == 0 && bonds.GriefStrength == 0f && !bonds.GriefThreatIdentity.HasValue, "grief expires cleanly");
 
-        Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
+        Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         var bat = (Fly)FormatterServices.GetUninitializedObject(batType);

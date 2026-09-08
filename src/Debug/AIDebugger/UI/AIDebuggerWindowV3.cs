@@ -398,7 +398,7 @@ internal sealed class AIDebuggerWindowV3
                     Row(AIDebugLocalization.T("field.position"), AIDebugFormat.Value(f.Position));
                     Row(AIDebugLocalization.T("field.velocity"), AIDebugFormat.Value(f.Velocity));
                     Row(AIDebugLocalization.T("field.local_goal"), AIDebugFormat.Value(f.LocalGoal));
-                    if (selected?.realizedCreature is DesertBatfly || selected?.creatureTemplate?.type == DB_Definition.CreatureType)
+                    if (selected?.realizedCreature is DB_Creature || selected?.creatureTemplate?.type == DB_Definition.CreatureType)
                     {
                         Row(AIDebugLocalization.T("field.health"), f.Health.ToString("0.000"));
                         Row(AIDebugLocalization.T("field.left_wing_injury"), f.LeftWing.ToString("0.000"));
@@ -758,7 +758,7 @@ internal sealed class AIDebuggerWindowV3
 
     private void SampleOne(AbstractCreature creature)
     {
-        if (creature?.realizedCreature is DesertBatfly bat)
+        if (creature?.realizedCreature is DB_Creature bat)
         {
             DB_Trace.Sample(bat);
             return;
@@ -824,7 +824,7 @@ internal sealed class AIDebuggerWindowV3
         for (int i = 0; i < entities.Count; i++)
         {
             if (!visibleRooms.Contains(entities[i].pos.room)) continue;
-            if (entities[i].realizedCreature is DesertBatfly) { candidate = entities[i]; break; }
+            if (entities[i].realizedCreature is DB_Creature) { candidate = entities[i]; break; }
             if (candidate == null && entities[i].realizedCreature != null) candidate = entities[i];
         }
         Select(candidate ?? entities[0]);

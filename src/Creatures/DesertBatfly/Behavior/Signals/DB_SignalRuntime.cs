@@ -34,14 +34,14 @@ internal static class DB_SignalRuntime
         internal Vector2 AlarmOrigin;
         internal Creature AlarmThreat;
         internal float DistressInterest;
-        internal DesertBatfly DistressSource;
+        internal DB_Creature DistressSource;
         internal float RallyInterest;
-        internal DesertBatfly RallySource;
+        internal DB_Creature RallySource;
         internal Creature RallyTarget;
         internal float RoostInterest;
-        internal DesertBatfly RoostSource;
+        internal DB_Creature RoostSource;
         internal float HarassInterest;
-        internal DesertBatfly HarassSource;
+        internal DB_Creature HarassSource;
         internal Player HarassTarget;
         internal float SafeConfidence;
 
@@ -60,20 +60,20 @@ internal static class DB_SignalRuntime
         internal int DisplayUntil = int.MinValue;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, ReceiverState> states = new();
+    private static ConditionalWeakTable<DB_Creature, ReceiverState> states = new();
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, ReceiverState>();
+        states = new ConditionalWeakTable<DB_Creature, ReceiverState>();
         DesertBatflySignalRoomRuntime.Reset();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) states.Remove(bat);
     }
 
-    internal static void Update(DesertBatfly bat)
+    internal static void Update(DB_Creature bat)
     {
         if (bat == null) return;
         ReceiverState state = states.GetValue(bat, _ => new ReceiverState());
@@ -108,7 +108,7 @@ internal static class DB_SignalRuntime
     }
 
     internal static DB_SignalPacket EmitAlarm(
-        DesertBatfly emitter,
+        DB_Creature emitter,
         Creature threat,
         Vector2 origin,
         Vector2 direction,
@@ -138,7 +138,7 @@ internal static class DB_SignalRuntime
 
 
     internal static DB_SignalPacket EmitRally(
-        DesertBatfly emitter,
+        DB_Creature emitter,
         Creature threat,
         float drive,
         string reason)
@@ -175,14 +175,14 @@ internal static class DB_SignalRuntime
         float intensity,
         string reason)
     {
-        DesertBatfly emitter = FindAcuteEmitter(room, position);
+        DB_Creature emitter = FindAcuteEmitter(room, position);
         if (emitter == null) return null;
         Vector2 direction = Custom.DirVec(emitter.mainBodyChunk.pos, position);
         return EmitAlarm(emitter, threat, position, direction, intensity, reason);
     }
 
     internal static DB_SignalPacket EmitDistress(
-        DesertBatfly emitter,
+        DB_Creature emitter,
         Creature threat,
         float intensity,
         string reason)
@@ -221,7 +221,7 @@ internal static class DB_SignalRuntime
     }
 
     internal static bool ReceivePacket(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         out bool relayAlarm)
     {
@@ -311,7 +311,7 @@ internal static class DB_SignalRuntime
 
 
     private static void ApplyAlarm(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         float response)
     {
@@ -331,14 +331,14 @@ internal static class DB_SignalRuntime
         receiver.DesertAI.ThreatenedAt(threat, packet.Origin, false, false);
     }
 
-    private static DesertBatfly FindAcuteEmitter(Room room, Vector2 position)
+    private static DB_Creature FindAcuteEmitter(Room room, Vector2 position)
     {
         if (room == null) return null;
-        DesertBatfly best = null;
+        DB_Creature best = null;
         float bestScore = float.MaxValue;
         foreach (Fly member in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (member is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion ||
+            if (member is not DB_Creature bat || bat.dead || bat.slatedForDeletetion ||
                 !bat.Consious || bat.room != room || bat.inShortcut)
                 continue;
 
@@ -353,7 +353,7 @@ internal static class DB_SignalRuntime
         return best;
     }
 
-    internal static bool TryGetInfluence(DesertBatfly bat, out DB_SignalInfluence influence)
+    internal static bool TryGetInfluence(DB_Creature bat, out DB_SignalInfluence influence)
     {
         influence = default;
         if (bat == null || !states.TryGetValue(bat, out ReceiverState state)) return false;
@@ -376,7 +376,7 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    internal static bool TryGetDisplay(DesertBatfly bat, out DB_SignalDisplayState display)
+    internal static bool TryGetDisplay(DB_Creature bat, out DB_SignalDisplayState display)
     {
         display = default;
         if (bat == null || !states.TryGetValue(bat, out ReceiverState state)) return false;
@@ -390,7 +390,7 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    internal static bool TryGetDebugState(DesertBatfly bat, out DB_SignalDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_SignalDebugState debug)
     {
         debug = default;
         if (!TryGetInfluence(bat, out DB_SignalInfluence influence) ||
@@ -407,7 +407,7 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    private static void EmitExistingBehaviorSignals(DesertBatfly bat, ReceiverState state, int clock)
+    private static void EmitExistingBehaviorSignals(DB_Creature bat, ReceiverState state, int clock)
     {
         if (state.LastNeutralEmitTick != int.MinValue && clock - state.LastNeutralEmitTick < 18)
             return;
@@ -482,9 +482,9 @@ internal static class DB_SignalRuntime
     }
 
     private static void EmitNeutral(
-        DesertBatfly emitter,
+        DB_Creature emitter,
         DB_SignalKind kind,
-        DesertBatfly subject,
+        DB_Creature subject,
         Creature threat,
         Player playerTarget,
         float intensity,
@@ -518,7 +518,7 @@ internal static class DB_SignalRuntime
         TraceEmit(emitter, packet, reason);
     }
     private static bool TryPerceive(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         out DB_SignalPerception perception,
         out float attenuation)
@@ -567,7 +567,7 @@ internal static class DB_SignalRuntime
     };
 
     private static float ResponseStrength(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         float attenuation)
     {
@@ -631,7 +631,7 @@ internal static class DB_SignalRuntime
     }
 
     private static bool ShouldRelayAlarm(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         float response)
     {
@@ -642,7 +642,7 @@ internal static class DB_SignalRuntime
         return Stable01(receiver, packet.Generation ^ (packet.Hop + 1) * 0x6D2B) < chance;
     }
 
-    private static bool CanAcceptSafe(DesertBatfly bat)
+    private static bool CanAcceptSafe(DB_Creature bat)
     {
         if (!Available(bat) || !bat.Consious || bat.DesertAI == null) return false;
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape)
@@ -698,7 +698,7 @@ internal static class DB_SignalRuntime
     }
 
     private static void SetDisplay(
-        DesertBatfly emitter,
+        DB_Creature emitter,
         DB_SignalKind kind,
         float intensity,
         int ticks,
@@ -710,16 +710,16 @@ internal static class DB_SignalRuntime
         state.DisplayUntil = Mathf.Max(state.DisplayUntil, clock + Mathf.Max(1, ticks));
     }
 
-    private static bool Available(DesertBatfly bat) =>
+    private static bool Available(DB_Creature bat) =>
         bat != null && !bat.dead && !bat.slatedForDeletetion && bat.room != null && !bat.inShortcut;
 
-    private static int StableInt(DesertBatfly bat, int salt, int min, int max)
+    private static int StableInt(DB_Creature bat, int salt, int min, int max)
     {
         if (max <= min) return min;
         return min + Mathf.FloorToInt(Stable01(bat, salt) * (max - min));
     }
 
-    private static float Stable01(DesertBatfly bat, int salt)
+    private static float Stable01(DB_Creature bat, int salt)
     {
         unchecked
         {
@@ -733,7 +733,7 @@ internal static class DB_SignalRuntime
         }
     }
 
-    private static void TraceEmit(DesertBatfly emitter, DB_SignalPacket packet, string reason)
+    private static void TraceEmit(DB_Creature emitter, DB_SignalPacket packet, string reason)
     {
         if (emitter?.abstractCreature == null ||
             !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(emitter.abstractCreature))
@@ -747,7 +747,7 @@ internal static class DB_SignalRuntime
     }
 
     private static void TraceReceive(
-        DesertBatfly receiver,
+        DB_Creature receiver,
         DB_SignalPacket packet,
         DB_SignalPerception perception,
         float response,

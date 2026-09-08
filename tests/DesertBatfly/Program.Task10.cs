@@ -8,10 +8,10 @@ internal static partial class Program
 {
     private static void RunTask10()
     {
-        Type socialType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
-        Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialMode", true);
-        Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialDebugState", true);
-        Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoomRuntime", true);
+        Type socialType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
+        Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialMode", true);
+        Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialDebugState", true);
+        Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoomRuntime", true);
         Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Personality", true);
         Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
 
@@ -140,9 +140,9 @@ internal static partial class Program
                 "Task10 realized-only state is not persisted in DB_State: " + forbidden);
         }
 
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null &&
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
             "Task10 does not revive any rejected Task02 social-role runtime type");
 
         Console.WriteLine("Task 10: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");

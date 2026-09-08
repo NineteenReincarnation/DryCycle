@@ -7,7 +7,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 // is closed AIDebugTrace.IsWatched is false and this method returns before allocating strings.
 internal static class DB_Trace
 {
-    internal static void Sample(DesertBatfly bat)
+    internal static void Sample(DB_Creature bat)
     {
         if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
 
@@ -86,7 +86,7 @@ internal static class DB_Trace
     }
 
     private static string Suppression(
-        DesertBatfly bat,
+        DB_Creature bat,
         bool hasTravel,
         in DB_TravelDebugState travel)
     {
@@ -113,7 +113,7 @@ internal static class DB_Trace
     }
 
     private static string ModeReason(
-        DesertBatfly bat,
+        DB_Creature bat,
         string suppression,
         bool hasTravel,
         in DB_TravelDebugState travel,
@@ -144,7 +144,7 @@ internal static class DB_Trace
     }
 
     private static string SuppressionReason(
-        DesertBatfly bat,
+        DB_Creature bat,
         string suppression,
         bool hasTravel,
         in DB_TravelDebugState travel)
@@ -170,7 +170,7 @@ internal static class DB_Trace
     }
 
     private static string ControlOwner(
-        DesertBatfly bat,
+        DB_Creature bat,
         string suppression,
         bool hasTravel,
         in DB_TravelDebugState travel,
@@ -198,7 +198,7 @@ internal static class DB_Trace
         }
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly bat)
+    private static bool RestrainedByNonFly(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -210,7 +210,7 @@ internal static class DB_Trace
         return false;
     }
 
-    private static float ActiveTrauma(DesertBatfly bat) => Mathf.Max(
+    private static float ActiveTrauma(DB_Creature bat) => Mathf.Max(
         bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
         bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
 }

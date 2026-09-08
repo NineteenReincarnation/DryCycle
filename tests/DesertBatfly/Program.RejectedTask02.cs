@@ -8,9 +8,9 @@ internal static partial class Program
     // physically absent. Any compatibility shell is considered a regression.
     private static void RunRoleDistribution()
     {
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
             "rejected Task 02 runtime class is physically removed");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null,
             "rejected Task 02 score type is physically removed");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "rejected Task 02 enum is physically removed");

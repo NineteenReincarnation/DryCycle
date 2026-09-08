@@ -132,9 +132,9 @@ internal static partial class Program
               travelDebugType.GetField("StatusReason", Flags) != null &&
               travelDebugType.GetField("RefugeNode", Flags) != null,
             "Task09 travel debug state exposes suspension reason and refuge node");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
             "Task09 does not reintroduce rejected social roles");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null,
             "Task09 remains structurally independent of rejected role scores");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "Task09 remains structurally independent of the rejected role enum");

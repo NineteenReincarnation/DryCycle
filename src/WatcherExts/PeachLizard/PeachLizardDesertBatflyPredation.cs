@@ -58,7 +58,7 @@ internal static class PeachLizardDesertBatflyPredation
         float result = orig(self);
         if (self?.owner?.AI is not LizardAI ai ||
             !IsPeach(ai.lizard) ||
-            self.critRep?.representedCreature?.realizedCreature is not DesertBatfly prey ||
+            self.critRep?.representedCreature?.realizedCreature is not DB_Creature prey ||
             prey.room == null || prey.room != ai.lizard.room || prey.inShortcut)
         {
             return result;
@@ -133,7 +133,7 @@ internal static class PeachLizardDesertBatflyPredation
     {
         float result = orig(self);
         if (self?.AI is not LizardAI ai || !IsPeach(ai.lizard) ||
-            self.MostAttractivePrey?.representedCreature?.realizedCreature is not DesertBatfly prey)
+            self.MostAttractivePrey?.representedCreature?.realizedCreature is not DB_Creature prey)
         {
             return result;
         }
@@ -162,7 +162,7 @@ internal static class PeachLizardDesertBatflyPredation
 
         if (!IsPeach(lizard) || self.behavior != LizardAI.Behavior.Hunt ||
             self.preyTracker?.MostAttractivePrey?.representedCreature?.realizedCreature
-                is not DesertBatfly prey ||
+                is not DB_Creature prey ||
             prey.dead || !HasEdibleRemains(prey) || IsHeldByPlayer(prey) ||
             prey.room != lizard.room || prey.inShortcut ||
             !connection.destinationCoord.TileDefined ||
@@ -226,7 +226,7 @@ internal static class PeachLizardDesertBatflyPredation
         orig(self);
 
         if (self.state != LizardTongue.State.AttachedInSmallObject ||
-            self.attached?.owner is not DesertBatfly caught)
+            self.attached?.owner is not DB_Creature caught)
         {
             return;
         }
@@ -248,7 +248,7 @@ internal static class PeachLizardDesertBatflyPredation
             lizard.grasps == null || lizard.grasps.Length == 0 ||
             lizard.grasps[0] != null ||
             tongue.state != LizardTongue.State.AttachedInSmallObject ||
-            tongue.attached?.owner is not DesertBatfly bat ||
+            tongue.attached?.owner is not DB_Creature bat ||
             !HasEdibleRemains(bat) || IsHeldByPlayer(bat) ||
             bat.room != lizard.room || bat.inShortcut ||
             !Custom.DistLess(
@@ -270,7 +270,7 @@ internal static class PeachLizardDesertBatflyPredation
             tongue.Retract();
     }
 
-    internal static bool HasEdibleRemains(DesertBatfly bat)
+    internal static bool HasEdibleRemains(DB_Creature bat)
     {
         return bat != null &&
                !bat.slatedForDeletetion &&
@@ -278,7 +278,7 @@ internal static class PeachLizardDesertBatflyPredation
                bat.bites > 0;
     }
 
-    internal static bool IsHeldByPlayer(DesertBatfly bat)
+    internal static bool IsHeldByPlayer(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -289,7 +289,7 @@ internal static class PeachLizardDesertBatflyPredation
         return false;
     }
 
-    private static float CorpseFoodValue(DesertBatfly prey)
+    private static float CorpseFoodValue(DB_Creature prey)
     {
         float remaining = Mathf.Clamp01(prey.bites / 3f);
         return Mathf.Lerp(

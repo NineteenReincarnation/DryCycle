@@ -6,10 +6,10 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static class DB_SocialBond
 {
     internal const float DirectDeathWitnessRadius = 340f;
-    internal static bool Available(DesertBatfly bat) => bat != null && !bat.dead &&
+    internal static bool Available(DB_Creature bat) => bat != null && !bat.dead &&
         !bat.slatedForDeletetion && bat.room != null && !bat.inShortcut;
 
-    internal static bool CanRespond(DesertBatfly bat)
+    internal static bool CanRespond(DB_Creature bat)
     {
         if (!Available(bat) || !bat.Consious) return false;
         foreach (var grasp in bat.grabbedBy)
@@ -17,45 +17,45 @@ internal static class DB_SocialBond
         return true;
     }
 
-    internal static void AddBond(DesertBatfly source, DesertBatfly target, float gain)
+    internal static void AddBond(DB_Creature source, DB_Creature target, float gain)
     {
         if (!Available(source) || !Available(target) || source == target || source.room != target.room) return;
         source.DesertState.StrengthenBond(target.abstractCreature.ID, gain);
     }
 
-    internal static float GetBondStrength(DesertBatfly source, DesertBatfly target) =>
+    internal static float GetBondStrength(DB_Creature source, DB_Creature target) =>
         source != null && target != null ? source.DesertState.BondStrength(target.abstractCreature.ID) : 0f;
 
-    internal static void OnSuccessfulRescue(DesertBatfly rescuer, DesertBatfly victim)
+    internal static void OnSuccessfulRescue(DB_Creature rescuer, DB_Creature victim)
     {
         AddBond(victim, rescuer, 0.30f * Mathf.Lerp(0.96f, 1.04f, victim.Personality.Conformity));
         AddBond(rescuer, victim, 0.12f * Mathf.Lerp(0.96f, 1.04f, rescuer.Personality.Conformity));
     }
 
-    internal static bool TryResolveBondPartner(DesertBatfly source, out DesertBatfly partner)
+    internal static bool TryResolveBondPartner(DB_Creature source, out DB_Creature partner)
     {
         partner = null;
         if (!Available(source) || !source.DesertState.SocialBondTarget.HasValue) return false;
         foreach (Fly member in DB_SwarmRoom.For(source.room).Hive.flies)
-            if (member is DesertBatfly candidate && candidate != source && Available(candidate) &&
+            if (member is DB_Creature candidate && candidate != source && Available(candidate) &&
                 candidate.room == source.room && GetBondStrength(source, candidate) > 0f)
             { partner = candidate; return true; }
         return false;
     }
 
     // Called only every 180 realized ticks. NextInChain is the direct physical neighbour.
-    internal static void SampleChain(DesertBatfly source)
+    internal static void SampleChain(DB_Creature source)
     {
         if (!Available(source) || !source.Consious || source.AI?.behavior != FlyAI.Behavior.Chain) return;
-        DesertBatfly next = source.NextInChain() as DesertBatfly;
+        DB_Creature next = source.NextInChain() as DB_Creature;
         if (next == null && source.grasps != null && source.grasps.Length > 0)
-            next = source.grasps[0]?.grabbed as DesertBatfly;
+            next = source.grasps[0]?.grabbed as DB_Creature;
         if (next != null && CanRespond(source) && CanRespond(next) && next.AI?.behavior == FlyAI.Behavior.Chain)
             AddBond(source, next, 0.004f);
     }
 
     // Evaluated at the existing roost scan, and only changes willingness at a valid local hang point.
-    internal static float RoostScale(DesertBatfly source)
+    internal static float RoostScale(DB_Creature source)
     {
         var state = source.DesertState;
         if (!Available(source) || !source.Consious ||
@@ -70,7 +70,7 @@ internal static class DB_SocialBond
         return scale;
     }
 
-    internal static float Motivation(DesertBatfly source, DesertBatfly victim, Creature threat)
+    internal static float Motivation(DB_Creature source, DB_Creature victim, Creature threat)
     {
         if (source == null) return 0f;
         float grief = source.DesertState.GriefThreatIdentity.HasValue && threat?.abstractCreature != null &&
@@ -91,8 +91,8 @@ internal static class DB_SocialBond
     }
 
     internal static bool IsDirectDeathWitness(
-        DesertBatfly observer,
-        DesertBatfly victim,
+        DB_Creature observer,
+        DB_Creature victim,
         Creature killer)
     {
         if (!Available(observer) || !observer.Consious || victim == null || observer == victim ||
@@ -109,7 +109,7 @@ internal static class DB_SocialBond
         return SamePhysicalChain(observer, victim);
     }
 
-    internal static void OnBondPartnerDeath(DesertBatfly observer, DesertBatfly victim, Creature killer)
+    internal static void OnBondPartnerDeath(DB_Creature observer, DB_Creature victim, Creature killer)
     {
         if (victim == null || !victim.dead || !IsDirectDeathWitness(observer, victim, killer)) return;
         float gain = observer.DesertState.BeginGrief(victim.abstractCreature.ID, killer?.abstractCreature?.ID);

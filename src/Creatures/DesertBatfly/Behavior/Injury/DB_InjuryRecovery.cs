@@ -11,11 +11,11 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal sealed class DB_InjuryRecovery
 {
     private readonly DB_AI brain;
-    private readonly DesertBatfly fly;
+    private readonly DB_Creature fly;
     private int recoverySearchCooldown;
     private Vector2? recoveryRoostTarget;
 
-    internal DB_InjuryRecovery(DB_AI brain, DesertBatfly fly)
+    internal DB_InjuryRecovery(DB_AI brain, DB_Creature fly)
     {
         this.brain = brain;
         this.fly = fly;

@@ -8,7 +8,7 @@ internal readonly struct DB_ThreatEvent
 {
     internal readonly Player Instigator;
     internal readonly PhysicalObject SourceObject;
-    internal readonly DesertBatfly Victim;
+    internal readonly DB_Creature Victim;
     internal readonly Vector2 Position;
     internal readonly DB_ThreatEvidence Evidence;
     internal readonly bool DirectVictim;
@@ -19,7 +19,7 @@ internal readonly struct DB_ThreatEvent
     internal DB_ThreatEvent(
         Player instigator,
         PhysicalObject sourceObject,
-        DesertBatfly victim,
+        DB_Creature victim,
         Vector2 position,
         in DB_ThreatEvidence evidence,
         bool directVictim,

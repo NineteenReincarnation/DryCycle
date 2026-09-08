@@ -108,7 +108,7 @@ internal static partial class Program
             "Task14 R1 removes Core Hooks duplicate mortality and tongue semantic roots");
 
         Type creature = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
+            "DryCycle.Creatures.DesertBatfly.DB_Creature", true);
         Type intimidation = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(creature.GetField("recentLethalDamager", Flags) == null &&
@@ -146,7 +146,7 @@ internal static partial class Program
             "Task14 R1 Colony and Intimidation consume the same canonical MortalityEvent killer");
 
         Type threatRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type threatState = threatRuntime.GetNestedType("RuntimeState", Flags);
         Check(threatRuntime.GetMethod("DamageEvent", Flags) != null &&
               threatRuntime.GetMethod("CaptureEvent", Flags) != null &&
@@ -167,7 +167,7 @@ internal static partial class Program
             "Task14 R1 ThreatRuntime clears its own transient state only after consuming canonical mortality");
 
         Type signalIntegration = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", true);
         MethodInfo signalEnable = signalIntegration.GetMethod("Enable", Flags);
         MethodInfo signalDisable = signalIntegration.GetMethod("Disable", Flags);
         Check(signalIntegration.GetMethod("FlyGrabbed", Flags) == null &&

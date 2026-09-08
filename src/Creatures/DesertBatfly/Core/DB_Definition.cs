@@ -31,7 +31,7 @@ internal sealed class DB_Definition : CreatureDefinition
         return template;
     }
 
-    internal override Creature CreateRealizedCreature(AbstractCreature creature) => new DesertBatfly(creature, creature.world);
+    internal override Creature CreateRealizedCreature(AbstractCreature creature) => new DB_Creature(creature, creature.world);
     internal override CreatureState CreateState(AbstractCreature creature) => new DB_State(creature);
 
     internal override void EstablishRelationships()

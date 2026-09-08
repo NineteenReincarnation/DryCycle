@@ -9,11 +9,11 @@ internal static partial class Program
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
 
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalDenseFogBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalDenseFogBridge", false) == null,
             "R5 removes behavior-neutral DenseFog RuntimeDetour shim");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalVengeanceBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalVengeanceBridge", false) == null,
             "R5 removes hard-survival Vengeance detour; Arbiter owns preemption");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", false) == null,
             "R5 removes Threat/Vengeance ForceFlight RuntimeDetour");
 
         MethodInfo forceFlight = intimidation.GetMethod("ForceFlight", Flags);
@@ -23,8 +23,8 @@ internal static partial class Program
 
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), intimidation, "Reset") >= 0,
             "R5 species lifecycle remains wired after deleting obsolete bridges");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalIntegration", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalIntegration", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSocialBridge", false) == null,
             "R5 removes Environment Reflection/RuntimeDetour integration and social bridge");
         Type policy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
         Check(policy.GetMethod("AggressionAuthorized", Flags) != null &&
@@ -37,14 +37,14 @@ internal static partial class Program
               policy.GetMethod("CanConsiderSandstormOutwardRefuge", Flags) != null &&
               policy.GetMethod("AcceptSandstormEmergencyRefuge", Flags) != null,
             "R5 explicit environmental policy replaces mutation/detour based cross-domain behavior");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalTask09Bridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", false) == null,
             "R5 B3 physically removes Task09 and Survival RuntimeDetour bridges");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalIntegration", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalVengeanceBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalThreatBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalAcuteBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySignalDirectWitnessBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalIntegration", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalVengeanceBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalThreatBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalAcuteBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSignalDirectWitnessBridge", false) == null,
             "R5 B4 physically removes the Task12 internal detour hub and four signal bridges");
 
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);

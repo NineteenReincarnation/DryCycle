@@ -106,12 +106,12 @@ internal static partial class Program
             "ordinary Fog has a hard Advisory ceiling; DenseFog owns shelter/displacement escalation");
 
         Check(mod.GetType(
-                "DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalDenseFogBridge", false) == null,
+                "DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalDenseFogBridge", false) == null,
             "Task13 DenseFog behavior-neutral RuntimeDetour shim is retired in R5");
 
         Type environmentalPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalTask09Bridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalTask09Bridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", false) == null,
             "Task13 R5 retires Task09/native-survival RuntimeDetour bridges");
         Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null,
             "Task13 realized-room runtime owns LocalShelterFailure evidence directly");
@@ -134,15 +134,15 @@ internal static partial class Program
 
         Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
         Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSignalBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalThreatBridge", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSignalBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalThreatBridge", false) == null,
             "Task13 visual signal/threat bridges are retired after R2 central perception adoption");
         Check(visibilityPolicy.GetMethod("CanObserve", Flags) != null &&
               weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null,
             "Task13 Fog/DenseFog visibility and close projectile recognition now use shared R2 perception policy");
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalVengeanceBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSocialBridge", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalIntegration", false) == null,
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalVengeanceBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSocialBridge", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalIntegration", false) == null,
             "Task13 R5 retires internal Environment RuntimeDetour integration layers");
         Check(environmentalPolicy.GetMethod("AggressionAuthorized", Flags) != null &&
               environmentalPolicy.GetMethod("CombatMotivation", Flags) != null &&
@@ -165,9 +165,9 @@ internal static partial class Program
         Check(Enum.GetNames(signalKind).Length == 6,
             "Task13 does not add weather signal kinds to Task12 V1");
 
-        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
         int task11 = MethodCallOffset(updateAI, threat, "Update");
         int task12 = MethodCallOffset(updateAI, signals, "Update");
@@ -197,8 +197,8 @@ internal static partial class Program
         Check(debug != null,
             "Task13 Observatory source exists for weather/phase/anchor/heat/failure inspection");
 
-        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoles", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false) == null &&
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "Task13 does not restore rejected Task02 role runtime");
 

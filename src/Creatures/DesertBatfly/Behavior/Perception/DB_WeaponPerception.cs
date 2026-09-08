@@ -64,7 +64,7 @@ internal readonly struct DB_HeldThreatObservation
 internal static class DB_WeaponPerception
 {
     internal static bool TryFindIncomingProjectile(
-        DesertBatfly observer,
+        DB_Creature observer,
         float maxDistance,
         float missRadius,
         float minimumVelocitySqr,
@@ -78,7 +78,7 @@ internal static class DB_WeaponPerception
             out observation);
 
     internal static bool TryFindIncomingProjectileFrom(
-        DesertBatfly observer,
+        DB_Creature observer,
         Creature requiredInstigator,
         float maxDistance,
         float missRadius,
@@ -140,7 +140,7 @@ internal static class DB_WeaponPerception
     }
 
     internal static bool TryFindImmediateThreat(
-        DesertBatfly observer,
+        DB_Creature observer,
         out DB_WeaponObservation observation)
     {
         observation = default;
@@ -183,7 +183,7 @@ internal static class DB_WeaponPerception
     }
 
     internal static bool TryObserveHeldThreats(
-        DesertBatfly observer,
+        DB_Creature observer,
         Player player,
         float baseRange,
         out DB_HeldThreatObservation observation)

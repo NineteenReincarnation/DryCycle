@@ -79,7 +79,7 @@ internal static partial class Program
         Check(Resolve("DeathRain", Sample("DEATHRAIN", 0.70f, 0.90f, 1f, 1f, 0)) == "Acute",
             "Task13 DeathRain enters Acute only under material lethal danger");
 
-        Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
+        Type survivalBridge = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureEnvironmentalSurvivalBridge", true);
         Check(survivalBridge.GetMethod("ShouldSeekHome", Flags) != null &&
               survivalBridge.GetMethod("ShouldBurrow", Flags) != null,
             "Task13 DeathRain local Home/Burrow pressure feeds the existing native FlyAI survival bridge");

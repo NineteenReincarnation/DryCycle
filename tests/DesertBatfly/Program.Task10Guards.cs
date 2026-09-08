@@ -6,13 +6,13 @@ internal static partial class Program
 {
     private static void RunTask10Guards()
     {
-        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
 
         Check(!TypeCallsForbiddenTask10Method(social),
             "Task10 neutral social layer does not call Random/combat/trauma/damage APIs");
 
         Type roomRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySocialRoomRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoomRuntime", true);
         Type roomState = roomRuntime.GetNestedType("RoomState", Flags);
         FieldInfo refreshInterval = roomState?.GetField("RefreshInterval", Flags);
         Check(refreshInterval != null && (int)refreshInterval.GetRawConstantValue() == 20,

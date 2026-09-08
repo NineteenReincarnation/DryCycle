@@ -28,7 +28,7 @@ internal static class AIDebugRecorderRichProviderRegistry
 
     internal static IAIDebugRecorderRichProvider Resolve(AbstractCreature creature)
     {
-        if (creature?.realizedCreature is DesertBatfly) return DesertBat;
+        if (creature?.realizedCreature is DB_Creature) return DesertBat;
         if (creature?.realizedCreature is MossySpider) return Mossy;
         if (creature?.realizedCreature is Lizard lizard &&
             SpinebackLizardEnums.Type != null && lizard.Template?.type == SpinebackLizardEnums.Type)
@@ -196,7 +196,7 @@ internal static class AIDebugRecorderRichProviderRegistry
         {
             fields.Begin(ProviderSchema.Fields.Length);
             decisions.Begin(ProviderSchema.Decisions.Length);
-            if (creature?.realizedCreature is not DesertBatfly bat)
+            if (creature?.realizedCreature is not DB_Creature bat)
             {
                 controlOwnerStringId = AIDebugRawStringTable.Intern("Unavailable");
                 return;
@@ -401,7 +401,7 @@ internal static class AIDebugRecorderRichProviderRegistry
         private static int FloatDetail(float value) =>
             AIDebugRawStringTable.Intern(value.ToString("0.000", CultureInfo.InvariantCulture));
 
-        private static int ControlOwnerId(DesertBatfly bat, bool restrained, bool fear, float trauma, bool vengeance, bool roost)
+        private static int ControlOwnerId(DB_Creature bat, bool restrained, bool fear, float trauma, bool vengeance, bool roost)
         {
             string owner;
             if (bat.dead || !bat.Consious) owner = "Creature / Physics";
@@ -421,7 +421,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             return AIDebugRawStringTable.Intern(owner);
         }
 
-        private static bool RestrainedByNonFly(DesertBatfly bat)
+        private static bool RestrainedByNonFly(DB_Creature bat)
         {
             if (bat?.grabbedBy == null) return false;
             for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -432,7 +432,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             return false;
         }
 
-        private static float ActiveTrauma(DesertBatfly bat) => Mathf.Max(
+        private static float ActiveTrauma(DB_Creature bat) => Mathf.Max(
             bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
             bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
 

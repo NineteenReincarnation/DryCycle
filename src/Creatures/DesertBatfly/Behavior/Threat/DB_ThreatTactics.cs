@@ -57,7 +57,7 @@ internal readonly struct DB_ThreatTacticalProfile
 internal static class DB_ThreatTactics
 {
     internal static float AdjustFakeDiveChance(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         float baseChance)
     {
@@ -102,7 +102,7 @@ internal static class DB_ThreatTactics
         return Mathf.Clamp01(baseChance + bonus * (1f - baseChance));
     }
 
-    internal static bool TryApplyOrdinaryProjectileEvade(DesertBatfly bat)
+    internal static bool TryApplyOrdinaryProjectileEvade(DB_Creature bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
             DB_VengeanceRuntime.IsActive(bat) ||
@@ -124,7 +124,7 @@ internal static class DB_ThreatTactics
         return ApplyProjectileEvadeOwned(bat, evade);
     }
 
-    internal static bool ApplyProjectileEvadeOwned(DesertBatfly bat, Vector2 evade)
+    internal static bool ApplyProjectileEvadeOwned(DB_Creature bat, Vector2 evade)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
@@ -149,7 +149,7 @@ internal static class DB_ThreatTactics
     }
 
     internal static Vector2 AdjustExtremeVengeanceGoal(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         Vector2 baseGoal,
         ref float speed)
@@ -215,7 +215,7 @@ internal static class DB_ThreatTactics
     }
 
     internal static bool TryIncomingProjectileEvade(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         out Vector2 evadeGoal)
     {
@@ -245,7 +245,7 @@ internal static class DB_ThreatTactics
     }
 
     internal static bool TryProfile(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         out DB_ThreatTacticalProfile profile)
     {
@@ -317,7 +317,7 @@ internal static class DB_ThreatTactics
         return DB_RoomContext.For(room)?.PlayerBySlot(slot);
     }
 
-    private static float StableSide(DesertBatfly bat, int slot)
+    private static float StableSide(DB_Creature bat, int slot)
     {
         unchecked
         {
@@ -334,7 +334,7 @@ internal static class DB_ThreatTactics
     }
 
     private static void TraceAdjustment(
-        DesertBatfly bat,
+        DB_Creature bat,
         string name,
         Vector2 goal,
         string reason)

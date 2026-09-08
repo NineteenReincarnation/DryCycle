@@ -74,7 +74,7 @@ internal sealed class DB_SwarmRoom
         // Hive occupants are removed from Room.Update by vanilla: recover them here once,
         // only while still inHive; entering a hive never grants an instant heal.
         foreach (Fly member in Hive.inHive)
-            if (member is DesertBatfly resting && !resting.dead)
+            if (member is DB_Creature resting && !resting.dead)
                 resting.Injury.Recover(0.0032f / 40f);
 
         Hive.Update(eu);
@@ -125,7 +125,7 @@ internal readonly struct DB_FlockSnapshot
 
         foreach (Fly fly in flies)
         {
-            if (fly is not DesertBatfly bat || bat.dead || bat.slatedForDeletetion ||
+            if (fly is not DB_Creature bat || bat.dead || bat.slatedForDeletetion ||
                 bat.room != room || bat.inShortcut || bat.DesertState.InHive ||
                 bat.mainBodyChunk == null || !Finite(bat.mainBodyChunk.pos) ||
                 !Finite(bat.mainBodyChunk.vel))

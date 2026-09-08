@@ -77,7 +77,7 @@ internal readonly struct DB_RoostFrameSummary
 /// </summary>
 internal readonly struct DB_FrameContext
 {
-    internal readonly DesertBatfly Bat;
+    internal readonly DB_Creature Bat;
     internal readonly EntityID EntityId;
     internal readonly int Clock;
     internal readonly Room Room;
@@ -133,7 +133,7 @@ internal readonly struct DB_FrameContext
     internal readonly DB_SpecialPhysicsOwner SpecialPhysicsOwner;
 
     internal DB_FrameContext(
-        DesertBatfly bat,
+        DB_Creature bat,
         EntityID entityId,
         int clock,
         Room room,
@@ -243,19 +243,19 @@ internal static class DB_FrameContextRuntime
         internal DB_FrameContext Context;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, Cache> caches = new();
+    private static ConditionalWeakTable<DB_Creature, Cache> caches = new();
 
     internal static void Reset()
     {
-        caches = new ConditionalWeakTable<DesertBatfly, Cache>();
+        caches = new ConditionalWeakTable<DB_Creature, Cache>();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) caches.Remove(bat);
     }
 
-    internal static DB_FrameContext For(DesertBatfly bat, bool refresh = false)
+    internal static DB_FrameContext For(DB_Creature bat, bool refresh = false)
     {
         if (bat == null) return default;
         int clock = bat.room?.game?.clock ?? int.MinValue;
@@ -266,7 +266,7 @@ internal static class DB_FrameContextRuntime
         return cache.Context;
     }
 
-    private static DB_FrameContext Capture(DesertBatfly bat, int clock)
+    private static DB_FrameContext Capture(DB_Creature bat, int clock)
     {
         Room room = bat.room;
         DB_Injury injury = bat.Injury;
@@ -305,7 +305,7 @@ internal static class DB_FrameContextRuntime
             {
                 Creature creature = creatures[i];
                 if (creature == null || creature == bat || creature is Player ||
-                    creature is DesertBatfly || creature.dead || creature.room != room ||
+                    creature is DB_Creature || creature.dead || creature.room != room ||
                     creature.mainBodyChunk == null || creature.Template == null)
                     continue;
                 CreatureTemplate.Relationship relation = bat.Template.CreatureRelationship(creature.Template);
@@ -438,7 +438,7 @@ internal static class DB_FrameContextRuntime
             special);
     }
 
-    private static bool RestrainedByNonFly(DesertBatfly bat)
+    private static bool RestrainedByNonFly(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -449,7 +449,7 @@ internal static class DB_FrameContextRuntime
         return false;
     }
 
-    private static DB_SpecialPhysicsOwner ResolveSpecialPhysicsOwner(DesertBatfly bat, bool restrained)
+    private static DB_SpecialPhysicsOwner ResolveSpecialPhysicsOwner(DB_Creature bat, bool restrained)
     {
         if (bat == null || bat.dead || !bat.Consious) return DB_SpecialPhysicsOwner.CreaturePhysics;
         if (restrained) return DB_SpecialPhysicsOwner.Grasp;

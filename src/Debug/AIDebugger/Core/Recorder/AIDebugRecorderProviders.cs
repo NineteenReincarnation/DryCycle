@@ -17,7 +17,7 @@ internal static class AIDebugRecorderProviderRegistry
 
     internal static IAIDebugRecorderFastProvider Resolve(AbstractCreature creature)
     {
-        return creature?.realizedCreature is DesertBatfly ? DesertBatflyProvider : GenericProvider;
+        return creature?.realizedCreature is DB_Creature ? DesertBatflyProvider : GenericProvider;
     }
 
     private sealed class GenericRecorderFastProvider : IAIDebugRecorderFastProvider
@@ -34,7 +34,7 @@ internal static class AIDebugRecorderProviderRegistry
     {
         public void CaptureFast(AbstractCreature creature, ref AIDebugFastState state)
         {
-            if (creature?.realizedCreature is not DesertBatfly bat) return;
+            if (creature?.realizedCreature is not DB_Creature bat) return;
 
             Creature target = bat.DesertAI.Target;
             int targetSpawner = AIDebugFastState.UnknownToken;

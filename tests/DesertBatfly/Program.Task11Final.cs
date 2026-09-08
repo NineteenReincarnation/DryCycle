@@ -9,13 +9,13 @@ internal static partial class Program
         Type tacticsType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type bridgeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", true);
         Type traceType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTrace", true);
         Type threatRuntimeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type socialLifeType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
         Type aiType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type hooksType = mod.GetType(
@@ -134,7 +134,7 @@ internal static partial class Program
             "real projectile cue is detected first, then ordinary lateral evade owns localGoal before Trace and neutral Task10");
 
         Type rejectedRole = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyRoleScores", false);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureRoleScores", false);
         Check(rejectedRole == null,
             "Task11 final combat integration still does not restore rejected Task02 roles");
 

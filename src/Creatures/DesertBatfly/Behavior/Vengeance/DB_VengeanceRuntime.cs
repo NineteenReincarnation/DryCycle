@@ -11,16 +11,16 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal static class DB_VengeanceRuntime
 {
-    internal static bool IsActive(DesertBatfly bat)
+    internal static bool IsActive(DB_Creature bat)
         => DB_FearRuntime.IsExtremeVengeanceActive(bat);
 
-    internal static bool IsAvenger(DesertBatfly bat)
+    internal static bool IsAvenger(DB_Creature bat)
         => DB_FearRuntime.IsVengeanceAvenger(bat);
 
-    internal static bool TryGetTarget(DesertBatfly bat, out Creature target)
+    internal static bool TryGetTarget(DB_Creature bat, out Creature target)
         => DB_FearRuntime.TryGetVengeanceTarget(bat, out target);
 
-    internal static bool ExecuteOwned(DesertBatfly bat)
+    internal static bool ExecuteOwned(DB_Creature bat)
         => DB_FearRuntime.ExecuteVengeanceOwned(bat);
 }
 
@@ -32,20 +32,20 @@ internal static class DB_VengeanceRuntime
 /// </summary>
 internal static partial class DB_FearRuntime
 {
-    internal static bool IsExtremeVengeanceActive(DesertBatfly bat)
+    internal static bool IsExtremeVengeanceActive(DB_Creature bat)
     {
         return bat != null && states.TryGetValue(bat, out State state) &&
                state.Active && state.Vengeance != VengeanceMode.None;
     }
 
-    internal static bool IsVengeanceAvenger(DesertBatfly bat)
+    internal static bool IsVengeanceAvenger(DB_Creature bat)
     {
         return bat != null && states.TryGetValue(bat, out State state) && state.Active &&
                state.Vengeance != VengeanceMode.None &&
                state.Role == VengeanceParticipation.Avenger;
     }
 
-    internal static bool TryGetVengeanceTarget(DesertBatfly bat, out Creature target)
+    internal static bool TryGetVengeanceTarget(DB_Creature bat, out Creature target)
     {
         target = null;
         if (bat == null || !states.TryGetValue(bat, out State state) || !state.Active ||
@@ -55,7 +55,7 @@ internal static partial class DB_FearRuntime
         return true;
     }
 
-    internal static bool ExecuteVengeanceOwned(DesertBatfly bat)
+    internal static bool ExecuteVengeanceOwned(DB_Creature bat)
     {
         if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance) ||
             !states.TryGetValue(bat, out State state) || !state.Active ||
@@ -68,10 +68,10 @@ internal static partial class DB_FearRuntime
     }
 
     private static void ArmVengeanceGroup(
-        List<DesertBatfly> trueCandidates,
-        List<DesertBatfly> bats,
+        List<DB_Creature> trueCandidates,
+        List<DB_Creature> bats,
         int[] tier,
-        DesertBatfly victim,
+        DB_Creature victim,
         Creature threat,
         EventKind kind,
         LizardTongue rescueTongue,
@@ -80,14 +80,14 @@ internal static partial class DB_FearRuntime
         if (suppressNewVengeance || !ValidThreat(threat, victim?.room))
             return;
 
-        List<DesertBatfly> leaders = new(MaxTrueAvengersPerEvent);
+        List<DB_Creature> leaders = new(MaxTrueAvengersPerEvent);
         int participants = 0;
-        DesertBatfly existingLeader = null;
+        DB_Creature existingLeader = null;
         State existingLeaderState = null;
 
         for (int i = 0; i < bats.Count; i++)
         {
-            DesertBatfly bat = bats[i];
+            DB_Creature bat = bats[i];
             if (!TryGetVengeanceState(bat, out State social) ||
                 social.Vengeance == VengeanceMode.None ||
                 social.VengeanceTarget != threat ||
@@ -125,7 +125,7 @@ internal static partial class DB_FearRuntime
                  leaders.Count < MaxTrueAvengersPerEvent &&
                  participants < DB_Tuning.SocialVengeanceGroupCap; i++)
             {
-                DesertBatfly bat = trueCandidates[i];
+                DB_Creature bat = trueCandidates[i];
                 if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat)) continue;
                 State state = StateFor(bat);
                 FearMemory fear = threat is Player ? state.PlayerFear : state.PredatorFear;
@@ -157,7 +157,7 @@ internal static partial class DB_FearRuntime
         List<FollowerCandidate> followers = new(bats.Count);
         for (int i = 0; i < bats.Count; i++)
         {
-            DesertBatfly bat = bats[i];
+            DB_Creature bat = bats[i];
             if (bat.Injury.BlocksCombat || !DB_SocialBond.CanRespond(bat) || tier[i] < 0 || tier[i] > 1 || bat.Personality.CanExtremeVengeance ||
                 bat.Personality.Conformity < DB_Tuning.SocialFollowerMinConformity ||
                 IsExtremeVengeanceActive(bat))
@@ -166,11 +166,11 @@ internal static partial class DB_FearRuntime
             float trauma = PersistentTraumaStrength(bat, threat);
             if (trauma >= DB_Tuning.TraumaAggressionBlock) continue;
 
-            DesertBatfly bestLeader = null;
+            DB_Creature bestLeader = null;
             float bestLeaderDrive = 0f;
             for (int l = 0; l < leaders.Count; l++)
             {
-                DesertBatfly leader = leaders[l];
+                DB_Creature leader = leaders[l];
                 float distance = Vector2.Distance(
                     bat.mainBodyChunk.pos,
                     leader.mainBodyChunk.pos);
@@ -237,16 +237,16 @@ internal static partial class DB_FearRuntime
     }
 
     private static void ArmVengeance(
-        DesertBatfly bat,
+        DB_Creature bat,
         State state,
         Creature threat,
         EventKind kind,
-        DesertBatfly victim,
+        DB_Creature victim,
         LizardTongue rescueTongue,
         float drive,
         float damageScale,
         bool supportOnly,
-        DesertBatfly leader)
+        DB_Creature leader)
     {
         float rage = Mathf.Clamp01(Mathf.Lerp(0.58f, 1f, drive) + DB_SocialBond.Motivation(bat, victim, threat));
         if (state.Vengeance != VengeanceMode.None && state.VengeanceTarget == threat)
@@ -297,7 +297,7 @@ internal static partial class DB_FearRuntime
                 bat, threat, drive, "new Avenger armed -> immediate RallySignal");
     }
 
-    private static void UpdateVengeance(DesertBatfly bat, State state)
+    private static void UpdateVengeance(DB_Creature bat, State state)
     {
         if (state.Vengeance == VengeanceMode.None) return;
 
@@ -464,7 +464,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static bool TryVengeanceContact(
-        DesertBatfly bat,
+        DB_Creature bat,
         State state,
         Creature target,
         bool rescue)
@@ -511,7 +511,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static bool TryRescueVictim(
-        DesertBatfly bat,
+        DB_Creature bat,
         State state,
         Creature target)
     {
@@ -528,7 +528,7 @@ internal static partial class DB_FearRuntime
         if (state.Role == VengeanceParticipation.Supporter)
             chance *= Mathf.Lerp(0.72f, 0.96f, state.Commitment);
 
-        DesertBatfly victim = state.RescueVictim;
+        DB_Creature victim = state.RescueVictim;
         bool tongueCatch = state.RescueTongue != null &&
             lizard.tongue == state.RescueTongue &&
             state.RescueTongue.attached?.owner == victim &&
@@ -603,7 +603,7 @@ internal static partial class DB_FearRuntime
             drive));
     }
 
-    private static float CombatDrive(DesertBatfly bat, State state)
+    private static float CombatDrive(DB_Creature bat, State state)
     {
         return state.Role == VengeanceParticipation.Supporter
             ? Mathf.Lerp(0.38f, 0.72f, state.Commitment)
@@ -611,7 +611,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static bool TryGetVengeanceState(
-        DesertBatfly bat,
+        DB_Creature bat,
         out State state)
     {
         state = null;
@@ -638,8 +638,8 @@ internal static partial class DB_FearRuntime
     }
 
     private static float StableEvent01(
-        DesertBatfly bat,
-        DesertBatfly victim,
+        DB_Creature bat,
+        DB_Creature victim,
         Creature threat,
         EventKind kind)
     {
@@ -659,7 +659,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static Vector2 OrbitOffset(
-        DesertBatfly bat,
+        DB_Creature bat,
         float width,
         float height)
     {
@@ -671,7 +671,7 @@ internal static partial class DB_FearRuntime
     }
 
     private static void ForceFlight(
-        DesertBatfly bat,
+        DB_Creature bat,
         Vector2 goal,
         float speed)
     {

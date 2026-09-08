@@ -23,12 +23,12 @@ internal static partial class Program
         Type fearExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearExecutor", true);
         Type combatExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatExecutor", true);
         Type roostExecutor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostExecutor", true);
-        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
+        Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureThreatRuntime", true);
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
-        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
+        Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialLife", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
-        Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
+        Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
 
         foreach (string name in new[]
                  {
@@ -113,7 +113,7 @@ internal static partial class Program
             "Task14 R3 Vengeance target is readable through an explicit API instead of sibling reflection");
 
         Type vengeanceBridge = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatVengeanceBridge", true);
+            "DryCycle.Creatures.DesertBatfly.DB_CreatureThreatVengeanceBridge", true);
         Check(vengeanceBridge.GetField("statesField", Flags) == null &&
               vengeanceBridge.GetField("tryGetValue", Flags) == null &&
               vengeanceBridge.GetField("vengeanceTargetField", Flags) == null &&

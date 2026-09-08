@@ -23,25 +23,25 @@ internal static class DB_EnvironmentRuntime
         internal int LastSecondaryMoistureTick = int.MinValue;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, State> states = new();
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, State>();
+        states = new ConditionalWeakTable<DB_Creature, State>();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) states.Remove(bat);
     }
 
-    internal static void Update(DesertBatfly bat)
+    internal static void Update(DB_Creature bat)
     {
         RefreshInfluence(bat);
         ApplyOwnedBehavior(bat);
     }
 
-    internal static void RefreshInfluence(DesertBatfly bat)
+    internal static void RefreshInfluence(DB_Creature bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion)
             return;
@@ -57,7 +57,7 @@ internal static class DB_EnvironmentRuntime
         ApplySecondaryLightRainMoisture(bat, state, tick);
     }
 
-    internal static bool ApplyOwnedBehavior(DesertBatfly bat)
+    internal static bool ApplyOwnedBehavior(DB_Creature bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion ||
             !states.TryGetValue(bat, out State state))
@@ -72,7 +72,7 @@ internal static class DB_EnvironmentRuntime
         return true;
     }
 
-    internal static bool TryGetInfluence(DesertBatfly bat, out DB_EnvironmentInfluence influence)
+    internal static bool TryGetInfluence(DB_Creature bat, out DB_EnvironmentInfluence influence)
     {
         if (bat != null && states.TryGetValue(bat, out State state))
         {
@@ -83,34 +83,34 @@ internal static class DB_EnvironmentRuntime
         return false;
     }
 
-    internal static float SocialScale(DesertBatfly bat)
+    internal static float SocialScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.SocialMultiplier : 1f;
 
-    internal static float PlayScale(DesertBatfly bat)
+    internal static float PlayScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.PlayMultiplier : 1f;
 
-    internal static float HarassScale(DesertBatfly bat)
+    internal static float HarassScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.HarassMultiplier : 1f;
 
-    internal static float RoostScale(DesertBatfly bat)
+    internal static float RoostScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.RoostMultiplier : 1f;
 
-    internal static float GroupCohesionScale(DesertBatfly bat)
+    internal static float GroupCohesionScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.GroupCohesionMultiplier : 1f;
 
-    internal static float VisibilityScale(DesertBatfly bat)
+    internal static float VisibilityScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.VisibilityConfidence : 1f;
 
-    internal static float ObstacleAnticipationScale(DesertBatfly bat)
+    internal static float ObstacleAnticipationScale(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.ObstacleAnticipationScale : 1f;
 
-    internal static bool AllowsEnvironmentalDamageAttack(DesertBatfly bat)
+    internal static bool AllowsEnvironmentalDamageAttack(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) && influence.DamageAttackPermission && !influence.HardSurvival;
 
-    internal static bool HardSurvival(DesertBatfly bat)
+    internal static bool HardSurvival(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) && influence.HardSurvival;
 
-    internal static bool ShouldHoldEnvironmentalRoost(DesertBatfly bat)
+    internal static bool ShouldHoldEnvironmentalRoost(DB_Creature bat)
     {
         if (!TryGetInfluence(bat, out var influence)) return false;
         if (influence.HardSurvival) return true;
@@ -118,13 +118,13 @@ internal static class DB_EnvironmentRuntime
                influence.RoostMultiplier >= 1.65f;
     }
 
-    internal static float MigrationSuppression(DesertBatfly bat)
+    internal static float MigrationSuppression(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) ? influence.MigrationSuppression : 0f;
 
-    internal static bool SuppressNeutralSocial(DesertBatfly bat)
+    internal static bool SuppressNeutralSocial(DB_Creature bat)
         => TryGetInfluence(bat, out var influence) && influence.SuppressesNeutralSocial;
 
-    private static void Recompute(DesertBatfly bat, State state, int tick)
+    private static void Recompute(DB_Creature bat, State state, int tick)
     {
         DB_EnvironmentRoomRuntime.RoomState roomState =
             DB_EnvironmentRoomRuntime.For(bat.room);
@@ -323,7 +323,7 @@ internal static class DB_EnvironmentRuntime
     }
 
     private static void ApplyWeatherProfile(
-        DesertBatfly bat,
+        DB_Creature bat,
         in DB_EnvironmentContext context,
         in DB_EnvironmentExposureSample exposure,
         float heatExposure01,
@@ -576,7 +576,7 @@ internal static class DB_EnvironmentRuntime
         thermalExhaustion = Mathf.Clamp01(thermalExhaustion);
     }
 
-    private static void ApplyLocalBehavior(DesertBatfly bat, State state)
+    private static void ApplyLocalBehavior(DB_Creature bat, State state)
     {
         DB_EnvironmentInfluence influence = state.Influence;
         if (influence.Phase == DB_EnvironmentPhase.Calm) return;
@@ -600,7 +600,7 @@ internal static class DB_EnvironmentRuntime
     }
 
     private static void ApplyAnchorCommitment(
-        DesertBatfly bat,
+        DB_Creature bat,
         State state,
         DB_ShelterAnchor candidate,
         float score)
@@ -631,7 +631,7 @@ internal static class DB_EnvironmentRuntime
         return null;
     }
 
-    private static int CommitmentDuration(DesertBatfly bat)
+    private static int CommitmentDuration(DB_Creature bat)
     {
         float cautious = Mathf.Clamp01((1f - bat.Personality.Nerve) * 0.55f + bat.Personality.RoostAffinity * 0.25f + (1f - bat.Injury.PhysicalCapability) * 0.20f);
         return Mathf.RoundToInt(Mathf.Lerp(MinCommitmentTicks, MaxCommitmentTicks, cautious));
@@ -658,7 +658,7 @@ internal static class DB_EnvironmentRuntime
 
     private static float IndividualRecovery(
         DB_EnvironmentRoomRuntime.RoomState roomState,
-        DesertBatfly bat,
+        DB_Creature bat,
         int tick)
     {
         float roomProgress = DB_EnvironmentRoomRuntime.RecoveryProgress(roomState, tick);
@@ -672,7 +672,7 @@ internal static class DB_EnvironmentRuntime
     }
 
 
-    private static void ApplySecondaryLightRainMoisture(DesertBatfly bat, State state, int tick)
+    private static void ApplySecondaryLightRainMoisture(DB_Creature bat, State state, int tick)
     {
         if (bat?.room == null || bat.mainBodyChunk == null || bat.DesertState.Thirst <= 0f || state == null)
             return;
@@ -702,7 +702,7 @@ internal static class DB_EnvironmentRuntime
     }
 
     private static bool ApplyNativeHomeAndBurrow(
-        DesertBatfly bat,
+        DB_Creature bat,
         in DB_EnvironmentInfluence influence)
     {
         if (bat?.room?.aimap == null || bat.AI == null || bat.dead || !bat.Consious ||
@@ -759,7 +759,7 @@ internal static class DB_EnvironmentRuntime
     }
 
     private static void ApplyLightRainMoisture(
-        DesertBatfly bat,
+        DB_Creature bat,
         in DB_EnvironmentContext context,
         in DB_EnvironmentExposureSample exposure)
     {

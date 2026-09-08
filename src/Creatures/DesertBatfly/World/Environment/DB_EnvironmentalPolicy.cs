@@ -21,11 +21,11 @@ internal static class DB_EnvironmentalPolicy
     internal const int SandstormEmergencyMaxHops = 2;
     internal const int DeathSandstormEmergencyMaxHops = 1;
 
-    internal static bool AggressionAuthorized(DesertBatfly bat)
+    internal static bool AggressionAuthorized(DB_Creature bat)
         => bat != null && (bat.Personality.Aggressive ||
             DB_EnvironmentRuntime.AllowsEnvironmentalDamageAttack(bat));
 
-    internal static float CombatMotivation(DesertBatfly bat)
+    internal static float CombatMotivation(DB_Creature bat)
     {
         if (bat == null) return 0f;
         float value = Mathf.Clamp01(bat.DesertState.Thirst);
@@ -44,7 +44,7 @@ internal static class DB_EnvironmentalPolicy
         return Mathf.Clamp01(value);
     }
 
-    internal static bool AllowsHarassCandidate(DesertBatfly bat, Creature creature)
+    internal static bool AllowsHarassCandidate(DB_Creature bat, Creature creature)
     {
         if (bat == null || creature == null) return false;
         if (!DB_EnvironmentRuntime.TryGetInfluence(
@@ -69,10 +69,10 @@ internal static class DB_EnvironmentalPolicy
         return Stable01(bat.Personality.VisualSeed ^ targetKey * 397 ^ clockBucket * 7919) <= scale;
     }
 
-    internal static float RoostChanceScale(DesertBatfly bat)
+    internal static float RoostChanceScale(DB_Creature bat)
         => DB_EnvironmentRuntime.RoostScale(bat);
 
-    internal static int AdjustRoostDuration(DesertBatfly bat, int baseDuration)
+    internal static int AdjustRoostDuration(DB_Creature bat, int baseDuration)
     {
         if (bat == null || baseDuration <= 0 ||
             !DB_EnvironmentRuntime.TryGetInfluence(
@@ -85,7 +85,7 @@ internal static class DB_EnvironmentalPolicy
         return Mathf.Clamp(adjusted, baseDuration, 4200);
     }
 
-    internal static bool BlocksNeutralSocial(DesertBatfly bat)
+    internal static bool BlocksNeutralSocial(DB_Creature bat)
     {
         if (bat == null) return true;
         if (DB_EnvironmentRuntime.SuppressNeutralSocial(bat)) return true;
@@ -95,13 +95,13 @@ internal static class DB_EnvironmentalPolicy
         return ShouldSeekHome(influence) || ShouldBurrow(influence);
     }
 
-    internal static float SocialDriveScale(DesertBatfly bat)
+    internal static float SocialDriveScale(DB_Creature bat)
         => DB_EnvironmentRuntime.SocialScale(bat);
 
-    internal static float GroupCohesionScale(DesertBatfly bat)
+    internal static float GroupCohesionScale(DB_Creature bat)
         => DB_EnvironmentRuntime.GroupCohesionScale(bat);
 
-    internal static bool AllowsPlayChase(DesertBatfly bat)
+    internal static bool AllowsPlayChase(DB_Creature bat)
     {
         if (bat == null) return false;
         float scale = DB_EnvironmentRuntime.PlayScale(bat);
@@ -111,7 +111,7 @@ internal static class DB_EnvironmentalPolicy
         return Stable01(bat.Personality.VisualSeed ^ bucket * 0x632BE5AB) <= scale;
     }
 
-    internal static bool WithinActivityRange(DesertBatfly source, DesertBatfly candidate, float baseRange)
+    internal static bool WithinActivityRange(DB_Creature source, DB_Creature candidate, float baseRange)
     {
         if (source?.mainBodyChunk == null || candidate?.mainBodyChunk == null) return false;
         if (!DB_EnvironmentRuntime.TryGetInfluence(
@@ -223,7 +223,7 @@ internal static class DB_EnvironmentalPolicy
     }
 
     internal static float FogNavigationFamiliarityScale(
-        DesertBatfly bat,
+        DB_Creature bat,
         DB_EnvironmentWeather weather)
     {
         if (bat?.room?.abstractRoom == null ||
@@ -244,7 +244,7 @@ internal static class DB_EnvironmentalPolicy
     }
 
     internal static bool IsSandstormHomeAccessBlocker(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         in DB_EnvironmentInfluence influence)
     {

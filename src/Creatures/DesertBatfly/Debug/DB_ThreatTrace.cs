@@ -5,7 +5,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 internal static class DB_ThreatTrace
 {
-    internal static void Sample(DesertBatfly bat)
+    internal static void Sample(DB_Creature bat)
     {
         if (bat?.abstractCreature == null ||
             !AIDebugTrace.IsWatched(bat.abstractCreature) ||

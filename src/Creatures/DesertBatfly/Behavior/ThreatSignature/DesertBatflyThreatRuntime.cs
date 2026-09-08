@@ -183,7 +183,7 @@ internal static class DesertBatflyThreatRuntime
         internal int Clock;
     }
 
-    private static ConditionalWeakTable<DesertBatfly, RuntimeState> states = new();
+    private static ConditionalWeakTable<DB_Creature, RuntimeState> states = new();
     private static ConditionalWeakTable<Room, RoomState> roomStates = new();
     private static ConditionalWeakTable<Explosion, ProcessedExplosion> processedExplosions = new();
     private static ConditionalWeakTable<PhysicalObject, SourceOwner> sourceOwners = new();
@@ -217,19 +217,19 @@ internal static class DesertBatflyThreatRuntime
 
     internal static void Reset()
     {
-        states = new ConditionalWeakTable<DesertBatfly, RuntimeState>();
+        states = new ConditionalWeakTable<DB_Creature, RuntimeState>();
         roomStates = new ConditionalWeakTable<Room, RoomState>();
         processedExplosions = new ConditionalWeakTable<Explosion, ProcessedExplosion>();
         sourceOwners = new ConditionalWeakTable<PhysicalObject, SourceOwner>();
         DB_ThreatMemoryStore.ResetRuntime();
     }
 
-    internal static void Forget(DesertBatfly bat)
+    internal static void Forget(DB_Creature bat)
     {
         if (bat != null) states.Remove(bat);
     }
 
-    internal static void RefreshState(DesertBatfly bat)
+    internal static void RefreshState(DB_Creature bat)
     {
         if (bat == null || bat.room == null || bat.dead || bat.slatedForDeletetion) return;
         RuntimeState state = StateFor(bat);
@@ -244,9 +244,9 @@ internal static class DesertBatflyThreatRuntime
     }
 
     // Compatibility state-only surface. R3 hooks call RefreshState before arbitration.
-    internal static void Update(DesertBatfly bat) => RefreshState(bat);
+    internal static void Update(DB_Creature bat) => RefreshState(bat);
 
-    internal static void ApplyOwnedTacticalModifier(DesertBatfly bat)
+    internal static void ApplyOwnedTacticalModifier(DB_Creature bat)
     {
         if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat) ||
             !states.TryGetValue(bat, out RuntimeState state))
@@ -254,13 +254,13 @@ internal static class DesertBatflyThreatRuntime
         ApplyTacticalAdjustment(bat, state);
     }
 
-    internal static void CommitFrame(DesertBatfly bat)
+    internal static void CommitFrame(DB_Creature bat)
     {
         if (bat != null && states.TryGetValue(bat, out RuntimeState state))
             state.PreviousMode = bat.DesertAI.Mode;
     }
 
-    internal static bool TryGetDebugState(DesertBatfly bat, out DesertBatflyThreatDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DesertBatflyThreatDebugState debug)
     {
         debug = default;
         if (bat == null) return false;
@@ -307,7 +307,7 @@ internal static class DesertBatflyThreatRuntime
 
     private static void DamageEvent(DB_DamageEvent damageEvent)
     {
-        DesertBatfly bat = damageEvent.Victim;
+        DB_Creature bat = damageEvent.Victim;
         if (bat == null) return;
 
         Player player = damageEvent.Instigator as Player ??
@@ -355,7 +355,7 @@ internal static class DesertBatflyThreatRuntime
 
     private static void CaptureEvent(DB_CaptureEvent captureEvent)
     {
-        DesertBatfly bat = captureEvent.Victim;
+        DB_Creature bat = captureEvent.Victim;
         if (bat == null || bat.dead || captureEvent.Captor is not Player player)
             return;
 
@@ -375,7 +375,7 @@ internal static class DesertBatflyThreatRuntime
 
     private static void MortalityEvent(DB_MortalityEvent mortalityEvent)
     {
-        DesertBatfly bat = mortalityEvent.Victim;
+        DB_Creature bat = mortalityEvent.Victim;
         if (bat == null) return;
 
         RuntimeState state = StateFor(bat);
@@ -499,7 +499,7 @@ internal static class DesertBatflyThreatRuntime
 
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+            if (other is not DB_Creature bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, explosion.pos);
             if (distance > acuteRadius) continue;
@@ -549,7 +549,7 @@ internal static class DesertBatflyThreatRuntime
 
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+            if (other is not DB_Creature bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
             float distance = Vector2.Distance(bat.mainBodyChunk.pos, position);
             if (distance > acuteRadius) continue;
@@ -584,7 +584,7 @@ internal static class DesertBatflyThreatRuntime
         if (room == null || player == null) return;
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly bat || bat.dead || bat.room != room || !bat.Consious)
+            if (other is not DB_Creature bat || bat.dead || bat.room != room || !bat.Consious)
                 continue;
             if (!Custom.DistLess(bat.mainBodyChunk.pos, position, 470f) &&
                 !Custom.DistLess(bat.mainBodyChunk.pos, player.mainBodyChunk.pos, 470f))
@@ -614,7 +614,7 @@ internal static class DesertBatflyThreatRuntime
 
         foreach (Fly other in DB_SwarmRoom.For(room).Hive.flies)
         {
-            if (other is not DesertBatfly witness || witness == threatEvent.Victim || witness.dead ||
+            if (other is not DB_Creature witness || witness == threatEvent.Victim || witness.dead ||
                 witness.room != room || !witness.Consious)
                 continue;
             float distance = Vector2.Distance(witness.mainBodyChunk.pos, threatEvent.Position);
@@ -641,7 +641,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static void AddEvidence(
-        DesertBatfly bat,
+        DB_Creature bat,
         Player player,
         in DB_ThreatEvidence evidence,
         float multiplier,
@@ -665,7 +665,7 @@ internal static class DesertBatflyThreatRuntime
         state.LastWitnessReason = witness ? reason : "direct: " + reason;
     }
 
-    private static void UpdateCue(DesertBatfly bat, RuntimeState state)
+    private static void UpdateCue(DB_Creature bat, RuntimeState state)
     {
         if (state.CueRefresh > 0)
         {
@@ -738,7 +738,7 @@ internal static class DesertBatflyThreatRuntime
         }
     }
 
-    private static void ApplyHeldThreatPriority(DesertBatfly bat, RuntimeState state)
+    private static void ApplyHeldThreatPriority(DB_Creature bat, RuntimeState state)
     {
         DesertBatflyThreatCue cue = state.Cue;
         if (!ValidSlot(cue.PlayerSlot) || bat.room == null) return;
@@ -775,7 +775,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static void LearnNearMiss(
-        DesertBatfly bat,
+        DB_Creature bat,
         RuntimeState state,
         Weapon weapon,
         Player player,
@@ -793,7 +793,7 @@ internal static class DesertBatflyThreatRuntime
         AddEvidence(bat, player, evidence, 0.28f, "projectile near miss", false);
     }
 
-    private static void TrackFormalAggression(DesertBatfly bat, RuntimeState state)
+    private static void TrackFormalAggression(DB_Creature bat, RuntimeState state)
     {
         if (bat.DesertAI.Target is not Player player) return;
         DB_AI.Activity mode = bat.DesertAI.Mode;
@@ -807,7 +807,7 @@ internal static class DesertBatflyThreatRuntime
         state.FormalAggressionTick = bat.room?.game?.clock ?? int.MinValue;
     }
 
-    private static void TrackPursuit(DesertBatfly bat, RuntimeState state)
+    private static void TrackPursuit(DB_Creature bat, RuntimeState state)
     {
         if (bat.DesertAI.Mode != DB_AI.Activity.Escape || bat.room == null)
         {
@@ -859,7 +859,7 @@ internal static class DesertBatflyThreatRuntime
         }
     }
 
-    private static void ExtendLearnedDisengage(DesertBatfly bat, RuntimeState state)
+    private static void ExtendLearnedDisengage(DB_Creature bat, RuntimeState state)
     {
         if (state.PreviousMode != DB_AI.Activity.Escape ||
             bat.DesertAI.Mode == DB_AI.Activity.Escape ||
@@ -883,7 +883,7 @@ internal static class DesertBatflyThreatRuntime
         state.ModifierReason = "learned pursuer: extended disengage";
     }
 
-    private static void TrackEncounter(DesertBatfly bat, RuntimeState state)
+    private static void TrackEncounter(DB_Creature bat, RuntimeState state)
     {
         if (bat.DesertAI.Target is not Player player || bat.room == null ||
             bat.DesertAI.Mode is DB_AI.Activity.Escape or DB_AI.Activity.Attach or
@@ -971,7 +971,7 @@ internal static class DesertBatflyThreatRuntime
         state.NonAggressionAwards = 0;
     }
 
-    private static void ApplyTacticalAdjustment(DesertBatfly bat, RuntimeState state)
+    private static void ApplyTacticalAdjustment(DB_Creature bat, RuntimeState state)
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat)) return;
 
@@ -1142,7 +1142,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static bool ShouldAbandonFreshHarass(
-        DesertBatfly bat,
+        DB_Creature bat,
         int slot,
         DB_PlayerThreatMemory memory,
         float caution)
@@ -1157,7 +1157,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static bool ShouldAbortDive(
-        DesertBatfly bat,
+        DB_Creature bat,
         int slot,
         float caution,
         float counterRisk,
@@ -1213,7 +1213,7 @@ internal static class DesertBatflyThreatRuntime
     }
 
     private static Player NearestVisiblePlayer(
-        DesertBatfly bat,
+        DB_Creature bat,
         IReadOnlyList<Player> players,
         float maxDistance = 430f)
     {
@@ -1235,10 +1235,10 @@ internal static class DesertBatflyThreatRuntime
         return best;
     }
 
-    private static RuntimeState StateFor(DesertBatfly bat) => states.GetOrCreateValue(bat);
+    private static RuntimeState StateFor(DB_Creature bat) => states.GetOrCreateValue(bat);
     private static RoomState RoomFor(Room room) => roomStates.GetOrCreateValue(room);
 
-    private static int CurrentCycle(DesertBatfly bat)
+    private static int CurrentCycle(DB_Creature bat)
     {
         RainWorldGame game = bat?.room?.game;
         return game != null && game.IsStorySession
@@ -1263,10 +1263,10 @@ internal static class DesertBatflyThreatRuntime
         }
     }
 
-    private static float StableSide(DesertBatfly bat, int slot) =>
+    private static float StableSide(DB_Creature bat, int slot) =>
         Stable01(bat, slot, 0x2C15) < 0.5f ? -1f : 1f;
 
-    private static float Stable01(DesertBatfly bat, int slot, int salt)
+    private static float Stable01(DB_Creature bat, int slot, int salt)
     {
         unchecked
         {

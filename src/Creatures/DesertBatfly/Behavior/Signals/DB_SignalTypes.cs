@@ -25,14 +25,14 @@ internal readonly struct DB_SignalInfluence
     internal readonly Vector2 AlarmOrigin;
     internal readonly Creature AlarmThreat;
     internal readonly float DistressInterest;
-    internal readonly DesertBatfly DistressSource;
+    internal readonly DB_Creature DistressSource;
     internal readonly float RallyInterest;
-    internal readonly DesertBatfly RallySource;
+    internal readonly DB_Creature RallySource;
     internal readonly Creature RallyTarget;
     internal readonly float RoostInterest;
-    internal readonly DesertBatfly RoostSource;
+    internal readonly DB_Creature RoostSource;
     internal readonly float HarassInterest;
-    internal readonly DesertBatfly HarassSource;
+    internal readonly DB_Creature HarassSource;
     internal readonly Player HarassTarget;
     internal readonly float SafeConfidence;
     internal readonly string LastReason;
@@ -42,14 +42,14 @@ internal readonly struct DB_SignalInfluence
         Vector2 alarmOrigin,
         Creature alarmThreat,
         float distressInterest,
-        DesertBatfly distressSource,
+        DB_Creature distressSource,
         float rallyInterest,
-        DesertBatfly rallySource,
+        DB_Creature rallySource,
         Creature rallyTarget,
         float roostInterest,
-        DesertBatfly roostSource,
+        DB_Creature roostSource,
         float harassInterest,
-        DesertBatfly harassSource,
+        DB_Creature harassSource,
         Player harassTarget,
         float safeConfidence,
         string lastReason)

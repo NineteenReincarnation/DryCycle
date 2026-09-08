@@ -63,7 +63,7 @@ internal sealed class DB_SandBurst : CosmeticSprite
 
     private int GrainCount => grains.Length;
 
-    private DB_SandBurst(Room room, DesertBatfly bat, Player holder,
+    private DB_SandBurst(Room room, DB_Creature bat, Player holder,
         float intensity, int seed, bool screenOverlayEnabled)
     {
         this.room = room;
@@ -141,7 +141,7 @@ internal sealed class DB_SandBurst : CosmeticSprite
         cameraAnchorReady = new bool[cameras];
     }
 
-    internal static void Emit(Room room, DesertBatfly bat, Player holder, float intensity, int seed)
+    internal static void Emit(Room room, DB_Creature bat, Player holder, float intensity, int seed)
     {
         if (room == null || bat == null || holder == null) return;
 
