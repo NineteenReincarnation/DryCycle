@@ -1,0 +1,238 @@
+name: DesertBatfly R6 Root Reorg Stage F
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - '.github/workflows/desertbatfly-r6-root-reorg-stage-f.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rename internal creature type without touching external identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import hashlib
+
+          OLD = 'DesertBatfly'
+          NEW = 'DB_Creature'
+          NS_PREFIX = 'DryCycle.Creatures.'
+          FULL_OLD = 'DryCycle.Creatures.DesertBatfly.DesertBatfly'
+          FULL_NEW = 'DryCycle.Creatures.DesertBatfly.DB_Creature'
+
+          # Split C# into code vs comments/strings/chars. Interpolated strings are treated as
+          # strings on purpose; if they contain the old type token we reject rather than guess.
+          def segments(text):
+              out=[]
+              start=0
+              i=0
+              state='code'
+              seg_start=0
+              prefix=''
+              while i < len(text):
+                  c=text[i]
+                  n=text[i+1] if i+1 < len(text) else ''
+                  if state=='code':
+                      if c=='/' and n=='/':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='line'; seg_start=i; i+=2; continue
+                      if c=='/' and n=='*':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='block'; seg_start=i; i+=2; continue
+                      if c=='$' and n=='@' and i+2<len(text) and text[i+2]=='"':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='istring'; seg_start=i; i+=3; continue
+                      if c=='@' and n=='$' and i+2<len(text) and text[i+2]=='"':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='istring'; seg_start=i; i+=3; continue
+                      if c=='$' and n=='"':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='istring'; seg_start=i; i+=2; continue
+                      if c=='@' and n=='"':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='vstring'; seg_start=i; i+=2; continue
+                      if c=='"':
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='string'; seg_start=i; i+=1; continue
+                      if c=="'":
+                          if seg_start < i: out.append(('code', text[seg_start:i]))
+                          state='char'; seg_start=i; i+=1; continue
+                      i+=1; continue
+                  if state=='line':
+                      if c=='\n':
+                          i+=1; out.append(('comment', text[seg_start:i])); state='code'; seg_start=i; continue
+                      i+=1; continue
+                  if state=='block':
+                      if c=='*' and n=='/':
+                          i+=2; out.append(('comment', text[seg_start:i])); state='code'; seg_start=i; continue
+                      i+=1; continue
+                  if state in ('string','istring'):
+                      if c=='\\': i+=2; continue
+                      if c=='"':
+                          i+=1; out.append((state, text[seg_start:i])); state='code'; seg_start=i; continue
+                      i+=1; continue
+                  if state=='vstring':
+                      if c=='"' and n=='"': i+=2; continue
+                      if c=='"':
+                          i+=1; out.append(('string', text[seg_start:i])); state='code'; seg_start=i; continue
+                      i+=1; continue
+                  if state=='char':
+                      if c=='\\': i+=2; continue
+                      if c=="'":
+                          i+=1; out.append(('char', text[seg_start:i])); state='code'; seg_start=i; continue
+                      i+=1; continue
+              if seg_start < len(text):
+                  kind = 'code' if state=='code' else ('comment' if state in ('line','block') else state)
+                  out.append((kind, text[seg_start:]))
+              return out
+
+          # Preserve the namespace segment but rename every other C# identifier occurrence.
+          code_pat = re.compile(r'(?<!DryCycle\.Creatures\.)\bDesertBatfly\b')
+
+          def transform(text, path):
+              pieces=[]
+              for kind, seg in segments(text):
+                  if kind=='code':
+                      seg = code_pat.sub(NEW, seg)
+                  elif kind=='istring':
+                      if re.search(r'\bDesertBatfly\b', seg):
+                          raise SystemExit(f'ambiguous interpolated-string occurrence in {path}: {seg[:160]!r}')
+                  elif kind in ('string','vstring'):
+                      # Only internal reflection identity may change inside strings.
+                      seg = seg.replace(FULL_OLD, FULL_NEW)
+                  pieces.append(seg)
+              return ''.join(pieces)
+
+          roots=[Path('src'),Path('tests')]
+          files=[]
+          for root in roots:
+              if root.exists(): files.extend(sorted(root.rglob('*.cs')))
+
+          snapshots={p: p.read_text(encoding='utf-8') for p in files}
+          changed=[]
+          before_string_inventory=[]
+          after_string_inventory=[]
+
+          for path,before in snapshots.items():
+              # Record all literal segments mentioning the species/type before modification.
+              for kind,seg in segments(before):
+                  if kind in ('string','vstring','istring') and OLD in seg:
+                      before_string_inventory.append((path.as_posix(),kind,seg))
+
+              after=transform(before,path)
+              if after!=before:
+                  path.write_text(after,encoding='utf-8')
+                  changed.append(path)
+
+              # Exact-transform postcondition: no secondary/manual edits are permitted.
+              actual=path.read_text(encoding='utf-8')
+              if actual!=after:
+                  raise SystemExit(f'unapproved secondary edit: {path}')
+              for kind,seg in segments(actual):
+                  if kind in ('string','vstring','istring') and (OLD in seg or NEW in seg):
+                      after_string_inventory.append((path.as_posix(),kind,seg))
+
+          # Every old string literal must remain byte-identical except the one explicitly allowed
+          # internal full-type reflection substitution.
+          expected=[]
+          for p,k,s in before_string_inventory:
+              expected.append((p,k,s.replace(FULL_OLD,FULL_NEW)))
+          if expected!=after_string_inventory:
+              print('EXPECTED STRING INVENTORY:')
+              for row in expected: print(row)
+              print('ACTUAL STRING INVENTORY:')
+              for row in after_string_inventory: print(row)
+              raise SystemExit('string/external identity inventory changed unexpectedly')
+
+          # No old class identifier may remain in executable C# code. Namespace occurrences are
+          # allowed only when immediately preceded by DryCycle.Creatures.
+          leftovers=[]
+          for path in files:
+              text=path.read_text(encoding='utf-8')
+              for kind,seg in segments(text):
+                  if kind!='code': continue
+                  for m in code_pat.finditer(seg):
+                      leftovers.append((path.as_posix(),m.group(0)))
+          if leftovers:
+              raise SystemExit(f'old executable type identifiers remain: {leftovers[:20]}')
+
+          print('C# files changed:',len(changed))
+          print('String literals containing DesertBatfly preserved/approved:',len(before_string_inventory))
+          print('Creature host hash after symbol migration:',hashlib.sha256(
+              Path('src/Creatures/DesertBatfly/Core/DB_Creature.cs').read_bytes()).hexdigest())
+          PY
+
+          creature='src/Creatures/DesertBatfly/Core/DB_Creature.cs'
+          definition='src/Creatures/DesertBatfly/Core/DB_Definition.cs'
+          test -f "$creature"
+          grep -q 'internal sealed class DB_Creature : Fly, IPlayerEdible' "$creature"
+          grep -q 'internal DB_Creature(AbstractCreature creature, World world)' "$creature"
+          grep -q 'new DB_Creature(creature, creature.world)' "$definition"
+
+          # Namespace and all published species IDs remain DesertBatfly.
+          grep -q '^namespace DryCycle.Creatures.DesertBatfly;' "$creature"
+          grep -q '^namespace DryCycle.Creatures.DesertBatfly;' "$definition"
+          grep -Fq 'CreatureTemplate.Type CreatureType = new("DesertBatfly", true);' "$definition"
+          grep -Fq 'template.name = "Desert Batfly";' "$definition"
+
+          # Core host lifecycle/gameplay invariants are unchanged by the symbol migration.
+          for token in \
+            'RockSurvivalHealthFloor = 0.01f' \
+            'Runtime.BeforeVanillaUpdate()' \
+            'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' \
+            'DB_EventHub.RecordConsumptionAttribution(this, player)' \
+            'DB_FearRuntime.IsSupportedLethalThreat(attacker)' \
+            'DB_FearRuntime.Forget(this)' \
+            'public override void Violence(' \
+            'public override void Die()'; do
+            grep -Fq "$token" "$creature"
+          done
+
+          # The namespace path is intentionally allowed; the old class declaration/construction is not.
+          ! grep -RIn --include='*.cs' -E 'class[[:space:]]+DesertBatfly\b|new[[:space:]]+DesertBatfly\s*\(|typeof\(DesertBatfly\)|\bis[[:space:]]+DesertBatfly\b|\bas[[:space:]]+DesertBatfly\b' src tests
+
+          # Reflection callers that used the internal full type name must follow the rename.
+          ! grep -RIn --include='*.cs' 'DryCycle.Creatures.DesertBatfly.DesertBatfly' src tests
+
+          # Previous migrations stay intact.
+          test -f src/Creatures/DesertBatfly/Behavior/DB_AI.cs
+          test -f src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs
+          test -f src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
+          grep -q 'internal readonly DB_AI DesertAI;' "$creature"
+
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,sys
+          pats=(re.compile(r'\bTask\s*[-_]?\s*\d+\b',re.I),re.compile(r'\bTask-number\b',re.I))
+          bad=[]
+          for p in Path('src/Creatures/DesertBatfly').rglob('*.cs'):
+              for n,l in enumerate(p.read_text(encoding='utf-8').splitlines(),1):
+                  if any(x.search(l) for x in pats): bad.append((p,n,l.strip()))
+          if bad:
+              for x in bad: print(f'{x[0]}:{x[1]}: {x[2]}')
+              sys.exit(1)
+          PY
+
+          test "$(find src/Creatures/DesertBatfly -maxdepth 1 -type f -name '*.cs' | wc -l)" -eq 0
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests
+          git commit -m 'R6 B38 rename internal creature type to DB_Creature [r6-b38-done]'
+          git push origin HEAD:task14-r6-b1-final
