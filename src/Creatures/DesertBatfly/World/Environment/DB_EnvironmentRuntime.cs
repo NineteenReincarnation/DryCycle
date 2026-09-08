@@ -1,0 +1,798 @@
+using System.Runtime.CompilerServices;
+using UnityEngine;
+
+namespace DryCycle.Creatures.DesertBatfly;
+
+internal static class DB_EnvironmentRuntime
+{
+    internal const int DecisionBaseInterval = 12;
+    internal const int MinCommitmentTicks = 120;
+    internal const int MaxCommitmentTicks = 300;
+    internal const float AnchorSwitchMargin = 0.13f;
+
+    private sealed class State
+    {
+        internal DB_EnvironmentInfluence Influence = DB_EnvironmentInfluence.Neutral;
+        internal int LastDecisionTick = int.MinValue;
+        internal int CommitmentTicks;
+        internal int AnchorId;
+        internal float AnchorScore = float.NegativeInfinity;
+        internal int HeatExposureTicks;
+        internal int LastWeatherOrdinal = -1;
+        internal DB_EnvironmentPhase LastPhase = DB_EnvironmentPhase.Calm;
+        internal int LastSecondaryMoistureTick = int.MinValue;
+    }
+
+    private static ConditionalWeakTable<DB_Creature, State> states = new();
+
+    internal static void Reset()
+    {
+        states = new ConditionalWeakTable<DB_Creature, State>();
+    }
+
+    internal static void Forget(DB_Creature bat)
+    {
+        if (bat != null) states.Remove(bat);
+    }
+
+    internal static void Update(DB_Creature bat)
+    {
+        RefreshInfluence(bat);
+        ApplyOwnedBehavior(bat);
+    }
+
+    internal static void RefreshInfluence(DB_Creature bat)
+    {
+        if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion)
+            return;
+
+        State state = states.GetValue(bat, _ => new State());
+        int tick = bat.room.game?.clock ?? 0;
+        int interval = DecisionBaseInterval + StableBucket(bat.Personality.VisualSeed, 7);
+        if (state.LastDecisionTick == int.MinValue || tick - state.LastDecisionTick >= interval)
+        {
+            state.LastDecisionTick = tick;
+            Recompute(bat, state, tick);
+        }
+        ApplySecondaryLightRainMoisture(bat, state, tick);
+    }
+
+    internal static bool ApplyOwnedBehavior(DB_Creature bat)
+    {
+        if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion ||
+            !states.TryGetValue(bat, out State state))
+            return false;
+
+        bool owns = DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentHardSurvival) ||
+                    DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.EnvironmentLocalSurvival);
+        if (!owns) return false;
+
+        if (ApplyNativeHomeAndBurrow(bat, state.Influence)) return true;
+        ApplyLocalBehavior(bat, state);
+        return true;
+    }
+
+    internal static bool TryGetInfluence(DB_Creature bat, out DB_EnvironmentInfluence influence)
+    {
+        if (bat != null && states.TryGetValue(bat, out State state))
+        {
+            influence = state.Influence;
+            return true;
+        }
+        influence = DB_EnvironmentInfluence.Neutral;
+        return false;
+    }
+
+    internal static float SocialScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.SocialMultiplier : 1f;
+
+    internal static float PlayScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.PlayMultiplier : 1f;
+
+    internal static float HarassScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.HarassMultiplier : 1f;
+
+    internal static float RoostScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.RoostMultiplier : 1f;
+
+    internal static float GroupCohesionScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.GroupCohesionMultiplier : 1f;
+
+    internal static float VisibilityScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.VisibilityConfidence : 1f;
+
+    internal static float ObstacleAnticipationScale(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.ObstacleAnticipationScale : 1f;
+
+    internal static bool AllowsEnvironmentalDamageAttack(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) && influence.DamageAttackPermission && !influence.HardSurvival;
+
+    internal static bool HardSurvival(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) && influence.HardSurvival;
+
+    internal static bool ShouldHoldEnvironmentalRoost(DB_Creature bat)
+    {
+        if (!TryGetInfluence(bat, out var influence)) return false;
+        if (influence.HardSurvival) return true;
+        return influence.Phase is DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute &&
+               influence.RoostMultiplier >= 1.65f;
+    }
+
+    internal static float MigrationSuppression(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) ? influence.MigrationSuppression : 0f;
+
+    internal static bool SuppressNeutralSocial(DB_Creature bat)
+        => TryGetInfluence(bat, out var influence) && influence.SuppressesNeutralSocial;
+
+    private static void Recompute(DB_Creature bat, State state, int tick)
+    {
+        DB_EnvironmentRoomRuntime.RoomState roomState =
+            DB_EnvironmentRoomRuntime.For(bat.room);
+        if (roomState == null)
+        {
+            state.Influence = DB_EnvironmentInfluence.Neutral;
+            return;
+        }
+
+        DB_EnvironmentContext context = roomState.Context;
+        if (context.Phase == DB_EnvironmentPhase.Calm)
+        {
+            state.HeatExposureTicks = Mathf.Max(0, state.HeatExposureTicks - 20);
+            state.CommitmentTicks = 0;
+            state.AnchorId = 0;
+            state.AnchorScore = float.NegativeInfinity;
+            state.Influence = DB_EnvironmentInfluence.Neutral;
+            return;
+        }
+
+        if (state.CommitmentTicks > 0)
+            state.CommitmentTicks = Mathf.Max(0, state.CommitmentTicks - (DecisionBaseInterval + 7));
+
+        IntVector2 currentTile = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        float visibility = context.Phase == DB_EnvironmentPhase.Recovery
+            ? RecoveryVisibility(roomState, tick)
+            : DB_EnvironmentProfile.VisibilityConfidence(context.Weather, context.ActiveIntensity);
+        DB_EnvironmentExposureSample exposure =
+            DB_EnvironmentExposure.Sample(bat.room, currentTile, visibility);
+
+        if (context.Weather is DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat &&
+            context.ActiveIntensity > 0f)
+        {
+            int add = Mathf.RoundToInt(Mathf.Lerp(2f, 18f, context.ActiveIntensity) * Mathf.Lerp(0.55f, 1f, exposure.Exposure));
+            state.HeatExposureTicks = Mathf.Clamp(state.HeatExposureTicks + add, 0, 2400);
+        }
+        else
+        {
+            state.HeatExposureTicks = Mathf.Max(0, state.HeatExposureTicks - 18);
+        }
+
+        float heatExposure01 = Mathf.Clamp01(state.HeatExposureTicks / 1200f);
+        float capability = bat.Injury.PhysicalCapability;
+        float injury = 1f - capability;
+        float thirst = Mathf.Clamp01(bat.DesertState.Thirst);
+        float nerve = bat.Personality.Nerve;
+        float temperament = bat.Personality.Temperament;
+        float roostAffinity = bat.Personality.RoostAffinity;
+        float stable = Stable01(bat.Personality.VisualSeed ^ 0x2A7F1531);
+        float sensitivity = Mathf.Clamp01(
+            (1f - nerve) * 0.30f + injury * 0.42f + bat.Injury.PostStunShock * 0.20f + (1f - stable) * 0.08f);
+        float heatTolerance = Mathf.Clamp01(
+            nerve * 0.34f + capability * 0.31f + temperament * 0.13f + stable * 0.10f
+            - injury * 0.16f - bat.Injury.PostStunShock * 0.10f - thirst * 0.18f + 0.16f);
+
+        float phasePressure = PhasePressure(context.Phase);
+        float shelterDrive = Mathf.Clamp01(context.ShelterUrgency * 0.60f + context.ActiveIntensity * 0.24f + sensitivity * 0.22f);
+        float openAversion = Mathf.Clamp01(context.TravelExposure * 0.45f + context.ActiveIntensity * 0.30f + phasePressure * 0.35f);
+        float roostMultiplier = 1f + shelterDrive * Mathf.Lerp(0.45f, 1.35f, roostAffinity);
+        float harassMultiplier = Mathf.Lerp(1f, 0.20f, phasePressure);
+        float socialMultiplier = Mathf.Lerp(1f, 0.30f, phasePressure);
+        float playMultiplier = Mathf.Lerp(1f, 0.12f, phasePressure);
+        float groupCohesion = Mathf.Lerp(1f, 0.78f, phasePressure);
+        float radiusMultiplier = Mathf.Lerp(1f, 0.38f, phasePressure);
+        float navUncertainty = context.Phase == DB_EnvironmentPhase.Recovery
+            ? DB_EnvironmentProfile.NavigationUncertainty(context.Weather, 1f) * (1f - RecoveryVisibility(roomState, tick))
+            : DB_EnvironmentProfile.NavigationUncertainty(context.Weather, context.ActiveIntensity);
+        float obstacleScale = Mathf.Clamp01(1f - navUncertainty * 0.72f);
+        float homeReturn = 0f;
+        float burrow = 0f;
+        float migrationSuppression = 0f;
+        float heatAgitation = 0f;
+        float heatShelter = 0f;
+        float thermalExhaustion = 0f;
+        bool damagePermission = false;
+        bool hardSurvival = context.Phase == DB_EnvironmentPhase.Acute;
+        string reason = context.PhaseReason;
+
+        ApplyWeatherProfile(
+            bat,
+            context,
+            exposure,
+            heatExposure01,
+            heatTolerance,
+            ref shelterDrive,
+            ref openAversion,
+            ref roostMultiplier,
+            ref harassMultiplier,
+            ref socialMultiplier,
+            ref playMultiplier,
+            ref groupCohesion,
+            ref radiusMultiplier,
+            ref navUncertainty,
+            ref obstacleScale,
+            ref homeReturn,
+            ref burrow,
+            ref migrationSuppression,
+            ref heatAgitation,
+            ref heatShelter,
+            ref thermalExhaustion,
+            ref damagePermission,
+            ref hardSurvival,
+            ref reason);
+
+        if (context.Phase == DB_EnvironmentPhase.Recovery)
+        {
+            float recovery = IndividualRecovery(roomState, bat, tick);
+            shelterDrive *= 1f - recovery;
+            openAversion *= 1f - recovery;
+            roostMultiplier = Mathf.Lerp(roostMultiplier, 1f, recovery);
+            harassMultiplier = Mathf.Lerp(harassMultiplier, 1f, recovery);
+            socialMultiplier = Mathf.Lerp(socialMultiplier, 1f, recovery);
+            playMultiplier = Mathf.Lerp(playMultiplier, 1f, recovery);
+            groupCohesion = Mathf.Lerp(groupCohesion, 1f, recovery);
+            radiusMultiplier = Mathf.Lerp(radiusMultiplier, 1f, recovery);
+            navUncertainty *= 1f - recovery;
+            obstacleScale = Mathf.Lerp(obstacleScale, 1f, recovery);
+            homeReturn *= 1f - recovery;
+            burrow *= 1f - recovery;
+            migrationSuppression *= 1f - recovery;
+            heatAgitation *= 1f - recovery;
+            heatShelter *= 1f - recovery;
+            thermalExhaustion *= Mathf.Lerp(1f, 0f, recovery * 0.72f);
+            damagePermission = false;
+            hardSurvival = false;
+            reason = "individual staggered environmental recovery";
+        }
+
+        DB_ShelterAnchor preferred = null;
+        float anchorScore = float.NegativeInfinity;
+        if (shelterDrive >= 0.16f || homeReturn >= 0.20f || hardSurvival)
+        {
+            DB_EnvironmentRoomRuntime.TryChooseAnchor(
+                bat,
+                context.Weather,
+                Mathf.Clamp01((roostMultiplier - 1f) / 1.8f),
+                out preferred,
+                out anchorScore);
+
+            if (preferred != null)
+                ApplyAnchorCommitment(bat, state, preferred, anchorScore);
+        }
+        else if (state.CommitmentTicks <= 0)
+        {
+            state.AnchorId = 0;
+            state.AnchorScore = float.NegativeInfinity;
+        }
+
+        Vector2? preferredPoint = null;
+        float preferredQuality = 0f;
+        if (state.AnchorId > 0)
+        {
+            DB_ShelterAnchor committed = FindAnchor(roomState, state.AnchorId);
+            if (committed != null)
+            {
+                preferredPoint = committed.Position;
+                preferredQuality = Mathf.Clamp01(DB_EnvironmentRoomRuntime.WeatherQuality(committed, context.Weather));
+            }
+        }
+
+        float recoveryProgress = context.Phase == DB_EnvironmentPhase.Recovery
+            ? IndividualRecovery(roomState, bat, tick)
+            : 0f;
+
+        state.Influence = new DB_EnvironmentInfluence(
+            context.Phase,
+            context.Weather,
+            shelterDrive,
+            openAversion,
+            roostMultiplier,
+            harassMultiplier,
+            socialMultiplier,
+            playMultiplier,
+            groupCohesion,
+            radiusMultiplier,
+            visibility,
+            navUncertainty,
+            obstacleScale,
+            homeReturn,
+            burrow,
+            migrationSuppression,
+            heatAgitation,
+            heatShelter,
+            thermalExhaustion,
+            damagePermission,
+            hardSurvival,
+            preferredPoint,
+            preferredQuality,
+            state.CommitmentTicks,
+            recoveryProgress,
+            reason);
+
+        ApplyLightRainMoisture(bat, context, exposure);
+        state.LastWeatherOrdinal = (int)context.Weather;
+        state.LastPhase = context.Phase;
+    }
+
+    private static void ApplyWeatherProfile(
+        DB_Creature bat,
+        in DB_EnvironmentContext context,
+        in DB_EnvironmentExposureSample exposure,
+        float heatExposure01,
+        float heatTolerance,
+        ref float shelterDrive,
+        ref float openAversion,
+        ref float roostMultiplier,
+        ref float harassMultiplier,
+        ref float socialMultiplier,
+        ref float playMultiplier,
+        ref float groupCohesion,
+        ref float radiusMultiplier,
+        ref float navUncertainty,
+        ref float obstacleScale,
+        ref float homeReturn,
+        ref float burrow,
+        ref float migrationSuppression,
+        ref float heatAgitation,
+        ref float heatShelter,
+        ref float thermalExhaustion,
+        ref bool damagePermission,
+        ref bool hardSurvival,
+        ref string reason)
+    {
+        float i = context.ActiveIntensity;
+        float capability = bat.Injury.PhysicalCapability;
+        float temperament = bat.Personality.Temperament;
+        float nerve = bat.Personality.Nerve;
+
+        switch (context.Weather)
+        {
+            case DB_EnvironmentWeather.LightRain:
+                shelterDrive *= 0.32f;
+                openAversion *= 0.25f;
+                roostMultiplier = Mathf.Lerp(1f, 1.14f, Mathf.Max(i, context.ShelterUrgency));
+                harassMultiplier = Mathf.Lerp(1f, 0.95f, i);
+                socialMultiplier = 1f;
+                playMultiplier = Mathf.Lerp(1f, 0.92f, i);
+                groupCohesion = 1f;
+                radiusMultiplier = Mathf.Lerp(1f, 0.94f, i);
+                reason = "LightRain: weak rest bias / moisture opportunity";
+                break;
+
+            case DB_EnvironmentWeather.Fog:
+                shelterDrive *= 0.32f;
+                openAversion *= 0.30f;
+                harassMultiplier = Mathf.Lerp(0.92f, 0.70f, i);
+                socialMultiplier = Mathf.Lerp(0.96f, 0.78f, i);
+                playMultiplier = Mathf.Lerp(0.90f, 0.66f, i);
+                groupCohesion = Mathf.Lerp(1.03f, 1.10f, i);
+                radiusMultiplier = Mathf.Lerp(0.86f, 0.62f, i);
+                roostMultiplier = Mathf.Lerp(1.02f, 1.16f, i);
+                reason = "Fog: reduced visual confidence and activity range";
+                break;
+
+            case DB_EnvironmentWeather.DenseFog:
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.28f, 0.64f, i));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.22f, 0.58f, i));
+                harassMultiplier = Mathf.Lerp(0.55f, 0.15f, i);
+                socialMultiplier = Mathf.Lerp(0.62f, 0.25f, i);
+                playMultiplier = Mathf.Lerp(0.45f, 0.12f, i);
+                groupCohesion = Mathf.Lerp(1.08f, 0.82f, i);
+                radiusMultiplier = Mathf.Lerp(0.58f, 0.28f, i);
+                roostMultiplier = Mathf.Lerp(1.35f, 1.90f, i);
+                homeReturn = Mathf.Lerp(0.20f, 0.72f, i);
+                navUncertainty = DB_EnvironmentProfile.NavigationUncertainty(context.Weather, i);
+                obstacleScale = DB_EnvironmentProfile.ObstacleAnticipationScale(context.Weather, i);
+                reason = "DenseFog: navigation uncertainty / Home and Roost bias";
+                break;
+
+            case DB_EnvironmentWeather.HeavyRain:
+            {
+                float rainBurden = DB_EnvironmentProfile.HeavyRainBurden(
+                    i,
+                    exposure.RainExposure,
+                    exposure.RoofShielding,
+                    context.ShelterUrgency,
+                    capability,
+                    bat.Injury.PostStunShock,
+                    nerve);
+                float injury = 1f - capability;
+                float covered = Mathf.Clamp01(exposure.RoofShielding * 0.82f + exposure.Enclosure * 0.18f);
+                float shelterPressure = Mathf.Clamp01(Mathf.Max(rainBurden, context.ShelterUrgency * 0.72f));
+
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.16f, 0.94f, shelterPressure));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.22f, 0.96f, rainBurden));
+                roostMultiplier = Mathf.Lerp(1.08f, 2.30f, shelterPressure);
+                harassMultiplier = Mathf.Lerp(0.92f, 0.20f, shelterPressure);
+                socialMultiplier = Mathf.Lerp(0.96f, 0.48f, shelterPressure);
+                playMultiplier = Mathf.Lerp(0.90f, 0.12f, shelterPressure);
+                groupCohesion = Mathf.Lerp(1.02f, 0.78f, shelterPressure);
+                radiusMultiplier = Mathf.Lerp(0.88f, 0.34f, shelterPressure);
+
+                // HeavyRain prefers nearby covered pockets over a blanket Hive recall.
+                // Home becomes attractive mainly when exposure is high and the individual
+                // is cautious/injured; Burrow is a late fallback, not the default answer.
+                float homePressure = Mathf.Clamp01(
+                    Mathf.InverseLerp(0.48f, 0.92f, rainBurden) *
+                    (0.42f + injury * 0.30f + (1f - nerve) * 0.18f));
+                float burrowPressure = Mathf.Clamp01(
+                    Mathf.InverseLerp(0.68f, 1f, rainBurden) *
+                    (0.28f + injury * 0.32f + (1f - covered) * 0.16f));
+                homeReturn = Mathf.Max(homeReturn, homePressure);
+                burrow = Mathf.Max(burrow, burrowPressure);
+
+                damagePermission = false;
+                hardSurvival = false;
+                reason = covered >= 0.62f
+                    ? "HeavyRain: covered pocket preserves local colony life"
+                    : "HeavyRain: RainExposure drives shelter; Home/Burrow only when local cover is poor";
+                break;
+            }
+
+            case DB_EnvironmentWeather.HeatWave:
+            {
+                heatAgitation = DB_EnvironmentProfile.HeatAgitation(i) * Mathf.Lerp(0.58f, 1.20f, temperament) * Mathf.Lerp(0.82f, 1.10f, nerve);
+                heatShelter = DB_EnvironmentProfile.HeatShelterDrive(i) * Mathf.Lerp(1.18f, 0.80f, heatTolerance);
+                thermalExhaustion = DB_EnvironmentProfile.ThermalExhaustion(i, heatExposure01) * Mathf.Lerp(1.18f, 0.72f, heatTolerance);
+                shelterDrive = Mathf.Clamp01(Mathf.Max(shelterDrive, heatShelter + thermalExhaustion * 0.45f));
+                openAversion = Mathf.Clamp01(Mathf.Max(openAversion, heatShelter * 0.72f));
+                float activeAggression = Mathf.Clamp01(heatAgitation * (1f - thermalExhaustion) * (1f - shelterDrive * 0.62f));
+                harassMultiplier = Mathf.Lerp(1f, 1.45f, activeAggression);
+                socialMultiplier = Mathf.Lerp(1.02f, 0.36f, Mathf.Max(shelterDrive, thermalExhaustion));
+                playMultiplier = Mathf.Lerp(1.08f, 0.18f, Mathf.Max(shelterDrive, thermalExhaustion));
+                groupCohesion = Mathf.Lerp(1f, 0.76f, thermalExhaustion);
+                radiusMultiplier = Mathf.Lerp(1f, 0.36f, Mathf.Max(heatShelter, thermalExhaustion));
+                roostMultiplier = Mathf.Lerp(1.05f, 2.25f, Mathf.Max(heatShelter, thermalExhaustion));
+                damagePermission = capability >= 0.76f &&
+                                   bat.Injury.PostStunShock < 0.30f &&
+                                   heatAgitation >= Mathf.Lerp(0.78f, 0.48f, temperament) &&
+                                   thermalExhaustion < 0.58f && shelterDrive < 0.72f;
+                reason = activeAggression > shelterDrive
+                    ? "HeatWave: agitation currently dominates shelter drive"
+                    : "HeatWave: shelter/exhaustion overtaking agitation";
+                break;
+            }
+
+            case DB_EnvironmentWeather.IntenseHeat:
+            {
+                heatAgitation = Mathf.Clamp01(0.72f + i * 0.28f) * Mathf.Lerp(0.78f, 1.12f, temperament);
+                heatShelter = Mathf.Clamp01(0.72f + i * 0.30f) * Mathf.Lerp(1.14f, 0.82f, heatTolerance);
+                thermalExhaustion = Mathf.Clamp01(0.40f + heatExposure01 * 0.55f + i * 0.22f) * Mathf.Lerp(1.16f, 0.76f, heatTolerance);
+                shelterDrive = Mathf.Clamp01(Mathf.Max(shelterDrive, heatShelter));
+                openAversion = Mathf.Clamp01(Mathf.Max(openAversion, 0.78f + i * 0.20f));
+                homeReturn = Mathf.Clamp01(0.62f + heatShelter * 0.35f);
+                burrow = Mathf.Clamp01(0.56f + heatShelter * 0.40f);
+                roostMultiplier = Mathf.Lerp(1.75f, 3.20f, Mathf.Max(heatShelter, thermalExhaustion));
+                harassMultiplier = Mathf.Lerp(1.10f, 1.65f, heatAgitation * (1f - Mathf.Clamp01(thermalExhaustion * 0.75f)));
+                socialMultiplier = Mathf.Lerp(0.52f, 0.05f, Mathf.Max(heatShelter, thermalExhaustion));
+                playMultiplier = Mathf.Lerp(0.24f, 0f, Mathf.Max(heatShelter, thermalExhaustion));
+                groupCohesion = Mathf.Lerp(0.82f, 0.38f, heatShelter);
+                radiusMultiplier = Mathf.Lerp(0.46f, 0.18f, Mathf.Max(heatShelter, thermalExhaustion));
+
+                float aggressionEligibility = Mathf.Clamp01(
+                    heatAgitation * 0.62f + temperament * 0.22f + nerve * 0.16f);
+                damagePermission = capability >= 0.72f &&
+                                   !bat.Injury.HasSevereWingInjury &&
+                                   bat.Injury.PostStunShock < 0.32f &&
+                                   aggressionEligibility >= 0.54f &&
+                                   thermalExhaustion < 0.84f &&
+                                   shelterDrive < 0.94f;
+                hardSurvival = context.Phase == DB_EnvironmentPhase.Acute ||
+                               thermalExhaustion >= 0.86f || heatShelter >= 0.94f;
+                if (hardSurvival) damagePermission = false;
+                reason = hardSurvival
+                    ? "IntenseHeat: hard thermal survival overrides aggression"
+                    : "IntenseHeat: damaging aggression permission coexists with retreat pressure";
+                break;
+            }
+
+            case DB_EnvironmentWeather.Sandstorm:
+                homeReturn = Mathf.Clamp01(0.38f + context.ShelterUrgency * 0.58f + (1f - nerve) * 0.12f);
+                burrow = Mathf.Clamp01(0.28f + context.ShelterUrgency * 0.62f);
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.36f, 0.92f, Mathf.Max(i, context.ShelterUrgency)));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.55f, 0.96f, Mathf.Max(i, context.ShelterUrgency)));
+                migrationSuppression = Mathf.Max(0f, DB_EnvironmentProfile.SandstormMigrationSuppression(
+                    context.Weather, DB_EnvironmentRoomRuntime.For(bat.room).WeatherSample));
+                roostMultiplier = Mathf.Lerp(1.45f, 2.65f, shelterDrive);
+                harassMultiplier = Mathf.Lerp(0.68f, 0.08f, shelterDrive);
+                socialMultiplier = Mathf.Lerp(0.70f, 0.18f, shelterDrive);
+                playMultiplier = Mathf.Lerp(0.52f, 0.04f, shelterDrive);
+                groupCohesion = context.Phase == DB_EnvironmentPhase.Advisory ? 1.05f : Mathf.Lerp(0.92f, 0.60f, shelterDrive);
+                radiusMultiplier = Mathf.Lerp(0.66f, 0.18f, shelterDrive);
+                reason = context.ActiveIntensity > 0f
+                    ? "Sandstorm: Home retention / Burrow / Roost"
+                    : "Sandstorm: species-specific early anticipation";
+                break;
+
+            case DB_EnvironmentWeather.DeathSandstorm:
+                homeReturn = 1f;
+                burrow = Mathf.Clamp01(0.82f + i * 0.18f);
+                shelterDrive = Mathf.Max(shelterDrive, 0.94f);
+                openAversion = 1f;
+                migrationSuppression = 1f;
+                roostMultiplier = 3.25f;
+                harassMultiplier = 0f;
+                socialMultiplier = 0.04f;
+                playMultiplier = 0f;
+                groupCohesion = 0.30f;
+                radiusMultiplier = 0.16f;
+                hardSurvival = context.Phase is DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute;
+                reason = "DeathSandstorm: hard Home retention / late travel suppression";
+                break;
+
+            case DB_EnvironmentWeather.DeathRain:
+            {
+                float phaseSeverity = context.Phase switch
+                {
+                    DB_EnvironmentPhase.Advisory => 0.34f,
+                    DB_EnvironmentPhase.Preparation => 0.62f,
+                    DB_EnvironmentPhase.Sheltering => 0.92f,
+                    DB_EnvironmentPhase.Acute => 1f,
+                    _ => Mathf.Clamp01(i)
+                };
+                float injury = 1f - capability;
+                float rainExposure = Mathf.Clamp01(exposure.RainExposure);
+
+                shelterDrive = Mathf.Max(shelterDrive, Mathf.Lerp(0.58f, 1f, phaseSeverity));
+                openAversion = Mathf.Max(openAversion, Mathf.Lerp(0.72f, 1f, phaseSeverity));
+                homeReturn = Mathf.Max(homeReturn, Mathf.Clamp01(0.54f + phaseSeverity * 0.44f + injury * 0.12f));
+                burrow = Mathf.Max(burrow, Mathf.Clamp01(0.40f + phaseSeverity * 0.52f + injury * 0.10f));
+                roostMultiplier = Mathf.Lerp(1.85f, 3.25f, phaseSeverity);
+                harassMultiplier = Mathf.Lerp(0.20f, 0f, phaseSeverity);
+                socialMultiplier = Mathf.Lerp(0.24f, 0.03f, phaseSeverity);
+                playMultiplier = 0f;
+                groupCohesion = Mathf.Lerp(0.55f, 0.28f, phaseSeverity);
+                radiusMultiplier = Mathf.Lerp(0.34f, 0.14f, phaseSeverity);
+                damagePermission = false;
+
+                // Cross-room travel owns pre-onset safety. Once this room is the accepted
+                // survival room, the environment runtime must actually drive native
+                // Home/Hive/Burrow instead of merely setting HardSurvival with zero pressure.
+                hardSurvival = context.Phase is DB_EnvironmentPhase.Sheltering or DB_EnvironmentPhase.Acute;
+                if (hardSurvival && rainExposure > 0.55f)
+                {
+                    homeReturn = Mathf.Max(homeReturn, 0.92f);
+                    burrow = Mathf.Max(burrow, 0.82f);
+                }
+                reason = hardSurvival
+                    ? "DeathRain: hard local Home/Roost/Burrow survival; travel retains cross-room ownership"
+                    : "DeathRain: pre-onset local contraction while travel handles refuge routing";
+                break;
+            }
+        }
+
+        shelterDrive = Mathf.Clamp01(shelterDrive);
+        openAversion = Mathf.Clamp01(openAversion);
+        heatAgitation = Mathf.Clamp01(heatAgitation);
+        heatShelter = Mathf.Clamp01(heatShelter);
+        thermalExhaustion = Mathf.Clamp01(thermalExhaustion);
+    }
+
+    private static void ApplyLocalBehavior(DB_Creature bat, State state)
+    {
+        DB_EnvironmentInfluence influence = state.Influence;
+        if (influence.Phase == DB_EnvironmentPhase.Calm) return;
+
+        if (influence.SuppressesNeutralSocial)
+            DB_SocialRuntime.CancelForPriority(bat, "environmental survival priority");
+
+        if (influence.PreferredShelterPoint is not Vector2 shelterPoint) return;
+        if (influence.ShelterDrive < 0.28f && !influence.HardSurvival) return;
+        if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return;
+        if (bat.AI.behavior == FlyAI.Behavior.Chain) return;
+
+        DB_BehaviorOwner owner = influence.HardSurvival
+            ? DB_BehaviorOwner.EnvironmentHardSurvival
+            : DB_BehaviorOwner.EnvironmentLocalSurvival;
+        DB_FlightMotor.TryGuideNative(
+            bat,
+            owner,
+            shelterPoint,
+            Mathf.Lerp(4f, 7f, influence.ShelterDrive));
+    }
+
+    private static void ApplyAnchorCommitment(
+        DB_Creature bat,
+        State state,
+        DB_ShelterAnchor candidate,
+        float score)
+    {
+        if (state.AnchorId == candidate.Id)
+        {
+            state.AnchorScore = score;
+            if (state.CommitmentTicks <= 0)
+                state.CommitmentTicks = CommitmentDuration(bat);
+            return;
+        }
+
+        if (state.AnchorId > 0 && state.CommitmentTicks > 0 && score < state.AnchorScore + AnchorSwitchMargin)
+            return;
+
+        state.AnchorId = candidate.Id;
+        state.AnchorScore = score;
+        state.CommitmentTicks = CommitmentDuration(bat);
+    }
+
+    private static DB_ShelterAnchor FindAnchor(
+        DB_EnvironmentRoomRuntime.RoomState roomState,
+        int id)
+    {
+        if (roomState == null || id <= 0) return null;
+        for (int i = 0; i < roomState.Anchors.Count; i++)
+            if (roomState.Anchors[i].Id == id) return roomState.Anchors[i];
+        return null;
+    }
+
+    private static int CommitmentDuration(DB_Creature bat)
+    {
+        float cautious = Mathf.Clamp01((1f - bat.Personality.Nerve) * 0.55f + bat.Personality.RoostAffinity * 0.25f + (1f - bat.Injury.PhysicalCapability) * 0.20f);
+        return Mathf.RoundToInt(Mathf.Lerp(MinCommitmentTicks, MaxCommitmentTicks, cautious));
+    }
+
+    private static float PhasePressure(DB_EnvironmentPhase phase)
+        => phase switch
+        {
+            DB_EnvironmentPhase.Calm => 0f,
+            DB_EnvironmentPhase.Advisory => 0.14f,
+            DB_EnvironmentPhase.Preparation => 0.46f,
+            DB_EnvironmentPhase.Sheltering => 0.78f,
+            DB_EnvironmentPhase.Acute => 1f,
+            DB_EnvironmentPhase.Recovery => 0.42f,
+            _ => 0f
+        };
+
+    private static float RecoveryVisibility(DB_EnvironmentRoomRuntime.RoomState state, int tick)
+    {
+        float progress = DB_EnvironmentRoomRuntime.RecoveryProgress(state, tick);
+        float worst = DB_EnvironmentProfile.VisibilityConfidence(state.LastWeather, 1f);
+        return Mathf.Lerp(worst, 1f, progress);
+    }
+
+    private static float IndividualRecovery(
+        DB_EnvironmentRoomRuntime.RoomState roomState,
+        DB_Creature bat,
+        int tick)
+    {
+        float roomProgress = DB_EnvironmentRoomRuntime.RecoveryProgress(roomState, tick);
+        float delay = Mathf.Clamp01(
+            (1f - bat.Personality.Nerve) * 0.24f +
+            (1f - bat.Injury.PhysicalCapability) * 0.28f +
+            bat.Injury.PostStunShock * 0.18f +
+            (1f - bat.Personality.Temperament) * 0.08f +
+            Stable01(bat.Personality.VisualSeed ^ 0x6D2B79F5) * 0.14f);
+        return Mathf.InverseLerp(delay * 0.46f, 1f, roomProgress);
+    }
+
+
+    private static void ApplySecondaryLightRainMoisture(DB_Creature bat, State state, int tick)
+    {
+        if (bat?.room == null || bat.mainBodyChunk == null || bat.DesertState.Thirst <= 0f || state == null)
+            return;
+
+        DB_EnvironmentRoomRuntime.RoomState roomState =
+            DB_EnvironmentRoomRuntime.For(bat.room);
+        if (roomState == null ||
+            roomState.Context.Weather is DB_EnvironmentWeather.LightRain or
+                DB_EnvironmentWeather.HeavyRain ||
+            roomState.WeatherAxes.LightRainIntensity <= 0f)
+            return;
+
+        const int secondaryMoistureIntervalTicks = 14;
+        if (state.LastSecondaryMoistureTick != int.MinValue &&
+            tick - state.LastSecondaryMoistureTick < secondaryMoistureIntervalTicks)
+            return;
+        state.LastSecondaryMoistureTick = tick;
+
+        IntVector2 tile = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        DB_EnvironmentExposureSample exposure =
+            DB_EnvironmentExposure.Sample(bat.room, tile, 1f);
+        if (exposure.RainExposure < 0.55f) return;
+
+        float rain = roomState.WeatherAxes.LightRainIntensity;
+        float relief = DB_Tuning.ThirstPerTick * 2.15f * rain * exposure.RainExposure;
+        bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
+    }
+
+    private static bool ApplyNativeHomeAndBurrow(
+        DB_Creature bat,
+        in DB_EnvironmentInfluence influence)
+    {
+        if (bat?.room?.aimap == null || bat.AI == null || bat.dead || !bat.Consious ||
+            bat.inShortcut || bat.Emergence?.Active == true)
+            return false;
+        bool seekHome = DB_EnvironmentalPolicy.ShouldSeekHome(influence);
+        bool burrow = DB_EnvironmentalPolicy.ShouldBurrow(influence);
+        if (!seekHome && !burrow) return false;
+        if (bat.room.hives == null || bat.room.hives.Length == 0) return false;
+
+        int bestMap = -1;
+        int bestHive = -1;
+        int bestDistance = int.MaxValue;
+        IntVector2 current = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        for (int i = 0; i < bat.room.hives.Length; i++)
+        {
+            IntVector2[] hive = bat.room.hives[i];
+            if (hive == null || hive.Length == 0) continue;
+            int map = bat.room.exitAndDenIndex.Length + i;
+            int distance = bat.room.aimap.ExitDistanceForCreature(current, map, bat.Template);
+            if (distance < 0 || distance >= bestDistance) continue;
+            bestDistance = distance;
+            bestHive = i;
+            bestMap = map;
+        }
+        if (bestHive < 0 || bestMap < 0) return false;
+
+        bool onHiveTile = bat.room.GetTile(bat.mainBodyChunk.pos).hive;
+        if (onHiveTile && burrow)
+        {
+            DB_SocialRuntime.CancelForPriority(bat, "environmental Burrow priority");
+            bat.DesertAI.CancelAttack();
+            bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
+            bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
+            bat.movMode = Fly.MovementMode.Burrow;
+            bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.25f : 0.62f);
+            return true;
+        }
+
+        if (!seekHome && influence.BurrowDrive < 0.45f) return false;
+        if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return false;
+
+        DB_SocialRuntime.CancelForPriority(bat, "same-room Home/Hive environmental retreat");
+        if (influence.HardSurvival) bat.DesertAI.CancelAttack();
+        bat.AI.leaveRoomDijkstra = -1;
+        bat.AI.followingDijkstraMap = bestMap;
+        Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);
+        DB_BehaviorOwner owner = influence.HardSurvival
+            ? DB_BehaviorOwner.EnvironmentHardSurvival
+            : DB_BehaviorOwner.EnvironmentLocalSurvival;
+        DB_FlightMotor.TryGuideNative(bat, owner, nextGoal);
+        bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.10f : 0.35f);
+        return true;
+    }
+
+    private static void ApplyLightRainMoisture(
+        DB_Creature bat,
+        in DB_EnvironmentContext context,
+        in DB_EnvironmentExposureSample exposure)
+    {
+        bool lightRain = context.Weather == DB_EnvironmentWeather.LightRain;
+        bool tolerableHeavyRain = context.Weather == DB_EnvironmentWeather.HeavyRain &&
+                                  context.Phase is DB_EnvironmentPhase.Advisory or DB_EnvironmentPhase.Preparation &&
+                                  context.ActiveIntensity < 0.58f;
+        if ((!lightRain && !tolerableHeavyRain) ||
+            context.ActiveIntensity <= 0f || exposure.RainExposure < 0.55f || bat.DesertState.Thirst <= 0f)
+            return;
+
+        float rainFactor = lightRain ? 1f : 0.52f;
+        float relief = DB_Tuning.ThirstPerTick * 2.15f * rainFactor * context.ActiveIntensity * exposure.RainExposure;
+        bat.DesertState.Thirst = Mathf.Max(0f, bat.DesertState.Thirst - relief);
+    }
+
+    private static int StableBucket(int seed, int count)
+    {
+        if (count <= 1) return 0;
+        return Mathf.Clamp(Mathf.FloorToInt(Stable01(seed) * count), 0, count - 1);
+    }
+
+    private static float Stable01(int seed)
+    {
+        unchecked
+        {
+            uint x = (uint)seed;
+            x ^= x >> 16;
+            x *= 0x7feb352d;
+            x ^= x >> 15;
+            x *= 0x846ca68b;
+            x ^= x >> 16;
+            return (x & 0x00ffffffu) / 16777215f;
+        }
+    }
+}

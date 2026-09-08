@@ -82,7 +82,7 @@ Peach Lizard 同时满足：
 
 ### 生态关系
 
-`DesertBatflyDefinition.EstablishRelationships()` 在 Watcher 启用时建立：
+`DB_Definition.EstablishRelationships()` 在 Watcher 启用时建立：
 
 ```text
 PeachLizard -> DesertBatfly : Eats 0.32

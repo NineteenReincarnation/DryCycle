@@ -1,0 +1,430 @@
+Task 14 / R3 — FrameContext & Behavior Arbitration
+Status record
+Date: 2026-09-07
+
+Current status:
+【R3 代码侧 ordinary single-owner 已收敛 / managed guard 已更新 / Rain World 实机验收尚未完成】
+
+======================================================================
+1. R3 目标边界
+======================================================================
+
+R3 处理：
+
+- DB_FrameContext；
+- DB_BehaviorProposal；
+- DB_BehaviorArbiter；
+- PrimaryOwner；
+- special-physics owner 显式化；
+- Travel / Injury / Vengeance / Environment / Social 逐步 proposal 化；
+- Observatory 改读真实 PrimaryOwner；
+- 最终把 ordinary locomotion 收敛到单一 owner。
+
+R3 不提前处理：
+
+- R4 FlightMotor；
+- Injury Dijkstra 重构；
+- 大规模 DB_ rename / move；
+- R5 bridge 全量清理。
+
+======================================================================
+2. 第一批已实现
+======================================================================
+
+2.1 DB_FrameContext
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Runtime/DB_FrameContext.cs
+
+当前 snapshot 覆盖：
+
+- EntityID / clock / Room；
+- position / velocity / current localGoal；
+- conscious / dead / restraint / shortcut / hive；
+- native Fly movement mode / FlyAI behavior；
+- Personality；
+- PhysicalCapability / severe injury / recovery / PostStunShock；
+- real Thirst；
+- Trauma / Grief / Bond；
+- visible player summary；
+- predator candidate summary；
+- real incoming projectile observation；
+- validated visibility factor；
+- Travel summary；
+- Task12 Signal influence；
+- Task13 Environment influence；
+- Task11 current Threat summary；
+- Task10 Social summary；
+- Roost summary；
+- Vengeance / fear facts；
+- ImmediateDanger / HardSurvival / CombatAllowed / SocialAllowed / CrossRoomOwned；
+- explicit SpecialPhysicsOwner。
+
+FrameContext：
+
+- 不持久化；
+- 不写 localGoal；
+- 不写 BodyChunk.vel；
+- 不训练 Threat memory；
+- 不创建 Signal；
+- 不规划跨房间路径。
+
+同一 tick 可复用 snapshot，Arbiter resolve 时可强制刷新当前帧事实。
+
+2.2 DB_BehaviorProposal
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Runtime/DB_BehaviorProposal.cs
+
+Proposal 当前字段：
+
+- Owner；
+- Priority；
+- BehaviorKind；
+- Goal；
+- NominalSpeed；
+- DesiredNativeBehavior；
+- DesiredDijkstraMap；
+- RequestBurrow；
+- SuppressCombat；
+- SuppressSocial；
+- PreserveGoal；
+- Commitment；
+- Reason。
+
+Proposal 自身不执行 ordinary locomotion。
+
+PrimaryOwner enum 明确不存在：
+
+- Signal；
+- ThreatMemory。
+
+它们仍然只能提供信息或 modifier。
+
+2.3 DB_BehaviorArbiter
+--------------------
+
+新增：
+
+src/Creatures/DesertBatfly/Runtime/DB_BehaviorArbiter.cs
+
+当前优先级编码：
+
+1. CreaturePhysics
+2. Restraint / Shortcut / Emergence
+3. NativeSpecial compatibility
+4. ImmediateDanger
+5. InjuryRecovery
+6. Travel
+7. EnvironmentHardSurvival
+8. FearResponse / PTSD
+9. Vengeance
+10. EnvironmentLocalSurvival
+11. ImmediateProjectileEvade
+12. Combat
+13. Roost
+14. Social
+15. Ordinary
+16. VanillaFallback
+
+注意：
+
+- 数字 priority 越小越高；
+- 同 priority 用 Commitment，再用稳定 owner enum 顺序决胜；
+- 每次 resolve 只产生一个 WinningProposal / PrimaryOwner；
+- 其他 proposal 记录 rejection reason 供 debug；
+- executor 拒绝后可在同一帧显式排除该 owner 并重新 resolve。
+
+2.4 SpecialPhysicsOwner
+--------------------
+
+当前显式类型：
+
+- CreaturePhysics；
+- Grasp；
+- Shortcut；
+- Emergence；
+- CombatAttach；
+- CombatInterfere。
+
+目的：
+
+后续 ordinary motor 单 writer 不得误吞：
+
+- 抓取；
+- shortcut；
+- emergence；
+- Attach / Interfere 等特殊接触物理。
+
+2.5 Travel 第一阶段进入真实 arbitration
+--------------------------------------
+
+DesertBatflyTravelNavigation 新增：
+
+CanOwnRealizedFrame(DesertBatfly, out string)
+
+该 API：
+
+- 只查询；
+- 不减少 DepartureDelay；
+- 不 Replan；
+- 不 LeaveRoom；
+- 不改变 Suspended；
+- current restraint / ImmediateDanger / severe Injury 会使 Travel proposal 失去资格；
+- 历史 Suspended 本身不是永久 veto，阻塞解除后可重新被 Arbiter 选中。
+
+UpdateAI 当前流程已经改成：
+
+FrameContext
+    ↓
+BehaviorArbiter.ResolveFrame
+    ↓
+PrimaryOwner == Travel ?
+    ├─ YES -> TryDriveRealized
+    │           ├─ 成功：Travel 真正拥有该帧
+    │           └─ 失败：同帧排除 Travel 后重新 resolve
+    └─ NO  -> 进入仍待迁移的旧 executor pipeline
+
+这比旧逻辑：
+
+TryDriveRealized -> true -> 再打 TravelFrameStamp
+
+前进了一层：Travel 现在先获得中央 owner，再执行。
+
+Rain/FleeFromRain 嵌套回调不再第二次执行 Travel。若 Arbiter 判定 Travel，应由外层 UpdateAI 统一执行一次。
+
+2.6 Vengeance 去除 sibling-private reflection
+--------------------------------------------
+
+DesertBatflyIntimidation 新增只读 API：
+
+TryGetVengeanceTarget(...)
+
+DesertBatflyThreatVengeanceBridge 已删除：
+
+- statesField；
+- TryGetValue 反射；
+- vengeanceTargetField；
+- TravelFrameStamp；
+- travelFrames；
+- MarkTravelOwnedFrame。
+
+当前：
+
+- Vengeance target 走正式 API；
+- Travel 是否暂停 Vengeance 直接读取同 tick 的 DB_BehaviorArbiter PrimaryOwner；
+- Travel intent 只是存在但被 Injury / danger 挂起时，不会冻结 Vengeance。
+
+2.7 Observatory
+--------------------
+
+DesertBatflyDebugSource.ControlOwner 不再按状态顺序猜：
+
+Dead -> Shortcut -> Injury -> Vengeance -> Trauma -> ...
+
+而是读取：
+
+DB_BehaviorArbiter.TryGetResolution
+
+并显示：
+
+PrimaryOwner / BehaviorKind
+
+如果当前 tick 尚未 resolve，则明确显示 R3 / unresolved，而不是伪造 owner。
+
+======================================================================
+3. 当前明确仍 OPEN
+======================================================================
+
+R3-CLOSED-01 — DesertBatflyAI decision / execution split（代码侧已收敛）
+-----------------------------------------------------------------------
+
+当前 FlyAI hook 顺序已经改为：
+
+Refresh facts/state
+    -> DB_BehaviorArbiter.ResolveFrame
+    -> exactly one owner executor
+
+而不是先执行 vanilla FlyAI.Update 再覆盖 localGoal。
+
+DesertBatflyAI 当前 R3 边界：
+
+- `RefreshDecisionState` 只刷新 perception / danger / target / roost intent；
+- `ExecuteImmediateDangerOwned` 只接受 `PrimaryOwner=ImmediateDanger`；
+- `ExecuteFearOwned` 只接受 `PrimaryOwner=FearResponse`；
+- `ExecuteCombatOwned` 只接受 `PrimaryOwner=Combat`；
+- `ExecuteRoostOwned` 只接受 `PrimaryOwner=Roost`；
+- `SteerOwned` 自身再次校验 same-tick PrimaryOwner；
+- Combat timers 在被高优先级 owner 抢占时冻结；
+- duplicate `DesertBatflyAI.ScanWeapons` 已删除，real projectile 使用统一 WeaponPerception/FrameContext；
+- `AfterPhysics` Attach/Interfere 只允许 Combat owner 同 tick 执行。
+
+vanilla FlyAI.Update 现在仅通过 `ExecuteNativeOwned` 进入，并只允许：
+
+- NativeSpecial；
+- Ordinary；
+- VanillaFallback。
+
+因此 custom owner 不再发生“vanilla 先写一次 localGoal，再被 custom 覆盖”的双 writer。
+
+这仍不是 R4：Combat 责任尚未迁出 DesertBatflyAI，也没有引入 DB_FlightMotor。
+
+仍需 Rain World 实机验证 Combat/Roost/Ordinary 切换、Attach/Interfere 和 vanilla swarm parity。
+
+R3-CLOSED-02 — Injury proposal executor（代码侧已收敛）
+--------------------------------------------------------
+
+新增 src/Creatures/DesertBatfly/Runtime/DB_InjuryRecoveryExecutor.cs。
+
+执行链已改为：
+FrameContext -> Arbiter -> PrimaryOwner=InjuryRecovery -> DB_InjuryRecoveryExecutor。
+
+- 旧 TryInjuryRecovery 入口删除；
+- DesertBatflyAI.Update 不再自行启动 severe InjuryRecovery movement；
+- ExecuteInjuryRecoveryOwned 必须验证同 tick PrimaryOwner；
+- InjuryRecovery 高于 Travel；
+- 若伤势刚降出 severe 阈值，清理 stale Recovery 后同帧重新仲裁；
+- 不删除 Task09 TravelIntent，因此恢复后 Travel 可重新竞争。
+
+仍需 Rain World 实机验证 severe injury -> recovery -> Travel resume。
+
+R3-CLOSED-03 — Vengeance proposal executor（代码侧已收敛）
+----------------------------------------------------------
+
+已完成状态与执行拆分：
+
+- `UpdateState` 只更新 fear / trauma / collapse / lifecycle；
+- Vengeance Observe/Circle/Feint/Charge/Withdraw 阶段只由 `ExecuteVengeanceOwned` 推进；
+- `DB_VengeanceExecutor` 要求同 tick `PrimaryOwner=Vengeance`；
+- `ForceFlight` 自身还有 owner guard，防止旁路写 movement；
+- 被 Injury / Travel / HardSurvival / fear 抢占时，Vengeance movement/timer 冻结但 fear/trauma 继续更新；
+- Task11 bridge 只剩 ForceFlight tactic modifier，不再 hook Intimidation.Update。
+
+仍需 Rain World 实机验证 preemption/resume 与 rescue charge/contact。
+
+R3-CLOSED-04 — Environment decision / apply split（代码侧已收敛）
+-------------------------------------------------------------------
+
+`DesertBatflyEnvironmentalBehavior` 已拆为：
+
+- `RefreshInfluence`：只刷新授权天气/暴露/anchor/influence；
+- Arbiter 从最新 influence 构建 Environment proposal；
+- `ApplyOwnedBehavior`：只有 `EnvironmentHardSurvival` 或 `EnvironmentLocalSurvival` 为当前 PrimaryOwner 才调用本地 apply；
+- `DB_EnvironmentExecutor` 是唯一 R3 环境执行入口。
+
+Task13 边界不变：
+
+- 不获得 cross-room authority；
+- 不新增第二 velocity controller；
+- 不新增 world planner；
+- Task09 仍独占跨房间 Travel。
+
+仍需 Rain World 实机验证 HeavyRain/DeathRain/DenseFog/Heat/Sandstorm 的 owner 切换。
+
+R3-CLOSED-05 — Social decision / apply split（代码侧已收敛）
+----------------------------------------------------------------
+
+Task10 已拆为：
+
+- `RefreshState`：更新 Drive/cooldown、检查 priority block、创建 reservation/interaction；
+- active interaction 的 timer/movement 不在 refresh 阶段推进；
+- `ApplyOwnedBehavior`：仅 `PrimaryOwner=Social` 时推进 active interaction；
+- `DB_SocialExecutor`：唯一 R3 Social 执行入口；
+- `SocialSteer` 自身增加 same-tick Social owner guard。
+
+因此 Companion/PassBy/Chase/Group/RoostInvitation 不再能在 Combat/Roost/Environment/Travel/Injury 等更高 owner 下后台写 localGoal。
+
+仍需 Rain World 实机验证 pair/group reservation 在抢占、房间切换和 chain join 时的释放/恢复。
+
+R3-CLOSED-06 — projectile modifier migration（代码侧已收敛）
+--------------------------------------------------------------
+
+- real incoming projectile 继续由 current-frame projectile fact 产生 `ImmediateProjectileEvade` proposal；
+- `DB_ProjectileEvadeExecutor` 只在该 owner 获胜时消费 Arbiter resolved goal；
+- `ApplyProjectileEvadeOwned` 与旧 compatibility surface 都有 same-tick owner guard；
+- Hooks 已删除无条件 `TryApplyOrdinaryProjectileEvade` 调用；
+- learned Threat Signature memory 仍只参与风险/几何，不进入 `DB_BehaviorOwner`。
+
+仍需实机验证 spear/rock near-miss 与 Vengeance geometry override 的连续性。
+
+R3-CLOSED-07 — Observatory rejected proposal presentation（代码侧已收敛）
+--------------------------------------------------------------------------
+
+Arbiter runtime 的 rejected proposals + reasons 已正式进入 AI Observatory：
+
+- 新增 `R3 Arbiter / R3 仲裁器` Inspector 区块；
+- 显示真实 PrimaryOwner、winning priority、BehaviorKind、winner reason；
+- 显示 FinalGoal、FinalNativeBehavior、SpecialPhysicsOwner；
+- 显示 rejected proposal 数量；
+- 对每条 rejected proposal 显示 Owner / Priority / Reason；
+- 数据来自同 tick `DB_BehaviorArbiter.TryGetDebugState`，不做 post-hoc 猜测。
+
+因此 R3 代码侧 Observatory owner/rejection 可观测性已闭合。
+
+======================================================================
+4. 当前自动回归
+======================================================================
+
+新增：
+
+tests/DesertBatfly/Program.Task14R3.cs
+
+当前保护：
+
+- FrameContext approved fact surface；
+- proposal contract；
+- resolution / PrimaryOwner surface；
+- priority order；
+- Signal 不可能成为 owner；
+- ThreatMemory 不可能成为 owner；
+- special physics owner 显式存在；
+- Travel side-effect-free eligibility API；
+- Vengeance target explicit API；
+- 旧 private reflection / Travel frame stamp 不得恢复；
+- Hooks lifecycle reset；
+- UpdateAI 使用 Arbiter + Travel executor；
+- Observatory ControlOwner 必须读取 Arbiter。
+
+Guarded GitHub Actions source migration 已成功执行：
+
+- git diff --check；
+- Travel preflight 存在；
+- Vengeance query API 存在；
+- Hook 进入 Arbiter；
+- MarkTravelOwnedFrame 不存在；
+- statesField 不存在；
+- Observatory 使用 Arbiter。
+
+这不是 Rain World managed integration test，也不是实机测试。
+
+======================================================================
+5. R3 完成定义
+======================================================================
+
+R3 只有同时满足以下条件才能改成【完成】：
+
+1. 每个 realized frame 最多一个 ordinary PrimaryOwner；
+2. Signals 永远不成为 PrimaryOwner；
+3. Threat memory 永远不成为 PrimaryOwner；
+4. special physics owner 明确；
+5. ImmediateDanger 高于 Injury；
+6. severe Injury 高于 active Travel，同时 Travel intent 保留；
+7. active Travel 高于 Vengeance；
+8. Environment HardSurvival 高于 Vengeance / combat；
+9. PTSD/fear 高于 Vengeance；
+10. Vengeance 高于 ordinary Environment prep；
+11. Environment survival 高于 projectile/combat/social；
+12. formal combat 高于 roost/social；
+13. Roost 高于 neutral Social；
+14. DesertBatflyAI / Environment / Social 不再在同一帧竞争 ordinary localGoal；
+15. Observatory 的 ControlOwner 与实际 executor 一致；
+16. managed regression + Rain World live scenarios 通过。
+
+当前结论：
+
+【R3 代码侧已收敛：所有 ordinary locomotion domain 均通过 Arbiter，Observatory 已正式显示 winner + rejected proposal stack。】
+【R3 尚不标记最终完成：只剩 Rain World live scenarios / managed integration 的实机验收。】

@@ -95,7 +95,7 @@ internal static class AIDebugAdvancedCapture
         // Task 02 social roles were rejected and physically removed. Desert Batfly does
         // not own a UtilityComparer-backed role module anymore, so its utility table is
         // intentionally empty. Do not synthesize Sentinel/Bully/Opportunist rows here.
-        if (creature?.realizedCreature is DryCycle.Creatures.DesertBatfly.DesertBatfly)
+        if (creature?.realizedCreature is DryCycle.Creatures.DesertBatfly.DB_Creature)
             return;
 
         UtilityComparer comparer = creature?.abstractAI?.RealAI?.utilityComparer;

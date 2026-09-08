@@ -1,0 +1,36 @@
+name: DesertBatfly R6 Function Retention
+
+# Long-lived read-only gameplay-contract guard for the R0 hidden-risk register.
+# Architecture identity remains protected by desertbatfly-r6-architecture-guard.yml.
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-function-retention.sh'
+      - '.github/workflows/desertbatfly-r6-function-retention.yml'
+  pull_request:
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-function-retention.sh'
+      - '.github/workflows/desertbatfly-r6-function-retention.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retention:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: R0 hidden-risk function retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-function-retention.sh

@@ -1,0 +1,150 @@
+Desert Batfly Task 14 — R7 Performance / Debug / Regression Status
+Revision: R7-A1 static hot-path audit / 2026-09-08
+Branch: task14-r6-b1-final
+Current R7 source baseline at start of this document: 64acf82deb5ec42917cc2bfd81f224dd454d51e4
+Status: 【R7 active / static performance hardening started / NOT Live Verified】
+
+======================================================================
+1. Scope
+======================================================================
+
+R7 is the final performance/debug/full-regression phase after R6 architecture closure.
+
+R7 does not reopen domain ownership merely to make files smaller or code visually different. Changes should be driven by measured or strongly demonstrated runtime cost, debug blind spots, live-regression failures, save compatibility issues, or genuine architecture regressions.
+
+This status records only work actually completed or verified. It does not claim the required live Rain World acceptance work has occurred.
+
+======================================================================
+2. R7-A1 static hot-path audit
+======================================================================
+
+A one-shot candidate audit inspected the main Desert Batfly hot paths for:
+- room physical-object scans;
+- abstract creature scans;
+- Hive.flies scans;
+- string interpolation in update paths;
+- ToArray allocations;
+- explicit List/Dictionary/HashSet allocations;
+- LINQ-style enumeration;
+- duplicate room-observation ownership.
+
+The audit distinguished persistent 20–30-bat costs from low-frequency/debug/event allocations. It deliberately did not refactor every allocation it found.
+
+Low-frequency/debug allocations intentionally left alone include:
+- small Social reservation lists created on interaction setup;
+- BehaviorArbiter debug-state ToArray materialization when a debug snapshot is requested;
+- event/watch/debug trace strings;
+- Travel collection initialization/reset work;
+- Colony abstract-population ecology scans that legitimately belong to the World/Colony domain.
+
+======================================================================
+3. R7-A1 promoted source fixes
+======================================================================
+
+Formal commit:
+64acf82deb5ec42917cc2bfd81f224dd454d51e4
+R7 share hot-path observations and add performance retention guard
+
+The clean promotion changed exactly four files.
+
+A. Fear/PTSD creature observation
+
+Before:
+- ResolveStrongestTraumaThreat scanned bat.room.abstractRoom.creatures per bat on its trauma scan cadence.
+
+After:
+- DB_FearRuntime consumes DB_RoomContext.For(bat?.room).Creatures;
+- ValidThreat still applies current-room/dead/deletion/shortcut filtering;
+- trauma thresholds, target scoring and retreat behavior were not retuned.
+
+Effect:
+- realized creature discovery is shared at room scope instead of repeated by each bat;
+- DB_RoomContext remains the ordinary realized-room observation authority.
+
+B. BehaviorArbiter rejection reason allocation
+
+Before:
+- every loser proposal could build an interpolated string such as rejected by higher-priority <Owner> during each bat/frame resolution.
+
+After:
+- HigherPriorityRejectionReason(DB_BehaviorOwner) returns stable literal strings;
+- Observatory/debug rejection detail is preserved;
+- the hot path no longer requires that interpolation allocation.
+
+======================================================================
+4. Permanent R7 performance guard
+======================================================================
+
+New script:
+scripts/check-desertbatfly-r7-performance.sh
+
+New workflow:
+.github/workflows/desertbatfly-r7-performance-guard.yml
+
+The guard currently protects:
+- bounded DB_RoomContext refresh cadence;
+- DB_RoomContext as the sole ordinary physicalObjects scanner;
+- DB_WeaponPerception consumption of shared weapon views;
+- Fear trauma discovery through shared DB_RoomContext creatures;
+- absence of new direct realized-room creature scans in Behavior/Core;
+- zero-interpolation BehaviorArbiter higher-priority rejection reasons;
+- lazy Room.Update activation for Desert Batfly Signal/Environment runtime work;
+- bounded Social room refresh cadence;
+- bounded Environment weather/crowding sample cadence;
+- Roslyn syntax parsing of Desert Batfly production code.
+
+This guard is a regression boundary, not a profiler and not evidence of live FPS acceptance.
+
+======================================================================
+5. Verification completed
+======================================================================
+
+Candidate verification before promotion passed:
+- R5 retention
+- R6 source retention
+- R0 HB-01 through HB-10 function retention
+- R7 static performance retention
+- Roslyn syntax parse of Desert Batfly production and managed tests
+
+On exact formal source HEAD 64acf82deb5ec42917cc2bfd81f224dd454d51e4:
+- DesertBatfly R6 Function Retention — success
+- DesertBatfly R6 Architecture Guard — success
+- DesertBatfly R7 Performance Guard — success
+
+The clean promotion diff was verified to contain only:
+- .github/workflows/desertbatfly-r7-performance-guard.yml
+- scripts/check-desertbatfly-r7-performance.sh
+- src/Creatures/DesertBatfly/Behavior/DB_FearRuntime.cs
+- src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorArbiter.cs
+
+======================================================================
+6. Current validation boundary
+======================================================================
+
+The current execution environment does not contain the complete exact Rain World developer assembly set required by src/DryCycle.csproj.
+
+Available uploaded/reference material is insufficient for a truthful full build because key game/hook assemblies are missing, including the exact PUBLIC/HOOKS Assembly-CSharp references expected by the project.
+
+Therefore the following remain unverified and must not be reported as passed:
+- exact developer-local net48 DryCycle build against installed Rain World assemblies;
+- real managed integration test execution against those binaries;
+- live Rain World runtime acceptance;
+- save/load compatibility in-game;
+- Scenario A–V full gameplay regression;
+- 20–30 Desert Batfly live stress/profile acceptance;
+- live Observatory acceptance.
+
+======================================================================
+7. Next R7 work
+======================================================================
+
+Priority order:
+1. Obtain/use the exact local Rain World/BepInEx/MonoMod reference set and perform a real build.
+2. Run the managed test executable against the real compiled mod/game references.
+3. Perform 20–30 Desert Batfly stress profiling in representative dense rooms.
+4. Inspect room-context refresh cost, Signal/Social/Threat/Environment/Travel frame cost and GC allocation under that live load.
+5. Use Observatory to verify owner/proposal/rejection/event visibility under real gameplay.
+6. Run Scenario A–V regression and save/load compatibility acceptance.
+7. Only after these pass, close R7 and mark Task14 Live Verified.
+
+No additional architecture split is planned solely from the current static audit. Further source changes require a demonstrated R7 performance/debug/regression reason.

@@ -1,0 +1,141 @@
+using RWCustom;
+using UnityEngine;
+
+namespace DryCycle.Creatures.DesertBatfly;
+
+/// <summary>
+/// First R1 consumers of DB_EventHub. Cross-domain reactions consume semantic facts here
+/// while their mature domain implementations remain unchanged behind explicit APIs.
+/// </summary>
+internal static class DB_EventConsumers
+{
+    private static bool enabled;
+
+    internal static bool Enabled => enabled;
+
+    internal static void Enable()
+    {
+        if (enabled) return;
+        enabled = true;
+        DB_EventHub.Capture += OnCapture;
+        DB_EventHub.Mortality += OnMortality;
+    }
+
+    internal static void Disable()
+    {
+        if (!enabled) return;
+        enabled = false;
+        DB_EventHub.Capture -= OnCapture;
+        DB_EventHub.Mortality -= OnMortality;
+    }
+
+    private static void OnCapture(DB_CaptureEvent capture)
+    {
+        DB_Creature victim = capture.Victim;
+        if (victim == null || victim.dead) return;
+
+        DB_SocialRuntime.CancelForPriority(victim, "semantic capture event");
+
+        if (capture.Captor is Lizard predator &&
+            DB_FearRuntime.IsSupportedLethalThreat(predator))
+        {
+            // Preserve the historical subscriber order from before R5-B4: direct
+            // Intimidation/fear/vengeance processing commits first. Capture Distress/Alarm
+            // is published below, so it cannot retroactively boost the initial vengeance
+            // candidate score for the same capture event.
+            DB_FearRuntime.BroadcastPredatorCapture(
+                victim,
+                predator,
+                capture.Tongue);
+
+            // A tongue capture precedes Fly.Grabbed; preserve the immediate native danger
+            // response that the old tongue hooks supplied. The later explicit capture
+            // Alarm is the sole root, so this direct danger fact does not rebroadcast.
+            if (capture.CaptureKind == DB_CaptureKind.Tongue)
+                victim.DesertAI.Threatened(predator, true, false);
+        }
+
+        Creature signalThreat = capture.Captor;
+        if (signalThreat != null && signalThreat.room == victim.room)
+        {
+            bool tongueSignal = capture.CaptureKind == DB_CaptureKind.Tongue;
+            DB_SignalRuntime.EmitDistress(
+                victim,
+                signalThreat,
+                tongueSignal ? 0.94f : 0.88f,
+                tongueSignal
+                    ? "semantic tongue capture emits one DistressCall"
+                    : "semantic non-Fly grasp emits one DistressCall");
+            Vector2 signalOrigin = signalThreat.mainBodyChunk?.pos ?? capture.Position;
+            DB_SignalRuntime.EmitAlarm(
+                victim,
+                signalThreat,
+                signalOrigin,
+                Custom.DirVec(victim.mainBodyChunk.pos, signalOrigin),
+                tongueSignal ? 0.90f : 0.82f,
+                tongueSignal
+                    ? "semantic tongue capture emits one AlarmFlutter"
+                    : "semantic grasp emits one AlarmFlutter alongside DistressCall");
+        }
+    }
+
+    private static void OnMortality(DB_MortalityEvent mortality)
+    {
+        DB_Creature victim = mortality.Victim;
+        if (victim == null || !victim.dead) return;
+
+        // Intimidation may add a finite CorpseWarning while reacting to this mortality.
+        // Remember only the Room weakly so full Reset/Disable can actively destroy any
+        // warning that has not naturally expired yet.
+        DB_CorpseWarningRuntime.TrackRoom(victim.room);
+
+        // Generic lifecycle consumers share the canonical killer. ThreatRuntime deliberately
+        // clears its own realized state only after it has processed this same MortalityEvent,
+        // so subscriber order cannot erase counter-kill / kill evidence prematurely.
+        DB_SocialRuntime.CancelForPriority(victim, "death");
+        DB_SignalRuntime.Forget(victim);
+        DB_ColonyRuntime.ReportDeath(victim, mortality.Killer);
+        DB_EnvironmentRuntime.Forget(victim);
+
+        Creature killer = mortality.Killer;
+        if (killer is Player playerKiller)
+        {
+            DB_FearRuntime.BroadcastPlayerKill(
+                victim,
+                playerKiller,
+                mortality.Position,
+                mortality.ChainWitnesses,
+                mortality.ThreatScale,
+                mortality.RevengeFailed);
+        }
+        else if (killer is Lizard lizardKiller &&
+                 DB_FearRuntime.IsSupportedLethalThreat(lizardKiller))
+        {
+            DB_FearRuntime.BroadcastPredatorKill(
+                victim,
+                lizardKiller,
+                mortality.Position,
+                mortality.ChainWitnesses,
+                mortality.ThreatScale,
+                mortality.RevengeFailed);
+        }
+        else if (victim.room != null)
+        {
+            // Unsupported/environmental deaths keep the old direct-experience grief rule:
+            // chain witnesses or very close line-of-sight observers may learn the bond loss,
+            // but no synthetic predator/player fear wave is invented.
+            foreach (Fly member in DB_SwarmRoom.For(victim.room).Hive.flies)
+            {
+                if (member is not DB_Creature observer || observer == victim) continue;
+                if (System.Array.IndexOf(mortality.ChainWitnesses, observer) < 0 &&
+                    (Vector2.Distance(observer.mainBodyChunk.pos, mortality.Position) > 180f ||
+                     !victim.room.VisualContact(observer.mainBodyChunk.pos, mortality.Position)))
+                    continue;
+
+                DB_SocialBond.OnBondPartnerDeath(observer, victim, killer);
+            }
+        }
+
+        DB_FearRuntime.Forget(victim);
+    }
+}

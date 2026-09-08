@@ -58,7 +58,7 @@ internal static class PeachLizardDesertBatflyPredation
         float result = orig(self);
         if (self?.owner?.AI is not LizardAI ai ||
             !IsPeach(ai.lizard) ||
-            self.critRep?.representedCreature?.realizedCreature is not DesertBatfly prey ||
+            self.critRep?.representedCreature?.realizedCreature is not DB_Creature prey ||
             prey.room == null || prey.room != ai.lizard.room || prey.inShortcut)
         {
             return result;
@@ -133,7 +133,7 @@ internal static class PeachLizardDesertBatflyPredation
     {
         float result = orig(self);
         if (self?.AI is not LizardAI ai || !IsPeach(ai.lizard) ||
-            self.MostAttractivePrey?.representedCreature?.realizedCreature is not DesertBatfly prey)
+            self.MostAttractivePrey?.representedCreature?.realizedCreature is not DB_Creature prey)
         {
             return result;
         }
@@ -162,7 +162,7 @@ internal static class PeachLizardDesertBatflyPredation
 
         if (!IsPeach(lizard) || self.behavior != LizardAI.Behavior.Hunt ||
             self.preyTracker?.MostAttractivePrey?.representedCreature?.realizedCreature
-                is not DesertBatfly prey ||
+                is not DB_Creature prey ||
             prey.dead || !HasEdibleRemains(prey) || IsHeldByPlayer(prey) ||
             prey.room != lizard.room || prey.inShortcut ||
             !connection.destinationCoord.TileDefined ||
@@ -223,12 +223,10 @@ internal static class PeachLizardDesertBatflyPredation
         // corpses, allowing vanilla ReturnPrey to carry the resulting grasp to the den.
         TryTransferTongueCatchToBite(self);
 
-        LizardTongue.State previousState = self.state;
-        BodyChunk previousAttached = self.attached;
         orig(self);
 
         if (self.state != LizardTongue.State.AttachedInSmallObject ||
-            self.attached?.owner is not DesertBatfly caught)
+            self.attached?.owner is not DB_Creature caught)
         {
             return;
         }
@@ -237,22 +235,10 @@ internal static class PeachLizardDesertBatflyPredation
         // carcass. This also closes the small race where the player grabs the corpse after
         // Peach has already committed to ShootTongue but before the tongue actually lands.
         if (!HasEdibleRemains(caught) || IsHeldByPlayer(caught))
-        {
             self.Retract();
-            return;
-        }
 
-        if (!caught.dead &&
-            (previousState != LizardTongue.State.AttachedInSmallObject ||
-             previousAttached?.owner != caught))
-        {
-            // Only a LIVE capture is a predator event. Picking up an existing corpse is
-            // scavenging and must not generate a second Peach mortality/fear event.
-            // Broadcast BEFORE Threatened() dismantles a hanging Fly Chain so the morale
-            // layer can snapshot FirstInChain() and mark every chain-mate as a witness.
-            DesertBatflyIntimidation.BroadcastPredatorCapture(caught, self.lizard, self);
-            caught.DesertAI.Threatened(self.lizard, true);
-        }
+        // Live-capture fear/signals are semantic facts owned by DB_EventHub. This Watcher
+        // adapter now owns only Peach prey/path/tongue mechanics and corpse validity.
     }
 
     private static void TryTransferTongueCatchToBite(LizardTongue tongue)
@@ -262,7 +248,7 @@ internal static class PeachLizardDesertBatflyPredation
             lizard.grasps == null || lizard.grasps.Length == 0 ||
             lizard.grasps[0] != null ||
             tongue.state != LizardTongue.State.AttachedInSmallObject ||
-            tongue.attached?.owner is not DesertBatfly bat ||
+            tongue.attached?.owner is not DB_Creature bat ||
             !HasEdibleRemains(bat) || IsHeldByPlayer(bat) ||
             bat.room != lizard.room || bat.inShortcut ||
             !Custom.DistLess(
@@ -278,13 +264,13 @@ internal static class PeachLizardDesertBatflyPredation
 
         // Lizard.Bite accepts dead Eats-relationship creatures as a normal grasp. Once
         // grasp[0] contains this bat, vanilla LizardAI immediately selects ReturnPrey with
-        // utility 1 and routes to den. For live prey, DesertBatfly.Grabbed reports capture;
-        // for a corpse, Grabbed intentionally stays silent so scavenging is not a kill event.
+        // utility 1 and routes to den. Live capture semantics are emitted once by
+        // DB_EventHub across tongue -> grasp transfer; corpse scavenging remains silent.
         if (lizard.grasps[0] != null && lizard.grasps[0].grabbed == bat)
             tongue.Retract();
     }
 
-    internal static bool HasEdibleRemains(DesertBatfly bat)
+    internal static bool HasEdibleRemains(DB_Creature bat)
     {
         return bat != null &&
                !bat.slatedForDeletetion &&
@@ -292,7 +278,7 @@ internal static class PeachLizardDesertBatflyPredation
                bat.bites > 0;
     }
 
-    internal static bool IsHeldByPlayer(DesertBatfly bat)
+    internal static bool IsHeldByPlayer(DB_Creature bat)
     {
         if (bat?.grabbedBy == null) return false;
         for (int i = 0; i < bat.grabbedBy.Count; i++)
@@ -303,7 +289,7 @@ internal static class PeachLizardDesertBatflyPredation
         return false;
     }
 
-    private static float CorpseFoodValue(DesertBatfly prey)
+    private static float CorpseFoodValue(DB_Creature prey)
     {
         float remaining = Mathf.Clamp01(prey.bites / 3f);
         return Mathf.Lerp(

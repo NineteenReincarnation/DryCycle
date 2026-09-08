@@ -1,0 +1,146 @@
+Desert Batfly Task 14 — R4 FlightMotor / AI Responsibility Split Status
+Revision: R4-Final / 2026-09-07
+Branch: task14-r4-flightmotor
+Base: R3 code-side closed at a2260b110af22f84317c90d8dcd7ec6ec128a67c
+Status: 【R4 代码侧完成 / 实机验收统一延后】
+
+======================================================================
+1. 已完成
+======================================================================
+
+R4-B1：
+- DB_FlightMotor foundation；
+- InjuryRecovery Dijkstra localGoal progression fix；
+- Injury final flight modifier ownership moved to motor；
+- DB_FogGoalModifier；
+- core AI ordinary SteerOwned -> FlightMotor。
+
+R4-B2：
+- DB_FlightMotor.TryGuideNative：只提交 owner-validated localGoal + nominal speed，保留 Rain World native Fly physics；
+- DB_FlightMotor.TryRetarget：Threat 等 modifier 只能调整同 owner、同 tick 已存在 motor intent；
+- Social localGoal writer -> FlightMotor；
+- Travel refuge localGoal writer -> FlightMotor；
+- Vengeance ForceFlight -> FlightMotor；
+- immediate projectile evade goal -> FlightMotor；
+- Threat learned Combat geometry -> FlightMotor retarget；
+- Environment shelter goal恢复为 goal-only native guidance，避免 B1 意外把旧 goal-only 行为升级成第二个主动速度控制；
+- Environmental same-room Home Dijkstra -> FlightMotor；
+- SurvivalBridge 不再 save/orig/restore localGoal；
+- Native Burrow / Native Chain 被显式标记为 special-physics owner。
+
+======================================================================
+2. R4 movement boundary
+======================================================================
+
+普通 Desert Batfly localGoal 的目标边界：
+
+    domain decision / executor
+        -> DB_FlightMotor.TrySteer / TryGuideNative / TryRetarget
+        -> FlyAI.localGoal
+        -> Rain World native collision / Fly physics
+        -> DB_FlightMotor.ApplyPostPhysics
+        -> Injury.ModifyFlight
+
+TrySteer：用于旧行为本来就主动请求 velocity 的 owner，例如 Combat/Vengeance。
+TryGuideNative：用于旧行为只提交 localGoal 的 owner，例如 Social/Travel/Environment/projectile evade。
+TryRetarget：用于 Threat learned tactics 这类 modifier；不得改变 PrimaryOwner。
+
+特殊物理继续允许绕过普通 motor：
+- Creature physics / external grasp；
+- Shortcut；
+- Emergence；
+- Combat Attach；
+- Combat Interfere；
+- native Burrow；
+- native Chain；
+- 瞬时 hit/collision/retaliation impulse。
+
+======================================================================
+3. 行为保持说明
+======================================================================
+
+B2 不把所有 owner 强制改成同一种飞法。
+
+- Social 原来只写 localGoal -> 继续只提交 native goal；
+- Travel refuge 原来只写 localGoal/Dijkstra -> 继续 native guidance；
+- projectile evade 原来只写 localGoal + nominal injury speed -> 继续 native guidance；
+- Environment 原来只写 shelter localGoal -> 恢复为 goal-only guidance；
+- Vengeance 原来会主动 Lerp velocity -> 继续 active TrySteer；
+- Threat 仍只改变“怎么打”的几何，不获得 locomotion owner。
+
+======================================================================
+4. 当前仍 OPEN
+======================================================================
+
+R4-B3 CLOSED — DB_CombatRuntime now owns formal phase execution, combat-local timers, AttackSlot counting, Attach/Interfere contact state and special contact physics. Production Combat executor and creature post-physics call it directly.
+
+R4-B4 CLOSED — target storage, Harass candidate interpretation, social Harass candidate selection, attacker memory and retaliation preparation now live in DB_CombatRuntime. DesertBatflyAI retains only danger/approach perception and compatibility read surfaces.
+
+R4-CLOSED-01 — final source audit confirms ordinary localGoal writes are centralized in DB_FlightMotor; remaining direct writers are classified special physics.
+R4-CLOSED-02 — Observatory exposes FlightMotor owner/goal/nominal speed/requested velocity/post-Injury result/special-physics boundary and reads migrated Combat state from DB_CombatRuntime.
+R4-DEFERRED-VALIDATION — managed compile/integration and Rain World live scenarios are intentionally deferred to final refactor acceptance per project decision.
+
+======================================================================
+5. R4 完成条件
+======================================================================
+
+R4 代码侧完成要求：
+- 普通飞行 localGoal 只由 DB_FlightMotor 写；
+- Injury 只做 modifier；
+- Fog 只做 goal modifier；
+- Threat 只能 same-owner retarget；
+- Combat responsibility 从旧 AI 拆出；
+- special physics owner 完整；
+- Observatory 显示 motor intent；
+- source architecture regressions 通过。
+
+Rain World live scenarios 统一留到最终重构验收阶段。
+
+
+======================================================================
+6. R4-B3 Combat responsibility extraction
+======================================================================
+
+新增 Combat/DB_CombatRuntime.cs。
+
+已迁出 DesertBatflyAI：
+- Observe/Approach/Circle/FakeDive/Dive/Attach/RetaliationCharge/Interfere 的 owner execution；
+- combat-local phase timer / unseen / interest；
+- AttackSlot membership/counting；
+- attached chunk / contact offset / drained water；
+- retaliation contact direction；
+- FindContact；
+- Attach post-physics；
+- Interfere post-physics；
+- initial retaliation impact；
+- Finish / FinishRetaliation 瞬时退出 impulse。
+
+特殊物理仍明确合法：Attach/Interfere 的 MoveFromOutsideMyUpdate + attachedChunk velocity 同步，以及完成攻击时一次性 retreat impulse。它们由 PrimaryOwner=Combat 和 special-physics state 约束，不属于第二套 ordinary FlightMotor。
+
+DesertBatflyAI 暂时保留 Target/attacker/memory/retaliation preparation、ScanCreatures/CanHarass 作为 B4 兼容选择层；Mode/Target/FormalAttack/PullingUp 对外查询面保持兼容，避免 Threat/Signals/Observatory 同批破坏。
+
+
+======================================================================
+7. R4-B4 Combat target / motivation extraction
+======================================================================
+
+DB_CombatRuntime 现拥有：Target、attacker memory、retaliation charges/recovery、Harass eligibility、social Harass candidate、target motivation 与 combat preparation。
+
+DesertBatflyAI.ScanCreatures 保留单次 RoomContext traversal，只计算 danger / player approach fear；同一可见候选通过 Combat.ConsiderCandidate 交给 Combat 域解释，避免为了分层重新扫描房间。
+
+Target 对外仍可通过 DesertBatflyAI.Target 只读兼容面查询，但真实存储已经迁到 DB_CombatRuntime。
+
+
+======================================================================
+8. R4-Final closeout
+======================================================================
+
+Final source audit contract:
+- ordinary FlyAI.localGoal assignment authority: DB_FlightMotor only;
+- DesertBatflyEmergence direct localGoal remains explicit Emergence special physics;
+- sustained direct mainBodyChunk.vel writers outside DB_FlightMotor are limited to Emergence and Combat Attach/Interfere contact pinning;
+- one-shot collision/retaliation impulses remain classified instantaneous physics, not continuous locomotion controllers.
+
+Observatory now reads migrated Combat memory/interest/unseen/slot data from DB_CombatRuntime rather than stale DesertBatflyAI reflection, and exposes the current R4 FlightMotor intent plus post-Injury velocity result.
+
+R4 may proceed to R5 without intermediate live testing; all Rain World live validation remains part of the final refactor acceptance matrix.

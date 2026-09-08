@@ -1,0 +1,253 @@
+name: DesertBatfly R6 Architecture Guard
+
+# Long-lived read-only guard for the closed R6 architecture baseline.
+# R7 may optimize or validate behavior, but R6 domain/ownership contracts remain protected here.
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r5-retention.sh'
+      - 'scripts/check-desertbatfly-r6-b1.sh'
+      - '.github/workflows/desertbatfly-r6-architecture-guard.yml'
+  pull_request:
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r5-retention.sh'
+      - 'scripts/check-desertbatfly-r6-b1.sh'
+      - '.github/workflows/desertbatfly-r6-architecture-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Retained behavior boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+      - name: Domain identity, managed tests and compatibility contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          src = Path('src/Creatures/DesertBatfly')
+          tests = Path('tests/DesertBatfly')
+          source_files = sorted(src.rglob('*.cs'))
+          test_files = sorted(tests.rglob('*.cs'))
+          failures = []
+
+          # Match Task-number prefixes even when they are immediately followed by a domain
+          # suffix such as Task09Travel. The previous trailing word boundary missed those.
+          task_term = re.compile(r'\bTask\s*[-_]?\s*\d+', re.IGNORECASE)
+          task_number = re.compile(r'\bTask-number\b', re.IGNORECASE)
+          old_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DesertBatfly[A-Za-z0-9_]+)\b')
+          db_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DB_[A-Za-z0-9_]+)\b')
+          declared = set()
+          production_text = []
+
+          for path in source_files:
+              text = path.read_text(encoding='utf-8')
+              production_text.append(text)
+              if task_term.search(text) or task_number.search(text):
+                  failures.append(f'production task-era terminology: {path}')
+              for name in old_decl.findall(text):
+                  failures.append(f'old internal declaration {name}: {path}')
+              declared.update(db_decl.findall(text))
+              if not path.name.startswith('DB_'):
+                  failures.append(f'non-DB production filename: {path}')
+
+          for path in test_files:
+              text = path.read_text(encoding='utf-8')
+              if task_term.search(text) or task_number.search(text):
+                  failures.append(f'managed-test task-era terminology: {path}')
+              if re.search(r'\bRunTask\d+\b', text):
+                  failures.append(f'legacy RunTask entry point: {path}')
+              if 'Task' in path.name:
+                  failures.append(f'Task-named managed-test file: {path}')
+
+          for path in src.glob('*.cs'):
+              failures.append(f'root-level DesertBatfly source: {path}')
+          if (src / 'Behavior' / 'ThreatSignature').exists():
+              failures.append('retired Behavior/ThreatSignature directory exists')
+
+          # Keep the tree compact when a leaf directory has no independent domain role.
+          for directory in sorted(p for p in src.rglob('*') if p.is_dir()):
+              child_dirs = [p for p in directory.iterdir() if p.is_dir()]
+              cs_files = [p for p in directory.iterdir() if p.is_file() and p.suffix == '.cs']
+              other_files = [p for p in directory.iterdir() if p.is_file() and p.suffix != '.cs']
+              if not child_dirs and not other_files and len(cs_files) == 1:
+                  failures.append(f'redundant single-file leaf directory: {directory} -> move {cs_files[0].name} up one level')
+
+          required = {
+              'DB_Creature', 'DB_AI', 'DB_Runtime', 'DB_EventHub', 'DB_RoomContext',
+              'DB_FrameContext', 'DB_BehaviorArbiter', 'DB_BehaviorExecution', 'DB_FlightMotor',
+              'DB_CombatRuntime', 'DB_Injury', 'DB_FearRuntime', 'DB_VengeanceRuntime',
+              'DB_SocialRuntime', 'DB_SocialRoomRuntime', 'DB_ThreatRuntime', 'DB_SignalRuntime',
+              'DB_SignalRoomRuntime', 'DB_EnvironmentRuntime', 'DB_EnvironmentRoomRuntime',
+              'DB_TravelRuntime', 'DB_ColonyRuntime', 'DB_RainWorldHooks', 'DB_RuntimePatch',
+              'DB_Sandbox', 'DB_WarpCompatibility'
+          }
+          for name in sorted(required - declared):
+              failures.append(f'missing formal production owner: {name}')
+
+          retired_executors = {
+              'DB_CombatExecutor', 'DB_EnvironmentExecutor', 'DB_FearExecutor',
+              'DB_ImmediateDangerExecutor', 'DB_InjuryRecoveryExecutor',
+              'DB_ProjectileEvadeExecutor', 'DB_RoostExecutor',
+              'DB_SocialExecutor', 'DB_VengeanceExecutor'
+          }
+          for name in sorted(retired_executors & declared):
+              failures.append(f'retired stateless executor shell returned: {name}')
+
+          positive = re.compile(
+              r'mod\.GetType\("DryCycle\.Creatures\.DesertBatfly\.(DB_[A-Za-z0-9_]+)"\s*,\s*true\)')
+          for path in test_files:
+              text = path.read_text(encoding='utf-8')
+              for name in positive.findall(text):
+                  if name not in declared:
+                      failures.append(f'stale positive managed reflection target {name}: {path}')
+
+          fear_path = src / 'Behavior' / 'DB_FearRuntime.cs'
+          vengeance_path = src / 'Behavior' / 'DB_VengeanceRuntime.cs'
+          ai_path = src / 'Behavior' / 'DB_AI.cs'
+          injury_recovery_path = src / 'Behavior' / 'Injury' / 'DB_InjuryRecovery.cs'
+          execution_path = src / 'Core' / 'Runtime' / 'DB_BehaviorExecution.cs'
+          hooks_path = src / 'Integration' / 'DB_RainWorldHooks.cs'
+          fear = fear_path.read_text(encoding='utf-8')
+          vengeance = vengeance_path.read_text(encoding='utf-8')
+          ai = ai_path.read_text(encoding='utf-8')
+          injury_recovery = injury_recovery_path.read_text(encoding='utf-8')
+          execution = execution_path.read_text(encoding='utf-8')
+          hooks = hooks_path.read_text(encoding='utf-8')
+          trace = (src / 'Debug' / 'DB_Trace.cs').read_text(encoding='utf-8')
+
+          for token in (
+              '"TravelPurpose"', '"TravelDestination"', '"TravelProgress"',
+              '"TravelStatus"', 'if (hasTravel && !travel.Suspended) return "Travel";'
+          ):
+              if token not in trace:
+                  failures.append('Travel Observatory trace contract missing: ' + token)
+
+          if 'partial class DB_FearRuntime' in fear or 'partial class DB_FearRuntime' in vengeance:
+              failures.append('partial DB_FearRuntime Vengeance implementation returned')
+          if 'ConditionalWeakTable' in vengeance:
+              failures.append('Vengeance owns a second weak table')
+          if fear.count('ConditionalWeakTable<DB_Creature, State> states') != 1:
+              failures.append('Fear no longer owns exactly one per-bat host weak table')
+          if 'internal readonly DB_VengeanceRuntime.State Vengeance = new();' not in fear:
+              failures.append('Fear host no longer embeds DB_VengeanceRuntime.State')
+          for token in (
+              'internal static class DB_VengeanceRuntime',
+              'internal sealed class State',
+              'internal static bool IsActive(',
+              'internal static bool ExecuteOwned(',
+              'internal static void ArmGroup(',
+              'internal static void Clear(State state)',
+              'DB_FlightMotor.TrySteer('
+          ):
+              if token not in vengeance:
+                  failures.append('Vengeance formal ownership missing: ' + token)
+
+          joined = '\n'.join(production_text)
+          if 'DB_BehaviorOwner.Mode' in joined:
+              failures.append('invalid generic Mode owner returned; domain execution must use a concrete DB_BehaviorOwner')
+          if re.search(r'^\s*recoveryRoostTarget\s*=\s*null\s*;', ai, re.MULTILINE) or \
+             re.search(r'^\s*recoverySearchCooldown\s*=\s*0\s*;', ai, re.MULTILINE):
+              failures.append('DB_AI directly mutates DB_InjuryRecovery-owned navigation state')
+          if 'injuryRecovery.ClearLocalTarget();' not in ai:
+              failures.append('DB_AI danger transition no longer clears InjuryRecovery through its owner API')
+          if 'if (brain.Mode == DB_AI.Activity.InjuryRecovery)' not in injury_recovery:
+              failures.append('DB_InjuryRecovery no longer reads activity through its owning DB_AI instance')
+
+          execution_tokens = (
+              'internal static class DB_BehaviorExecution',
+              'ExecuteImmediateDangerOwned()',
+              'ExecuteInjuryRecoveryOwned()',
+              'DB_EnvironmentRuntime.ApplyOwnedBehavior(bat)',
+              'ExecuteFearOwned(resolution)',
+              'DB_VengeanceRuntime.ExecuteOwned(bat)',
+              'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)',
+              'bat.DesertAI.Combat.TryExecuteOwned()',
+              'DB_ThreatRuntime.ApplyOwnedTacticalModifier(bat)',
+              'ExecuteRoostOwned()',
+              'DB_SocialRuntime.ApplyOwnedBehavior(bat)'
+          )
+          for token in execution_tokens:
+              if token not in execution:
+                  failures.append('consolidated behavior execution contract missing: ' + token)
+          for old in retired_executors:
+              if old in joined or any(old in p.read_text(encoding='utf-8') for p in test_files):
+                  failures.append(f'stale executor identity remains in production/tests: {old}')
+
+          # Preserve the established owner execution order. Consolidation may change routing
+          # identity, but it must not reorder gameplay precedence or fallback behavior.
+          owner_order = (
+              'PrimaryOwner == DB_BehaviorOwner.ImmediateDanger',
+              'PrimaryOwner == DB_BehaviorOwner.InjuryRecovery',
+              'PrimaryOwner == DB_BehaviorOwner.Travel',
+              'PrimaryOwner == DB_BehaviorOwner.EnvironmentHardSurvival',
+              'PrimaryOwner == DB_BehaviorOwner.FearResponse',
+              'PrimaryOwner == DB_BehaviorOwner.Vengeance',
+              'PrimaryOwner == DB_BehaviorOwner.EnvironmentLocalSurvival',
+              'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
+              'PrimaryOwner == DB_BehaviorOwner.Combat',
+              'PrimaryOwner == DB_BehaviorOwner.Roost',
+              'PrimaryOwner == DB_BehaviorOwner.Social'
+          )
+          positions = [hooks.find(token) for token in owner_order]
+          if any(position < 0 for position in positions) or positions != sorted(positions):
+              failures.append('DB_RainWorldHooks behavior owner execution order changed')
+
+          definition = (src / 'Core' / 'DB_Definition.cs').read_text(encoding='utf-8')
+          sandbox = (src / 'Integration' / 'DB_Sandbox.cs').read_text(encoding='utf-8')
+          if 'CreatureType = new("DesertBatfly", true);' not in definition:
+              failures.append('CreatureTemplate external identity changed')
+          if 'UnlockValue = "DesertBatfly";' not in sandbox:
+              failures.append('Sandbox external identity changed')
+          for literal in ('DCDesertBatflyV1', 'DCDesertBatflyThreatV1', 'DCBATCOLONY09<svB>', 'DESERTSWARMROOM'):
+              if literal not in joined:
+                  failures.append(f'compatibility/save/world literal missing: {literal}')
+
+          for stale in (
+              Path('.github/workflows/desertbatfly-r6-root-reorg-stage-g.yml'),
+              Path('.github/workflows/desertbatfly-r6-task-term-guard.yml'),
+              Path('scripts/task14_r3_observatory_apply.py')
+          ):
+              if stale.exists():
+                  failures.append(f'retired migration artifact returned: {stale}')
+
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              sys.exit(1)
+
+          print(f'R6 architecture guard passed: {len(source_files)} production files, {len(test_files)} managed test files.')
+          PY
+
+      - name: Roslyn syntax parse Desert Batfly production and managed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat > "$tmp/P.csproj" <<'CSPROJ'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup><ItemGroup><Reference Include="Microsoft.CodeAnalysis"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath></Reference><Reference Include="Microsoft.CodeAnalysis.CSharp"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath></Reference></ItemGroup></Project>
+          CSPROJ
+          cat > "$tmp/Program.cs" <<'CS'
+          using Microsoft.CodeAnalysis;using Microsoft.CodeAnalysis.CSharp;var errors=new List<string>();foreach(var root in new[]{"src/Creatures/DesertBatfly","tests/DesertBatfly"})foreach(var path in Directory.EnumerateFiles(root,"*.cs",SearchOption.AllDirectories)){var tree=CSharpSyntaxTree.ParseText(File.ReadAllText(path),new CSharpParseOptions(LanguageVersion.Preview),path);foreach(var d in tree.GetDiagnostics().Where(d=>d.Severity==DiagnosticSeverity.Error))errors.Add(d.ToString());}if(errors.Count>0){Console.Error.WriteLine(string.Join(Environment.NewLine,errors));Environment.Exit(1);}Console.WriteLine("R6 architecture Roslyn syntax parse passed.");
+          CS
+          dotnet run --project "$tmp/P.csproj"

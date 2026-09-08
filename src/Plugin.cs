@@ -54,7 +54,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (!_contentRegistered)
         {
             DryCycleContent.Register(new MossySpiderDefinition());
-            DryCycleContent.Register(new DesertBatflyDefinition());
+            DryCycleContent.Register(new DB_Definition());
             _contentRegistered = true;
         }
 
@@ -69,7 +69,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
         DryCycleContent.Enable();
         MossySpiderBackPlatform.Enable();
-        DesertBatflyHooks.Enable();
+        DB_RainWorldHooks.Enable();
         SpinebackLizardHooks.Enable();
         DewPodAudioHooks.InitializeSoundIds();
 
@@ -86,7 +86,7 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         DryCycleContent.Disable();
         MossySpiderBackPlatform.Disable();
-        DesertBatflyHooks.Disable();
+        DB_RainWorldHooks.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();

@@ -66,7 +66,7 @@ internal static class AIDebugWorldOverlay
         uint red = Color(0.96f, 0.33f, 0.30f, 0.90f);
         uint green = Color(0.35f, 0.92f, 0.52f, 0.90f);
 
-        if (realized is DesertBatfly bat)
+        if (realized is DB_Creature bat)
         {
             if (bat.DesertAI.Target?.room == camera.room && bat.DesertAI.Target.mainBodyChunk != null)
             {
@@ -84,7 +84,7 @@ internal static class AIDebugWorldOverlay
                 if (drawLabels) draw.AddText(localGoal + new Num.Vector2(6f, -7f), cyan, "localGoal");
             }
 
-            if (DesertSwarmRoom.TryGet(camera.room, out DesertSwarmRoom colony))
+            if (DB_SwarmRoom.TryGet(camera.room, out DB_SwarmRoom colony))
             {
                 Num.Vector2 center = AIDebugCameraUtil.WorldToImGui(camera, colony.Flock.Center);
                 draw.AddCircle(center, 13f, green, 24, 1.5f);
