@@ -30,19 +30,20 @@ jobs:
 
           OLD = 'DesertBatfly'
           NEW = 'DB_Creature'
-          NS_PREFIX = 'DryCycle.Creatures.'
           FULL_OLD = 'DryCycle.Creatures.DesertBatfly.DesertBatfly'
           FULL_NEW = 'DryCycle.Creatures.DesertBatfly.DB_Creature'
+          ALLOWED_INTERPOLATED_SPECIES_LABELS = {
+              '$"DesertBatfly #{creature.ID.number}"',
+          }
 
-          # Split C# into code vs comments/strings/chars. Interpolated strings are treated as
-          # strings on purpose; if they contain the old type token we reject rather than guess.
+          # Split C# into code vs comments/strings/chars. Interpolated strings remain literal
+          # UI/debug identity unless explicitly allowlisted. Unknown occurrences stop the migration
+          # because an interpolation expression could otherwise hide a real C# type reference.
           def segments(text):
               out=[]
-              start=0
               i=0
               state='code'
               seg_start=0
-              prefix=''
               while i < len(text):
                   c=text[i]
                   n=text[i+1] if i+1 < len(text) else ''
@@ -88,7 +89,7 @@ jobs:
                   if state=='vstring':
                       if c=='"' and n=='"': i+=2; continue
                       if c=='"':
-                          i+=1; out.append(('string', text[seg_start:i])); state='code'; seg_start=i; continue
+                          i+=1; out.append(('vstring', text[seg_start:i])); state='code'; seg_start=i; continue
                       i+=1; continue
                   if state=='char':
                       if c=='\\': i+=2; continue
@@ -100,7 +101,8 @@ jobs:
                   out.append((kind, text[seg_start:]))
               return out
 
-          # Preserve the namespace segment but rename every other C# identifier occurrence.
+          # Preserve namespace segment DryCycle.Creatures.DesertBatfly while renaming the
+          # executable internal type identifier everywhere else.
           code_pat = re.compile(r'(?<!DryCycle\.Creatures\.)\bDesertBatfly\b')
 
           def transform(text, path):
@@ -109,10 +111,10 @@ jobs:
                   if kind=='code':
                       seg = code_pat.sub(NEW, seg)
                   elif kind=='istring':
-                      if re.search(r'\bDesertBatfly\b', seg):
+                      if re.search(r'\bDesertBatfly\b', seg) and seg not in ALLOWED_INTERPOLATED_SPECIES_LABELS:
                           raise SystemExit(f'ambiguous interpolated-string occurrence in {path}: {seg[:160]!r}')
                   elif kind in ('string','vstring'):
-                      # Only internal reflection identity may change inside strings.
+                      # Only an internal reflection identity is allowed to change inside literals.
                       seg = seg.replace(FULL_OLD, FULL_NEW)
                   pieces.append(seg)
               return ''.join(pieces)
@@ -128,7 +130,6 @@ jobs:
           after_string_inventory=[]
 
           for path,before in snapshots.items():
-              # Record all literal segments mentioning the species/type before modification.
               for kind,seg in segments(before):
                   if kind in ('string','vstring','istring') and OLD in seg:
                       before_string_inventory.append((path.as_posix(),kind,seg))
@@ -138,7 +139,6 @@ jobs:
                   path.write_text(after,encoding='utf-8')
                   changed.append(path)
 
-              # Exact-transform postcondition: no secondary/manual edits are permitted.
               actual=path.read_text(encoding='utf-8')
               if actual!=after:
                   raise SystemExit(f'unapproved secondary edit: {path}')
@@ -146,8 +146,8 @@ jobs:
                   if kind in ('string','vstring','istring') and (OLD in seg or NEW in seg):
                       after_string_inventory.append((path.as_posix(),kind,seg))
 
-          # Every old string literal must remain byte-identical except the one explicitly allowed
-          # internal full-type reflection substitution.
+          # Literal inventory is byte-stable except for the explicitly approved internal
+          # reflection full-name migration. This protects CreatureType/save/resource/UI IDs.
           expected=[]
           for p,k,s in before_string_inventory:
               expected.append((p,k,s.replace(FULL_OLD,FULL_NEW)))
@@ -158,8 +158,6 @@ jobs:
               for row in after_string_inventory: print(row)
               raise SystemExit('string/external identity inventory changed unexpectedly')
 
-          # No old class identifier may remain in executable C# code. Namespace occurrences are
-          # allowed only when immediately preceded by DryCycle.Creatures.
           leftovers=[]
           for path in files:
               text=path.read_text(encoding='utf-8')
@@ -183,13 +181,13 @@ jobs:
           grep -q 'internal DB_Creature(AbstractCreature creature, World world)' "$creature"
           grep -q 'new DB_Creature(creature, creature.world)' "$definition"
 
-          # Namespace and all published species IDs remain DesertBatfly.
+          # Namespace and published species/display IDs must remain DesertBatfly.
           grep -q '^namespace DryCycle.Creatures.DesertBatfly;' "$creature"
           grep -q '^namespace DryCycle.Creatures.DesertBatfly;' "$definition"
           grep -Fq 'CreatureTemplate.Type CreatureType = new("DesertBatfly", true);' "$definition"
           grep -Fq 'template.name = "Desert Batfly";' "$definition"
+          grep -Fq '$"DesertBatfly #{creature.ID.number}"' src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs
 
-          # Core host lifecycle/gameplay invariants are unchanged by the symbol migration.
           for token in \
             'RockSurvivalHealthFloor = 0.01f' \
             'Runtime.BeforeVanillaUpdate()' \
@@ -202,13 +200,9 @@ jobs:
             grep -Fq "$token" "$creature"
           done
 
-          # The namespace path is intentionally allowed; the old class declaration/construction is not.
           ! grep -RIn --include='*.cs' -E 'class[[:space:]]+DesertBatfly\b|new[[:space:]]+DesertBatfly\s*\(|typeof\(DesertBatfly\)|\bis[[:space:]]+DesertBatfly\b|\bas[[:space:]]+DesertBatfly\b' src tests
-
-          # Reflection callers that used the internal full type name must follow the rename.
           ! grep -RIn --include='*.cs' 'DryCycle.Creatures.DesertBatfly.DesertBatfly' src tests
 
-          # Previous migrations stay intact.
           test -f src/Creatures/DesertBatfly/Behavior/DB_AI.cs
           test -f src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs
           test -f src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
