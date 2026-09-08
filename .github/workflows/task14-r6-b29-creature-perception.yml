@@ -31,7 +31,7 @@ jobs:
           scan_start = text.index('    internal bool Valid(Creature creature)')
           scan_end = text.index('    internal bool IsRememberedPlayer(Player player)')
           scan_block = textwrap.dedent(text[scan_start:scan_end]).rstrip()
-          valid_end = scan_block.index('    private void ScanCreatures()')
+          valid_end = scan_block.index('private void ScanCreatures()')
           valid_block = scan_block[:valid_end].rstrip()
           scan_method = scan_block[valid_end:].rstrip()
 
@@ -75,7 +75,6 @@ jobs:
               ''
           ]
 
-          valid_block = valid_block.replace('internal bool Valid(', 'internal bool Valid(', 1)
           scan_method = scan_method.replace('danger = null;', 'Danger = null;', 1)
           scan_method = scan_method.replace('combat.BeginCandidateScan();', 'brain.Combat.BeginCandidateScan();')
           scan_method = scan_method.replace('danger = creature;', 'Danger = creature;')
