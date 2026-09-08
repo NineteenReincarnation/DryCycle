@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task14-r6-b1-final
+      - main
     paths:
       - 'src/Creatures/DesertBatfly/**'
       - 'src/Debug/AIDebugger/Sources/**'
