@@ -333,7 +333,7 @@ internal sealed class DB_CombatRuntime
                 fly, target.mainBodyChunk.pos, DB_Tuning.SightRange, DB_VisibilityChannel.Player))
             return null;
 
-        if (DesertBatflyThreatRuntime.TryGetDebugState(fly, out DesertBatflyThreatDebugState threat))
+        if (DB_ThreatRuntime.TryGetDebugState(fly, out DB_ThreatDebugState threat))
         {
             float caution = threat.CounterKillPressure * 0.55f +
                             threat.PiercingPressure * 0.30f +

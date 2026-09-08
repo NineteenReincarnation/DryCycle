@@ -601,8 +601,8 @@ internal static class DB_SignalRuntime
         Player player = packet.PlayerTarget ?? packet.Threat as Player;
         if (player != null)
         {
-            int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
-            if (DesertBatflyThreatRuntime.ValidSlot(slot))
+            int slot = DB_ThreatRuntime.PlayerSlot(player);
+            if (DB_ThreatRuntime.ValidSlot(slot))
             {
                 DB_PlayerThreatMemory memory =
                     DB_ThreatMemoryStore.For(receiver.DesertState, slot);
@@ -650,7 +650,7 @@ internal static class DB_SignalRuntime
         if (bat.Injury.IsSeverelyInjured || DB_TravelRuntime.HasIntent(bat.abstractCreature))
             return false;
 
-        if (DesertBatflyThreatRuntime.TryGetDebugState(bat, out DesertBatflyThreatDebugState threat) &&
+        if (DB_ThreatRuntime.TryGetDebugState(bat, out DB_ThreatDebugState threat) &&
             (threat.Cue.ProjectileThreat ||
              threat.AcuteExplosionTimer > 0 ||
              threat.AcuteStartleTimer > 0 ||

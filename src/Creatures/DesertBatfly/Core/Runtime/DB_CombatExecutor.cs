@@ -13,7 +13,7 @@ internal static class DB_CombatExecutor
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Combat");
         if (!bat.DesertAI.Combat.TryExecuteOwned()) return false;
-        DesertBatflyThreatRuntime.ApplyOwnedTacticalModifier(bat);
+        DB_ThreatRuntime.ApplyOwnedTacticalModifier(bat);
         return true;
     }
 }

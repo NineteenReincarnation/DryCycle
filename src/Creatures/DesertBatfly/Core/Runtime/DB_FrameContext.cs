@@ -334,8 +334,8 @@ internal static class DB_FrameContextRuntime
         bool hasSignal = DB_SignalRuntime.TryGetInfluence(
             bat, out DB_SignalInfluence signal);
 
-        bool hasThreat = DesertBatflyThreatRuntime.TryGetDebugState(
-            bat, out DesertBatflyThreatDebugState threatDebug);
+        bool hasThreat = DB_ThreatRuntime.TryGetDebugState(
+            bat, out DB_ThreatDebugState threatDebug);
         bool acuteThreat = hasThreat && (
             threatDebug.AcuteExplosionTimer > 0 || threatDebug.AcuteStartleTimer > 0 ||
             threatDebug.AcuteMassCasualtyTimer > 0 || threatDebug.AcuteCaptureTimer > 0 ||

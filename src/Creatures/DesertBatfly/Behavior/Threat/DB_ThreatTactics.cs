@@ -109,12 +109,12 @@ internal static class DB_ThreatTactics
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
 
-        if (!DesertBatflyThreatRuntime.TryGetDebugState(
+        if (!DB_ThreatRuntime.TryGetDebugState(
                 bat,
-                out DesertBatflyThreatDebugState threat) ||
+                out DB_ThreatDebugState threat) ||
             !threat.Cue.ProjectileThreat ||
             threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f ||
-            !DesertBatflyThreatRuntime.ValidSlot(threat.Cue.PlayerSlot))
+            !DB_ThreatRuntime.ValidSlot(threat.Cue.PlayerSlot))
             return false;
 
         Player player = PlayerBySlot(bat.room, threat.Cue.PlayerSlot);
@@ -223,10 +223,10 @@ internal static class DB_ThreatTactics
         if (bat?.room == null || player == null || player.room != bat.room)
             return false;
 
-        int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
-        if (!DesertBatflyThreatRuntime.TryGetDebugState(
+        int slot = DB_ThreatRuntime.PlayerSlot(player);
+        if (!DB_ThreatRuntime.TryGetDebugState(
                 bat,
-                out DesertBatflyThreatDebugState threat) ||
+                out DB_ThreatDebugState threat) ||
             threat.Cue.PlayerSlot != slot ||
             !threat.Cue.ProjectileThreat ||
             threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f)
@@ -254,8 +254,8 @@ internal static class DB_ThreatTactics
             player.room != bat.room || player.dead)
             return false;
 
-        int slot = DesertBatflyThreatRuntime.PlayerSlot(player);
-        if (!DesertBatflyThreatRuntime.ValidSlot(slot)) return false;
+        int slot = DB_ThreatRuntime.PlayerSlot(player);
+        if (!DB_ThreatRuntime.ValidSlot(slot)) return false;
         DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.001f) return false;
 
@@ -313,7 +313,7 @@ internal static class DB_ThreatTactics
 
     private static Player PlayerBySlot(Room room, int slot)
     {
-        if (!DesertBatflyThreatRuntime.ValidSlot(slot)) return null;
+        if (!DB_ThreatRuntime.ValidSlot(slot)) return null;
         return DB_RoomContext.For(room)?.PlayerBySlot(slot);
     }
 

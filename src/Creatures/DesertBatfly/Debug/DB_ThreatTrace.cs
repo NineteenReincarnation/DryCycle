@@ -9,9 +9,9 @@ internal static class DB_ThreatTrace
     {
         if (bat?.abstractCreature == null ||
             !AIDebugTrace.IsWatched(bat.abstractCreature) ||
-            !DesertBatflyThreatRuntime.TryGetDebugState(
+            !DB_ThreatRuntime.TryGetDebugState(
                 bat,
-                out DesertBatflyThreatDebugState threat))
+                out DB_ThreatDebugState threat))
             return;
 
         AbstractCreature creature = bat.abstractCreature;
@@ -90,7 +90,7 @@ internal static class DB_ThreatTrace
                 : threat.ModifierReason);
     }
 
-    private static string CueText(in DesertBatflyThreatCue cue)
+    private static string CueText(in DB_ThreatCue cue)
     {
         return $"P{cue.PlayerSlot}" +
                (cue.VisibleSpear ? "+Spear" : "") +
@@ -106,7 +106,7 @@ internal static class DB_ThreatTrace
                (cue.PlayerRetreating ? "+Retreating" : "");
     }
 
-    private static string AcuteText(in DesertBatflyThreatDebugState threat)
+    private static string AcuteText(in DB_ThreatDebugState threat)
     {
         return $"E{threat.AcuteExplosionTimer}/" +
                $"S{threat.AcuteStartleTimer}/" +

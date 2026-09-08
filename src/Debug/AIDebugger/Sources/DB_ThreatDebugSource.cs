@@ -20,8 +20,8 @@ internal sealed class DB_ThreatDebugSource : IAIDebugSource
         if (snapshot == null || creature?.realizedCreature is not DB_Creature bat)
             return snapshot;
 
-        bool hasThreat = DesertBatflyThreatRuntime.TryGetDebugState(
-            bat, out DesertBatflyThreatDebugState threat);
+        bool hasThreat = DB_ThreatRuntime.TryGetDebugState(
+            bat, out DB_ThreatDebugState threat);
 
         var memory = new AIDebugSection("Threat Threat Signature Memory / 威胁特征记忆")
             .Add("Target player slot / 玩家槽", "ThreatMemory.PlayerSlot",
@@ -57,7 +57,7 @@ internal sealed class DB_ThreatDebugSource : IAIDebugSource
                     ? threat.DominantSignature : "None");
         snapshot.Sections.Add(memory);
 
-        DesertBatflyThreatCue cue = hasThreat ? threat.Cue : default;
+        DB_ThreatCue cue = hasThreat ? threat.Cue : default;
         var current = new AIDebugSection("Threat Current Threat Cue / 当前威胁线索")
             .Add("Visible spear / 可见矛", "ThreatCue.VisibleSpear", cue.VisibleSpear)
             .Add("Visible rock / 可见石头", "ThreatCue.VisibleRock", cue.VisibleRock)
@@ -125,7 +125,7 @@ internal sealed class DB_ThreatDebugSource : IAIDebugSource
             hasThreat
                 ? $"slot={threat.PlayerSlot}; {threat.DominantSignature}; confidence={threat.Confidence:0.00}; {threat.ModifierReason}"
                 : "no realized Threat state",
-            "DesertBatflyThreatRuntime"));
+            "DB_ThreatRuntime"));
 
         return snapshot;
     }

@@ -27,7 +27,7 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRuntime.Reset();
         DB_EventHub.Enable();
         DB_EventConsumers.Enable();
-        DesertBatflyThreatRuntime.Enable();
+        DB_ThreatRuntime.Enable();
         DB_ColonyRuntime.Enable();
         DB_PlatformRoostRuntime.Enable();
         if (!debugRegistered)
@@ -69,7 +69,7 @@ internal static class DB_RainWorldHooks
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DB_EventConsumers.Disable();
         DB_EventHub.Disable();
-        DesertBatflyThreatRuntime.Disable();
+        DB_ThreatRuntime.Disable();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
@@ -118,7 +118,7 @@ internal static class DB_RainWorldHooks
         {
             DB_SocialRuntime.CancelForPriority(desert, "room transition");
             DB_SignalRuntime.Forget(desert);
-            DesertBatflyThreatRuntime.Forget(desert);
+            DB_ThreatRuntime.Forget(desert);
             DB_EnvironmentRuntime.Forget(desert);
             DB_FrameContextRuntime.Forget(desert);
             DB_BehaviorArbiter.Forget(desert);
@@ -173,7 +173,7 @@ internal static class DB_RainWorldHooks
         // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
         DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
-        DesertBatflyThreatRuntime.RefreshState(desert);
+        DB_ThreatRuntime.RefreshState(desert);
         DB_SocialRuntime.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
@@ -362,7 +362,7 @@ internal static class DB_RainWorldHooks
         in DB_BehaviorResolution ownership)
     {
         if (desert == null) return;
-        DesertBatflyThreatRuntime.CommitFrame(desert);
+        DB_ThreatRuntime.CommitFrame(desert);
         DB_ThreatTrace.Sample(desert);
         DB_SignalRuntime.Update(desert);
         DB_SocialRuntime.SampleTrace(desert);

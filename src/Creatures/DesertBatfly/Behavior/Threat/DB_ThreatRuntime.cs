@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal struct DesertBatflyThreatCue
+internal struct DB_ThreatCue
 {
     internal int PlayerSlot;
     internal bool VisibleSpear;
@@ -24,7 +24,7 @@ internal struct DesertBatflyThreatCue
     internal bool PlayerRetreating;
 }
 
-internal struct DesertBatflyThreatDebugState
+internal struct DB_ThreatDebugState
 {
     internal int PlayerSlot;
     internal float Confidence;
@@ -42,7 +42,7 @@ internal struct DesertBatflyThreatDebugState
     internal float NonAggressionConfidence;
     internal string DominantSignature;
 
-    internal DesertBatflyThreatCue Cue;
+    internal DB_ThreatCue Cue;
     internal int AcuteExplosionTimer;
     internal int AcuteStartleTimer;
     internal int AcuteMassCasualtyTimer;
@@ -60,7 +60,7 @@ internal struct DesertBatflyThreatDebugState
     internal string LastWitnessReason;
 }
 
-internal static class DesertBatflyThreatRuntime
+internal static class DB_ThreatRuntime
 {
     internal const int CueRefreshTicks = 12;
     internal const int ProjectileCueTicks = 90;
@@ -80,7 +80,7 @@ internal static class DesertBatflyThreatRuntime
     private sealed class RuntimeState
     {
         internal int CueRefresh;
-        internal DesertBatflyThreatCue Cue;
+        internal DB_ThreatCue Cue;
 
         // Short-lived Threat evidence cache only. Mortality attribution belongs exclusively
         // to DB_EventHub and is never reconstructed from these fields.
@@ -260,7 +260,7 @@ internal static class DesertBatflyThreatRuntime
             state.PreviousMode = bat.DesertAI.Mode;
     }
 
-    internal static bool TryGetDebugState(DB_Creature bat, out DesertBatflyThreatDebugState debug)
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_ThreatDebugState debug)
     {
         debug = default;
         if (bat == null) return false;
@@ -689,7 +689,7 @@ internal static class DesertBatflyThreatRuntime
                 bat, player.mainBodyChunk.pos, 430f, DB_VisibilityChannel.Player))
             player = NearestVisiblePlayer(bat, context.Players);
 
-        DesertBatflyThreatCue cue = default;
+        DB_ThreatCue cue = default;
         cue.PlayerSlot = PlayerSlot(player);
         if (player == null || !ValidSlot(cue.PlayerSlot))
         {
@@ -740,7 +740,7 @@ internal static class DesertBatflyThreatRuntime
 
     private static void ApplyHeldThreatPriority(DB_Creature bat, RuntimeState state)
     {
-        DesertBatflyThreatCue cue = state.Cue;
+        DB_ThreatCue cue = state.Cue;
         if (!ValidSlot(cue.PlayerSlot) || bat.room == null) return;
         DB_PlayerThreatMemory memory =
             DB_ThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
@@ -989,7 +989,7 @@ internal static class DesertBatflyThreatRuntime
             DB_ThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.02f) return;
 
-        DesertBatflyThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;
+        DB_ThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;
         float nerve = bat.Personality.Nerve;
         float projectileRisk = Mathf.Clamp01(
             memory.ProjectilePressure * 0.35f + memory.PiercingPressure * 0.65f);
@@ -1161,7 +1161,7 @@ internal static class DesertBatflyThreatRuntime
         int slot,
         float caution,
         float counterRisk,
-        in DesertBatflyThreatCue cue)
+        in DB_ThreatCue cue)
     {
         float chance = caution * 0.30f + counterRisk * 0.18f;
         if (cue.VisibleSpear) chance += 0.12f;

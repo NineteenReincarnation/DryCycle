@@ -45,7 +45,7 @@ grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/De
 grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
 grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
 grep -q 'DB_ThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
-test "$(grep -c 'DB_SignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/Behavior/ThreatSignature/DesertBatflyThreatRuntime.cs)" -ge 3
+test "$(grep -c 'DB_SignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatRuntime.cs)" -ge 3
 grep -q 'DB_SignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Core/Runtime/DB_EventConsumers.cs
 # Rally is a Vengeance-domain action: it must remain on the arming path after the Fear/Vengeance split.
 grep -q 'DB_SignalRuntime.EmitRally' src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs
