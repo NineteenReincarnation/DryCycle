@@ -88,7 +88,6 @@ jobs:
             "$root/Integration/DB_Sandbox.cs" \
             "$root/Integration/DB_WarpCompatibility.cs"; do test -f "$f"; done
 
-          git diff --cached --quiet || true
           bash scripts/check-desertbatfly-r5-retention.sh
           bash scripts/check-desertbatfly-r6-b1.sh
           git grep -q 'DCDesertBatflyV1' -- src tests
@@ -97,9 +96,9 @@ jobs:
           git grep -q 'DESERTSWARMROOM' -- src tests
           git diff --check
 
-          # This batch is path-only for production code: all moved .cs blobs must be unchanged.
-          git diff --summary | grep -E 'rename src/Creatures/DesertBatfly/(Colony|Environment|Travel|Integration/.+)'
-          if git diff --numstat -- src/Creatures/DesertBatfly | awk '$1 != "0" || $2 != "0" { bad=1 } END { exit bad }'; then :; else
+          # git mv stages moves, so inspect the staged index rather than only the worktree.
+          git diff --cached --summary | grep -E 'rename src/Creatures/DesertBatfly/(Colony|Environment|Travel|Integration/.+)'
+          if git diff --cached --numstat -- src/Creatures/DesertBatfly | awk '$1 != "0" || $2 != "0" { bad=1 } END { exit bad }'; then :; else
             echo 'Production DesertBatfly source changed during path-only B32a.' >&2
             exit 1
           fi
