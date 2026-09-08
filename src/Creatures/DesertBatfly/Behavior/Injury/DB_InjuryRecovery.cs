@@ -231,7 +231,7 @@ internal sealed class DB_InjuryRecovery
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery)) return;
         recoveryRoostTarget = anchor;
-        brain.SetRecoveryRoostClaim(anchor.Spot);
+        brain.SetRecoveryRoostClaim(anchor);
         fly.AI.followingDijkstraMap = -1;
         fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
         fly.burrowOrHangSpot = anchor.Spot;
