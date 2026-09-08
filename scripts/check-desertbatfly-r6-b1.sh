@@ -9,12 +9,12 @@ for f in \
   src/Creatures/DesertBatfly/Integration/DB_RuntimePatch.cs \
   src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs \
   src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs \
-  src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs \
+  src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelIntent.cs \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs \
-  src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs \
-  src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs \
+  src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs \
+  src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
   src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
   src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs \
@@ -37,29 +37,29 @@ grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/Worl
 grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
 ! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
 
-grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
-grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
-grep -q '^            bat,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
-! grep -q '^            this,$' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs
+grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
+grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
+grep -q '^            bat,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
+! grep -q '^            this,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
 if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' src/Creatures/DesertBatfly/DesertBatfly.cs; then
   echo 'Creature shell regained SandSpit runtime ownership.' >&2
   exit 1
 fi
 
-grep -q 'internal sealed class DB_Runtime' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
+grep -q 'internal sealed class DB_Runtime' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 grep -q 'Runtime.BeforeVanillaUpdate()' src/Creatures/DesertBatfly/DesertBatfly.cs
 grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/DesertBatfly/DesertBatfly.cs
-! grep -q 'base.Update' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
+! grep -q 'base.Update' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 
-grep -q 'internal sealed class DB_CreaturePerception' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-grep -q 'internal Creature Danger' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-! grep -n -E '\bdanger[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
-! grep -n '\.localGoal[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+grep -q 'internal sealed class DB_CreaturePerception' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+grep -q 'internal Creature Danger' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+! grep -n -E '\bdanger[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+! grep -n '\.localGoal[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
 ! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/DesertBatflyAI.cs
 ! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/DesertBatflyAI.cs
 
