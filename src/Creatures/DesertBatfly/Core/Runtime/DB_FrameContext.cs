@@ -363,8 +363,8 @@ internal static class DB_FrameContextRuntime
             hasTravel && travelDebug.Suspended,
             travelReason);
 
-        bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
-        DB_FearRuntime.TryGetVengeanceTarget(bat, out Creature vengeanceTarget);
+        bool vengeance = DB_VengeanceRuntime.IsActive(bat);
+        DB_VengeanceRuntime.TryGetTarget(bat, out Creature vengeanceTarget);
         bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
 
         float trauma = Mathf.Max(

@@ -105,7 +105,7 @@ internal static class DB_ThreatTactics
     internal static bool TryApplyOrdinaryProjectileEvade(DesertBatfly bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
-            DB_FearRuntime.IsExtremeVengeanceActive(bat) ||
+            DB_VengeanceRuntime.IsActive(bat) ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
 

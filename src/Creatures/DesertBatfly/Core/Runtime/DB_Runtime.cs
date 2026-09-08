@@ -50,7 +50,7 @@ internal sealed class DB_Runtime
 
     internal void AfterVanillaUpdate(bool eu, Vector2 previousFlightVelocity)
     {
-        bool extremeVengeance = !bat.dead && DB_FearRuntime.IsExtremeVengeanceActive(bat);
+        bool extremeVengeance = !bat.dead && DB_VengeanceRuntime.IsActive(bat);
         if (extremeVengeance) bat.DesertAI.CancelAttack();
 
         if (bat.room == null) return;

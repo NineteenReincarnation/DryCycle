@@ -180,7 +180,7 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.special","DesertBatfly special state"),
                 D("decision.injury","DB_Injury.BlocksCombat",1),
                 D("decision.grief","DB_State.GriefStrength",1),
-                D("decision.vengeance","DB_FearRuntime.IsExtremeVengeanceActive",1),
+                D("decision.vengeance","DB_VengeanceRuntime.IsActive",1),
                 D("decision.roost","FlyAI.behavior / DesertBatflyAI.Mode",1),
                 D("decision.retaliation_injury","DB_Injury.BlocksCombat",1),
                 D("decision.vengeance_injury","DB_FearRuntime.Update injury gate",1),
@@ -285,7 +285,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
             float trauma = ActiveTrauma(bat);
             bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
-            bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
+            bool vengeance = DB_VengeanceRuntime.IsActive(bat);
             bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain || ai.Mode == DesertBatflyAI.Activity.Roost;
 
             decisions.Set(0, AIDebugDecisionState.Active);

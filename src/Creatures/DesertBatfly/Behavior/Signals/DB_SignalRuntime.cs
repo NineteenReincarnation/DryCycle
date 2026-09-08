@@ -412,9 +412,9 @@ internal static class DB_SignalRuntime
         if (state.LastNeutralEmitTick != int.MinValue && clock - state.LastNeutralEmitTick < 18)
             return;
 
-        if (DB_FearRuntime.IsVengeanceAvenger(bat))
+        if (DB_VengeanceRuntime.IsAvenger(bat))
         {
-            DB_FearRuntime.TryGetVengeanceTarget(bat, out Creature target);
+            DB_VengeanceRuntime.TryGetTarget(bat, out Creature target);
             EmitNeutral(
                 bat,
                 DB_SignalKind.RallySignal,

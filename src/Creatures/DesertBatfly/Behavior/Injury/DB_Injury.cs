@@ -166,7 +166,7 @@ internal sealed class DB_Injury
         recoverySample = 0;
         if (bat.room == null || !bat.Consious || bat.inShortcut || !DB_SocialBond.CanRespond(bat) ||
             bat.DesertAI.HasImmediateDanger || bat.DesertAI.FormalAttack ||
-            DB_FearRuntime.IsExtremeVengeanceActive(bat) || DB_FearRuntime.HasActiveFearSuppression(bat)) return;
+            DB_VengeanceRuntime.IsActive(bat) || DB_FearRuntime.HasActiveFearSuppression(bat)) return;
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain;
         Recover(roost ? 0.004f : 0.0005f);
     }

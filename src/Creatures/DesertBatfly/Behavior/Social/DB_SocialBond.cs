@@ -61,7 +61,7 @@ internal static class DB_SocialBond
         if (!Available(source) || !source.Consious ||
             state.PlayerTraumaStrength >= DB_Tuning.TraumaSevere ||
             state.PredatorTraumaStrength >= DB_Tuning.TraumaSevere ||
-            DB_FearRuntime.IsExtremeVengeanceActive(source)) return 1f;
+            DB_VengeanceRuntime.IsActive(source)) return 1f;
         float scale = state.GriefRoostScale;
         if (TryResolveBondPartner(source, out var partner) && partner.AI?.behavior == FlyAI.Behavior.Chain &&
             Vector2.Distance(source.mainBodyChunk.pos, partner.mainBodyChunk.pos) < 100f &&

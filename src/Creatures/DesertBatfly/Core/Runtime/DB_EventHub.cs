@@ -223,7 +223,7 @@ internal static class DB_EventHub
             ? DB_FearRuntime.SnapshotChainWitnesses(victim)
             : Array.Empty<DesertBatfly>();
         bool revengeFailed = !wasDead &&
-            DB_FearRuntime.IsExtremeVengeanceActive(victim);
+            DB_VengeanceRuntime.IsActive(victim);
 
         ResolveMortalityAttribution(
             state,

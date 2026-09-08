@@ -16,6 +16,6 @@ internal static class DB_VengeanceExecutor
 
         DesertBatflySocialLife.CancelForPriority(bat, "R3 PrimaryOwner=Vengeance");
         bat.DesertAI.CancelAttack();
-        return DB_FearRuntime.ExecuteVengeanceOwned(bat);
+        return DB_VengeanceRuntime.ExecuteOwned(bat);
     }
 }

@@ -206,7 +206,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
         bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
-        bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
+        bool vengeance = DB_VengeanceRuntime.IsActive(bat);
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain ||
                      bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost;
 
@@ -268,7 +268,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance",
             vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             vengeance ? "Extreme Vengeance active" : null,
-            "DB_FearRuntime.IsExtremeVengeanceActive", 1));
+            "DB_VengeanceRuntime.IsActive", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.roost",
             roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             roost ? "FlyAI Chain / DesertBatflyAI Roost" : null,
