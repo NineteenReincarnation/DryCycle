@@ -1,0 +1,38 @@
+name: DesertBatfly R6 B45 Status Sync
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - '.github/workflows/desertbatfly-r6-b45-status-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Keep Task14 status aligned without closing R6
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('docs/Task/Task_14_DesertBatfly_ArchitectureRefactor.txt')
+          text = p.read_text(encoding='utf-8')
+          old = 'Status: 【正式任务书 / 待实施】'
+          new = 'Status: 【R0-R5 已完成 / R6 持续实施中】'
+          if text.count(old) != 1:
+              raise SystemExit(f'unexpected Task14 status occurrence count: {text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/Task/Task_14_DesertBatfly_ArchitectureRefactor.txt
+          git commit -m 'R6 B45 sync Task14 status while keeping R6 open'
+          git push origin HEAD:task14-r6-b1-final
