@@ -451,13 +451,29 @@ internal static class DB_EnvironmentRuntime
                 groupCohesion = Mathf.Lerp(1f, 0.76f, thermalExhaustion);
                 radiusMultiplier = Mathf.Lerp(1f, 0.36f, Mathf.Max(heatShelter, thermalExhaustion));
                 roostMultiplier = Mathf.Lerp(1.05f, 2.25f, Mathf.Max(heatShelter, thermalExhaustion));
+
+                // HeatWave used to create strong shelter pressure but leave both Home and
+                // Burrow at zero. Once a returning bat entered its colony room, the local
+                // shelter-anchor system therefore pulled it into shared shade pockets instead
+                // of the native BatHive. Convert sufficiently strong thermal retreat into the
+                // existing native Home/Burrow channel while preserving early agitation.
+                float heatRetreat = Mathf.Clamp01(Mathf.Max(heatShelter, thermalExhaustion));
+                homeReturn = Mathf.Max(
+                    homeReturn,
+                    Mathf.InverseLerp(0.48f, 0.88f, heatRetreat));
+                burrow = Mathf.Max(
+                    burrow,
+                    Mathf.InverseLerp(0.70f, 0.96f, heatRetreat));
+
                 damagePermission = capability >= 0.76f &&
                                    bat.Injury.PostStunShock < 0.30f &&
                                    heatAgitation >= Mathf.Lerp(0.78f, 0.48f, temperament) &&
                                    thermalExhaustion < 0.58f && shelterDrive < 0.72f;
                 reason = activeAggression > shelterDrive
                     ? "HeatWave: agitation currently dominates shelter drive"
-                    : "HeatWave: shelter/exhaustion overtaking agitation";
+                    : burrow >= 0.68f
+                        ? "HeatWave: thermal retreat commits to Home/BatHive"
+                        : "HeatWave: shelter/exhaustion overtaking agitation";
                 break;
             }
 
