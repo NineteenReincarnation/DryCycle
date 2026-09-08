@@ -34,6 +34,7 @@ internal static class DB_EnvironmentRoomRuntime
         internal int LastCrowdingSampleTick = int.MinValue;
         internal int PhaseStartTick = int.MinValue;
         internal bool AnchorsBuilt;
+        internal int AnchorBuildCount;
         internal int ShelterFailureLastTick = int.MinValue;
         internal int ShelterFailureAccumulatedTicks;
         internal int ShelterFailureLastReportTick = int.MinValue;
@@ -47,6 +48,16 @@ internal static class DB_EnvironmentRoomRuntime
 
         internal int PhaseTicks(int tick)
             => PhaseStartTick == int.MinValue ? 0 : Mathf.Max(0, tick - PhaseStartTick);
+
+        internal int WeatherSampleAge => AgeSince(LastWeatherSampleTick);
+        internal int CrowdingSampleAge => AgeSince(LastCrowdingSampleTick);
+
+        private int AgeSince(int stamp)
+        {
+            if (stamp == int.MinValue) return int.MaxValue;
+            int tick = Room?.game?.clock ?? 0;
+            return tick < stamp ? 0 : tick - stamp;
+        }
     }
 
     private sealed class AnchorCandidate
@@ -71,6 +82,13 @@ internal static class DB_EnvironmentRoomRuntime
         RoomState state = states.GetValue(room, r => new RoomState(r));
         Refresh(state);
         return state;
+    }
+
+    /// <summary>Debug/profile peek. Does not construct, refresh or build shelter anchors.</summary>
+    internal static bool TryPeekExisting(Room room, out RoomState state)
+    {
+        state = null;
+        return room != null && states.TryGetValue(room, out state);
     }
 
     internal static void Update(Room room)
@@ -446,6 +464,7 @@ internal static class DB_EnvironmentRoomRuntime
     {
         Room room = state.Room;
         state.AnchorsBuilt = true;
+        state.AnchorBuildCount++;
         List<AnchorCandidate> candidates = new(96);
         const int stride = 3;
 

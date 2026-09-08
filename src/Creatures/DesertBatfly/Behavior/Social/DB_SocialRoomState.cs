@@ -45,6 +45,21 @@ internal static class DB_SocialRoomRuntime
         private int lastRefreshTick = int.MinValue;
         private int tokenSerial;
 
+        internal int RefreshAge
+        {
+            get
+            {
+                if (lastRefreshTick == int.MinValue) return int.MaxValue;
+                int tick = room?.game?.clock ?? 0;
+                return tick < lastRefreshTick ? 0 : tick - lastRefreshTick;
+            }
+        }
+
+        internal int CachedCandidateCount => candidates.Count;
+        internal int CachedRoostingCount => roosting.Count;
+        internal int CachedReservationCount => reservations.Count;
+        internal int CachedReservedMemberCount => byMember.Count;
+
         internal RoomState(Room room)
         {
             this.room = room;
@@ -299,6 +314,13 @@ internal static class DB_SocialRoomRuntime
     private static ConditionalWeakTable<Room, RoomState> rooms = new();
 
     internal static RoomState For(Room room) => room == null ? null : rooms.GetValue(room, r => new RoomState(r));
+
+    /// <summary>Debug/profile peek. Does not construct a room state or call Refresh().</summary>
+    internal static bool TryPeekExisting(Room room, out RoomState state)
+    {
+        state = null;
+        return room != null && rooms.TryGetValue(room, out state);
+    }
 
     internal static void Reset()
     {

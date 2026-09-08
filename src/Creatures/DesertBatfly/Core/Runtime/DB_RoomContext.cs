@@ -32,6 +32,13 @@ internal sealed class DB_RoomContext
     internal int RefreshCount { get; private set; }
     internal int CreatureScanCount { get; private set; }
     internal int PhysicalObjectScanCount { get; private set; }
+    internal int SnapshotAge => AgeSince(LastRefreshClock);
+    internal int WeaponRefreshAge => SnapshotAge;
+    internal int CachedCreatureCount => creatures.Count;
+    internal int CachedBatCount => bats.Count;
+    internal int CachedPlayerCount => players.Count;
+    internal int CachedWeaponCount => weapons.Count;
+    internal int CachedThrownWeaponCount => thrownWeapons.Count;
 
     internal IReadOnlyList<Creature> Creatures
     {
@@ -79,6 +86,13 @@ internal sealed class DB_RoomContext
         return true;
     }
 
+    /// <summary>Debug/profile peek. Never refreshes or prunes the cached room snapshot.</summary>
+    internal static bool TryPeekExisting(Room room, out DB_RoomContext context)
+    {
+        context = null;
+        return room != null && contexts.TryGetValue(room, out context);
+    }
+
     internal static void Reset()
     {
         contexts = new ConditionalWeakTable<Room, DB_RoomContext>();
@@ -110,6 +124,13 @@ internal sealed class DB_RoomContext
     {
         LastRefreshClock = int.MinValue;
         RefreshIfNeeded();
+    }
+
+    private int AgeSince(int stamp)
+    {
+        if (stamp == int.MinValue) return int.MaxValue;
+        int clock = room?.game?.clock ?? 0;
+        return clock < stamp ? 0 : clock - stamp;
     }
 
     private void RefreshIfNeeded()

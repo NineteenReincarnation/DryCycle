@@ -16,8 +16,8 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
         if (snapshot == null || creature?.realizedCreature is not DB_Creature bat || bat.room == null)
             return snapshot;
 
-        DB_EnvironmentRoomRuntime.RoomState roomState =
-            DB_EnvironmentRoomRuntime.For(bat.room);
+        DB_EnvironmentRoomRuntime.TryPeekExisting(
+            bat.room, out DB_EnvironmentRoomRuntime.RoomState roomState);
         DB_EnvironmentContext context = roomState?.Context ??
             DB_EnvironmentContext.Calm;
         bool hasInfluence = DB_EnvironmentRuntime.TryGetInfluence(
@@ -49,7 +49,10 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             out int failureTicks,
             out float failureSeverity,
             out string failureReason);
-        bool task09Owns = DB_TravelRuntime.HasIntent(bat.abstractCreature);
+        DB_RoomContext.TryPeekExisting(bat.room, out DB_RoomContext roomContext);
+        DB_SocialRoomRuntime.TryPeekExisting(
+            bat.room, out DB_SocialRoomRuntime.RoomState socialRoomState);
+        bool travelOwns = DB_TravelRuntime.HasIntent(bat.abstractCreature);
 
         snapshot.Sections.Add(new AIDebugSection("Environment Environment / 环境活动")
             .Add("Weather source valid / 天气源有效", "Environment.WeatherSourceValid",
@@ -63,7 +66,7 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
                 context.ForecastTicks == int.MaxValue ? -1 : context.ForecastTicks)
             .Add("Room phase / 房间阶段", "Environment.Phase", context.Phase.ToString())
             .Add("Phase reason / 阶段原因", "Environment.PhaseReason", context.PhaseReason)
-            .Add("Travel intent / Travel跨房意图", "Environment.TravelOwnsControl", task09Owns)
+            .Add("Travel intent / Travel跨房意图", "Environment.TravelOwnsControl", travelOwns)
             .Add("Commitment / 环境承诺ticks", "Environment.CommitmentTicks",
                 influence.CommitmentTicks)
             .Add("Shelter drive / 避险驱动", "Environment.ShelterDrive",
@@ -133,6 +136,42 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             .Add("Decision reason / 当前环境决策", "Environment.DecisionReason",
                 influence.DecisionReason));
 
+        snapshot.Sections.Add(new AIDebugSection("Performance Cache / 性能缓存")
+            .Add("Room context active / 房间缓存激活", "Performance.RoomContextActive",
+                roomContext != null)
+            .Add("Room cache age / 房间缓存年龄", "Performance.RoomCacheAge",
+                DisplayAge(roomContext?.SnapshotAge ?? int.MaxValue))
+            .Add("Weapon refresh age / 武器刷新年龄", "Performance.WeaponRefreshAge",
+                DisplayAge(roomContext?.WeaponRefreshAge ?? int.MaxValue))
+            .Add("Room refresh count / 房间刷新次数", "Performance.RoomRefreshCount",
+                roomContext?.RefreshCount ?? 0)
+            .Add("Creature scans / 生物扫描次数", "Performance.CreatureScanCount",
+                roomContext?.CreatureScanCount ?? 0)
+            .Add("Physical object scans / 物体扫描次数", "Performance.PhysicalObjectScanCount",
+                roomContext?.PhysicalObjectScanCount ?? 0)
+            .Add("Cached bats / 缓存蝠蝇", "Performance.CachedBats",
+                roomContext?.CachedBatCount ?? 0)
+            .Add("Cached players / 缓存玩家", "Performance.CachedPlayers",
+                roomContext?.CachedPlayerCount ?? 0)
+            .Add("Cached weapons / 缓存武器", "Performance.CachedWeapons",
+                roomContext?.CachedWeaponCount ?? 0)
+            .Add("Cached thrown weapons / 缓存投掷武器", "Performance.CachedThrownWeapons",
+                roomContext?.CachedThrownWeaponCount ?? 0)
+            .Add("Social refresh age / 社交刷新年龄", "Performance.SocialRefreshAge",
+                DisplayAge(socialRoomState?.RefreshAge ?? int.MaxValue))
+            .Add("Social candidates / 社交候选", "Performance.SocialCandidateCount",
+                socialRoomState?.CachedCandidateCount ?? 0)
+            .Add("Social reservations / 社交占位", "Performance.SocialReservationCount",
+                socialRoomState?.CachedReservationCount ?? 0)
+            .Add("Weather refresh age / 天气刷新年龄", "Performance.WeatherRefreshAge",
+                DisplayAge(roomState?.WeatherSampleAge ?? int.MaxValue))
+            .Add("Crowding refresh age / 拥挤刷新年龄", "Performance.CrowdingRefreshAge",
+                DisplayAge(roomState?.CrowdingSampleAge ?? int.MaxValue))
+            .Add("Shelter build count / 避险点构建次数", "Performance.ShelterBuildCount",
+                roomState?.AnchorBuildCount ?? 0)
+            .Add("Cached shelter anchors / 缓存避险点", "Performance.ShelterAnchorCount",
+                roomState?.Anchors.Count ?? 0));
+
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Environment environmental behavior / 环境行为",
             context.Phase == DB_EnvironmentPhase.Calm
@@ -149,4 +188,6 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
 
         return snapshot;
     }
+
+    private static int DisplayAge(int age) => age == int.MaxValue ? -1 : age;
 }

@@ -24,6 +24,12 @@ arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
 social_room = read('Behavior/Social/DB_SocialRoomState.cs')
 environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')
+debug_environment_path = Path('src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs')
+if not debug_environment_path.exists():
+    failures.append('missing DB_EnvironmentDebugSource observability source')
+    debug_environment = ''
+else:
+    debug_environment = debug_environment_path.read_text(encoding='utf-8')
 
 # Shared room observation remains bounded and is the sole ordinary physicalObjects scanner.
 match = re.search(r'RefreshIntervalTicks\s*=\s*(\d+)', room_context)
@@ -81,6 +87,46 @@ for name in ('WeatherSampleInterval', 'CrowdingSampleInterval'):
     m = re.search(rf'{name}\s*=\s*(\d+)', environment_room)
     if not m or not (10 <= int(m.group(1)) <= 40):
         failures.append(f'{name} must remain bounded to 10..40 ticks')
+
+# Observatory/profile reads must be side-effect free: peeking may not refresh caches or build anchors.
+for token in (
+    'TryPeekExisting(Room room, out DB_RoomContext context)',
+    'internal int SnapshotAge',
+    'internal int WeaponRefreshAge',
+):
+    if token not in room_context:
+        failures.append('room cache observability contract missing: ' + token)
+for token in (
+    'TryPeekExisting(Room room, out RoomState state)',
+    'internal int RefreshAge',
+    'internal int CachedCandidateCount',
+):
+    if token not in social_room:
+        failures.append('social cache observability contract missing: ' + token)
+for token in (
+    'TryPeekExisting(Room room, out RoomState state)',
+    'internal int WeatherSampleAge',
+    'internal int CrowdingSampleAge',
+    'internal int AnchorBuildCount',
+    'state.AnchorBuildCount++;',
+):
+    if token not in environment_room:
+        failures.append('environment cache observability contract missing: ' + token)
+if 'DB_EnvironmentRoomRuntime.For(bat.room)' in debug_environment:
+    failures.append('Observatory reintroduced refreshing Environment.For(bat.room) read')
+for token in (
+    'DB_RoomContext.TryPeekExisting',
+    'DB_SocialRoomRuntime.TryPeekExisting',
+    'DB_EnvironmentRoomRuntime.TryPeekExisting',
+    'Performance.RoomCacheAge',
+    'Performance.WeaponRefreshAge',
+    'Performance.SocialRefreshAge',
+    'Performance.WeatherRefreshAge',
+    'Performance.CrowdingRefreshAge',
+    'Performance.ShelterBuildCount',
+):
+    if token not in debug_environment:
+        failures.append('R7 Observatory performance field missing: ' + token)
 
 if failures:
     print('\n'.join(failures), file=sys.stderr)
