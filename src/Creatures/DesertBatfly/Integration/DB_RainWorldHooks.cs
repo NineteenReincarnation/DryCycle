@@ -16,6 +16,7 @@ internal static class DB_RainWorldHooks
         enabled = true;
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
+        DB_PerformanceProbe.Reset();
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();
@@ -79,6 +80,7 @@ internal static class DB_RainWorldHooks
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
+        DB_PerformanceProbe.Reset();
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();

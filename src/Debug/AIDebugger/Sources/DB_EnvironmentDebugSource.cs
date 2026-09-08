@@ -52,6 +52,8 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
         DB_RoomContext.TryPeekExisting(bat.room, out DB_RoomContext roomContext);
         DB_SocialRoomRuntime.TryPeekExisting(
             bat.room, out DB_SocialRoomRuntime.RoomState socialRoomState);
+        bool performanceActive = DB_PerformanceProbe.TryPeek(
+            bat.room, out DB_PerformanceSnapshot performance);
         bool travelOwns = DB_TravelRuntime.HasIntent(bat.abstractCreature);
 
         snapshot.Sections.Add(new AIDebugSection("Environment Environment / 环境活动")
@@ -170,7 +172,25 @@ internal sealed class DB_EnvironmentDebugSource : IAIDebugSource
             .Add("Shelter build count / 避险点构建次数", "Performance.ShelterBuildCount",
                 roomState?.AnchorBuildCount ?? 0)
             .Add("Cached shelter anchors / 缓存避险点", "Performance.ShelterAnchorCount",
-                roomState?.Anchors.Count ?? 0));
+                roomState?.Anchors.Count ?? 0)
+            .Add("Spike probe active / 峰值探针激活", "Performance.SpikeProbeActive",
+                performanceActive)
+            .Add("Threat cue refreshes this tick / 本tick威胁感知刷新", "Performance.ThreatCueThisTick",
+                performance.ThreatCueThisTick)
+            .Add("Threat cue steady peak / 威胁感知稳态峰值", "Performance.ThreatCuePeakAfterWarmup",
+                performance.ThreatCuePeakAfterWarmup)
+            .Add("Threat cue refresh total / 威胁感知刷新总数", "Performance.ThreatCueTotal",
+                performance.ThreatCueTotal)
+            .Add("Threat probe age / 威胁探针年龄", "Performance.ThreatCueAgeTicks",
+                performance.ThreatCueAgeTicks)
+            .Add("Trauma scans this tick / 本tick创伤扫描", "Performance.TraumaScanThisTick",
+                performance.TraumaScanThisTick)
+            .Add("Trauma steady peak / 创伤扫描稳态峰值", "Performance.TraumaScanPeakAfterWarmup",
+                performance.TraumaScanPeakAfterWarmup)
+            .Add("Trauma scan total / 创伤扫描总数", "Performance.TraumaScanTotal",
+                performance.TraumaScanTotal)
+            .Add("Trauma probe age / 创伤探针年龄", "Performance.TraumaScanAgeTicks",
+                performance.TraumaScanAgeTicks));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Environment environmental behavior / 环境行为",

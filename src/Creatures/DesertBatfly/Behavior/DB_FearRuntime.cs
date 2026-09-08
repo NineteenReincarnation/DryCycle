@@ -700,11 +700,13 @@ internal static class DB_FearRuntime
         if (state.TraumaRetreatRefresh > 0) state.TraumaRetreatRefresh--;
         if (state.TraumaThreatScan > 0) return;
 
-        // Preserve the first trauma lookup, then spread subsequent per-bat scans across the
-        // existing interval so a mass-casualty event does not lock the whole swarm in phase.
-        int phase = state.TraumaScanPhasePending ? TraumaThreatScanPhase(bat) : 0;
+        // Preserve the first trauma lookup, then pull the next scan forward to a stable
+        // per-bat phase inside the existing interval. Later scans resume the original cadence,
+        // preventing a mass-casualty event from locking the whole swarm in phase.
+        int phase = state.TraumaScanPhasePending ? TraumaThreatScanPhase(bat) : TraumaThreatScanTicks;
         state.TraumaScanPhasePending = false;
-        state.TraumaThreatScan = TraumaThreatScanTicks + phase;
+        state.TraumaThreatScan = phase;
+        DB_PerformanceProbe.RecordTraumaThreatScan(bat.room);
 
         Creature threat = ResolveStrongestTraumaThreat(bat);
         if (!ValidThreat(threat, bat.room)) return;
@@ -886,7 +888,7 @@ internal static class DB_FearRuntime
             x ^= x >> 15;
             x *= 0x846CA68Bu;
             x ^= x >> 16;
-            return (int)(x % (uint)TraumaThreatScanTicks);
+            return 1 + (int)(x % (uint)TraumaThreatScanTicks);
         }
     }
 

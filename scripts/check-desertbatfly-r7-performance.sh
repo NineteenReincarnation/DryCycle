@@ -18,6 +18,7 @@ def read(rel):
     return path.read_text(encoding='utf-8')
 
 room_context = read('Core/Runtime/DB_RoomContext.cs')
+performance_probe = read('Core/Runtime/DB_PerformanceProbe.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
 weapon = read('Behavior/Perception/DB_WeaponPerception.cs')
@@ -92,8 +93,9 @@ for name in ('WeatherSampleInterval', 'CrowdingSampleInterval'):
 # Expensive per-bat perception keeps immediate first recognition but disperses steady-state work.
 for token in (
     'internal bool CuePhasePending = true;',
-    'state.CueRefresh = CueRefreshTicks + phase;',
+    'state.CueRefresh = phase;',
     'CueRefreshPhase(int visualSeed)',
+    'return 1 + (int)(x % (uint)CueRefreshTicks);',
 ):
     if token not in threat:
         failures.append('Threat cue stagger contract missing: ' + token)
@@ -101,8 +103,9 @@ if 'RuntimeState state = StateFor(bat);' in threat[threat.find('internal static 
     failures.append('Threat debug read creates runtime state')
 for token in (
     'internal bool TraumaScanPhasePending = true;',
-    'state.TraumaThreatScan = TraumaThreatScanTicks + phase;',
+    'state.TraumaThreatScan = phase;',
     'TraumaThreatScanPhase(int visualSeed)',
+    'return 1 + (int)(x % (uint)TraumaThreatScanTicks);',
     'state.TraumaScanPhasePending = true;',
 ):
     if token not in fear:
@@ -111,6 +114,36 @@ if '$"R3 PrimaryOwner={ownership.PrimaryOwner}"' in hooks:
     failures.append('per-frame primary-owner cancellation reintroduced interpolated allocation')
 if 'PrimaryOwnerBlockReason(ownership.PrimaryOwner)' not in hooks:
     failures.append('constant primary-owner cancellation reason authority missing')
+
+# Live R7 spike counters quantify the staggered work without making Observatory a producer.
+for token in (
+    'internal const int WarmupTicks = 40;',
+    'RecordThreatCue(Room room)',
+    'RecordTraumaThreatScan(Room room)',
+    'TryPeek(Room room, out DB_PerformanceSnapshot snapshot)',
+    'rooms.TryGetValue(room, out RoomState state)',
+    'new DB_PerformanceSnapshot(0, 0, 0, -1, 0, 0, 0, -1)',
+):
+    if token not in performance_probe:
+        failures.append('R7 performance probe contract missing: ' + token)
+if 'DB_PerformanceProbe.RecordThreatCue(bat.room);' not in threat:
+    failures.append('Threat expensive refresh no longer records R7 spike telemetry')
+if 'DB_PerformanceProbe.RecordTraumaThreatScan(bat.room);' not in fear:
+    failures.append('Fear trauma scan no longer records R7 spike telemetry')
+if hooks.count('DB_PerformanceProbe.Reset();') != 2:
+    failures.append('R7 performance probe must reset on both enable and disable')
+for token in (
+    'DB_PerformanceProbe.TryPeek',
+    'Performance.SpikeProbeActive',
+    'Performance.ThreatCueThisTick',
+    'Performance.ThreatCuePeakAfterWarmup',
+    'Performance.ThreatCueTotal',
+    'Performance.TraumaScanThisTick',
+    'Performance.TraumaScanPeakAfterWarmup',
+    'Performance.TraumaScanTotal',
+):
+    if token not in debug_environment:
+        failures.append('R7 live spike Observatory field missing: ' + token)
 
 # Observatory/profile reads must be side-effect free: peeking may not refresh caches or build anchors.
 for token in (

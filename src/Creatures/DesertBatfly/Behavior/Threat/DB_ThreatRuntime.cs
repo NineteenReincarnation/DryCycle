@@ -673,12 +673,14 @@ internal static class DB_ThreatRuntime
             return;
         }
 
-        // The first observation remains immediate. Only the next interval receives a stable
-        // per-bat phase offset, after which the original cadence resumes. This disperses a
-        // freshly realized 20-30 bat swarm without weakening initial danger recognition.
-        int phase = state.CuePhasePending ? CueRefreshPhase(bat) : 0;
+        // The first observation remains immediate. The next sample is pulled forward to a
+        // stable per-bat phase inside the existing refresh budget; later samples resume the
+        // original cadence. This disperses a freshly realized 20-30 bat swarm without
+        // extending the maximum danger-recognition interval.
+        int phase = state.CuePhasePending ? CueRefreshPhase(bat) : CueRefreshTicks;
         state.CuePhasePending = false;
-        state.CueRefresh = CueRefreshTicks + phase;
+        state.CueRefresh = phase;
+        DB_PerformanceProbe.RecordThreatCue(bat.room);
 
         Room room = bat.room;
         RoomState roomState = RoomFor(room);
@@ -1254,7 +1256,7 @@ internal static class DB_ThreatRuntime
             x ^= x >> 15;
             x *= 0x846CA68Bu;
             x ^= x >> 16;
-            return (int)(x % (uint)CueRefreshTicks);
+            return 1 + (int)(x % (uint)CueRefreshTicks);
         }
     }
 
