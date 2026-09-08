@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal static class DesertBatflySignalRoomRuntime
+internal static class DB_SignalRoomRuntime
 {
     internal const int ActiveSignalCap = 24;
     internal const int AlarmRootMergeTicks = 14;

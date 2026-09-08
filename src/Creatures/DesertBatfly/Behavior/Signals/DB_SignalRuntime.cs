@@ -65,7 +65,7 @@ internal static class DB_SignalRuntime
     internal static void Reset()
     {
         states = new ConditionalWeakTable<DB_Creature, ReceiverState>();
-        DesertBatflySignalRoomRuntime.Reset();
+        DB_SignalRoomRuntime.Reset();
     }
 
     internal static void Forget(DB_Creature bat)
@@ -94,8 +94,8 @@ internal static class DB_SignalRuntime
             NeutralScanMinTicks,
             NeutralScanMaxTicks + 1);
 
-        DesertBatflySignalRoomRuntime.RoomState roomState =
-            DesertBatflySignalRoomRuntime.For(bat.room);
+        DB_SignalRoomRuntime.RoomState roomState =
+            DB_SignalRoomRuntime.For(bat.room);
         roomState?.Prune(bat.room);
         if (roomState == null) return;
 
@@ -116,7 +116,7 @@ internal static class DB_SignalRuntime
         string reason)
     {
         if (!Available(emitter)) return null;
-        DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
+        DB_SignalRoomRuntime.RoomState room = DB_SignalRoomRuntime.For(emitter.room);
         DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
             DB_SignalKind.AlarmFlutter,
@@ -148,7 +148,7 @@ internal static class DB_SignalRuntime
         Vector2 direction = threat.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
-        DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
+        DB_SignalRoomRuntime.RoomState room = DB_SignalRoomRuntime.For(emitter.room);
         DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
             DB_SignalKind.RallySignal,
@@ -200,7 +200,7 @@ internal static class DB_SignalRuntime
         Vector2 direction = threat?.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
-        DesertBatflySignalRoomRuntime.RoomState room = DesertBatflySignalRoomRuntime.For(emitter.room);
+        DB_SignalRoomRuntime.RoomState room = DB_SignalRoomRuntime.For(emitter.room);
         DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
             DB_SignalKind.DistressCall,
@@ -403,7 +403,7 @@ internal static class DB_SignalRuntime
             state.LastPerception,
             state.LastHop,
             state.LastDecision,
-            DesertBatflySignalRoomRuntime.For(bat.room)?.Count ?? 0);
+            DB_SignalRoomRuntime.For(bat.room)?.Count ?? 0);
         return true;
     }
 
@@ -496,7 +496,7 @@ internal static class DB_SignalRuntime
         Vector2 direction = threat?.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
             : Vector2.zero;
-        DB_SignalPacket packet = DesertBatflySignalRoomRuntime.For(emitter.room)?.AddOrRefresh(
+        DB_SignalPacket packet = DB_SignalRoomRuntime.For(emitter.room)?.AddOrRefresh(
             emitter.room,
             kind,
             emitter,

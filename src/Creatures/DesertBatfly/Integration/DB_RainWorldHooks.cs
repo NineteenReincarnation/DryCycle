@@ -464,7 +464,7 @@ internal static class DB_RainWorldHooks
 
         if (self.readyForAI && self.aimap != null)
             DB_RefugePolicy.ObserveRoom(self);
-        DesertBatflySignalRoomRuntime.For(self)?.Prune(self);
+        DB_SignalRoomRuntime.For(self)?.Prune(self);
         DB_EnvironmentRoomRuntime.Update(self);
     }
 

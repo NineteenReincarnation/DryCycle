@@ -86,8 +86,8 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
 
     private static DB_SignalPacket FindSignalPacket(DB_Creature bat, int generation)
     {
-        DesertBatflySignalRoomRuntime.RoomState room =
-            DesertBatflySignalRoomRuntime.For(bat?.room);
+        DB_SignalRoomRuntime.RoomState room =
+            DB_SignalRoomRuntime.For(bat?.room);
         if (room == null) return null;
         for (int i = 0; i < room.ActiveSignals.Count; i++)
         {
