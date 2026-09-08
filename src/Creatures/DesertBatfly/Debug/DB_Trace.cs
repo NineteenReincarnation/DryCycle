@@ -43,17 +43,17 @@ internal static class DB_Trace
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
-            "Task09TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
+            "TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
             hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
-            "Task09TravelDestination", hasTravel ? travel.DestinationRoom : "—",
+            "TravelDestination", hasTravel ? travel.DestinationRoom : "—",
             hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
-            "Task09TravelProgress",
+            "TravelProgress",
             hasTravel ? $"{travel.RouteIndex}/{Mathf.Max(0, travel.RouteRooms.Length - 1)} next={travel.NextRoom}" : "—",
             hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
-            "Task09TravelStatus", hasTravel ? travel.StatusReason : "—",
+            "TravelStatus", hasTravel ? travel.StatusReason : "—",
             hasTravel && travel.Suspended ? "TravelSuspended" : "TravelActiveOrNone");
 
         AIDebugCandidateRegistry.Begin(bat.abstractCreature);
@@ -99,7 +99,7 @@ internal static class DB_Trace
         if (bat.Injury.BlocksCombat || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "Injury";
-        if (hasTravel && !travel.Suspended) return "Task09Travel";
+        if (hasTravel && !travel.Suspended) return "Travel";
         if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
             bat.AI.luredCounter > 0 || bat.safariControlled)
             return "VanillaPriority";

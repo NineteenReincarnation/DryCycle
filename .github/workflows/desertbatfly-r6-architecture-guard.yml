@@ -52,7 +52,9 @@ jobs:
           test_files = sorted(tests.rglob('*.cs'))
           failures = []
 
-          task_term = re.compile(r'\bTask\s*[-_]?\s*\d+\b', re.IGNORECASE)
+          # Match Task-number prefixes even when they are immediately followed by a domain
+          # suffix such as Task09Travel. The previous trailing word boundary missed those.
+          task_term = re.compile(r'\bTask\s*[-_]?\s*\d+', re.IGNORECASE)
           task_number = re.compile(r'\bTask-number\b', re.IGNORECASE)
           old_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DesertBatfly[A-Za-z0-9_]+)\b')
           db_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DB_[A-Za-z0-9_]+)\b')
@@ -133,6 +135,14 @@ jobs:
           injury_recovery = injury_recovery_path.read_text(encoding='utf-8')
           execution = execution_path.read_text(encoding='utf-8')
           hooks = hooks_path.read_text(encoding='utf-8')
+          trace = (src / 'Debug' / 'DB_Trace.cs').read_text(encoding='utf-8')
+
+          for token in (
+              '"TravelPurpose"', '"TravelDestination"', '"TravelProgress"',
+              '"TravelStatus"', 'if (hasTravel && !travel.Suspended) return "Travel";'
+          ):
+              if token not in trace:
+                  failures.append('Travel Observatory trace contract missing: ' + token)
 
           if 'partial class DB_FearRuntime' in fear or 'partial class DB_FearRuntime' in vengeance:
               failures.append('partial DB_FearRuntime Vengeance implementation returned')
