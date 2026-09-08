@@ -4,7 +4,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Explicit R5 policy surface for Task13 soft modifiers consumed by other Desert Batfly
+/// Explicit environmental policy surface for soft modifiers consumed by other Desert Batfly
 /// domains. This class never owns locomotion, never mutates Personality/Thirst to spoof a
 /// decision, and never reaches another domain through Reflection or RuntimeDetour.
 /// </summary>
