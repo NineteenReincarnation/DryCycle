@@ -480,7 +480,7 @@ internal static class DB_EnvironmentRuntime
                 float aggressionEligibility = Mathf.Clamp01(
                     heatAgitation * 0.62f + temperament * 0.22f + nerve * 0.16f);
                 damagePermission = capability >= 0.72f &&
-                                   !bat.Injury.HasSevereWingInjury &&
+                                   !bat.Injury.IsSeverelyInjured &&
                                    bat.Injury.PostStunShock < 0.32f &&
                                    aggressionEligibility >= 0.54f &&
                                    thermalExhaustion < 0.84f &&
