@@ -80,6 +80,7 @@ internal static class DB_ThreatRuntime
     private sealed class RuntimeState
     {
         internal int CueRefresh;
+        internal bool CuePhasePending = true;
         internal DB_ThreatCue Cue;
 
         // Short-lived Threat evidence cache only. Mortality attribution belongs exclusively
@@ -263,8 +264,7 @@ internal static class DB_ThreatRuntime
     internal static bool TryGetDebugState(DB_Creature bat, out DB_ThreatDebugState debug)
     {
         debug = default;
-        if (bat == null) return false;
-        RuntimeState state = StateFor(bat);
+        if (bat == null || !states.TryGetValue(bat, out RuntimeState state)) return false;
         int slot = state.Cue.PlayerSlot;
         DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(bat.DesertState, slot);
         debug.PlayerSlot = slot;
@@ -672,7 +672,13 @@ internal static class DB_ThreatRuntime
             state.CueRefresh--;
             return;
         }
-        state.CueRefresh = CueRefreshTicks;
+
+        // The first observation remains immediate. Only the next interval receives a stable
+        // per-bat phase offset, after which the original cadence resumes. This disperses a
+        // freshly realized 20-30 bat swarm without weakening initial danger recognition.
+        int phase = state.CuePhasePending ? CueRefreshPhase(bat) : 0;
+        state.CuePhasePending = false;
+        state.CueRefresh = CueRefreshTicks + phase;
 
         Room room = bat.room;
         RoomState roomState = RoomFor(room);
@@ -1233,6 +1239,23 @@ internal static class DB_ThreatRuntime
             best = player;
         }
         return best;
+    }
+
+    private static int CueRefreshPhase(DB_Creature bat)
+        => CueRefreshPhase(bat?.Personality?.VisualSeed ?? 0);
+
+    internal static int CueRefreshPhase(int visualSeed)
+    {
+        unchecked
+        {
+            uint x = (uint)visualSeed ^ 0xA511E9B3u;
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return (int)(x % (uint)CueRefreshTicks);
+        }
     }
 
     private static RuntimeState StateFor(DB_Creature bat) => states.GetOrCreateValue(bat);

@@ -79,6 +79,7 @@ internal static class DB_FearRuntime
         internal FearMemory PredatorFear;
 
         internal int TraumaThreatScan;
+        internal bool TraumaScanPhasePending = true;
         internal int TraumaRetreatRefresh;
     }
 
@@ -698,7 +699,12 @@ internal static class DB_FearRuntime
         if (state.TraumaThreatScan > 0) state.TraumaThreatScan--;
         if (state.TraumaRetreatRefresh > 0) state.TraumaRetreatRefresh--;
         if (state.TraumaThreatScan > 0) return;
-        state.TraumaThreatScan = TraumaThreatScanTicks;
+
+        // Preserve the first trauma lookup, then spread subsequent per-bat scans across the
+        // existing interval so a mass-casualty event does not lock the whole swarm in phase.
+        int phase = state.TraumaScanPhasePending ? TraumaThreatScanPhase(bat) : 0;
+        state.TraumaScanPhasePending = false;
+        state.TraumaThreatScan = TraumaThreatScanTicks + phase;
 
         Creature threat = ResolveStrongestTraumaThreat(bat);
         if (!ValidThreat(threat, bat.room)) return;
@@ -867,6 +873,23 @@ internal static class DB_FearRuntime
             memory = default;
     }
 
+    private static int TraumaThreatScanPhase(DB_Creature bat)
+        => TraumaThreatScanPhase(bat?.Personality?.VisualSeed ?? 0);
+
+    internal static int TraumaThreatScanPhase(int visualSeed)
+    {
+        unchecked
+        {
+            uint x = (uint)visualSeed ^ 0x6C8E9CF5u;
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return (int)(x % (uint)TraumaThreatScanTicks);
+        }
+    }
+
     private static State StateFor(DB_Creature bat)
     {
         State state = states.GetValue(bat, _ => new State());
@@ -885,6 +908,8 @@ internal static class DB_FearRuntime
             bat.DesertState.HasTrauma)
             return;
 
+        state.TraumaThreatScan = 0;
+        state.TraumaScanPhasePending = true;
         state.Active = false;
         activeStates = Mathf.Max(0, activeStates - 1);
     }

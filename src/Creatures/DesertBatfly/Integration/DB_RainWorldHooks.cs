@@ -181,7 +181,7 @@ internal static class DB_RainWorldHooks
         if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or
             DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
         {
-            DB_SocialRuntime.CancelForPriority(desert, $"R3 PrimaryOwner={ownership.PrimaryOwner}");
+            DB_SocialRuntime.CancelForPriority(desert, PrimaryOwnerBlockReason(ownership.PrimaryOwner));
             CompleteR3Frame(desert, ownership);
             return;
         }
@@ -221,7 +221,7 @@ internal static class DB_RainWorldHooks
         {
             if (DB_TravelRuntime.TryDriveRealized(desert))
             {
-                DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=Travel");
+                DB_SocialRuntime.CancelForPriority(desert, "travel priority");
                 desert.DesertAI.CancelAttack();
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -341,6 +341,18 @@ internal static class DB_RainWorldHooks
         CompleteR3Frame(desert, ownership);
     }
 
+    private static string PrimaryOwnerBlockReason(DB_BehaviorOwner owner)
+    {
+        return owner switch
+        {
+            DB_BehaviorOwner.CreaturePhysics => "creature physics priority",
+            DB_BehaviorOwner.Restraint => "restraint priority",
+            DB_BehaviorOwner.Shortcut => "shortcut priority",
+            DB_BehaviorOwner.Emergence => "emergence priority",
+            _ => "higher-priority owner"
+        };
+    }
+
     private static bool ExecuteNativeOwned(
         On.FlyAI.orig_Update orig,
         FlyAI self,
@@ -423,7 +435,7 @@ internal static class DB_RainWorldHooks
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
-            DB_SocialRuntime.CancelForPriority(desert, "R3 Travel owns enclosing AI frame");
+            DB_SocialRuntime.CancelForPriority(desert, "travel owns enclosing AI frame");
             return;
         }
 

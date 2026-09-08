@@ -19,6 +19,7 @@ def read(rel):
 
 room_context = read('Core/Runtime/DB_RoomContext.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
+threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
 weapon = read('Behavior/Perception/DB_WeaponPerception.cs')
 arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
@@ -87,6 +88,29 @@ for name in ('WeatherSampleInterval', 'CrowdingSampleInterval'):
     m = re.search(rf'{name}\s*=\s*(\d+)', environment_room)
     if not m or not (10 <= int(m.group(1)) <= 40):
         failures.append(f'{name} must remain bounded to 10..40 ticks')
+
+# Expensive per-bat perception keeps immediate first recognition but disperses steady-state work.
+for token in (
+    'internal bool CuePhasePending = true;',
+    'state.CueRefresh = CueRefreshTicks + phase;',
+    'CueRefreshPhase(int visualSeed)',
+):
+    if token not in threat:
+        failures.append('Threat cue stagger contract missing: ' + token)
+if 'RuntimeState state = StateFor(bat);' in threat[threat.find('internal static bool TryGetDebugState'):threat.find('private static void DamageEvent')]:
+    failures.append('Threat debug read creates runtime state')
+for token in (
+    'internal bool TraumaScanPhasePending = true;',
+    'state.TraumaThreatScan = TraumaThreatScanTicks + phase;',
+    'TraumaThreatScanPhase(int visualSeed)',
+    'state.TraumaScanPhasePending = true;',
+):
+    if token not in fear:
+        failures.append('Fear trauma stagger contract missing: ' + token)
+if '$"R3 PrimaryOwner={ownership.PrimaryOwner}"' in hooks:
+    failures.append('per-frame primary-owner cancellation reintroduced interpolated allocation')
+if 'PrimaryOwnerBlockReason(ownership.PrimaryOwner)' not in hooks:
+    failures.append('constant primary-owner cancellation reason authority missing')
 
 # Observatory/profile reads must be side-effect free: peeking may not refresh caches or build anchors.
 for token in (
