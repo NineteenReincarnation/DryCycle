@@ -1,0 +1,169 @@
+name: DesertBatfly R6 Architecture Guard
+
+# Long-lived read-only guard for the current R6 architecture baseline.
+# R6 remains open for additional planned work; this guard protects completed contracts.
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r5-retention.sh'
+      - 'scripts/check-desertbatfly-r6-b1.sh'
+      - '.github/workflows/desertbatfly-r6-architecture-guard.yml'
+  pull_request:
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'tests/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r5-retention.sh'
+      - 'scripts/check-desertbatfly-r6-b1.sh'
+      - '.github/workflows/desertbatfly-r6-architecture-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Retained behavior boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r5-retention.sh
+          bash scripts/check-desertbatfly-r6-b1.sh
+
+      - name: Domain identity, managed tests and compatibility contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          src = Path('src/Creatures/DesertBatfly')
+          tests = Path('tests/DesertBatfly')
+          source_files = sorted(src.rglob('*.cs'))
+          test_files = sorted(tests.rglob('*.cs'))
+          failures = []
+
+          task_term = re.compile(r'\bTask\s*[-_]?\s*\d+\b', re.IGNORECASE)
+          task_number = re.compile(r'\bTask-number\b', re.IGNORECASE)
+          old_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DesertBatfly[A-Za-z0-9_]+)\b')
+          db_decl = re.compile(r'\b(?:class|struct|enum|interface)\s+(DB_[A-Za-z0-9_]+)\b')
+          declared = set()
+          production_text = []
+
+          for path in source_files:
+              text = path.read_text(encoding='utf-8')
+              production_text.append(text)
+              if task_term.search(text) or task_number.search(text):
+                  failures.append(f'production task-era terminology: {path}')
+              for name in old_decl.findall(text):
+                  failures.append(f'old internal declaration {name}: {path}')
+              declared.update(db_decl.findall(text))
+              if not path.name.startswith('DB_'):
+                  failures.append(f'non-DB production filename: {path}')
+
+          for path in test_files:
+              text = path.read_text(encoding='utf-8')
+              if task_term.search(text) or task_number.search(text):
+                  failures.append(f'managed-test task-era terminology: {path}')
+              if re.search(r'\bRunTask\d+\b', text):
+                  failures.append(f'legacy RunTask entry point: {path}')
+              if 'Task' in path.name:
+                  failures.append(f'Task-named managed-test file: {path}')
+
+          for path in src.glob('*.cs'):
+              failures.append(f'root-level DesertBatfly source: {path}')
+          if (src / 'Behavior' / 'ThreatSignature').exists():
+              failures.append('retired Behavior/ThreatSignature directory exists')
+
+          required = {
+              'DB_Creature', 'DB_AI', 'DB_Runtime', 'DB_EventHub', 'DB_RoomContext',
+              'DB_FrameContext', 'DB_BehaviorArbiter', 'DB_FlightMotor', 'DB_CombatRuntime',
+              'DB_Injury', 'DB_FearRuntime', 'DB_VengeanceRuntime', 'DB_SocialRuntime',
+              'DB_SocialRoomRuntime', 'DB_ThreatRuntime', 'DB_SignalRuntime',
+              'DB_SignalRoomRuntime', 'DB_EnvironmentRuntime', 'DB_EnvironmentRoomRuntime',
+              'DB_TravelRuntime', 'DB_ColonyRuntime', 'DB_RainWorldHooks', 'DB_RuntimePatch',
+              'DB_Sandbox', 'DB_WarpCompatibility'
+          }
+          for name in sorted(required - declared):
+              failures.append(f'missing formal production owner: {name}')
+
+          positive = re.compile(
+              r'mod\.GetType\("DryCycle\.Creatures\.DesertBatfly\.(DB_[A-Za-z0-9_]+)"\s*,\s*true\)')
+          for path in test_files:
+              text = path.read_text(encoding='utf-8')
+              for name in positive.findall(text):
+                  if name not in declared:
+                      failures.append(f'stale positive managed reflection target {name}: {path}')
+
+          fear_path = src / 'Behavior' / 'Fear' / 'DB_FearRuntime.cs'
+          vengeance_path = src / 'Behavior' / 'Vengeance' / 'DB_VengeanceRuntime.cs'
+          fear = fear_path.read_text(encoding='utf-8')
+          vengeance = vengeance_path.read_text(encoding='utf-8')
+
+          if 'partial class DB_FearRuntime' in fear or 'partial class DB_FearRuntime' in vengeance:
+              failures.append('partial DB_FearRuntime Vengeance implementation returned')
+          if 'ConditionalWeakTable' in vengeance:
+              failures.append('Vengeance owns a second weak table')
+          if fear.count('ConditionalWeakTable<DB_Creature, State> states') != 1:
+              failures.append('Fear no longer owns exactly one per-bat host weak table')
+          if 'internal readonly DB_VengeanceRuntime.State Vengeance = new();' not in fear:
+              failures.append('Fear host no longer embeds DB_VengeanceRuntime.State')
+          for token in (
+              'internal static class DB_VengeanceRuntime',
+              'internal sealed class State',
+              'internal static bool IsActive(',
+              'internal static bool ExecuteOwned(',
+              'internal static void ArmGroup(',
+              'internal static void Clear(State state)',
+              'DB_FlightMotor.TrySteer('
+          ):
+              if token not in vengeance:
+                  failures.append('Vengeance formal ownership missing: ' + token)
+
+          definition = (src / 'Core' / 'DB_Definition.cs').read_text(encoding='utf-8')
+          sandbox = (src / 'Integration' / 'DB_Sandbox.cs').read_text(encoding='utf-8')
+          joined = '\n'.join(production_text)
+          if 'CreatureType = new("DesertBatfly", true);' not in definition:
+              failures.append('CreatureTemplate external identity changed')
+          if 'UnlockValue = "DesertBatfly";' not in sandbox:
+              failures.append('Sandbox external identity changed')
+          for literal in ('DCDesertBatflyV1', 'DCDesertBatflyThreatV1', 'DCBATCOLONY09<svB>', 'DESERTSWARMROOM'):
+              if literal not in joined:
+                  failures.append(f'compatibility/save/world literal missing: {literal}')
+
+          for stale in (
+              Path('.github/workflows/desertbatfly-r6-root-reorg-stage-g.yml'),
+              Path('.github/workflows/desertbatfly-r6-task-term-guard.yml'),
+              Path('scripts/task14_r3_observatory_apply.py')
+          ):
+              if stale.exists():
+                  failures.append(f'retired migration artifact returned: {stale}')
+
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              sys.exit(1)
+
+          print(f'R6 architecture guard passed: {len(source_files)} production files, {len(test_files)} managed test files.')
+          PY
+
+      - name: Roslyn syntax parse Desert Batfly production and managed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat > "$tmp/P.csproj" <<'CSPROJ'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup><ItemGroup><Reference Include="Microsoft.CodeAnalysis"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath></Reference><Reference Include="Microsoft.CodeAnalysis.CSharp"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath></Reference></ItemGroup></Project>
+          CSPROJ
+          cat > "$tmp/Program.cs" <<'CS'
+          using Microsoft.CodeAnalysis;using Microsoft.CodeAnalysis.CSharp;var errors=new List<string>();foreach(var root in new[]{"src/Creatures/DesertBatfly","tests/DesertBatfly"})foreach(var path in Directory.EnumerateFiles(root,"*.cs",SearchOption.AllDirectories)){var tree=CSharpSyntaxTree.ParseText(File.ReadAllText(path),new CSharpParseOptions(LanguageVersion.Preview),path);foreach(var d in tree.GetDiagnostics().Where(d=>d.Severity==DiagnosticSeverity.Error))errors.Add(d.ToString());}if(errors.Count>0){Console.Error.WriteLine(string.Join(Environment.NewLine,errors));Environment.Exit(1);}Console.WriteLine("R6 architecture Roslyn syntax parse passed.");
+          CS
+          dotnet run --project "$tmp/P.csproj"
