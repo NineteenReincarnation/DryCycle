@@ -1,7 +1,7 @@
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// R3 execution boundary for Task10 neutral social locomotion and roost-join transitions.
+/// R3 execution boundary for neutral social locomotion and roost-join transitions.
 /// Social state may be prepared before arbitration; active interaction movement progresses
 /// only while Social is the current PrimaryOwner.
 /// </summary>

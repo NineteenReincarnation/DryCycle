@@ -1,7 +1,7 @@
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// R3 owned execution boundary for Task13 realized-room local survival. Task13 still never
+/// R3 owned execution boundary for realized-room local environmental survival. This layer never
 /// owns cross-room travel and never gains a second velocity controller.
 /// </summary>
 internal static class DB_EnvironmentExecutor

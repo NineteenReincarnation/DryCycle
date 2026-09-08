@@ -687,7 +687,7 @@ internal static class DesertBatflyIntimidation
             eventPosition,
             Custom.DirVec(bat.mainBodyChunk.pos, eventPosition),
             Mathf.Clamp01(0.62f + Mathf.Clamp(threatScale, 0f, 1.5f) * 0.20f),
-            "direct Intimidation witness emits sole indirect Task12 Alarm generation");
+            "direct Intimidation witness emits sole indirect Alarm generation");
     }
 
     private static void TraceIndirectFearSuppressed(DesertBatfly bat, int tier)
@@ -700,7 +700,7 @@ internal static class DesertBatflyIntimidation
             DryCycle.Debugging.AI.AIDebugEventCategory.Social,
             "Task12LegacyIndirectFearSuppressed",
             $"tier={tier}",
-            "Secondary/Chain fear no longer applies Trauma/Fear directly; Task12 Alarm perception owns indirect propagation");
+            "Secondary/Chain fear no longer applies Trauma/Fear directly; Alarm perception owns indirect propagation");
     }
 
     private static void ReceiveCorpseReminder(
@@ -962,11 +962,11 @@ internal static class DesertBatflyIntimidation
         state.VengeanceTimer = Mathf.RoundToInt(
             Mathf.Lerp(maxDelay, minDelay, drive)) + socialDelay;
 
-        // Deliver synchronously before ArmVengeanceGroup scores followers so Task12 Rally
+        // Deliver synchronously before ArmVengeanceGroup scores followers so Rally
         // interest can participate in SocialBond.Motivation without a detour around this method.
         if (state.Role == VengeanceParticipation.Avenger && !supportOnly && leader == null)
             DB_SignalRuntime.EmitRally(
-                bat, threat, drive, "new Avenger armed -> immediate Task12 RallySignal");
+                bat, threat, drive, "new Avenger armed -> immediate RallySignal");
     }
 
     private static void UpdateVengeance(DesertBatfly bat, State state)
@@ -1619,7 +1619,7 @@ internal static class DesertBatflyIntimidation
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance))
             return;
 
-        // R5: Task11 is a tactical modifier, not an internal RuntimeDetour. Vengeance owns
+        // R5: threat tactics are modifiers, not an internal RuntimeDetour. Vengeance owns
         // the frame and explicitly asks Threat Signature to refine the already-authorized
         // goal/speed before the single FlightMotor write boundary.
         if (TryGetVengeanceTarget(bat, out Creature vengeanceTarget) && vengeanceTarget is Player player)

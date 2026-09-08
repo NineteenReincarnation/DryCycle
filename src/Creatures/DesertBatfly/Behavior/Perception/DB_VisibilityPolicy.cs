@@ -15,7 +15,7 @@ internal enum DB_VisibilityChannel
 /// <summary>
 /// Single policy for Desert Batfly line-of-sight + environmental visual confidence.
 ///
-/// Room.VisualContact remains the terrain authority. Task13/DryCycle weather contributes
+/// Room.VisualContact remains the terrain authority. DryCycle weather contributes
 /// VisibilityConfidence only through the already-validated environmental influence, so a
 /// RoomSettings fog/shader cannot activate this policy by itself.
 /// </summary>

@@ -178,6 +178,6 @@ internal readonly struct DB_EnvironmentInfluence
         1f, 0f, 1f, 0f, 0f, 0f,
         0f, 0f, 0f,
         false, false, null, 0f, 0, 1f,
-        "calm / no Task13 influence");
+        "calm / no environmental influence");
 }
 

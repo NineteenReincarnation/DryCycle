@@ -126,7 +126,7 @@ internal static class DB_Trace
             case "Shortcut": return "shortcut owns movement";
             case "Restrained": return "non-fly grasp or restraint owns movement";
             case "Emergence": return "emergence animation owns behavior";
-            case "Task09Travel": return hasTravel ? travel.StatusReason : "Task 09 travel";
+            case "Travel": return hasTravel ? travel.StatusReason : "travel";
             case "VanillaPriority": return "vanilla FlyAI priority";
             case "Danger": return "danger / retreat owns movement";
             case "Injury": return bat.Injury.IsRecovering ? bat.Injury.RecoveryReason : "injury / shock limits behavior";
@@ -138,7 +138,7 @@ internal static class DB_Trace
         }
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
         if (hasSocial) return string.IsNullOrEmpty(social.DecisionReason)
-            ? "Task 10 neutral social interaction"
+            ? "neutral social interaction"
             : social.DecisionReason;
         return "DesertBatflyAI state machine";
     }
@@ -152,7 +152,7 @@ internal static class DB_Trace
         switch (suppression)
         {
             case "Injury": return bat.Injury.BlocksCombat ? bat.Injury.CombatBlockReason : bat.Injury.RecoveryReason;
-            case "Task09Travel": return hasTravel ? travel.StatusReason : "Task 09 travel";
+            case "Travel": return hasTravel ? travel.StatusReason : "travel";
             case "None": return "no higher-priority blocker";
             case "Unavailable": return "dead / unconscious / no room";
             case "Shortcut": return "shortcut lifecycle";
@@ -183,7 +183,7 @@ internal static class DB_Trace
             case "Shortcut": return "Shortcut";
             case "Restrained": return "Grasp / Restraint";
             case "Emergence": return "Emergence";
-            case "Task09Travel": return hasTravel ? "Task 09 / " + travel.Purpose : "Task 09 Travel";
+            case "Travel": return hasTravel ? "Travel / " + travel.Purpose : "Travel";
             case "VanillaPriority": return "Vanilla FlyAI";
             case "Danger": return "Danger / Escape";
             case "Injury": return "Injury Recovery";
@@ -193,7 +193,7 @@ internal static class DB_Trace
             case "Vengeance": return "Vengeance";
             case "Roost": return "Roost / Chain";
             default:
-                if (hasSocial) return "Task 10 Social / " + social.Mode;
+                if (hasSocial) return "Social / " + social.Mode;
                 return "DesertBatflyAI";
         }
     }

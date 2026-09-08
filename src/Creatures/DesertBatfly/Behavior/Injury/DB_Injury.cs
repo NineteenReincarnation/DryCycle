@@ -30,7 +30,7 @@ internal sealed class DB_Injury
     internal float PhysicalCapability => Mathf.Clamp01(1f - 0.18f * (1f - Mathf.Clamp01(State.health)) -
         0.46f * WingSeverity - 0.15f * WingAsymmetry - 0.25f * PostStunShock);
 
-    // Task 04 tuning target: structural injury hits turning/lift much harder than straight speed.
+    // Structural injury tuning target: turning/lift degrade much harder than straight speed.
     // At WingMean ~= 0.65, symmetric injury lands near 86% forward / 60% turn / 73% lift.
     internal float ForwardControl => Mathf.Clamp(1f - 0.20f * WingSeverity - 0.04f * WingAsymmetry, 0.80f, 1f);
     internal float TurnControl => Mathf.Clamp(1f - 0.55f * WingSeverity - 0.18f * WingAsymmetry -

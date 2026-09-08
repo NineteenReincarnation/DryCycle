@@ -278,7 +278,7 @@ internal static class DB_WeatherEcology
             "LIGHTRAIN" => new Profile(0.04f, 0.10f, 0f, 0.06f),
             "FOG" => new Profile(0.02f, 0.05f, 0f, 0.05f),
             // DenseFog is a temporary usability/shelter problem, not a permanent-habitat
-            // migration signal. High active Shelter lets Task09 consider a nearby clearer
+            // migration signal. High active Shelter lets travel consider a nearby clearer
             // Refuge once the fog is materially present; near-zero Migration prevents one
             // fog event from becoming a ColonyMigration.
             "DENSEFOG" => new Profile(0.06f, 0.90f, 0.01f, 0.12f),

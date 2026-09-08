@@ -6,7 +6,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// <summary>
 /// Severe-injury local recovery owner. It searches legal local roosts, drives the
 /// native hive Dijkstra fallback and performs the owned low-risk recovery steering.
-/// Cross-room travel remains Task09/DB_TravelRuntime authority.
+/// Cross-room travel remains DB_TravelRuntime authority.
 /// </summary>
 internal sealed class DB_InjuryRecovery
 {
@@ -42,7 +42,7 @@ internal sealed class DB_InjuryRecovery
             return false;
         }
 
-        // Higher-priority preemption must not erase recovery state or Task09 intent.
+        // Higher-priority preemption must not erase recovery state or an active travel intent.
         if (fly.dead || !fly.Consious || fly.room == null || brain.RestrainedByNonFly() ||
             fly.inShortcut || fly.Emergence?.Active == true || brain.HasImmediateDanger)
             return false;

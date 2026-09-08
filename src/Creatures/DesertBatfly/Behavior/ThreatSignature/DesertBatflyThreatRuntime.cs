@@ -512,7 +512,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardCenter = explosion.pos;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 220);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute explosion");
+            DesertBatflySocialLife.CancelForPriority(bat, "acute explosion");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, explosion.pos, false, false);
 
@@ -533,7 +533,7 @@ internal static class DesertBatflyThreatRuntime
             explosion.killTagHolder,
             explosion.pos,
             Mathf.Max(0.62f, alarmIntensity),
-            "Task11 acute explosion -> Task12 AlarmFlutter at real explosion center");
+            "acute explosion -> AlarmFlutter at real explosion center");
     }
 
     private static void BroadcastStartle(
@@ -562,7 +562,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardCenter = position;
             state.HazardTimer = Mathf.Max(state.HazardTimer, 110);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute startle");
+            DesertBatflySocialLife.CancelForPriority(bat, "acute startle");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
 
@@ -576,7 +576,7 @@ internal static class DesertBatflyThreatRuntime
 
         DB_SignalRuntime.EmitAcuteAlarm(
             room, player, position, 0.82f,
-            "Task11 firecracker/startle -> Task12 AlarmFlutter at real startle center");
+            "firecracker/startle -> AlarmFlutter at real startle center");
     }
 
     private static void BroadcastMassCasualty(Room room, Player player, Vector2 position)
@@ -593,14 +593,14 @@ internal static class DesertBatflyThreatRuntime
             RuntimeState state = StateFor(bat);
             state.AcuteMassCasualtyTimer = Mathf.Max(state.AcuteMassCasualtyTimer, 300);
             state.AcuteInstigator = player;
-            DesertBatflySocialLife.CancelForPriority(bat, "Task11 acute mass casualty");
+            DesertBatflySocialLife.CancelForPriority(bat, "acute mass casualty");
             if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
         }
 
         DB_SignalRuntime.EmitAcuteAlarm(
             room, player, position, 0.96f,
-            "Task11 mass casualty -> high urgency Task12 AlarmFlutter");
+            "mass casualty -> high urgency AlarmFlutter");
     }
 
     private static void BroadcastWitnessEvidence(
@@ -733,7 +733,7 @@ internal static class DesertBatflyThreatRuntime
         {
             // Real trajectory is a current-frame Arbiter fact. Do not pre-promote it into
             // DesertAI Escape here or ImmediateDanger would starve ProjectileEvade.
-            DesertBatflySocialLife.CancelForPriority(bat, "Task11 incoming projectile");
+            DesertBatflySocialLife.CancelForPriority(bat, "incoming projectile");
             state.ModifierReason = "real incoming projectile queued for R3 arbitration";
         }
     }
@@ -762,7 +762,7 @@ internal static class DesertBatflyThreatRuntime
 
         float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
         if (distance < Mathf.Lerp(170f, 260f, heldRisk))
-            DesertBatflySocialLife.CancelForPriority(bat, "Task11 learned held-item caution");
+            DesertBatflySocialLife.CancelForPriority(bat, "learned held-item caution");
 
         if (heldRisk >= 0.72f && distance < 155f &&
             !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) &&
@@ -878,7 +878,7 @@ internal static class DesertBatflyThreatRuntime
             return;
 
         state.PursuitDisengageExtended = true;
-        DesertBatflySocialLife.CancelForPriority(bat, "Task11 learned pursuit disengage");
+        DesertBatflySocialLife.CancelForPriority(bat, "learned pursuit disengage");
         bat.DesertAI.Threatened(player, false);
         state.ModifierReason = "learned pursuer: extended disengage";
     }
