@@ -42,11 +42,11 @@ internal sealed class DB_RestraintRuntime
         grasp = playerGrasp;
         if (!newSession) return false;
 
-        holdTicks = 0;
-        pulseTicks = NextPulseInterval();
-        pulseSerial = 0;
-        escapePressure = 0f;
         holdSerial++;
+        holdTicks = 0;
+        pulseSerial = 0;
+        pulseTicks = NextPulseInterval();
+        escapePressure = 0f;
         PrepareThreshold();
         bat.SandSpit.BeginPlayerHold();
         return true;
@@ -71,8 +71,8 @@ internal sealed class DB_RestraintRuntime
         // struggle rather than being bypassed by an unrelated escape timer.
         if (!bat.Consious || bat.stun > 0 || bat.inShortcut) return;
         if (--pulseTicks > 0) return;
-        pulseTicks = NextPulseInterval();
         pulseSerial++;
+        pulseTicks = NextPulseInterval();
 
         float capability = Mathf.Clamp01(bat.Injury.PhysicalCapability);
         float shockScale = Mathf.Lerp(1f, 0.48f, bat.Injury.PostStunShock);
@@ -96,8 +96,9 @@ internal sealed class DB_RestraintRuntime
             DB_Tuning.GrabEscapeBurstChanceMax,
             pressureT * pressureT) * Mathf.Lerp(0.78f, 1.22f, drive);
 
-        if (escapePressure >= escapeThreshold || Stable01(0x2D51 + pulseSerial * 43) < burstChance)
-            Release(DB_GrabEscapeCause.SelfStruggle, null, 0f);
+        int burstSalt = 0x2D51 + pulseSerial * 43 + holdSerial * 131;
+        if (escapePressure >= escapeThreshold || Stable01(burstSalt) < burstChance)
+            Release(DB_GrabEscapeCause.SelfStruggle, 0f);
     }
 
     internal bool RegisterRescueImpact(DB_Creature rescuer, Player struckHolder, float closingSpeed)
@@ -119,7 +120,7 @@ internal sealed class DB_RestraintRuntime
         bool forceRelease = closingSpeed >= DB_Tuning.RescueStrongImpactSpeed &&
                             rescuer.Personality.RescueDrive >= DB_Tuning.RescueStrongImpactDrive;
         if (!forceRelease && escapePressure < escapeThreshold) return false;
-        return Release(DB_GrabEscapeCause.RescueImpact, rescuer, closingSpeed);
+        return Release(DB_GrabEscapeCause.RescueImpact, closingSpeed);
     }
 
     internal void ClearTransient()
@@ -133,7 +134,7 @@ internal sealed class DB_RestraintRuntime
         bat.SandSpit.ClearTransient();
     }
 
-    private bool Release(DB_GrabEscapeCause cause, DB_Creature rescuer, float impactSpeed)
+    private bool Release(DB_GrabEscapeCause cause, float impactSpeed)
     {
         if (!IsCurrentGrasp()) return false;
 
@@ -151,11 +152,13 @@ internal sealed class DB_RestraintRuntime
         escapePressure = 0f;
         bat.SandSpit.EndPlayerHold();
 
+        // IsCurrentGrasp() was true immediately above, so this exact slot must still own the
+        // captured bat. Never call LoseAllGrasps and never release the player's other hand.
         if (graspIndex >= 0 && graspIndex < releasedBy.grasps.Length &&
             ReferenceEquals(releasedBy.grasps[graspIndex], releasedGrasp))
             releasedBy.ReleaseGrasp(graspIndex);
-        else if (!releasedGrasp.discontinued)
-            releasedGrasp.Release();
+        else
+            return false;
 
         releasedBy.noPickUpOnRelease = Mathf.Max(
             releasedBy.noPickUpOnRelease,
