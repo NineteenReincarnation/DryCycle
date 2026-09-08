@@ -16,6 +16,10 @@ jobs:
           set -uo pipefail
           echo '=== DryCycle.Creatures.DB_Creature ==='
           grep -RIn --include='*.cs' -F 'DryCycle.Creatures.DB_Creature' . || true
+          echo '=== using DryCycle.Creatures ==='
+          grep -RIn --include='*.cs' -E '^using[[:space:]]+DryCycle\.Creatures[[:space:]]*;' . || true
+          echo '=== DB_Creature outside DesertBatfly production ==='
+          grep -RIn --include='*.cs' -F 'DB_Creature' src tests | grep -v 'src/Creatures/DesertBatfly/' || true
           echo '=== HasSevereWingInjury ==='
           grep -RIn --include='*.cs' -F 'HasSevereWingInjury' . || true
           echo '=== suspect spot declarations ==='
