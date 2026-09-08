@@ -49,7 +49,7 @@ internal readonly struct DB_ThreatTacticalProfile
 }
 
 /// <summary>
-/// Shared Task 11 tactical math. It is deliberately read-only with respect to persistent
+/// Shared threat tactical math. It is deliberately read-only with respect to persistent
 /// memory: observing a held item changes only the current tactical profile and never trains
 /// Threat Signature Memory. This class changes goals/probabilities only; it never owns Fly
 /// physics and never writes BodyChunk.vel.
