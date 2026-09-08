@@ -1,30 +1,64 @@
-name: Post Task14 Compile Diagnose
+name: Post Task14 Compile Fix
 on:
   push:
     branches:
       - diag/post-task14-compile
 permissions:
-  contents: read
+  contents: write
 jobs:
-  diagnose:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Locate stale semantic references
+      - name: Apply known semantic compile fixes
         shell: bash
         run: |
-          set -uo pipefail
-          echo '=== DryCycle.Creatures.DB_Creature ==='
-          grep -RIn --include='*.cs' -F 'DryCycle.Creatures.DB_Creature' . || true
-          echo '=== using DryCycle.Creatures ==='
-          grep -RIn --include='*.cs' -E '^using[[:space:]]+DryCycle\.Creatures[[:space:]]*;' . || true
-          echo '=== DB_Creature outside DesertBatfly production ==='
-          grep -RIn --include='*.cs' -F 'DB_Creature' src tests | grep -v 'src/Creatures/DesertBatfly/' || true
-          echo '=== HasSevereWingInjury ==='
-          grep -RIn --include='*.cs' -F 'HasSevereWingInjury' . || true
-          echo '=== suspect spot declarations ==='
-          grep -RIn --include='*.cs' -E 'Vector2[[:space:]]+spot;|out[[:space:]]+Vector2[[:space:]]+spot' src || true
-          echo '=== suspect target declarations ==='
-          grep -RIn --include='*.cs' -E 'Vector2[[:space:]]+target;|out[[:space:]]+[^,;)]*[[:space:]]+target' src || true
-          echo '=== suspect victim pattern vars ==='
-          grep -RIn --include='*.cs' -E 'is[[:space:]]+DB_Creature[[:space:]]+victim|out[[:space:]]+DB_Creature[[:space:]]+victim' src || true
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=None):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              found = text.count(old)
+              if found == 0:
+                  raise SystemExit(f'missing expected text in {path}: {old!r}')
+              if count is not None and found != count:
+                  raise SystemExit(f'unexpected occurrence count in {path}: {old!r}: {found} != {count}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+              print(f'{path}: replaced {found} occurrence(s)')
+
+          social = 'src/Creatures/DesertBatfly/Behavior/Social/DB_SocialRuntime.cs'
+          replace(social, '        Vector2 spot;\n', '        Vector2 spot = default;\n', 1)
+          replace(social, '        Vector2 target;\n', '        Vector2 target = default;\n', 1)
+
+          eventhub = 'src/Creatures/DesertBatfly/Core/Runtime/DB_EventHub.cs'
+          replace(
+              eventhub,
+              '        PhysicalObject afterOwner = self.attached?.owner;\n        bool enteredCapture =\n            afterState == LizardTongue.State.AttachedInSmallObject &&\n            afterOwner is DB_Creature victim && !victim.dead &&\n',
+              '        PhysicalObject afterOwner = self.attached?.owner;\n        DB_Creature victim = afterOwner as DB_Creature;\n        bool enteredCapture =\n            afterState == LizardTongue.State.AttachedInSmallObject &&\n            victim != null && !victim.dead &&\n',
+              1)
+
+          environment = 'src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRuntime.cs'
+          replace(environment, 'bat.Injury.HasSevereWingInjury', 'bat.Injury.IsSeverelyInjured', 1)
+
+          capture = 'src/Debug/AIDebugger/Core/AIDebugCapture.cs'
+          replace(capture, 'Creatures.DB_Creature.DB_Creature', 'Creatures.DesertBatfly.DB_Creature', 2)
+          replace(capture, 'Creatures.DB_Creature.DB_Tuning', 'Creatures.DesertBatfly.DB_Tuning', 1)
+          PY
+
+          grep -RIn --include='*.cs' -F 'HasSevereWingInjury' src && exit 1 || true
+          grep -RIn --include='*.cs' -F 'Creatures.DB_Creature.' src && exit 1 || true
+          grep -n -F 'Vector2 spot;' src/Creatures/DesertBatfly/Behavior/Social/DB_SocialRuntime.cs && exit 1 || true
+          grep -n -F 'Vector2 target;' src/Creatures/DesertBatfly/Behavior/Social/DB_SocialRuntime.cs && exit 1 || true
+          grep -n -F 'afterOwner is DB_Creature victim' src/Creatures/DesertBatfly/Core/Runtime/DB_EventHub.cs && exit 1 || true
+
+          git rm .github/workflows/_tmp-post-task14-compile-diagnose.yml
+          git config user.name 'Orrhisk'
+          git config user.email '164201860+NineteenReincarnation@users.noreply.github.com'
+          git add src/Creatures/DesertBatfly/Behavior/Social/DB_SocialRuntime.cs \
+                  src/Creatures/DesertBatfly/Core/Runtime/DB_EventHub.cs \
+                  src/Creatures/DesertBatfly/World/Environment/DB_EnvironmentRuntime.cs \
+                  src/Debug/AIDebugger/Core/AIDebugCapture.cs
+          git commit -m 'fix: resolve post-Task14 semantic compile errors'
+          git push origin HEAD:diag/post-task14-compile
