@@ -363,9 +363,9 @@ internal static class DB_FrameContextRuntime
             hasTravel && travelDebug.Suspended,
             travelReason);
 
-        bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
-        DesertBatflyIntimidation.TryGetVengeanceTarget(bat, out Creature vengeanceTarget);
-        bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
+        bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
+        DB_FearRuntime.TryGetVengeanceTarget(bat, out Creature vengeanceTarget);
+        bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
 
         float trauma = Mathf.Max(
             persistent.PlayerTraumaTicks > 0 ? persistent.PlayerTraumaStrength : 0f,

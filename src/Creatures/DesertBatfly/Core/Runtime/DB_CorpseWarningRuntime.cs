@@ -54,7 +54,7 @@ internal static class DB_CorpseWarningRuntime
     {
         Type type = item?.GetType();
         return type != null &&
-               type.DeclaringType == typeof(DesertBatflyIntimidation) &&
+               type.DeclaringType == typeof(DB_FearRuntime) &&
                type.Name == "CorpseWarning";
     }
 }

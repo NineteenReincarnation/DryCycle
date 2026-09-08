@@ -322,7 +322,7 @@ internal sealed class DB_CombatRuntime
     private Player FindSocialHarassTarget()
     {
         if (fly.room == null || fly.Injury.BlocksCombat ||
-            DesertBatflyIntimidation.HasActiveFearSuppression(fly) ||
+            DB_FearRuntime.HasActiveFearSuppression(fly) ||
             !DB_SignalRuntime.TryGetInfluence(fly, out DB_SignalInfluence influence) ||
             influence.HarassInterest < 0.20f)
             return null;

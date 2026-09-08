@@ -94,7 +94,7 @@ internal sealed class DB_Injury
         float rightGain = State.RightWingInjury - oldRight;
         ApplyShock(Mathf.Clamp(loss * 0.8f + 0.08f, 0.08f, 0.65f));
         float traumaGain = Mathf.Clamp(loss * 0.35f, 0.02f, 0.25f);
-        DesertBatflyIntimidation.AddTrauma(bat, attacker, traumaGain);
+        DB_FearRuntime.AddTrauma(bat, attacker, traumaGain);
         LastInjurySource = source is Weapon weapon ? weapon.GetType().Name : source?.GetType().Name ?? attacker?.GetType().Name ?? "environment";
         LastInjuryDamageType = type?.value ?? "unknown";
         LastInjuryTick = bat.room?.game?.clock ?? MotionTick;
@@ -140,7 +140,7 @@ internal sealed class DB_Injury
         capturePending = false;
         capturePredator = null;
         ApplyShock(0.38f);
-        DesertBatflyIntimidation.AddTrauma(bat, predator, 0.16f);
+        DB_FearRuntime.AddTrauma(bat, predator, 0.16f);
         impulseGrace = 3;
         if (AIDebugTrace.IsWatched(bat.abstractCreature))
             AIDebugTrace.Record(bat.abstractCreature, AIDebugEventCategory.State, "PeachTongueSurvivor", PostStunShock,
@@ -166,7 +166,7 @@ internal sealed class DB_Injury
         recoverySample = 0;
         if (bat.room == null || !bat.Consious || bat.inShortcut || !DB_SocialBond.CanRespond(bat) ||
             bat.DesertAI.HasImmediateDanger || bat.DesertAI.FormalAttack ||
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) || DesertBatflyIntimidation.HasActiveFearSuppression(bat)) return;
+            DB_FearRuntime.IsExtremeVengeanceActive(bat) || DB_FearRuntime.HasActiveFearSuppression(bat)) return;
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain;
         Recover(roost ? 0.004f : 0.0005f);
     }

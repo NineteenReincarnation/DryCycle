@@ -18,7 +18,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Persistent trauma is kept in DB_State, not this weak table. This class owns only
 /// realized runtime steering and fixed-size fear state; there is no per-frame observer graph.
 /// </summary>
-internal static class DesertBatflyIntimidation
+internal static class DB_FearRuntime
 {
     private enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
     private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
@@ -698,7 +698,7 @@ internal static class DesertBatflyIntimidation
         DryCycle.Debugging.AI.AIDebugTrace.Record(
             bat.abstractCreature,
             DryCycle.Debugging.AI.AIDebugEventCategory.Social,
-            "Task12LegacyIndirectFearSuppressed",
+            "LegacyIndirectFearSuppressed",
             $"tier={tier}",
             "Secondary/Chain fear no longer applies Trauma/Fear directly; Alarm perception owns indirect propagation");
     }

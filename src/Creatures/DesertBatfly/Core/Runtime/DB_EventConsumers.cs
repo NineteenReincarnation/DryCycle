@@ -37,13 +37,13 @@ internal static class DB_EventConsumers
         DesertBatflySocialLife.CancelForPriority(victim, "semantic capture event");
 
         if (capture.Captor is Lizard predator &&
-            DesertBatflyIntimidation.IsSupportedLethalThreat(predator))
+            DB_FearRuntime.IsSupportedLethalThreat(predator))
         {
             // Preserve the historical subscriber order from before R5-B4: direct
             // Intimidation/fear/vengeance processing commits first. Capture Distress/Alarm
             // is published below, so it cannot retroactively boost the initial vengeance
             // candidate score for the same capture event.
-            DesertBatflyIntimidation.BroadcastPredatorCapture(
+            DB_FearRuntime.BroadcastPredatorCapture(
                 victim,
                 predator,
                 capture.Tongue);
@@ -100,7 +100,7 @@ internal static class DB_EventConsumers
         Creature killer = mortality.Killer;
         if (killer is Player playerKiller)
         {
-            DesertBatflyIntimidation.BroadcastPlayerKill(
+            DB_FearRuntime.BroadcastPlayerKill(
                 victim,
                 playerKiller,
                 mortality.Position,
@@ -109,9 +109,9 @@ internal static class DB_EventConsumers
                 mortality.RevengeFailed);
         }
         else if (killer is Lizard lizardKiller &&
-                 DesertBatflyIntimidation.IsSupportedLethalThreat(lizardKiller))
+                 DB_FearRuntime.IsSupportedLethalThreat(lizardKiller))
         {
-            DesertBatflyIntimidation.BroadcastPredatorKill(
+            DB_FearRuntime.BroadcastPredatorKill(
                 victim,
                 lizardKiller,
                 mortality.Position,
@@ -136,6 +136,6 @@ internal static class DB_EventConsumers
             }
         }
 
-        DesertBatflyIntimidation.Forget(victim);
+        DB_FearRuntime.Forget(victim);
     }
 }

@@ -513,7 +513,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardTimer = Mathf.Max(state.HazardTimer, 220);
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "acute explosion");
-            if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+            if (!DB_FearRuntime.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, explosion.pos, false, false);
 
             if (player != null && evidence.Any &&
@@ -563,7 +563,7 @@ internal static class DesertBatflyThreatRuntime
             state.HazardTimer = Mathf.Max(state.HazardTimer, 110);
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "acute startle");
-            if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+            if (!DB_FearRuntime.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
 
             if (player != null && DB_VisibilityPolicy.CanObserve(
@@ -594,7 +594,7 @@ internal static class DesertBatflyThreatRuntime
             state.AcuteMassCasualtyTimer = Mathf.Max(state.AcuteMassCasualtyTimer, 300);
             state.AcuteInstigator = player;
             DesertBatflySocialLife.CancelForPriority(bat, "acute mass casualty");
-            if (!DesertBatflyIntimidation.IsExtremeVengeanceActive(bat))
+            if (!DB_FearRuntime.IsExtremeVengeanceActive(bat))
                 bat.DesertAI.ThreatenedAt(player, position, false, false);
         }
 
@@ -765,7 +765,7 @@ internal static class DesertBatflyThreatRuntime
             DesertBatflySocialLife.CancelForPriority(bat, "learned held-item caution");
 
         if (heldRisk >= 0.72f && distance < 155f &&
-            !DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) &&
+            !DB_FearRuntime.IsExtremeVengeanceActive(bat) &&
             bat.DesertAI.Target == null)
         {
             // Learned Threat memory may suppress/reshape aggression, but it never creates a
@@ -1020,7 +1020,7 @@ internal static class DesertBatflyThreatRuntime
         if (currentOffset.sqrMagnitude < 4f)
             currentOffset = Vector2.right * StableSide(bat, slot);
 
-        bool extremeVengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
+        bool extremeVengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
         switch (bat.DesertAI.Mode)
         {
             case DesertBatflyAI.Activity.Observe:

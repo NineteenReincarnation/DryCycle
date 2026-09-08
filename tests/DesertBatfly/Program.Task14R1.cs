@@ -110,7 +110,7 @@ internal static partial class Program
         Type creature = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type intimidation = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+            "DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(creature.GetField("recentLethalDamager", Flags) == null &&
               creature.GetField("recentLethalDamageTicks", Flags) == null &&
               creature.GetField("recentLethalThreatScale", Flags) == null,

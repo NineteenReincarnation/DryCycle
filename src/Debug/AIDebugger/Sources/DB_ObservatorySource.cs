@@ -203,10 +203,10 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
     {
         DB_Injury injury = bat.Injury;
         bool restrained = RestrainedByNonFly(bat);
-        bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
+        bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
         bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
-        bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
+        bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain ||
                      bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost;
 
@@ -229,8 +229,8 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             "DesertBatflyAI.HasImmediateDanger", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.fear",
             fear ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            fear ? "DesertBatflyIntimidation fear gate" : null,
-            "DesertBatflyIntimidation.HasActiveFearSuppression", 1));
+            fear ? "DB_FearRuntime fear gate" : null,
+            "DB_FearRuntime.HasActiveFearSuppression", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.trauma",
             traumatized ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             traumatized ? $"active trauma={trauma:0.000}" : null,
@@ -268,7 +268,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance",
             vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             vengeance ? "Extreme Vengeance active" : null,
-            "DesertBatflyIntimidation.IsExtremeVengeanceActive", 1));
+            "DB_FearRuntime.IsExtremeVengeanceActive", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.roost",
             roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             roost ? "FlyAI Chain / DesertBatflyAI Roost" : null,
@@ -281,7 +281,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vengeance_injury",
             injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
             injury.BlocksCombat ? injury.CombatBlockReason : null,
-            "DesertBatflyIntimidation.Update injury gate", 1));
+            "DB_FearRuntime.Update injury gate", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.custom_ai", AIDebugDecisionState.Active,
             bat.DesertAI.Mode.ToString(), "DesertBatflyAI.Mode"));

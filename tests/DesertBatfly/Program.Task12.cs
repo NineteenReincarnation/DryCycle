@@ -33,7 +33,7 @@ internal static partial class Program
         Type graphics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Graphics", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
-        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type eventConsumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
 

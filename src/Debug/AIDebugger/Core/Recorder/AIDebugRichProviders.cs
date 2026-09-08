@@ -168,7 +168,7 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.restrained","Creature.grabbedBy",1),
                 D("decision.survival","DesertBatfly survival"),
                 D("decision.danger","DesertBatflyAI.HasImmediateDanger",1),
-                D("decision.fear","DesertBatflyIntimidation.HasActiveFearSuppression",1),
+                D("decision.fear","DB_FearRuntime.HasActiveFearSuppression",1),
                 D("decision.trauma","DB_State Trauma",1),
                 D("decision.physical_condition","DB_Injury.BlocksCombat"),
                 D("field.health","DB_State.health",1),
@@ -180,10 +180,10 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.special","DesertBatfly special state"),
                 D("decision.injury","DB_Injury.BlocksCombat",1),
                 D("decision.grief","DB_State.GriefStrength",1),
-                D("decision.vengeance","DesertBatflyIntimidation.IsExtremeVengeanceActive",1),
+                D("decision.vengeance","DB_FearRuntime.IsExtremeVengeanceActive",1),
                 D("decision.roost","FlyAI.behavior / DesertBatflyAI.Mode",1),
                 D("decision.retaliation_injury","DB_Injury.BlocksCombat",1),
-                D("decision.vengeance_injury","DesertBatflyIntimidation.Update injury gate",1),
+                D("decision.vengeance_injury","DB_FearRuntime.Update injury gate",1),
                 D("decision.custom_ai","DesertBatflyAI.Mode"),
                 D("decision.vanilla_ai","FlyAI.behavior"),
                 D("decision.motor","FlyAI.localGoal")
@@ -282,10 +282,10 @@ internal static class AIDebugRecorderRichProviderRegistry
             }
 
             bool restrained = RestrainedByNonFly(bat);
-            bool fear = DesertBatflyIntimidation.HasActiveFearSuppression(bat);
+            bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
             float trauma = ActiveTrauma(bat);
             bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
-            bool vengeance = DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
+            bool vengeance = DB_FearRuntime.IsExtremeVengeanceActive(bat);
             bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain || ai.Mode == DesertBatflyAI.Activity.Roost;
 
             decisions.Set(0, AIDebugDecisionState.Active);

@@ -109,7 +109,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         // Injury/Trauma. They are deliberately excluded from lethal attribution because
         // a rock impact itself is never allowed to perform the live -> dead transition.
         bool supportedLethalThreat = !rockHit && damage > 0f &&
-            DesertBatflyIntimidation.IsSupportedLethalThreat(attacker);
+            DB_FearRuntime.IsSupportedLethalThreat(attacker);
 
         // Preserve an intact Fly chain until Die() has captured its witnesses. A hit
         // that does not kill receives the ordinary Threatened transition afterwards.
@@ -215,7 +215,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         injury?.ClearTransient();
         SandSpit.ClearTransient();
         DesertAI?.CancelAttack();
-        DesertBatflyIntimidation.Forget(this);
+        DB_FearRuntime.Forget(this);
         base.Destroy();
     }
 }

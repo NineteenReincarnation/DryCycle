@@ -400,8 +400,8 @@ internal static class DesertBatflySocialLife
                 DesertBatflyAI.Activity.Attach or DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere)
             return "formal attack / harassment";
         if (bat.DesertState.Cooldown > 0) return "post-attack cooldown";
-        if (DesertBatflyIntimidation.IsExtremeVengeanceActive(bat) ||
-            DesertBatflyIntimidation.HasActiveFearSuppression(bat))
+        if (DB_FearRuntime.IsExtremeVengeanceActive(bat) ||
+            DB_FearRuntime.HasActiveFearSuppression(bat))
             return "fear / vengeance suppression";
         if (ActiveTrauma(bat) >= DB_Tuning.TraumaSevere) return "severe trauma";
         if (bat.AI.behavior != FlyAI.Behavior.Idle && bat.AI.behavior != FlyAI.Behavior.Swarm)

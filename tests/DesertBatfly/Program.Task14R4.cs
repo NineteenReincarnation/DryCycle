@@ -16,7 +16,7 @@ internal static partial class Program
         Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type survival = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyEnvironmentalSurvivalBridge", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
-        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);

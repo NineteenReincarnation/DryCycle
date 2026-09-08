@@ -43,14 +43,14 @@ internal sealed class DB_Runtime
         if (bat.DesertState.Cooldown > 0) bat.DesertState.Cooldown--;
         bat.DesertAI.TickMemory();
         if (!bat.dead)
-            DesertBatflyIntimidation.UpdateState(bat);
+            DB_FearRuntime.UpdateState(bat);
 
         return previousFlightVelocity;
     }
 
     internal void AfterVanillaUpdate(bool eu, Vector2 previousFlightVelocity)
     {
-        bool extremeVengeance = !bat.dead && DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
+        bool extremeVengeance = !bat.dead && DB_FearRuntime.IsExtremeVengeanceActive(bat);
         if (extremeVengeance) bat.DesertAI.CancelAttack();
 
         if (bat.room == null) return;

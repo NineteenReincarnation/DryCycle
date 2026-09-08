@@ -220,10 +220,10 @@ internal static class DB_EventHub
         int clock = Clock(victim);
         Vector2 deathPosition = victim.mainBodyChunk?.pos ?? Vector2.zero;
         DesertBatfly[] chainWitnesses = !wasDead
-            ? DesertBatflyIntimidation.SnapshotChainWitnesses(victim)
+            ? DB_FearRuntime.SnapshotChainWitnesses(victim)
             : Array.Empty<DesertBatfly>();
         bool revengeFailed = !wasDead &&
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(victim);
+            DB_FearRuntime.IsExtremeVengeanceActive(victim);
 
         ResolveMortalityAttribution(
             state,

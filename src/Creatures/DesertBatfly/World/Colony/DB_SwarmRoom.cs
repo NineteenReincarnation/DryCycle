@@ -135,7 +135,7 @@ internal readonly struct DB_FlockSnapshot
             center += (bat.mainBodyChunk.pos - center) / count;
             velocity += (bat.mainBodyChunk.vel - velocity) / count;
 
-            if (bat.DesertAI.HasImmediateDanger || DesertBatflyIntimidation.HasActiveFearSuppression(bat))
+            if (bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat))
                 panic++;
             if (bat.AI?.behavior == FlyAI.Behavior.Chain ||
                 bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)

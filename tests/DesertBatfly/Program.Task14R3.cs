@@ -108,7 +108,7 @@ internal static partial class Program
         Check(travel.GetMethod("CanOwnRealizedFrame", Flags) != null,
             "Task14 R3 Travel exposes a non-destructive proposal eligibility query");
 
-        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(intimidation.GetMethod("TryGetVengeanceTarget", Flags) != null,
             "Task14 R3 Vengeance target is readable through an explicit API instead of sibling reflection");
 

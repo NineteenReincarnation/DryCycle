@@ -19,7 +19,7 @@ internal static class DB_RainWorldHooks
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();
-        DesertBatflyIntimidation.Reset();
+        DB_FearRuntime.Reset();
         DB_RefugePolicy.Reset();
         DesertBatflySocialLife.Reset();
         DB_SignalRuntime.Reset();
@@ -82,7 +82,7 @@ internal static class DB_RainWorldHooks
         DB_FrameContextRuntime.Reset();
         DB_BehaviorArbiter.Reset();
         DB_FlightMotor.Reset();
-        DesertBatflyIntimidation.Reset();
+        DB_FearRuntime.Reset();
         DB_WarpCompatibility.Disable();
         DB_Sandbox.Disable();
         DB_SwarmRoom.Reset();

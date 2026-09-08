@@ -61,7 +61,7 @@ internal static class DB_SocialBond
         if (!Available(source) || !source.Consious ||
             state.PlayerTraumaStrength >= DB_Tuning.TraumaSevere ||
             state.PredatorTraumaStrength >= DB_Tuning.TraumaSevere ||
-            DesertBatflyIntimidation.IsExtremeVengeanceActive(source)) return 1f;
+            DB_FearRuntime.IsExtremeVengeanceActive(source)) return 1f;
         float scale = state.GriefRoostScale;
         if (TryResolveBondPartner(source, out var partner) && partner.AI?.behavior == FlyAI.Behavior.Chain &&
             Vector2.Distance(source.mainBodyChunk.pos, partner.mainBodyChunk.pos) < 100f &&
@@ -114,7 +114,7 @@ internal static class DB_SocialBond
         if (victim == null || !victim.dead || !IsDirectDeathWitness(observer, victim, killer)) return;
         float gain = observer.DesertState.BeginGrief(victim.abstractCreature.ID, killer?.abstractCreature?.ID);
         if (gain <= 0f) return;
-        DesertBatflyIntimidation.AddTrauma(observer, killer, gain);
+        DB_FearRuntime.AddTrauma(observer, killer, gain);
         observer.DesertAI.BeginGriefResponse();
     }
 

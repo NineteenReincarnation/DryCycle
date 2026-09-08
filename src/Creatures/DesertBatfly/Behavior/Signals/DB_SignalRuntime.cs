@@ -412,9 +412,9 @@ internal static class DB_SignalRuntime
         if (state.LastNeutralEmitTick != int.MinValue && clock - state.LastNeutralEmitTick < 18)
             return;
 
-        if (DesertBatflyIntimidation.IsVengeanceAvenger(bat))
+        if (DB_FearRuntime.IsVengeanceAvenger(bat))
         {
-            DesertBatflyIntimidation.TryGetVengeanceTarget(bat, out Creature target);
+            DB_FearRuntime.TryGetVengeanceTarget(bat, out Creature target);
             EmitNeutral(
                 bat,
                 DB_SignalKind.RallySignal,
@@ -659,7 +659,7 @@ internal static class DB_SignalRuntime
              threat.AcuteShockTimer > 0))
             return false;
 
-        return !DesertBatflyIntimidation.HasActiveFearSuppression(bat);
+        return !DB_FearRuntime.HasActiveFearSuppression(bat);
     }
 
     private static void TickInfluence(ReceiverState state)

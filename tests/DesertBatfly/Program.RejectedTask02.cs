@@ -19,7 +19,7 @@ internal static partial class Program
         Check(ai.GetField("Roles", Flags) == null && ai.GetProperty("Roles", Flags) == null,
             "DesertBatflyAI has no rejected Roles API");
 
-        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyIntimidation", true);
+        Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(intimidation.GetMethod("BlocksSocialRoles", Flags) == null,
             "fear/intimidation no longer exposes BlocksSocialRoles");
         Check(intimidation.GetMethod("HasActiveFearSuppression", Flags) != null,
