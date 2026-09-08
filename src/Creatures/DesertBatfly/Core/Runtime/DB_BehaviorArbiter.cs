@@ -375,15 +375,19 @@ internal static class DB_BehaviorArbiter
                 commitment: 0.90f));
         }
 
-        if (ai != null && (ai.FormalAttack || IsCombatMode(ai.Mode)))
+        bool rescue = bat?.Rescue?.Active == true;
+        if (ai != null && (rescue || ai.FormalAttack || IsCombatMode(ai.Mode)))
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.Combat,
                 DB_BehaviorKind.Combat,
-                "existing formal combat / retaliation state",
-                ai.Target?.mainBodyChunk != null ? ai.Target.mainBodyChunk.pos : frame.CurrentGoal,
-                nominalSpeed: 9f,
+                rescue ? "companion rescue response" : "existing formal combat / retaliation state",
+                rescue ? bat.Rescue.Goal :
+                    ai.Target?.mainBodyChunk != null ? ai.Target.mainBodyChunk.pos : frame.CurrentGoal,
+                nominalSpeed: rescue
+                    ? Mathf.Lerp(DB_Tuning.RescueSpeedMin, DB_Tuning.RescueSpeedMax, bat.Rescue.Motivation)
+                    : 9f,
                 suppressSocial: true,
-                commitment: ai.FormalAttack ? 0.90f : 0.70f));
+                commitment: rescue ? bat.Rescue.Commitment : ai.FormalAttack ? 0.90f : 0.70f));
 
         if (frame.Roost.Active)
             proposals.Add(DB_BehaviorProposal.Create(
