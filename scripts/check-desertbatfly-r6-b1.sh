@@ -60,7 +60,7 @@ grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Behavior/Per
 ! grep -n -E '\bdanger[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
 ! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
 ! grep -n '\.localGoal[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/DesertBatflyAI.cs
-! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
+! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 
 echo 'R6 source retention audit passed.'

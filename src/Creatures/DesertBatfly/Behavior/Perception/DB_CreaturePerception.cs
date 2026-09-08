@@ -10,14 +10,14 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_CreaturePerception
 {
-    private readonly DesertBatflyAI brain;
+    private readonly DB_AI brain;
     private readonly DesertBatfly fly;
     private int scan, pursuit;
 
     internal Creature Danger { get; private set; }
     internal bool IsScanFrame => scan == 0;
 
-    internal DB_CreaturePerception(DesertBatflyAI brain, DesertBatfly fly)
+    internal DB_CreaturePerception(DB_AI brain, DesertBatfly fly)
     {
         this.brain = brain;
         this.fly = fly;

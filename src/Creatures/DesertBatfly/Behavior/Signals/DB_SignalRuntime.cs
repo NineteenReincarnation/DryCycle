@@ -429,7 +429,7 @@ internal static class DB_SignalRuntime
         }
 
         if (bat.AI?.behavior == FlyAI.Behavior.Chain || bat.movMode == Fly.MovementMode.Hang ||
-            bat.DesertAI?.Mode == DesertBatflyAI.Activity.Roost)
+            bat.DesertAI?.Mode == DB_AI.Activity.Roost)
         {
             EmitNeutral(
                 bat,
@@ -445,9 +445,9 @@ internal static class DB_SignalRuntime
         }
 
         if (bat.DesertAI?.Target is Player player && bat.DesertAI.Mode is
-            DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-            DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-            DesertBatflyAI.Activity.Dive)
+            DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+            DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
+            DB_AI.Activity.Dive)
         {
             EmitNeutral(
                 bat,
@@ -645,7 +645,7 @@ internal static class DB_SignalRuntime
     private static bool CanAcceptSafe(DesertBatfly bat)
     {
         if (!Available(bat) || !bat.Consious || bat.DesertAI == null) return false;
-        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape)
             return false;
         if (bat.Injury.IsSeverelyInjured || DB_TravelRuntime.HasIntent(bat.abstractCreature))
             return false;

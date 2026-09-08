@@ -184,7 +184,7 @@ internal static class DB_BehaviorArbiter
         List<DB_BehaviorProposal> proposals)
     {
         DesertBatfly bat = frame.Bat;
-        DesertBatflyAI ai = bat?.DesertAI;
+        DB_AI ai = bat?.DesertAI;
 
         if (frame.Dead || !frame.Conscious)
             proposals.Add(DB_BehaviorProposal.Create(
@@ -393,9 +393,9 @@ internal static class DB_BehaviorArbiter
             commitment: 0.10f));
     }
 
-    private static bool IsCombatMode(DesertBatflyAI.Activity mode) => mode is
-        DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-        DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-        DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
-        DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere;
+    private static bool IsCombatMode(DB_AI.Activity mode) => mode is
+        DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+        DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
+        DB_AI.Activity.Dive or DB_AI.Activity.Attach or
+        DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere;
 }

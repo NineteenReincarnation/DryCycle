@@ -17,7 +17,7 @@ internal static partial class Program
         Type socialLifeType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
         Type aiType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+            "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type hooksType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
 
@@ -74,7 +74,7 @@ internal static partial class Program
 
         MethodInfo aiUpdate = aiType.GetMethod("Update", Flags);
         Check(MethodCallsTask11(aiUpdate, tacticsType, "AdjustFakeDiveChance"),
-            "ordinary DesertBatflyAI attack selection actually consumes learned FakeDive weighting");
+            "ordinary DB_AI attack selection actually consumes learned FakeDive weighting");
 
         MethodInfo tryInjuryRecovery = aiType.GetMethod("TryInjuryRecovery", Flags);
         MethodInfo canHarass = aiType.GetMethod("CanHarass", Flags);

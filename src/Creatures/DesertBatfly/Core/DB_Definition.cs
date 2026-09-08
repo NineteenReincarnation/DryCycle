@@ -51,7 +51,7 @@ internal sealed class DB_Definition : CreatureDefinition
         // intensity is comparable to Watcher's own Peach->Frog relationship: enough
         // for PreyTracker/Hunt/tongue logic to engage without making a tiny flying
         // prey override every other useful target in the room. The reverse Afraid
-        // relationship also plugs directly into DesertBatflyAI's predator detection,
+        // relationship also plugs directly into DB_AI's predator detection,
         // so even nasty individuals flee instead of trying to harass their predator.
         if (ModManager.Watcher &&
             WatcherEnums.CreatureTemplateType.PeachLizard != null &&

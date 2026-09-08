@@ -10,7 +10,7 @@ internal static partial class Program
         Type owner = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorOwner", true);
         Type special = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SpecialPhysicsOwner", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
-        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type injury = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Injury", true);
         Type creature = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
         Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);

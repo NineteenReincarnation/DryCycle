@@ -27,7 +27,7 @@ internal static partial class Program
         Type threatTactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type environmentBehavior = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflySocialLife", true);
-        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatfly", true);
 
         foreach (string name in new[]
@@ -153,7 +153,7 @@ internal static partial class Program
               desertAI.GetMethod("ExecuteCombatOwned", Flags) != null &&
               desertAI.GetMethod("ExecuteRoostOwned", Flags) != null &&
               desertAI.GetMethod("ScanWeapons", Flags) == null,
-            "Task14 R3 DesertBatflyAI separates decision refresh from owner executors and removes duplicate weapon scan");
+            "Task14 R3 DB_AI separates decision refresh from owner executors and removes duplicate weapon scan");
         foreach (string methodName in new[]
                  { "ExecuteImmediateDangerOwned", "ExecuteFearOwned", "ExecuteCombatOwned", "ExecuteRoostOwned", "SteerOwned" })
             Check(MethodCallOffset(desertAI.GetMethod(methodName, Flags), arbiter, "IsPrimaryOwner") >= 0,
@@ -188,7 +188,7 @@ internal static partial class Program
             "Task14 R3 all ordinary locomotion domains enter through central owner resolution");
         Check(MethodCallOffset(updateAI, threatTactics, "TryApplyOrdinaryProjectileEvade") < 0 &&
               MethodCallOffset(updateAI, desertAI, "Update") < 0,
-            "Task14 R3 hook has no legacy projectile or monolithic DesertBatflyAI executor pipeline");
+            "Task14 R3 hook has no legacy projectile or monolithic DB_AI executor pipeline");
         MethodInfo executeNativeOwned = hooks.GetMethod("ExecuteNativeOwned", Flags);
         Check(executeNativeOwned != null && MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0,
             "Task14 R3 vanilla FlyAI.Update is itself restricted to an accepted NativeSpecial/Ordinary/Fallback owner");

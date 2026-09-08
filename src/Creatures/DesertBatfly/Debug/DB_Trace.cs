@@ -38,7 +38,7 @@ internal static class DB_Trace
             "FormalAttack", bat.DesertAI.FormalAttack, bat.DesertAI.Target == null
                 ? "no target" : AIDebugFormat.Creature(bat.DesertAI.Target));
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Perception,
-            "Target", AIDebugFormat.Creature(bat.DesertAI.Target), "DesertBatflyAI.Target");
+            "Target", AIDebugFormat.Creature(bat.DesertAI.Target), "DB_AI.Target");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
@@ -94,10 +94,10 @@ internal static class DB_Trace
         if (bat.inShortcut) return "Shortcut";
         if (RestrainedByNonFly(bat)) return "Restrained";
         if (bat.Emergence?.Active == true) return "Emergence";
-        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape)
             return "Danger";
         if (bat.Injury.BlocksCombat || bat.Injury.IsRecovering ||
-            bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
+            bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "Injury";
         if (hasTravel && !travel.Suspended) return "Task09Travel";
         if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
@@ -107,7 +107,7 @@ internal static class DB_Trace
         if (ActiveTrauma(bat) >= DB_Tuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
         if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";
-        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
+        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)
             return "Roost";
         return "None";
     }
@@ -140,7 +140,7 @@ internal static class DB_Trace
         if (hasSocial) return string.IsNullOrEmpty(social.DecisionReason)
             ? "neutral social interaction"
             : social.DecisionReason;
-        return "DesertBatflyAI state machine";
+        return "DB_AI state machine";
     }
 
     private static string SuppressionReason(
@@ -194,7 +194,7 @@ internal static class DB_Trace
             case "Roost": return "Roost / Chain";
             default:
                 if (hasSocial) return "Social / " + social.Mode;
-                return "DesertBatflyAI";
+                return "DB_AI";
         }
     }
 

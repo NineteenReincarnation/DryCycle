@@ -100,11 +100,11 @@ internal sealed class DB_SignalDebugSource : IAIDebugSource
 
     private static string ConsumerFor(DB_SignalKind kind) => kind switch
     {
-        DB_SignalKind.AlarmFlutter => "DesertBatflyAI danger / Task10 cancel",
+        DB_SignalKind.AlarmFlutter => "DB_AI danger / Task10 cancel",
         DB_SignalKind.DistressCall => "SocialBond + Intimidation rescue/support motivation",
         DB_SignalKind.RallySignal => "Intimidation supporter candidacy",
         DB_SignalKind.RoostCall => "Task10 RoostInvitation / ChainSocialization",
-        DB_SignalKind.HarassSignal => "DesertBatflyAI social harass target interest",
+        DB_SignalKind.HarassSignal => "DB_AI social harass target interest",
         DB_SignalKind.SafeSignal => "Signal signal concern recovery",
         _ => "None"
     };

@@ -9,9 +9,9 @@ namespace DryCycle.Debugging.AI;
 internal sealed class DB_ObservatorySource : IAIDebugSource
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);
-    private static readonly FieldInfo PursuitField = typeof(DesertBatflyAI).GetField("pursuit", PrivateInstance);
-    private static readonly FieldInfo EscapeFromField = typeof(DesertBatflyAI).GetField("escapeFrom", PrivateInstance);
+    private static readonly FieldInfo RetreatField = typeof(DB_AI).GetField("retreat", PrivateInstance);
+    private static readonly FieldInfo PursuitField = typeof(DB_AI).GetField("pursuit", PrivateInstance);
+    private static readonly FieldInfo EscapeFromField = typeof(DB_AI).GetField("escapeFrom", PrivateInstance);
 
     public int Priority => 1000;
     public bool CanInspect(AbstractCreature creature) => creature?.realizedCreature is DesertBatfly;
@@ -20,7 +20,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
     {
         if (creature?.realizedCreature is not DesertBatfly bat) return null;
 
-        DesertBatflyAI ai = bat.DesertAI;
+        DB_AI ai = bat.DesertAI;
         DB_State state = bat.DesertState;
         DB_Personality p = bat.Personality;
         DB_Injury injury = bat.Injury;
@@ -77,14 +77,14 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.aggressive", "DB_Personality.Aggressive", p.Aggressive));
 
         snapshot.Sections.Add(new AIDebugSection("section.ai")
-            .Add("field.mode", "DesertBatflyAI.Mode", ai.Mode)
-            .Add("field.target", "DesertBatflyAI.Target", AIDebugFormat.Creature(ai.Target))
-            .Add("field.formal_attack", "DesertBatflyAI.FormalAttack", ai.FormalAttack)
-            .Add("field.immediate_danger", "DesertBatflyAI.HasImmediateDanger", ai.HasImmediateDanger)
-            .Add("field.retreat", "DesertBatflyAI.retreat", Read<int>(RetreatField, ai))
+            .Add("field.mode", "DB_AI.Mode", ai.Mode)
+            .Add("field.target", "DB_AI.Target", AIDebugFormat.Creature(ai.Target))
+            .Add("field.formal_attack", "DB_AI.FormalAttack", ai.FormalAttack)
+            .Add("field.immediate_danger", "DB_AI.HasImmediateDanger", ai.HasImmediateDanger)
+            .Add("field.retreat", "DB_AI.retreat", Read<int>(RetreatField, ai))
             .Add("field.memory", "DB_CombatRuntime.Memory", ai.Combat.Memory)
             .Add("field.interest", "DB_CombatRuntime.InterestTicks", ai.Combat.InterestTicks)
-            .Add("field.pursuit", "DesertBatflyAI.pursuit", Read<int>(PursuitField, ai))
+            .Add("field.pursuit", "DB_AI.pursuit", Read<int>(PursuitField, ai))
             .Add("field.unseen", "DB_CombatRuntime.UnseenTicks", ai.Combat.UnseenTicks)
             .Add("field.has_slot", "DB_CombatRuntime.HasSlot", ai.Combat.HasSlot));
 
@@ -115,7 +115,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Sections.Add(new AIDebugSection("section.movement")
             .Add("field.position", "mainBodyChunk.pos", bat.mainBodyChunk?.pos)
             .Add("field.velocity", "mainBodyChunk.vel", bat.mainBodyChunk?.vel)
-            .Add("field.escape_from", "DesertBatflyAI.escapeFrom", Read<Vector2>(EscapeFromField, ai))
+            .Add("field.escape_from", "DB_AI.escapeFrom", Read<Vector2>(EscapeFromField, ai))
             .Add("field.local_goal", "FlyAI.localGoal", bat.AI?.localGoal)
             .Add("field.behavior", "FlyAI.behavior", bat.AI?.behavior)
             .Add("field.flee_from_rain", "FlyAI.fleeFromRain", bat.AI?.fleeFromRain ?? false)
@@ -208,7 +208,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
         bool vengeance = DB_VengeanceRuntime.IsActive(bat);
         bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain ||
-                     bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost;
+                     bat.DesertAI.Mode == DB_AI.Activity.Roost;
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.availability", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.conscious",
@@ -225,8 +225,8 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.survival", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.danger",
             bat.DesertAI.HasImmediateDanger ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            bat.DesertAI.HasImmediateDanger ? "DesertBatflyAI.HasImmediateDanger=true" : null,
-            "DesertBatflyAI.HasImmediateDanger", 1));
+            bat.DesertAI.HasImmediateDanger ? "DB_AI.HasImmediateDanger=true" : null,
+            "DB_AI.HasImmediateDanger", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.fear",
             fear ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             fear ? "DB_FearRuntime fear gate" : null,
@@ -271,8 +271,8 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             "DB_VengeanceRuntime.IsActive", 1));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.roost",
             roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-            roost ? "FlyAI Chain / DesertBatflyAI Roost" : null,
-            "FlyAI.behavior / DesertBatflyAI.Mode", 1));
+            roost ? "FlyAI Chain / DB_AI Roost" : null,
+            "FlyAI.behavior / DB_AI.Mode", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.retaliation_injury",
             injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready,
@@ -284,7 +284,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             "DB_FearRuntime.Update injury gate", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.custom_ai", AIDebugDecisionState.Active,
-            bat.DesertAI.Mode.ToString(), "DesertBatflyAI.Mode"));
+            bat.DesertAI.Mode.ToString(), "DB_AI.Mode"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.vanilla_ai", AIDebugDecisionState.Ready,
             AIDebugFormat.Value(bat.AI?.behavior), "FlyAI.behavior"));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.motor", AIDebugDecisionState.Active,

@@ -117,7 +117,7 @@ internal static class DesertBatflyThreatRuntime
         internal int HazardTimer;
         internal Player AcuteInstigator;
 
-        internal DesertBatflyAI.Activity PreviousMode;
+        internal DB_AI.Activity PreviousMode;
 
         internal string ModifierReason = string.Empty;
         internal string AttackGeometryAdjustment = string.Empty;
@@ -796,12 +796,12 @@ internal static class DesertBatflyThreatRuntime
     private static void TrackFormalAggression(DesertBatfly bat, RuntimeState state)
     {
         if (bat.DesertAI.Target is not Player player) return;
-        DesertBatflyAI.Activity mode = bat.DesertAI.Mode;
+        DB_AI.Activity mode = bat.DesertAI.Mode;
         bool formal = bat.DesertAI.FormalAttack || mode is
-            DesertBatflyAI.Activity.Approach or DesertBatflyAI.Activity.Circle or
-            DesertBatflyAI.Activity.FakeDive or DesertBatflyAI.Activity.Dive or
-            DesertBatflyAI.Activity.Attach or DesertBatflyAI.Activity.RetaliationCharge or
-            DesertBatflyAI.Activity.Interfere;
+            DB_AI.Activity.Approach or DB_AI.Activity.Circle or
+            DB_AI.Activity.FakeDive or DB_AI.Activity.Dive or
+            DB_AI.Activity.Attach or DB_AI.Activity.RetaliationCharge or
+            DB_AI.Activity.Interfere;
         if (!formal) return;
         state.FormalAggressionPlayerSlot = PlayerSlot(player);
         state.FormalAggressionTick = bat.room?.game?.clock ?? int.MinValue;
@@ -809,7 +809,7 @@ internal static class DesertBatflyThreatRuntime
 
     private static void TrackPursuit(DesertBatfly bat, RuntimeState state)
     {
-        if (bat.DesertAI.Mode != DesertBatflyAI.Activity.Escape || bat.room == null)
+        if (bat.DesertAI.Mode != DB_AI.Activity.Escape || bat.room == null)
         {
             state.PursuitTicks = 0;
             state.PursuitLastDistance = -1f;
@@ -818,7 +818,7 @@ internal static class DesertBatflyThreatRuntime
             return;
         }
 
-        if (state.PreviousMode != DesertBatflyAI.Activity.Escape)
+        if (state.PreviousMode != DB_AI.Activity.Escape)
             state.PursuitDisengageExtended = false;
 
         DB_RoomContext context = DB_RoomContext.For(bat.room);
@@ -861,8 +861,8 @@ internal static class DesertBatflyThreatRuntime
 
     private static void ExtendLearnedDisengage(DesertBatfly bat, RuntimeState state)
     {
-        if (state.PreviousMode != DesertBatflyAI.Activity.Escape ||
-            bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape ||
+        if (state.PreviousMode != DB_AI.Activity.Escape ||
+            bat.DesertAI.Mode == DB_AI.Activity.Escape ||
             state.PursuitDisengageExtended || !ValidSlot(state.EscapeThreatPlayerSlot))
             return;
 
@@ -886,8 +886,8 @@ internal static class DesertBatflyThreatRuntime
     private static void TrackEncounter(DesertBatfly bat, RuntimeState state)
     {
         if (bat.DesertAI.Target is not Player player || bat.room == null ||
-            bat.DesertAI.Mode is DesertBatflyAI.Activity.Escape or DesertBatflyAI.Activity.Attach or
-                DesertBatflyAI.Activity.Interfere or DesertBatflyAI.Activity.RetaliationCharge)
+            bat.DesertAI.Mode is DB_AI.Activity.Escape or DB_AI.Activity.Attach or
+                DB_AI.Activity.Interfere or DB_AI.Activity.RetaliationCharge)
         {
             ResetEncounter(state);
             return;
@@ -1023,9 +1023,9 @@ internal static class DesertBatflyThreatRuntime
         bool extremeVengeance = DB_VengeanceRuntime.IsActive(bat);
         switch (bat.DesertAI.Mode)
         {
-            case DesertBatflyAI.Activity.Observe:
+            case DB_AI.Activity.Observe:
             {
-                if (!extremeVengeance && state.PreviousMode != DesertBatflyAI.Activity.Observe &&
+                if (!extremeVengeance && state.PreviousMode != DB_AI.Activity.Observe &&
                     ShouldAbandonFreshHarass(bat, slot, memory, caution))
                 {
                     bat.DesertAI.CancelAttack();
@@ -1048,7 +1048,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.Approach:
+            case DB_AI.Activity.Approach:
             {
                 float side = StableSide(bat, slot);
                 float lateral = Mathf.Lerp(
@@ -1064,7 +1064,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.Circle:
+            case DB_AI.Activity.Circle:
             {
                 DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, playerCenter + currentOffset * (1f + caution * 0.55f));
                 state.ModifierReason = "learned circle spacing";
@@ -1072,7 +1072,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.FakeDive:
+            case DB_AI.Activity.FakeDive:
             {
                 if (!bat.DesertAI.PullingUp && caution > 0.18f)
                 {
@@ -1086,7 +1086,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.Dive:
+            case DB_AI.Activity.Dive:
             {
                 float side = StableSide(bat, slot);
                 Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);
@@ -1094,7 +1094,7 @@ internal static class DesertBatflyThreatRuntime
                 DB_FlightMotor.TryRetarget(bat, DB_BehaviorOwner.Combat, bat.AI.localGoal + (perpendicular * Mathf.Lerp(8f, 62f, caution)));
                 state.ModifierReason = "learned dive geometry";
                 state.AttackGeometryAdjustment = "straight dive reduced";
-                if (!extremeVengeance && state.PreviousMode != DesertBatflyAI.Activity.Dive &&
+                if (!extremeVengeance && state.PreviousMode != DB_AI.Activity.Dive &&
                     ShouldAbortDive(bat, slot, caution, counterRisk, cue))
                 {
                     bat.DesertAI.CancelAttack();
@@ -1108,7 +1108,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.Attach:
+            case DB_AI.Activity.Attach:
             {
                 state.AttachSuppression = Mathf.Clamp01(
                     closeRisk * 0.55f + counterRisk * 0.45f +
@@ -1128,7 +1128,7 @@ internal static class DesertBatflyThreatRuntime
                 break;
             }
 
-            case DesertBatflyAI.Activity.RetaliationCharge:
+            case DB_AI.Activity.RetaliationCharge:
             {
                 float side = StableSide(bat, slot);
                 Vector2 direction = Custom.DirVec(bat.mainBodyChunk.pos, playerCenter);

@@ -89,7 +89,7 @@ internal static partial class Program
         // native FlyAI Dijkstra helper. R4 will fix the wrong seed/localGoal semantics and
         // remove its second ordinary-flight velocity loop without replacing native pathing.
         Type aiType = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+            "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         MethodInfo recoveryHive = aiType.GetMethod("TryDriveRecoveryHive", Flags);
         Check(recoveryHive != null &&
               MethodCallOffset(recoveryHive, typeof(FlyAI), "ProgressLocalGoalAlongDijkstraMap") >= 0,

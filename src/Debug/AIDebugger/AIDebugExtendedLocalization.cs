@@ -176,7 +176,7 @@ internal static class AIDebugExtendedLocalization
             "fear / intimidation priority" => "恐惧 / 威吓优先级接管",
             "vanilla FlyAI priority" => "原版 FlyAI 优先级接管",
             "formal attack state machine" => "正式攻击状态机接管",
-            "DesertBatflyAI state machine" => "DesertBatflyAI 状态机控制",
+            "DB_AI state machine" => "DB_AI 状态机控制",
             _ => raw
         };
     }

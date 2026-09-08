@@ -380,11 +380,11 @@ internal static class DesertBatflySocialLife
         if (bat.Emergence?.Active == true) return "emergence";
         if (bat.DesertAI == null || bat.AI == null) return "AI unavailable";
         if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
-        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
+        if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape)
             return "immediate danger";
         if (DB_TravelRuntime.HasIntent(bat.abstractCreature)) return "cross-room travel priority";
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
-            bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
+            bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "severe injury / recovery";
         if (bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
             bat.AI.luredCounter > 0 || bat.safariControlled)
@@ -392,12 +392,12 @@ internal static class DesertBatflySocialLife
         if (bat.AI.behavior == FlyAI.Behavior.Drop || bat.movMode == Fly.MovementMode.Passive)
             return "Drop / Passive";
         if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.movMode == Fly.MovementMode.Hang ||
-            bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
+            bat.DesertAI.Mode == DB_AI.Activity.Roost)
             return "roost commitment";
         if (bat.DesertAI.Target != null || bat.DesertAI.FormalAttack ||
-            bat.DesertAI.Mode is DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or DesertBatflyAI.Activity.Dive or
-                DesertBatflyAI.Activity.Attach or DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere)
+            bat.DesertAI.Mode is DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+                DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or DB_AI.Activity.Dive or
+                DB_AI.Activity.Attach or DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere)
             return "formal attack / harassment";
         if (bat.DesertState.Cooldown > 0) return "post-attack cooldown";
         if (DB_VengeanceRuntime.IsActive(bat) ||

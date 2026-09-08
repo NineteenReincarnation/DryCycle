@@ -9,7 +9,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
 
     private DB_Injury injury;
     internal DB_Injury Injury => injury ??= new DB_Injury(this);
-    internal readonly DesertBatflyAI DesertAI;
+    internal readonly DB_AI DesertAI;
     internal readonly DB_Emergence Emergence;
     internal DB_State DesertState => (DB_State)State;
     internal DB_Personality Personality => DesertState.Personality;
@@ -32,7 +32,7 @@ internal sealed class DesertBatfly : Fly, IPlayerEdible
         airFriction = 0.975f;
         bites = DesertState.Bites;
         if (DesertState.MealConsumed) eaten = 1;
-        DesertAI = new DesertBatflyAI(this);
+        DesertAI = new DB_AI(this);
         Emergence = new DB_Emergence(this);
         SandSpit = new DB_SandSpitRuntime(this);
         Runtime = new DB_Runtime(this);

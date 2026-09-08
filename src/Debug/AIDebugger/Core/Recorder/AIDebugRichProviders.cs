@@ -150,13 +150,13 @@ internal static class AIDebugRecorderRichProviderRegistry
     private sealed class DesertBatflyRichProvider : IAIDebugRecorderRichProvider
     {
         private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-        private static readonly FieldInfo RetreatField = typeof(DesertBatflyAI).GetField("retreat", PrivateInstance);
-        private static readonly FieldInfo MemoryField = typeof(DesertBatflyAI).GetField("memory", PrivateInstance);
-        private static readonly FieldInfo InterestField = typeof(DesertBatflyAI).GetField("interest", PrivateInstance);
-        private static readonly FieldInfo PursuitField = typeof(DesertBatflyAI).GetField("pursuit", PrivateInstance);
-        private static readonly FieldInfo UnseenField = typeof(DesertBatflyAI).GetField("unseen", PrivateInstance);
-        private static readonly FieldInfo HasSlotField = typeof(DesertBatflyAI).GetField("hasSlot", PrivateInstance);
-        private static readonly FieldInfo EscapeFromField = typeof(DesertBatflyAI).GetField("escapeFrom", PrivateInstance);
+        private static readonly FieldInfo RetreatField = typeof(DB_AI).GetField("retreat", PrivateInstance);
+        private static readonly FieldInfo MemoryField = typeof(DB_AI).GetField("memory", PrivateInstance);
+        private static readonly FieldInfo InterestField = typeof(DB_AI).GetField("interest", PrivateInstance);
+        private static readonly FieldInfo PursuitField = typeof(DB_AI).GetField("pursuit", PrivateInstance);
+        private static readonly FieldInfo UnseenField = typeof(DB_AI).GetField("unseen", PrivateInstance);
+        private static readonly FieldInfo HasSlotField = typeof(DB_AI).GetField("hasSlot", PrivateInstance);
+        private static readonly FieldInfo EscapeFromField = typeof(DB_AI).GetField("escapeFrom", PrivateInstance);
 
         private static readonly AIDebugRichSchema ProviderSchema = new(
             "desert-batfly.v5", "DesertBatfly", BuildFields(),
@@ -167,7 +167,7 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.shortcut","Creature.inShortcut",1),
                 D("decision.restrained","Creature.grabbedBy",1),
                 D("decision.survival","DesertBatfly survival"),
-                D("decision.danger","DesertBatflyAI.HasImmediateDanger",1),
+                D("decision.danger","DB_AI.HasImmediateDanger",1),
                 D("decision.fear","DB_FearRuntime.HasActiveFearSuppression",1),
                 D("decision.trauma","DB_State Trauma",1),
                 D("decision.physical_condition","DB_Injury.BlocksCombat"),
@@ -181,10 +181,10 @@ internal static class AIDebugRecorderRichProviderRegistry
                 D("decision.injury","DB_Injury.BlocksCombat",1),
                 D("decision.grief","DB_State.GriefStrength",1),
                 D("decision.vengeance","DB_VengeanceRuntime.IsActive",1),
-                D("decision.roost","FlyAI.behavior / DesertBatflyAI.Mode",1),
+                D("decision.roost","FlyAI.behavior / DB_AI.Mode",1),
                 D("decision.retaliation_injury","DB_Injury.BlocksCombat",1),
                 D("decision.vengeance_injury","DB_FearRuntime.Update injury gate",1),
-                D("decision.custom_ai","DesertBatflyAI.Mode"),
+                D("decision.custom_ai","DB_AI.Mode"),
                 D("decision.vanilla_ai","FlyAI.behavior"),
                 D("decision.motor","FlyAI.localGoal")
             });
@@ -202,7 +202,7 @@ internal static class AIDebugRecorderRichProviderRegistry
                 return;
             }
 
-            DesertBatflyAI ai = bat.DesertAI;
+            DB_AI ai = bat.DesertAI;
             DB_State state = bat.DesertState;
             DB_Personality p = bat.Personality;
             DB_Injury injury = bat.Injury;
@@ -286,7 +286,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             float trauma = ActiveTrauma(bat);
             bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
             bool vengeance = DB_VengeanceRuntime.IsActive(bat);
-            bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain || ai.Mode == DesertBatflyAI.Activity.Roost;
+            bool roost = bat.AI?.behavior == FlyAI.Behavior.Chain || ai.Mode == DB_AI.Activity.Roost;
 
             decisions.Set(0, AIDebugDecisionState.Active);
             decisions.Set(1, bat.Consious ? AIDebugDecisionState.Pass : AIDebugDecisionState.Blocked);
@@ -316,7 +316,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             decisions.Set(18, vengeance ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
                 vengeance ? AIDebugRawStringTable.Intern("Extreme Vengeance active") : 0);
             decisions.Set(19, roost ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
-                roost ? AIDebugRawStringTable.Intern("FlyAI Chain / DesertBatflyAI Roost") : 0);
+                roost ? AIDebugRawStringTable.Intern("FlyAI Chain / DB_AI Roost") : 0);
             decisions.Set(20, injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready);
             decisions.Set(21, injury.BlocksCombat ? AIDebugDecisionState.Blocked : AIDebugDecisionState.Ready);
             decisions.Set(22, AIDebugDecisionState.Active, AIDebugRawStringTable.Intern(ai.Mode.ToString()));
@@ -367,16 +367,16 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(32,"section.personality","field.vengeance_affinity","DB_Personality.VengeanceAffinity",AIDebugRawValueKind.Float,true),
             F(33,"section.personality","field.sand_affinity","DB_Personality.SandSpitAffinity",AIDebugRawValueKind.Float,true),
             F(34,"section.personality","field.aggressive","DB_Personality.Aggressive",AIDebugRawValueKind.Bool,true),
-            F(35,"section.ai","field.mode","DesertBatflyAI.Mode",AIDebugRawValueKind.StringId,true),
-            F(36,"section.ai","field.target","DesertBatflyAI.Target",AIDebugRawValueKind.EntityId,true),
-            F(37,"section.ai","field.formal_attack","DesertBatflyAI.FormalAttack",AIDebugRawValueKind.Bool,true),
-            F(38,"section.ai","field.immediate_danger","DesertBatflyAI.HasImmediateDanger",AIDebugRawValueKind.Bool,true),
-            F(39,"section.ai","field.retreat","DesertBatflyAI.retreat",AIDebugRawValueKind.Int,true),
-            F(40,"section.ai","field.memory","DesertBatflyAI.memory",AIDebugRawValueKind.Int,true),
-            F(41,"section.ai","field.interest","DesertBatflyAI.interest",AIDebugRawValueKind.Int,true),
-            F(42,"section.ai","field.pursuit","DesertBatflyAI.pursuit",AIDebugRawValueKind.Int,true),
-            F(43,"section.ai","field.unseen","DesertBatflyAI.unseen",AIDebugRawValueKind.Int,true),
-            F(44,"section.ai","field.has_slot","DesertBatflyAI.hasSlot",AIDebugRawValueKind.Bool,true),
+            F(35,"section.ai","field.mode","DB_AI.Mode",AIDebugRawValueKind.StringId,true),
+            F(36,"section.ai","field.target","DB_AI.Target",AIDebugRawValueKind.EntityId,true),
+            F(37,"section.ai","field.formal_attack","DB_AI.FormalAttack",AIDebugRawValueKind.Bool,true),
+            F(38,"section.ai","field.immediate_danger","DB_AI.HasImmediateDanger",AIDebugRawValueKind.Bool,true),
+            F(39,"section.ai","field.retreat","DB_AI.retreat",AIDebugRawValueKind.Int,true),
+            F(40,"section.ai","field.memory","DB_AI.memory",AIDebugRawValueKind.Int,true),
+            F(41,"section.ai","field.interest","DB_AI.interest",AIDebugRawValueKind.Int,true),
+            F(42,"section.ai","field.pursuit","DB_AI.pursuit",AIDebugRawValueKind.Int,true),
+            F(43,"section.ai","field.unseen","DB_AI.unseen",AIDebugRawValueKind.Int,true),
+            F(44,"section.ai","field.has_slot","DB_AI.hasSlot",AIDebugRawValueKind.Bool,true),
             F(45,"section.flock","field.flock_center","DB_FlockSnapshot.Center",AIDebugRawValueKind.Vector2,true),
             F(46,"section.flock","field.flock_velocity","DB_FlockSnapshot.AverageVelocity",AIDebugRawValueKind.Vector2,true),
             F(47,"section.flock","field.flock_active","DB_FlockSnapshot.ActiveCount",AIDebugRawValueKind.Int,true),
@@ -391,7 +391,7 @@ internal static class AIDebugRecorderRichProviderRegistry
             F(56,"section.social","field.social_bond_target","DB_State.SocialBondTarget",AIDebugRawValueKind.EntityId,true),
             F(57,"section.movement","field.position","mainBodyChunk.pos",AIDebugRawValueKind.Vector2,true),
             F(58,"section.movement","field.velocity","mainBodyChunk.vel",AIDebugRawValueKind.Vector2,true),
-            F(59,"section.movement","field.escape_from","DesertBatflyAI.escapeFrom",AIDebugRawValueKind.Vector2,true),
+            F(59,"section.movement","field.escape_from","DB_AI.escapeFrom",AIDebugRawValueKind.Vector2,true),
             F(60,"section.movement","field.local_goal","FlyAI.localGoal",AIDebugRawValueKind.Vector2,true),
             F(61,"section.movement","field.behavior","FlyAI.behavior",AIDebugRawValueKind.StringId,true),
             F(62,"section.movement","field.flee_from_rain","FlyAI.fleeFromRain",AIDebugRawValueKind.Bool,true),
@@ -410,14 +410,14 @@ internal static class AIDebugRecorderRichProviderRegistry
             else if (bat.Emergence?.Active == true) owner = "Emergence";
             else if (bat.AI == null || bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
                      bat.AI.luredCounter > 0 || bat.safariControlled) owner = "Vanilla FlyAI";
-            else if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape) owner = "Danger / Escape";
-            else if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery) owner = "Injury Recovery";
+            else if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape) owner = "Danger / Escape";
+            else if (bat.Injury.IsRecovering || bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery) owner = "Injury Recovery";
             else if (vengeance) owner = "Vengeance";
             else if (trauma >= DB_Tuning.TraumaAggressionBlock) owner = "Trauma";
             else if (bat.DesertState.GriefStrength >= 0.30f) owner = "Grief";
             else if (fear) owner = "Fear / Intimidation";
             else if (roost) owner = "Roost / Chain";
-            else owner = "DesertBatflyAI";
+            else owner = "DB_AI";
             return AIDebugRawStringTable.Intern(owner);
         }
 

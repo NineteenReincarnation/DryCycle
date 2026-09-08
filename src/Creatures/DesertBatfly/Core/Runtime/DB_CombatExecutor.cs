@@ -1,7 +1,7 @@
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// R3 owner boundary for the existing DesertBatflyAI combat state machine. R4 may later move
+/// R3 owner boundary for the existing DB_AI combat state machine. R4 may later move
 /// these responsibilities into Combat/ and FlightMotor; R3 only guarantees one owner.
 /// </summary>
 internal static class DB_CombatExecutor

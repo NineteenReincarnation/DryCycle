@@ -138,7 +138,7 @@ internal readonly struct DB_FlockSnapshot
             if (bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat))
                 panic++;
             if (bat.AI?.behavior == FlyAI.Behavior.Chain ||
-                bat.DesertAI.Mode == DesertBatflyAI.Activity.Roost)
+                bat.DesertAI.Mode == DB_AI.Activity.Roost)
                 roost++;
         }
 

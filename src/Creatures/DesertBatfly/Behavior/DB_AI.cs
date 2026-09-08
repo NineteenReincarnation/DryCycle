@@ -4,7 +4,7 @@ using DryCycle.Thirst;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DesertBatflyAI
+internal sealed class DB_AI
 {
     internal enum Activity
     {
@@ -45,7 +45,7 @@ internal sealed class DesertBatflyAI
     internal int CombatRetaliationCharges => combat.RetaliationCharges;
     internal int CombatRetaliationRecovery => combat.RetaliationRecovery;
 
-    internal DesertBatflyAI(DesertBatfly fly)
+    internal DB_AI(DesertBatfly fly)
     {
         this.fly = fly;
         combat = new DB_CombatRuntime(this, fly);
@@ -612,7 +612,7 @@ internal sealed class DesertBatflyAI
 
             if (member is DesertBatfly desert)
             {
-                DesertBatflyAI brain = desert.DesertAI;
+                DB_AI brain = desert.DesertAI;
                 brain.hasRoost = false;
                 brain.combat.ClearAttackState();
                 brain.combat.ClearTarget();

@@ -270,7 +270,7 @@ internal static class DB_FrameContextRuntime
     {
         Room room = bat.room;
         DB_Injury injury = bat.Injury;
-        DesertBatflyAI ai = bat.DesertAI;
+        DB_AI ai = bat.DesertAI;
         DB_State persistent = bat.DesertState;
         DB_RoomContext roomContext = DB_RoomContext.For(room);
 
@@ -371,13 +371,13 @@ internal static class DB_FrameContextRuntime
             persistent.PlayerTraumaTicks > 0 ? persistent.PlayerTraumaStrength : 0f,
             persistent.PredatorTraumaTicks > 0 ? persistent.PredatorTraumaStrength : 0f);
         bool nativeChain = bat.AI?.behavior == FlyAI.Behavior.Chain;
-        bool speciesRoost = ai?.Mode == DesertBatflyAI.Activity.Roost;
+        bool speciesRoost = ai?.Mode == DB_AI.Activity.Roost;
         DB_RoostFrameSummary roost = new(nativeChain || speciesRoost, nativeChain, speciesRoost);
 
         bool restrained = RestrainedByNonFly(bat);
         DB_SpecialPhysicsOwner special = ResolveSpecialPhysicsOwner(bat, restrained);
         bool immediateDanger = ai?.HasImmediateDanger == true ||
-                               ai?.Mode == DesertBatflyAI.Activity.Escape;
+                               ai?.Mode == DB_AI.Activity.Escape;
         bool hardSurvival = hasEnvironment && environment.HardSurvival;
         bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&
                              special is not (DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&
@@ -455,8 +455,8 @@ internal static class DB_FrameContextRuntime
         if (restrained) return DB_SpecialPhysicsOwner.Grasp;
         if (bat.inShortcut) return DB_SpecialPhysicsOwner.Shortcut;
         if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;
-        if (bat.DesertAI?.Mode == DesertBatflyAI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;
-        if (bat.DesertAI?.Mode == DesertBatflyAI.Activity.Interfere) return DB_SpecialPhysicsOwner.CombatInterfere;
+        if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;
+        if (bat.DesertAI?.Mode == DB_AI.Activity.Interfere) return DB_SpecialPhysicsOwner.CombatInterfere;
         if (bat.AI?.behavior == FlyAI.Behavior.Burrow) return DB_SpecialPhysicsOwner.NativeBurrow;
         if (bat.AI?.behavior == FlyAI.Behavior.Chain) return DB_SpecialPhysicsOwner.NativeChain;
         return DB_SpecialPhysicsOwner.None;

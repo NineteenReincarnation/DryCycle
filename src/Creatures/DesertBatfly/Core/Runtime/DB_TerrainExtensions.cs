@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Narrow compatibility helper for the older DesertBatflyAI steering probe. Rain World's
+/// Narrow compatibility helper for the older DB_AI steering probe. Rain World's
 /// TerrainManager exposes tile obstruction, not a Vector2 Contains API; convert through the
 /// same Room tile mapping used by the game and delegate to the native terrain manager.
 /// Keep this species-local rather than changing TerrainManager globally.

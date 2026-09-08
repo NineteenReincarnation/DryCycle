@@ -15,9 +15,9 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.ExpressedSocialRole", false) == null,
             "rejected Task 02 enum is physically removed");
 
-        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Check(ai.GetField("Roles", Flags) == null && ai.GetProperty("Roles", Flags) == null,
-            "DesertBatflyAI has no rejected Roles API");
+            "DB_AI has no rejected Roles API");
 
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(intimidation.GetMethod("BlocksSocialRoles", Flags) == null,

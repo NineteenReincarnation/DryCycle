@@ -10,12 +10,12 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_InjuryRecovery
 {
-    private readonly DesertBatflyAI brain;
+    private readonly DB_AI brain;
     private readonly DesertBatfly fly;
     private int recoverySearchCooldown;
     private Vector2? recoveryRoostTarget;
 
-    internal DB_InjuryRecovery(DesertBatflyAI brain, DesertBatfly fly)
+    internal DB_InjuryRecovery(DB_AI brain, DesertBatfly fly)
     {
         this.brain = brain;
         this.fly = fly;
@@ -38,7 +38,7 @@ internal sealed class DB_InjuryRecovery
         {
             ClearNavigation();
             injury.SetRecovery(DB_InjuryRecoveryState.None, null, "recovered below severe threshold");
-            if (Mode == DesertBatflyAI.Activity.InjuryRecovery) brain.SetMode(DesertBatflyAI.Activity.Flight);
+            if (Mode == DB_AI.Activity.InjuryRecovery) brain.SetMode(DB_AI.Activity.Flight);
             return false;
         }
 
@@ -48,7 +48,7 @@ internal sealed class DB_InjuryRecovery
             return false;
 
         brain.CancelPhysicalAttack();
-        brain.SetMode(DesertBatflyAI.Activity.InjuryRecovery);
+        brain.SetMode(DB_AI.Activity.InjuryRecovery);
 
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
         {
@@ -79,7 +79,7 @@ internal sealed class DB_InjuryRecovery
             else
             {
                 brain.SteerOwned(target, 4.2f, DB_BehaviorOwner.InjuryRecovery);
-                brain.SetMode(DesertBatflyAI.Activity.InjuryRecovery);
+                brain.SetMode(DB_AI.Activity.InjuryRecovery);
                 injury.SetRecovery(DB_InjuryRecoveryState.Roost, target, "severe injury; approaching legal local roost");
             }
             return true;
@@ -87,7 +87,7 @@ internal sealed class DB_InjuryRecovery
 
         if (TryDriveRecoveryHive(out Vector2 hiveTarget))
         {
-            brain.SetMode(DesertBatflyAI.Activity.InjuryRecovery);
+            brain.SetMode(DB_AI.Activity.InjuryRecovery);
             injury.SetRecovery(DB_InjuryRecoveryState.Hive, hiveTarget, "severe injury; native hive dijkstra recovery route");
             return true;
         }
@@ -97,7 +97,7 @@ internal sealed class DB_InjuryRecovery
             !fly.room.VisualContact(fly.mainBodyChunk.pos, safeGoal))
             safeGoal = fly.mainBodyChunk.pos + Vector2.up * 60f;
         brain.SteerOwned(safeGoal, 3.8f, DB_BehaviorOwner.InjuryRecovery);
-        brain.SetMode(DesertBatflyAI.Activity.InjuryRecovery);
+        brain.SetMode(DB_AI.Activity.InjuryRecovery);
         injury.SetRecovery(DB_InjuryRecoveryState.SafeFlight, safeGoal, "severe injury; no reachable local roost or hive; low-risk flight");
         return true;
     }
@@ -238,6 +238,6 @@ internal sealed class DB_InjuryRecovery
         fly.burrowOrHangSpot = spot;
         fly.movMode = Fly.MovementMode.Hang;
         fly.mainBodyChunk.vel *= 0.5f;
-        brain.SetMode(DesertBatflyAI.Activity.InjuryRecovery);
+        brain.SetMode(DB_AI.Activity.InjuryRecovery);
     }
 }

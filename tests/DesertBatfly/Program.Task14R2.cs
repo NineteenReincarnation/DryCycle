@@ -16,7 +16,7 @@ internal static partial class Program
         Type heldObservation = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
         Type ai = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DesertBatflyAI", true);
+            "DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type threat = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DesertBatflyThreatRuntime", true);
         Type tactics = mod.GetType(
@@ -96,7 +96,7 @@ internal static partial class Program
         MethodInfo acquireSlot = ai.GetMethod("AcquireSlot", Flags);
         MethodInfo socialHarass = ai.GetMethod("FindSocialHarassTarget", Flags);
         Check(MethodCallOffset(aiScanWeapons, weaponPerception, "TryFindImmediateThreat") >= 0,
-            "Task14 R2 DesertBatflyAI weapon scan consumes shared DB_WeaponPerception");
+            "Task14 R2 DB_AI weapon scan consumes shared DB_WeaponPerception");
         Check(MethodCallOffset(aiScanCreatures, roomContext, "For") >= 0 &&
               MethodCallOffset(aiScanCreatures, visibility, "CanObserve") >= 0,
             "Task14 R2 ordinary creature recognition consumes shared RoomContext + VisibilityPolicy");

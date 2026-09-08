@@ -12,7 +12,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_CombatRuntime
 {
-    private readonly DesertBatflyAI ai;
+    private readonly DB_AI ai;
     private readonly DesertBatfly fly;
 
     private Creature target;
@@ -33,7 +33,7 @@ internal sealed class DB_CombatRuntime
     private Vector2 retaliationDirection;
     private BodyChunk attachedChunk;
 
-    internal DB_CombatRuntime(DesertBatflyAI ai, DesertBatfly fly)
+    internal DB_CombatRuntime(DB_AI ai, DesertBatfly fly)
     {
         this.ai = ai;
         this.fly = fly;
@@ -55,12 +55,12 @@ internal sealed class DB_CombatRuntime
     internal int InterestTicks => interest;
     internal int UnseenTicks => unseen;
     internal int PhaseTicks => ticks;
-    internal bool PullingUp => ai.Mode == DesertBatflyAI.Activity.FakeDive &&
+    internal bool PullingUp => ai.Mode == DB_AI.Activity.FakeDive &&
                                ticks > DB_Tuning.FakeDivePullUpTicks;
     internal bool FormalAttack => hasSlot && ai.Mode is
-        DesertBatflyAI.Activity.Approach or DesertBatflyAI.Activity.Circle or
-        DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
-        DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere;
+        DB_AI.Activity.Approach or DB_AI.Activity.Circle or
+        DB_AI.Activity.Dive or DB_AI.Activity.Attach or
+        DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere;
 
     internal void Reset()
     {
@@ -82,18 +82,18 @@ internal sealed class DB_CombatRuntime
         attachedChunk = null;
     }
 
-    internal void OnModeChanged(DesertBatflyAI.Activity next)
+    internal void OnModeChanged(DB_AI.Activity next)
     {
         ticks = 0;
-        if (next is not (DesertBatflyAI.Activity.Attach or DesertBatflyAI.Activity.Interfere))
+        if (next is not (DB_AI.Activity.Attach or DB_AI.Activity.Interfere))
         {
             attachedChunk = null;
             attachOffset = Vector2.zero;
         }
-        if (next is not (DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-            DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-            DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.RetaliationCharge or
-            DesertBatflyAI.Activity.Attach or DesertBatflyAI.Activity.Interfere))
+        if (next is not (DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+            DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
+            DB_AI.Activity.Dive or DB_AI.Activity.RetaliationCharge or
+            DB_AI.Activity.Attach or DB_AI.Activity.Interfere))
         {
             hasSlot = false;
             unseen = 0;
@@ -171,11 +171,11 @@ internal sealed class DB_CombatRuntime
         {
             ClearAttackState();
             target = null;
-            if (ai.Mode is DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-                DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
-                DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere)
-                ai.SetMode(DesertBatflyAI.Activity.Flight);
+            if (ai.Mode is DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+                DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
+                DB_AI.Activity.Dive or DB_AI.Activity.Attach or
+                DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere)
+                ai.SetMode(DB_AI.Activity.Flight);
         }
         if (attacker == source)
         {
@@ -247,29 +247,29 @@ internal sealed class DB_CombatRuntime
             target = scanCandidate;
 
         if (target != null)
-            ai.SetMode(DesertBatflyAI.Activity.Observe);
+            ai.SetMode(DB_AI.Activity.Observe);
     }
 
     internal SelectionResult PrepareSelection()
     {
         bool retaliationReady = DB_EnvironmentalPolicy.AggressionAuthorized(fly) &&
             retaliationCharges > 0 && retaliationRecovery <= 0;
-        if (fly.DesertState.Cooldown > 0 && ai.Mode != DesertBatflyAI.Activity.Attach &&
-            ai.Mode != DesertBatflyAI.Activity.Interfere && !retaliationReady)
+        if (fly.DesertState.Cooldown > 0 && ai.Mode != DB_AI.Activity.Attach &&
+            ai.Mode != DB_AI.Activity.Interfere && !retaliationReady)
         {
             ClearAttackState();
             target = null;
-            ai.SetMode(DesertBatflyAI.Activity.Cooldown);
+            ai.SetMode(DB_AI.Activity.Cooldown);
             return SelectionResult.Cooldown;
         }
 
         if (!DB_EnvironmentalPolicy.AggressionAuthorized(fly) || !GriefAllowsHarass())
         {
-            if (ai.Mode != DesertBatflyAI.Activity.Roost)
+            if (ai.Mode != DB_AI.Activity.Roost)
             {
                 ClearAttackState();
                 target = null;
-                ai.SetMode(DesertBatflyAI.Activity.Flight);
+                ai.SetMode(DB_AI.Activity.Flight);
             }
             return SelectionResult.NoTarget;
         }
@@ -278,17 +278,17 @@ internal sealed class DB_CombatRuntime
         {
             ClearAttackState();
             target = null;
-            ai.SetMode(DesertBatflyAI.Activity.Flight);
+            ai.SetMode(DB_AI.Activity.Flight);
             if (memory > 0 && ai.Valid(attacker) && CanHarass(attacker))
                 target = attacker;
             if (target == null)
                 return SelectionResult.NoTarget;
-            ai.SetMode(DesertBatflyAI.Activity.Observe);
+            ai.SetMode(DB_AI.Activity.Observe);
         }
 
-        if (ai.Mode is DesertBatflyAI.Activity.Flight or DesertBatflyAI.Activity.Cooldown or
-            DesertBatflyAI.Activity.Roost)
-            ai.SetMode(DesertBatflyAI.Activity.Observe);
+        if (ai.Mode is DB_AI.Activity.Flight or DB_AI.Activity.Cooldown or
+            DB_AI.Activity.Roost)
+            ai.SetMode(DB_AI.Activity.Observe);
         return SelectionResult.Ready;
     }
 
@@ -352,10 +352,10 @@ internal sealed class DB_CombatRuntime
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat) ||
             fly.room == null || fly.dead || !fly.Consious || ai.RestrainedByNonFly() ||
             fly.inShortcut || fly.Injury.BlocksCombat || !ai.Valid(target) ||
-            ai.Mode is not (DesertBatflyAI.Activity.Observe or DesertBatflyAI.Activity.Approach or
-                DesertBatflyAI.Activity.Circle or DesertBatflyAI.Activity.FakeDive or
-                DesertBatflyAI.Activity.Dive or DesertBatflyAI.Activity.Attach or
-                DesertBatflyAI.Activity.RetaliationCharge or DesertBatflyAI.Activity.Interfere))
+            ai.Mode is not (DB_AI.Activity.Observe or DB_AI.Activity.Approach or
+                DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
+                DB_AI.Activity.Dive or DB_AI.Activity.Attach or
+                DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere))
             return false;
 
         ticks++;
@@ -379,7 +379,7 @@ internal sealed class DB_CombatRuntime
 
         switch (ai.Mode)
         {
-            case DesertBatflyAI.Activity.Observe:
+            case DB_AI.Activity.Observe:
                 ai.SteerOwned(center + Orbit(150f, 90f), 4.5f, DB_BehaviorOwner.Combat);
                 if (ticks > fly.Personality.ObserveDuration)
                 {
@@ -401,7 +401,7 @@ internal sealed class DB_CombatRuntime
                             retaliationDirection = Custom.DirVec(
                                 fly.mainBodyChunk.pos,
                                 retaliationTarget.mainBodyChunk.pos);
-                            ai.SetMode(DesertBatflyAI.Activity.RetaliationCharge);
+                            ai.SetMode(DB_AI.Activity.RetaliationCharge);
                             break;
                         }
                     }
@@ -425,33 +425,33 @@ internal sealed class DB_CombatRuntime
                             fly, learnedTarget, fakeChance);
 
                     if (!wantsRealAttack || Random.value < fakeChance)
-                        ai.SetMode(DesertBatflyAI.Activity.FakeDive);
+                        ai.SetMode(DB_AI.Activity.FakeDive);
                     else if (AcquireSlot())
-                        ai.SetMode(DesertBatflyAI.Activity.Approach);
+                        ai.SetMode(DB_AI.Activity.Approach);
                     else
                         ticks = fly.Personality.ObserveDuration / 2;
                 }
                 break;
 
-            case DesertBatflyAI.Activity.Approach:
+            case DB_AI.Activity.Approach:
                 ai.SteerOwned(
                     center + Vector2.up * 100f,
                     6f + fly.Personality.AggressionDrive * 1.2f,
                     DB_BehaviorOwner.Combat);
                 if (ticks > DB_Tuning.ApproachTicks || distance < 110f)
-                    ai.SetMode(DesertBatflyAI.Activity.Circle);
+                    ai.SetMode(DB_AI.Activity.Circle);
                 break;
 
-            case DesertBatflyAI.Activity.Circle:
+            case DB_AI.Activity.Circle:
                 ai.SteerOwned(
                     center + Orbit(95f, 65f),
                     6.5f + fly.Personality.AggressionDrive,
                     DB_BehaviorOwner.Combat);
                 if (ticks > DB_Tuning.CircleTicks)
-                    ai.SetMode(DesertBatflyAI.Activity.Dive);
+                    ai.SetMode(DB_AI.Activity.Dive);
                 break;
 
-            case DesertBatflyAI.Activity.FakeDive:
+            case DB_AI.Activity.FakeDive:
                 if (distance < 52f || ticks > DB_Tuning.FakeDivePullUpTicks)
                     ticks = Mathf.Max(DB_Tuning.FakeDivePullUpTicks + 1, ticks);
                 ai.SteerOwned(
@@ -461,10 +461,10 @@ internal sealed class DB_CombatRuntime
                     PullingUp ? 10f : 12f,
                     DB_BehaviorOwner.Combat);
                 if (ticks > DB_Tuning.FakeDiveTicks)
-                    ai.SetMode(DesertBatflyAI.Activity.Observe);
+                    ai.SetMode(DB_AI.Activity.Observe);
                 break;
 
-            case DesertBatflyAI.Activity.Dive:
+            case DB_AI.Activity.Dive:
                 ai.SteerOwned(
                     center + target.mainBodyChunk.vel * 1.5f,
                     12f + fly.Personality.AggressionDrive * 1.5f,
@@ -476,19 +476,19 @@ internal sealed class DB_CombatRuntime
                     attachOffset = Custom.DirVec(contact.pos, fly.mainBodyChunk.pos) *
                         (contact.rad + fly.mainBodyChunk.rad * 0.5f);
                     drainedWater = 0f;
-                    ai.SetMode(DesertBatflyAI.Activity.Attach);
+                    ai.SetMode(DB_AI.Activity.Attach);
                 }
                 else if (ticks > DB_Tuning.DiveTicks)
                     Finish(false);
                 break;
 
-            case DesertBatflyAI.Activity.Attach:
+            case DB_AI.Activity.Attach:
                 fly.movMode = Fly.MovementMode.Passive;
                 if (ticks >= DB_Tuning.AttachTicks)
                     Finish(drainedWater > 0.001f);
                 break;
 
-            case DesertBatflyAI.Activity.RetaliationCharge:
+            case DB_AI.Activity.RetaliationCharge:
                 if (target is not Player chargeTarget || ai.IsTraumatizedPlayer(chargeTarget))
                 {
                     FinishRetaliation(false);
@@ -507,13 +507,13 @@ internal sealed class DB_CombatRuntime
                     attachOffset = Custom.DirVec(retaliationContact.pos, fly.mainBodyChunk.pos) *
                         (retaliationContact.rad + fly.mainBodyChunk.rad * 0.45f);
                     ApplyInitialRetaliationImpact(chargeTarget);
-                    ai.SetMode(DesertBatflyAI.Activity.Interfere);
+                    ai.SetMode(DB_AI.Activity.Interfere);
                 }
                 else if (ticks > DB_Tuning.RetaliationChargeTicks)
                     FinishRetaliation(false);
                 break;
 
-            case DesertBatflyAI.Activity.Interfere:
+            case DB_AI.Activity.Interfere:
                 fly.movMode = Fly.MovementMode.Passive;
                 if (ticks >= fly.Personality.RetaliationContactDuration)
                     FinishRetaliation(true);
@@ -526,13 +526,13 @@ internal sealed class DB_CombatRuntime
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat)) return;
 
-        if (ai.Mode == DesertBatflyAI.Activity.Interfere)
+        if (ai.Mode == DB_AI.Activity.Interfere)
         {
             UpdateInterference(eu);
             return;
         }
 
-        if (ai.Mode != DesertBatflyAI.Activity.Attach) return;
+        if (ai.Mode != DB_AI.Activity.Attach) return;
         if (!ai.Valid(target) || attachedChunk == null || !fly.Consious ||
             ai.RestrainedByNonFly() || fly.inShortcut || target.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
