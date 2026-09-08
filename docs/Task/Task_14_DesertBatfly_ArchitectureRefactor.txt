@@ -3,7 +3,7 @@ Architecture Refactor, Stability Consolidation & Hidden Bug Cleanup
 沙漠蝠蝇全项目架构重构、稳定性收敛、可读性重建与隐性 Bug 清理
 
 Specification revision: V1.2 / 2026-09-07
-Status: 【正式任务书 / 待实施】
+Status: 【R0-R5 已完成 / R6 持续实施中】
 Priority: Critical / project-wide structural maintenance
 
 Related project principle:
