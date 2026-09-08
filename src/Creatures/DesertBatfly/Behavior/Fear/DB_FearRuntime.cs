@@ -21,9 +21,6 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static partial class DB_FearRuntime
 {
     private enum EventKind { PlayerKill, PredatorCapture, PredatorKill }
-    private enum VengeanceMode { None, Waiting, Observe, Circle, Feint, RescueCharge, Charge, Withdraw }
-    private enum VengeanceParticipation { None, Avenger, Supporter }
-
     private const float DirectWitnessRadius = 340f;
     private const float SecondaryAlarmRadius = 180f;
     private const float ChainFearRadius = 150f;
@@ -57,40 +54,6 @@ internal static partial class DB_FearRuntime
     private const int CorpseReminderShockTicks = 60;
     private const int CorpseReminderCooldownTicks = 180;
 
-    // One event has one actual leader. The runtime group cap of three means the normal
-    // social form remains one true avenger plus zero, one or two followers even if
-    // additional deaths/captures occur before the first group has finished withdrawing.
-    private const int MaxTrueAvengersPerEvent = 1;
-    private const float VengeanceCollapseStrength = 0.84f;
-    private const int VengeanceCaptureDelayMin = 12;
-    private const int VengeanceCaptureDelayMax = 30;
-    private const int VengeanceKillDelayMin = 70;
-    private const int VengeanceKillDelayMax = 155;
-    private const int VengeanceObserveMinTicks = 18;
-    private const int VengeanceObserveMaxTicks = 46;
-    private const int VengeanceCircleMinTicks = 22;
-    private const int VengeanceCircleMaxTicks = 48;
-    private const int VengeanceFeintTicks = 18;
-    private const int VengeanceChargeTimeout = 72;
-    private const int VengeanceWithdrawMinTicks = 100;
-    private const int VengeanceWithdrawMaxTicks = 210;
-    private const float VengeanceChargeMinSpeed = 12.5f;
-    private const float VengeanceChargeMaxSpeed = 18f;
-    private const float VengeanceHitExtraRadius = 5f;
-
-    private const float PlayerVengeanceDamageMin = 0.30f;
-    private const float PlayerVengeanceDamageMax = 1.30f;
-    private const float LizardVengeanceDamageMin = 0.12f;
-    private const float LizardVengeanceDamageMax = 0.44f;
-    private const float VengeanceStunMin = 14f;
-    private const float VengeanceStunMax = 58f;
-    private const float VengeanceImpactMin = 0.75f;
-    private const float VengeanceImpactMax = 2.8f;
-
-    private const float TongueRescueChanceMin = 0.18f;
-    private const float TongueRescueChanceMax = 0.48f;
-    private const float GraspRescueChanceScale = 0.62f;
-
     private const int TraumaThreatScanTicks = 20;
     private const int TraumaRetreatRefreshTicks = 120;
 
@@ -108,26 +71,11 @@ internal static partial class DB_FearRuntime
         internal bool Active => MemoryTicks > 0 && Strength > 0f;
     }
 
-    private sealed class State
+    private sealed partial class State
     {
         internal bool Active;
         internal FearMemory PlayerFear;
         internal FearMemory PredatorFear;
-
-        internal VengeanceMode Vengeance;
-        internal VengeanceParticipation Role;
-        internal Creature VengeanceTarget;
-        internal DB_Creature Leader;
-        internal DB_Creature RescueVictim;
-        internal LizardTongue RescueTongue;
-        internal float Rage;
-        internal float Commitment;
-        internal float DamageScale = 1f;
-        internal int VengeanceTimer;
-        internal int PassesRemaining;
-        internal bool RescueAttempted;
-        internal bool WasRescuePlan;
-        internal bool SupportOnly;
 
         internal int TraumaThreatScan;
         internal int TraumaRetreatRefresh;
@@ -137,20 +85,6 @@ internal static partial class DB_FearRuntime
     {
         internal int PredatorIdentity = int.MinValue;
         internal int Clock = int.MinValue;
-    }
-
-    private readonly struct FollowerCandidate
-    {
-        internal readonly DB_Creature Bat;
-        internal readonly DB_Creature Leader;
-        internal readonly float Score;
-
-        internal FollowerCandidate(DB_Creature bat, DB_Creature leader, float score)
-        {
-            Bat = bat;
-            Leader = leader;
-            Score = score;
-        }
     }
 
     private sealed class CorpseWarning : UpdatableAndDeletable
