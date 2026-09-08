@@ -23,8 +23,10 @@ jobs:
           set -euo pipefail
           fear='src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs'
           vengeance='src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs'
+          old_root='src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs'
           test -f "$fear"
           test ! -e "$vengeance"
+          test ! -e "$old_root"
           mkdir -p "$(dirname "$vengeance")"
 
           cat > "$vengeance" <<'CS'
@@ -64,11 +66,14 @@ jobs:
               'DB_FearRuntime.TryGetVengeanceTarget': 'DB_VengeanceRuntime.TryGetTarget',
               'DB_FearRuntime.ExecuteVengeanceOwned': 'DB_VengeanceRuntime.ExecuteOwned',
           }
-          fear = Path('src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs').resolve()
+          excluded = {
+              Path('src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs').resolve(),
+              Path('src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs').resolve(),
+          }
           changed = []
           for root in (Path('src'), Path('tests')):
               for path in root.rglob('*.cs'):
-                  if path.resolve() == fear:
+                  if path.resolve() in excluded:
                       continue
                   text = path.read_text(encoding='utf-8')
                   updated = text
@@ -80,15 +85,34 @@ jobs:
           print('external Vengeance callsites migrated:', len(changed))
           for path in changed:
               print(path)
+
+          # R6 retention scripts are architecture locks and must follow the approved move.
+          for path in Path('scripts').glob('check-desertbatfly-*.sh'):
+              text = path.read_text(encoding='utf-8')
+              updated = text.replace(
+                  'src/Creatures/DesertBatfly/DesertBatflyIntimidation.cs',
+                  'src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs')
+              if updated != text:
+                  path.write_text(updated, encoding='utf-8')
+                  print('updated retention path:', path)
           PY
 
           # External modules must no longer use Fear as their Vengeance API.
-          if git grep -n -E 'DB_FearRuntime\.(IsExtremeVengeanceActive|IsVengeanceAvenger|TryGetVengeanceTarget|ExecuteVengeanceOwned)' -- 'src/**/*.cs' 'tests/**/*.cs' | grep -v '^src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs:'; then
+          leftovers="$(git grep -n -E 'DB_FearRuntime\.(IsExtremeVengeanceActive|IsVengeanceAvenger|TryGetVengeanceTarget|ExecuteVengeanceOwned)' -- 'src/**/*.cs' 'tests/**/*.cs' || true)"
+          filtered="$(printf '%s\n' "$leftovers" | grep -v '^src/Creatures/DesertBatfly/Behavior/Fear/DB_FearRuntime.cs:' | grep -v '^src/Creatures/DesertBatfly/Behavior/Vengeance/DB_VengeanceRuntime.cs:' || true)"
+          if [ -n "$filtered" ]; then
+            printf '%s\n' "$filtered"
             echo 'external Vengeance callsite still bypasses DB_VengeanceRuntime' >&2
             exit 1
           fi
 
           grep -q 'internal static class DB_VengeanceRuntime' "$vengeance"
+          grep -q '=> DB_FearRuntime.IsExtremeVengeanceActive(bat);' "$vengeance"
+          grep -q '=> DB_FearRuntime.IsVengeanceAvenger(bat);' "$vengeance"
+          grep -q '=> DB_FearRuntime.TryGetVengeanceTarget(bat, out target);' "$vengeance"
+          grep -q '=> DB_FearRuntime.ExecuteVengeanceOwned(bat);' "$vengeance"
+          ! grep -q '=> DB_VengeanceRuntime\.' "$vengeance"
+
           grep -q 'DB_VengeanceRuntime.ExecuteOwned' src/Creatures/DesertBatfly/Core/Runtime/DB_VengeanceExecutor.cs
           grep -q 'DB_VengeanceRuntime.IsActive' src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs
           grep -q 'DB_VengeanceRuntime.TryGetTarget' src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs
@@ -102,6 +126,9 @@ jobs:
           grep -q 'DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Vengeance)' "$fear"
           grep -q 'ArmVengeanceGroup(' "$fear"
           grep -q 'DB_Tuning.SocialVengeanceGroupCap' "$fear"
+
+          # No current retention guard may still demand the removed root file.
+          ! grep -RIn --include='check-desertbatfly-*.sh' 'DesertBatflyIntimidation.cs' scripts
 
           # Existing architecture/source retention checks must continue to pass.
           bash scripts/check-desertbatfly-r6-b1.sh
@@ -128,6 +155,6 @@ jobs:
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src tests
+          git add src tests scripts
           git commit -m 'R6 B35b establish formal Vengeance runtime boundary [r6-b35b-done]'
           git push origin HEAD:task14-r6-b1-final
