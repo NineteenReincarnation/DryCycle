@@ -40,7 +40,7 @@ internal sealed class DB_SignalPacket
         Origin = origin;
         Direction = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.zero;
         Intensity = Mathf.Clamp01(intensity);
-        Hop = Mathf.Clamp(hop, 0, DB_SignalRuntime.MaxAlarmHop);
+        Hop = Mathf.Clamp(hop, 0, DB_SignalDefinition.For(kind).MaxRelayHops);
         CreatedTick = createdTick;
         ExpiresTick = Mathf.Max(createdTick + 1, expiresTick);
     }

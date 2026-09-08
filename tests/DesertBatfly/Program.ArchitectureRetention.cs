@@ -7,6 +7,7 @@ internal static partial class Program
     {
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
         Type tactics = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type policy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
@@ -44,7 +45,7 @@ internal static partial class Program
                 "R5 retention: retired adapter stays physically absent: " + removed);
 
         // B1: tactical semantics moved to the real Vengeance owner.
-        Check(MethodCallOffset(intimidation.GetMethod("ForceFlight", Flags), tactics,
+        Check(MethodCallOffset(vengeance.GetMethod("ForceFlight", Flags), tactics,
                   "AdjustExtremeVengeanceGoal") >= 0,
             "R5 retention B1: Vengeance still consumes Threat tactical geometry directly");
 
@@ -122,7 +123,7 @@ internal static partial class Program
                   "IsDirectDeathWitness") >= 0,
             "R5 retention B4: persistent grief still requires direct death witness");
         Check(MethodCallOffset(intimidation.GetMethod("ReceiveFear", Flags), signal, "EmitAlarm") >= 0 &&
-              MethodCallOffset(intimidation.GetMethod("ArmVengeance", Flags), signal, "EmitRally") >= 0,
+              MethodCallOffset(vengeance.GetMethod("ArmVengeance", Flags), signal, "EmitRally") >= 0,
             "R5 retention B4: direct fear Alarm and synchronous Vengeance Rally remain explicit");
 
         // B5 classification: reflection is retained only for integration surfaces whose

@@ -172,14 +172,11 @@ internal static class DB_SignalRoomRuntime
 
                     if (!DB_SignalRuntime.ReceivePacket(receiver, packet, out bool relay))
                         continue;
-                    if (!relay || packet.Kind != DB_SignalKind.AlarmFlutter ||
-                        packet.Hop >= DB_SignalRuntime.MaxAlarmHop)
+                    DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
+                    if (!relay || !definition.CanRelay || packet.Hop >= definition.MaxRelayHops)
                         continue;
 
-                    float relayIntensity = packet.Intensity *
-                        (packet.Hop == 0
-                            ? DB_SignalRuntime.AlarmHop1Scale
-                            : DB_SignalRuntime.AlarmHop2Scale);
+                    float relayIntensity = packet.Intensity * definition.RelayScale(packet.Hop);
                     if (relayIntensity < 0.08f) continue;
 
                     DB_SignalPacket relayed = AddOrRefresh(
@@ -192,7 +189,7 @@ internal static class DB_SignalRoomRuntime
                         packet.Origin,
                         packet.Direction,
                         relayIntensity,
-                        DB_SignalRuntime.AlarmTtlTicks,
+                        definition.RootTtlTicks,
                         packet.Generation,
                         packet.Hop + 1);
                     if (relayed != null) urgentQueue.Enqueue(relayed);

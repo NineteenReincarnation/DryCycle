@@ -26,6 +26,7 @@ internal static partial class Program
             Check(packet.GetField(field, Flags) != null, "Signals signal packet contains " + field);
 
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
+        Type definition = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalDefinition", true);
         Type roomRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRoomRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
         Type socialBond = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialBond", true);
@@ -34,11 +35,22 @@ internal static partial class Program
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type combat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type intimidation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
+        Type vengeance = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
         Type threatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type eventConsumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
 
-        Check((int)runtime.GetField("MaxAlarmHop", Flags).GetRawConstantValue() == 2,
-            "Signals Alarm relay is capped at two hops");
+        MethodInfo definitionFor = definition.GetMethod("For", Flags);
+        object alarmDefinition = definitionFor?.Invoke(null, new[] { Enum.Parse(kind, "AlarmFlutter") });
+        object distressDefinition = definitionFor?.Invoke(null, new[] { Enum.Parse(kind, "DistressCall") });
+        object rallyDefinition = definitionFor?.Invoke(null, new[] { Enum.Parse(kind, "RallySignal") });
+        Check(alarmDefinition != null &&
+              Convert.ToInt32(definition.GetField("MaxRelayHops", Flags)?.GetValue(alarmDefinition)) == 2 &&
+              Math.Abs(Convert.ToSingle(definition.GetField("VisualRange", Flags)?.GetValue(alarmDefinition)) - 300f) < 0.0001f &&
+              Math.Abs(Convert.ToSingle(definition.GetField("CloseAcousticRange", Flags)?.GetValue(alarmDefinition)) - 95f) < 0.0001f &&
+              Convert.ToInt32(definition.GetField("RootTtlTicks", Flags)?.GetValue(alarmDefinition)) == 135 &&
+              Convert.ToInt32(definition.GetField("RootTtlTicks", Flags)?.GetValue(distressDefinition)) == 120 &&
+              Convert.ToInt32(definition.GetField("RootTtlTicks", Flags)?.GetValue(rallyDefinition)) == 84,
+            "Signals Definition is the single authority for retained range, TTL and relay parameters");
         Check((int)roomRuntime.GetField("ActiveSignalCap", Flags).GetRawConstantValue() == 24,
             "Signals room signal storage is capped at 24 packets");
         Check((int)roomRuntime.GetField("AlarmRootMergeTicks", Flags).GetRawConstantValue() == 14,
@@ -78,7 +90,7 @@ internal static partial class Program
         MethodInfo startle = threatRuntime.GetMethod("BroadcastStartle", Flags);
         MethodInfo mass = threatRuntime.GetMethod("BroadcastMassCasualty", Flags);
         MethodInfo receiveFear = intimidation.GetMethod("ReceiveFear", Flags);
-        MethodInfo armVengeance = intimidation.GetMethod("ArmVengeance", Flags);
+        MethodInfo armVengeance = vengeance.GetMethod("ArmVengeance", Flags);
         MethodInfo captureConsumer = eventConsumers.GetMethod("OnCapture", Flags);
         Check(MethodCallOffset(reportExplosion, runtime, "EmitAcuteAlarm") >= 0 &&
               MethodCallOffset(startle, runtime, "EmitAcuteAlarm") >= 0 &&
@@ -117,8 +129,8 @@ internal static partial class Program
             "Signals does not restore rejected social-role design social role runtime");
 
         Check(intimidation.GetNestedType("SocialRole", Flags) == null &&
-              intimidation.GetNestedType("VengeanceParticipation", Flags) != null,
-            "Signals terminology keeps vengeance participation separate from rejected social-role design SocialRole");
+              vengeance.GetNestedType("Participation", Flags) != null,
+            "Signals terminology keeps Vengeance participation separate from rejected social-role design SocialRole");
 
         Console.WriteLine(
             "Signals signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Threat read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");

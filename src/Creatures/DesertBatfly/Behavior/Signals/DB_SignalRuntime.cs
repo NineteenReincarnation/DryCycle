@@ -6,16 +6,10 @@ namespace DryCycle.Creatures.DesertBatfly;
 
 internal static class DB_SignalRuntime
 {
-    internal const int MaxAlarmHop = 2;
-    internal const int AlarmTtlTicks = 135;
-    internal const float AlarmHop1Scale = 0.56f;
-    internal const float AlarmHop2Scale = 0.31f;
-
     private const int GenerationHistorySize = 12;
     private const int NeutralScanMinTicks = 14;
     private const int NeutralScanMaxTicks = 24;
     private const int SafeDelayTicks = 210;
-    private const int NeutralSignalTtl = 90;
     // Retained from the retired SignalIntegration/SignalThreatBridge split:
     // a concrete Creature alarm may trigger Escape at 0.30, while an anonymous
     // hazard needs the old stricter 0.34 confidence before creating Escape.
@@ -116,6 +110,7 @@ internal static class DB_SignalRuntime
         string reason)
     {
         if (!Available(emitter)) return null;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(DB_SignalKind.AlarmFlutter);
         DB_SignalRoomRuntime.RoomState room = DB_SignalRoomRuntime.For(emitter.room);
         DB_SignalPacket packet = room?.AddOrRefresh(
             emitter.room,
@@ -127,10 +122,10 @@ internal static class DB_SignalRuntime
             origin,
             direction,
             intensity,
-            AlarmTtlTicks);
+            definition.RootTtlTicks);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DB_SignalKind.AlarmFlutter, intensity, 38, direction);
+        SetDisplay(emitter, DB_SignalKind.AlarmFlutter, intensity, definition.DisplayTicks, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
@@ -144,6 +139,7 @@ internal static class DB_SignalRuntime
         string reason)
     {
         if (!Available(emitter) || threat == null) return null;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(DB_SignalKind.RallySignal);
         Vector2 origin = emitter.mainBodyChunk.pos;
         Vector2 direction = threat.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
@@ -159,10 +155,10 @@ internal static class DB_SignalRuntime
             origin,
             direction,
             Mathf.Clamp01(0.55f + Mathf.Clamp01(drive) * 0.30f),
-            84);
+            definition.RootTtlTicks);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DB_SignalKind.RallySignal, packet.Intensity, 42, direction);
+        SetDisplay(emitter, DB_SignalKind.RallySignal, packet.Intensity, definition.DisplayTicks, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
@@ -188,6 +184,7 @@ internal static class DB_SignalRuntime
         string reason)
     {
         if (!Available(emitter)) return null;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(DB_SignalKind.DistressCall);
         ReceiverState state = states.GetValue(emitter, _ => new ReceiverState());
         int clock = emitter.room.game?.clock ?? 0;
         if (state.LastDistressEmitTick != int.MinValue &&
@@ -211,10 +208,10 @@ internal static class DB_SignalRuntime
             origin,
             direction,
             intensity,
-            120);
+            definition.RootTtlTicks);
         if (packet == null) return null;
 
-        SetDisplay(emitter, DB_SignalKind.DistressCall, intensity, 52, direction);
+        SetDisplay(emitter, DB_SignalKind.DistressCall, intensity, definition.DisplayTicks, direction);
         room.DeliverUrgent(emitter.room, packet);
         TraceEmit(emitter, packet, reason);
         return packet;
@@ -260,7 +257,9 @@ internal static class DB_SignalRuntime
                 state.LastDecision = "accepted AlarmFlutter as short-term danger context";
                 DB_SocialRuntime.CancelForPriority(receiver, "AlarmFlutter priority");
                 ApplyAlarm(receiver, packet, response);
-                relayAlarm = packet.Hop < MaxAlarmHop && ShouldRelayAlarm(receiver, packet, response);
+                DB_SignalDefinition alarmDefinition = DB_SignalDefinition.For(packet.Kind);
+                relayAlarm = alarmDefinition.CanRelay && packet.Hop < alarmDefinition.MaxRelayHops &&
+                             ShouldRelayAlarm(receiver, packet, response);
                 break;
 
             case DB_SignalKind.DistressCall:
@@ -422,7 +421,6 @@ internal static class DB_SignalRuntime
                 target,
                 target as Player,
                 0.70f,
-                70,
                 "existing Avenger emits RallySignal");
             state.LastNeutralEmitTick = clock;
             return;
@@ -438,7 +436,6 @@ internal static class DB_SignalRuntime
                 null,
                 null,
                 Mathf.Lerp(0.42f, 0.78f, bat.Personality.RoostAffinity),
-                110,
                 "committed legal roost emits RoostCall");
             state.LastNeutralEmitTick = clock;
             return;
@@ -456,7 +453,6 @@ internal static class DB_SignalRuntime
                 player,
                 player,
                 Mathf.Lerp(0.34f, 0.74f, bat.Personality.AggressionDrive),
-                72,
                 "existing formal harass posture emits HarassSignal");
             state.LastNeutralEmitTick = clock;
             return;
@@ -474,7 +470,6 @@ internal static class DB_SignalRuntime
                 null,
                 null,
                 Mathf.Lerp(0.28f, 0.58f, bat.Personality.Nerve),
-                80,
                 "recent local alarm remained clear long enough for SafeSignal");
             state.LastSafeEmitTick = clock;
             state.LastNeutralEmitTick = clock;
@@ -488,10 +483,10 @@ internal static class DB_SignalRuntime
         Creature threat,
         Player playerTarget,
         float intensity,
-        int ttl,
         string reason)
     {
         if (!Available(emitter)) return;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(kind);
         Vector2 origin = emitter.mainBodyChunk.pos;
         Vector2 direction = threat?.mainBodyChunk != null
             ? Custom.DirVec(origin, threat.mainBodyChunk.pos)
@@ -506,14 +501,14 @@ internal static class DB_SignalRuntime
             origin,
             direction,
             intensity,
-            Mathf.Max(NeutralSignalTtl, ttl));
+            definition.AmbientTtlTicks);
         if (packet == null) return;
 
         SetDisplay(
             emitter,
             kind,
             intensity,
-            kind == DB_SignalKind.RallySignal ? 42 : 30,
+            definition.DisplayTicks,
             direction);
         TraceEmit(emitter, packet, reason);
     }
@@ -525,8 +520,9 @@ internal static class DB_SignalRuntime
     {
         perception = DB_SignalPerception.None;
         attenuation = 0f;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
         float distance = Vector2.Distance(receiver.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
-        float baseVisualRadius = VisualRadius(packet.Kind);
+        float baseVisualRadius = definition.VisualRange;
         float visibility = DB_EnvironmentRuntime.VisibilityScale(receiver);
         float visualRadius = DB_VisibilityPolicy.EffectiveRange(
             baseVisualRadius, visibility, DB_VisibilityChannel.Signal);
@@ -542,12 +538,7 @@ internal static class DB_SignalRuntime
             return true;
         }
 
-        float acousticRadius = packet.Kind switch
-        {
-            DB_SignalKind.AlarmFlutter => 95f,
-            DB_SignalKind.DistressCall => 108f,
-            _ => 0f
-        };
+        float acousticRadius = definition.CloseAcousticRange;
         if (acousticRadius <= 0f || distance > acousticRadius) return false;
 
         perception = DB_SignalPerception.CloseAcoustic;
@@ -555,16 +546,6 @@ internal static class DB_SignalRuntime
         return true;
     }
 
-    internal static float VisualRadius(DB_SignalKind kind) => kind switch
-    {
-        DB_SignalKind.AlarmFlutter => 300f,
-        DB_SignalKind.DistressCall => 250f,
-        DB_SignalKind.RallySignal => 235f,
-        DB_SignalKind.RoostCall => 215f,
-        DB_SignalKind.HarassSignal => 235f,
-        DB_SignalKind.SafeSignal => 195f,
-        _ => 200f
-    };
 
     private static float ResponseStrength(
         DB_Creature receiver,
@@ -635,7 +616,8 @@ internal static class DB_SignalRuntime
         DB_SignalPacket packet,
         float response)
     {
-        if (packet.Hop >= MaxAlarmHop || response < 0.24f) return false;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
+        if (!definition.CanRelay || packet.Hop >= definition.MaxRelayHops || response < 0.24f) return false;
         float chance = Mathf.Clamp01(
             0.14f + receiver.Personality.Conformity * 0.58f +
             (1f - receiver.Personality.Nerve) * 0.18f + response * 0.18f);
