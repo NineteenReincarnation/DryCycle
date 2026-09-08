@@ -482,7 +482,7 @@ internal sealed class DesertBatflyAI
     {
         if (source == null) return;
         combat.SuppressHostility(source);
-        pursuit = 0;
+        perception.ClearPursuit();
     }
 
     internal void SetMode(Activity next)
@@ -627,7 +627,7 @@ internal sealed class DesertBatflyAI
         fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
         hasRoost = false;
         combat.ClearAttackState();
-        Target = null;
+        combat.ClearTarget();
         SetMode(Activity.Escape);
         if (perception.Danger != null) escapeFrom = perception.Danger.mainBodyChunk.pos;
 
@@ -747,7 +747,7 @@ internal sealed class DesertBatflyAI
     {
         if (Mode == Activity.Roost || hasRoost || fly.AI.behavior == FlyAI.Behavior.Chain)
             return;
-        if (scan != 0 || Random.value >
+        if (!perception.IsScanFrame || Random.value >
             fly.Personality.RoostChance * DB_EnvironmentalPolicy.RoostChanceScale(fly) *
             DB_SocialBond.RoostScale(fly) * fly.Injury.RoostScale)
             return;

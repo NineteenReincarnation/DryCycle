@@ -15,6 +15,7 @@ internal sealed class DB_CreaturePerception
     private int scan, pursuit;
 
     internal Creature Danger { get; private set; }
+    internal bool IsScanFrame => scan == 0;
 
     internal DB_CreaturePerception(DesertBatflyAI brain, DesertBatfly fly)
     {
@@ -27,6 +28,8 @@ internal sealed class DB_CreaturePerception
         Danger = null;
         scan = pursuit = 0;
     }
+
+    internal void ClearPursuit() => pursuit = 0;
 
     internal void UpdateScan()
     {
