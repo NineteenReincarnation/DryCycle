@@ -96,7 +96,7 @@ internal static class DB_RoostPolicy
             return false;
         }
 
-        if (!InBounds(room, floorTile) || !HasFloorClearance(room, floorTile))
+        if (!InBounds(room, floorTile) || floorTile.y < 5 || !HasFloorClearance(room, floorTile))
             return false;
 
         anchor = new DB_RoostAnchor(
