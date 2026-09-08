@@ -73,9 +73,9 @@ internal readonly struct DesertBatflySocialDebugState
 }
 
 /// <summary>
-/// Task 10 neutral social-life layer. All state is realized-only and non-persistent.
-/// Survival, Task 09 travel, injury, combat and committed roost behavior remain owned by
-/// their existing systems. Task 10 only chooses temporary neutral local goals; vanilla
+/// Neutral social-life layer. All state is realized-only and non-persistent.
+/// Survival, cross-room travel, injury, combat and committed roost behavior remain owned by
+/// their existing systems. This layer only chooses temporary neutral local goals; vanilla
 /// Fly.BatFlight remains the locomotion implementation.
 /// </summary>
 internal static class DesertBatflySocialLife
@@ -285,24 +285,24 @@ internal static class DesertBatflySocialLife
         float driveBucket = Mathf.Round(social.SocialDrive * 20f) / 20f;
         int cooldownBucket = social.SocialCooldown <= 0 ? 0 : (social.SocialCooldown / 20) * 20;
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialEligible", social.Eligible, social.DecisionReason);
+            "SocialEligible", social.Eligible, social.DecisionReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialDrive", driveBucket, "quantized 0.05 SocialDrive bucket");
+            "SocialDrive", driveBucket, "quantized 0.05 SocialDrive bucket");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialCooldown", cooldownBucket, "quantized 20-tick cooldown bucket");
+            "SocialCooldown", cooldownBucket, "quantized 20-tick cooldown bucket");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialMode", social.Mode, social.DecisionReason);
+            "SocialMode", social.Mode, social.DecisionReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialPartner", social.Partner, social.DecisionReason);
+            "SocialPartner", social.Partner, social.DecisionReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10MicroFlock", social.MicroFlockId == 0 ? "—" : $"{social.MicroFlockId}:{social.MicroFlockSize}",
+            "SocialMicroFlock", social.MicroFlockId == 0 ? "—" : $"{social.MicroFlockId}:{social.MicroFlockSize}",
             social.DecisionReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
-            "Task10SocialReason", social.DecisionReason, social.Mode.ToString());
+            "SocialReason", social.DecisionReason, social.Mode.ToString());
     }
 
     // Pure helpers are intentionally internal so the managed regression suite can verify
-    // Task 10 without constructing a full Unity room/game loop.
+    // neutral social behavior without constructing a full Unity room/game loop.
     internal static float SocialDrivePerTick(DB_Personality personality)
     {
         if (personality == null) return 0f;
@@ -382,7 +382,7 @@ internal static class DesertBatflySocialLife
         if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DesertBatflyAI.Activity.Escape)
             return "immediate danger";
-        if (DB_TravelRuntime.HasIntent(bat.abstractCreature)) return "Task09 travel priority";
+        if (DB_TravelRuntime.HasIntent(bat.abstractCreature)) return "cross-room travel priority";
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DesertBatflyAI.Activity.InjuryRecovery)
             return "severe injury / recovery";
@@ -1036,7 +1036,7 @@ internal static class DesertBatflySocialLife
     }
 
     /// <summary>
-    /// Task 10 deliberately owns only the neutral goal, not flight physics. No velocity is
+    /// Neutral social behavior owns only the temporary goal, not flight physics. No velocity is
     /// written here: Fly.Act calls vanilla BatFlight after FlyAI.Update and follows localGoal.
     /// </summary>
     private static bool SocialSteer(DesertBatfly bat, Vector2 goal, float speed, int preferredSide)
