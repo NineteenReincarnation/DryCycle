@@ -36,104 +36,107 @@ jobs:
 
           start = text.index('    public override void Update(bool eu)')
           end = text.index('    public override void Stun(int ticks)')
-          replacement = '''    public override void Update(bool eu)
-    {
-        Vector2 previousFlightVelocity = Runtime.BeforeVanillaUpdate();
-        if (room == null)
-        {
-            base.Update(eu);
-            return;
-        }
-
-        Room currentRoom = room;
-        FliesRoomAI original = currentRoom.fliesRoomAi;
-        var colony = DB_SwarmRoom.For(currentRoom);
-        currentRoom.fliesRoomAi = colony.Hive;
-        colony.Hive.AddFly(this);
-        runningVanillaUpdate = true;
-        try
-        {
-            base.Update(eu);
-        }
-        finally
-        {
-            runningVanillaUpdate = false;
-            currentRoom.fliesRoomAi = original;
-        }
-
-        Runtime.AfterVanillaUpdate(eu, previousFlightVelocity);
-    }
-
-'''
+          replacement = '\n'.join([
+              '    public override void Update(bool eu)',
+              '    {',
+              '        Vector2 previousFlightVelocity = Runtime.BeforeVanillaUpdate();',
+              '        if (room == null)',
+              '        {',
+              '            base.Update(eu);',
+              '            return;',
+              '        }',
+              '',
+              '        Room currentRoom = room;',
+              '        FliesRoomAI original = currentRoom.fliesRoomAi;',
+              '        var colony = DB_SwarmRoom.For(currentRoom);',
+              '        currentRoom.fliesRoomAi = colony.Hive;',
+              '        colony.Hive.AddFly(this);',
+              '        runningVanillaUpdate = true;',
+              '        try',
+              '        {',
+              '            base.Update(eu);',
+              '        }',
+              '        finally',
+              '        {',
+              '            runningVanillaUpdate = false;',
+              '            currentRoom.fliesRoomAi = original;',
+              '        }',
+              '',
+              '        Runtime.AfterVanillaUpdate(eu, previousFlightVelocity);',
+              '    }',
+              '',
+              ''
+          ])
           text = text[:start] + replacement + text[end:]
           creature.write_text(text, encoding='utf-8')
 
-          runtime = Path('src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs')
-          runtime.write_text('''using UnityEngine;
-
-namespace DryCycle.Creatures.DesertBatfly;
-
-/// <summary>
-/// Species-level realized update orchestration around the native Fly update boundary.
-/// Rain World lifecycle/base.Update stays on DB_Creature/DesertBatfly; this runtime only
-/// sequences already-owned domain ticks before and after that native boundary.
-/// </summary>
-internal sealed class DB_Runtime
-{
-    private readonly DesertBatfly bat;
-    private int socialSampleTicks;
-
-    internal DB_Runtime(DesertBatfly bat)
-    {
-        this.bat = bat;
-    }
-
-    internal Vector2 BeforeVanillaUpdate()
-    {
-        bat.Injury.Tick();
-        Vector2 previousFlightVelocity = bat.mainBodyChunk?.vel ?? Vector2.zero;
-        bat.SandSpit.PreUpdate();
-
-        if (!bat.dead)
-        {
-            bat.DesertState.TickTrauma();
-            bat.DesertState.TickGrief();
-            if (++socialSampleTicks >= 180)
-            {
-                socialSampleTicks = 0;
-                DB_SocialBond.SampleChain(bat);
-            }
-        }
-
-        if (bat.room == null)
-            return previousFlightVelocity;
-
-        bat.SandSpit.UpdateHeldStruggle();
-        bat.DesertState.Thirst = Mathf.Clamp01(
-            bat.DesertState.Thirst + (bat.dead ? 0f : DB_Tuning.ThirstPerTick));
-        if (bat.DesertState.Cooldown > 0) bat.DesertState.Cooldown--;
-        bat.DesertAI.TickMemory();
-        if (!bat.dead)
-            DesertBatflyIntimidation.UpdateState(bat);
-
-        return previousFlightVelocity;
-    }
-
-    internal void AfterVanillaUpdate(bool eu, Vector2 previousFlightVelocity)
-    {
-        // Vengeance state/fear is refreshed before native Fly.Update so the R3 arbiter sees
-        // current facts. Movement itself remains owned by DB_VengeanceExecutor/FlightMotor.
-        bool extremeVengeance = !bat.dead && DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);
-        if (extremeVengeance) bat.DesertAI.CancelAttack();
-
-        if (bat.room == null) return;
-        bat.Emergence.Update(eu);
-        if (!extremeVengeance)
-            bat.DesertAI.Combat.AfterPhysics(eu);
-        DB_FlightMotor.ApplyPostPhysics(bat, previousFlightVelocity);
-    }
-}
-''', encoding='utf-8')
+          runtime_lines = [
+              'using UnityEngine;',
+              '',
+              'namespace DryCycle.Creatures.DesertBatfly;',
+              '',
+              '/// <summary>',
+              '/// Species-level realized update orchestration around the native Fly update boundary.',
+              '/// Rain World lifecycle/base.Update stays on DesertBatfly; this runtime only',
+              '/// sequences already-owned domain ticks before and after that native boundary.',
+              '/// </summary>',
+              'internal sealed class DB_Runtime',
+              '{',
+              '    private readonly DesertBatfly bat;',
+              '    private int socialSampleTicks;',
+              '',
+              '    internal DB_Runtime(DesertBatfly bat)',
+              '    {',
+              '        this.bat = bat;',
+              '    }',
+              '',
+              '    internal Vector2 BeforeVanillaUpdate()',
+              '    {',
+              '        bat.Injury.Tick();',
+              '        Vector2 previousFlightVelocity = bat.mainBodyChunk?.vel ?? Vector2.zero;',
+              '        bat.SandSpit.PreUpdate();',
+              '',
+              '        if (!bat.dead)',
+              '        {',
+              '            bat.DesertState.TickTrauma();',
+              '            bat.DesertState.TickGrief();',
+              '            if (++socialSampleTicks >= 180)',
+              '            {',
+              '                socialSampleTicks = 0;',
+              '                DB_SocialBond.SampleChain(bat);',
+              '            }',
+              '        }',
+              '',
+              '        if (bat.room == null)',
+              '            return previousFlightVelocity;',
+              '',
+              '        bat.SandSpit.UpdateHeldStruggle();',
+              '        bat.DesertState.Thirst = Mathf.Clamp01(',
+              '            bat.DesertState.Thirst + (bat.dead ? 0f : DB_Tuning.ThirstPerTick));',
+              '        if (bat.DesertState.Cooldown > 0) bat.DesertState.Cooldown--;',
+              '        bat.DesertAI.TickMemory();',
+              '        if (!bat.dead)',
+              '            DesertBatflyIntimidation.UpdateState(bat);',
+              '',
+              '        return previousFlightVelocity;',
+              '    }',
+              '',
+              '    internal void AfterVanillaUpdate(bool eu, Vector2 previousFlightVelocity)',
+              '    {',
+              '        bool extremeVengeance = !bat.dead && DesertBatflyIntimidation.IsExtremeVengeanceActive(bat);',
+              '        if (extremeVengeance) bat.DesertAI.CancelAttack();',
+              '',
+              '        if (bat.room == null) return;',
+              '        bat.Emergence.Update(eu);',
+              '        if (!extremeVengeance)',
+              '            bat.DesertAI.Combat.AfterPhysics(eu);',
+              '        DB_FlightMotor.ApplyPostPhysics(bat, previousFlightVelocity);',
+              '    }',
+              '}',
+              ''
+          ]
+          Path('src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs').write_text(
+              '\n'.join(runtime_lines), encoding='utf-8')
           PY
       - name: Validate Runtime boundary
         shell: bash
@@ -172,6 +175,6 @@ internal sealed class DB_Runtime
           rm -f .github/workflows/task14-r6-b28-runtime-orchestration.yml
           git add -A
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+NineteenReincarnation@users.noreply.github.com'
           git commit -m 'R6 B28 extract Runtime orchestration [r6-b28-done]'
           git push origin HEAD:task14-r6-b1-final
