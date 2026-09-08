@@ -22,6 +22,7 @@ internal sealed class DB_Runtime
         bat.Injury.Tick();
         Vector2 previousFlightVelocity = bat.mainBodyChunk?.vel ?? Vector2.zero;
         bat.SandSpit.PreUpdate();
+        bat.Restraint.Tick();
 
         if (!bat.dead)
         {
@@ -37,7 +38,6 @@ internal sealed class DB_Runtime
         if (bat.room == null)
             return previousFlightVelocity;
 
-        bat.SandSpit.UpdateHeldStruggle();
         bat.DesertState.Thirst = Mathf.Clamp01(
             bat.DesertState.Thirst + (bat.dead ? 0f : DB_Tuning.ThirstPerTick));
         if (bat.DesertState.Cooldown > 0) bat.DesertState.Cooldown--;
@@ -45,6 +45,9 @@ internal sealed class DB_Runtime
         if (!bat.dead)
             DB_FearRuntime.UpdateState(bat);
 
+        // Rescue refresh runs after current fear/vengeance facts are known. It may schedule a
+        // Combat-owned rescue intent, but it never writes localGoal or velocity here.
+        bat.Rescue.RefreshState();
         return previousFlightVelocity;
     }
 
@@ -56,7 +59,12 @@ internal sealed class DB_Runtime
         if (bat.room == null) return;
         bat.Emergence.Update(eu);
         if (!extremeVengeance)
+        {
+            // Confirm rescue contact after Fly physics. If the hit succeeds, Rescue moves the
+            // bat to Escape before Combat.AfterPhysics can apply ordinary Attach/Interfere.
+            bat.Rescue.AfterPhysics();
             bat.DesertAI.Combat.AfterPhysics(eu);
+        }
         DB_FlightMotor.ApplyPostPhysics(bat, previousFlightVelocity);
     }
 }
