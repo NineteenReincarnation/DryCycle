@@ -36,7 +36,8 @@ internal sealed class DB_AI
 
     private int retreat, ticks;
     private bool hasRoost;
-    private Vector2 escapeFrom, roost;
+    private Vector2 escapeFrom;
+    private DB_RoostAnchor roost;
 
     internal bool PullingUp => combat.PullingUp;
     internal bool FormalAttack => combat.FormalAttack;
@@ -101,7 +102,7 @@ internal sealed class DB_AI
         perception.Reset();
         retreat = 0;
         injuryRecovery.ResetRoom();
-        hasRoost = false;
+        ClearRoostClaim();
     }
 
     internal void Threatened(
@@ -252,13 +253,17 @@ internal sealed class DB_AI
 
     internal bool ExecuteInjuryRecoveryOwned() => injuryRecovery.ExecuteOwned();
 
-    internal void SetRecoveryRoostClaim(Vector2 spot)
+    internal void SetRoostClaim(in DB_RoostAnchor anchor)
     {
-        roost = spot;
+        roost = anchor;
         hasRoost = true;
     }
 
-    internal void ClearRoostClaim() => hasRoost = false;
+    internal void ClearRoostClaim()
+    {
+        roost = default;
+        hasRoost = false;
+    }
 
     internal void CancelAttack()
     {
@@ -308,7 +313,7 @@ internal sealed class DB_AI
         {
             if (Mode == Activity.Roost)
             {
-                hasRoost = false;
+                ClearRoostClaim();
                 SetMode(Activity.Flight);
             }
             if (Mode == Activity.InjuryRecovery)
@@ -329,7 +334,7 @@ internal sealed class DB_AI
         {
             if (Mode == Activity.Roost)
             {
-                hasRoost = false;
+                ClearRoostClaim();
                 SetMode(Activity.Flight);
             }
             if (Mode == Activity.InjuryRecovery)
@@ -351,7 +356,7 @@ internal sealed class DB_AI
         {
             injuryRecovery.ClearLocalTarget();
             fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "danger / escape");
-            hasRoost = false;
+            ClearRoostClaim();
             combat.ClearAttackState();
             combat.ClearTarget();
             SetMode(Activity.Escape);
@@ -400,7 +405,7 @@ internal sealed class DB_AI
 
         // Combat selected a valid target/mode, but locomotion remains frozen until Arbiter
         // actually grants PrimaryOwner=Combat.
-        hasRoost = false;
+        ClearRoostClaim();
     }
 
     // Compatibility surface for old callers/tests. R3 hooks use RefreshDecisionState directly;
@@ -417,7 +422,7 @@ internal sealed class DB_AI
 
         injuryRecovery.ClearNavigation();
         fly.Injury.SetRecovery(DB_InjuryRecoveryState.None, null, "R3 PrimaryOwner=ImmediateDanger");
-        hasRoost = false;
+        ClearRoostClaim();
         combat.ClearAttackState();
         combat.ClearTarget();
         SetMode(Activity.Escape);
@@ -465,7 +470,8 @@ internal sealed class DB_AI
         {
             ticks++;
             int roostDuration = DB_EnvironmentalPolicy.AdjustRoostDuration(fly, fly.Personality.RoostDuration);
-            if (!hasRoost || ticks > roostDuration || fly.AI.fleeFromRain)
+            if (!hasRoost || !DB_RoostPolicy.IsStillValid(fly, roost) ||
+                ticks > roostDuration || fly.AI.fleeFromRain)
             {
                 StopRoost(true);
                 return true;
@@ -473,17 +479,22 @@ internal sealed class DB_AI
 
             if (fly.AI.behavior != FlyAI.Behavior.Chain)
                 fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
-            fly.burrowOrHangSpot = roost;
+            fly.burrowOrHangSpot = roost.Spot;
             fly.movMode = Fly.MovementMode.Hang;
             fly.mainBodyChunk.vel *= 0.5f;
             fly.AI.HangInChainUpdate();
             return true;
         }
 
-        // A native/social Fly chain is still a Roost owner. Preserve vanilla chain physics
-        // without running the rest of FlyAI.Update, which could choose an unrelated goal.
+        // A native/social Fly chain is still a Roost owner. If it carries a canonical tile
+        // claim, keep validating that exact anchor; fly-to-fly chains intentionally have none.
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
         {
+            if (hasRoost && !DB_RoostPolicy.IsStillValid(fly, roost))
+            {
+                StopRoost(true);
+                return true;
+            }
             fly.movMode = Fly.MovementMode.Hang;
             fly.AI.HangInChainUpdate();
             return true;
@@ -531,7 +542,7 @@ internal sealed class DB_AI
     internal bool SteerOwned(Vector2 goal, float speed, DB_BehaviorOwner owner)
     {
         if (!DB_FlightMotor.TrySteer(fly, owner, goal, speed)) return false;
-        hasRoost = false;
+        ClearRoostClaim();
         return true;
     }
 
@@ -543,18 +554,17 @@ internal sealed class DB_AI
             fly.Personality.RoostChance * DB_EnvironmentalPolicy.RoostChanceScale(fly) *
             DB_SocialBond.RoostScale(fly) * fly.Injury.RoostScale)
             return;
-        if (!TryFindRoost(out Vector2 spot)) return;
+        if (!TryFindRoost(out DB_RoostAnchor anchor)) return;
 
         // State/proposal preparation only. DB_BehaviorExecution performs the Chain/Hang writes.
-        roost = spot;
-        hasRoost = true;
+        SetRoostClaim(anchor);
         SetMode(Activity.Roost);
     }
 
-    private bool TryFindRoost(out Vector2 spot)
+    private bool TryFindRoost(out DB_RoostAnchor anchor)
     {
         IntVector2 tile = fly.room.GetTilePosition(fly.mainBodyChunk.pos);
-        return DB_RoostPolicy.TryGetSpot(fly, tile, out spot);
+        return DB_RoostPolicy.TryGetAnchor(fly, tile, out anchor);
     }
 
     private void StopRoost(bool releaseWholeChain)
@@ -567,7 +577,7 @@ internal sealed class DB_AI
 
         fly.LoseAllGrasps();
         fly.burrowOrHangSpot = null;
-        hasRoost = false;
+        ClearRoostClaim();
         if (fly.AI.behavior == FlyAI.Behavior.Chain)
             fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
         fly.movMode = Fly.MovementMode.BatFlight;
@@ -612,7 +622,7 @@ internal sealed class DB_AI
             if (member is DB_Creature desert)
             {
                 DB_AI brain = desert.DesertAI;
-                brain.hasRoost = false;
+                brain.ClearRoostClaim();
                 brain.combat.ClearAttackState();
                 brain.combat.ClearTarget();
 
