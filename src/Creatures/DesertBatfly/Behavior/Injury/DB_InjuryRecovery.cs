@@ -13,7 +13,7 @@ internal sealed class DB_InjuryRecovery
     private readonly DB_AI brain;
     private readonly DB_Creature fly;
     private int recoverySearchCooldown;
-    private Vector2? recoveryRoostTarget;
+    private DB_RoostAnchor? recoveryRoostTarget;
 
     internal DB_InjuryRecovery(DB_AI brain, DB_Creature fly)
     {
@@ -64,16 +64,17 @@ internal sealed class DB_InjuryRecovery
         if (!recoveryRoostTarget.HasValue && recoverySearchCooldown <= 0)
         {
             recoverySearchCooldown = 30;
-            if (TryFindRecoveryRoost(out Vector2 candidate))
+            if (TryFindRecoveryRoost(out DB_RoostAnchor candidate))
                 recoveryRoostTarget = candidate;
         }
 
         if (recoveryRoostTarget.HasValue)
         {
-            Vector2 target = recoveryRoostTarget.Value;
+            DB_RoostAnchor anchor = recoveryRoostTarget.Value;
+            Vector2 target = anchor.Spot;
             if (Custom.DistLess(fly.mainBodyChunk.pos, target, 26f))
             {
-                BeginRecoveryRoost(target);
+                BeginRecoveryRoost(anchor);
                 injury.SetRecovery(DB_InjuryRecoveryState.Roost, target, "severe injury; reached legal local roost");
             }
             else
@@ -111,20 +112,18 @@ internal sealed class DB_InjuryRecovery
             fly.AI.followingDijkstraMap = -1;
     }
 
-    private bool RecoveryRoostTargetValid(Vector2 target)
+    private bool RecoveryRoostTargetValid(DB_RoostAnchor anchor)
     {
-        if (fly.room == null || !Custom.DistLess(fly.mainBodyChunk.pos, target, 220f) ||
-            !fly.room.VisualContact(fly.mainBodyChunk.pos, target))
-            return false;
-        IntVector2 tile = fly.room.GetTilePosition(target);
-        return tile.x > 0 && tile.x < fly.room.TileWidth - 1 &&
-               tile.y >= 4 && tile.y < fly.room.TileHeight - 1 &&
-               DB_RoostPolicy.TryGetSpot(fly, tile, out _);
+        Vector2 target = anchor.Spot;
+        return fly.room != null &&
+               Custom.DistLess(fly.mainBodyChunk.pos, target, 220f) &&
+               fly.room.VisualContact(fly.mainBodyChunk.pos, target) &&
+               DB_RoostPolicy.IsStillValid(fly, anchor);
     }
 
-    private bool TryFindRecoveryRoost(out Vector2 spot)
+    private bool TryFindRecoveryRoost(out DB_RoostAnchor anchor)
     {
-        spot = default;
+        anchor = default;
         if (fly.room == null || fly.AI == null) return false;
         IntVector2 origin = fly.room.GetTilePosition(fly.mainBodyChunk.pos);
         float best = float.MaxValue;
@@ -138,15 +137,15 @@ internal sealed class DB_InjuryRecovery
             if (tile.x <= 0 || tile.x >= fly.room.TileWidth - 1 ||
                 tile.y < 4 || tile.y >= fly.room.TileHeight - 1)
                 continue;
-            if (!DB_RoostPolicy.TryGetSpot(fly, tile, out Vector2 candidate) ||
-                !Custom.DistLess(fly.mainBodyChunk.pos, candidate, 190f) ||
-                !fly.room.VisualContact(fly.mainBodyChunk.pos, candidate))
+            if (!DB_RoostPolicy.TryGetAnchor(fly, tile, out DB_RoostAnchor candidate) ||
+                !Custom.DistLess(fly.mainBodyChunk.pos, candidate.Spot, 190f) ||
+                !fly.room.VisualContact(fly.mainBodyChunk.pos, candidate.Spot))
                 continue;
 
-            float score = (candidate - fly.mainBodyChunk.pos).sqrMagnitude;
+            float score = (candidate.Spot - fly.mainBodyChunk.pos).sqrMagnitude;
             if (score >= best) continue;
             best = score;
-            spot = candidate;
+            anchor = candidate;
             found = true;
         }
         return found;
@@ -228,14 +227,14 @@ internal sealed class DB_InjuryRecovery
         return best;
     }
 
-    private void BeginRecoveryRoost(Vector2 spot)
+    private void BeginRecoveryRoost(DB_RoostAnchor anchor)
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery)) return;
-        recoveryRoostTarget = spot;
-        brain.SetRecoveryRoostClaim(spot);
+        recoveryRoostTarget = anchor;
+        brain.SetRecoveryRoostClaim(anchor.Spot);
         fly.AI.followingDijkstraMap = -1;
         fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
-        fly.burrowOrHangSpot = spot;
+        fly.burrowOrHangSpot = anchor.Spot;
         fly.movMode = Fly.MovementMode.Hang;
         fly.mainBodyChunk.vel *= 0.5f;
         brain.SetMode(DB_AI.Activity.InjuryRecovery);
