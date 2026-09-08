@@ -258,7 +258,7 @@ internal static class DB_SignalRuntime
                 state.AlarmThreat = packet.Threat;
                 state.LastAlarmTick = receiver.room.game?.clock ?? 0;
                 state.LastDecision = "accepted AlarmFlutter as short-term danger context";
-                DesertBatflySocialLife.CancelForPriority(receiver, "Task12 AlarmFlutter");
+                DesertBatflySocialLife.CancelForPriority(receiver, "AlarmFlutter priority");
                 ApplyAlarm(receiver, packet, response);
                 relayAlarm = packet.Hop < MaxAlarmHop && ShouldRelayAlarm(receiver, packet, response);
                 break;
@@ -268,7 +268,7 @@ internal static class DB_SignalRuntime
                 state.DistressSource = packet.Subject ?? packet.Emitter;
                 state.LastDecision = "accepted DistressCall; existing rescue/vengeance systems retain authority";
                 if (response >= 0.38f)
-                    DesertBatflySocialLife.CancelForPriority(receiver, "Task12 DistressCall");
+                    DesertBatflySocialLife.CancelForPriority(receiver, "DistressCall priority");
                 break;
 
             case DB_SignalKind.RallySignal:
@@ -281,7 +281,7 @@ internal static class DB_SignalRuntime
             case DB_SignalKind.RoostCall:
                 state.RoostInterest = Mathf.Max(state.RoostInterest, response);
                 state.RoostSource = packet.Emitter;
-                state.LastDecision = "accepted RoostCall; Task10 still owns legal roost/reservation";
+                state.LastDecision = "accepted RoostCall; social runtime still owns legal roost/reservation";
                 break;
 
             case DB_SignalKind.HarassSignal:
@@ -517,7 +517,6 @@ internal static class DB_SignalRuntime
             direction);
         TraceEmit(emitter, packet, reason);
     }
-
     private static bool TryPerceive(
         DesertBatfly receiver,
         DB_SignalPacket packet,
@@ -597,8 +596,8 @@ internal static class DB_SignalRuntime
         };
         float response = Mathf.Clamp01(packet.Intensity * attenuation * scale);
 
-        // Task11 memory stays private to the receiver. Task12 reads it only to modulate the
-        // receiver's own willingness; no emitter memory/evidence is copied through a signal.
+        // Threat memory stays private to the receiver. Signal response reads it only to
+        // modulate the receiver's own willingness; no emitter memory/evidence is copied.
         Player player = packet.PlayerTarget ?? packet.Threat as Player;
         if (player != null)
         {
@@ -742,7 +741,7 @@ internal static class DB_SignalRuntime
         DryCycle.Debugging.AI.AIDebugTrace.Record(
             emitter.abstractCreature,
             DryCycle.Debugging.AI.AIDebugEventCategory.Social,
-            "Task12SignalEmitted",
+            "SignalEmitted",
             $"{packet.Kind} gen={packet.Generation} hop={packet.Hop}",
             reason ?? string.Empty);
     }
@@ -760,7 +759,7 @@ internal static class DB_SignalRuntime
         DryCycle.Debugging.AI.AIDebugTrace.Record(
             receiver.abstractCreature,
             DryCycle.Debugging.AI.AIDebugEventCategory.Social,
-            "Task12SignalReceived",
+            "SignalReceived",
             $"{packet.Kind} gen={packet.Generation} hop={packet.Hop} via={perception} response={response:0.00}",
             reason ?? string.Empty);
     }
