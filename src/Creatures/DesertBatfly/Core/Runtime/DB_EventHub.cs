@@ -8,7 +8,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Authoritative semantic-event root for one Desert Batfly life.
 ///
 /// This type observes Rain World facts only. It does not choose behavior, write velocity,
-/// mutate persistent CreatureState, or know Task-number architecture. Domain systems
+/// mutate persistent CreatureState, or depend on historical refactor stages. Domain systems
 /// subscribe to Damage/Capture/Mortality and remain responsible for their own reactions.
 /// </summary>
 internal static class DB_EventHub
