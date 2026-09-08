@@ -57,13 +57,62 @@ internal static partial class Program
         Type frameContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContext", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         Type motor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
+        Type roostPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostPolicy", true);
+        Type roostAnchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostAnchor", true);
+        Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
+        Type platformRoost = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PlatformRoostRuntime", true);
 
         Check(creature != null && ai != null && social != null && threat != null &&
               signal != null && signalRoom != null && fear != null && vengeance != null &&
               environment != null && travel != null && colony != null && eventHub != null &&
-              roomContext != null && frameContext != null && arbiter != null && motor != null,
+              roomContext != null && frameContext != null && arbiter != null && motor != null &&
+              roostPolicy != null && roostAnchor != null,
             "R6 current architecture exposes all formal core and domain owners established so far");
 
-        Console.WriteLine("Architecture domain migration checkpoint checks pass: current owners, Integration lifecycle and Observatory chain are protected while R6 remains open.");
+        Check(roostAnchor.GetField("Tile", Flags) != null &&
+              roostAnchor.GetField("Kind", Flags) != null &&
+              roostAnchor.GetField("Spot", Flags) != null &&
+              roostPolicy.GetMethod("TryGetAnchor", Flags) != null &&
+              roostPolicy.GetMethod("IsStillValid", Flags) != null,
+            "Floor/native tile roosts use one canonical tile-kind-spot anchor policy");
+
+        Check(ai.GetField("roost", Flags)?.FieldType == roostAnchor,
+            "DB_AI retains the canonical roost anchor instead of only a world-space Vector2");
+        MethodInfo setRoostClaim = ai.GetMethod("SetRoostClaim", Flags);
+        Type claimParameter = setRoostClaim?.GetParameters().Length == 1
+            ? setRoostClaim.GetParameters()[0].ParameterType
+            : null;
+        Check(claimParameter != null &&
+              (claimParameter == roostAnchor ||
+               (claimParameter.IsByRef && claimParameter.GetElementType() == roostAnchor)),
+            "DB_AI roost ownership accepts the canonical anchor fact");
+
+        FieldInfo injuryTarget = injuryRecovery.GetField("recoveryRoostTarget", Flags);
+        Check(injuryTarget != null && Nullable.GetUnderlyingType(injuryTarget.FieldType) == roostAnchor,
+            "injury recovery preserves the canonical anchor across search/revalidation/commit");
+
+        Type socialState = social.GetNestedType("State", Flags);
+        FieldInfo socialRoost = socialState?.GetField("RoostAnchor", Flags);
+        Check(socialRoost != null && Nullable.GetUnderlyingType(socialRoost.FieldType) == roostAnchor,
+            "social tile-roost invitations preserve the canonical anchor instead of re-deriving a tile from Spot");
+
+        Check(IsNoOp(platformRoost.GetMethod("Enable", Flags)) &&
+              IsNoOp(platformRoost.GetMethod("Disable", Flags)),
+            "legacy platform-roost lifecycle shell cannot patch vanilla FlyAI.ChainTile");
+
+        Console.WriteLine("Architecture domain migration checkpoint checks pass: current owners, Integration lifecycle, canonical roost anchors and Observatory chain are protected.");
+    }
+
+    private static bool IsNoOp(MethodInfo method)
+    {
+        byte[] il = method?.GetMethodBody()?.GetILAsByteArray();
+        if (il == null || il.Length == 0) return false;
+        for (int i = 0; i < il.Length; i++)
+        {
+            if (il[i] == 0x00) continue; // nop
+            if (il[i] == 0x2A && i == il.Length - 1) continue; // ret
+            return false;
+        }
+        return il[il.Length - 1] == 0x2A;
     }
 }
