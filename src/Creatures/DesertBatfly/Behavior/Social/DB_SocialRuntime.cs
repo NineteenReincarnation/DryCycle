@@ -695,7 +695,7 @@ internal static class DB_SocialRuntime
         State state,
         DB_SocialRoomRuntime.RoomState roomState)
     {
-        Vector2 spot;
+        Vector2 spot = default;
         bool hasTarget = mode == DB_SocialMode.ChainSocialization &&
             TryGetChainApproachTarget(target, source, out spot);
         if (!hasTarget)
@@ -1000,7 +1000,7 @@ internal static class DB_SocialRuntime
         }
 
         DB_SocialRoomRuntime.RoomState roomState = state.Token?.Owner;
-        Vector2 target;
+        Vector2 target = default;
         bool approachingChain = state.Mode == DB_SocialMode.ChainSocialization &&
             TryGetChainApproachTarget(bat, source, out target);
         if (!approachingChain)

@@ -292,9 +292,10 @@ internal static class DB_EventHub
 
         LizardTongue.State afterState = self.state;
         PhysicalObject afterOwner = self.attached?.owner;
+        DB_Creature victim = afterOwner as DB_Creature;
         bool enteredCapture =
             afterState == LizardTongue.State.AttachedInSmallObject &&
-            afterOwner is DB_Creature victim && !victim.dead &&
+            victim != null && !victim.dead &&
             self.lizard != null &&
             (beforeState != LizardTongue.State.AttachedInSmallObject ||
              !ReferenceEquals(beforeOwner, afterOwner));

@@ -178,16 +178,16 @@ internal static class AIDebugAnomalyDetector
             }
         }
 
-        if (reason == null && creature.realizedCreature is Creatures.DB_Creature.DB_Creature bat &&
+        if (reason == null && creature.realizedCreature is Creatures.DesertBatfly.DB_Creature bat &&
             bat.room?.abstractRoom?.creatures != null && bat.DesertAI.Target != null)
         {
             int attackers = 0;
             foreach (AbstractCreature abs in bat.room.abstractRoom.creatures)
-                if (abs?.realizedCreature is Creatures.DB_Creature.DB_Creature other &&
+                if (abs?.realizedCreature is Creatures.DesertBatfly.DB_Creature other &&
                     other != bat && other.DesertAI.Target == bat.DesertAI.Target && other.DesertAI.FormalAttack)
                     attackers++;
             if (bat.DesertAI.FormalAttack) attackers++;
-            if (attackers > Creatures.DB_Creature.DB_Tuning.AttackSlots)
+            if (attackers > Creatures.DesertBatfly.DB_Tuning.AttackSlots)
                 reason = "AttackSlotsViolation";
         }
 
