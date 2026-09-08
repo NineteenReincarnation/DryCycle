@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Pure decision math for Task 09. Selection is continuous and personality-driven;
+/// Pure migration decision math. Selection is continuous and personality-driven;
 /// there is intentionally no Migrator/Scout/Leader role or runtime job state.
 /// </summary>
 internal static class DB_MigrationPolicy
