@@ -34,8 +34,8 @@ internal readonly struct DB_RoostAnchor
 /// Canonical Desert Batfly local roost legality and anchor geometry policy.
 /// Native FlyAI.ChainTile remains authoritative for native Solid/Beam anchors; the only
 /// species extension is the underside of Rain World's one-way Floor terrain. The extension
-/// does not modify FlyAI.ChainTile and uses the Floor tile itself as the anchor owner because
-/// Rain World's one-way collision plane is the top edge of that tile.
+/// does not modify FlyAI.ChainTile. An Air candidate immediately below a Floor and the Floor
+/// tile itself are normalized to one immutable Floor-owned anchor fact.
 /// </summary>
 internal static class DB_RoostPolicy
 {
@@ -78,17 +78,31 @@ internal static class DB_RoostPolicy
             return true;
         }
 
-        // Desert Batfly extension: a Floor tile is itself traversable from below, while its
-        // one-way collision surface is ((tile.y + 1) * 20). Therefore the correct underside
-        // anchor is the Floor tile's top edge, not the top edge of the Air tile beneath it.
-        if (current.Terrain != Room.Tile.TerrainType.Floor ||
-            !HasVanillaClearance(room, tile))
+        // Desert Batfly extension. Normal AI asks about its current Air tile, while spatial
+        // searches may encounter the Floor tile directly. Normalize both observations to the
+        // Floor tile because Rain World's one-way collision plane is that tile's top edge.
+        IntVector2 floorTile;
+        if (current.Terrain == Room.Tile.TerrainType.Floor)
+        {
+            floorTile = tile;
+        }
+        else if (current.Terrain == Room.Tile.TerrainType.Air &&
+                 above.Terrain == Room.Tile.TerrainType.Floor)
+        {
+            floorTile = new IntVector2(tile.x, tile.y + 1);
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!InBounds(room, floorTile) || !HasFloorClearance(room, floorTile))
             return false;
 
         anchor = new DB_RoostAnchor(
-            tile,
+            floorTile,
             DB_RoostAnchorKind.FloorUnderside,
-            middle + Vector2.up * 10f);
+            room.MiddleOfTile(floorTile) + Vector2.up * 10f);
         return true;
     }
 
@@ -98,6 +112,7 @@ internal static class DB_RoostPolicy
             return false;
 
         return current.Kind == anchor.Kind &&
+               current.Tile.x == anchor.Tile.x && current.Tile.y == anchor.Tile.y &&
                (current.Spot - anchor.Spot).sqrMagnitude <= 0.01f;
     }
 
@@ -120,11 +135,14 @@ internal static class DB_RoostPolicy
            tile.x > 0 && tile.x < room.TileWidth - 1 &&
            tile.y >= 4 && tile.y < room.TileHeight - 1;
 
-    private static bool HasVanillaClearance(Room room, IntVector2 tile)
+    private static bool HasFloorClearance(Room room, IntVector2 floorTile)
     {
-        for (int y = tile.y; y > tile.y - 5; y--)
+        // Match the native chain rule's five traversable tiles beneath the support surface.
+        // Floor itself is a one-way surface rather than a Solid obstruction, so clearance
+        // begins at the Air/candidate tile immediately below it.
+        for (int y = floorTile.y - 1; y > floorTile.y - 6; y--)
         {
-            Room.Tile below = room.GetTile(tile.x, y);
+            Room.Tile below = room.GetTile(floorTile.x, y);
             if (below.Terrain == Room.Tile.TerrainType.Solid || below.AnyWater)
                 return false;
         }
