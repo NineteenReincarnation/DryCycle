@@ -3,13 +3,12 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Player-held defensive sand-spit state. Owns struggle meter, windup and cooldown;
-/// presentation remains DB_SandBurst and ordinary locomotion remains outside this runtime.
+/// Player-held defensive sand-spit action. The player-grasp session itself is owned by
+/// DB_RestraintRuntime; this class owns only sand meter, windup, cooldown and presentation.
 /// </summary>
 internal sealed class DB_SandSpitRuntime
 {
     private readonly DB_Creature bat;
-    private Player playerHolder;
     private float sandStruggleMeter, sandSpitThreshold;
     private int sandSpitCooldown, sandSpitWindup, sandSpitCycle;
 
@@ -24,21 +23,33 @@ internal sealed class DB_SandSpitRuntime
 
     internal void PreUpdate()
     {
-        TrackPlayerRelease();
         if (sandSpitCooldown > 0) sandSpitCooldown--;
     }
 
     internal void ClearTransient()
     {
-        playerHolder = null;
         sandStruggleMeter = 0f;
         sandSpitWindup = 0;
     }
 
-    internal void UpdateHeldStruggle()
+    internal void BeginPlayerHold()
     {
-        if (playerHolder == null || !bat.Personality.CanSandSpit || bat.dead || !bat.Consious ||
-            bat.inShortcut || playerHolder.room != bat.room)
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
+        sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);
+        PrepareNextSandThreshold();
+    }
+
+    internal void EndPlayerHold()
+    {
+        sandStruggleMeter = 0f;
+        sandSpitWindup = 0;
+    }
+
+    internal void UpdateHeldStruggle(Player holder)
+    {
+        if (holder == null || !bat.Personality.CanSandSpit || bat.dead || !bat.Consious ||
+            bat.inShortcut || holder.room != bat.room)
         {
             sandSpitWindup = 0;
             sandStruggleMeter = Mathf.Max(0f, sandStruggleMeter - 0.02f);
@@ -49,13 +60,15 @@ internal sealed class DB_SandSpitRuntime
         {
             sandSpitWindup--;
             if (sandSpitWindup == 0)
-                EmitSandSpit();
+                EmitSandSpit(holder);
             return;
         }
 
         if (sandSpitCooldown > 0) return;
 
-        float movement = Mathf.Clamp01(playerHolder.mainBodyChunk.vel.magnitude / 8f);
+        float movement = holder.mainBodyChunk != null
+            ? Mathf.Clamp01(holder.mainBodyChunk.vel.magnitude / 8f)
+            : 0f;
         sandStruggleMeter += bat.Personality.SandSpitMeterRate +
             movement * DB_Tuning.SandSpitMovementBonus;
 
@@ -64,16 +77,17 @@ internal sealed class DB_SandSpitRuntime
         sandSpitWindup = DB_Tuning.SandSpitWindupTicks;
     }
 
-    private void EmitSandSpit()
+    private void EmitSandSpit(Player holder)
     {
-        if (bat.room == null || playerHolder == null || bat.dead || !bat.Consious ||
-            !bat.Personality.CanSandSpit) return;
+        if (bat.room == null || holder == null || holder.room != bat.room || bat.dead ||
+            !bat.Consious || !bat.Personality.CanSandSpit)
+            return;
 
         int seed = unchecked(bat.Personality.VisualSeed ^ (sandSpitCycle * 1103515245));
         DB_SandBurst.Emit(
             bat.room,
             bat,
-            playerHolder,
+            holder,
             bat.Personality.SandSpitIntensity,
             seed);
 
@@ -108,39 +122,5 @@ internal sealed class DB_SandSpitRuntime
             x ^= x >> 16;
             return (x & 0x00FFFFFFu) / 16777215f;
         }
-    }
-
-    internal bool BeginPlayerHold(Player player)
-    {
-        if (player == null || playerHolder == player) return false;
-        playerHolder = player;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        sandSpitCooldown = Mathf.Max(sandSpitCooldown, 18);
-        PrepareNextSandThreshold();
-        return true;
-    }
-
-    private void TrackPlayerRelease()
-    {
-        if (playerHolder == null) return;
-
-        bool stillHeld = false;
-        for (int i = 0; i < bat.grabbedBy.Count; i++)
-        {
-            if (bat.grabbedBy[i]?.grabber == playerHolder)
-            {
-                stillHeld = true;
-                break;
-            }
-        }
-        if (stillHeld) return;
-
-        Player releasedBy = playerHolder;
-        playerHolder = null;
-        sandStruggleMeter = 0f;
-        sandSpitWindup = 0;
-        if (!bat.dead && !bat.slatedForDeletetion)
-            bat.DesertAI.PlayerReleased(releasedBy, bat.mainBodyChunk.vel.magnitude);
     }
 }
