@@ -13,8 +13,9 @@ internal static partial class Program
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureHooks", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRuntimePatch", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSandbox", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureWarpCompatibility", false) == null,
-            "R6 current architecture keeps retired Integration identities physically absent");
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureWarpCompatibility", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PlatformRoostRuntime", false) == null,
+            "R6 current architecture keeps retired Integration/platform-hook identities physically absent");
 
         MethodInfo modsInit = hooks.GetMethod("RainWorld_OnModsInit", Flags);
         Check(MethodCallOffset(modsInit, sandbox, "Enable") >= 0 &&
@@ -60,7 +61,6 @@ internal static partial class Program
         Type roostPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostPolicy", true);
         Type roostAnchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostAnchor", true);
         Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
-        Type platformRoost = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PlatformRoostRuntime", true);
 
         Check(creature != null && ai != null && social != null && threat != null &&
               signal != null && signalRoom != null && fear != null && vengeance != null &&
@@ -96,23 +96,6 @@ internal static partial class Program
         Check(socialRoost != null && Nullable.GetUnderlyingType(socialRoost.FieldType) == roostAnchor,
             "social tile-roost invitations preserve the canonical anchor instead of re-deriving a tile from Spot");
 
-        Check(IsNoOp(platformRoost.GetMethod("Enable", Flags)) &&
-              IsNoOp(platformRoost.GetMethod("Disable", Flags)),
-            "legacy platform-roost lifecycle shell cannot patch vanilla FlyAI.ChainTile");
-
         Console.WriteLine("Architecture domain migration checkpoint checks pass: current owners, Integration lifecycle, canonical roost anchors and Observatory chain are protected.");
-    }
-
-    private static bool IsNoOp(MethodInfo method)
-    {
-        byte[] il = method?.GetMethodBody()?.GetILAsByteArray();
-        if (il == null || il.Length == 0) return false;
-        for (int i = 0; i < il.Length; i++)
-        {
-            if (il[i] == 0x00) continue; // nop
-            if (il[i] == 0x2A && i == il.Length - 1) continue; // ret
-            return false;
-        }
-        return il[il.Length - 1] == 0x2A;
     }
 }
