@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using DryCycle.TerrainExt.QuicksandZone;
 using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -144,6 +145,7 @@ internal static class DB_EnvironmentRoomRuntime
         bool homeRoom = !string.IsNullOrEmpty(currentColony) &&
             string.Equals(currentColony, bat.room.abstractRoom?.name, StringComparison.OrdinalIgnoreCase);
         float injury = 1f - bat.Injury.PhysicalCapability;
+        bool heatWeather = weather is DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat;
 
         for (int i = 0; i < state.Anchors.Count; i++)
         {
@@ -154,7 +156,16 @@ internal static class DB_EnvironmentRoomRuntime
                 candidate.Position) / 720f);
             float candidateScore = quality;
             candidateScore -= distance01 * Mathf.Lerp(0.24f, 0.42f, injury);
-            candidateScore -= Mathf.Clamp01(candidate.Crowding / 5f) * 0.22f;
+
+            // Heat shelter is particularly prone to funneling a whole colony into the same
+            // two or three shaded pockets. Keep crowding soft, but make it strong enough for
+            // already-busy heat anchors to lose against similarly protected alternatives.
+            float crowdingPenalty = heatWeather ? 0.40f : 0.22f;
+            candidateScore -= Mathf.Clamp01(
+                candidate.Crowding / SevereCrowdingPerAnchor) * crowdingPenalty;
+            if (heatWeather && candidate.Crowding >= SevereCrowdingPerAnchor)
+                candidateScore -= 0.12f;
+
             if (candidate.RoostCompatible)
                 candidateScore += Mathf.Clamp01(roostPreference) * 0.11f;
             if (homeRoom && candidate.NearHive) candidateScore += 0.14f;
@@ -474,6 +485,10 @@ internal static class DB_EnvironmentRoomRuntime
             IntVector2 tile = new(x, y);
             Room.Tile current = room.GetTile(tile);
             if (current.Solid || current.AnyWater) continue;
+
+            Vector2 anchorPoint = room.MiddleOfTile(tile);
+            if (QuicksandAIHazard.IsUnsafeShelterPoint(room, anchorPoint, 10f))
+                continue;
 
             DB_EnvironmentExposureSample exposure =
                 DB_EnvironmentExposure.Sample(room, tile, 1f);
