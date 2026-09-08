@@ -30,7 +30,6 @@ internal static class DB_RainWorldHooks
         DB_EventConsumers.Enable();
         DB_ThreatRuntime.Enable();
         DB_ColonyRuntime.Enable();
-        DB_PlatformRoostRuntime.Enable();
         if (!debugRegistered)
         {
             AIDebugRegistry.Register(new DB_EnvironmentDebugSource());
@@ -75,7 +74,6 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_SocialRuntime.Reset();
-        DB_PlatformRoostRuntime.Disable();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
