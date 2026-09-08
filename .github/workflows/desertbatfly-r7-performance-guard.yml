@@ -1,0 +1,42 @@
+name: DesertBatfly R7 Performance Guard
+
+on:
+  push:
+    branches:
+      - task14-r6-b1-final
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r7-performance.sh'
+      - '.github/workflows/desertbatfly-r7-performance-guard.yml'
+  pull_request:
+    paths:
+      - 'src/Creatures/DesertBatfly/**'
+      - 'scripts/check-desertbatfly-r7-performance.sh'
+      - '.github/workflows/desertbatfly-r7-performance-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static performance retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-desertbatfly-r7-performance.sh
+      - name: Roslyn syntax parse Desert Batfly production
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cat > "$tmp/P.csproj" <<'CSPROJ'
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup><ItemGroup><Reference Include="Microsoft.CodeAnalysis"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath></Reference><Reference Include="Microsoft.CodeAnalysis.CSharp"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath></Reference></ItemGroup></Project>
+          CSPROJ
+          cat > "$tmp/Program.cs" <<'CS'
+          using Microsoft.CodeAnalysis;using Microsoft.CodeAnalysis.CSharp;var errors=new List<string>();foreach(var path in Directory.EnumerateFiles("src/Creatures/DesertBatfly","*.cs",SearchOption.AllDirectories)){var tree=CSharpSyntaxTree.ParseText(File.ReadAllText(path),new CSharpParseOptions(LanguageVersion.Preview),path);foreach(var d in tree.GetDiagnostics().Where(d=>d.Severity==DiagnosticSeverity.Error))errors.Add(d.ToString());}if(errors.Count>0){Console.Error.WriteLine(string.Join(Environment.NewLine,errors));Environment.Exit(1);}Console.WriteLine("R7 performance-guard Roslyn syntax parse passed.");
+          CS
+          dotnet run --project "$tmp/P.csproj"

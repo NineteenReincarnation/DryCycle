@@ -727,11 +727,15 @@ internal static class DB_FearRuntime
 
     private static Creature ResolveStrongestTraumaThreat(DB_Creature bat)
     {
+        DB_RoomContext roomContext = DB_RoomContext.For(bat?.room);
+        if (roomContext == null) return null;
+
         Creature best = null;
         float bestStrength = 0f;
-        foreach (AbstractCreature abs in bat.room.abstractRoom.creatures)
+        IReadOnlyList<Creature> creatures = roomContext.Creatures;
+        for (int i = 0; i < creatures.Count; i++)
         {
-            Creature creature = abs.realizedCreature;
+            Creature creature = creatures[i];
             if (!ValidThreat(creature, bat.room)) continue;
             float strength = PersistentTraumaStrength(bat, creature);
             if (strength <= bestStrength) continue;

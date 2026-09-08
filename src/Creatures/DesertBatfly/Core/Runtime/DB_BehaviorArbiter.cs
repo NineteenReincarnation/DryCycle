@@ -98,7 +98,7 @@ internal static class DB_BehaviorArbiter
                 state.Rejected.Add(new DB_BehaviorRejection(
                     proposal.Owner,
                     proposal.Priority,
-                    $"rejected by higher-priority {winner.Owner}"));
+                    HigherPriorityRejectionReason(winner.Owner)));
         }
 
         Vector2? finalGoal = winner.Goal ?? frame.CurrentGoal;
@@ -178,6 +178,29 @@ internal static class DB_BehaviorArbiter
         }
         return winner;
     }
+
+    private static string HigherPriorityRejectionReason(DB_BehaviorOwner winner) => winner switch
+    {
+        DB_BehaviorOwner.CreaturePhysics => "rejected by higher-priority CreaturePhysics",
+        DB_BehaviorOwner.Restraint => "rejected by higher-priority Restraint",
+        DB_BehaviorOwner.Shortcut => "rejected by higher-priority Shortcut",
+        DB_BehaviorOwner.Emergence => "rejected by higher-priority Emergence",
+        DB_BehaviorOwner.NativeSpecial => "rejected by higher-priority NativeSpecial",
+        DB_BehaviorOwner.ImmediateDanger => "rejected by higher-priority ImmediateDanger",
+        DB_BehaviorOwner.InjuryRecovery => "rejected by higher-priority InjuryRecovery",
+        DB_BehaviorOwner.Travel => "rejected by higher-priority Travel",
+        DB_BehaviorOwner.EnvironmentHardSurvival => "rejected by higher-priority EnvironmentHardSurvival",
+        DB_BehaviorOwner.FearResponse => "rejected by higher-priority FearResponse",
+        DB_BehaviorOwner.Vengeance => "rejected by higher-priority Vengeance",
+        DB_BehaviorOwner.EnvironmentLocalSurvival => "rejected by higher-priority EnvironmentLocalSurvival",
+        DB_BehaviorOwner.ImmediateProjectileEvade => "rejected by higher-priority ImmediateProjectileEvade",
+        DB_BehaviorOwner.Combat => "rejected by higher-priority Combat",
+        DB_BehaviorOwner.Roost => "rejected by higher-priority Roost",
+        DB_BehaviorOwner.Social => "rejected by higher-priority Social",
+        DB_BehaviorOwner.Ordinary => "rejected by higher-priority Ordinary",
+        DB_BehaviorOwner.VanillaFallback => "rejected by higher-priority VanillaFallback",
+        _ => "rejected by higher-priority owner"
+    };
 
     private static void BuildProposals(
         in DB_FrameContext frame,
