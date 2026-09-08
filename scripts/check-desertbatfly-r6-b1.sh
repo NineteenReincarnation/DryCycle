@@ -9,10 +9,12 @@ for f in \
   src/Creatures/DesertBatfly/Integration/RainWorld/DB_RuntimePatch.cs \
   src/Creatures/DesertBatfly/Integration/Sandbox/DB_Sandbox.cs \
   src/Creatures/DesertBatfly/Integration/Warp/DB_WarpCompatibility.cs \
+  src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs \
   src/Creatures/DesertBatfly/Travel/DB_TravelRuntime.cs \
   src/Creatures/DesertBatfly/Travel/DB_TravelIntent.cs \
   src/Creatures/DesertBatfly/Travel/DB_TravelDebugState.cs \
   src/Creatures/DesertBatfly/Combat/DB_SandSpitRuntime.cs \
+  src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
   src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
   src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs \
@@ -44,5 +46,21 @@ if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown
   echo 'Creature shell regained SandSpit runtime ownership.' >&2
   exit 1
 fi
+
+grep -q 'internal sealed class DB_Runtime' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
+grep -q 'Runtime.BeforeVanillaUpdate()' src/Creatures/DesertBatfly/DesertBatfly.cs
+grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/DesertBatfly/DesertBatfly.cs
+! grep -q 'base.Update' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Runtime/DB_Runtime.cs
+
+grep -q 'internal sealed class DB_CreaturePerception' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+grep -q 'internal Creature Danger' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+! grep -n -E '\bdanger[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+! grep -n '\.localGoal[[:space:]]*=' src/Creatures/DesertBatfly/Perception/DB_CreaturePerception.cs
+! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/DesertBatflyAI.cs
+! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/DesertBatflyAI.cs
 
 echo 'R6 source retention audit passed.'
