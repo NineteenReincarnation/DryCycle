@@ -1,126 +1,88 @@
 Desert Batfly Task 14 — R6 Domain / File / Type Migration Status
-Revision: R6-B45 architecture checkpoint / 2026-09-08
+Revision: R6 closure / 2026-09-08
 Branch: task14-r6-b1-final
-Verified implementation baseline before B45 checkpoint: 71f53f3b29fbd83b658bd0474975215e300bd263
-Status: 【R6 继续开放 / 当前架构迁移基线已稳定并进入长期 guard 保护】
+Closure source baseline: 64acf82deb5ec42917cc2bfd81f224dd454d51e4
+Status: 【R6 结构迁移已收口 / R7 已开始 / 尚未 Live Verified】
 
-R6 remains open for additional planned work. This document records the stable architecture reached through the current B45 checkpoint; it does not close the phase or advance the project to R7.
+R6 is now structurally complete. The production Desert Batfly implementation has completed the planned domain/file/type migration, historical internal ownership debt has been removed or bounded behind explicit compatibility integration, and long-lived architecture/function guards protect the resulting contracts.
+
+This is an architecture closure, not a claim that Task 14 is fully Live Verified. R7 performance/debug/live-regression work is still in progress.
 
 ======================================================================
-1. Current production architecture baseline
+1. R6 closure decision
 ======================================================================
 
-R6 has migrated the historical Desert Batfly implementation toward domain ownership without intentionally redesigning gameplay.
+R6 closure is based on the actual production tree and guards, not on file size or on the historical Task-number layout.
 
-Current source-level invariants established so far:
-- production Desert Batfly `.cs` files live under domain directories rather than the creature root;
-- production Desert Batfly filenames use `DB_` domain identities;
-- internal `DesertBatflyXxx` type declarations have been retired;
-- production Task-number development terminology has exited runtime source;
-- old `Behavior/ThreatSignature` physical ownership has been retired in favor of the Threat domain;
-- internal Bridge/RuntimeDetour debt remains retired except explicit Sandbox/Warp compatibility reflection/patch integration;
-- managed Desert Batfly tests use domain suites and current positive reflection targets.
+Current closure invariants:
+- no production Desert Batfly C# remains at the creature root;
+- production Desert Batfly filenames use DB_ domain identities;
+- historical DesertBatflyXxx internal type declarations are retired;
+- production Task-number development terminology is absent under the permanent regex policy;
+- Behavior/ThreatSignature physical ownership is retired;
+- Fear and Vengeance are separate formal responsibility owners;
+- Social, Threat, Signal, Environment, Travel and Colony have formal domain owners;
+- EventHub, RoomContext, FrameContext, BehaviorArbiter and FlightMotor remain the architecture foundation;
+- published/save/world compatibility identities remain unchanged;
+- managed tests target the current domain architecture rather than retired façade identities.
 
-Formal owner set currently includes:
+The production tree is domain based:
 
-Core / runtime / integration:
+Core:
 - DB_Creature
-- DB_AI
-- DB_Runtime
 - DB_Definition
-- DB_Emergence
-- DB_RainWorldHooks
-- DB_RuntimePatch
-- DB_Sandbox
-- DB_WarpCompatibility
-
-Architecture foundation:
+- DB_State
+- DB_Personality
+- DB_Tuning
+- DB_Runtime
 - DB_EventHub / DB_EventConsumers
 - DB_RoomContext
 - DB_FrameContext
-- DB_BehaviorArbiter
+- DB_BehaviorArbiter / DB_BehaviorExecution
 - DB_FlightMotor
 
-World ecology:
-- DB_ColonyRuntime / DB_ColonyState / DB_MigrationPolicy
-- DB_TravelRuntime / DB_TravelIntent / DB_RefugePolicy / DB_WorldRoutePlanner
-- DB_EnvironmentRuntime / DB_EnvironmentRoomRuntime and environment policy/profile/exposure owners
-
 Behavior:
-- DB_CombatRuntime
-- DB_Injury / DB_InjuryRecovery
-- DB_SocialRuntime / DB_SocialRoomRuntime / DB_SocialBond
-- DB_ThreatRuntime / DB_ThreatMemory / DB_ThreatTactics
-- DB_SignalRuntime / DB_SignalRoomRuntime
+- DB_AI
 - DB_FearRuntime
 - DB_VengeanceRuntime
+- Combat / Injury / Perception / Roost / Signals / Social / Threat owners
+
+World:
+- Colony
+- Environment
+- Travel
+
+Integration / Presentation / Debug remain explicit boundary domains.
 
 ======================================================================
-2. B43 — managed regression modernization
+2. Major late-R6 closure work
 ======================================================================
 
-B43 updated the managed regression layer so it protects the current architecture instead of historical Task-number implementation details.
+Managed regression modernization:
+- managed tests were migrated away from historical Task-number filenames and stale positive reflection targets;
+- current architecture/domain owners are now the positive contract;
+- Vengeance tests target DB_VengeanceRuntime rather than the retired Fear-owned façade path.
 
-Completed:
-- Task-number test filenames and entry points were replaced by domain names;
-- positive `GetType(..., true)` probes were audited against current production declarations;
-- stale reflection targets were migrated to current owners;
-- Threat tactics tests now protect the current direct owner/API path instead of the removed Vengeance bridge and old AI execution path;
-- managed Task-era terminology was removed under the defined R6 policy.
+Fear / Vengeance extraction:
+- DB_FearRuntime retains the single per-bat host lifecycle;
+- host State embeds exactly one DB_VengeanceRuntime.State;
+- DB_VengeanceRuntime owns Vengeance mode/participation/group arming/state-machine/rescue/movement behavior;
+- no second Vengeance weak-table lifetime was introduced;
+- Vengeance movement remains owner-gated through BehaviorArbiter and DB_FlightMotor.
 
-The managed suite continues to cover Travel/Colony, Social, Threat, Threat tactics, Threat event semantics, Signals, Environment/rain and architecture foundations/retention/domain migration.
+Signal authority consolidation:
+- DB_SignalDefinition is the single transport-definition authority for visual/acoustic range, TTL, display lifetime and relay limits/scales;
+- the consolidation preserved the established effective Signal ranges and lifetimes rather than retuning gameplay.
 
-======================================================================
-3. B44 — Fear / Vengeance responsibility extraction
-======================================================================
+Function-retention protection:
+- scripts/check-desertbatfly-function-retention.sh protects the R0 HB-01 through HB-10 hidden-risk contracts;
+- .github/workflows/desertbatfly-r6-function-retention.yml runs those checks independently of the architecture guard.
 
-The remaining responsibility debt was that the real Extreme Vengeance state machine still lived in a `partial DB_FearRuntime` while `DB_VengeanceRuntime` acted as a façade.
-
-Current design:
-- `DB_FearRuntime` retains exactly one per-bat `ConditionalWeakTable<DB_Creature, State>` host;
-- Fear host State embeds exactly one `DB_VengeanceRuntime.State`;
-- `DB_VengeanceRuntime` owns no second weak table;
-- Reset, Forget, death handling, trauma collapse and fear collapse therefore retain one synchronous object lifecycle;
-- `DB_VengeanceRuntime` owns Mode, Participation, group arming, target/leader/supporter state, state-machine transitions, rescue/contact behavior, cancellation and owner-gated movement;
-- ordinary Vengeance movement remains behind Arbiter ownership and `DB_FlightMotor`;
-- Fear exposes only narrow host/fear/trauma services needed by Vengeance.
-
-Behavior-preservation checks during B44 froze:
-- Fear/Vengeance tuning constant values;
-- critical Rally, Violence, grasp/tongue rescue, FlightMotor, Threat tactic, trauma and threat-notification call counts;
-- switch/case state-machine structure;
-- runtime string payloads.
-
-B44 candidate and clean-promotion verification passed before entering the final working branch.
+Architecture protection:
+- .github/workflows/desertbatfly-r6-architecture-guard.yml protects domain identity, current formal owners, Fear/Vengeance ownership, compatibility literals, retired-debt absence and Roslyn syntax parsing.
 
 ======================================================================
-4. B45 — architecture consolidation checkpoint
-======================================================================
-
-B45 is a checkpoint, not R6 closure.
-
-Its purpose is to consolidate and permanently guard the architecture already established while leaving the phase open for later project arrangements.
-
-B45 introduces:
-- a current `Program.ArchitectureDomainMigration` regression that verifies present formal owners, Integration lifecycle and Observatory enrichment order;
-- `.github/workflows/desertbatfly-r6-architecture-guard.yml`, a read-only aggregate architecture guard;
-- retirement of obsolete write-oriented migration facilities after aggregate-guard validation;
-- refreshed progress/status documentation that explicitly keeps R6 open.
-
-The aggregate guard protects:
-- R5 retained bridge boundaries;
-- R6 source-retention boundaries;
-- Task-era terminology exit in production and managed Desert Batfly tests;
-- DB_ production filenames/internal identities;
-- absence of root-level Desert Batfly production C# and retired ThreatSignature directory;
-- formal production owner presence;
-- validity of positive managed reflection targets;
-- Fear/Vengeance single-host ownership;
-- published/save/world compatibility literals;
-- Roslyn syntax parsing of Desert Batfly production and managed tests.
-
-======================================================================
-5. Compatibility identities intentionally unchanged
+3. Compatibility identities intentionally unchanged
 ======================================================================
 
 Internal architecture migration does not rename published/game-data identities:
@@ -131,28 +93,40 @@ Internal architecture migration does not rename published/game-data identities:
 - colony save prefix: "DCBATCOLONY09<svB>"
 - authored room tag: "DESERTSWARMROOM"
 
-`DCBATCOLONY09<svB>` is a persisted protocol identity. Its numeric `09` is deliberately retained and is not treated as Task architecture terminology.
+DCBATCOLONY09<svB> is a persisted protocol identity. Its numeric 09 is deliberately retained and is not Task architecture terminology.
 
 ======================================================================
-6. Validation boundary
+4. Formal validation at R6 closure
 ======================================================================
 
-The available CI can execute source guards and Roslyn syntax parsing. It does not provide the developer-local Rain World/BepInEx assembly set or a live Rain World runtime.
+On formal source baseline 64acf82deb5ec42917cc2bfd81f224dd454d51e4:
+- DesertBatfly R6 Architecture Guard: success
+- DesertBatfly R6 Function Retention: success
+- DesertBatfly R7 Performance Guard: success
 
-Not claimed by this checkpoint:
-- full developer-local net48 build against the exact installed game assemblies;
-- managed integration-binary execution against those assemblies;
-- Rain World save/load compatibility;
-- live scenario regression;
-- 20-30 Desert Batfly stress/profile acceptance;
+The R7 guard is listed because the first R7 source hardening was promoted immediately after R6 structural closure and verified without reopening R6 ownership.
+
+Available CI validates source contracts and Roslyn syntax. It does not replace a developer-local Rain World build or live runtime regression.
+
+Not claimed by R6 closure:
+- full net48 compilation against the exact installed Rain World/BepInEx/MonoMod assembly set;
+- managed integration-binary execution against those exact assemblies;
+- Rain World save/load live compatibility acceptance;
+- Scenario A–V live regression;
+- 20–30 Desert Batfly stress/profile acceptance;
 - live Observatory acceptance.
 
-These remain future validation/work items.
-
 ======================================================================
-7. R6 remains open
+5. R7 handoff
 ======================================================================
 
-R6 is intentionally NOT marked complete or closed by B45.
+R7 is now the active Task14 phase.
 
-The current migration baseline is stable and guarded, but subsequent R6 tasks may extend, reorganize or add architecture work according to later project instructions. Do not automatically advance to R7 and do not create a final report solely because the current B45 checklist is exhausted.
+The first R7 static performance pass has already:
+- moved Fear/PTSD realized-creature discovery to shared DB_RoomContext observation;
+- removed per-bat/per-frame interpolated BehaviorArbiter rejection strings while preserving detailed debug reasons;
+- added a permanent static performance-retention guard for shared scans, lazy room activation and bounded room-level cadences.
+
+Remaining work belongs to R7 and must not be described as R6 architecture debt unless a genuine ownership regression is discovered.
+
+Task14 remains NOT Live Verified until the real game-assembly build, save/runtime regressions, Scenario A–V and 20–30 bat live stress/profile work are completed.
