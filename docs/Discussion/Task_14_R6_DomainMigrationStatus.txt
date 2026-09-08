@@ -1,174 +1,158 @@
-Desert Batfly Task 14 — R6 Domain / Physical Migration Status
-Revision: R6-B13 / 2026-09-08
-Base: R5 code-side complete at e7bb53e32b367fec91805c180151a36a75b68816
-Current verified R6 implementation HEAD before this status update: 3e6837b7997698926ffd24f774619388be769362
-Status: 【R6 进行中 / B1-B13 source-level migration progressing】
+Desert Batfly Task 14 — R6 Domain / File / Type Migration Status
+Revision: R6-B45 architecture checkpoint / 2026-09-08
+Branch: task14-r6-b1-final
+Verified implementation baseline before B45 checkpoint: 71f53f3b29fbd83b658bd0474975215e300bd263
+Status: 【R6 继续开放 / 当前架构迁移基线已稳定并进入长期 guard 保护】
 
-R6 changes physical ownership/file/type identity without changing gameplay semantics.
-Historical R0-R5 documents retain their historical names; executable guards follow R6 names and paths.
-
-======================================================================
-B1 — Integration + Observatory identity migration
-======================================================================
-
-Integration moved to:
-- Integration/RainWorld/DB_RainWorldHooks.cs
-- Integration/RainWorld/DB_RuntimePatch.cs
-- Integration/Sandbox/DB_Sandbox.cs
-- Integration/Warp/DB_WarpCompatibility.cs
-
-Observatory identity chain is now:
-DB_ObservatorySource -> DB_TravelDebugSource -> DB_SocialDebugSource ->
-DB_ThreatDebugSource -> DB_SignalDebugSource -> DB_EnvironmentDebugSource.
-
-Validation:
-- Task14 R6 B1 clean finalizer run 34143572208: SUCCESS.
+R6 remains open for additional planned work. This document records the stable architecture reached through the current B45 checkpoint; it does not close the phase or advance the project to R7.
 
 ======================================================================
-B2 — Colony domain identity migration
+1. Current production architecture baseline
 ======================================================================
 
-Moved and renamed without changing migration/persistence algorithms:
-- DesertBatflyColonyState.cs -> Colony/DB_ColonyState.cs
-- DesertBatflyColonyRuntime.cs -> Colony/DB_ColonyRuntime.cs
-- DesertBatflyColonyMigration.cs -> Colony/DB_MigrationPolicy.cs
+R6 has migrated the historical Desert Batfly implementation toward domain ownership without intentionally redesigning gameplay.
 
-Hard compatibility preserved:
-- Colony save prefix remains "DCBATCOLONY09<svB>".
-- Colony payload version remains "V1".
-- Task09-approved migration semantics and Environment/Travel ownership boundaries are unchanged.
+Current source-level invariants established so far:
+- production Desert Batfly `.cs` files live under domain directories rather than the creature root;
+- production Desert Batfly filenames use `DB_` domain identities;
+- internal `DesertBatflyXxx` type declarations have been retired;
+- production Task-number development terminology has exited runtime source;
+- old `Behavior/ThreatSignature` physical ownership has been retired in favor of the Threat domain;
+- internal Bridge/RuntimeDetour debt remains retired except explicit Sandbox/Warp compatibility reflection/patch integration;
+- managed Desert Batfly tests use domain suites and current positive reflection targets.
 
-Validation:
-- Task14 R6 B2 Colony migration run 34143783596: SUCCESS.
-- R5 and R6 retention audits passed.
+Formal owner set currently includes:
 
-======================================================================
-B3 — Travel support identity migration
-======================================================================
+Core / runtime / integration:
+- DB_Creature
+- DB_AI
+- DB_Runtime
+- DB_Definition
+- DB_Emergence
+- DB_RainWorldHooks
+- DB_RuntimePatch
+- DB_Sandbox
+- DB_WarpCompatibility
 
-Moved and renamed without changing route/refuge algorithms:
-- DesertBatflyRefuge.cs -> Travel/DB_RefugePolicy.cs
-- DesertBatflyWorldRoutePlanner.cs -> Travel/DB_WorldRoutePlanner.cs
+Architecture foundation:
+- DB_EventHub / DB_EventConsumers
+- DB_RoomContext
+- DB_FrameContext
+- DB_BehaviorArbiter
+- DB_FlightMotor
 
-Supporting Travel identities:
-- DesertBatflyRefugeTarget -> DB_RefugeTarget
-- DesertBatflyWorldRoute -> DB_WorldRoute
-- DesertBatflyTravelPurpose -> DB_TravelPurpose
+World ecology:
+- DB_ColonyRuntime / DB_ColonyState / DB_MigrationPolicy
+- DB_TravelRuntime / DB_TravelIntent / DB_RefugePolicy / DB_WorldRoutePlanner
+- DB_EnvironmentRuntime / DB_EnvironmentRoomRuntime and environment policy/profile/exposure owners
 
-Validation:
-- Task14 R6 B3 Travel support migration run 34147710304: SUCCESS.
-- R5/R6 retention audits passed after guard path update.
-
-======================================================================
-B4 — Platform Roost identity migration
-======================================================================
-
-- DesertBatflyPlatformRoostRuntime.cs -> Roost/DB_PlatformRoostRuntime.cs
-- DesertBatflyPlatformRoostRuntime -> DB_PlatformRoostRuntime
-
-Validation:
-- Task14 R6 B4 Roost migration run 34147755095: SUCCESS.
-
-======================================================================
-B5-B6 — Presentation SandBurst + SocialBond
-======================================================================
-
-- DesertBatflySandBurst.cs -> Presentation/DB_SandBurst.cs
-- DesertBatflySocialBond.cs -> Social/DB_SocialBond.cs
-- Existing R5/R6 retention guards passed after the successful migrations.
+Behavior:
+- DB_CombatRuntime
+- DB_Injury / DB_InjuryRecovery
+- DB_SocialRuntime / DB_SocialRoomRuntime / DB_SocialBond
+- DB_ThreatRuntime / DB_ThreatMemory / DB_ThreatTactics
+- DB_SignalRuntime / DB_SignalRoomRuntime
+- DB_FearRuntime
+- DB_VengeanceRuntime
 
 ======================================================================
-B7-B9 — Presentation Graphics + Threat leaves
+2. B43 — managed regression modernization
 ======================================================================
 
-- B7: DesertBatflyGraphics.cs -> Presentation/DB_Graphics.cs; validation run 34155488424 SUCCESS.
-- B8: ThreatSignature/DesertBatflyThreatMemory.cs -> Threat/DB_ThreatMemory.cs; `DCDesertBatflyThreatV1` and serialized version 1 retained; run 34155529191 SUCCESS.
-- B9: ThreatSignature/DesertBatflyThreatTactics.cs -> Threat/DB_ThreatTactics.cs; no input cheating/no held-item memory training/Arbiter+FlightMotor contracts retained; run 34155584734 SUCCESS.
+B43 updated the managed regression layer so it protects the current architecture instead of historical Task-number implementation details.
+
+Completed:
+- Task-number test filenames and entry points were replaced by domain names;
+- positive `GetType(..., true)` probes were audited against current production declarations;
+- stale reflection targets were migrated to current owners;
+- Threat tactics tests now protect the current direct owner/API path instead of the removed Vengeance bridge and old AI execution path;
+- managed Task-era terminology was removed under the defined R6 policy.
+
+The managed suite continues to cover Travel/Colony, Social, Threat, Threat tactics, Threat event semantics, Signals, Environment/rain and architecture foundations/retention/domain migration.
 
 ======================================================================
-B10 — Historical production/debug wording cleanup
+3. B44 — Fear / Vengeance responsibility extraction
 ======================================================================
 
-- ThreatTrace historical `Task11` reason text changed to domain wording `Threat Signature`.
-- EnvironmentProfile historical `Task09` / `Task13` comments/reasons changed to Travel/Environment domain wording.
-- No algorithms, thresholds, save identity, event ownership, or control flow changed.
+The remaining responsibility debt was that the real Extreme Vengeance state machine still lived in a `partial DB_FearRuntime` while `DB_VengeanceRuntime` acted as a façade.
+
+Current design:
+- `DB_FearRuntime` retains exactly one per-bat `ConditionalWeakTable<DB_Creature, State>` host;
+- Fear host State embeds exactly one `DB_VengeanceRuntime.State`;
+- `DB_VengeanceRuntime` owns no second weak table;
+- Reset, Forget, death handling, trauma collapse and fear collapse therefore retain one synchronous object lifecycle;
+- `DB_VengeanceRuntime` owns Mode, Participation, group arming, target/leader/supporter state, state-machine transitions, rescue/contact behavior, cancellation and owner-gated movement;
+- ordinary Vengeance movement remains behind Arbiter ownership and `DB_FlightMotor`;
+- Fear exposes only narrow host/fear/trauma services needed by Vengeance.
+
+Behavior-preservation checks during B44 froze:
+- Fear/Vengeance tuning constant values;
+- critical Rally, Violence, grasp/tongue rescue, FlightMotor, Threat tactic, trauma and threat-notification call counts;
+- switch/case state-machine structure;
+- runtime string payloads.
+
+B44 candidate and clean-promotion verification passed before entering the final working branch.
 
 ======================================================================
-B11 — Environment Exposure/Profile physical migration
+4. B45 — architecture consolidation checkpoint
 ======================================================================
 
-Physical domain paths now:
-- `Environment/DB_EnvironmentExposure.cs`
-- `Environment/DB_EnvironmentProfile.cs`
+B45 is a checkpoint, not R6 closure.
 
-Important scope distinction:
-- B11 moved the physical files and DB_ filenames only.
-- Internal C# types remain `DesertBatflyEnvironmentalExposure` and `DesertBatflyEnvironmentalProfile` for now because all-caller type replacement could not be validated repository-locally in the current execution environment.
-- This is intentionally recorded as partial identity migration rather than falsely claiming type migration complete.
+Its purpose is to consolidate and permanently guard the architecture already established while leaving the phase open for later project arrangements.
 
-Behavior-preserving proof:
-- Exposure moved with identical blob SHA `2910ad2ebbcb0ee0651ee2e11a6a35021cfcfcae`.
-- Profile moved with identical blob SHA `c36a390ca4842d9a0e819de873b7123ad98156c3`.
-- Git compare reports both as renames with 0 additions / 0 deletions.
-- R5 retention guard was extended so Environment cross-room-ownership prohibitions inspect both `Environmental/` and `Environment/`; no guard was removed or weakened.
+B45 introduces:
+- a current `Program.ArchitectureDomainMigration` regression that verifies present formal owners, Integration lifecycle and Observatory enrichment order;
+- `.github/workflows/desertbatfly-r6-architecture-guard.yml`, a read-only aggregate architecture guard;
+- retirement of obsolete write-oriented migration facilities after aggregate-guard validation;
+- refreshed progress/status documentation that explicitly keeps R6 open.
 
-Implementation commit:
-- `f93ad003ef44a16c1a6f13d36dfa54270a771992`.
-
-======================================================================
-B12 — Runtime Emergence physical migration
-======================================================================
-
-Physical domain path now:
-- `Runtime/DB_Emergence.cs`
-
-Scope:
-- source body is byte-for-byte unchanged from `DesertBatflyEmergence.cs`;
-- internal C# type remains `DesertBatflyEmergence` pending a caller-safe identity rename;
-- special emergence physics ownership, `MoveFromOutsideMyUpdate`, collision gating, terrain sampling and quicksand exclusion are unchanged.
-
-Behavior-preserving proof:
-- Git compare from B11 status HEAD to B13 implementation reports this file as a rename with 0 additions / 0 deletions.
+The aggregate guard protects:
+- R5 retained bridge boundaries;
+- R6 source-retention boundaries;
+- Task-era terminology exit in production and managed Desert Batfly tests;
+- DB_ production filenames/internal identities;
+- absence of root-level Desert Batfly production C# and retired ThreatSignature directory;
+- formal production owner presence;
+- validity of positive managed reflection targets;
+- Fear/Vengeance single-host ownership;
+- published/save/world compatibility literals;
+- Roslyn syntax parsing of Desert Batfly production and managed tests.
 
 ======================================================================
-B13 — Core Definition physical migration
+5. Compatibility identities intentionally unchanged
 ======================================================================
 
-Physical domain path now:
-- `Core/DB_Definition.cs`
+Internal architecture migration does not rename published/game-data identities:
+- CreatureTemplate.Type value: "DesertBatfly"
+- Sandbox unlock value: "DesertBatfly"
+- primary state key: "DCDesertBatflyV1"
+- Threat memory key: "DCDesertBatflyThreatV1"
+- colony save prefix: "DCBATCOLONY09<svB>"
+- authored room tag: "DESERTSWARMROOM"
 
-Scope:
-- source body is byte-for-byte unchanged from `DesertBatflyDefinition.cs`;
-- internal C# type remains `DesertBatflyDefinition` pending a caller-safe identity rename;
-- external creature identity `CreatureTemplate.Type.value = "DesertBatfly"` is untouched;
-- template properties and Peach Lizard relationship setup are unchanged.
-
-Behavior-preserving proof:
-- Git compare reports this file as a rename with 0 additions / 0 deletions.
-
-Implementation HEAD after B12-B13:
-- `3e6837b7997698926ffd24f774619388be769362`.
-
-Validation limitation for B11-B13:
-- actual shell execution of R5/R6 guards was not available;
-- no managed build or Rain World live validation is claimed.
-- changes were restricted to mechanically reviewable blob-identical physical moves where repository-local execution was unavailable.
+`DCBATCOLONY09<svB>` is a persisted protocol identity. Its numeric `09` is deliberately retained and is not treated as Task architecture terminology.
 
 ======================================================================
-Remaining R6 scope
+6. Validation boundary
 ======================================================================
 
-Still open:
-- finish pending leaf C# type identities (`DB_EnvironmentExposure`, `DB_EnvironmentProfile`, `DB_Emergence`, `DB_Definition`) when all callers can be safely replaced and validated;
-- Environment Runtime/RoomState/Core responsibility migration;
-- production-wide Task09-Task13 identifier/text cleanup;
-- TravelNavigation responsibility-aware split/rename;
-- Threat runtime/event responsibility-aware migration;
-- Signals domain migration;
-- remaining Social/Roost identities and policies;
-- Injury/Fear/Vengeance/Core/Presentation remaining identities;
-- final old-root-file and dead-code cleanup;
-- final R6 production naming/path guard.
+The available CI can execute source guards and Roslyn syntax parsing. It does not provide the developer-local Rain World/BepInEx assembly set or a live Rain World runtime.
 
-R6 does not claim full build, managed integration, or Rain World live validation.
-Those validations remain deferred to final acceptance because this environment lacks the developer-local Rain World/BepInEx assemblies and game runtime.
+Not claimed by this checkpoint:
+- full developer-local net48 build against the exact installed game assemblies;
+- managed integration-binary execution against those assemblies;
+- Rain World save/load compatibility;
+- live scenario regression;
+- 20-30 Desert Batfly stress/profile acceptance;
+- live Observatory acceptance.
+
+These remain future validation/work items.
+
+======================================================================
+7. R6 remains open
+======================================================================
+
+R6 is intentionally NOT marked complete or closed by B45.
+
+The current migration baseline is stable and guarded, but subsequent R6 tasks may extend, reorganize or add architecture work according to later project instructions. Do not automatically advance to R7 and do not create a final report solely because the current B45 checklist is exhausted.
