@@ -20,6 +20,7 @@ internal static class QuicksandAIHazard
     private const float NearHeight = 40f;
     private const float SideMargin = 20f;
     private const float EnterDanger = 0.70f;
+    private const float UnsafeShelterDanger = 0.50f;
     private const float OuterEdgeDangerMax = 0.48f;
     private const float DangerEpsilon = 0.04f;
     private const float SampleSpacing = 10f;
@@ -64,6 +65,17 @@ internal static class QuicksandAIHazard
             RemoveFearPoints(LiveFearStates[i]);
         }
         LiveFearStates.Clear();
+    }
+
+    /// <summary>
+    /// Shared point query for systems that choose a destination without running a native
+    /// PathFinder connection first. In particular, environmental shelter anchors must not
+    /// turn the shaded interior/surface of quicksand into an attractive resting target.
+    /// </summary>
+    internal static bool IsUnsafeShelterPoint(Room room, Vector2 point, float clearance = 8f)
+    {
+        if (room == null) return false;
+        return Danger(Zones(room), point, Mathf.Max(0f, clearance)) >= UnsafeShelterDanger;
     }
 
     private static PathCost PathFinder_CheckConnectionCost(
