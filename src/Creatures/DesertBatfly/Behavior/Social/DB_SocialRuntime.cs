@@ -121,7 +121,8 @@ internal static class DB_SocialRuntime
         internal string DecisionReason = "initial neutral state";
         internal int CandidateCount;
         internal int Side;
-        internal Vector2? RoostTarget;
+        internal DB_RoostAnchor? RoostAnchor;
+        internal Vector2? ChainApproachTarget;
         internal Room LastRoom;
         internal readonly List<DB_Creature> GroupScratch = new(GroupMax);
     }
@@ -257,6 +258,9 @@ internal static class DB_SocialRuntime
         int groupSize = state.Token?.Active == true && state.Token.Mode == DB_SocialMode.GroupDrift
             ? state.Token.Members.Count
             : 0;
+        Vector2? debugRoostTarget = state.RoostAnchor.HasValue
+            ? state.RoostAnchor.Value.Spot
+            : state.ChainApproachTarget;
         debug = new DB_SocialDebugState(
             PriorityBlockReason(bat) == null,
             state.Drive,
@@ -271,7 +275,7 @@ internal static class DB_SocialRuntime
             state.LastMode,
             state.DecisionReason,
             state.CandidateCount,
-            state.RoostTarget,
+            debugRoostTarget,
             state.Side);
         return true;
     }
@@ -695,11 +699,12 @@ internal static class DB_SocialRuntime
         State state,
         DB_SocialRoomRuntime.RoomState roomState)
     {
-        Vector2 spot = default;
-        bool hasTarget = mode == DB_SocialMode.ChainSocialization &&
-            TryGetChainApproachTarget(target, source, out spot);
-        if (!hasTarget)
-            hasTarget = TryFindSocialRoost(target, source, roomState, out spot);
+        Vector2 approachTarget = default;
+        DB_RoostAnchor tileAnchor = default;
+        bool approachingChain = mode == DB_SocialMode.ChainSocialization &&
+            TryGetChainApproachTarget(target, source, out approachTarget);
+        bool hasTarget = approachingChain ||
+            TryFindSocialRoost(target, source, roomState, out tileAnchor);
         if (!hasTarget)
         {
             state.DecisionReason = "roost invitation rejected: no legal chain/tile target";
@@ -722,8 +727,19 @@ internal static class DB_SocialRuntime
             source,
             source,
             StablePairSide(target.abstractCreature.ID, source.abstractCreature.ID));
-        state.RoostTarget = spot;
-        TraceStart(target, mode, source, $"legal roost target={spot}; invitationCap={cap}");
+
+        Vector2 targetSpot;
+        if (approachingChain)
+        {
+            state.ChainApproachTarget = approachTarget;
+            targetSpot = approachTarget;
+        }
+        else
+        {
+            state.RoostAnchor = tileAnchor;
+            targetSpot = tileAnchor.Spot;
+        }
+        TraceStart(target, mode, source, $"legal roost target={targetSpot}; invitationCap={cap}");
     }
 
     private static void AssignPair(
@@ -767,7 +783,8 @@ internal static class DB_SocialRuntime
         state.Partner = partner;
         state.Anchor = anchor;
         state.Side = side == 0 ? 1 : Math.Sign(side);
-        state.RoostTarget = null;
+        state.RoostAnchor = null;
+        state.ChainApproachTarget = null;
         state.DecisionReason = "interaction active";
     }
 
@@ -1003,27 +1020,37 @@ internal static class DB_SocialRuntime
         Vector2 target = default;
         bool approachingChain = state.Mode == DB_SocialMode.ChainSocialization &&
             TryGetChainApproachTarget(bat, source, out target);
-        if (!approachingChain)
+        if (approachingChain)
         {
-            if (!state.RoostTarget.HasValue || !RoostSpotStillLegal(bat, state.RoostTarget.Value))
+            state.RoostAnchor = null;
+            state.ChainApproachTarget = target;
+        }
+        else
+        {
+            state.ChainApproachTarget = null;
+            if (!state.RoostAnchor.HasValue ||
+                !Custom.DistLess(bat.mainBodyChunk.pos, state.RoostAnchor.Value.Spot, 260f) ||
+                !DB_RoostPolicy.IsStillValid(bat, state.RoostAnchor.Value))
             {
-                if (roomState == null || !TryFindSocialRoost(bat, source, roomState, out Vector2 replacement))
+                if (roomState == null ||
+                    !TryFindSocialRoost(bat, source, roomState, out DB_RoostAnchor replacement))
                 {
                     CancelState(bat, state, "roost target invalid / no replacement", true);
                     return;
                 }
-                state.RoostTarget = replacement;
+                state.RoostAnchor = replacement;
             }
-            target = state.RoostTarget.Value;
-        }
-        else
-        {
-            state.RoostTarget = target;
+            target = state.RoostAnchor.Value.Spot;
         }
 
         if (!approachingChain && Custom.DistLess(bat.mainBodyChunk.pos, target, 18f))
         {
-            CommitTileRoost(bat, target);
+            if (!DB_RoostPolicy.IsStillValid(bat, state.RoostAnchor.Value))
+            {
+                state.RoostAnchor = null;
+                return;
+            }
+            CommitTileRoost(bat, state.RoostAnchor.Value);
             FinishToken(bat, state, "committed to invited legal roost", true);
             return;
         }
@@ -1085,9 +1112,9 @@ internal static class DB_SocialRuntime
         DB_Creature bat,
         DB_Creature source,
         DB_SocialRoomRuntime.RoomState roomState,
-        out Vector2 spot)
+        out DB_RoostAnchor anchor)
     {
-        spot = default;
+        anchor = default;
         if (bat?.room == null || bat.AI == null || source?.room != bat.room || roomState == null)
             return false;
         IntVector2 origin = bat.room.GetTilePosition(source.mainBodyChunk.pos);
@@ -1102,19 +1129,18 @@ internal static class DB_SocialRuntime
             IntVector2 tile = new IntVector2(origin.x + x, origin.y + y);
             if (tile.x <= 0 || tile.x >= bat.room.TileWidth - 1 ||
                 tile.y < 4 || tile.y >= bat.room.TileHeight - 1 ||
-                !bat.AI.ChainTile(tile))
+                !DB_RoostPolicy.TryGetAnchor(bat, tile, out DB_RoostAnchor candidate))
                 continue;
-            Vector2 candidate = RoostSpot(bat.room, tile);
-            if (!Custom.DistLess(bat.mainBodyChunk.pos, candidate, 230f) ||
-                !bat.room.VisualContact(bat.mainBodyChunk.pos, candidate))
+            if (!Custom.DistLess(bat.mainBodyChunk.pos, candidate.Spot, 230f) ||
+                !bat.room.VisualContact(bat.mainBodyChunk.pos, candidate.Spot))
                 continue;
             float score =
-                Vector2.Distance(bat.mainBodyChunk.pos, candidate) +
-                Vector2.Distance(source.mainBodyChunk.pos, candidate) * 0.35f -
-                Mathf.Min(3, roomState.CountRoostingNear(candidate, 75f)) * 11f;
+                Vector2.Distance(bat.mainBodyChunk.pos, candidate.Spot) +
+                Vector2.Distance(source.mainBodyChunk.pos, candidate.Spot) * 0.35f -
+                Mathf.Min(3, roomState.CountRoostingNear(candidate.Spot, 75f)) * 11f;
             if (score >= best) continue;
             best = score;
-            spot = candidate;
+            anchor = candidate;
             found = true;
         }
         return found;
@@ -1136,33 +1162,12 @@ internal static class DB_SocialRuntime
             bat.room.VisualContact(bat.mainBodyChunk.pos, target);
     }
 
-    private static bool RoostSpotStillLegal(DB_Creature bat, Vector2 spot)
-    {
-        if (bat?.room == null || bat.AI == null || !Custom.DistLess(bat.mainBodyChunk.pos, spot, 260f))
-            return false;
-        IntVector2 tile = bat.room.GetTilePosition(spot);
-        return tile.x > 0 && tile.x < bat.room.TileWidth - 1 &&
-            tile.y >= 4 && tile.y < bat.room.TileHeight - 1 && bat.AI.ChainTile(tile);
-    }
-
-    private static Vector2 RoostSpot(Room room, IntVector2 tile)
-    {
-        Room.Tile current = room.GetTile(tile);
-        Vector2 middle = room.MiddleOfTile(tile);
-        if (current.horizontalBeam)
-            return new Vector2(middle.x, middle.y - 4f);
-        Room.Tile above = room.GetTile(tile + new IntVector2(0, 1));
-        if (current.Terrain == Room.Tile.TerrainType.Air && above.Terrain == Room.Tile.TerrainType.Floor)
-            return middle + Vector2.up * 8f;
-        return middle + Vector2.up * 10f;
-    }
-
-    private static void CommitTileRoost(DB_Creature bat, Vector2 spot)
+    private static void CommitTileRoost(DB_Creature bat, in DB_RoostAnchor anchor)
     {
         bat.LoseAllGrasps();
         bat.AI.followingDijkstraMap = -1;
         bat.AI.ChangeBehavior(FlyAI.Behavior.Chain);
-        bat.burrowOrHangSpot = spot;
+        bat.burrowOrHangSpot = anchor.Spot;
         bat.movMode = Fly.MovementMode.Hang;
         bat.mainBodyChunk.vel *= 0.5f;
     }
@@ -1409,7 +1414,8 @@ internal static class DB_SocialRuntime
         state.Partner = null;
         state.Anchor = null;
         state.Side = 0;
-        state.RoostTarget = null;
+        state.RoostAnchor = null;
+        state.ChainApproachTarget = null;
         state.DecisionReason = reason;
     }
 
