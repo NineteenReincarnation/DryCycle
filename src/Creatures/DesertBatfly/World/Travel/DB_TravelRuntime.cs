@@ -6,9 +6,9 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// High-level cross-room travel state. It owns destination/room route only.
-/// Realized room-local movement is still FlyAI.LeaveRoom/AImap/shortcut; no travel code
-/// writes body velocity or maintains a second tile pathfinder.
+/// High-level cross-room travel state. It owns destination/room route and, for ReturnHome,
+/// retains ownership through the final native BatHive ingress. Realized room-local movement
+/// still uses FlyAI/AImap/shortcut; no travel code maintains a second tile pathfinder.
 /// </summary>
 internal static class DB_TravelRuntime
 {
@@ -170,6 +170,7 @@ internal static class DB_TravelRuntime
             TickRoomProgress(intent, currentRoom, 120);
             if (ReachedDestination(intent, currentRoom))
             {
+                MarkAbstractReturnHomeInHive(intent);
                 HandleArrival(world, intent);
                 continue;
             }
@@ -205,7 +206,11 @@ internal static class DB_TravelRuntime
             intent.StatusReason = "abstract transit -> " + nextRoom.name;
             intent.SameRoomTravelTicks = 0;
             intent.LastObservedRoom = creature.pos.room;
-            if (ReachedDestination(intent, creature.pos.room)) HandleArrival(world, intent);
+            if (ReachedDestination(intent, creature.pos.room))
+            {
+                MarkAbstractReturnHomeInHive(intent);
+                HandleArrival(world, intent);
+            }
         }
     }
 
@@ -246,6 +251,9 @@ internal static class DB_TravelRuntime
         TickRoomProgressRealized(intent, currentRoom);
         if (ReachedDestination(intent, currentRoom))
         {
+            if (intent.Purpose == DB_TravelPurpose.ReturnHome)
+                return DriveIntoHomeHive(bat, intent);
+
             DB_TravelPurpose arrivedPurpose = intent.Purpose;
             HandleArrival(world, intent);
             return arrivedPurpose == DB_TravelPurpose.EmergencyRefuge;
@@ -394,7 +402,10 @@ internal static class DB_TravelRuntime
             }
             if (creature.pos.room == home.index)
             {
-                intents.Remove(keys[i]);
+                if (TryBuildReturnRoute(world, creature, home, template, out DB_WorldRoute localRoute))
+                    ConvertToReturnHome(intent, home, localRoute);
+                else
+                    intents.Remove(keys[i]);
                 continue;
             }
             if (!TryBuildReturnRoute(world, creature, home, template, out DB_WorldRoute route))
@@ -621,6 +632,74 @@ internal static class DB_TravelRuntime
         }
     }
 
+    private static bool DriveIntoHomeHive(DB_Creature bat, DB_TravelIntent intent)
+    {
+        if (bat?.room?.aimap == null || bat.AI == null || bat.mainBodyChunk == null || intent == null)
+            return false;
+
+        if (bat.DesertState.InHive)
+        {
+            intents.Remove(Key(bat.abstractCreature.ID));
+            intent.StatusReason = "ReturnHome complete: entered BatHive";
+            return true;
+        }
+
+        if (bat.room.hives == null || bat.room.hives.Length == 0)
+        {
+            intent.StatusReason = "home room reached but it has no realized BatHive";
+            HandleArrival(bat.abstractCreature.world, intent);
+            return false;
+        }
+
+        int bestMap = -1;
+        int bestDistance = int.MaxValue;
+        IntVector2 current = bat.room.GetTilePosition(bat.mainBodyChunk.pos);
+        for (int i = 0; i < bat.room.hives.Length; i++)
+        {
+            IntVector2[] hive = bat.room.hives[i];
+            if (hive == null || hive.Length == 0) continue;
+            int map = bat.room.exitAndDenIndex.Length + i;
+            int distance = bat.room.aimap.ExitDistanceForCreature(current, map, bat.Template);
+            if (distance < 0 || distance >= bestDistance) continue;
+            bestDistance = distance;
+            bestMap = map;
+        }
+
+        if (bestMap < 0)
+        {
+            intent.Suspended = true;
+            intent.StatusReason = "home room reached; no reachable native BatHive Dijkstra map";
+            return false;
+        }
+
+        DB_SocialRuntime.CancelForPriority(bat, "ReturnHome final BatHive ingress");
+        bat.DesertAI.CancelAttack();
+        bat.AI.leaveRoomDijkstra = -1;
+        bat.AI.followingDijkstraMap = bestMap;
+        bat.AI.afraid = Mathf.Max(bat.AI.afraid, 1.05f);
+
+        if (bat.room.GetTile(bat.mainBodyChunk.pos).hive)
+        {
+            bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
+            bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
+            bat.movMode = Fly.MovementMode.Burrow;
+            intent.Suspended = false;
+            intent.StatusReason = "home room reached; entering BatHive";
+            return true;
+        }
+
+        Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);
+        bool guided = DB_FlightMotor.TryGuideNative(
+            bat,
+            DB_BehaviorOwner.Travel,
+            nextGoal);
+        intent.Suspended = !guided;
+        intent.StatusReason = guided
+            ? "home room reached; following native BatHive Dijkstra"
+            : "home room reached; BatHive guidance rejected by current owner";
+        return guided;
+    }
+
     private static bool HoldAtRefuge(DB_Creature bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null) return false;
@@ -668,6 +747,17 @@ internal static class DB_TravelRuntime
     private static void TryEmergeForTravel(DB_Creature bat, DB_TravelIntent intent)
     {
         if (bat?.room == null || intent == null || !bat.DesertState.InHive) return;
+
+        // ReturnHome is not complete at room arrival; it completes only after actual hive
+        // entry. Once that happened, clear the travel intent instead of immediately asking
+        // the native hive to emit the bat again on the next abstract-world tick.
+        if (intent.Purpose == DB_TravelPurpose.ReturnHome)
+        {
+            intents.Remove(Key(bat.abstractCreature.ID));
+            intent.StatusReason = "ReturnHome complete: resting in BatHive";
+            return;
+        }
+
         try
         {
             DB_SwarmRoom colony = DB_SwarmRoom.For(bat.room);
@@ -681,6 +771,15 @@ internal static class DB_TravelRuntime
         {
             intent.StatusReason = "waiting for compatible hive emergence";
         }
+    }
+
+    private static void MarkAbstractReturnHomeInHive(DB_TravelIntent intent)
+    {
+        if (intent?.Purpose != DB_TravelPurpose.ReturnHome ||
+            intent.Creature?.realizedCreature != null)
+            return;
+        if (intent.Creature.state is DB_State state)
+            state.InHive = true;
     }
 
     private static void ConvertToReturnHome(DB_TravelIntent intent, AbstractRoom home, in DB_WorldRoute route)
