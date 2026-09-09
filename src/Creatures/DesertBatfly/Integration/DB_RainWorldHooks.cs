@@ -23,6 +23,7 @@ internal static class DB_RainWorldHooks
         DB_FearRuntime.Reset();
         DB_RefugePolicy.Reset();
         DB_SocialRuntime.Reset();
+        DB_SwarmLifecycleRuntime.Reset();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
@@ -78,6 +79,7 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRoomRuntime.Reset();
         DB_FeedingCoordinator.Reset();
         DB_SocialRuntime.Reset();
+        DB_SwarmLifecycleRuntime.Reset();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
@@ -121,6 +123,7 @@ internal static class DB_RainWorldHooks
         if (self is DB_Creature desert)
         {
             DB_SocialRuntime.CancelForPriority(desert, "room transition");
+            DB_SwarmLifecycleRuntime.Forget(desert);
             DB_SignalRuntime.Forget(desert);
             DB_ThreatRuntime.Forget(desert);
             DB_EnvironmentRuntime.Forget(desert);
@@ -144,6 +147,7 @@ internal static class DB_RainWorldHooks
         {
             desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
+            DB_SwarmLifecycleRuntime.Forget(desert);
             DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
         }
@@ -160,6 +164,7 @@ internal static class DB_RainWorldHooks
 
         desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
+        DB_SwarmLifecycleRuntime.Forget(desert);
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
@@ -440,11 +445,32 @@ internal static class DB_RainWorldHooks
 
         if (!DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom))
         {
-            if (self.behavior == FlyAI.Behavior.Swarm) self.ChangeBehavior(FlyAI.Behavior.Idle);
+            if (self.behavior == FlyAI.Behavior.Swarm)
+                self.ChangeBehavior(FlyAI.Behavior.Idle);
+            DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, false);
             return;
         }
-        if (self.behavior == FlyAI.Behavior.Idle && !self.fleeFromRain && self.ValidSwarmPosition(self.localGoal))
+
+        bool currentlySwarm = self.behavior == FlyAI.Behavior.Swarm;
+        if (!DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, currentlySwarm))
+        {
+            if (currentlySwarm)
+                self.ChangeBehavior(FlyAI.Behavior.Idle);
+            return;
+        }
+
+        // A live bout remains under native SwarmFlight until vanilla ends it, a higher owner
+        // interrupts it, or the bounded lifecycle expires. Do not continually re-run entry.
+        if (self.behavior == FlyAI.Behavior.Swarm)
+            return;
+
+        if (self.behavior == FlyAI.Behavior.Idle && !self.fleeFromRain &&
+            DB_SwarmLifecycleRuntime.CanEnterSwarm(desert) &&
+            self.ValidSwarmPosition(self.localGoal))
+        {
             self.ChangeBehavior(FlyAI.Behavior.Swarm);
+            DB_SwarmLifecycleRuntime.EnteredSwarm(desert);
+        }
     }
 
     private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
