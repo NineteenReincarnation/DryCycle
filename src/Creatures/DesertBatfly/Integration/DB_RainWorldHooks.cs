@@ -46,6 +46,7 @@ internal static class DB_RainWorldHooks
         On.FlyAI.Update += UpdateAI;
         On.FlyAI.UpdateThreats += Threats;
         On.FlyAI.IdleUpdate += Idle;
+        On.FlyAI.SwarmUpdate += Swarm;
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.FlyAI.FleeFromRainUpdate += Rain;
         On.Room.Update += UpdateRoom;
@@ -65,6 +66,7 @@ internal static class DB_RainWorldHooks
         On.FlyAI.Update -= UpdateAI;
         On.FlyAI.UpdateThreats -= Threats;
         On.FlyAI.IdleUpdate -= Idle;
+        On.FlyAI.SwarmUpdate -= Swarm;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.FlyAI.FleeFromRainUpdate -= Rain;
         On.Room.Update -= UpdateRoom;
@@ -471,6 +473,24 @@ internal static class DB_RainWorldHooks
             self.ChangeBehavior(FlyAI.Behavior.Swarm);
             DB_SwarmLifecycleRuntime.EnteredSwarm(desert);
         }
+    }
+
+    private static void Swarm(On.FlyAI.orig_SwarmUpdate orig, FlyAI self)
+    {
+        orig(self);
+        if (self.fly is not DB_Creature desert) return;
+
+        if (!DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom))
+        {
+            if (self.behavior == FlyAI.Behavior.Swarm)
+                self.ChangeBehavior(FlyAI.Behavior.Idle);
+            DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, false);
+            return;
+        }
+
+        bool currentlySwarm = self.behavior == FlyAI.Behavior.Swarm;
+        if (!DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, currentlySwarm) && currentlySwarm)
+            self.ChangeBehavior(FlyAI.Behavior.Idle);
     }
 
     private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
