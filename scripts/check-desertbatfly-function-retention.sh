@@ -68,11 +68,13 @@ grep -q 'DB_CorpseWarningRuntime.TrackRoom' "$CONSUMERS"
 
 # -----------------------------------------------------------------------------
 # HB-06 — no temporary Thirst spoofing. Legitimate persistent writes remain limited to
-# baseline thirst accumulation, approved combat drain relief and real rain moisture relief.
+# baseline thirst accumulation, approved combat relief, aggregated dehydration-feeding relief,
+# and real rain moisture relief.
 # -----------------------------------------------------------------------------
 mapfile -t thirst_writers < <(grep -RIlE --include='*.cs' 'DesertState\.Thirst\s*=' "$SRC" | sort)
-test "${#thirst_writers[@]}" -eq 3
+test "${#thirst_writers[@]}" -eq 4
 printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Behavior/Combat/DB_CombatRuntime.cs"
+printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Behavior/Feeding/DB_FeedingCoordinator.cs"
 printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Core/Runtime/DB_Runtime.cs"
 printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/World/Environment/DB_EnvironmentRuntime.cs"
 
