@@ -13,10 +13,16 @@ internal static partial class Program
             "DryCycle.Creatures.DesertBatfly.DB_VisibilityChannel", true);
         Type weaponPerception = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Type creaturePerception = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
         Type heldObservation = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
         Type ai = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_AI", true);
+        Type combat = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
+        Type frameContextRuntime = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
         Type threat = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type tactics = mod.GetType(
@@ -91,20 +97,60 @@ internal static partial class Program
             Check(heldObservation.GetField(field, Flags) != null,
                 "Architecture shared perception held threat observation exposes " + field);
 
-        MethodInfo aiScanWeapons = ai.GetMethod("ScanWeapons", Flags);
-        MethodInfo aiScanCreatures = ai.GetMethod("ScanCreatures", Flags);
-        MethodInfo acquireSlot = ai.GetMethod("AcquireSlot", Flags);
-        MethodInfo socialHarass = ai.GetMethod("FindSocialHarassTarget", Flags);
-        Check(MethodCallOffset(aiScanWeapons, weaponPerception, "TryFindImmediateThreat") >= 0,
-            "Architecture shared perception DB_AI weapon scan consumes shared DB_WeaponPerception");
-        Check(MethodCallOffset(aiScanCreatures, roomContext, "For") >= 0 &&
-              MethodCallOffset(aiScanCreatures, visibility, "CanObserve") >= 0,
-            "Architecture shared perception ordinary creature recognition consumes shared RoomContext + VisibilityPolicy");
-        Check(MethodCallOffset(acquireSlot, roomContext, "For") >= 0,
-            "Architecture shared perception AttackSlots enumerate the shared active-bat view");
-        Check(MethodCallOffset(socialHarass, roomContext, "For") >= 0 &&
-              MethodCallOffset(socialHarass, visibility, "CanObserve") >= 0,
-            "Architecture shared perception social-harass candidate recognition reuses shared bat and visibility observations");
+        // R6 moved these responsibilities out of DB_AI. The managed probe must validate the
+        // current domain owners instead of keeping deleted facade methods alive for tests.
+        Check(ai.GetMethod("ScanWeapons", Flags) == null &&
+              ai.GetMethod("ScanCreatures", Flags) == null &&
+              ai.GetMethod("AcquireSlot", Flags) == null &&
+              ai.GetMethod("FindSocialHarassTarget", Flags) == null,
+            "Architecture shared perception does not resurrect pre-R6 DB_AI scan/slot facades");
+
+        MethodInfo perceptionScan = creaturePerception.GetMethod("ScanCreatures", Flags);
+        Check(perceptionScan != null &&
+              MethodCallOffset(perceptionScan, roomContext, "For") >= 0 &&
+              MethodCallOffset(perceptionScan, visibility, "CanObserve") >= 0,
+            "Architecture shared perception ordinary creature recognition belongs to DB_CreaturePerception and consumes RoomContext + VisibilityPolicy");
+
+        int canObserveOffset = MethodCallOffset(perceptionScan, visibility, "CanObserve");
+        int exactDistanceOffset = MethodCallOffset(perceptionScan, typeof(UnityEngine.Vector2), "Distance");
+        Check(canObserveOffset >= 0 && exactDistanceOffset > canObserveOffset,
+            "Architecture performance keeps exact creature distance sqrt behind visibility/range rejection");
+
+        int scanInterval = (int)creaturePerception.GetField("ScanIntervalTicks", Flags).GetRawConstantValue();
+        MethodInfo scanPhase = creaturePerception.GetMethod("ScanPhase", Flags);
+        bool[] phaseBuckets = new bool[scanInterval];
+        bool phasesBounded = scanInterval == 8 && scanPhase != null;
+        if (phasesBounded)
+        {
+            for (int seed = 0; seed < 256; seed++)
+            {
+                int phase = (int)scanPhase.Invoke(null, new object[] { seed });
+                if (phase < 1 || phase > scanInterval)
+                {
+                    phasesBounded = false;
+                    break;
+                }
+                phaseBuckets[phase - 1] = true;
+            }
+        }
+        bool allBucketsUsed = phasesBounded;
+        for (int i = 0; i < phaseBuckets.Length; i++) allBucketsUsed &= phaseBuckets[i];
+        Check(phasesBounded && allBucketsUsed,
+            "Architecture performance disperses newly-realized creature scans across all stable 1..8 phases without extending the old maximum interval");
+
+        MethodInfo acquireSlot = combat.GetMethod("AcquireSlot", Flags);
+        MethodInfo socialHarass = combat.GetMethod("FindSocialHarassTarget", Flags);
+        Check(acquireSlot != null && MethodCallOffset(acquireSlot, roomContext, "For") >= 0,
+            "Architecture shared perception Combat AttackSlots enumerate the shared active-bat view");
+        Check(socialHarass != null && MethodCallOffset(socialHarass, visibility, "CanObserve") >= 0,
+            "Architecture shared perception Combat social-harass target recognition reuses central visibility observations");
+
+        MethodInfo captureFrame = frameContextRuntime.GetMethod("Capture", Flags);
+        Check(captureFrame != null &&
+              MethodCallOffset(captureFrame, roomContext, "For") >= 0 &&
+              MethodCallOffset(captureFrame, visibility, "CanObserve") >= 0 &&
+              MethodCallOffset(captureFrame, weaponPerception, "TryFindIncomingProjectile") >= 0,
+            "Architecture shared perception FrameContext consumes shared creature/player/projectile facts without a second scanner");
 
         Type threatRoomState = threat.GetNestedType("RoomState", BindingFlags.NonPublic);
         Check(threatRoomState != null &&
@@ -155,10 +201,12 @@ internal static partial class Program
 
         Check(roomContext.Name.StartsWith("DB_", StringComparison.Ordinal) &&
               visibility.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              weaponPerception.Name.StartsWith("DB_", StringComparison.Ordinal),
-            "Architecture shared perception new architecture uses DB_ domain names and no TaskXX production type");
+              weaponPerception.Name.StartsWith("DB_", StringComparison.Ordinal) &&
+              creaturePerception.Name.StartsWith("DB_", StringComparison.Ordinal) &&
+              combat.Name.StartsWith("DB_", StringComparison.Ordinal),
+            "Architecture shared perception current domains use DB_ names and no TaskXX production type");
 
         Console.WriteLine(
-            "Architecture shared perception complete: shared RoomContext with live membership revalidation, creature/AttackSlots/weapon candidate views, Threat current perception, Signal visual policy, lazy irrelevant-room gating and obsolete visual-bridge removal verified.");
+            "Architecture shared perception complete: current Perception/Combat/FrameContext owners, staggered scan phases, distance/visibility ordering, shared RoomContext, Threat/Signal visual policy and lazy irrelevant-room gating verified.");
     }
 }
