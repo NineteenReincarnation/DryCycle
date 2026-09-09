@@ -116,6 +116,12 @@ internal static class DB_BehaviorExecution
             return false;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
             return false;
-        return DB_SocialRuntime.ApplyOwnedBehavior(bat);
+
+        // Discrete Social events get first execution choice. When no event is active,
+        // the same Social owner falls through to low-intensity ambient ecology rather than
+        // immediately returning the frame to Ordinary/vanilla.
+        if (DB_SocialRuntime.ApplyOwnedBehavior(bat))
+            return true;
+        return DB_AmbientSocialRuntime.ApplyOwnedBehavior(bat);
     }
 }
