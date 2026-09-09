@@ -18,6 +18,7 @@ def read(rel):
     return path.read_text(encoding='utf-8')
 
 room_context = read('Core/Runtime/DB_RoomContext.cs')
+frame_context = read('Core/Runtime/DB_FrameContext.cs')
 performance_probe = read('Core/Runtime/DB_PerformanceProbe.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
@@ -82,6 +83,21 @@ perception_visibility = perception.find('if (!DB_VisibilityPolicy.CanObserve(')
 perception_distance = perception.find('float distance = Vector2.Distance(', perception_visibility)
 if min(perception_visibility, perception_distance) < 0 or perception_visibility > perception_distance:
     failures.append('creature perception must validate visibility before exact Vector2.Distance sqrt')
+
+# FrameContext is captured for every realized bat every AI frame. It may copy already-owned
+# domain facts, but it must not recreate the old per-bat player/predator room scan merely for
+# unused snapshot fields. Immediate projectile recognition remains a real arbiter input.
+for retired in (
+    'VisiblePlayerCount', 'NearestVisiblePlayer',
+    'PredatorCandidateCount', 'NearestPredator',
+):
+    if retired in frame_context:
+        failures.append('FrameContext retained unused per-frame visibility fact: ' + retired)
+for token in ('roomContext.Players', 'roomContext.Creatures', 'DB_RoomContext.For(room)'):
+    if token in frame_context:
+        failures.append('FrameContext reintroduced per-bat room visibility scanning: ' + token)
+if 'DB_WeaponPerception.TryFindIncomingProjectile(' not in frame_context:
+    failures.append('FrameContext lost the real incoming-projectile fact consumed by arbitration')
 
 # Realized Fear/PTSD target discovery must reuse the room snapshot instead of doing a per-bat room scan.
 if 'DB_RoomContext.For(bat?.room)' not in fear or 'roomContext.Creatures' not in fear:
@@ -246,5 +262,5 @@ if failures:
     print('\n'.join(failures), file=sys.stderr)
     sys.exit(1)
 
-print('R7 static performance retention passed: shared scans, staggered creature perception, distance-cull-before-LOS, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
+print('R7 static performance retention passed: shared scans, lean FrameContext, staggered creature perception, distance-cull-before-LOS, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
 PY
