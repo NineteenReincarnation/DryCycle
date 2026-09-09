@@ -112,14 +112,19 @@ internal static partial class Program
             limb.SolvePose(anchor, target, !pincer);
 
             Vector2 previous = anchor;
+            bool chainValid = true;
+            float maxLengthDrift = 0f;
             for (int segment = 0; segment < 4; segment++)
             {
                 Vector2 point = limb.Pos[segment];
-                Check(Finite(point), "Non-finite " + (pincer ? "pincer" : "walking") + " IK point");
-                Check(Math.Abs(Vector2.Distance(previous, point) - limb.Lengths[segment]) < .01f,
-                    "V2 anatomy segment length drift: limb=" + index + " segment=" + segment);
+                chainValid &= Finite(point);
+                float drift = Math.Abs(Vector2.Distance(previous, point) - limb.Lengths[segment]);
+                maxLengthDrift = Math.Max(maxLengthDrift, drift);
+                chainValid &= drift < .01f;
                 previous = point;
             }
+            Check(chainValid,
+                "V2 anatomy chain invalid: limb=" + index + " pose=" + pose + " maxLengthDrift=" + maxLengthDrift);
 
             float error = Vector2.Distance(limb.Tip, target);
             maxError = Math.Max(maxError, error);
@@ -148,9 +153,11 @@ internal static partial class Program
         }
         Check(height < 0f, "One foot must not indefinitely suspend the full shell");
 
+        float[] errors = { -100f, 0f, 100f };
+        float[] speeds = { -20f, 0f, 20f };
         for (int feet = 2; feet <= 4; feet++)
-        foreach (float error in new[] { -100f, 0f, 100f })
-        foreach (float speed in new[] { -20f, 0f, 20f })
+        foreach (float error in errors)
+        foreach (float speed in speeds)
         {
             float acceleration = MantleCrabRigMath.SupportAcceleration(error, speed, .9f, feet);
             Check(Finite(acceleration), "SupportAcceleration returned a non-finite value");
