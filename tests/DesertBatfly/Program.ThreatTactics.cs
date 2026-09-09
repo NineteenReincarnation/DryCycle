@@ -11,6 +11,8 @@ internal static partial class Program
         Type vengeanceType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VengeanceRuntime", true);
         Type motorType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
         Type arbiterType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
+        Type behaviorExecutionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
+        Type frameRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
         Type weaponPerceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
 
         MethodInfo learnedFakeDive = tacticsType.GetMethod("LearnedFakeDiveChance", Flags);
@@ -48,35 +50,42 @@ internal static partial class Program
             "Threat personality modulation makes low-Nerve bats more cautious than high-Nerve bats");
 
         MethodInfo adjustFakeDive = tacticsType.GetMethod("AdjustFakeDiveChance", Flags);
-        MethodInfo ordinaryEvade = tacticsType.GetMethod("TryApplyOrdinaryProjectileEvade", Flags);
         MethodInfo applyEvade = tacticsType.GetMethod("ApplyProjectileEvadeOwned", Flags);
         MethodInfo adjustVengeance = tacticsType.GetMethod("AdjustExtremeVengeanceGoal", Flags);
         MethodInfo projectileGeometry = tacticsType.GetMethod("TryIncomingProjectileEvade", Flags);
         MethodInfo tryProfile = tacticsType.GetMethod("TryProfile", Flags);
-        Check(adjustFakeDive != null && ordinaryEvade != null && applyEvade != null &&
-              adjustVengeance != null && projectileGeometry != null && tryProfile != null,
-            "Threat exposes current attack weighting, projectile evade and Vengeance geometry entry points");
+        Check(adjustFakeDive != null && applyEvade != null && adjustVengeance != null &&
+              projectileGeometry != null && tryProfile != null,
+            "Threat exposes current attack weighting, formal projectile evade and Vengeance geometry entry points");
+        Check(tacticsType.GetMethod("TryApplyOrdinaryProjectileEvade", Flags) == null,
+            "Threat retired pre-R3 ordinary projectile evade facade stays absent");
+        Check(tacticsType.GetMethod("PlayerBySlot", Flags) == null,
+            "Threat tactics no longer retains the player lookup helper that existed only for the retired evade facade");
 
         Check(!MethodWritesField(adjustFakeDive, typeof(BodyChunk), "vel") &&
-              !MethodWritesField(ordinaryEvade, typeof(BodyChunk), "vel") &&
               !MethodWritesField(applyEvade, typeof(BodyChunk), "vel") &&
               !MethodWritesField(adjustVengeance, typeof(BodyChunk), "vel") &&
               !MethodWritesField(projectileGeometry, typeof(BodyChunk), "vel"),
             "Threat tactics never become a parallel BodyChunk velocity locomotion system");
-        Check(MethodCallsThreat(ordinaryEvade, threatRuntimeType, "TryGetDebugState") &&
-              MethodCallsThreat(ordinaryEvade, vengeanceType, "IsActive") &&
-              MethodCallsThreat(ordinaryEvade, tacticsType, "ApplyProjectileEvadeOwned"),
-            "ordinary projectile response consumes current Threat facts, preserves Vengeance priority and enters the owner-gated evade path");
         Check(MethodCallsThreat(applyEvade, arbiterType, "IsPrimaryOwner") &&
               MethodCallsThreat(applyEvade, motorType, "TryGuideNative"),
             "projectile evade requires same-frame ownership and submits movement through FlightMotor");
+        Check(MethodCallsThreat(behaviorExecutionType.GetMethod("TryProjectileEvade", Flags),
+                  tacticsType, "ApplyProjectileEvadeOwned"),
+            "central R3 execution routes ImmediateProjectileEvade directly into the formal Threat tactics owner surface");
+        Check(MethodCallsThreat(frameRuntimeType.GetMethod("Capture", Flags),
+                  weaponPerceptionType, "TryFindIncomingProjectile"),
+            "FrameContext captures real incoming-projectile geometry before arbitration through shared WeaponPerception");
+        Check(MethodCallsThreat(adjustVengeance, tacticsType, "TryIncomingProjectileEvade") &&
+              MethodCallsThreat(projectileGeometry, threatRuntimeType, "TryGetDebugState"),
+            "Extreme Vengeance retains its tactical projectile geometry without restoring an ordinary evade executor");
         Check(MethodCallsThreat(tryProfile, weaponPerceptionType, "TryObserveHeldThreats"),
             "Threat tactical profile uses shared held-item perception rather than a private scan");
         Check(!TypeCallsForbiddenThreatInput(tacticsType),
             "Threat tactics never inspect player input/controller state or hidden intent");
 
         Console.WriteLine(
-            "Threat tactics: learned FakeDive weighting, shared perception, current Threat facts, Vengeance priority, owner-gated projectile evade and FlightMotor ownership verified.");
+            "Threat tactics: learned FakeDive weighting, shared perception, formal R3 projectile evade, Vengeance geometry and FlightMotor ownership verified.");
     }
 
     private static bool MethodCallsThreat(MethodInfo caller, Type targetType, string targetName) =>
