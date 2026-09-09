@@ -18,6 +18,7 @@ internal sealed class DB_CreaturePerception
 
     internal Creature Danger { get; private set; }
     internal bool IsScanFrame => scan == 0;
+    internal int PursuitTicks => pursuit;
 
     internal DB_CreaturePerception(DB_AI brain, DB_Creature fly)
     {
