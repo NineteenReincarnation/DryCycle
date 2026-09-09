@@ -25,7 +25,7 @@ internal static class DB_BehaviorExecution
 
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=InjuryRecovery");
         bat.DesertAI.CancelPhysicalAttack();
-        return bat.DesertAI.ExecuteInjuryRecoveryOwned();
+        return bat.DesertAI.InjuryRecovery.ExecuteOwned();
     }
 
     internal static bool TryEnvironment(DB_Creature bat, in DB_BehaviorResolution resolution)
