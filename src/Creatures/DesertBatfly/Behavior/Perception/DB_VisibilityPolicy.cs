@@ -34,13 +34,17 @@ internal static class DB_VisibilityPolicy
             return false;
 
         Vector2 origin = observer.mainBodyChunk.pos;
-        if (!observer.room.VisualContact(origin, targetPosition))
-            return false;
-
         float confidence = Mathf.Clamp01(
             DB_EnvironmentRuntime.VisibilityScale(observer));
         float range = EffectiveRange(baseRange, confidence, channel, realProjectile);
-        return (targetPosition - origin).sqrMagnitude <= range * range;
+
+        // Distance rejection is exact and much cheaper than Room.VisualContact. In a
+        // 20-30 bat room most candidate pairs are outside their effective channel range;
+        // never traverse room terrain for a pair that cannot be observed anyway.
+        if ((targetPosition - origin).sqrMagnitude > range * range)
+            return false;
+
+        return observer.room.VisualContact(origin, targetPosition);
     }
 
     internal static float EffectiveRange(
