@@ -22,6 +22,7 @@ performance_probe = read('Core/Runtime/DB_PerformanceProbe.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
 weapon = read('Behavior/Perception/DB_WeaponPerception.cs')
+visibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')
 arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
 social_room = read('Behavior/Social/DB_SocialRoomState.cs')
@@ -55,6 +56,16 @@ if physical_scan_owners != ['Core/Runtime/DB_RoomContext.cs']:
 
 if 'context.ThrownWeapons' not in weapon or 'context.Weapons' not in weapon:
     failures.append('DB_WeaponPerception no longer consumes shared DB_RoomContext weapon views')
+
+# Visibility is called from several O(bats*candidates) paths. Reject impossible distance
+# pairs before asking Rain World to traverse terrain for VisualContact; this is semantics-
+# preserving because an out-of-range pair is false regardless of line of sight.
+distance_gate = visibility.find('if ((targetPosition - origin).sqrMagnitude > range * range)')
+los_gate = visibility.find('return observer.room.VisualContact(origin, targetPosition);')
+if min(distance_gate, los_gate) < 0 or distance_gate > los_gate:
+    failures.append('visibility must reject effective range before Room.VisualContact terrain LOS')
+if 'if (!observer.room.VisualContact(origin, targetPosition))' in visibility:
+    failures.append('visibility reintroduced terrain LOS before exact distance rejection')
 
 # Realized Fear/PTSD target discovery must reuse the room snapshot instead of doing a per-bat room scan.
 if 'DB_RoomContext.For(bat?.room)' not in fear or 'roomContext.Creatures' not in fear:
@@ -219,5 +230,5 @@ if failures:
     print('\n'.join(failures), file=sys.stderr)
     sys.exit(1)
 
-print('R7 static performance retention passed: shared scans, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
+print('R7 static performance retention passed: shared scans, distance-cull-before-LOS, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
 PY
