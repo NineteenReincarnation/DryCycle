@@ -14,8 +14,9 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureRuntimePatch", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSandbox", false) == null &&
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureWarpCompatibility", false) == null &&
-              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PlatformRoostRuntime", false) == null,
-            "R6 current architecture keeps retired Integration/platform-hook identities physically absent");
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PlatformRoostRuntime", false) == null &&
+              mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalHiveDocking", false) == null,
+            "R6 current architecture keeps retired Integration/platform-hook and environment-only hive identities physically absent");
 
         MethodInfo modsInit = hooks.GetMethod("RainWorld_OnModsInit", Flags);
         Check(MethodCallOffset(modsInit, sandbox, "Enable") >= 0 &&
@@ -57,7 +58,9 @@ internal static partial class Program
         Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);
         Type frameContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContext", true);
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
+        Type behaviorExecution = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
         Type motor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FlightMotor", true);
+        Type hiveDocking = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_HiveDocking", true);
         Type roostPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostPolicy", true);
         Type roostAnchor = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoostAnchor", true);
         Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
@@ -65,9 +68,29 @@ internal static partial class Program
         Check(creature != null && ai != null && social != null && threat != null &&
               signal != null && signalRoom != null && fear != null && vengeance != null &&
               environment != null && travel != null && colony != null && eventHub != null &&
-              roomContext != null && frameContext != null && arbiter != null && motor != null &&
+              roomContext != null && frameContext != null && arbiter != null &&
+              behaviorExecution != null && motor != null && hiveDocking != null &&
               roostPolicy != null && roostAnchor != null,
             "R6 current architecture exposes all formal core and domain owners established so far");
+
+        MethodInfo environmentExecutor = behaviorExecution.GetMethod("TryEnvironment", Flags);
+        MethodInfo environmentApproach = environment.GetMethod("ApplyNativeHomeAndBurrow", Flags);
+        MethodInfo travelIngress = travel.GetMethod("DriveIntoHomeHive", Flags);
+        MethodInfo hiveCore = hiveDocking.GetMethod("TryHandleDocking", Flags);
+        Check(MethodCallOffset(environmentExecutor, hiveDocking, "TryHandleEnvironment") >= 0 &&
+              MethodCallOffset(travelIngress, hiveDocking, "TryHandleTravelReturnHome") >= 0,
+            "Hive final ingress is routed through one shared docking authority");
+        Check(MethodCallOffset(environmentApproach, typeof(FlyAI), "ChangeBehavior") < 0 &&
+              MethodCallOffset(travelIngress, typeof(FlyAI), "ChangeBehavior") < 0 &&
+              MethodCallOffset(hiveCore, typeof(FlyAI), "ChangeBehavior") >= 0,
+            "Environment/Travel cannot directly transition BatHive Burrow outside DB_HiveDocking");
+
+        MethodInfo nativeRain = arbiter.GetMethod("NativeRainRequiresNativeOwner", Flags);
+        Check(nativeRain != null &&
+              !(bool)nativeRain.Invoke(null, new object[] { true, true }) &&
+              (bool)nativeRain.Invoke(null, new object[] { true, false }) &&
+              !(bool)nativeRain.Invoke(null, new object[] { false, true }),
+            "Committed Travel supersedes native rain steering while vanilla rain remains fallback");
 
         Check(roostAnchor.GetField("Tile", Flags) != null &&
               roostAnchor.GetField("Kind", Flags) != null &&
@@ -96,6 +119,6 @@ internal static partial class Program
         Check(socialRoost != null && Nullable.GetUnderlyingType(socialRoost.FieldType) == roostAnchor,
             "social tile-roost invitations preserve the canonical anchor instead of re-deriving a tile from Spot");
 
-        Console.WriteLine("Architecture domain migration checkpoint checks pass: current owners, Integration lifecycle, canonical roost anchors and Observatory chain are protected.");
+        Console.WriteLine("Architecture domain migration checkpoint checks pass: current owners, shared Hive docking, rain/Travel ownership, Integration lifecycle, canonical roost anchors and Observatory chain are protected.");
     }
 }

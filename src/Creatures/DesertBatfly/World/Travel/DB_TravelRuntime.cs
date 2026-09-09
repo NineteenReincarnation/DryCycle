@@ -680,12 +680,14 @@ internal static class DB_TravelRuntime
 
         if (bat.room.GetTile(bat.mainBodyChunk.pos).hive)
         {
-            bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
-            bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
-            bat.movMode = Fly.MovementMode.Burrow;
-            intent.Suspended = false;
-            intent.StatusReason = "home room reached; entering BatHive";
-            return true;
+            bool handled = DB_HiveDocking.TryHandleTravelReturnHome(bat);
+            intent.Suspended = !handled;
+            intent.StatusReason = handled
+                ? bat.AI.behavior == FlyAI.Behavior.Burrow
+                    ? "home room reached; entering BatHive"
+                    : "home room reached; settling onto BatHive entrance"
+                : "home room reached; BatHive docking deferred by current owner";
+            return handled;
         }
 
         Vector2 nextGoal = bat.AI.ProgressLocalGoalAlongDijkstraMap(bat.AI.localGoal, bestMap);

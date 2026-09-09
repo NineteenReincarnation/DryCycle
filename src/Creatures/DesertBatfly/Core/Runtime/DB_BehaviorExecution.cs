@@ -41,10 +41,9 @@ internal static class DB_BehaviorExecution
         if (resolution.WinningProposal.SuppressCombat)
             bat.DesertAI.CancelPhysicalAttack();
 
-        // Vanilla FlyAI.Update normally owns the final hive-tile -> Burrow transition. When
-        // Environment owns the frame that native Update is intentionally skipped, so complete
-        // the docking contract here before the ordinary environmental Dijkstra/anchor executor.
-        if (DB_EnvironmentalHiveDocking.TryExecute(bat, resolution))
+        // Environment owns only the approach. Final BatHive contact/Burrow is centralized in
+        // the Hive domain so a failed contact check cannot fall through to a second authority.
+        if (DB_HiveDocking.TryHandleEnvironment(bat, resolution))
             return true;
 
         return DB_EnvironmentRuntime.ApplyOwnedBehavior(bat);

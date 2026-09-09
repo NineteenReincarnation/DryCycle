@@ -133,6 +133,14 @@ internal static class DB_BehaviorArbiter
         return state.Clock == clock && state.Resolution.PrimaryOwner == owner;
     }
 
+    /// <summary>
+    /// Native rain steering is only an exclusive special owner when no committed Travel
+    /// intent can own this realized frame. Travel then remains the single cross-room planner;
+    /// if it cannot run, vanilla FleeFromRain is preserved as the fallback.
+    /// </summary>
+    internal static bool NativeRainRequiresNativeOwner(bool fleeFromRain, bool travelCanOwnRealizedFrame)
+        => fleeFromRain && !travelCanOwnRealizedFrame;
+
     internal static bool TryGetDebugState(DB_Creature bat, out DB_BehaviorArbiterDebugState debug)
     {
         debug = default;
@@ -245,14 +253,19 @@ internal static class DB_BehaviorArbiter
                 suppressSocial: true,
                 commitment: 1f));
 
+        bool nativeRain = NativeRainRequiresNativeOwner(
+            bat?.AI?.fleeFromRain == true,
+            frame.Travel.CanOwnRealizedFrame);
         bool nativeSpecial = bat?.AI == null || bat.safariControlled ||
-                             bat.AI.fleeFromRain || bat.AI.luredCounter > 0 ||
+                             nativeRain || bat.AI.luredCounter > 0 ||
                              bat.AI.behavior == FlyAI.Behavior.Burrow;
         if (nativeSpecial)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.NativeSpecial,
                 DB_BehaviorKind.Native,
-                "native FlyAI special state",
+                nativeRain
+                    ? "native FlyAI rain fallback: Travel cannot own current frame"
+                    : "native FlyAI special state",
                 frame.CurrentGoal,
                 desiredNativeBehavior: frame.NativeBehavior,
                 suppressSocial: true,
