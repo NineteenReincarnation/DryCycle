@@ -25,6 +25,7 @@ internal static partial class Program
             GenomeTests();
             RigTests();
             TerrainTests();
+            PlatformSurfaceTests();
             GeometryTests();
 
             Console.WriteLine(
@@ -35,6 +36,7 @@ internal static partial class Program
                 "; terrain cases=" + terrainCases +
                 "; standing cases=" + standingCases +
                 "; spawn-support cases=" + spawnSupportCases +
+                "; platform-surface cases=" + platformSurfaceCases +
                 "; geometry meshes=" + geometryMeshes +
                 "; atlas pixels=" + atlasPixels +
                 "; assertions=" + assertions +

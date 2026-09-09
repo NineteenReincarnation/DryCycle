@@ -1,3 +1,5 @@
+using DryCycle.Creatures.Platforming;
+
 namespace DryCycle.Registration;
 
 /// <summary>
@@ -29,6 +31,7 @@ internal static class DryCycleContent
 
         CreatureRegistry.Enable();
         ItemRegistry.Enable();
+        WalkableDynamicSurfaceRuntime.Enable();
         _enabled = true;
     }
 
@@ -39,6 +42,7 @@ internal static class DryCycleContent
             return;
         }
 
+        WalkableDynamicSurfaceRuntime.Disable();
         ItemRegistry.Disable();
         CreatureRegistry.Disable();
         _resourcesLoaded = false;

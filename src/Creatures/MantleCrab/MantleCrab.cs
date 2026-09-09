@@ -1,9 +1,10 @@
+using DryCycle.Creatures.Platforming;
 using UnityEngine;
 
 namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>Passive shell and standing rig. All real collision masses belong to the shell.</summary>
-public sealed class MantleCrab : Creature
+public sealed class MantleCrab : Creature, IWalkableDynamicSurface
 {
     internal static readonly Vector2[] ShellRest =
     [new(-84, 0), new(-44, 5), new(0, 8), new(44, 5), new(84, 0)];
@@ -31,6 +32,15 @@ public sealed class MantleCrab : Creature
             return fallback.sqrMagnitude > 0.0001f ? fallback.normalized : Vector2.right;
         }
     }
+
+    Room IWalkableDynamicSurface.SurfaceRoom => room;
+    bool IWalkableDynamicSurface.SurfaceEnabled => room != null && !slatedForDeletetion;
+
+    bool IWalkableDynamicSurface.TrySample(Vector2 worldPosition, out WalkableSurfaceSample sample) =>
+        TrySampleWalkableSurface(worldPosition, out sample);
+
+    bool IWalkableDynamicSurface.TrySample(float coordinate, out WalkableSurfaceSample sample) =>
+        TrySampleWalkableSurface(coordinate, out sample);
 
     public MantleCrab(AbstractCreature creature, World world) : base(creature, world)
     {
@@ -329,6 +339,99 @@ public sealed class MantleCrab : Creature
             Vector2 local = ShellRest[i] * ShellScale - shellRestCenter;
             shellRestInertia += bodyChunks[i].mass * local.sqrMagnitude;
         }
+    }
+
+    /// <summary>
+    /// Continuous top surface used by the shared player moving-platform runtime. It is flatter
+    /// than the decorative mantle mesh on purpose: the visual wing tips are not stable footing.
+    /// </summary>
+    internal bool TrySampleWalkableSurface(Vector2 worldPosition, out WalkableSurfaceSample sample)
+    {
+        sample = default;
+        if (!TryFitShellFrame(previous: false, out Vector2 center, out Vector2 axis)) return false;
+        float coordinate = Vector2.Dot(worldPosition - center, axis);
+        return TrySampleWalkableSurface(coordinate, out sample);
+    }
+
+    internal bool TrySampleWalkableSurface(float coordinate, out WalkableSurfaceSample sample)
+    {
+        sample = default;
+        if (!TryFitShellFrame(previous: false, out Vector2 center, out Vector2 axis) ||
+            !TryFitShellFrame(previous: true, out Vector2 previousCenter, out Vector2 previousAxis))
+            return false;
+
+        float halfWidth = Mathf.Max(48f, 78f * ShellScale);
+        if (Mathf.Abs(coordinate) > halfWidth) return false;
+
+        float localY = WalkableSurfaceHeight(coordinate, halfWidth);
+        float slope = WalkableSurfaceSlope(coordinate, halfWidth);
+        Vector2 up = new(-axis.y, axis.x);
+        Vector2 previousUp = new(-previousAxis.y, previousAxis.x);
+        Vector2 point = center + axis * coordinate + up * localY;
+        Vector2 previousPoint = previousCenter + previousAxis * coordinate + previousUp * localY;
+        Vector2 tangent = (axis + up * slope).normalized;
+        Vector2 normal = new(-tangent.y, tangent.x);
+        if (Vector2.Dot(normal, up) < 0f) normal = -normal;
+
+        sample = new WalkableSurfaceSample(this, coordinate, point, previousPoint, normal, tangent);
+        return true;
+    }
+
+    private static float WalkableSurfaceHeight(float coordinate, float halfWidth)
+    {
+        float n = Mathf.Clamp01(Mathf.Abs(coordinate) / Mathf.Max(1f, halfWidth));
+        return 39.5f - 8f * n * n - 5f * n * n * n * n;
+    }
+
+    private static float WalkableSurfaceSlope(float coordinate, float halfWidth)
+    {
+        if (Mathf.Abs(coordinate) < 0.0001f) return 0f;
+        float width = Mathf.Max(1f, halfWidth);
+        float n = Mathf.Clamp01(Mathf.Abs(coordinate) / width);
+        float magnitude = (16f * n + 20f * n * n * n) / width;
+        return -Mathf.Sign(coordinate) * magnitude;
+    }
+
+    private bool TryFitShellFrame(bool previous, out Vector2 center, out Vector2 axis)
+    {
+        center = Vector2.zero;
+        axis = Vector2.right;
+        if (bodyChunks == null || bodyChunks.Length != ShellRest.Length) return false;
+        EnsureRigidShellMetrics();
+
+        float mass = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            if (chunk == null) return false;
+            Vector2 position = previous ? chunk.lastPos : chunk.pos;
+            mass += chunk.mass;
+            center += position * chunk.mass;
+        }
+        if (mass <= 0.0001f) return false;
+        center /= mass;
+
+        float fitDot = 0f;
+        float fitCross = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            Vector2 local = ShellRest[i] * ShellScale - shellRestCenter;
+            Vector2 position = previous ? chunk.lastPos : chunk.pos;
+            Vector2 current = position - center;
+            fitDot += chunk.mass * Vector2.Dot(local, current);
+            fitCross += chunk.mass * Cross(local, current);
+        }
+
+        if (fitDot * fitDot + fitCross * fitCross <= 0.0001f)
+        {
+            axis = shellFrameInitialized ? shellAxis : Vector2.right;
+            return true;
+        }
+
+        float angle = Mathf.Atan2(fitCross, fitDot);
+        axis = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+        return true;
     }
 
     private static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;

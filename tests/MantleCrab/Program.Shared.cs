@@ -14,6 +14,7 @@ internal static partial class Program
     private static int terrainCases;
     private static int standingCases;
     private static int spawnSupportCases;
+    private static int platformSurfaceCases;
     private static int geometryMeshes;
     private static int atlasPixels;
 
