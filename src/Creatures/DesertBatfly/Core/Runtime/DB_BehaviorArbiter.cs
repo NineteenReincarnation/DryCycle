@@ -422,15 +422,19 @@ internal static class DB_BehaviorArbiter
                 preserveGoal: true,
                 commitment: 0.82f));
 
-        if (frame.HasSocialState && frame.Social.Mode != DB_SocialMode.None)
+        bool activeSocialEvent = frame.HasSocialState && frame.Social.Mode != DB_SocialMode.None;
+        bool ambientSocial = !activeSocialEvent && DB_AmbientSocialRuntime.ShouldOwn(frame);
+        if (activeSocialEvent || ambientSocial)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.Social,
                 DB_BehaviorKind.Social,
-                frame.Social.DecisionReason,
-                frame.Social.RoostTarget ?? frame.CurrentGoal,
-                nominalSpeed: 5f,
-                preserveGoal: frame.Social.RoostTarget == null,
-                commitment: Mathf.Clamp01(frame.Social.SocialDrive)));
+                ambientSocial ? "ambient neutral social ecology" : frame.Social.DecisionReason,
+                activeSocialEvent ? frame.Social.RoostTarget ?? frame.CurrentGoal : frame.CurrentGoal,
+                nominalSpeed: ambientSocial ? 4.6f : 5f,
+                preserveGoal: ambientSocial || frame.Social.RoostTarget == null,
+                commitment: ambientSocial
+                    ? DB_AmbientSocialRuntime.Commitment(frame.Personality)
+                    : Mathf.Clamp01(frame.Social.SocialDrive)));
 
         proposals.Add(DB_BehaviorProposal.Create(
             DB_BehaviorOwner.Ordinary,
