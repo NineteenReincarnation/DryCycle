@@ -17,6 +17,22 @@ internal sealed class DB_Runtime
         this.bat = bat;
     }
 
+    /// <summary>
+    /// Clears realized-only domain state before vanilla Fly.NewRoom observes the new room.
+    /// This replaces the former On.Fly.NewRoom detour while preserving its pre-orig order.
+    /// </summary>
+    internal void BeforeNewRoom()
+    {
+        DB_SocialRuntime.CancelForPriority(bat, "room transition");
+        DB_SwarmLifecycleRuntime.Forget(bat);
+        DB_SignalRuntime.Forget(bat);
+        DB_ThreatRuntime.Forget(bat);
+        DB_EnvironmentRuntime.Forget(bat);
+        DB_FrameContextRuntime.Forget(bat);
+        DB_BehaviorArbiter.Forget(bat);
+        DB_FlightMotor.Forget(bat);
+    }
+
     internal Vector2 BeforeVanillaUpdate()
     {
         bat.Injury.Tick();
