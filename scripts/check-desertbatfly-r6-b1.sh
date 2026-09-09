@@ -83,6 +83,14 @@ grep -q '"FeedingRole"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 grep -q '"FeedingGroup"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 grep -q 'DB_FeedingCoordinator.TryPeekTarget' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 
+# Collision auto-capture must pass through the same dehydration grip gate without
+# letting vanilla emit a false successful-catch side effect before SlugcatGrab.
+grep -q 'On.Player.Collide += PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+grep -q 'On.Player.Collide -= PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+grep -q 'VanillaAutoCaptureWouldAttempt' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+grep -q 'ApprovedCollisionBat' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+grep -q 'bat.shortcutDelay = 1;' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+
 if grep -RIn --include='*.cs' -E 'HydrationWeakness|ThirstStore\.' src/Creatures/DesertBatfly/Behavior/Feeding; then
   echo 'Feeding bypassed PlayerDehydrationFacts physiology boundary.' >&2
   exit 1
@@ -99,12 +107,30 @@ from pathlib import Path
 import re
 facts = Path('src/Thirst/PlayerDehydrationFacts.cs').read_text(encoding='utf-8')
 coordinator = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs').read_text(encoding='utf-8')
+grip = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs').read_text(encoding='utf-8')
 if re.search(r'(?:>=|<=|>|<)\s*PlayerDehydrationStage\.', facts + coordinator):
     raise SystemExit('PlayerDehydrationStage relational comparison is not legal C#')
 if coordinator.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:
     raise SystemExit('Feeding must have exactly one aggregate predation-stress ingress')
 if 'DB_RoomContext.For(room)' not in coordinator or 'context.Players' not in coordinator:
     raise SystemExit('Feeding coordinator must consume the shared room player snapshot')
+if 'internal int MaintenanceClock = int.MinValue;' not in coordinator:
+    raise SystemExit('Feeding room maintenance lost its per-tick gate')
+if coordinator.count('MaintainRoomState(bat.room, state);') != 2 or \
+        coordinator.count('MaintainRoomState(room, state);') != 1:
+    raise SystemExit('Feeding assignment/update paths must share the room maintenance gate')
+if 'RefreshTargets(bat.room, state);' in coordinator or 'Prune(bat.room, state);' in coordinator:
+    raise SystemExit('Per-bat feeding queries bypassed the room maintenance gate')
+if coordinator.count('PromoteCloudReservations(state);') < 2:
+    raise SystemExit('Cloud promotion must run from maintenance and event-driven release')
+for token in (
+    'CollisionPickupAttempt(self, otherObject',
+    'PassesGripGate(self, bat, facts, state, clock)',
+    'ApprovedCollisionBat',
+    'bat.shortcutDelay = 1;',
+):
+    if token not in grip:
+        raise SystemExit('Dehydrated collision pickup contract missing: ' + token)
 PY
 
 echo 'R6 source retention audit passed.'
