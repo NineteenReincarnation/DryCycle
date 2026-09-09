@@ -374,7 +374,7 @@ internal static class DB_FrameContextRuntime
         bool speciesRoost = ai?.Mode == DB_AI.Activity.Roost;
         DB_RoostFrameSummary roost = new(nativeChain || speciesRoost, nativeChain, speciesRoost);
 
-        bool restrained = RestrainedByNonFly(bat);
+        bool restrained = DB_RestraintPolicy.IsRestrainedByNonFly(bat);
         DB_SpecialPhysicsOwner special = ResolveSpecialPhysicsOwner(bat, restrained);
         bool immediateDanger = ai?.HasImmediateDanger == true ||
                                ai?.Mode == DB_AI.Activity.Escape;
@@ -437,17 +437,6 @@ internal static class DB_FrameContextRuntime
             socialAllowed,
             travelCanOwn,
             special);
-    }
-
-    private static bool RestrainedByNonFly(DB_Creature bat)
-    {
-        if (bat?.grabbedBy == null) return false;
-        for (int i = 0; i < bat.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = bat.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
-        }
-        return false;
     }
 
     private static DB_SpecialPhysicsOwner ResolveSpecialPhysicsOwner(DB_Creature bat, bool restrained)
