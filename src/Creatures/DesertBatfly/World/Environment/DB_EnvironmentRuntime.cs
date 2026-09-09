@@ -35,12 +35,6 @@ internal static class DB_EnvironmentRuntime
         if (bat != null) states.Remove(bat);
     }
 
-    internal static void Update(DB_Creature bat)
-    {
-        RefreshInfluence(bat);
-        ApplyOwnedBehavior(bat);
-    }
-
     internal static void RefreshInfluence(DB_Creature bat)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || bat.slatedForDeletetion)
