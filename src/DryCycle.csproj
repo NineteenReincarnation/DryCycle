@@ -40,6 +40,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="MantleCrab.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Only reference the assemblies DryCycle actually needs. SlugBase support
          is reflection-based and therefore remains an optional runtime integration. -->
     <Reference Include="BepInEx">
