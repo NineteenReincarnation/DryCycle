@@ -104,6 +104,14 @@ internal sealed class DB_Personality
         Nerve * 0.36f +
         Temperament * 0.26f);
 
+    // Dehydration feeding is opportunistic rather than a new personality stream. Nerve controls
+    // willingness to land on a living player, Temperament supports commitment, and Conformity
+    // makes an individual more willing to join an already forming feeding cluster.
+    internal float FeedingBoldness => Mathf.Clamp01(
+        Nerve * 0.50f +
+        Temperament * 0.30f +
+        Conformity * 0.20f);
+
     internal bool CanSandSpit => SandSpitAffinity >= DB_Tuning.SandSpitTraitThreshold;
     internal float SandSpitDrive => Mathf.InverseLerp(
         DB_Tuning.SandSpitTraitThreshold,
