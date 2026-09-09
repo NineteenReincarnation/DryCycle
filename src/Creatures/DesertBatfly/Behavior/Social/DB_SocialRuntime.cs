@@ -149,12 +149,6 @@ internal static class DB_SocialRuntime
         DB_SocialRoomRuntime.Reset();
     }
 
-    internal static void Update(DB_Creature bat)
-    {
-        RefreshState(bat);
-        ApplyOwnedBehavior(bat);
-    }
-
     internal static void RefreshState(DB_Creature bat)
     {
         if (bat == null) return;
@@ -380,7 +374,7 @@ internal static class DB_SocialRuntime
         if (bat == null || bat.dead || bat.slatedForDeletetion || !bat.Consious || bat.room == null)
             return "unavailable / unconscious";
         if (bat.inShortcut) return "shortcut";
-        if (RestrainedByNonFly(bat)) return "restrained by non-Fly";
+        if (DB_RestraintPolicy.IsRestrainedByNonFly(bat)) return "restrained by non-Fly";
         if (bat.Emergence?.Active == true) return "emergence";
         if (bat.DesertAI == null || bat.AI == null) return "AI unavailable";
         if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
@@ -1435,17 +1429,6 @@ internal static class DB_SocialRuntime
         if (partner != null && state.LastPartnerKey == DB_SocialRoomRuntime.Key(partner))
             scale *= mode == DB_SocialMode.SocialChase ? 0.25f : 0.55f;
         return scale;
-    }
-
-    private static bool RestrainedByNonFly(DB_Creature bat)
-    {
-        if (bat?.grabbedBy == null) return false;
-        for (int i = 0; i < bat.grabbedBy.Count; i++)
-        {
-            if (bat.grabbedBy[i]?.grabber != null && bat.grabbedBy[i].grabber is not Fly)
-                return true;
-        }
-        return false;
     }
 
     private static float ActiveTrauma(DB_Creature bat)

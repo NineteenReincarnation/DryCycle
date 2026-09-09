@@ -7,9 +7,10 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// <summary>
 /// Authoritative semantic-event root for one Desert Batfly life.
 ///
-/// This type observes Rain World facts only. It does not choose behavior, write velocity,
-/// mutate persistent CreatureState, or depend on historical refactor stages. Domain systems
-/// subscribe to Damage/Capture/Mortality and remain responsible for their own reactions.
+/// DB_Creature reports lifecycle facts it owns directly; only genuinely external facts such
+/// as LizardTongue attachment are observed through Rain World hooks. This type does not choose
+/// behavior, write velocity, or mutate persistent CreatureState. Domain systems subscribe to
+/// Damage/Capture/Mortality and remain responsible for their own reactions.
 /// </summary>
 internal static class DB_EventHub
 {
@@ -70,6 +71,116 @@ internal static class DB_EventHub
         }
     }
 
+    /// <summary>
+    /// Opaque transaction opened immediately before DB_Creature calls base.Violence.
+    /// EndViolence must be called exactly once so nested Die() can keep Damage -> Mortality
+    /// causal ordering without a global On.Creature.Violence detour.
+    /// </summary>
+    internal readonly struct ViolenceTransaction
+    {
+        private readonly VictimState state;
+        private readonly DB_Creature victim;
+        private readonly bool wasDead;
+        private readonly int sequence;
+        private readonly Creature instigator;
+        private readonly PhysicalObject sourceObject;
+        private readonly Creature.DamageType damageType;
+        private readonly float damage;
+        private readonly float stun;
+        private readonly Vector2 position;
+        private readonly int clock;
+        private readonly bool canAttributeMortality;
+
+        private ViolenceTransaction(
+            VictimState state,
+            DB_Creature victim,
+            bool wasDead,
+            int sequence,
+            Creature instigator,
+            PhysicalObject sourceObject,
+            Creature.DamageType damageType,
+            float damage,
+            float stun,
+            Vector2 position,
+            int clock,
+            bool canAttributeMortality)
+        {
+            this.state = state;
+            this.victim = victim;
+            this.wasDead = wasDead;
+            this.sequence = sequence;
+            this.instigator = instigator;
+            this.sourceObject = sourceObject;
+            this.damageType = damageType;
+            this.damage = damage;
+            this.stun = stun;
+            this.position = position;
+            this.clock = clock;
+            this.canAttributeMortality = canAttributeMortality;
+        }
+
+        private bool Active => state != null && victim != null;
+    }
+
+    /// <summary>
+    /// Opaque mortality snapshot captured after DB_Creature's Die guards accept the death but
+    /// before base.Die mutates chain/grasp state.
+    /// </summary>
+    internal readonly struct MortalityTransaction
+    {
+        private readonly VictimState state;
+        private readonly DB_Creature victim;
+        private readonly bool wasDead;
+        private readonly int clock;
+        private readonly Vector2 deathPosition;
+        private readonly DB_Creature[] chainWitnesses;
+        private readonly bool revengeFailed;
+        private readonly Creature killer;
+        private readonly PhysicalObject sourceObject;
+        private readonly Creature.DamageType damageType;
+        private readonly float damage;
+        private readonly float stun;
+        private readonly float threatScale;
+        private readonly bool wasConsumed;
+        private readonly DB_MortalityAttribution attribution;
+
+        private MortalityTransaction(
+            VictimState state,
+            DB_Creature victim,
+            bool wasDead,
+            int clock,
+            Vector2 deathPosition,
+            DB_Creature[] chainWitnesses,
+            bool revengeFailed,
+            Creature killer,
+            PhysicalObject sourceObject,
+            Creature.DamageType damageType,
+            float damage,
+            float stun,
+            float threatScale,
+            bool wasConsumed,
+            DB_MortalityAttribution attribution)
+        {
+            this.state = state;
+            this.victim = victim;
+            this.wasDead = wasDead;
+            this.clock = clock;
+            this.deathPosition = deathPosition;
+            this.chainWitnesses = chainWitnesses;
+            this.revengeFailed = revengeFailed;
+            this.killer = killer;
+            this.sourceObject = sourceObject;
+            this.damageType = damageType;
+            this.damage = damage;
+            this.stun = stun;
+            this.threatScale = threatScale;
+            this.wasConsumed = wasConsumed;
+            this.attribution = attribution;
+        }
+
+        private bool Active => state != null && victim != null;
+    }
+
     private static ConditionalWeakTable<DB_Creature, VictimState> victims = new();
     private static bool enabled;
     private static int nextSequence;
@@ -81,9 +192,6 @@ internal static class DB_EventHub
         if (enabled) return;
         enabled = true;
         ResetState();
-        On.Creature.Violence += CreatureViolence;
-        On.Creature.Die += CreatureDie;
-        On.Fly.Grabbed += FlyGrabbed;
         On.LizardTongue.Update += TongueUpdate;
     }
 
@@ -91,9 +199,6 @@ internal static class DB_EventHub
     {
         if (!enabled) return;
         enabled = false;
-        On.Creature.Violence -= CreatureViolence;
-        On.Creature.Die -= CreatureDie;
-        On.Fly.Grabbed -= FlyGrabbed;
         On.LizardTongue.Update -= TongueUpdate;
         ResetState();
 
@@ -117,41 +222,39 @@ internal static class DB_EventHub
     /// </summary>
     internal static void RecordConsumptionAttribution(DB_Creature victim, Player consumer)
     {
-        if (victim == null || consumer == null || victim.dead || victim.slatedForDeletetion)
+        if (!enabled || victim == null || consumer == null || victim.dead || victim.slatedForDeletetion)
             return;
         VictimState state = StateFor(victim);
         state.ExplicitConsumer = consumer;
         state.ExplicitConsumeClock = Clock(victim);
     }
 
-    internal static bool WithinAttributionWindow(int now, int then, int window)
+    /// <summary>
+    /// Reports a DB_Creature grasp before Fly.Grabbed installs the new grasp into grabbedBy.
+    /// Keeping this pre-base boundary preserves tongue -> grasp transfer deduplication while
+    /// avoiding a global On.Fly.Grabbed observer for our own virtual lifecycle.
+    /// </summary>
+    internal static void ReportGraspCapture(DB_Creature victim, Creature.Grasp grasp)
     {
-        return now != int.MinValue && then != int.MinValue && window >= 0 &&
-               now >= then && now - then <= window;
+        if (!enabled || victim == null || victim.dead || victim.slatedForDeletetion ||
+            grasp?.grabber is not Creature captor || captor is Fly)
+            return;
+        ReportCapture(victim, captor, null, DB_CaptureKind.Grasp);
     }
 
-    private static int NextSequence()
-    {
-        nextSequence = nextSequence == int.MaxValue ? 1 : nextSequence + 1;
-        return nextSequence;
-    }
-
-    private static void CreatureViolence(
-        On.Creature.orig_Violence orig,
-        Creature self,
+    /// <summary>
+    /// Opens the canonical damage transaction before vanilla Creature.Violence runs. Killer
+    /// attribution is written here because vanilla may call virtual Die() re-entrantly.
+    /// </summary>
+    internal static ViolenceTransaction BeginViolence(
+        DB_Creature victim,
         BodyChunk source,
-        Vector2? momentum,
-        BodyChunk hitChunk,
-        Appendage.Pos appendage,
         Creature.DamageType type,
         float damage,
         float stunBonus)
     {
-        if (self is not DB_Creature victim)
-        {
-            orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
-            return;
-        }
+        if (!enabled || victim == null)
+            return default;
 
         VictimState state = StateFor(victim);
         bool wasDead = victim.dead;
@@ -164,9 +267,6 @@ internal static class DB_EventHub
             instigator != null && damage > 0f && sourceObject is not Rock;
         float threatScale = ThreatScale(instigator, sourceObject);
 
-        // Attribution facts must exist before vanilla damage runs because Creature.Violence
-        // may call Die() re-entrantly. The semantic Damage event itself is delayed until
-        // vanilla finishes so subscribers know whether this hit was actually lethal.
         if (canAttributeMortality)
         {
             state.LastDamageInstigator = instigator;
@@ -179,19 +279,11 @@ internal static class DB_EventHub
         }
 
         state.ViolenceDepth++;
-        try
-        {
-            orig(self, source, momentum, hitChunk, appendage, type, damage, stunBonus);
-        }
-        finally
-        {
-            state.ViolenceDepth = Mathf.Max(0, state.ViolenceDepth - 1);
-        }
-
-        bool lethal = !wasDead && victim.dead;
-        Dispatch(Damage, new DB_DamageEvent(
-            sequence,
+        return new ViolenceTransaction(
+            state,
             victim,
+            wasDead,
+            sequence,
             instigator,
             sourceObject,
             type,
@@ -199,21 +291,47 @@ internal static class DB_EventHub
             stunBonus,
             position,
             clock,
-            canAttributeMortality,
+            canAttributeMortality);
+    }
+
+    /// <summary>
+    /// Closes the damage transaction. The caller passes vanillaCompleted=false when
+    /// base.Violence throws; depth is still restored but no semantic Damage is fabricated.
+    /// </summary>
+    internal static void EndViolence(in ViolenceTransaction transaction, bool vanillaCompleted)
+    {
+        if (!transaction.Active) return;
+
+        transaction.state.ViolenceDepth = Mathf.Max(0, transaction.state.ViolenceDepth - 1);
+        if (!vanillaCompleted) return;
+
+        bool lethal = !transaction.wasDead && transaction.victim.dead;
+        Dispatch(Damage, new DB_DamageEvent(
+            transaction.sequence,
+            transaction.victim,
+            transaction.instigator,
+            transaction.sourceObject,
+            transaction.damageType,
+            transaction.damage,
+            transaction.stun,
+            transaction.position,
+            transaction.clock,
+            transaction.canAttributeMortality,
             lethal));
 
         // A Die() reached from inside Creature.Violence is buffered until after Damage is
-        // delivered. This gives every consumer one causal order: Damage -> Mortality.
-        FlushPendingMortality(state);
+        // delivered. This preserves one causal order for every consumer: Damage -> Mortality.
+        FlushPendingMortality(transaction.state);
     }
 
-    private static void CreatureDie(On.Creature.orig_Die orig, Creature self)
+    /// <summary>
+    /// Captures mortality facts immediately before base.Die. DB_Creature must run its rock and
+    /// held-update early-return guards before calling this method.
+    /// </summary>
+    internal static MortalityTransaction PrepareMortality(DB_Creature victim)
     {
-        if (self is not DB_Creature victim)
-        {
-            orig(self);
-            return;
-        }
+        if (!enabled || victim == null)
+            return default;
 
         bool wasDead = victim.dead;
         VictimState state = StateFor(victim);
@@ -222,8 +340,7 @@ internal static class DB_EventHub
         DB_Creature[] chainWitnesses = !wasDead
             ? DB_FearRuntime.SnapshotChainWitnesses(victim)
             : Array.Empty<DB_Creature>();
-        bool revengeFailed = !wasDead &&
-            DB_VengeanceRuntime.IsActive(victim);
+        bool revengeFailed = !wasDead && DB_VengeanceRuntime.IsActive(victim);
 
         ResolveMortalityAttribution(
             state,
@@ -237,45 +354,66 @@ internal static class DB_EventHub
             out bool wasConsumed,
             out DB_MortalityAttribution attribution);
 
-        orig(self);
-
-        if (wasDead || !victim.dead || !state.TryMarkMortality()) return;
-
-        var mortality = new DB_MortalityEvent(
-            NextSequence(),
+        return new MortalityTransaction(
+            state,
             victim,
+            wasDead,
+            clock,
+            deathPosition,
+            chainWitnesses,
+            revengeFailed,
             killer,
             sourceObject,
             damageType,
             damage,
             stun,
-            deathPosition,
-            chainWitnesses,
             threatScale,
-            revengeFailed,
             wasConsumed,
-            clock,
             attribution);
+    }
 
-        if (state.ViolenceDepth > 0)
-            state.PendingMortality = mortality;
+    /// <summary>
+    /// Confirms the live -> dead transition after base.Die. Nested mortality remains buffered
+    /// while a Violence transaction is active and is flushed only after its Damage event.
+    /// </summary>
+    internal static void CompleteMortality(in MortalityTransaction transaction)
+    {
+        if (!transaction.Active || transaction.wasDead || !transaction.victim.dead ||
+            !transaction.state.TryMarkMortality())
+            return;
+
+        var mortality = new DB_MortalityEvent(
+            NextSequence(),
+            transaction.victim,
+            transaction.killer,
+            transaction.sourceObject,
+            transaction.damageType,
+            transaction.damage,
+            transaction.stun,
+            transaction.deathPosition,
+            transaction.chainWitnesses,
+            transaction.threatScale,
+            transaction.revengeFailed,
+            transaction.wasConsumed,
+            transaction.clock,
+            transaction.attribution);
+
+        if (transaction.state.ViolenceDepth > 0)
+            transaction.state.PendingMortality = mortality;
         else
             Dispatch(Mortality, mortality);
     }
 
-    private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
+    internal static bool WithinAttributionWindow(int now, int then, int window)
     {
-        if (self is DB_Creature victim && !victim.dead &&
-            grasp?.grabber is Creature captor && captor is not Fly)
-        {
-            // Publish before orig installs this new grasp into grabbedBy. If a Peach tongue
-            // is already holding the same victim, the existing tongue session remains
-            // physically active and suppresses the transfer duplicate. A genuine recapture
-            // after release has no prior active hold and therefore publishes again.
-            ReportCapture(victim, captor, null, DB_CaptureKind.Grasp);
-        }
+        return now != int.MinValue && then != int.MinValue && window >= 0 &&
+               now >= then && now - then <= window;
+    }
 
-        orig(self, grasp);
+    private static int NextSequence()
+    {
+        nextSequence = nextSequence == int.MaxValue ? 1 : nextSequence + 1;
+        return nextSequence;
     }
 
     private static void TongueUpdate(On.LizardTongue.orig_Update orig, LizardTongue self)

@@ -244,9 +244,6 @@ internal static class DB_ThreatRuntime
         TrackEncounter(bat, state);
     }
 
-    // Compatibility state-only surface. R3 hooks call RefreshState before arbitration.
-    internal static void Update(DB_Creature bat) => RefreshState(bat);
-
     internal static void ApplyOwnedTacticalModifier(DB_Creature bat)
     {
         if (bat == null || !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat) ||

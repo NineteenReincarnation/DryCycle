@@ -15,6 +15,12 @@ internal static partial class Program
         Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type consumers = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventConsumers", true);
         Type hub = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EventHub", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
+        Type frameContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
+        Type travel = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_TravelRuntime", true);
+        Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
+        Type restraint = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RestraintPolicy", true);
 
         Check(fear.GetMethod("UpdateState", Flags) != null &&
               vengeance.GetMethod("TryGetTarget", Flags) != null &&
@@ -49,6 +55,30 @@ internal static partial class Program
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), fear, "Reset") >= 0,
             "Architecture bridge cleanup species lifecycle remains wired to direct domain owners");
 
-        Console.WriteLine("Architecture bridge cleanup: direct domain APIs replace internal detour/bridge integration while preserving behavior contracts.");
+        Check(ai.GetMethod("Update", Flags) == null &&
+              ai.GetMethod("AfterPhysics", Flags) == null &&
+              environment.GetMethod("Update", Flags) == null &&
+              social.GetMethod("Update", Flags) == null &&
+              threat.GetMethod("Update", Flags) == null,
+            "Architecture lifecycle ownership forbids legacy combined-update facades that can bypass R3 refresh/arbitrate/execute order");
+
+        MethodInfo restraintQuery = restraint.GetMethod("IsRestrainedByNonFly", Flags);
+        MethodInfo aiRestraintQuery = ai.GetMethod("RestrainedByNonFly", Flags);
+        Check(restraintQuery != null &&
+              aiRestraintQuery != null &&
+              MethodCallOffset(aiRestraintQuery, restraint, "IsRestrainedByNonFly") >= 0 &&
+              frameContext.GetMethod("RestrainedByNonFly", Flags) == null &&
+              travel.GetMethod("RestrainedByNonFly", Flags) == null &&
+              social.GetMethod("RestrainedByNonFly", Flags) == null,
+            "Architecture lifecycle ownership keeps non-Fly restraint classification in one canonical policy implementation");
+
+        Check(hooks.GetMethod("FlyNewRoom", Flags) == null &&
+              hooks.GetMethod("FlyGrabbed", Flags) == null &&
+              hub.GetMethod("CreatureViolence", Flags) == null &&
+              hub.GetMethod("CreatureDie", Flags) == null &&
+              hub.GetMethod("FlyGrabbed", Flags) == null,
+            "Architecture lifecycle ownership forbids reintroducing raw hooks for DesertBatfly-owned virtual lifecycle callbacks");
+
+        Console.WriteLine("Architecture bridge cleanup: direct domain APIs, owned lifecycle callbacks, canonical restraint facts and split R3 refresh/execute surfaces verified.");
     }
 }

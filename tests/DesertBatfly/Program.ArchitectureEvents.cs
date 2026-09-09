@@ -43,11 +43,17 @@ internal static partial class Program
               hub.GetEvent("Capture", Flags) != null &&
               hub.GetEvent("Mortality", Flags) != null,
             "Architecture event foundation EventHub exposes semantic event subscriptions");
-        Check(hub.GetMethod("CreatureViolence", Flags) != null &&
-              hub.GetMethod("CreatureDie", Flags) != null &&
-              hub.GetMethod("FlyGrabbed", Flags) != null &&
+        Check(hub.GetMethod("BeginViolence", Flags) != null &&
+              hub.GetMethod("EndViolence", Flags) != null &&
+              hub.GetMethod("PrepareMortality", Flags) != null &&
+              hub.GetMethod("CompleteMortality", Flags) != null &&
+              hub.GetMethod("ReportGraspCapture", Flags) != null &&
               hub.GetMethod("TongueUpdate", Flags) != null,
-            "Architecture event foundation EventHub is the sole new Rain World fact observer for damage/capture/mortality");
+            "Architecture event foundation owned Creature lifecycle enters EventHub through explicit transactions while tongue remains an external observer");
+        Check(hub.GetMethod("CreatureViolence", Flags) == null &&
+              hub.GetMethod("CreatureDie", Flags) == null &&
+              hub.GetMethod("FlyGrabbed", Flags) == null,
+            "Architecture event foundation no longer detours base Creature/Fly lifecycle solely to rediscover DB_Creature");
         Check(hub.GetMethod("RecordConsumptionAttribution", Flags) != null,
             "Architecture event foundation exposes an explicit vanilla-eating attribution fact instead of inferring killer from a grasp");
 
@@ -103,22 +109,37 @@ internal static partial class Program
               MethodCallOffset(hooksEnable, consumers, "Enable") >= 0 &&
               MethodCallOffset(hooksDisable, consumers, "Disable") >= 0,
             "Architecture event foundation EventHub and first consumers share the species hook lifecycle");
-        Check(hooks.GetMethod("CreatureDie", Flags) == null &&
+        Check(hooks.GetMethod("FlyNewRoom", Flags) == null &&
+              hooks.GetMethod("FlyGrabbed", Flags) == null &&
+              hooks.GetMethod("CreatureDie", Flags) == null &&
               hooks.GetMethod("TongueUpdate", Flags) == null,
-            "Architecture event foundation removes Core Hooks duplicate mortality and tongue semantic roots");
+            "Architecture event foundation Integration no longer wraps owned Creature room/grasp/death lifecycle");
 
         Type creature = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_Creature", true);
+        Type runtime = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_Runtime", true);
         Type intimidation = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_FearRuntime", true);
         Check(creature.GetField("recentLethalDamager", Flags) == null &&
               creature.GetField("recentLethalDamageTicks", Flags) == null &&
               creature.GetField("recentLethalThreatScale", Flags) == null,
             "Architecture event foundation removes Creature-local mortality attribution cache");
+        Check(MethodCallOffset(creature.GetMethod("NewRoom", Flags), runtime, "BeforeNewRoom") >= 0 &&
+              runtime.GetMethod("BeforeNewRoom", Flags) != null,
+            "Architecture event foundation room-transition cleanup is called directly by DB_Creature before vanilla NewRoom");
+        Check(MethodCallOffset(creature.GetMethod("Grabbed", Flags), hub, "ReportGraspCapture") >= 0,
+            "Architecture event foundation DB_Creature reports owned grasp lifecycle directly before vanilla Grabbed");
+        Check(MethodCallOffset(creature.GetMethod("Violence", Flags), hub, "BeginViolence") >= 0 &&
+              MethodCallOffset(creature.GetMethod("Violence", Flags), hub, "EndViolence") >= 0,
+            "Architecture event foundation DB_Creature wraps vanilla Violence in one direct semantic transaction");
+        Check(MethodCallOffset(creature.GetMethod("Die", Flags), hub, "PrepareMortality") >= 0 &&
+              MethodCallOffset(creature.GetMethod("Die", Flags), hub, "CompleteMortality") >= 0,
+            "Architecture event foundation DB_Creature wraps accepted vanilla Die in one direct mortality transaction");
         Check(MethodCallOffset(creature.GetMethod("Die", Flags), intimidation, "BroadcastPlayerKill") < 0 &&
               MethodCallOffset(creature.GetMethod("Die", Flags), intimidation, "BroadcastPredatorKill") < 0 &&
               MethodCallOffset(creature.GetMethod("Grabbed", Flags), intimidation, "BroadcastPredatorCapture") < 0,
-            "Architecture event foundation Creature no longer publishes mortality/predator-capture semantics directly");
+            "Architecture event foundation Creature reports facts but does not publish mortality/predator-capture domain reactions directly");
 
         InterfaceMapping edible = creature.GetInterfaceMap(typeof(IPlayerEdible));
         MethodInfo bitByPlayer = null;
@@ -155,7 +176,7 @@ internal static partial class Program
         Check(threatRuntime.GetMethod("CreatureViolence", Flags) == null &&
               threatRuntime.GetMethod("CreatureDie", Flags) == null &&
               threatRuntime.GetMethod("FlyGrabbed", Flags) == null,
-            "Architecture event foundation ThreatRuntime no longer owns duplicate raw damage/death/grasp hooks");
+            "Architecture event foundation ThreatRuntime owns no duplicate raw damage/death/grasp hooks");
         Check(threatState.GetField("RecentDamagePlayer", Flags) == null &&
               threatState.GetField("RecentDamageSourceObject", Flags) == null &&
               threatState.GetField("RecentDamagePlayerSlot", Flags) != null &&
@@ -198,6 +219,6 @@ internal static partial class Program
             "Architecture event foundation new production authorities follow DB_ domain naming without TaskXX architecture");
 
         Console.WriteLine(
-            "Architecture event foundation: sequenced EventHub roots, causal Damage->Mortality ordering, explicit consumption attribution, exactly-once capture, Threat/Colony/Fear/Signal consumers, and bounded CorpseWarning teardown verified.");
+            "Architecture event foundation: direct owned lifecycle transactions, causal Damage->Mortality ordering, explicit consumption attribution, exactly-once capture, Threat/Colony/Fear/Signal consumers, and bounded CorpseWarning teardown verified.");
     }
 }

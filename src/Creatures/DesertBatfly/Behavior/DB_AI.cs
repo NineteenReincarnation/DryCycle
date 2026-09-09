@@ -72,16 +72,10 @@ internal sealed class DB_AI
         if (retreat > 0) retreat--;
     }
 
+    // Query surface only; classification itself lives in the restraint domain so AI,
+    // FrameContext, Social and Travel cannot drift semantically.
     internal bool RestrainedByNonFly()
-    {
-        for (int i = 0; i < fly.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = fly.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly)
-                return true;
-        }
-        return false;
-    }
+        => DB_RestraintPolicy.IsRestrainedByNonFly(fly);
 
     private void TickGrabMemory()
     {
@@ -408,10 +402,6 @@ internal sealed class DB_AI
         ClearRoostClaim();
     }
 
-    // Compatibility surface for old callers/tests. R3 hooks use RefreshDecisionState directly;
-    // this alias never executes locomotion.
-    internal void Update() => RefreshDecisionState();
-
     internal bool ExecuteImmediateDangerOwned()
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.ImmediateDanger) ||
@@ -502,10 +492,6 @@ internal sealed class DB_AI
 
         return false;
     }
-
-    // Compatibility surface for older tests/callers. Production calls Combat.AfterPhysics directly.
-    internal void AfterPhysics(bool eu)
-        => combat.AfterPhysics(eu);
 
     internal bool Valid(Creature creature) => perception.Valid(creature);
 
