@@ -47,20 +47,39 @@ public sealed class MantleCrab : Creature
     {
         base.PlaceInRoom(placeRoom);
         Vector2 center = placeRoom.MiddleOfTile(abstractCreature.pos.Tile);
-        for (int i = 0; i < 5; i++) bodyChunks[i].HardSetPosition(center + ShellRest[i] * ShellScale);
-        ResetLimbs();
+        for (int i = 0; i < 5; i++)
+        {
+            bodyChunks[i].HardSetPosition(center + ShellRest[i] * ShellScale);
+            bodyChunks[i].vel = Vector2.zero;
+        }
+
+        // DevConsole and ordinary realization both enter through PlaceInRoom. If a normal
+        // standing surface is already reachable, plant the visual legs immediately so the
+        // first gravity frames do not make the tall passive prototype crumple before its
+        // support springs engage. A genuinely airborne spawn still falls normally.
+        ResetLimbs(snapWalkingToSupport: true);
     }
 
     public override void NewRoom(Room newRoom)
     {
         base.NewRoom(newRoom);
-        ResetLimbs();
+        ResetLimbs(snapWalkingToSupport: false);
     }
 
-    private void ResetLimbs()
+    private void ResetLimbs(bool snapWalkingToSupport)
     {
-        foreach (MantleCrabLimb leg in Legs) leg.Reset(Anchor(leg));
-        foreach (MantleCrabLimb pincer in Pincers) pincer.Reset(Anchor(pincer));
+        SupportingFeet = 0;
+        foreach (MantleCrabLimb leg in Legs)
+        {
+            Vector2 anchor = Anchor(leg);
+            leg.Reset(anchor);
+            if (snapWalkingToSupport && leg.TrySnapToSupport(this, anchor))
+                SupportingFeet++;
+        }
+
+        foreach (MantleCrabLimb pincer in Pincers)
+            pincer.Reset(Anchor(pincer));
+
         graphicsModule?.Reset();
     }
 
