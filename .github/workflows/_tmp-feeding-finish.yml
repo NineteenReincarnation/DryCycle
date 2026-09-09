@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply feeding ownership, aggregation and guard fixes
+      - name: Apply source and performance-guard fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -24,237 +24,336 @@ jobs:
           from pathlib import Path
           import re
 
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
+          def read(path): return Path(path).read_text(encoding='utf-8')
+          def write(path, text): Path(path).write_text(text, encoding='utf-8')
+          def one(text, old, new, label):
+              n=text.count(old)
+              if n != 1: raise SystemExit(f'{label}: expected 1 match, got {n}')
+              return text.replace(old,new,1)
 
-          def write(path, text):
-              Path(path).write_text(text, encoding='utf-8')
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
-              return text.replace(old, new, 1)
-
-          # Thirst-domain read-only contract: enums are never compared with relational operators.
-          path = 'src/Thirst/PlayerDehydrationFacts.cs'
-          text = read(path)
-          text = replace_once(
-              text,
+          p='src/Thirst/PlayerDehydrationFacts.cs'; t=read(p)
+          t=one(t,
               '    internal bool FeedingEligible => Stage >= PlayerDehydrationStage.Severe;',
               '    internal bool FeedingEligible => Stage is PlayerDehydrationStage.Severe or PlayerDehydrationStage.Critical;',
-              'PlayerDehydrationSnapshot.FeedingEligible')
-          write(path, text)
+              'FeedingEligible')
+          write(p,t)
 
-          # Room-level feeding aggregation, debug peek and cloud->attach promotion.
-          path = 'src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs'
-          text = read(path)
-          critical_old = ' >= PlayerDehydrationStage.Critical'
-          critical_count = text.count(critical_old)
-          if critical_count != 4:
-              raise SystemExit(f'feeding Critical comparisons: expected 4, got {critical_count}')
-          text = text.replace(critical_old, ' == PlayerDehydrationStage.Critical')
+          p='src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs'; t=read(p)
+          old=' >= PlayerDehydrationStage.Critical'
+          if t.count(old)!=4: raise SystemExit(f'Critical comparison count {t.count(old)}')
+          t=t.replace(old,' == PlayerDehydrationStage.Critical')
+          t=one(t,
+''' }
+'''.replace(' }','}') + '''
+/// <summary>
+/// Room-level authority for dehydration-feeding aggregation.''',
+''' }
+'''.replace(' }','}') + '''
 
-          marker = '''}\n\n/// <summary>\n/// Room-level authority for dehydration-feeding aggregation.'''
-          debug_struct = '''}\n\ninternal readonly struct DB_FeedingTargetDebugState\n{\n    internal readonly Player Target;\n    internal readonly PlayerDehydrationStage Stage;\n    internal readonly int ReservationCount;\n    internal readonly int AttachReservationCount;\n    internal readonly int AttachedCount;\n    internal readonly int CloudCount;\n    internal readonly int SnapshotAge;\n\n    internal DB_FeedingTargetDebugState(\n        Player target,\n        PlayerDehydrationStage stage,\n        int reservationCount,\n        int attachReservationCount,\n        int attachedCount,\n        int cloudCount,\n        int snapshotAge)\n    {\n        Target = target;\n        Stage = stage;\n        ReservationCount = reservationCount;\n        AttachReservationCount = attachReservationCount;\n        AttachedCount = attachedCount;\n        CloudCount = cloudCount;\n        SnapshotAge = snapshotAge;\n    }\n}\n\n/// <summary>\n/// Room-level authority for dehydration-feeding aggregation.'''
-          text = replace_once(text, marker, debug_struct, 'feeding debug struct insertion')
+internal readonly struct DB_FeedingTargetDebugState
+{
+    internal readonly Player Target;
+    internal readonly PlayerDehydrationStage Stage;
+    internal readonly int ReservationCount;
+    internal readonly int AttachReservationCount;
+    internal readonly int AttachedCount;
+    internal readonly int CloudCount;
+    internal readonly int SnapshotAge;
 
-          before_mark = '''    internal static void MarkAttached(DB_Creature bat, bool attached)\n    {'''
-          peek_method = '''    /// <summary>Debug-only room-state peek. Never refreshes targets, prunes reservations or allocates domain state.</summary>\n    internal static bool TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)\n    {\n        debug = default;\n        Room room = target?.room;\n        if (room == null || !rooms.TryGetValue(room, out RoomState state)) return false;\n\n        bool hasSnapshot = false;\n        PlayerDehydrationStage stage = default;\n        for (int i = 0; i < state.Targets.Count; i++)\n        {\n            TargetEntry entry = state.Targets[i];\n            if (!ReferenceEquals(entry?.Player, target)) continue;\n            stage = entry.Facts.Stage;\n            hasSnapshot = true;\n            break;\n        }\n\n        int reservations = 0;\n        int attachReservations = 0;\n        int attached = 0;\n        int cloud = 0;\n        for (int i = 0; i < state.Reservations.Count; i++)\n        {\n            Reservation reservation = state.Reservations[i];\n            if (!ReferenceEquals(reservation.Target, target)) continue;\n            reservations++;\n            if (reservation.Role == DB_FeedingRole.Attach)\n            {\n                attachReservations++;\n                if (reservation.Attached) attached++;\n            }\n            else if (reservation.Role == DB_FeedingRole.Cloud)\n            {\n                cloud++;\n            }\n        }\n\n        if (!hasSnapshot && reservations == 0) return false;\n        int clock = room.game?.clock ?? 0;\n        int age = state.TargetRefreshClock == int.MinValue\n            ? int.MaxValue\n            : Mathf.Max(0, clock - state.TargetRefreshClock);\n        debug = new DB_FeedingTargetDebugState(\n            target, stage, reservations, attachReservations, attached, cloud, age);\n        return true;\n    }\n\n    internal static void MarkAttached(DB_Creature bat, bool attached)\n    {'''
-          text = replace_once(text, before_mark, peek_method, 'feeding debug peek insertion')
+    internal DB_FeedingTargetDebugState(Player target, PlayerDehydrationStage stage,
+        int reservationCount, int attachReservationCount, int attachedCount, int cloudCount, int snapshotAge)
+    {
+        Target=target; Stage=stage; ReservationCount=reservationCount;
+        AttachReservationCount=attachReservationCount; AttachedCount=attachedCount;
+        CloudCount=cloudCount; SnapshotAge=snapshotAge;
+    }
+}
 
-          prune_tail = '''                state.Reservations.RemoveAt(i);\n        }\n    }\n\n    private static DB_FeedingAssignment ToAssignment'''
-          promote_insert = '''                state.Reservations.RemoveAt(i);\n        }\n\n        PromoteCloudReservations(state);\n    }\n\n    private static void PromoteCloudReservations(RoomState state)\n    {\n        for (int t = 0; t < state.Targets.Count; t++)\n        {\n            TargetEntry target = state.Targets[t];\n            if (target?.Player == null || !target.Facts.FeedingEligible) continue;\n\n            while (true)\n            {\n                int freeAttachSlot = FindFreeSlot(\n                    state, target.Player, DB_FeedingRole.Attach, target.Facts.Stage);\n                if (freeAttachSlot < 0) break;\n\n                Reservation bestCloud = null;\n                float bestMotivation = -1f;\n                for (int i = 0; i < state.Reservations.Count; i++)\n                {\n                    Reservation reservation = state.Reservations[i];\n                    if (!ReferenceEquals(reservation.Target, target.Player) ||\n                        reservation.Role != DB_FeedingRole.Cloud ||\n                        reservation.Motivation <= bestMotivation)\n                        continue;\n                    bestCloud = reservation;\n                    bestMotivation = reservation.Motivation;\n                }\n\n                if (bestCloud == null) break;\n                bestCloud.Role = DB_FeedingRole.Attach;\n                bestCloud.SlotIndex = freeAttachSlot;\n                bestCloud.Attached = false;\n            }\n        }\n    }\n\n    private static DB_FeedingAssignment ToAssignment'''
-          text = replace_once(text, prune_tail, promote_insert, 'feeding cloud promotion insertion')
-          write(path, text)
+/// <summary>
+/// Room-level authority for dehydration-feeding aggregation.''',
+              'feeding debug struct')
+          t=one(t,
+'''    internal static void MarkAttached(DB_Creature bat, bool attached)
+    {''',
+'''    /// <summary>Debug-only room-state peek. Never refreshes, prunes or creates domain state.</summary>
+    internal static bool TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)
+    {
+        debug = default;
+        Room room = target?.room;
+        if (room == null || !rooms.TryGetValue(room, out RoomState state)) return false;
+        bool hasSnapshot = false;
+        PlayerDehydrationStage stage = default;
+        for (int i=0;i<state.Targets.Count;i++)
+        {
+            TargetEntry entry=state.Targets[i];
+            if (!ReferenceEquals(entry?.Player,target)) continue;
+            stage=entry.Facts.Stage; hasSnapshot=true; break;
+        }
+        int reservations=0, attachReservations=0, attached=0, cloud=0;
+        for (int i=0;i<state.Reservations.Count;i++)
+        {
+            Reservation r=state.Reservations[i];
+            if (!ReferenceEquals(r.Target,target)) continue;
+            reservations++;
+            if (r.Role==DB_FeedingRole.Attach) { attachReservations++; if (r.Attached) attached++; }
+            else if (r.Role==DB_FeedingRole.Cloud) cloud++;
+        }
+        if (!hasSnapshot && reservations==0) return false;
+        int clock=room.game?.clock ?? 0;
+        int age=state.TargetRefreshClock==int.MinValue ? int.MaxValue : Mathf.Max(0,clock-state.TargetRefreshClock);
+        debug=new DB_FeedingTargetDebugState(target,stage,reservations,attachReservations,attached,cloud,age);
+        return true;
+    }
 
-          # Per-bat feeding: native-special gating plus non-destructive attachment yield for a higher owner.
-          path = 'src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationFeedingRuntime.cs'
-          text = read(path)
-          old = '''        if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||\n            bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||\n            bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||\n            bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||\n            DB_VengeanceRuntime.IsActive(bat))'''
-          new = '''        if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||\n            bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||\n            bat.AI == null || bat.safariControlled || bat.AI.fleeFromRain || bat.AI.luredCounter > 0 ||\n            bat.AI.behavior == FlyAI.Behavior.Burrow ||\n            bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||\n            bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||\n            DB_VengeanceRuntime.IsActive(bat))'''
-          text = replace_once(text, old, new, 'feeding native-special gate')
-          old = '''    internal void CancelForGrab()\n    {\n        if (Active)\n            Cancel(true, false);\n    }'''
-          new = '''    /// <summary>\n    /// Release only the physical pin when a higher-priority owner preempts Feeding. The room\n    /// reservation survives, so a short projectile evade does not churn the group assignment.\n    /// </summary>\n    internal void YieldAttachmentForHigherPriority()\n    {\n        if (!Attached) return;\n        attached = false;\n        attachedTicks = 0;\n        DB_FeedingCoordinator.MarkAttached(bat, false);\n        if (bat.movMode == Fly.MovementMode.Passive)\n            bat.movMode = Fly.MovementMode.BatFlight;\n    }\n\n    internal void CancelForGrab()\n    {\n        if (Active)\n            Cancel(true, false);\n    }'''
-          text = replace_once(text, old, new, 'feeding attachment yield')
-          write(path, text)
+    internal static void MarkAttached(DB_Creature bat, bool attached)
+    {''', 'feeding debug peek')
+          t=one(t,
+'''                state.Reservations.RemoveAt(i);
+        }
+    }
 
-          # Pickup retry lock must not extend forever while the pickup key is held.
-          path = 'src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs'
-          text = read(path)
-          old = '''        State state = states.GetOrCreateValue(self);\n        int clock = self.room.game?.clock ?? 0;\n        state.AttemptSerial++;\n        bool retryLocked = clock < state.RetryUntilClock;\n        float roll = Stable01(\n            self.playerState?.playerNumber ?? 0,\n            bat.Personality.VisualSeed,\n            state.AttemptSerial,\n            clock);\n\n        if (!retryLocked && roll >= facts.PickupFailureChance)\n        {\n            orig(self, obj, graspUsed);\n            return;\n        }'''
-          new = '''        State state = states.GetOrCreateValue(self);\n        int clock = self.room.game?.clock ?? 0;\n        if (clock < state.RetryUntilClock)\n        {\n            self.wantToPickUp = 0;\n            return;\n        }\n\n        state.AttemptSerial++;\n        float roll = Stable01(\n            self.playerState?.playerNumber ?? 0,\n            bat.Personality.VisualSeed,\n            state.AttemptSerial,\n            clock);\n        if (roll >= facts.PickupFailureChance)\n        {\n            orig(self, obj, graspUsed);\n            return;\n        }'''
-          text = replace_once(text, old, new, 'dehydrated pickup retry lock')
-          write(path, text)
+    private static DB_FeedingAssignment ToAssignment''',
+'''                state.Reservations.RemoveAt(i);
+        }
+        PromoteCloudReservations(state);
+    }
 
-          # Frame-level special physics explicitly recognizes a feeding pin.
-          path = 'src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs'
-          text = read(path)
-          text = replace_once(
-              text,
-              '''        bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&\n                             special is not (DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&''',
-              '''        bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&\n                             special is not (DB_SpecialPhysicsOwner.FeedingAttach or\n                                 DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&''',
-              'FrameContext combat special-physics gate')
-          text = replace_once(
-              text,
-              '''        if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;\n        if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;''',
-              '''        if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;\n        if (bat.Feeding?.Attached == true) return DB_SpecialPhysicsOwner.FeedingAttach;\n        if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;''',
-              'FrameContext FeedingAttach ownership')
-          write(path, text)
+    private static void PromoteCloudReservations(RoomState state)
+    {
+        for (int t=0;t<state.Targets.Count;t++)
+        {
+            TargetEntry target=state.Targets[t];
+            if (target?.Player==null || !target.Facts.FeedingEligible) continue;
+            while (true)
+            {
+                int slot=FindFreeSlot(state,target.Player,DB_FeedingRole.Attach,target.Facts.Stage);
+                if (slot<0) break;
+                Reservation best=null; float motivation=-1f;
+                for (int i=0;i<state.Reservations.Count;i++)
+                {
+                    Reservation r=state.Reservations[i];
+                    if (!ReferenceEquals(r.Target,target.Player) || r.Role!=DB_FeedingRole.Cloud || r.Motivation<=motivation) continue;
+                    best=r; motivation=r.Motivation;
+                }
+                if (best==null) break;
+                best.Role=DB_FeedingRole.Attach; best.SlotIndex=slot; best.Attached=false;
+            }
+        }
+    }
 
-          # If a higher owner (notably projectile evade) wins while pinned, clear only the pin,
-          # then re-resolve so DB_FlightMotor sees current special-physics state.
-          path = 'src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs'
-          text = read(path)
-          old = '''        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);\n\n        if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or'''
-          new = '''        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);\n\n        if (desert.Feeding.Attached && ownership.PrimaryOwner != DB_BehaviorOwner.Feeding)\n        {\n            desert.Feeding.YieldAttachmentForHigherPriority();\n            ownership = DB_BehaviorArbiter.ResolveFrame(desert);\n        }\n\n        if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or'''
-          text = replace_once(text, old, new, 'feeding higher-priority preemption')
-          write(path, text)
+    private static DB_FeedingAssignment ToAssignment''', 'cloud promotion')
+          write(p,t)
 
-          # Observatory: expose assignment plus room-level aggregation without making debug a producer.
-          path = 'src/Creatures/DesertBatfly/Debug/DB_Trace.cs'
-          text = read(path)
-          old = '''        bool hasSocial = DB_SocialRuntime.TryGetDebugState(\n            bat, out DB_SocialDebugState social) &&\n            social.Mode != DB_SocialMode.None;\n        string suppression = Suppression(bat, hasTravel, travel);'''
-          new = '''        bool hasSocial = DB_SocialRuntime.TryGetDebugState(\n            bat, out DB_SocialDebugState social) &&\n            social.Mode != DB_SocialMode.None;\n        DB_FeedingTargetDebugState feedingGroup = default;\n        bool hasFeedingGroup = bat.Feeding.Target != null &&\n            DB_FeedingCoordinator.TryPeekTarget(bat.Feeding.Target, out feedingGroup);\n        string suppression = Suppression(bat, hasTravel, travel);'''
-          text = replace_once(text, old, new, 'trace feeding debug state')
-          old = '''        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,\n            "RescueTarget", bat.Rescue.Active ? AIDebugFormat.Creature(bat.Rescue.Victim) : "—",\n            bat.Rescue.Active\n                ? $"holder={AIDebugFormat.Creature(bat.Rescue.Holder)} motivation={bat.Rescue.Motivation:0.000}"\n                : "no active companion rescue");\n\n        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,'''
-          new = '''        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,\n            "RescueTarget", bat.Rescue.Active ? AIDebugFormat.Creature(bat.Rescue.Victim) : "—",\n            bat.Rescue.Active\n                ? $"holder={AIDebugFormat.Creature(bat.Rescue.Holder)} motivation={bat.Rescue.Motivation:0.000}"\n                : "no active companion rescue");\n        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,\n            "FeedingRole", bat.Feeding.Active ? bat.Feeding.Role.ToString() : "None",\n            bat.Feeding.Active\n                ? $"target={AIDebugFormat.Creature(bat.Feeding.Target)} attached={bat.Feeding.Attached} motivation={bat.Feeding.Motivation:0.000}"\n                : "no dehydration-feeding assignment");\n        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,\n            "FeedingGroup",\n            hasFeedingGroup\n                ? $"stage={feedingGroup.Stage} reserved={feedingGroup.ReservationCount} attachSlots={feedingGroup.AttachReservationCount} pinned={feedingGroup.AttachedCount} cloud={feedingGroup.CloudCount} age={feedingGroup.SnapshotAge}"\n                : "—",\n            "DB_FeedingCoordinator read-only aggregate snapshot");\n\n        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,'''
-          text = replace_once(text, old, new, 'trace feeding fields')
-          text = replace_once(
-              text,
-              '''        if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";\n        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)''',
-              '''        if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";\n        if (bat.Feeding.Active) return "Feeding";\n        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)''',
-              'trace feeding suppression')
-          text = replace_once(
-              text,
-              '''            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Roost": return "roost / fly chain owns movement";''',
-              '''            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Feeding": return bat.Feeding.Attached\n                ? "attached dehydration feeding"\n                : "dehydrated-player feeding assignment";\n            case "Roost": return "roost / fly chain owns movement";''',
-              'trace feeding mode reason')
-          text = replace_once(
-              text,
-              '''            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Roost": return "roost or fly chain";''',
-              '''            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Feeding": return "dehydrated-player feeding suppresses combat/social";\n            case "Roost": return "roost or fly chain";''',
-              'trace feeding suppression reason')
-          text = replace_once(
-              text,
-              '''            case "Vengeance": return "Vengeance";\n            case "Roost": return "Roost / Chain";''',
-              '''            case "Vengeance": return "Vengeance";\n            case "Feeding": return bat.Feeding.Attached ? "Feeding / Attach" : "Feeding / " + bat.Feeding.Role;\n            case "Roost": return "Roost / Chain";''',
-              'trace feeding control owner')
-          write(path, text)
+          p='src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationFeedingRuntime.cs'; t=read(p)
+          t=one(t,
+'''        if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||
+            bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||
+            bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||
+            bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||
+            DB_VengeanceRuntime.IsActive(bat))''',
+'''        if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||
+            bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||
+            bat.AI == null || bat.safariControlled || bat.AI.fleeFromRain || bat.AI.luredCounter > 0 ||
+            bat.AI.behavior == FlyAI.Behavior.Burrow ||
+            bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||
+            bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||
+            DB_VengeanceRuntime.IsActive(bat))''','native special gate')
+          t=one(t,
+'''    internal void CancelForGrab()
+    {
+        if (Active)
+            Cancel(true, false);
+    }''',
+'''    internal void YieldAttachmentForHigherPriority()
+    {
+        if (!Attached) return;
+        attached=false;
+        attachedTicks=0;
+        DB_FeedingCoordinator.MarkAttached(bat,false);
+        if (bat.movMode==Fly.MovementMode.Passive) bat.movMode=Fly.MovementMode.BatFlight;
+    }
 
-          # R6 architecture guard: Feeding is a formal domain, not an exception to the owner model.
-          path = '.github/workflows/desertbatfly-r6-architecture-guard.yml'
-          text = read(path)
-          text = text.replace(
-              "      - 'src/Creatures/DesertBatfly/**'\n      - 'tests/DesertBatfly/**'",
-              "      - 'src/Creatures/DesertBatfly/**'\n      - 'src/Thirst/PlayerDehydrationFacts.cs'\n      - 'src/Thirst/HydrationWeakness.cs'\n      - 'tests/DesertBatfly/**'")
-          if text.count("src/Thirst/PlayerDehydrationFacts.cs") != 2:
-              raise SystemExit('R6 trigger paths were not updated in push + pull_request')
-          text = replace_once(
-              text,
-              "              'DB_TravelRuntime', 'DB_ColonyRuntime', 'DB_RainWorldHooks', 'DB_RuntimePatch',\n              'DB_Sandbox', 'DB_WarpCompatibility'",
-              "              'DB_TravelRuntime', 'DB_ColonyRuntime', 'DB_FeedingCoordinator',\n              'DB_DehydrationFeedingRuntime', 'DB_DehydrationGripRuntime',\n              'DB_RainWorldHooks', 'DB_RuntimePatch', 'DB_Sandbox', 'DB_WarpCompatibility'",
-              'R6 required feeding owners')
-          text = replace_once(
-              text,
-              "              'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)',\n              'bat.DesertAI.Combat.TryExecuteOwned()',",
-              "              'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)',\n              'bat.Feeding.ApplyOwnedBehavior()',\n              'bat.DesertAI.Combat.TryExecuteOwned()',",
-              'R6 execution feeding token')
-          text = replace_once(
-              text,
-              "              'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',\n              'PrimaryOwner == DB_BehaviorOwner.Combat',",
-              "              'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',\n              'PrimaryOwner == DB_BehaviorOwner.Feeding',\n              'PrimaryOwner == DB_BehaviorOwner.Combat',",
-              'R6 owner order Feeding')
+    internal void CancelForGrab()
+    {
+        if (Active)
+            Cancel(true, false);
+    }''','attachment yield')
+          write(p,t)
 
-          hook_marker = '''          for old in retired_executors:\n              if old in joined or any(old in p.read_text(encoding='utf-8') for p in test_files):\n                  failures.append(f'stale executor identity remains in production/tests: {old}')\n\n          # Preserve the established owner execution order.'''
-          feeding_checks = '''          for old in retired_executors:\n              if old in joined or any(old in p.read_text(encoding='utf-8') for p in test_files):\n                  failures.append(f'stale executor identity remains in production/tests: {old}')\n\n          feeding_dir = src / 'Behavior' / 'Feeding'\n          feeding_coordinator = (feeding_dir / 'DB_FeedingCoordinator.cs').read_text(encoding='utf-8')\n          feeding_runtime = (feeding_dir / 'DB_DehydrationFeedingRuntime.cs').read_text(encoding='utf-8')\n          feeding_grip = (feeding_dir / 'DB_DehydrationGripRuntime.cs').read_text(encoding='utf-8')\n          dehydration_facts = Path('src/Thirst/PlayerDehydrationFacts.cs').read_text(encoding='utf-8')\n          frame_context = (src / 'Core' / 'Runtime' / 'DB_FrameContext.cs').read_text(encoding='utf-8')\n          if 'DB_RoomContext.For(room)' not in feeding_coordinator or 'context.Players' not in feeding_coordinator:\n              failures.append('Feeding coordinator no longer consumes the shared room player snapshot')\n          if feeding_coordinator.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:\n              failures.append('aggregated dehydration stress must have exactly one Feeding coordinator ingress')\n          for label, domain_text in (\n              ('coordinator', feeding_coordinator),\n              ('runtime', feeding_runtime),\n              ('grip', feeding_grip)):\n              if 'HydrationWeakness' in domain_text or 'ThirstStore.' in domain_text:\n                  failures.append(f'Feeding {label} bypasses PlayerDehydrationFacts boundary')\n              if 'physicalObjects' in domain_text or 'abstractRoom.creatures' in domain_text:\n                  failures.append(f'Feeding {label} reintroduced a direct room scan')\n          if 'DB_RoomContext' in feeding_runtime or 'DB_RoomContext' in feeding_grip:\n              failures.append('per-bat Feeding/Grip runtime may not own room aggregation')\n          if re.search(r'(?:>=|<=|>|<)\\s*PlayerDehydrationStage\\.', dehydration_facts + feeding_coordinator):\n              failures.append('PlayerDehydrationStage relational comparison is not legal C#; use explicit stage policy')\n          for token in (\n              'DB_SpecialPhysicsOwner.FeedingAttach',\n              'bat.Feeding?.Attached == true',\n          ):\n              if token not in frame_context:\n                  failures.append('Feeding special-physics ownership missing: ' + token)\n          for token in (\n              'desert.Feeding.YieldAttachmentForHigherPriority();',\n              'DB_FeedingCoordinator.UpdateRoom(self)',\n              'DB_DehydrationGripRuntime.Enable()',\n              'DB_DehydrationGripRuntime.Disable()',\n          ):\n              if token not in hooks:\n                  failures.append('Feeding integration contract missing: ' + token)\n          for token in ('"FeedingRole"', '"FeedingGroup"', 'DB_FeedingCoordinator.TryPeekTarget'):\n              if token not in trace:\n                  failures.append('Feeding Observatory contract missing: ' + token)\n\n          # Preserve the established owner execution order.'''
-          text = replace_once(text, hook_marker, feeding_checks, 'R6 feeding architecture checks')
-          write(path, text)
+          p='src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs'; t=read(p)
+          t=one(t,
+'''        State state = states.GetOrCreateValue(self);
+        int clock = self.room.game?.clock ?? 0;
+        state.AttemptSerial++;
+        bool retryLocked = clock < state.RetryUntilClock;
+        float roll = Stable01(
+            self.playerState?.playerNumber ?? 0,
+            bat.Personality.VisualSeed,
+            state.AttemptSerial,
+            clock);
 
-          # R7 performance guard: target discovery/drain aggregation stays room-scoped and bounded.
-          path = 'scripts/check-desertbatfly-r7-performance.sh'
-          text = read(path)
-          text = replace_once(
-              text,
-              "environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')\n",
-              "environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')\nfeeding = read('Behavior/Feeding/DB_FeedingCoordinator.cs')\nfeeding_runtime = read('Behavior/Feeding/DB_DehydrationFeedingRuntime.cs')\nfeeding_grip = read('Behavior/Feeding/DB_DehydrationGripRuntime.cs')\ntuning = read('Core/DB_Tuning.cs')\n",
-              'R7 feeding source reads')
-          text = replace_once(
-              text,
-              "environment = hooks.find('DB_EnvironmentRoomRuntime.Update(self)', lazy)\nif min(lazy, bats_gate, signal, environment) < 0 or not (lazy < bats_gate < signal < environment):\n    failures.append('Room.Update lazy DB activation ordering changed')",
-              "environment = hooks.find('DB_EnvironmentRoomRuntime.Update(self)', lazy)\nfeeding_update = hooks.find('DB_FeedingCoordinator.UpdateRoom(self)', lazy)\nif min(lazy, bats_gate, signal, environment, feeding_update) < 0 or not (lazy < bats_gate < signal < environment < feeding_update):\n    failures.append('Room.Update lazy DB activation ordering changed')",
-              'R7 lazy feeding room update')
-          performance_marker = '''# Room-scoped social/environment work remains cadence-bounded rather than per-bat/per-frame full refresh.\nsocial_match = re.search(r'RefreshInterval\\s*=\\s*(\\d+)', social_room)'''
-          performance_insert = '''# Dehydration feeding remains a room-level aggregate consumer of the shared player snapshot.\nif 'DB_RoomContext.For(room)' not in feeding or 'context.Players' not in feeding:\n    failures.append('Feeding target discovery no longer uses shared DB_RoomContext players')\nif feeding.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:\n    failures.append('Feeding aggregate drain authority changed')\nfor label, domain_text in (('coordinator', feeding), ('runtime', feeding_runtime), ('grip', feeding_grip)):\n    if 'physicalObjects' in domain_text or 'abstractRoom.creatures' in domain_text:\n        failures.append(f'Feeding {label} reintroduced direct realized-room scanning')\n    if 'HydrationWeakness' in domain_text or 'ThirstStore.' in domain_text:\n        failures.append(f'Feeding {label} bypasses PlayerDehydrationFacts physiology boundary')\nif 'DB_RoomContext' in feeding_runtime or 'DB_RoomContext' in feeding_grip:\n    failures.append('per-bat Feeding/Grip runtime reintroduced room aggregation')\nfeeding_refresh = re.search(r'FeedingCoordinatorRefreshTicks\\s*=\\s*(\\d+)', tuning)\nif not feeding_refresh or not (8 <= int(feeding_refresh.group(1)) <= 30):\n    failures.append('Feeding coordinator refresh cadence must remain bounded to 8..30 ticks')\nfor token in (\n    'TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)',\n    'rooms.TryGetValue(room, out RoomState state)',\n    'PromoteCloudReservations(state);',\n):\n    if token not in feeding:\n        failures.append('Feeding aggregation/observability contract missing: ' + token)\n\n# Room-scoped social/environment work remains cadence-bounded rather than per-bat/per-frame full refresh.\nsocial_match = re.search(r'RefreshInterval\\s*=\\s*(\\d+)', social_room)'''
-          text = replace_once(text, performance_marker, performance_insert, 'R7 feeding performance checks')
-          write(path, text)
+        if (!retryLocked && roll >= facts.PickupFailureChance)
+        {
+            orig(self, obj, graspUsed);
+            return;
+        }''',
+'''        State state = states.GetOrCreateValue(self);
+        int clock = self.room.game?.clock ?? 0;
+        if (clock < state.RetryUntilClock)
+        {
+            self.wantToPickUp = 0;
+            return;
+        }
+        state.AttemptSerial++;
+        float roll = Stable01(
+            self.playerState?.playerNumber ?? 0,
+            bat.Personality.VisualSeed,
+            state.AttemptSerial,
+            clock);
+        if (roll >= facts.PickupFailureChance)
+        {
+            orig(self, obj, graspUsed);
+            return;
+        }''','retry lock')
+          write(p,t)
 
-          # Make R7 run when the cross-domain physiology contract itself changes.
-          path = '.github/workflows/desertbatfly-r7-performance-guard.yml'
-          text = read(path)
-          text = text.replace(
-              "      - 'src/Creatures/DesertBatfly/**'\n      - 'src/Debug/AIDebugger/Sources/**'",
-              "      - 'src/Creatures/DesertBatfly/**'\n      - 'src/Thirst/PlayerDehydrationFacts.cs'\n      - 'src/Debug/AIDebugger/Sources/**'")
-          if text.count("src/Thirst/PlayerDehydrationFacts.cs") != 2:
-              raise SystemExit('R7 trigger paths were not updated in push + pull_request')
-          write(path, text)
+          p='src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs'; t=read(p)
+          t=one(t,
+'''        bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&
+                             special is not (DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&''',
+'''        bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&
+                             special is not (DB_SpecialPhysicsOwner.FeedingAttach or
+                                 DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&''','special combat gate')
+          t=one(t,
+'''        if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;
+        if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;''',
+'''        if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;
+        if (bat.Feeding?.Attached == true) return DB_SpecialPhysicsOwner.FeedingAttach;
+        if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;''','FeedingAttach')
+          write(p,t)
 
-          # Final static semantic sanity for the new stage policy and dependency boundary.
-          facts = read('src/Thirst/PlayerDehydrationFacts.cs')
-          coordinator = read('src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs')
-          if re.search(r'(?:>=|<=|>|<)\s*PlayerDehydrationStage\.', facts + coordinator):
-              raise SystemExit('illegal enum relational comparison remains')
-          feeding_text = '\n'.join(
-              read(str(p)) for p in Path('src/Creatures/DesertBatfly/Behavior/Feeding').glob('*.cs'))
-          if 'HydrationWeakness' in feeding_text or 'ThirstStore.' in feeding_text:
-              raise SystemExit('Feeding domain directly depends on Thirst implementation internals')
+          p='src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs'; t=read(p)
+          t=one(t,
+'''        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+
+        if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or''',
+'''        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+
+        if (desert.Feeding.Attached && ownership.PrimaryOwner != DB_BehaviorOwner.Feeding)
+        {
+            desert.Feeding.YieldAttachmentForHigherPriority();
+            ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        }
+
+        if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or''','preemption re-resolve')
+          write(p,t)
+
+          p='src/Creatures/DesertBatfly/Debug/DB_Trace.cs'; t=read(p)
+          t=one(t,
+'''        bool hasSocial = DB_SocialRuntime.TryGetDebugState(
+            bat, out DB_SocialDebugState social) &&
+            social.Mode != DB_SocialMode.None;
+        string suppression = Suppression(bat, hasTravel, travel);''',
+'''        bool hasSocial = DB_SocialRuntime.TryGetDebugState(
+            bat, out DB_SocialDebugState social) &&
+            social.Mode != DB_SocialMode.None;
+        DB_FeedingTargetDebugState feedingGroup = default;
+        bool hasFeedingGroup = bat.Feeding.Target != null &&
+            DB_FeedingCoordinator.TryPeekTarget(bat.Feeding.Target, out feedingGroup);
+        string suppression = Suppression(bat, hasTravel, travel);''','trace state')
+          t=one(t,
+'''        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "TravelPurpose",''',
+'''        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "FeedingRole", bat.Feeding.Active ? bat.Feeding.Role.ToString() : "None",
+            bat.Feeding.Active ? $"target={AIDebugFormat.Creature(bat.Feeding.Target)} attached={bat.Feeding.Attached} motivation={bat.Feeding.Motivation:0.000}" : "no dehydration-feeding assignment");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "FeedingGroup", hasFeedingGroup ? $"stage={feedingGroup.Stage} reserved={feedingGroup.ReservationCount} attachSlots={feedingGroup.AttachReservationCount} pinned={feedingGroup.AttachedCount} cloud={feedingGroup.CloudCount} age={feedingGroup.SnapshotAge}" : "—",
+            "DB_FeedingCoordinator read-only aggregate snapshot");
+
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
+            "TravelPurpose",''','trace fields')
+          t=one(t,
+'''        if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";
+        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)''',
+'''        if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";
+        if (bat.Feeding.Active) return "Feeding";
+        if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)''','trace suppression')
+          t=one(t,'            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Roost": return "roost / fly chain owns movement";',
+'''            case "Vengeance": return "extreme vengeance owns behavior";
+            case "Feeding": return bat.Feeding.Attached ? "attached dehydration feeding" : "dehydrated-player feeding assignment";
+            case "Roost": return "roost / fly chain owns movement";''','mode reason')
+          t=one(t,'            case "Vengeance": return "extreme vengeance owns behavior";\n            case "Roost": return "roost or fly chain";',
+'''            case "Vengeance": return "extreme vengeance owns behavior";
+            case "Feeding": return "dehydrated-player feeding suppresses combat/social";
+            case "Roost": return "roost or fly chain";''','supp reason')
+          t=one(t,'            case "Vengeance": return "Vengeance";\n            case "Roost": return "Roost / Chain";',
+'''            case "Vengeance": return "Vengeance";
+            case "Feeding": return bat.Feeding.Attached ? "Feeding / Attach" : "Feeding / " + bat.Feeding.Role;
+            case "Roost": return "Roost / Chain";''','control owner')
+          write(p,t)
+
+          p='scripts/check-desertbatfly-r7-performance.sh'; t=read(p)
+          t=one(t,"environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')\n",
+"environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')\nfeeding = read('Behavior/Feeding/DB_FeedingCoordinator.cs')\nfeeding_runtime = read('Behavior/Feeding/DB_DehydrationFeedingRuntime.cs')\nfeeding_grip = read('Behavior/Feeding/DB_DehydrationGripRuntime.cs')\ntuning = read('Core/DB_Tuning.cs')\n",'r7 reads')
+          t=one(t,
+"environment = hooks.find('DB_EnvironmentRoomRuntime.Update(self)', lazy)\nif min(lazy, bats_gate, signal, environment) < 0 or not (lazy < bats_gate < signal < environment):\n    failures.append('Room.Update lazy DB activation ordering changed')",
+"environment = hooks.find('DB_EnvironmentRoomRuntime.Update(self)', lazy)\nfeeding_update = hooks.find('DB_FeedingCoordinator.UpdateRoom(self)', lazy)\nif min(lazy, bats_gate, signal, environment, feeding_update) < 0 or not (lazy < bats_gate < signal < environment < feeding_update):\n    failures.append('Room.Update lazy DB activation ordering changed')",'r7 lazy')
+          marker="# Room-scoped social/environment work remains cadence-bounded rather than per-bat/per-frame full refresh.\nsocial_match = re.search(r'RefreshInterval\\s*=\\s*(\\d+)', social_room)"
+          ins="""# Dehydration feeding remains a room-level aggregate consumer of the shared player snapshot.
+if 'DB_RoomContext.For(room)' not in feeding or 'context.Players' not in feeding:
+    failures.append('Feeding target discovery no longer uses shared DB_RoomContext players')
+if feeding.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:
+    failures.append('Feeding aggregate drain authority changed')
+for label, domain_text in (('coordinator', feeding), ('runtime', feeding_runtime), ('grip', feeding_grip)):
+    if 'physicalObjects' in domain_text or 'abstractRoom.creatures' in domain_text:
+        failures.append(f'Feeding {label} reintroduced direct realized-room scanning')
+    if 'HydrationWeakness' in domain_text or 'ThirstStore.' in domain_text:
+        failures.append(f'Feeding {label} bypasses PlayerDehydrationFacts physiology boundary')
+if 'DB_RoomContext' in feeding_runtime or 'DB_RoomContext' in feeding_grip:
+    failures.append('per-bat Feeding/Grip runtime reintroduced room aggregation')
+feeding_refresh = re.search(r'FeedingCoordinatorRefreshTicks\\s*=\\s*(\\d+)', tuning)
+if not feeding_refresh or not (8 <= int(feeding_refresh.group(1)) <= 30):
+    failures.append('Feeding coordinator refresh cadence must remain bounded to 8..30 ticks')
+for token in ('TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)', 'rooms.TryGetValue(room, out RoomState state)', 'PromoteCloudReservations(state);'):
+    if token not in feeding:
+        failures.append('Feeding aggregation/observability contract missing: ' + token)
+
+# Room-scoped social/environment work remains cadence-bounded rather than per-bat/per-frame full refresh.
+social_match = re.search(r'RefreshInterval\\s*=\\s*(\\d+)', social_room)"""
+          t=one(t,marker,ins,'r7 feeding checks')
+          write(p,t)
+
+          facts=read('src/Thirst/PlayerDehydrationFacts.cs'); coord=read('src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs')
+          if re.search(r'(?:>=|<=|>|<)\s*PlayerDehydrationStage\.', facts+coord): raise SystemExit('enum relational comparison remains')
           PY
 
-      - name: Run retained architecture and performance scripts
+      - name: Run retained scripts and syntax parse
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/check-desertbatfly-r5-retention.sh
           bash scripts/check-desertbatfly-r6-b1.sh
           bash scripts/check-desertbatfly-r7-performance.sh
-
-      - name: Roslyn syntax parse changed CSharp domains
-        shell: bash
-        run: |
-          set -euo pipefail
           tmp="$(mktemp -d)"
           cat > "$tmp/P.csproj" <<'CSPROJ'
           <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup><ItemGroup><Reference Include="Microsoft.CodeAnalysis"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath></Reference><Reference Include="Microsoft.CodeAnalysis.CSharp"><HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath></Reference></ItemGroup></Project>
           CSPROJ
           cat > "$tmp/Program.cs" <<'CS'
-          using Microsoft.CodeAnalysis;
-          using Microsoft.CodeAnalysis.CSharp;
-          var files = Directory.EnumerateFiles("src/Creatures/DesertBatfly", "*.cs", SearchOption.AllDirectories)
-              .Concat(new[] { "src/Thirst/PlayerDehydrationFacts.cs", "src/Thirst/HydrationWeakness.cs" });
-          var errors = new List<string>();
-          foreach (var path in files)
-          {
-              var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(path), new CSharpParseOptions(LanguageVersion.Preview), path);
-              foreach (var d in tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error))
-                  errors.Add(d.ToString());
-          }
-          if (errors.Count > 0)
-          {
-              Console.Error.WriteLine(string.Join(Environment.NewLine, errors));
-              Environment.Exit(1);
-          }
-          Console.WriteLine("Feeding finalization Roslyn syntax parse passed.");
+          using Microsoft.CodeAnalysis; using Microsoft.CodeAnalysis.CSharp;
+          var files=Directory.EnumerateFiles("src/Creatures/DesertBatfly","*.cs",SearchOption.AllDirectories).Concat(new[]{"src/Thirst/PlayerDehydrationFacts.cs","src/Thirst/HydrationWeakness.cs"});
+          var e=new List<string>(); foreach(var p in files){var t=CSharpSyntaxTree.ParseText(File.ReadAllText(p),new CSharpParseOptions(LanguageVersion.Preview),p);foreach(var d in t.GetDiagnostics().Where(d=>d.Severity==DiagnosticSeverity.Error))e.Add(d.ToString());}
+          if(e.Count>0){Console.Error.WriteLine(string.Join(Environment.NewLine,e));Environment.Exit(1);} Console.WriteLine("Feeding syntax parse passed.");
           CS
           dotnet run --project "$tmp/P.csproj"
 
-      - name: Commit finalized code and remove temporary workflow
+      - name: Commit source changes
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Orrhisk"
           git config user.email "164201860+NineteenReincarnation@users.noreply.github.com"
-          git rm .github/workflows/_tmp-feeding-finish.yml
-          git add -A
+          git add src scripts
           git diff --cached --check
-          git commit -m "Finalize aggregated dehydration feeding architecture"
+          git commit -m "Finalize aggregated dehydration feeding runtime"
           git push origin HEAD:main
