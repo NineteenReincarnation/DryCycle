@@ -380,7 +380,8 @@ internal static class DB_FrameContextRuntime
                                ai?.Mode == DB_AI.Activity.Escape;
         bool hardSurvival = hasEnvironment && environment.HardSurvival;
         bool combatAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&
-                             special is not (DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&
+                             special is not (DB_SpecialPhysicsOwner.FeedingAttach or
+                                 DB_SpecialPhysicsOwner.CombatAttach or DB_SpecialPhysicsOwner.CombatInterfere) &&
                              !injury.BlocksCombat && !hardSurvival && !fear;
         bool socialAllowed = !bat.dead && bat.Consious && !restrained && !bat.inShortcut &&
                              !immediateDanger && !travelCanOwn && !injury.IsSeverelyInjured &&
@@ -455,6 +456,7 @@ internal static class DB_FrameContextRuntime
         if (restrained) return DB_SpecialPhysicsOwner.Grasp;
         if (bat.inShortcut) return DB_SpecialPhysicsOwner.Shortcut;
         if (bat.Emergence?.Active == true) return DB_SpecialPhysicsOwner.Emergence;
+        if (bat.Feeding?.Attached == true) return DB_SpecialPhysicsOwner.FeedingAttach;
         if (bat.DesertAI?.Mode == DB_AI.Activity.Attach) return DB_SpecialPhysicsOwner.CombatAttach;
         if (bat.DesertAI?.Mode == DB_AI.Activity.Interfere) return DB_SpecialPhysicsOwner.CombatInterfere;
         if (bat.AI?.behavior == FlyAI.Behavior.Burrow) return DB_SpecialPhysicsOwner.NativeBurrow;

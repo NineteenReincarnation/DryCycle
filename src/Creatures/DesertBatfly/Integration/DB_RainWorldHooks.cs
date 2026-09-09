@@ -185,6 +185,12 @@ internal static class DB_RainWorldHooks
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
 
+        if (desert.Feeding.Attached && ownership.PrimaryOwner != DB_BehaviorOwner.Feeding)
+        {
+            desert.Feeding.YieldAttachmentForHigherPriority();
+            ownership = DB_BehaviorArbiter.ResolveFrame(desert);
+        }
+
         if (ownership.PrimaryOwner is DB_BehaviorOwner.CreaturePhysics or
             DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
         {

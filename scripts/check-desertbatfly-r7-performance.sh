@@ -26,6 +26,10 @@ arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
 social_room = read('Behavior/Social/DB_SocialRoomState.cs')
 environment_room = read('World/Environment/DB_EnvironmentRoomRuntime.cs')
+feeding = read('Behavior/Feeding/DB_FeedingCoordinator.cs')
+feeding_runtime = read('Behavior/Feeding/DB_DehydrationFeedingRuntime.cs')
+feeding_grip = read('Behavior/Feeding/DB_DehydrationGripRuntime.cs')
+tuning = read('Core/DB_Tuning.cs')
 debug_environment_path = Path('src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs')
 if not debug_environment_path.exists():
     failures.append('missing DB_EnvironmentDebugSource observability source')
@@ -78,8 +82,34 @@ lazy = hooks.find('DB_RoomContext.TryGetExisting(self, out DB_RoomContext contex
 bats_gate = hooks.find('context.Bats.Count == 0', lazy)
 signal = hooks.find('DB_SignalRoomRuntime.For(self)', lazy)
 environment = hooks.find('DB_EnvironmentRoomRuntime.Update(self)', lazy)
-if min(lazy, bats_gate, signal, environment) < 0 or not (lazy < bats_gate < signal < environment):
+feeding_update = hooks.find('DB_FeedingCoordinator.UpdateRoom(self)', lazy)
+if min(lazy, bats_gate, signal, environment, feeding_update) < 0 or not (
+        lazy < bats_gate < signal < environment < feeding_update):
     failures.append('Room.Update lazy DB activation ordering changed')
+
+# Dehydration feeding remains room-aggregated and consumes the shared room player snapshot.
+if 'DB_RoomContext.For(room)' not in feeding or 'context.Players' not in feeding:
+    failures.append('Feeding target discovery no longer uses shared DB_RoomContext players')
+if feeding.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:
+    failures.append('Feeding aggregate drain authority changed')
+for label, domain_text in (
+        ('coordinator', feeding), ('runtime', feeding_runtime), ('grip', feeding_grip)):
+    if 'physicalObjects' in domain_text or 'abstractRoom.creatures' in domain_text:
+        failures.append(f'Feeding {label} reintroduced direct realized-room scanning')
+    if 'HydrationWeakness' in domain_text or 'ThirstStore.' in domain_text:
+        failures.append(f'Feeding {label} bypasses PlayerDehydrationFacts physiology boundary')
+if 'DB_RoomContext' in feeding_runtime or 'DB_RoomContext' in feeding_grip:
+    failures.append('per-bat Feeding/Grip runtime reintroduced room aggregation')
+feeding_refresh = re.search(r'FeedingCoordinatorRefreshTicks\s*=\s*(\d+)', tuning)
+if not feeding_refresh or not (8 <= int(feeding_refresh.group(1)) <= 30):
+    failures.append('Feeding coordinator refresh cadence must remain bounded to 8..30 ticks')
+for token in (
+    'TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)',
+    'rooms.TryGetValue(room, out RoomState state)',
+    'PromoteCloudReservations(state);',
+):
+    if token not in feeding:
+        failures.append('Feeding aggregation/observability contract missing: ' + token)
 
 # Room-scoped social/environment work remains cadence-bounded rather than per-bat/per-frame full refresh.
 social_match = re.search(r'RefreshInterval\s*=\s*(\d+)', social_room)

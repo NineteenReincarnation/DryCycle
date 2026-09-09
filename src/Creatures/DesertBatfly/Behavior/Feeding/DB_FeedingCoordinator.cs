@@ -36,6 +36,35 @@ internal readonly struct DB_FeedingAssignment
     }
 }
 
+internal readonly struct DB_FeedingTargetDebugState
+{
+    internal readonly Player Target;
+    internal readonly PlayerDehydrationStage Stage;
+    internal readonly int ReservationCount;
+    internal readonly int AttachReservationCount;
+    internal readonly int AttachedCount;
+    internal readonly int CloudCount;
+    internal readonly int SnapshotAge;
+
+    internal DB_FeedingTargetDebugState(
+        Player target,
+        PlayerDehydrationStage stage,
+        int reservationCount,
+        int attachReservationCount,
+        int attachedCount,
+        int cloudCount,
+        int snapshotAge)
+    {
+        Target = target;
+        Stage = stage;
+        ReservationCount = reservationCount;
+        AttachReservationCount = attachReservationCount;
+        AttachedCount = attachedCount;
+        CloudCount = cloudCount;
+        SnapshotAge = snapshotAge;
+    }
+}
+
 /// <summary>
 /// Room-level authority for dehydration-feeding aggregation. It owns player target snapshots,
 /// per-player participant budgets, attachment/cloud slots and aggregate fluid-loss application.
@@ -101,7 +130,7 @@ internal static class DB_FeedingCoordinator
             if (!CurrentTarget(target?.Player, bat.room) || !target.Facts.FeedingEligible)
                 continue;
 
-            float range = target.Facts.Stage >= PlayerDehydrationStage.Critical
+            float range = target.Facts.Stage == PlayerDehydrationStage.Critical
                 ? DB_Tuning.FeedingCriticalRange
                 : DB_Tuning.FeedingSevereRange;
             float distance = Vector2.Distance(
@@ -126,7 +155,7 @@ internal static class DB_FeedingCoordinator
             if (slot < 0) continue;
 
             float motivation = Motivation(bat, target, distance, range);
-            float threshold = target.Facts.Stage >= PlayerDehydrationStage.Critical
+            float threshold = target.Facts.Stage == PlayerDehydrationStage.Critical
                 ? DB_Tuning.FeedingCriticalMotivationThreshold
                 : DB_Tuning.FeedingSevereMotivationThreshold;
             if (motivation < threshold || motivation <= bestMotivation) continue;
@@ -167,6 +196,63 @@ internal static class DB_FeedingCoordinator
         if (reservation == null) return false;
         assignment = ToAssignment(state, reservation);
         return assignment.Valid;
+    }
+
+    /// <summary>
+    /// Debug-only room-state peek. It never refreshes targets, prunes reservations,
+    /// or creates a room runtime.
+    /// </summary>
+    internal static bool TryPeekTarget(Player target, out DB_FeedingTargetDebugState debug)
+    {
+        debug = default;
+        Room room = target?.room;
+        if (room == null || !rooms.TryGetValue(room, out RoomState state)) return false;
+
+        bool hasSnapshot = false;
+        PlayerDehydrationStage stage = default;
+        for (int i = 0; i < state.Targets.Count; i++)
+        {
+            TargetEntry entry = state.Targets[i];
+            if (!ReferenceEquals(entry?.Player, target)) continue;
+            stage = entry.Facts.Stage;
+            hasSnapshot = true;
+            break;
+        }
+
+        int reservations = 0;
+        int attachReservations = 0;
+        int attached = 0;
+        int cloud = 0;
+        for (int i = 0; i < state.Reservations.Count; i++)
+        {
+            Reservation reservation = state.Reservations[i];
+            if (!ReferenceEquals(reservation.Target, target)) continue;
+            reservations++;
+            if (reservation.Role == DB_FeedingRole.Attach)
+            {
+                attachReservations++;
+                if (reservation.Attached) attached++;
+            }
+            else if (reservation.Role == DB_FeedingRole.Cloud)
+            {
+                cloud++;
+            }
+        }
+
+        if (!hasSnapshot && reservations == 0) return false;
+        int clock = room.game?.clock ?? 0;
+        int age = state.TargetRefreshClock == int.MinValue
+            ? int.MaxValue
+            : Mathf.Max(0, clock - state.TargetRefreshClock);
+        debug = new DB_FeedingTargetDebugState(
+            target,
+            stage,
+            reservations,
+            attachReservations,
+            attached,
+            cloud,
+            age);
+        return true;
     }
 
     internal static void MarkAttached(DB_Creature bat, bool attached)
@@ -272,6 +358,45 @@ internal static class DB_FeedingCoordinator
                 (reservation.Role == DB_FeedingRole.Cloud &&
                  reservation.SlotIndex >= CloudCapacity(facts.Stage)))
                 state.Reservations.RemoveAt(i);
+        }
+
+        PromoteCloudReservations(state);
+    }
+
+    private static void PromoteCloudReservations(RoomState state)
+    {
+        for (int t = 0; t < state.Targets.Count; t++)
+        {
+            TargetEntry target = state.Targets[t];
+            if (target?.Player == null || !target.Facts.FeedingEligible) continue;
+
+            while (true)
+            {
+                int freeAttachSlot = FindFreeSlot(
+                    state,
+                    target.Player,
+                    DB_FeedingRole.Attach,
+                    target.Facts.Stage);
+                if (freeAttachSlot < 0) break;
+
+                Reservation bestCloud = null;
+                float bestMotivation = -1f;
+                for (int i = 0; i < state.Reservations.Count; i++)
+                {
+                    Reservation reservation = state.Reservations[i];
+                    if (!ReferenceEquals(reservation.Target, target.Player) ||
+                        reservation.Role != DB_FeedingRole.Cloud ||
+                        reservation.Motivation <= bestMotivation)
+                        continue;
+                    bestCloud = reservation;
+                    bestMotivation = reservation.Motivation;
+                }
+
+                if (bestCloud == null) break;
+                bestCloud.Role = DB_FeedingRole.Attach;
+                bestCloud.SlotIndex = freeAttachSlot;
+                bestCloud.Attached = false;
+            }
         }
     }
 
@@ -380,12 +505,12 @@ internal static class DB_FeedingCoordinator
     }
 
     private static int AttachCapacity(PlayerDehydrationStage stage)
-        => stage >= PlayerDehydrationStage.Critical
+        => stage == PlayerDehydrationStage.Critical
             ? DB_Tuning.FeedingCriticalAttachCapacity
             : DB_Tuning.FeedingSevereAttachCapacity;
 
     private static int TotalCapacity(PlayerDehydrationStage stage)
-        => stage >= PlayerDehydrationStage.Critical
+        => stage == PlayerDehydrationStage.Critical
             ? DB_Tuning.FeedingCriticalTotalCapacity
             : DB_Tuning.FeedingSevereTotalCapacity;
 

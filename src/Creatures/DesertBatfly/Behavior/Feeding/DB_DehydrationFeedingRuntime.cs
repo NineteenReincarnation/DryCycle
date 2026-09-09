@@ -186,6 +186,20 @@ internal sealed class DB_DehydrationFeedingRuntime
             Cancel(true, true);
     }
 
+    /// <summary>
+    /// Release only the physical pin when a higher-priority owner preempts Feeding.
+    /// The room reservation survives, so a short evade does not churn group assignment.
+    /// </summary>
+    internal void YieldAttachmentForHigherPriority()
+    {
+        if (!Attached) return;
+        attached = false;
+        attachedTicks = 0;
+        DB_FeedingCoordinator.MarkAttached(bat, false);
+        if (bat.movMode == Fly.MovementMode.Passive)
+            bat.movMode = Fly.MovementMode.BatFlight;
+    }
+
     internal void CancelForGrab()
     {
         if (Active)
@@ -212,6 +226,8 @@ internal sealed class DB_DehydrationFeedingRuntime
     {
         if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||
             bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||
+            bat.AI == null || bat.safariControlled || bat.AI.fleeFromRain || bat.AI.luredCounter > 0 ||
+            bat.AI.behavior == FlyAI.Behavior.Burrow ||
             bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||
             bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||
             DB_VengeanceRuntime.IsActive(bat))

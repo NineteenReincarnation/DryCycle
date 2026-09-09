@@ -60,15 +60,20 @@ internal static class DB_DehydrationGripRuntime
 
         State state = states.GetOrCreateValue(self);
         int clock = self.room.game?.clock ?? 0;
+        if (clock < state.RetryUntilClock)
+        {
+            self.wantToPickUp = 0;
+            return;
+        }
+
         state.AttemptSerial++;
-        bool retryLocked = clock < state.RetryUntilClock;
         float roll = Stable01(
             self.playerState?.playerNumber ?? 0,
             bat.Personality.VisualSeed,
             state.AttemptSerial,
             clock);
 
-        if (!retryLocked && roll >= facts.PickupFailureChance)
+        if (roll >= facts.PickupFailureChance)
         {
             orig(self, obj, graspUsed);
             return;

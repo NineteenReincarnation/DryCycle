@@ -24,6 +24,9 @@ internal static class DB_Trace
         bool hasSocial = DB_SocialRuntime.TryGetDebugState(
             bat, out DB_SocialDebugState social) &&
             social.Mode != DB_SocialMode.None;
+        DB_FeedingTargetDebugState feedingGroup = default;
+        bool hasFeedingGroup = bat.Feeding.Target != null &&
+            DB_FeedingCoordinator.TryPeekTarget(bat.Feeding.Target, out feedingGroup);
         string suppression = Suppression(bat, hasTravel, travel);
         string modeReason = ModeReason(bat, suppression, hasTravel, travel, hasSocial, social);
         string controlOwner = ControlOwner(bat, suppression, hasTravel, travel, hasSocial, social);
@@ -56,6 +59,18 @@ internal static class DB_Trace
             bat.Rescue.Active
                 ? $"holder={AIDebugFormat.Creature(bat.Rescue.Holder)} motivation={bat.Rescue.Motivation:0.000}"
                 : "no active companion rescue");
+
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "FeedingRole", bat.Feeding.Active ? bat.Feeding.Role.ToString() : "None",
+            bat.Feeding.Active
+                ? $"target={AIDebugFormat.Creature(bat.Feeding.Target)} attached={bat.Feeding.Attached} motivation={bat.Feeding.Motivation:0.000}"
+                : "no dehydration-feeding assignment");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "FeedingGroup",
+            hasFeedingGroup
+                ? $"stage={feedingGroup.Stage} reserved={feedingGroup.ReservationCount} attachSlots={feedingGroup.AttachReservationCount} pinned={feedingGroup.AttachedCount} cloud={feedingGroup.CloudCount} age={feedingGroup.SnapshotAge}"
+                : "—",
+            "DB_FeedingCoordinator read-only aggregate snapshot");
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
@@ -122,6 +137,7 @@ internal static class DB_Trace
         if (ActiveTrauma(bat) >= DB_Tuning.TraumaAggressionBlock) return "Trauma";
         if (bat.DesertState.GriefStrength >= 0.30f) return "Grief";
         if (DB_FearRuntime.HasActiveFearSuppression(bat)) return "Fear";
+        if (bat.Feeding.Active) return "Feeding";
         if (bat.AI.behavior == FlyAI.Behavior.Chain || bat.DesertAI.Mode == DB_AI.Activity.Roost)
             return "Roost";
         return "None";
@@ -149,6 +165,9 @@ internal static class DB_Trace
             case "Trauma": return "trauma above aggression block";
             case "Grief": return "grief state limits behavior";
             case "Vengeance": return "extreme vengeance owns behavior";
+            case "Feeding": return bat.Feeding.Attached
+                ? "attached dehydration feeding"
+                : "dehydrated-player feeding assignment";
             case "Roost": return "roost / fly chain owns movement";
         }
         if (bat.Rescue.Active) return "companion rescue uses Combat PrimaryOwner";
@@ -180,6 +199,7 @@ internal static class DB_Trace
             case "Trauma": return "trauma above aggression block";
             case "Grief": return "grief >= 0.30";
             case "Vengeance": return "extreme vengeance owns behavior";
+            case "Feeding": return "dehydrated-player feeding suppresses combat/social";
             case "Roost": return "roost or fly chain";
             default: return suppression;
         }
@@ -207,6 +227,7 @@ internal static class DB_Trace
             case "Trauma": return "Trauma";
             case "Grief": return "Grief";
             case "Vengeance": return "Vengeance";
+            case "Feeding": return bat.Feeding.Attached ? "Feeding / Attach" : "Feeding / " + bat.Feeding.Role;
             case "Roost": return "Roost / Chain";
             default:
                 if (bat.Rescue.Active) return "Combat / Rescue";

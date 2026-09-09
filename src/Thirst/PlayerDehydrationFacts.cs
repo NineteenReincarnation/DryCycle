@@ -23,7 +23,7 @@ internal readonly struct PlayerDehydrationSnapshot
     internal readonly float PickupFailureChance;
     internal readonly float PreyAttraction;
 
-    internal bool FeedingEligible => Stage >= PlayerDehydrationStage.Severe;
+    internal bool FeedingEligible => Stage is PlayerDehydrationStage.Severe or PlayerDehydrationStage.Critical;
 
     internal PlayerDehydrationSnapshot(
         PlayerDehydrationStage stage,
