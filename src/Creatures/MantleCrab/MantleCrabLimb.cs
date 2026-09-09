@@ -49,6 +49,42 @@ internal sealed class MantleCrabLimb
         searchTick = Index;
     }
 
+    internal bool TrySnapToSupport(MantleCrab crab, Vector2 anchor)
+    {
+        if (IsPincer || crab?.room == null)
+            return false;
+
+        Anchor = LastAnchor = anchor;
+        Vector2 desired = anchor + RestTipOffset;
+        hasTarget = MantleCrabTerrainProbe.Find(
+            crab.room,
+            anchor,
+            desired,
+            Reach * .995f,
+            out contact,
+            out GroundNormal);
+
+        if (!hasTarget)
+        {
+            Planted = false;
+            return false;
+        }
+
+        // Placement/DevConsole realization should start from a valid standing pose rather than
+        // spending several gravity frames dragging the feet toward the floor. This is not a
+        // hover lock: if no reachable surface exists the caller leaves the creature unsupported.
+        SolvePose(anchor, contact, true);
+        for (int i = 0; i < 4; i++)
+        {
+            LastPos[i] = Pos[i];
+            Velocity[i] = Vector2.zero;
+        }
+
+        Planted = Vector2.Distance(Tip, contact) < 1.2f;
+        searchTick = 8 + Index;
+        return Planted;
+    }
+
     internal void Update(MantleCrab crab, Vector2 anchor)
     {
         LastAnchor = Anchor;
