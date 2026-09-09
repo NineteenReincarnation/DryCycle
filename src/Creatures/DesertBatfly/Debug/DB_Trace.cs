@@ -42,6 +42,21 @@ internal static class DB_Trace
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "VanillaBehavior", bat.AI?.behavior, "FlyAI.behavior");
 
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "PlayerHeld", bat.Restraint.IsPlayerHeld,
+            bat.Restraint.IsPlayerHeld ? AIDebugFormat.Creature(bat.Restraint.Holder) : "no active player grasp");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
+            "EscapePressure",
+            bat.Restraint.IsPlayerHeld
+                ? $"{bat.Restraint.EscapePressure:0.000}/{bat.Restraint.EscapeThreshold:0.000} t={bat.Restraint.HoldTicks}"
+                : "—",
+            "DB_RestraintRuntime exact-grasp escape state");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
+            "RescueTarget", bat.Rescue.Active ? AIDebugFormat.Creature(bat.Rescue.Victim) : "—",
+            bat.Rescue.Active
+                ? $"holder={AIDebugFormat.Creature(bat.Rescue.Holder)} motivation={bat.Rescue.Motivation:0.000}"
+                : "no active companion rescue");
+
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Path,
             "TravelPurpose", hasTravel ? travel.Purpose.ToString() : "None",
             hasTravel ? travel.StatusReason : "no active DB_TravelIntent");
@@ -136,6 +151,7 @@ internal static class DB_Trace
             case "Vengeance": return "extreme vengeance owns behavior";
             case "Roost": return "roost / fly chain owns movement";
         }
+        if (bat.Rescue.Active) return "companion rescue uses Combat PrimaryOwner";
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
         if (hasSocial) return string.IsNullOrEmpty(social.DecisionReason)
             ? "neutral social interaction"
@@ -193,6 +209,7 @@ internal static class DB_Trace
             case "Vengeance": return "Vengeance";
             case "Roost": return "Roost / Chain";
             default:
+                if (bat.Rescue.Active) return "Combat / Rescue";
                 if (hasSocial) return "Social / " + social.Mode;
                 return "DB_AI";
         }
