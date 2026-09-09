@@ -21,6 +21,9 @@ internal static partial class Program
         Type socialLife = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
         Type desertAI = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type desertBat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
+        Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Runtime", true);
+        Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
+        Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
 
         foreach (string name in new[]
                  {
@@ -28,14 +31,18 @@ internal static partial class Program
                      "Conscious", "Dead", "Restrained", "InShortcut", "InHive",
                      "NativeMovementMode", "NativeBehavior", "Personality", "PhysicalCapability",
                      "SevereInjury", "InjuryRecovering", "InjuryRecoveryTarget", "PostStunShock",
-                     "Thirst", "Trauma", "Grief", "BondStrength", "VisiblePlayerCount",
-                     "PredatorCandidateCount", "IncomingProjectile", "VisibilityFactor", "Travel",
-                     "SignalInfluence", "EnvironmentInfluence", "Threat", "Social", "Roost",
-                     "VengeanceActive", "ImmediateDanger", "HardSurvival", "CombatAllowed",
-                     "SocialAllowed", "CrossRoomOwned", "SpecialPhysicsOwner"
+                     "Thirst", "Trauma", "Grief", "BondStrength", "IncomingProjectile",
+                     "VisibilityFactor", "Travel", "SignalInfluence", "EnvironmentInfluence",
+                     "Threat", "Social", "Roost", "VengeanceActive", "ImmediateDanger",
+                     "HardSurvival", "CombatAllowed", "SocialAllowed", "CrossRoomOwned",
+                     "SpecialPhysicsOwner"
                  })
             Check(frame.GetField(name, Flags) != null,
                 "Architecture arbitration FrameContext contains approved current-frame fact " + name);
+        foreach (string retired in new[]
+                 { "VisiblePlayerCount", "NearestVisiblePlayer", "PredatorCandidateCount", "NearestPredator" })
+            Check(frame.GetField(retired, Flags) == null,
+                "Architecture arbitration FrameContext does not retain unused per-frame visibility fact " + retired);
         Check(frameRuntime.GetMethod("For", Flags) != null &&
               frameRuntime.GetMethod("Reset", Flags) != null &&
               frameRuntime.GetMethod("Forget", Flags) != null,
@@ -44,10 +51,11 @@ internal static partial class Program
         string[] ownerNames = Enum.GetNames(owner);
         foreach (string required in new[]
                  {
-                     "CreaturePhysics", "Restraint", "Shortcut", "Emergence", "ImmediateDanger",
-                     "InjuryRecovery", "Travel", "EnvironmentHardSurvival", "FearResponse",
-                     "Vengeance", "EnvironmentLocalSurvival", "ImmediateProjectileEvade",
-                     "Combat", "Roost", "Social", "Ordinary", "VanillaFallback"
+                     "CreaturePhysics", "Restraint", "Shortcut", "Emergence", "NativeSpecial",
+                     "ImmediateDanger", "InjuryRecovery", "Travel", "EnvironmentHardSurvival",
+                     "FearResponse", "Vengeance", "EnvironmentLocalSurvival",
+                     "ImmediateProjectileEvade", "Feeding", "Combat", "Roost", "Social",
+                     "Ordinary", "VanillaFallback"
                  })
             Check(ownerNames.Contains(required), "Architecture arbitration owner enum includes " + required);
         Check(ownerNames.All(name =>
@@ -79,10 +87,11 @@ internal static partial class Program
               P("FearResponse") < P("Vengeance") &&
               P("Vengeance") < P("EnvironmentLocalSurvival") &&
               P("EnvironmentLocalSurvival") < P("ImmediateProjectileEvade") &&
-              P("ImmediateProjectileEvade") < P("Combat") &&
+              P("ImmediateProjectileEvade") < P("Feeding") &&
+              P("Feeding") < P("Combat") &&
               P("Combat") < P("Roost") && P("Roost") < P("Social") &&
               P("Social") < P("Ordinary"),
-            "Architecture arbitration arbiter encodes the approved survival/travel/fear/vengeance/combat/social priority order");
+            "Architecture arbitration arbiter encodes the approved survival/travel/fear/vengeance/feeding/combat/social priority order");
         Check(arbiter.GetMethod("ResolveFrame", Flags) != null &&
               arbiter.GetMethod("ResolveWinner", Flags) != null &&
               arbiter.GetMethod("TryGetResolution", Flags) != null &&
@@ -92,7 +101,10 @@ internal static partial class Program
 
         string[] specialNames = Enum.GetNames(specialPhysics);
         foreach (string required in new[]
-                 { "None", "CreaturePhysics", "Grasp", "Shortcut", "Emergence", "CombatAttach", "CombatInterfere" })
+                 {
+                     "None", "CreaturePhysics", "Grasp", "Shortcut", "Emergence",
+                     "FeedingAttach", "CombatAttach", "CombatInterfere", "NativeBurrow", "NativeChain"
+                 })
             Check(specialNames.Contains(required),
                 "Architecture arbitration special-physics ownership explicitly includes " + required);
 
@@ -114,8 +126,9 @@ internal static partial class Program
         Check(MethodCallOffset(behaviorExecution.GetMethod("TryVengeance", Flags), vengeanceRuntime, "ExecuteOwned") >= 0,
             "Architecture arbitration Vengeance executor enters the formal Vengeance runtime");
         Check(intimidation.GetMethod("UpdateState", Flags) != null &&
-              MethodCallOffset(desertBat.GetMethod("Update", Flags), intimidation, "UpdateState") >= 0,
-            "Architecture arbitration refreshes Fear state before FlyAI arbitration; Vengeance facts live in the embedded domain state");
+              MethodCallOffset(runtime.GetMethod("BeforeVanillaUpdate", Flags), intimidation, "UpdateState") >= 0 &&
+              MethodCallOffset(desertBat.GetMethod("Update", Flags), runtime, "BeforeVanillaUpdate") >= 0,
+            "Architecture arbitration Fear state refresh occurs in the species runtime before the native Fly update boundary");
         Check(environmentBehavior.GetMethod("RefreshInfluence", Flags) != null &&
               environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags) != null &&
               MethodCallOffset(environmentBehavior.GetMethod("ApplyOwnedBehavior", Flags), arbiter, "IsPrimaryOwner") >= 0,
@@ -133,19 +146,38 @@ internal static partial class Program
               threatRuntime.GetMethod("CommitFrame", Flags) != null &&
               MethodCallOffset(threatRuntime.GetMethod("ApplyTacticalAdjustment", Flags), arbiter, "IsPrimaryOwner") >= 0,
             "Architecture arbitration Threat refresh is pre-arbiter and tactical localGoal adjustment is Combat-owner-only");
+
         Check(desertAI.GetMethod("RefreshDecisionState", Flags) != null &&
               desertAI.GetMethod("ExecuteImmediateDangerOwned", Flags) != null &&
               desertAI.GetMethod("ExecuteFearOwned", Flags) != null &&
-              desertAI.GetMethod("ExecuteCombatOwned", Flags) != null &&
               desertAI.GetMethod("ExecuteRoostOwned", Flags) != null &&
-              desertAI.GetMethod("ScanWeapons", Flags) == null,
-            "Architecture arbitration DB_AI separates decision refresh from owner executors and removes duplicate weapon scan");
+              desertAI.GetMethod("ScanWeapons", Flags) == null &&
+              desertAI.GetMethod("AfterPhysics", Flags) == null,
+            "Architecture arbitration DB_AI retains orchestration/AI-owned executors and no longer owns weapon scan or post-physics combat");
         foreach (string methodName in new[]
-                 { "ExecuteImmediateDangerOwned", "ExecuteFearOwned", "ExecuteCombatOwned", "ExecuteRoostOwned", "SteerOwned" })
+                 { "ExecuteImmediateDangerOwned", "ExecuteFearOwned", "ExecuteRoostOwned", "SteerOwned" })
             Check(MethodCallOffset(desertAI.GetMethod(methodName, Flags), arbiter, "IsPrimaryOwner") >= 0,
                 "Architecture arbitration " + methodName + " requires same-tick PrimaryOwner");
-        Check(MethodCallOffset(desertAI.GetMethod("AfterPhysics", Flags), arbiter, "IsPrimaryOwner") >= 0,
-            "Architecture arbitration Attach/Interfere AfterPhysics cannot run after another locomotion owner won");
+
+        MethodInfo combatExecute = combatRuntime.GetMethod("TryExecuteOwned", Flags);
+        MethodInfo combatAfterPhysics = combatRuntime.GetMethod("AfterPhysics", Flags);
+        Check(combatExecute != null && combatAfterPhysics != null &&
+              MethodCallOffset(combatExecute, arbiter, "IsPrimaryOwner") >= 0 &&
+              MethodCallOffset(combatAfterPhysics, arbiter, "IsPrimaryOwner") >= 0,
+            "Architecture arbitration Combat domain owns both formal execution and Attach/Interfere post-physics owner checks");
+        MethodInfo aiCombatFacade = desertAI.GetMethod("ExecuteCombatOwned", Flags);
+        Check(aiCombatFacade == null || MethodCallOffset(aiCombatFacade, combatRuntime, "TryExecuteOwned") >= 0,
+            "Architecture arbitration any retained AI Combat forwarding surface may only delegate to DB_CombatRuntime");
+
+        MethodInfo aiInjuryExecutor = desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags);
+        MethodInfo injuryExecute = injuryRecovery.GetMethod("ExecuteOwned", Flags);
+        Check(aiInjuryExecutor != null && injuryExecute != null &&
+              MethodCallOffset(aiInjuryExecutor, injuryRecovery, "ExecuteOwned") >= 0 &&
+              MethodCallOffset(injuryExecute, arbiter, "IsPrimaryOwner") >= 0 &&
+              desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
+            "Architecture arbitration severe injury movement delegates to one Injury-domain owner-gated executor");
+        Check(MethodCallOffset(behaviorExecution.GetMethod("TryInjuryRecovery", Flags), desertAI, "ExecuteInjuryRecoveryOwned") >= 0,
+            "Architecture arbitration central execution routes InjuryRecovery through the species query surface into DB_InjuryRecovery");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -168,6 +200,7 @@ internal static partial class Program
               MethodCallOffset(updateAI, behaviorExecution, "TryVengeance") >= 0 &&
               MethodCallOffset(updateAI, socialLife, "RefreshState") >= 0 &&
               MethodCallOffset(updateAI, behaviorExecution, "TryProjectileEvade") >= 0 &&
+              MethodCallOffset(updateAI, behaviorExecution, "TryFeeding") >= 0 &&
               MethodCallOffset(updateAI, behaviorExecution, "TryCombat") >= 0 &&
               MethodCallOffset(updateAI, behaviorExecution, "TryRoost") >= 0 &&
               MethodCallOffset(updateAI, behaviorExecution, "TrySocial") >= 0,
@@ -178,12 +211,6 @@ internal static partial class Program
         MethodInfo executeNativeOwned = hooks.GetMethod("ExecuteNativeOwned", Flags);
         Check(executeNativeOwned != null && MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0,
             "Architecture arbitration vanilla FlyAI.Update is itself restricted to an accepted NativeSpecial/Ordinary/Fallback owner");
-        Check(behaviorExecution.GetMethod("TryInjuryRecovery", Flags) != null &&
-              desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) != null &&
-              desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
-            "Architecture arbitration severe injury movement has one explicit owner-gated executor surface");
-        Check(MethodCallOffset(desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags), arbiter, "IsPrimaryOwner") >= 0,
-            "Architecture arbitration InjuryRecovery executor requires same-tick PrimaryOwner");
 
         Type observatory = mod.GetType("DryCycle.Debugging.AI.DB_ObservatorySource", true);
         Check(MethodCallOffset(observatory.GetMethod("ControlOwner", Flags), arbiter, "TryGetResolution") >= 0,
@@ -198,6 +225,6 @@ internal static partial class Program
             "Architecture arbitration architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Architecture arbitration: code-side owner arbitration and rejected-proposal Observatory presentation are closed; Rain World live validation remains.");
+            "Architecture arbitration: current domain owner checks, lean FrameContext, Feeding priority, special physics and rejected-proposal Observatory presentation are guarded; Rain World live validation remains.");
     }
 }

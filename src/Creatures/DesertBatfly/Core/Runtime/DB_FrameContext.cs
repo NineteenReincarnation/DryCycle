@@ -104,10 +104,6 @@ internal readonly struct DB_FrameContext
     internal readonly float Grief;
     internal readonly float BondStrength;
 
-    internal readonly int VisiblePlayerCount;
-    internal readonly Player NearestVisiblePlayer;
-    internal readonly int PredatorCandidateCount;
-    internal readonly Creature NearestPredator;
     internal readonly bool IncomingProjectile;
     internal readonly DB_WeaponObservation IncomingProjectileObservation;
     internal readonly float VisibilityFactor;
@@ -157,10 +153,6 @@ internal readonly struct DB_FrameContext
         float trauma,
         float grief,
         float bondStrength,
-        int visiblePlayerCount,
-        Player nearestVisiblePlayer,
-        int predatorCandidateCount,
-        Creature nearestPredator,
         bool incomingProjectile,
         in DB_WeaponObservation incomingProjectileObservation,
         float visibilityFactor,
@@ -207,10 +199,6 @@ internal readonly struct DB_FrameContext
         Trauma = Mathf.Clamp01(trauma);
         Grief = Mathf.Clamp01(grief);
         BondStrength = Mathf.Clamp01(bondStrength);
-        VisiblePlayerCount = Mathf.Max(0, visiblePlayerCount);
-        NearestVisiblePlayer = nearestVisiblePlayer;
-        PredatorCandidateCount = Mathf.Max(0, predatorCandidateCount);
-        NearestPredator = nearestPredator;
         IncomingProjectile = incomingProjectile;
         IncomingProjectileObservation = incomingProjectileObservation;
         VisibilityFactor = Mathf.Clamp01(visibilityFactor);
@@ -272,58 +260,6 @@ internal static class DB_FrameContextRuntime
         DB_Injury injury = bat.Injury;
         DB_AI ai = bat.DesertAI;
         DB_State persistent = bat.DesertState;
-        DB_RoomContext roomContext = DB_RoomContext.For(room);
-
-        int visiblePlayers = 0;
-        Player nearestVisiblePlayer = null;
-        float nearestPlayerDistance = float.MaxValue;
-        int predators = 0;
-        Creature nearestPredator = null;
-        float nearestPredatorDistance = float.MaxValue;
-
-        if (roomContext != null && bat.mainBodyChunk != null)
-        {
-            var players = roomContext.Players;
-            for (int i = 0; i < players.Count; i++)
-            {
-                Player player = players[i];
-                if (player == null || player.dead || player.room != room || player.mainBodyChunk == null)
-                    continue;
-                if (!DB_VisibilityPolicy.CanObserve(
-                        bat, player.mainBodyChunk.pos, DB_Tuning.SightRange,
-                        DB_VisibilityChannel.Player))
-                    continue;
-                visiblePlayers++;
-                float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
-                if (distance >= nearestPlayerDistance) continue;
-                nearestPlayerDistance = distance;
-                nearestVisiblePlayer = player;
-            }
-
-            var creatures = roomContext.Creatures;
-            for (int i = 0; i < creatures.Count; i++)
-            {
-                Creature creature = creatures[i];
-                if (creature == null || creature == bat || creature is Player ||
-                    creature is DB_Creature || creature.dead || creature.room != room ||
-                    creature.mainBodyChunk == null || creature.Template == null)
-                    continue;
-                CreatureTemplate.Relationship relation = bat.Template.CreatureRelationship(creature.Template);
-                CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(bat.Template);
-                bool predator = relation.type == CreatureTemplate.Relationship.Type.Afraid ||
-                                reverse.type == CreatureTemplate.Relationship.Type.Eats ||
-                                reverse.type == CreatureTemplate.Relationship.Type.Attacks;
-                if (!predator || !DB_VisibilityPolicy.CanObserve(
-                        bat, creature.mainBodyChunk.pos, DB_Tuning.SightRange,
-                        DB_VisibilityChannel.Creature))
-                    continue;
-                predators++;
-                float distance = Vector2.Distance(bat.mainBodyChunk.pos, creature.mainBodyChunk.pos);
-                if (distance >= nearestPredatorDistance) continue;
-                nearestPredatorDistance = distance;
-                nearestPredator = creature;
-            }
-        }
 
         bool incomingProjectile = DB_WeaponPerception.TryFindIncomingProjectile(
             bat, 230f, 42f, 16f, out DB_WeaponObservation projectile);
@@ -412,10 +348,6 @@ internal static class DB_FrameContextRuntime
             trauma,
             persistent.GriefStrength,
             persistent.SocialBondStrength,
-            visiblePlayers,
-            nearestVisiblePlayer,
-            predators,
-            nearestPredator,
             incomingProjectile,
             projectile,
             hasEnvironment ? environment.VisibilityConfidence : 1f,

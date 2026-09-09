@@ -105,7 +105,6 @@ internal static partial class Program
         Check(resolvedFogPhase.ToString() == "Advisory",
             "ordinary Fog has a hard Advisory ceiling; DenseFog owns shelter/displacement escalation");
 
-
         Type environmentalPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentalPolicy", true);
         Check(roomRuntime.GetMethod("TryGetShelterFailureDebug", Flags) != null,
             "Environment realized-room runtime owns LocalShelterFailure evidence directly");
@@ -155,13 +154,25 @@ internal static partial class Program
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
         Type signals = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
+        Type feeding = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_DehydrationFeedingRuntime", true);
+        Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
-        int threatStage = MethodCallOffset(updateAI, threat, "Update");
-        int signalStage = MethodCallOffset(updateAI, signals, "Update");
-        int environmentStage = MethodCallOffset(updateAI, behavior, "Update");
-        int socialStage = MethodCallOffset(updateAI, social, "Update");
-        Check(threatStage >= 0 && signalStage > threatStage && environmentStage > signalStage && socialStage > environmentStage,
-            "realized pipeline stays Threat -> Signals -> Environment -> Social after Travel/Colony travel refusal");
+        int environmentStage = MethodCallOffset(updateAI, behavior, "RefreshInfluence");
+        int aiStage = MethodCallOffset(updateAI, ai, "RefreshDecisionState");
+        int threatStage = MethodCallOffset(updateAI, threat, "RefreshState");
+        int socialStage = MethodCallOffset(updateAI, social, "RefreshState");
+        int feedingStage = MethodCallOffset(updateAI, feeding, "RefreshState");
+        int resolveStage = MethodCallOffset(updateAI, arbiter, "ResolveFrame");
+        Check(environmentStage >= 0 && aiStage > environmentStage &&
+              threatStage > aiStage && socialStage > threatStage &&
+              feedingStage > socialStage && resolveStage > feedingStage,
+            "realized R3 refresh pipeline stays Environment -> AI decision -> Threat -> Social -> Feeding -> Arbiter");
+        Check(threat.GetMethod("Update", Flags) == null &&
+              behavior.GetMethod("Update", Flags) == null &&
+              social.GetMethod("Update", Flags) == null &&
+              signals.GetMethod("Update", Flags) != null,
+            "Environment regression distinguishes retired combined-update facades from the retained post-resolution Signal information tick");
 
         Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check(state.GetFields(Flags).All(f =>
@@ -190,7 +201,7 @@ internal static partial class Program
             "Environment does not restore rejected social-role design role runtime");
 
         Console.WriteLine(
-            "Environment environment: six phases, DryCycle-only source boundary, bounded anchors, Fog ceiling, severe DenseFog temporary Travel/Colony handoff, Heat axes, Sandstorm Home-retention policy, native Home/Burrow, pipeline, persistence and forbidden-ownership guards verified.");
+            "Environment environment: six phases, DryCycle-only source boundary, bounded anchors, Fog ceiling, severe DenseFog temporary Travel/Colony handoff, Heat axes, Sandstorm Home-retention policy, native Home/Burrow, R3 refresh pipeline, persistence and forbidden-ownership guards verified.");
     }
 
     private static bool TypeCallsEnvironmentForbidden(Type type)

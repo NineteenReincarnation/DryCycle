@@ -76,12 +76,13 @@ internal static partial class Program
         Check(response != null && receive != null && perceive != null && safe != null,
             "Signals has explicit response, perception and Safe acceptance gates");
 
-        Check(runtime.GetMethod("ApplyAlarm", Flags) != null &&
+        Check(runtime.GetMethod("Update", Flags) != null &&
+              runtime.GetMethod("ApplyAlarm", Flags) != null &&
               runtime.GetMethod("EmitAcuteAlarm", Flags) != null &&
               runtime.GetMethod("EmitRally", Flags) != null &&
               ai.GetMethod("ThreatenedAt", Flags) != null &&
               socialBond.GetMethod("IsDirectDeathWitness", Flags) != null,
-            "Signals direct APIs own anonymous alarm escape, acute roots, Rally and grief witness boundaries");
+            "Signals direct APIs own the post-resolution receiver tick, anonymous alarm escape, acute roots, Rally and grief witness boundaries");
         Check(combat.GetMethod("FindSocialHarassTarget", Flags) != null &&
               social.GetMethod("FindRoostSource", Flags) != null,
             "Signals Harass/Roost influence is consumed directly by Combat and Social owners");
@@ -109,11 +110,20 @@ internal static partial class Program
             "Signals realized signal state is not persisted in DB_State");
 
         MethodInfo updateAI = hooks.GetMethod("UpdateAI", Flags);
-        int threatStage = MethodCallOffset(updateAI, threatRuntime, "Update");
-        int signalStage = MethodCallOffset(updateAI, runtime, "Update");
-        int socialStage = MethodCallOffset(updateAI, social, "Update");
-        Check(threatStage >= 0 && signalStage > threatStage && socialStage > signalStage,
-            "realized pipeline stays Threat threat context -> Signals signal information -> Social neutral social life");
+        MethodInfo completeFrame = hooks.GetMethod("CompleteR3Frame", Flags);
+        Check(MethodCallOffset(updateAI, runtime, "Update") < 0,
+            "Signals receiver tick is not a pre-arbiter locomotion/update stage");
+        int threatCommitStage = MethodCallOffset(completeFrame, threatRuntime, "CommitFrame");
+        int signalStage = MethodCallOffset(completeFrame, runtime, "Update");
+        int socialTraceStage = MethodCallOffset(completeFrame, social, "SampleTrace");
+        Check(threatCommitStage >= 0 && signalStage > threatCommitStage &&
+              socialTraceStage > signalStage,
+            "post-resolution completion stays Threat commit -> Signals information tick -> Social trace");
+
+        MethodInfo updateRoom = hooks.GetMethod("UpdateRoom", Flags);
+        Check(MethodCallOffset(updateRoom, roomRuntime, "For") >= 0 &&
+              MethodCallOffset(updateRoom, roomState, "Prune") >= 0,
+            "Signals room packet expiry is maintained by the shared lazy Room.Update path");
 
         MethodInfo draw = graphics.GetMethod("DrawSprites", Flags);
         Check(MethodCallsSignal(draw, runtime, "TryGetDisplay"),
@@ -133,7 +143,7 @@ internal static partial class Program
             "Signals terminology keeps Vengeance participation separate from rejected social-role design SocialRole");
 
         Console.WriteLine(
-            "Signals signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, Threat read-only boundary, pipeline, graphics, vengeance terminology and anti-role guards verified.");
+            "Signals signals: six-kind model, bounded room/generation state, relay cap, direct API indirect-fear migration, accurate acute roots, direct-witness grief boundary, post-resolution information tick, room pruning, graphics, vengeance terminology and anti-role guards verified.");
     }
 
     private static bool MethodCallsSignal(MethodInfo caller, Type targetType, string targetName) =>

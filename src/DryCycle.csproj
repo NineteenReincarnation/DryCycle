@@ -8,9 +8,14 @@
     <AssemblyName>DryCycle</AssemblyName>
     <RootNamespace>DryCycle</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <GameModOutputDir>D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
-    <GameModRootDir>$(GameModOutputDir)/../..</GameModRootDir>
-    <OutputPath>$(GameModOutputDir)</OutputPath>
+
+    <!-- Keep the historical one-command local workflow as the default, but allow
+         compile/CI validation to use the exact Rain World references without requiring
+         a writable Windows game installation as the build output directory. -->
+    <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
+    <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(DeployToGame)' == 'true'">D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <GameModRootDir Condition="'$(GameModRootDir)' == '' and '$(GameModOutputDir)' != ''">$(GameModOutputDir)/../..</GameModRootDir>
+    <OutputPath Condition="'$(DeployToGame)' == 'true'">$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
 
     <DryCycleShaderProjectDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderProjectDir>
@@ -105,7 +110,8 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.AudioModule.dll')" Text="UnityEngine.AudioModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll')" Text="UnityEngine.InputLegacyModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll')" Text="Unity.Mathematics.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
-    <Error Condition="!Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
+    <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModOutputDir)' == ''" Text="DeployToGame=true requires GameModOutputDir." />
+    <Error Condition="'$(DeployToGame)' == 'true' and !Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
   </Target>
 
   <!-- Optional one-command shader build. Keep it opt-in because the Unity Editor is
@@ -121,7 +127,7 @@
     <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile -" />
   </Target>
 
-  <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+  <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU' and '$(DeployToGame)' == 'true'">
     <ItemGroup>
       <RemovePlugins Include="$(GameModOutputDir)/*.pdb" />
     </ItemGroup>

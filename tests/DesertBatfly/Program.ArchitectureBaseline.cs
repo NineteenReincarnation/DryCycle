@@ -82,15 +82,20 @@ internal static partial class Program
         Check(once == 11 && twice == once,
             "Architecture baseline preserves existing same-frame idempotence for realized room-progress ticks");
 
-        // Hidden-bug baseline guard 2: injury recovery must continue using Rain World's
-        // native FlyAI Dijkstra helper. R4 will fix the wrong seed/localGoal semantics and
-        // remove its second ordinary-flight velocity loop without replacing native pathing.
+        // Hidden-bug baseline guard 2: severe-injury hive recovery must continue using Rain
+        // World's native FlyAI Dijkstra helper. R6 moved this responsibility out of DB_AI
+        // into the dedicated Injury domain; the baseline follows the current owner and also
+        // prevents the retired DB_AI compatibility entry point from returning.
         Type aiType = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_AI", true);
-        MethodInfo recoveryHive = aiType.GetMethod("TryDriveRecoveryHive", Flags);
+        Type injuryRecoveryType = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
+        MethodInfo recoveryHive = injuryRecoveryType.GetMethod("TryDriveRecoveryHive", Flags);
         Check(recoveryHive != null &&
               MethodCallOffset(recoveryHive, typeof(FlyAI), "ProgressLocalGoalAlongDijkstraMap") >= 0,
-            "Architecture baseline freezes native FlyAI Dijkstra ownership for severe-injury hive recovery");
+            "Architecture baseline preserves native FlyAI Dijkstra ownership inside severe-injury recovery");
+        Check(aiType.GetMethod("TryDriveRecoveryHive", Flags) == null,
+            "Architecture baseline keeps severe-injury hive routing out of the retired DB_AI compatibility surface");
 
         Console.WriteLine(
             "Architecture baseline: external IDs/save keys, migration naming guard, partial travel frame idempotence and native injury Dijkstra dependency frozen.");

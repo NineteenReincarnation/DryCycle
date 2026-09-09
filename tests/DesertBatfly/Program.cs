@@ -175,6 +175,7 @@ internal static partial class Program
 
         Type batType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
         Type aiType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
+        Type combatType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         var bat = (Fly)FormatterServices.GetUninitializedObject(batType);
         bat.abstractPhysicalObject = creature;
@@ -206,9 +207,11 @@ internal static partial class Program
         var rockChunk = new BodyChunk(rock, 0, Vector2.zero, 3f, 0.1f);
         for (int i = 0; i < 100; i++)
             bat.Violence(rockChunk, new Vector2(1f, 0f), bat.mainBodyChunk, null, Creature.DamageType.Blunt, 2f, 45f);
-        Check(!bat.dead && ((HealthState)creature.state).health == -0.25f, "100 rocks cannot kill or accumulate damage, even pre-injured");
+        float rockHealth = ((HealthState)creature.state).health;
+        Check(!bat.dead && rockHealth >= 0.0099f,
+            "100 rocks can injure but cannot directly kill; repeated blunt damage respects the survival floor");
         Check(bat.stun >= 110 && bat.mainBodyChunk.vel.x > 0f, "rock retains stun and impulse");
-        Console.WriteLine("Weapon: actual compiled Violence override, 100 hits against injured state.");
+        Console.WriteLine("Weapon: actual compiled Violence override, ordinary rock injury/stun with nonlethal survival floor.");
 
         Set(bat, "mealFood", 2);
         var edible = (IPlayerEdible)bat;
@@ -253,8 +256,13 @@ internal static partial class Program
             return instance;
         }
         object Brain(Fly instance) => batType.GetField("DesertAI", Flags).GetValue(instance);
-        object Invoke(object brain, string name, params object[] arguments) => aiType.GetMethod(name, Flags).Invoke(brain, arguments);
-        void Mode(object brain, string name) => Invoke(brain, "SetMode", Enum.Parse(aiType.GetNestedType("Activity", Flags), name));
+        object Combat(Fly instance) => aiType.GetProperty("Combat", Flags).GetValue(Brain(instance));
+        object InvokeBrain(object brain, string name, params object[] arguments) =>
+            aiType.GetMethod(name, Flags).Invoke(brain, arguments);
+        object InvokeCombat(object combat, string name, params object[] arguments) =>
+            combatType.GetMethod(name, Flags).Invoke(combat, arguments);
+        void Mode(object brain, string name) =>
+            InvokeBrain(brain, "SetMode", Enum.Parse(aiType.GetNestedType("Activity", Flags), name));
         var target = MakeBat(100);
         var first = MakeBat(101);
         var second = MakeBat(102);
@@ -297,13 +305,14 @@ internal static partial class Program
         Social("OnBondPartnerDeath", first, second, null);
         Check((int)stateType.GetField("GriefTicks", Flags).GetValue(first.State) == 0, "cross-room death is not perceived");
         second.room = room;
-        Set(Brain(first), "hasSlot", true);
-        Set(Brain(first), "retaliationCharges", 2);
-        Set(Brain(first), "memory", 100);
+        Set(Combat(first), "hasSlot", true);
+        Set(Combat(first), "retaliationCharges", 2);
+        Set(Combat(first), "memory", 100);
         Social("OnBondPartnerDeath", first, second, null);
-        Check(!(bool)aiType.GetField("hasSlot", Flags).GetValue(Brain(first)) &&
-            (int)aiType.GetField("retaliationCharges", Flags).GetValue(Brain(first)) == 0 &&
-            (int)aiType.GetField("memory", Flags).GetValue(Brain(first)) == 0, "grief clears old attack slot and retaliation");
+        Check(!(bool)combatType.GetProperty("HasSlot", Flags).GetValue(Combat(first)) &&
+            (int)combatType.GetProperty("RetaliationCharges", Flags).GetValue(Combat(first)) == 0 &&
+            (int)combatType.GetProperty("Memory", Flags).GetValue(Combat(first)) == 0,
+            "grief clears Combat-owned attack slot, retaliation and attacker memory");
         int observedGrief = (int)stateType.GetField("GriefTicks", Flags).GetValue(first.State);
         Check(observedGrief >= 1200 && (float)stateType.GetField("PlayerTraumaStrength", Flags).GetValue(first.State) == 0.9f, "observed death creates grief without clearing severe PTSD");
         Social("OnBondPartnerDeath", first, second, null);
@@ -314,22 +323,33 @@ internal static partial class Program
         Set(first.State, "GriefStrength", 0f);
         Set(first.State, "GriefTicks", 0);
         Console.WriteLine("Social: full identity, single-slot replacement, asymmetric rescue, death idempotence, grief expiry, cross-room/dead guards.");
-        foreach (var instance in new[] { first, second, third }) Set(Brain(instance), "<Target>k__BackingField", target);
-        Check((bool)Invoke(Brain(first), "AcquireSlot"), "first attack slot");
+
+        foreach (var instance in new[] { first, second, third }) Set(Combat(instance), "target", target);
+        Check((bool)InvokeCombat(Combat(first), "AcquireSlot"), "first attack slot");
         Mode(Brain(first), "RetaliationCharge");
-        Check((bool)Invoke(Brain(second), "AcquireSlot"), "second attack slot");
+        Check((bool)InvokeCombat(Combat(second), "AcquireSlot"), "second attack slot");
         Mode(Brain(second), "Interfere");
-        Check(!(bool)Invoke(Brain(third), "AcquireSlot"), "third attacker blocked while retaliation uses slots");
+        Check(!(bool)InvokeCombat(Combat(third), "AcquireSlot"), "third attacker blocked while retaliation uses slots");
         first.stun = 10;
-        Invoke(Brain(first), "TickMemory");
-        Check((bool)Invoke(Brain(third), "AcquireSlot"), "stun releases slot");
-        third.grabbedBy.Add(new Creature.Grasp(target, third, 0, 0, Creature.Grasp.Shareability.NonExclusive, 1f, false));
+        InvokeBrain(Brain(first), "TickMemory");
+        Check((bool)InvokeCombat(Combat(third), "AcquireSlot"), "stun releases Combat-owned attack slot");
+
+        float thirstBeforeRestraint = (float)stateType.GetField("Thirst", Flags).GetValue(third.State);
+        var nonFlyRestrainer = Bare<Lizard>();
+        third.grabbedBy.Add(new Creature.Grasp(
+            nonFlyRestrainer, third, 0, 0,
+            Creature.Grasp.Shareability.NonExclusive, 1f, false));
+        Set(Combat(third), "hasSlot", true);
+        Set(Combat(third), "attachedChunk", target.mainBodyChunk);
         Mode(Brain(third), "Attach");
-        Invoke(Brain(third), "AfterPhysics", true);
-        Check(aiType.GetProperty("Mode", Flags).GetValue(Brain(third)).ToString() != "Attach", "held attacker detaches before drain");
-        Check((float)stateType.GetField("Thirst", Flags).GetValue(third.State) > 0f, "grab cannot satisfy thirst");
-        Check(!(bool)aiType.GetProperty("FormalAttack", Flags).GetValue(Brain(third)), "grab releases formal attack slot");
-        Console.WriteLine("Attack slots: retaliation shares cap at two, stun release, held-attach cancellation.");
+        InvokeBrain(Brain(third), "TickMemory");
+        Check(aiType.GetProperty("Mode", Flags).GetValue(Brain(third)).ToString() != "Attach",
+            "non-Fly restraint cancels Attach during current pre-physics TickMemory lifecycle");
+        Check(Math.Abs((float)stateType.GetField("Thirst", Flags).GetValue(third.State) - thirstBeforeRestraint) < 0.00001f,
+            "restraint cancellation cannot satisfy thirst or run attach drain");
+        Check(!(bool)aiType.GetProperty("FormalAttack", Flags).GetValue(Brain(third)),
+            "non-Fly restraint releases formal Combat attack slot");
+        Console.WriteLine("Attack slots: Combat owns slot cap, stun release and non-Fly restraint cancellation before attach drain.");
 
         room.Width = room.Height = 30;
         room.Tiles = new Room.Tile[30, 30];

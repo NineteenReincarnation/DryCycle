@@ -15,6 +15,7 @@ for f in \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs \
   src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs \
   src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs \
+  src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
   src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
   src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs \
@@ -63,6 +64,11 @@ grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Behavior/Per
 ! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 ! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 
+# Immediate projectile response is now a formal R3 owner. The retired ordinary facade used
+# to rediscover the same cue/player after arbitration and could become a second execution path.
+! grep -q 'TryApplyOrdinaryProjectileEvade' src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs
+grep -q 'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)' src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorExecution.cs
+
 # Dehydration Feeding is a formal domain. It may read Thirst only through
 # PlayerDehydrationFacts, and room aggregation belongs only to DB_FeedingCoordinator.
 for f in \
@@ -108,6 +114,7 @@ import re
 facts = Path('src/Thirst/PlayerDehydrationFacts.cs').read_text(encoding='utf-8')
 coordinator = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs').read_text(encoding='utf-8')
 grip = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs').read_text(encoding='utf-8')
+hooks = Path('src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs').read_text(encoding='utf-8')
 if re.search(r'(?:>=|<=|>|<)\s*PlayerDehydrationStage\.', facts + coordinator):
     raise SystemExit('PlayerDehydrationStage relational comparison is not legal C#')
 if coordinator.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:
@@ -131,6 +138,17 @@ for token in (
 ):
     if token not in grip:
         raise SystemExit('Dehydrated collision pickup contract missing: ' + token)
+
+# R3's execution precedence must keep Feeding between immediate projectile evade and Combat.
+# A simple presence check is insufficient because moving Feeding below Combat changes gameplay.
+owner_order = (
+    'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
+    'PrimaryOwner == DB_BehaviorOwner.Feeding',
+    'PrimaryOwner == DB_BehaviorOwner.Combat',
+)
+positions = [hooks.find(token) for token in owner_order]
+if any(position < 0 for position in positions) or positions != sorted(positions):
+    raise SystemExit('R3 owner order changed: expected ImmediateProjectileEvade -> Feeding -> Combat')
 PY
 
 echo 'R6 source retention audit passed.'
