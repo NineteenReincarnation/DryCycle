@@ -83,7 +83,6 @@ internal static class DB_EventHub
         ResetState();
         On.Creature.Violence += CreatureViolence;
         On.Creature.Die += CreatureDie;
-        On.Fly.Grabbed += FlyGrabbed;
         On.LizardTongue.Update += TongueUpdate;
     }
 
@@ -93,7 +92,6 @@ internal static class DB_EventHub
         enabled = false;
         On.Creature.Violence -= CreatureViolence;
         On.Creature.Die -= CreatureDie;
-        On.Fly.Grabbed -= FlyGrabbed;
         On.LizardTongue.Update -= TongueUpdate;
         ResetState();
 
@@ -122,6 +120,19 @@ internal static class DB_EventHub
         VictimState state = StateFor(victim);
         state.ExplicitConsumer = consumer;
         state.ExplicitConsumeClock = Clock(victim);
+    }
+
+    /// <summary>
+    /// Reports a DB_Creature grasp before Fly.Grabbed installs the new grasp into grabbedBy.
+    /// Keeping this pre-base boundary preserves tongue -> grasp transfer deduplication while
+    /// removing the old global On.Fly.Grabbed observer for our own virtual lifecycle.
+    /// </summary>
+    internal static void ReportGraspCapture(DB_Creature victim, Creature.Grasp grasp)
+    {
+        if (!enabled || victim == null || victim.dead || victim.slatedForDeletetion ||
+            grasp?.grabber is not Creature captor || captor is Fly)
+            return;
+        ReportCapture(victim, captor, null, DB_CaptureKind.Grasp);
     }
 
     internal static bool WithinAttributionWindow(int now, int then, int window)
@@ -261,21 +272,6 @@ internal static class DB_EventHub
             state.PendingMortality = mortality;
         else
             Dispatch(Mortality, mortality);
-    }
-
-    private static void FlyGrabbed(On.Fly.orig_Grabbed orig, Fly self, Creature.Grasp grasp)
-    {
-        if (self is DB_Creature victim && !victim.dead &&
-            grasp?.grabber is Creature captor && captor is not Fly)
-        {
-            // Publish before orig installs this new grasp into grabbedBy. If a Peach tongue
-            // is already holding the same victim, the existing tongue session remains
-            // physically active and suppresses the transfer duplicate. A genuine recapture
-            // after release has no prior active hold and therefore publishes again.
-            ReportCapture(victim, captor, null, DB_CaptureKind.Grasp);
-        }
-
-        orig(self, grasp);
     }
 
     private static void TongueUpdate(On.LizardTongue.orig_Update orig, LizardTongue self)
