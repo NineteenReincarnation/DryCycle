@@ -72,16 +72,10 @@ internal sealed class DB_AI
         if (retreat > 0) retreat--;
     }
 
+    // Compatibility/query surface kept for existing callers; classification itself lives in
+    // the restraint domain so AI, FrameContext and Travel cannot drift semantically.
     internal bool RestrainedByNonFly()
-    {
-        for (int i = 0; i < fly.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = fly.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly)
-                return true;
-        }
-        return false;
-    }
+        => DB_RestraintPolicy.IsRestrainedByNonFly(fly);
 
     private void TickGrabMemory()
     {
