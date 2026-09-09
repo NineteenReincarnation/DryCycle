@@ -55,6 +55,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         Feeding.ClearTransient();
         Rescue.ClearTransient();
         DesertAI?.ResetRoom();
+        Runtime.BeforeNewRoom();
         base.NewRoom(newRoom);
     }
 
@@ -165,6 +166,11 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
 
         DesertAI.CancelAttack();
         Emergence.Cancel();
+        DB_SocialRuntime.CancelForPriority(this, "grabbed / restraint");
+
+        // Report before vanilla installs this grasp into grabbedBy. The EventHub uses that
+        // pre-base fact to keep tongue -> grasp transfer within one capture session.
+        DB_EventHub.ReportGraspCapture(this, grasp);
         base.Grabbed(grasp);
     }
 
