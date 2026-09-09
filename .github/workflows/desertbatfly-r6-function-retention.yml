@@ -12,6 +12,7 @@ on:
       - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
       - 'tests/DesertBatfly/**'
       - 'scripts/check-desertbatfly-function-retention.sh'
+      - 'scripts/check-desertbatfly-internal-hook-cleanup.sh'
       - '.github/workflows/desertbatfly-r6-function-retention.yml'
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
       - 'tests/DesertBatfly/**'
       - 'scripts/check-desertbatfly-function-retention.sh'
+      - 'scripts/check-desertbatfly-internal-hook-cleanup.sh'
       - '.github/workflows/desertbatfly-r6-function-retention.yml'
   workflow_dispatch:
 
@@ -35,3 +37,4 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/check-desertbatfly-function-retention.sh
+          bash scripts/check-desertbatfly-internal-hook-cleanup.sh
