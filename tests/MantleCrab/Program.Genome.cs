@@ -32,13 +32,17 @@ internal static partial class Program
 
         for (int seed = -32; seed < 32; seed++)
         {
+            bool hashesDeterministic = true;
+            bool hashesInRange = true;
             foreach (string channel in channels)
             {
                 float first = MantleCrabVisualGenome.Hash(seed, channel);
                 float second = MantleCrabVisualGenome.Hash(seed, channel);
-                Check(first == second, "Genome hash is not deterministic for " + channel + " seed=" + seed);
-                Check(first >= 0f && first < 1f, "Genome hash escaped [0,1): " + channel + " seed=" + seed);
+                hashesDeterministic &= first == second;
+                hashesInRange &= first >= 0f && first < 1f;
             }
+            Check(hashesDeterministic, "Genome hash is not deterministic for seed=" + seed);
+            Check(hashesInRange, "Genome hash escaped [0,1) for seed=" + seed);
 
             MantleCrabVisualPhenotype a = CreatePhenotype(seed);
             MantleCrabVisualPhenotype b = CreatePhenotype(seed);
@@ -54,10 +58,12 @@ internal static partial class Program
             Check(identical, "Phenotype reload drift for seed=" + seed);
 
             MantleCrabVisualPhenotype dominant = CreatePhenotype(seed, 1f);
-            Check(a.ShellWidth >= .96f && a.ShellWidth <= 1.04f, "Species shell width escaped bounds");
-            Check(a.EyeSize >= 3.6f && a.EyeSize <= 4.01f, "Eye size escaped species bounds");
-            Check(a.FootBulk >= .92f && a.FootBulk <= 1.17f, "Foot bulk escaped species bounds");
-            Check(a.Asymmetry >= .02f && a.Asymmetry <= .061f, "Visual asymmetry escaped species bounds");
+            bool speciesBounds =
+                a.ShellWidth >= .96f && a.ShellWidth <= 1.04f &&
+                a.EyeSize >= 3.6f && a.EyeSize <= 4.01f &&
+                a.FootBulk >= .92f && a.FootBulk <= 1.17f &&
+                a.Asymmetry >= .02f && a.Asymmetry <= .061f;
+            Check(speciesBounds, "Phenotype escaped MantleCrab species bounds for seed=" + seed);
             Check(a.Hue == dominant.Hue, "Dominance must not change shell hue");
             genomeCases++;
         }
