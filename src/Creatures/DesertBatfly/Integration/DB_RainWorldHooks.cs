@@ -26,6 +26,8 @@ internal static class DB_RainWorldHooks
         DB_SignalRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
+        DB_FeedingCoordinator.Reset();
+        DB_DehydrationGripRuntime.Enable();
         DB_EventHub.Enable();
         DB_EventConsumers.Enable();
         DB_ThreatRuntime.Enable();
@@ -67,12 +69,14 @@ internal static class DB_RainWorldHooks
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        DB_DehydrationGripRuntime.Disable();
         DB_EventConsumers.Disable();
         DB_EventHub.Disable();
         DB_ThreatRuntime.Disable();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
+        DB_FeedingCoordinator.Reset();
         DB_SocialRuntime.Reset();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
@@ -138,6 +142,7 @@ internal static class DB_RainWorldHooks
     {
         if (self is DB_Creature desert)
         {
+            desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
             DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
@@ -153,6 +158,7 @@ internal static class DB_RainWorldHooks
             return;
         }
 
+        desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
@@ -175,6 +181,7 @@ internal static class DB_RainWorldHooks
         desert.DesertAI.RefreshDecisionState();
         DB_ThreatRuntime.RefreshState(desert);
         DB_SocialRuntime.RefreshState(desert);
+        desert.Feeding.RefreshState();
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
 
@@ -289,6 +296,18 @@ internal static class DB_RainWorldHooks
             ownership = DB_BehaviorArbiter.ResolveFrame(
                 desert, DB_BehaviorOwner.ImmediateProjectileEvade,
                 "Projectile evade executor yielded after current projectile recheck");
+        }
+
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.Feeding)
+        {
+            if (DB_BehaviorExecution.TryFeeding(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.Feeding,
+                "Feeding executor yielded after target/slot recheck");
         }
 
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Combat)
@@ -478,6 +497,7 @@ internal static class DB_RainWorldHooks
             DB_RefugePolicy.ObserveRoom(self);
         DB_SignalRoomRuntime.For(self)?.Prune(self);
         DB_EnvironmentRoomRuntime.Update(self);
+        DB_FeedingCoordinator.UpdateRoom(self);
     }
 
     private static int Nourishment(
