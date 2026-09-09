@@ -180,11 +180,33 @@ internal static partial class Program
             "Threat CounterKill, Pursuit and Retreat require non-zero sustained event windows");
 
         Type roomState = runtimeType.GetNestedType("RoomState", Flags);
-        Check(roomState != null && roomState.GetField("LastRefreshClock", Flags) != null &&
-              roomState.GetField("Players", Flags) != null && roomState.GetField("ThrownWeapons", Flags) != null,
-            "Threat Current Cue uses one room-scoped player/projectile cache rather than a per-bat room scan");
-        Check((int)runtimeType.GetField("CueRefreshTicks", Flags).GetRawConstantValue() >= 8,
-            "Threat room cue cache remains low-frequency instead of scanning all objects every frame");
+        Check(roomState != null &&
+              roomState.GetField("LastRefreshClock", Flags) == null &&
+              roomState.GetField("Players", Flags) == null &&
+              roomState.GetField("ThrownWeapons", Flags) == null &&
+              roomState.GetField("RecentSpearThrow", Flags) != null &&
+              roomState.GetField("RecentRockThrow", Flags) != null &&
+              roomState.GetField("RecentExplosion", Flags) != null &&
+              roomState.GetField("RecentGrab", Flags) != null,
+            "Threat RoomState owns temporal evidence only and cannot become a second room scanner");
+
+        Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);
+        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Check(roomContext.GetProperty("Players", Flags) != null &&
+              roomContext.GetProperty("ThrownWeapons", Flags) != null,
+            "Threat current perception reuses the shared room player/projectile snapshot");
+        MethodInfo updateCue = runtimeType.GetMethod("UpdateCue", Flags);
+        Check(MethodCallOffset(updateCue, roomContext, "For") >= 0 &&
+              MethodCallOffset(updateCue, weaponPerception, "TryObserveHeldThreats") >= 0 &&
+              MethodCallOffset(updateCue, weaponPerception, "TryFindIncomingProjectileFrom") >= 0,
+            "Threat Current Cue consumes shared RoomContext and WeaponPerception rather than rescanning the room");
+        Check((int)runtimeType.GetField("CueRefreshTicks", Flags).GetRawConstantValue() >= 8 &&
+              runtimeType.GetMethod("CueRefreshPhase", Flags) != null,
+            "Threat per-bat cue refresh remains low-frequency and phase-staggered");
+        Check(runtimeType.GetMethod("RefreshState", Flags) != null &&
+              runtimeType.GetMethod("CommitFrame", Flags) != null &&
+              runtimeType.GetMethod("Update", Flags) == null,
+            "Threat keeps split pre-arbiter refresh/post-resolution commit surfaces and no legacy combined Update facade");
 
         MethodInfo tactical = runtimeType.GetMethod("ApplyTacticalAdjustment", Flags);
         Check(tactical != null && !MethodWritesField(tactical, typeof(BodyChunk), "vel"),
@@ -211,7 +233,7 @@ internal static partial class Program
             "Threat does not revive rejected social-role design social roles");
 
         Console.WriteLine(
-            "Threat: twelve-dimensional memory, four-player isolation, saturating learning/decay, built-in threat tags, independent save key, room cues, non-persistent acute state, vanilla flight ownership and debug shape verified.");
+            "Threat: twelve-dimensional memory, four-player isolation, saturating learning/decay, built-in threat tags, independent save key, shared room perception, staggered cues, non-persistent acute state, vanilla flight ownership and debug shape verified.");
     }
 
     private static float Evidence(object boxedEvidence, Type evidenceType, string field)
