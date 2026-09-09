@@ -21,6 +21,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     internal readonly DB_SandSpitRuntime SandSpit;
     internal readonly DB_RestraintRuntime Restraint;
     internal readonly DB_RescueRuntime Rescue;
+    internal readonly DB_DehydrationFeedingRuntime Feeding;
     internal readonly DB_Runtime Runtime;
     internal bool SandSpitWindingUp => SandSpit.WindingUp;
     internal int SandSpitWindupRemaining => SandSpit.WindupRemaining;
@@ -39,6 +40,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         SandSpit = new DB_SandSpitRuntime(this);
         Restraint = new DB_RestraintRuntime(this);
         Rescue = new DB_RescueRuntime(this);
+        Feeding = new DB_DehydrationFeedingRuntime(this);
         Runtime = new DB_Runtime(this);
     }
 
@@ -50,6 +52,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     public override void NewRoom(Room newRoom)
     {
         injury?.ClearTransient();
+        Feeding.ClearTransient();
         Rescue.ClearTransient();
         DesertAI?.ResetRoom();
         base.NewRoom(newRoom);
@@ -148,6 +151,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     {
         if (grasp?.grabber is Player player)
         {
+            Feeding.CancelForGrab();
             if (Restraint.BeginPlayerHold(player, grasp))
                 DesertAI.PlayerGrabbed(player);
         }
@@ -155,6 +159,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         {
             // Capture fear/signals are semantic-event consumers. Creature retains only its
             // immediate native danger response; DB_EventHub dedupes tongue -> grasp transfer.
+            Feeding.ClearTransient();
             DesertAI.Threatened(grasp.grabber, true);
         }
 
@@ -204,6 +209,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
             return;
 
         bool wasDead = dead;
+        Feeding.ClearTransient();
         Rescue.ClearTransient();
         Restraint.ClearTransient();
         DesertAI?.CancelAttack();
@@ -219,6 +225,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     public override void Destroy()
     {
         injury?.ClearTransient();
+        Feeding.ClearTransient();
         Rescue.ClearTransient();
         Restraint.ClearTransient();
         DesertAI?.CancelAttack();
