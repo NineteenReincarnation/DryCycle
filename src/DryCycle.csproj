@@ -141,6 +141,14 @@
          sidecar produced alongside it. The sidecar lets runtime logs distinguish an
          algorithm/render bug from an AssetBundle editor/player compatibility problem. -->
     <MakeDir Directories="$(GameModRootDir)/assets/drycycle" />
+    <Copy Condition="Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures')"
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures"
+      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycyclecreatures" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures.version.txt')"
+      SourceFiles="$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures.version.txt"
+      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycyclecreatures.version.txt" SkipUnchangedFiles="true" />
+    <Warning Condition="!Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures')"
+      Text="MantleCrab creature bundle missing. Procedural CPU appearance fallback will be used." />
     <Copy
       Condition="Exists('$(DryCycleWeatherBundleSource)')"
       SourceFiles="$(DryCycleWeatherBundleSource)"

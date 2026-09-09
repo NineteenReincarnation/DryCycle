@@ -34,6 +34,39 @@ internal static class DryCycleShaderAssets
         "assets/drycycle/shaders/drycycledehydrationcomposite.shader";
 
     private static AssetBundle _bundle;
+    private static AssetBundle _creatureBundle;
+    internal static FShader MantleCrabSurface { get; private set; }
+    internal static ComputeShader MantleCrabBake { get; private set; }
+
+    // Called only by CreatureDefinition.LoadResources, after RW/Futile initialization.
+    // Same resolver, FShader ownership and safe AssetBundle lifetime as weather resources.
+    internal static void EnsureCreatureAssets(RainWorld rainWorld)
+    {
+        if (_creatureBundle != null) return;
+        string path = ResolveWeatherAssetPath("assets/drycycle/drycyclecreatures");
+        if (!File.Exists(path))
+        {
+            Plugin.Logger?.LogWarning("MantleCrab creature bundle missing; using opaque procedural CPU geometry/material fallback.");
+            return;
+        }
+        try
+        {
+            string version = ResolveWeatherAssetPath("assets/drycycle/drycyclecreatures.version.txt");
+            if (!File.Exists(version) || File.ReadAllText(version).Trim() != Application.unityVersion)
+                Plugin.Logger?.LogWarning("MantleCrab bundle editor/player version differs or metadata is missing. Player: " + Application.unityVersion);
+            _creatureBundle = AssetBundle.LoadFromFile(path);
+            if (_creatureBundle == null) return;
+            Shader shader = _creatureBundle.LoadAsset<Shader>("assets/drycycle/creatures/mantlecrab/mantlecrabsurface.shader");
+            if (shader != null && shader.isSupported)
+            {
+                MantleCrabSurface = FShader.CreateShader("DryCycleMantleCrabSurface", shader);
+                rainWorld.Shaders["DryCycleMantleCrabSurface"] = MantleCrabSurface;
+            }
+            if (SystemInfo.supportsComputeShaders)
+                MantleCrabBake = _creatureBundle.LoadAsset<ComputeShader>("assets/drycycle/creatures/mantlecrab/mantlecrabmaterialbake.compute");
+        }
+        catch (Exception ex) { Plugin.Logger?.LogError("MantleCrab assets: " + ex); }
+    }
     private static bool _enabled;
     private static bool _missingBundleLogged;
 

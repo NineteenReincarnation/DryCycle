@@ -54,6 +54,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (!_contentRegistered)
         {
             DryCycleContent.Register(new MossySpiderDefinition());
+            DryCycleContent.Register(new Creatures.MantleCrab.MantleCrabDefinition());
             DryCycleContent.Register(new DB_Definition());
             _contentRegistered = true;
         }

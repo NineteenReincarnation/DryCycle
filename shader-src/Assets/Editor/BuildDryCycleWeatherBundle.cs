@@ -67,6 +67,16 @@ namespace DryCycle.Editor
                 assetBundleName = BundleName,
                 assetNames = WeatherAssets
             };
+            string[] creatureAssets = {
+                "Assets/DryCycle/Creatures/MantleCrab/MantleCrabSurface.shader",
+                "Assets/DryCycle/Creatures/MantleCrab/MantleCrabMaterialBake.compute"
+            };
+            Shader creatureShader = AssetDatabase.LoadAssetAtPath<Shader>(creatureAssets[0]);
+            if (creatureShader == null || ShaderUtil.ShaderHasError(creatureShader))
+                throw new InvalidOperationException("MantleCrab surface shader failed to import/compile.");
+            if (AssetDatabase.LoadAssetAtPath<ComputeShader>(creatureAssets[1]) == null)
+                throw new InvalidOperationException("MantleCrab compute shader failed to import.");
+            AssetBundleBuild creatures = new AssetBundleBuild { assetBundleName = "drycyclecreatures", assetNames = creatureAssets };
 
             BuildAssetBundleOptions options =
                 BuildAssetBundleOptions.ChunkBasedCompression |
@@ -74,7 +84,7 @@ namespace DryCycle.Editor
 
             AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
                 output,
-                new AssetBundleBuild[] { build },
+                new AssetBundleBuild[] { build, creatures },
                 options,
                 target);
 
@@ -88,6 +98,9 @@ namespace DryCycle.Editor
 
             string sidecarPath = Path.Combine(output, VersionSidecarName);
             File.WriteAllText(sidecarPath, Application.unityVersion + Environment.NewLine);
+            if (!File.Exists(Path.Combine(output, "drycyclecreatures")))
+                throw new InvalidOperationException("Creature bundle output missing.");
+            File.WriteAllText(Path.Combine(output, "drycyclecreatures.version.txt"), Application.unityVersion + Environment.NewLine);
 
             Debug.Log(
                 "DryCycle weather AssetBundle built with Unity " +

@@ -1,0 +1,62 @@
+#pragma kernel Bake
+
+RWTexture2D<float4> _Atlas;
+float4 _Motif, _Pattern, _Material, _Eye, _NoiseSeed;
+
+float cell(int2 p)
+{
+    uint n = (uint)p.x * 374761393u + (uint)p.y * 668265263u;
+    n = (n ^ (n >> 13)) * 1274126177u;
+    return ((n ^ (n >> 16)) & 65535u) / 65535.0;
+}
+float noise(float2 p)
+{
+    int2 q = (int2)floor(p); float2 f = frac(p); f = f*f*(3-2*f);
+    return lerp(lerp(cell(q),cell(q+int2(1,0)),f.x),lerp(cell(q+int2(0,1)),cell(q+1),f.x),f.y);
+}
+
+// Macro bands follow wing growth; meso modulation breaks plates; micro only disturbs height.
+[numthreads(8,8,1)]
+void Bake(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 896 || id.y >= 128) return;
+    uint kind = id.x / 128;
+    float2 uv = float2(id.x % 128, id.y) / 127.0;
+    float u=uv.x, v=uv.y, wing=abs(u*2-1);
+    float mutation = u<.5 ? _NoiseSeed.z : _NoiseSeed.w;
+    float n=noise(float2(wing*5+_NoiseSeed.x,v*6+mutation*_Pattern.w));
+    float meso=noise(float2(u*17+_NoiseSeed.x,v*12+_NoiseSeed.y));
+    float micro=noise(float2(u*83+mutation,v*91+_NoiseSeed.y));
+    float band=pow(.5+.5*cos((v+wing*wing*_Pattern.z+(n-.5)*_Motif.w)*_Motif.x*6.283185+_Pattern.y),_Motif.y);
+    band *= smoothstep(_Pattern.x,_Pattern.x+.18,meso);
+    float joint=pow(abs(u*2-1),12), ridge=abs(sin((u*_Material.y+meso*.12)*6.283185));
+    float height=.45+(meso-.5)*.12+(micro-.5)*.025;
+    float ao=.8, rough=_Material.x, emission=0;
+    float3 color=0;
+    if (kind==0)
+    {
+        color=lerp(float3(.055+_Material.w,.025,.075),float3(.33,.055,.19+_Material.w),band*_Motif.z*smoothstep(0,1,wing*1.4));
+        height+=band*.08; ao=lerp(.4,.95,smoothstep(0,1,v*3)); rough=lerp(.94,.68,wing);
+    }
+    else if (kind==4)
+    {
+        color=lerp(float3(.10,.025,.055),float3(.31,.055,.115),_Material.z+ridge*.15);
+        ao=.9-.48*joint; rough=.53; height+=ridge*.06;
+    }
+    else if (kind==5)
+    {
+        color=float3(.8,.018+_Eye.y*.025,.035);
+        emission=.22+(1-smoothstep(0,_Eye.x,length(uv-.5)))*.48;
+        rough=.15; ao=1; height=.5;
+    }
+    else if (kind==3) { color=lerp(float3(.065,.045,.12),float3(.13,.11,.21),meso*.4); ao=.58+v*.27; rough=.72; }
+    else if (kind==2) { color=float3(.085,.075,.16); ao=.48+ridge*.25; rough=.7; }
+    else if (kind==6) { color=float3(.11,.055,.16); ao=.65; }
+    else
+    {
+        color=lerp(float3(.105,.13,.23+_Material.w),float3(.20,.24,.34),ridge*.25+meso*.12);
+        ao=.92-joint*.43; rough=.52; height+=ridge*.055;
+    }
+    _Atlas[id.xy]=float4(color,saturate(height));
+    _Atlas[id.xy+uint2(0,128)]=float4(ao,rough,kind/6.0,emission);
+}
