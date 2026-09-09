@@ -40,6 +40,13 @@ internal static class DB_BehaviorExecution
             DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=" + resolution.PrimaryOwner);
         if (resolution.WinningProposal.SuppressCombat)
             bat.DesertAI.CancelPhysicalAttack();
+
+        // Vanilla FlyAI.Update normally owns the final hive-tile -> Burrow transition. When
+        // Environment owns the frame that native Update is intentionally skipped, so complete
+        // the docking contract here before the ordinary environmental Dijkstra/anchor executor.
+        if (DB_EnvironmentalHiveDocking.TryExecute(bat, resolution))
+            return true;
+
         return DB_EnvironmentRuntime.ApplyOwnedBehavior(bat);
     }
 
