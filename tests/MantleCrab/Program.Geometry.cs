@@ -93,12 +93,17 @@ internal static partial class Program
         {
             object part = parts.GetValue(index);
             TriangleMesh mesh = (TriangleMesh)leaser.sprites[index];
+            bool finite = true;
+            float largestCoordinate = 0f;
             foreach (Vector2 point in mesh.vertices)
             {
-                Check(Finite(point), "Non-finite MantleCrab mesh vertex at sprite=" + index);
-                Check(Math.Abs(point.x) < 5000f && Math.Abs(point.y) < 5000f,
-                    "MantleCrab mesh vertex escaped sane bounds at sprite=" + index + ": " + point);
+                finite &= Finite(point);
+                if (Finite(point))
+                    largestCoordinate = Math.Max(largestCoordinate, Math.Max(Math.Abs(point.x), Math.Abs(point.y)));
             }
+            Check(finite, "Non-finite MantleCrab mesh vertex at sprite=" + index);
+            Check(largestCoordinate < 5000f,
+                "MantleCrab mesh escaped sane bounds at sprite=" + index + "; maxCoordinate=" + largestCoordinate);
 
             meshes.Add(new
             {
@@ -164,6 +169,9 @@ internal static partial class Program
             WriteByte(writer, color.a);
             atlasPixels++;
         }
+
+        Check(atlasPixels == width * height,
+            "CPU atlas pixel count mismatch; expected=" + (width * height) + " actual=" + atlasPixels);
     }
 
     private static void WriteByte(BinaryWriter writer, float value)
