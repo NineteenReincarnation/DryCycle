@@ -21,6 +21,7 @@ room_context = read('Core/Runtime/DB_RoomContext.cs')
 performance_probe = read('Core/Runtime/DB_PerformanceProbe.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
+perception = read('Behavior/Perception/DB_CreaturePerception.cs')
 weapon = read('Behavior/Perception/DB_WeaponPerception.cs')
 visibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')
 arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
@@ -66,6 +67,21 @@ if min(distance_gate, los_gate) < 0 or distance_gate > los_gate:
     failures.append('visibility must reject effective range before Room.VisualContact terrain LOS')
 if 'if (!observer.room.VisualContact(origin, targetPosition))' in visibility:
     failures.append('visibility reintroduced terrain LOS before exact distance rejection')
+
+# Base creature perception is also an O(bats*creatures) scan. A freshly realized swarm
+# must not lock-step every eighth tick, and exact distance sqrt belongs after visibility.
+for token in (
+    'internal const int ScanIntervalTicks = 8;',
+    'ResetScanPhase();',
+    'ScanPhase(int visualSeed)',
+    'return 1 + (int)(x % (uint)ScanIntervalTicks);',
+):
+    if token not in perception:
+        failures.append('creature perception stagger contract missing: ' + token)
+perception_visibility = perception.find('if (!DB_VisibilityPolicy.CanObserve(')
+perception_distance = perception.find('float distance = Vector2.Distance(', perception_visibility)
+if min(perception_visibility, perception_distance) < 0 or perception_visibility > perception_distance:
+    failures.append('creature perception must validate visibility before exact Vector2.Distance sqrt')
 
 # Realized Fear/PTSD target discovery must reuse the room snapshot instead of doing a per-bat room scan.
 if 'DB_RoomContext.For(bat?.room)' not in fear or 'roomContext.Creatures' not in fear:
@@ -230,5 +246,5 @@ if failures:
     print('\n'.join(failures), file=sys.stderr)
     sys.exit(1)
 
-print('R7 static performance retention passed: shared scans, distance-cull-before-LOS, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
+print('R7 static performance retention passed: shared scans, staggered creature perception, distance-cull-before-LOS, lazy room activation, bounded cadences, and arbiter hot-path allocation guard.')
 PY
