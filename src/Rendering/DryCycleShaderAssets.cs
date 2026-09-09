@@ -5,7 +5,7 @@ using UnityEngine;
 namespace DryCycle.Rendering;
 
 /// <summary>
-/// Owns DryCycle's custom Unity weather shader bundle. AssetBundle.LoadAsset is
+/// Owns DryCycle's custom weather and creature shader bundles. AssetBundle.LoadAsset is
 /// deliberately deferred until RainWorld.LoadResources; loading Unity shader assets
 /// from BepInEx OnEnable/Awake can hard-crash the player before Rain World has
 /// initialized its rendering resources.

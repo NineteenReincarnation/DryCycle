@@ -10,6 +10,8 @@ public sealed class MantleCrab : Creature
     private static readonly float[] Radii = [17, 26, 30, 26, 17];
     internal readonly MantleCrabLimb[] Legs = new MantleCrabLimb[4];
     internal readonly MantleCrabLimb[] Pincers = new MantleCrabLimb[2];
+    private readonly float[] supportAccelerations = new float[4];
+    private readonly Vector2[] frameCorrections = new Vector2[5];
     internal float ShellScale = 1f;
     internal readonly Rendering.MantleCrabVisualPhenotype Phenotype;
     internal int SupportingFeet { get; private set; }
@@ -62,14 +64,14 @@ public sealed class MantleCrab : Creature
         graphicsModule?.Reset();
     }
 
-    internal Vector2 Anchor(MantleCrabLimb limb) => bodyChunks[limb.AnchorChunk].pos +
-        new Vector2(Axis.y, -Axis.x) * (limb.IsPincer ? 14f : 8f) +
-        (limb.IsPincer ? Axis * limb.Side * 16f : Vector2.zero);
+    internal Vector2 Anchor(MantleCrabLimb limb) => bodyChunks[2].pos +
+        Axis * limb.Rest[0].x + new Vector2(-Axis.y, Axis.x) * limb.Rest[0].y;
 
     public override void Update(bool eu)
     {
         base.Update(eu);
         if (room == null) return;
+        StabilizeShell();
         SupportingFeet = 0;
         foreach (MantleCrabLimb leg in Legs)
         {
@@ -78,19 +80,83 @@ public sealed class MantleCrab : Creature
         }
         foreach (MantleCrabLimb pincer in Pincers) pincer.Update(this, Anchor(pincer));
         if (!Consious || SupportingFeet == 0) return;
+        ApplySupport(gravity * room.gravity);
+    }
 
+    internal void ApplySupport(float effectiveGravity)
+    {
         float totalMass = TotalMass;
-        foreach (MantleCrabLimb leg in Legs)
+        Vector2 center = Vector2.zero, velocity = Vector2.zero;
+        foreach (BodyChunk chunk in bodyChunks)
+        { center += chunk.pos * chunk.mass; velocity += chunk.vel * chunk.mass; }
+        center /= totalMass; velocity /= totalMass;
+        float angularMomentum = 0f, inertia = 0f;
+        foreach (BodyChunk chunk in bodyChunks)
         {
+            Vector2 offset = chunk.pos - center, relativeVelocity = chunk.vel - velocity;
+            angularMomentum += chunk.mass * (offset.x * relativeVelocity.y - offset.y * relativeVelocity.x);
+            inertia += chunk.mass * offset.sqrMagnitude;
+        }
+        float angularVelocity = angularMomentum / Mathf.Max(1f, inertia);
+        for (int i = 0; i < Legs.Length; i++)
+        {
+            MantleCrabLimb leg = Legs[i];
+            supportAccelerations[i] = 0f;
             if (!leg.Planted) continue;
             BodyChunk anchor = bodyChunks[leg.AnchorChunk];
             float extensionError = leg.StandHeight - (Anchor(leg).y - leg.Tip.y);
-            float acceleration = MantleCrabRigMath.SupportAcceleration(extensionError,
-                anchor.vel.y + gravity * room.gravity, gravity * room.gravity, SupportingFeet);
+            // Distance constraints exchange local velocities even at rest. Damping the fitted
+            // rigid-frame velocity avoids interpreting those impulses as upward body motion.
+            float stationVelocity = velocity.y + angularVelocity * (anchor.pos.x - center.x);
+            supportAccelerations[i] = MantleCrabRigMath.SupportAcceleration(extensionError,
+                stationVelocity, effectiveGravity, SupportingFeet);
+        }
+        // Evaluate every leg against the same velocity snapshot. Paired legs share a chunk;
+        // applying the first force before evaluating the second made support order-dependent.
+        for (int i = 0; i < Legs.Length; i++)
+        {
+            MantleCrabLimb leg = Legs[i];
+            if (!leg.Planted) continue;
+            BodyChunk anchor = bodyChunks[leg.AnchorChunk];
             // Forces act at the attached shell station; asymmetric contacts can tilt the body.
-            anchor.vel.y += acceleration * totalMass / anchor.mass;
+            anchor.vel.y += supportAccelerations[i] * totalMass / anchor.mass;
             if (SupportingFeet >= 2) anchor.vel.x -= Mathf.Clamp(anchor.vel.x * .08f, -.35f, .35f);
         }
+    }
+
+    internal void StabilizeShell()
+    {
+        // A nearly collinear distance graph can bow far with very little length error.
+        // Fit the species frame to the current axis, then restore only its deformation.
+        // This is internal elasticity, not a world-space orientation or height lock.
+        Vector2 center = Vector2.zero, velocity = Vector2.zero, restCenter = Vector2.zero;
+        float mass = TotalMass;
+        for (int i = 0; i < 5; i++)
+        {
+            center += bodyChunks[i].pos * bodyChunks[i].mass;
+            velocity += bodyChunks[i].vel * bodyChunks[i].mass;
+            restCenter += ShellRest[i] * ShellScale * bodyChunks[i].mass;
+        }
+        center /= mass; velocity /= mass; restCenter /= mass;
+        Vector2 axis = Axis, up = new(-axis.y, axis.x);
+        Vector2 net = Vector2.zero;
+        float limit = 1f;
+        for (int i = 0; i < 5; i++)
+        {
+            Vector2 local = ShellRest[i] * ShellScale - restCenter;
+            Vector2 error = center + axis * local.x + up * local.y - bodyChunks[i].pos;
+            // Only the component normal to the shell corrects bowing; the main links own span.
+            frameCorrections[i] = up * (.32f * Vector2.Dot(error, up) -
+                .16f * Vector2.Dot(bodyChunks[i].vel - velocity, up));
+            net += frameCorrections[i] * bodyChunks[i].mass;
+        }
+        net /= mass;
+        for (int i = 0; i < 5; i++)
+        {
+            frameCorrections[i] -= net;
+            limit = Mathf.Min(limit, 4f / Mathf.Max(4f, frameCorrections[i].magnitude));
+        }
+        for (int i = 0; i < 5; i++) bodyChunks[i].vel += frameCorrections[i] * limit;
     }
 
     public override void InitiateGraphicsModule()

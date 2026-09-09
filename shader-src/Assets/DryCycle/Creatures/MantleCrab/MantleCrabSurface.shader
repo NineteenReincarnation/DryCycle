@@ -37,9 +37,10 @@ Shader "DryCycle/MantleCrabSurface"
                 if (kind<.5) n=normalize(float3(xy.x*.38,xy.y*.65,.85));
                 else if (kind==3) n=normalize(float3(sign(xy.x)*smoothstep(.35,.55,abs(xy.x))*.8,
                     sign(xy.y)*smoothstep(.25,.45,abs(xy.y))*.9,1)); // flat crown, beveled sides, heavy sole
-                else if (kind==5 || kind==2) n=normalize(float3(xy*.8,sqrt(saturate(1-dot(xy,xy)*.45))+.2));
+                else if (kind==5) n=normalize(float3(xy*.8,sqrt(saturate(1-dot(xy,xy)*.45))+.2));
+                else if (kind==2) n=normalize(float3(xy.x*.3,sign(xy.y)*.55,.8));
                 else if (kind==4) n=normalize(float3(xy.x*.25,xy.y*.75,.7));
-                else n=normalize(float3(0,xy.y,sqrt(saturate(1-xy.y*xy.y))+.25));
+                else n=normalize(float3(-.06,xy.y<-.25?-.75:xy.y>.25?.65:.05,xy.y<-.25?.55:xy.y>.25?.65:1));
                 float2 grad=float2(heightAt(i.uv+float2(1.0/896,0),kind)-heightAt(i.uv-float2(1.0/896,0),kind),
                     heightAt(i.uv+float2(0,1.0/256),kind)-heightAt(i.uv-float2(0,1.0/256),kind));
                 n=normalize(n-float3(grad*3.5,0));
@@ -64,7 +65,7 @@ Shader "DryCycle/MantleCrabSurface"
                 float3 fog=tex2D(_PalTex,float2(1.5/32,7.5/16)).rgb;
                 color=lerp(color,black,.08);
                 float fogAmount=1-tex2D(_PalTex,float2(9.5/32,7.5/16)).r;
-                color=lerp(color,fog,depth*.18+fogAmount*.06);
+                color=lerp(color,fog,depth*.38+fogAmount*.06);
                 color+=pattern.rgb*surface.a; // emission only; never creates a LightSource
                 // Stable anatomical dither, not frame-random noise or transparent edges.
                 float2 pixel=floor(uv*128);

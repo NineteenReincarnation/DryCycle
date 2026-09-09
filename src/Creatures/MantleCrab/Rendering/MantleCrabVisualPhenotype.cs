@@ -28,8 +28,8 @@ internal sealed class MantleCrabVisualPhenotype
         ChitinRoughness = .68f + .18f * g.Channel("ChitinRoughness");
         LegDetail = 7f + 5f * g.Channel("LegDetail") + 3f * g.Energy;
         PincerAccent = .2f + .35f * g.Channel("PincerAccent") + .2f * g.Aggression;
-        EyeSize = 5.7f + .7f * g.Channel("EyeSize");
-        EyeAspect = 1.35f + .2f * g.Channel("EyeAspect");
+        EyeSize = 3.6f + .4f * g.Channel("EyeSize");
+        EyeAspect = 1.8f + .2f * g.Channel("EyeAspect");
         EyeCore = .16f + .08f * g.Channel("EyeCore");
         EyeWarmth = g.Channel("EyeWarmth");
         Hue = (g.Channel("ShellHue") - .5f) * .035f;

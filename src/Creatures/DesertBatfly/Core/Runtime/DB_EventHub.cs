@@ -21,7 +21,7 @@ internal static class DB_EventHub
     internal static event Action<DB_CaptureEvent> Capture;
     internal static event Action<DB_MortalityEvent> Mortality;
 
-    private sealed class CaptureSession
+    internal sealed class CaptureSession
     {
         internal object Captor;
         internal LizardTongue Tongue;
@@ -45,7 +45,7 @@ internal static class DB_EventHub
         }
     }
 
-    private sealed class VictimState
+    internal sealed class VictimState
     {
         internal Creature LastDamageInstigator;
         internal PhysicalObject LastDamageSource;
@@ -78,20 +78,20 @@ internal static class DB_EventHub
     /// </summary>
     internal readonly struct ViolenceTransaction
     {
-        private readonly VictimState state;
-        private readonly DB_Creature victim;
-        private readonly bool wasDead;
-        private readonly int sequence;
-        private readonly Creature instigator;
-        private readonly PhysicalObject sourceObject;
-        private readonly Creature.DamageType damageType;
-        private readonly float damage;
-        private readonly float stun;
-        private readonly Vector2 position;
-        private readonly int clock;
-        private readonly bool canAttributeMortality;
+        internal readonly VictimState state;
+        internal readonly DB_Creature victim;
+        internal readonly bool wasDead;
+        internal readonly int sequence;
+        internal readonly Creature instigator;
+        internal readonly PhysicalObject sourceObject;
+        internal readonly Creature.DamageType damageType;
+        internal readonly float damage;
+        internal readonly float stun;
+        internal readonly Vector2 position;
+        internal readonly int clock;
+        internal readonly bool canAttributeMortality;
 
-        private ViolenceTransaction(
+        internal ViolenceTransaction(
             VictimState state,
             DB_Creature victim,
             bool wasDead,
@@ -119,7 +119,7 @@ internal static class DB_EventHub
             this.canAttributeMortality = canAttributeMortality;
         }
 
-        private bool Active => state != null && victim != null;
+        internal bool Active => state != null && victim != null;
     }
 
     /// <summary>
@@ -128,23 +128,23 @@ internal static class DB_EventHub
     /// </summary>
     internal readonly struct MortalityTransaction
     {
-        private readonly VictimState state;
-        private readonly DB_Creature victim;
-        private readonly bool wasDead;
-        private readonly int clock;
-        private readonly Vector2 deathPosition;
-        private readonly DB_Creature[] chainWitnesses;
-        private readonly bool revengeFailed;
-        private readonly Creature killer;
-        private readonly PhysicalObject sourceObject;
-        private readonly Creature.DamageType damageType;
-        private readonly float damage;
-        private readonly float stun;
-        private readonly float threatScale;
-        private readonly bool wasConsumed;
-        private readonly DB_MortalityAttribution attribution;
+        internal readonly VictimState state;
+        internal readonly DB_Creature victim;
+        internal readonly bool wasDead;
+        internal readonly int clock;
+        internal readonly Vector2 deathPosition;
+        internal readonly DB_Creature[] chainWitnesses;
+        internal readonly bool revengeFailed;
+        internal readonly Creature killer;
+        internal readonly PhysicalObject sourceObject;
+        internal readonly Creature.DamageType damageType;
+        internal readonly float damage;
+        internal readonly float stun;
+        internal readonly float threatScale;
+        internal readonly bool wasConsumed;
+        internal readonly DB_MortalityAttribution attribution;
 
-        private MortalityTransaction(
+        internal MortalityTransaction(
             VictimState state,
             DB_Creature victim,
             bool wasDead,
@@ -178,7 +178,7 @@ internal static class DB_EventHub
             this.attribution = attribution;
         }
 
-        private bool Active => state != null && victim != null;
+        internal bool Active => state != null && victim != null;
     }
 
     private static ConditionalWeakTable<DB_Creature, VictimState> victims = new();

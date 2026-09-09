@@ -14,6 +14,18 @@ float noise(float2 p)
     int2 q = (int2)floor(p); float2 f = frac(p); f = f*f*(3-2*f);
     return lerp(lerp(cell(q),cell(q+int2(1,0)),f.x),lerp(cell(q+int2(0,1)),cell(q+1),f.x),f.y);
 }
+float plateSeam(float2 p)
+{
+    int2 q=(int2)floor(p); float nearest=100, second=100;
+    for (int cy=-1;cy<=1;cy++) for (int cx=-1;cx<=1;cx++)
+    {
+        int2 tile=q+int2(cx,cy);
+        float2 d=tile+.2+float2(cell(tile),cell(tile+int2(37,-19)))*.6-p;
+        float distance=dot(d,d);
+        if(distance<nearest) { second=nearest; nearest=distance; } else second=min(second,distance);
+    }
+    return 1-smoothstep(.02,.16,sqrt(second)-sqrt(nearest));
+}
 
 // Macro bands follow wing growth; meso modulation breaks plates; micro only disturbs height.
 [numthreads(8,8,1)]
@@ -27,7 +39,8 @@ void Bake(uint3 id : SV_DispatchThreadID)
     float n=noise(float2(wing*5+_NoiseSeed.x,v*6+mutation*_Pattern.w));
     float meso=noise(float2(u*17+_NoiseSeed.x,v*12+_NoiseSeed.y));
     float micro=noise(float2(u*83+mutation,v*91+_NoiseSeed.y));
-    float band=pow(.5+.5*cos((v+wing*wing*_Pattern.z+(n-.5)*_Motif.w)*_Motif.x*6.283185+_Pattern.y),_Motif.y);
+    float plate=plateSeam(float2((kind==0?wing:u)*12+_NoiseSeed.x,v*(kind==0?8:3)+_NoiseSeed.y+mutation*_Pattern.w));
+    float band=pow(.5+.5*cos(wing*(_Motif.x+8)*3.141593+(1-v)*(2+wing*(2+2*_Pattern.z))+(n-.5)*_Motif.w*3+_Pattern.y),_Motif.y+1);
     band *= smoothstep(_Pattern.x,_Pattern.x+.18,meso);
     float joint=pow(abs(u*2-1),12), ridge=abs(sin((u*_Material.y+meso*.12)*6.283185));
     float height=.45+(meso-.5)*.12+(micro-.5)*.025;
@@ -35,12 +48,16 @@ void Bake(uint3 id : SV_DispatchThreadID)
     float3 color=0;
     if (kind==0)
     {
-        color=lerp(float3(.055+_Material.w,.025,.075),float3(.33,.055,.19+_Material.w),band*_Motif.z*smoothstep(0,1,wing*1.4));
+        float wingMask=smoothstep(.38,.8,wing);
+        color=lerp(float3(.018,.015,.042),float3(.20,.22,.28),wingMask);
+        color=lerp(color,float3(.38,.075,.15+_Material.w),band*_Motif.z*wingMask*(.55+v*.45));
+        float crown=smoothstep(.65,.95,v)*(1-wingMask);
+        color=lerp(color,float3(.14,.052,.08),crown*.75);
         height+=band*.08; ao=lerp(.4,.95,smoothstep(0,1,v*3)); rough=lerp(.94,.68,wing);
     }
     else if (kind==4)
     {
-        color=lerp(float3(.10,.025,.055),float3(.31,.055,.115),_Material.z+ridge*.15);
+        color=lerp(float3(.055,.012,.034),float3(.24,.035,.08),_Material.z+meso*.12);
         ao=.9-.48*joint; rough=.53; height+=ridge*.06;
     }
     else if (kind==5)
@@ -54,9 +71,10 @@ void Bake(uint3 id : SV_DispatchThreadID)
     else if (kind==6) { color=float3(.11,.055,.16); ao=.65; }
     else
     {
-        color=lerp(float3(.105,.13,.23+_Material.w),float3(.20,.24,.34),ridge*.25+meso*.12);
-        ao=.92-joint*.43; rough=.52; height+=ridge*.055;
+        color=lerp(float3(.105,.17,.23+_Material.w),float3(.23,.31,.38),meso*.15);
+        ao=.96-joint*.22; rough=.5; height+=ridge*.012;
     }
+    if(kind!=5) { height-=plate*.045; ao*=1-plate*.18; rough=saturate(rough+(micro-.5)*.08); }
     _Atlas[id.xy]=float4(color,saturate(height));
     _Atlas[id.xy+uint2(0,128)]=float4(ao,rough,kind/6.0,emission);
 }

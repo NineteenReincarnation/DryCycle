@@ -110,7 +110,7 @@ namespace DryCycle.Editor
             {
                 Shader.SetGlobalVector("_lightDirAndPixelSize", new Vector4(direction.x, direction.y, 1f / 960, 1f / 1080));
                 commands.SetRenderTarget(target);
-                commands.ClearRenderTarget(true, true, dark ? new Color(.02f, .035f, .045f) : new Color(.29f, .47f, .51f));
+                commands.ClearRenderTarget(true, true, dark ? new Color(.02f, .035f, .045f) : new Color(.43f, .72f, .78f));
                 commands.SetViewProjectionMatrices(Matrix4x4.identity, GL.GetGPUProjectionMatrix(Matrix4x4.Ortho(-160, 160, -20, 340, -1, 1), false));
                 for (int i = 0; i < meshes.Count; i++)
                 {

@@ -41,9 +41,14 @@ namespace DryCycle.Editor
             Build(BuildTarget.StandaloneWindows64);
         }
 
-        private static void Build(BuildTarget target)
+        public static void BuildCreaturesFromCommandLine()
         {
-            ValidateSourceAssets();
+            Build(BuildTarget.StandaloneWindows64, true);
+        }
+
+        private static void Build(BuildTarget target, bool creaturesOnly = false)
+        {
+            if (!creaturesOnly) ValidateSourceAssets();
 
             DirectoryInfo projectDirectory = Directory.GetParent(Application.dataPath);
             string projectRoot = projectDirectory == null ? null : projectDirectory.FullName;
@@ -84,11 +89,11 @@ namespace DryCycle.Editor
 
             AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
                 output,
-                new AssetBundleBuild[] { build, creatures },
+                creaturesOnly ? new AssetBundleBuild[] { creatures } : new AssetBundleBuild[] { build, creatures },
                 options,
                 target);
 
-            string bundlePath = Path.Combine(output, BundleName);
+            string bundlePath = Path.Combine(output, creaturesOnly ? "drycyclecreatures" : BundleName);
             if (manifest == null || !File.Exists(bundlePath))
             {
                 throw new InvalidOperationException(
@@ -96,7 +101,7 @@ namespace DryCycle.Editor
                     bundlePath + "'.");
             }
 
-            string sidecarPath = Path.Combine(output, VersionSidecarName);
+            string sidecarPath = Path.Combine(output, creaturesOnly ? "drycyclecreatures.version.txt" : VersionSidecarName);
             File.WriteAllText(sidecarPath, Application.unityVersion + Environment.NewLine);
             if (!File.Exists(Path.Combine(output, "drycyclecreatures")))
                 throw new InvalidOperationException("Creature bundle output missing.");

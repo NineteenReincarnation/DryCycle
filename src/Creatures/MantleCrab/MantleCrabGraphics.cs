@@ -7,12 +7,12 @@ namespace DryCycle.Creatures.MantleCrab;
 
 public sealed class MantleCrabGraphics : GraphicsModule
 {
-    private const int Shell = 38, PincersStart = 39, EyesStart = 59, SpriteCount = 61;
+    internal const int ThreadCount = 20, Shell = 32 + ThreadCount, PincersStart = Shell + 1, EyesStart = PincersStart + 20, SpriteCount = EyesStart + 2;
     private readonly MantleCrab crab;
     private readonly MantleCrabVisualPhenotype phenotype;
     private MantleCrabMaterialCache material;
     private readonly Part[] parts = new Part[SpriteCount];
-    private readonly Vector2[,] threads = new Vector2[6, 4], lastThreads = new Vector2[6, 4];
+    private readonly Vector2[,] threads = new Vector2[ThreadCount, 5], lastThreads = new Vector2[ThreadCount, 5];
     private readonly Vector2[] eyes = new Vector2[2], lastEyes = new Vector2[2];
 
     private sealed class Part
@@ -42,19 +42,19 @@ public sealed class MantleCrabGraphics : GraphicsModule
         this.crab = crab; phenotype = crab.Phenotype; cullRange = 650f;
         for (int i = 0; i < 4; i++)
         {
-            for (int j = 0; j < 4; j++) Define(i * 8 + j, 8, 4, MantleCrabMaterial.Leg, crab.Legs[i].LocalDepth);
+            for (int j = 0; j < 4; j++) Define(i * 8 + j, 12, 6, MantleCrabMaterial.Leg, crab.Legs[i].LocalDepth);
             for (int j = 0; j < 3; j++) Define(i * 8 + 4 + j, 6, 4, MantleCrabMaterial.Joint, crab.Legs[i].LocalDepth);
-            Define(i * 8 + 7, 6, 4, MantleCrabMaterial.Foot, crab.Legs[i].LocalDepth);
+            Define(i * 8 + 7, 12, 6, MantleCrabMaterial.Foot, crab.Legs[i].LocalDepth);
         }
-        for (int i = 32; i < 38; i++) Define(i, 3, 1, MantleCrabMaterial.Fringe, .4f);
-        Define(Shell, 64, 12, MantleCrabMaterial.Shell, 0f);
+        for (int i = 32; i < Shell; i++) Define(i, 16, 1, MantleCrabMaterial.Fringe, .3f);
+        Define(Shell, 96, 20, MantleCrabMaterial.Shell, 0f);
         for (int i = 0; i < 2; i++)
         {
             int start = PincersStart + i * 9;
             for (int j = 0; j < 3; j++) Define(start + j, 8, 4, MantleCrabMaterial.Pincer, 0f);
             for (int j = 3; j < 6; j++) Define(start + j, 6, 4, MantleCrabMaterial.Pincer, 0f);
             for (int j = 6; j < 9; j++) Define(start + j, 8, 4, MantleCrabMaterial.Pincer, 0f);
-            Define(57 + i, 3, 2, MantleCrabMaterial.Pincer, 0f);
+            Define(EyesStart - 2 + i, 8, 2, MantleCrabMaterial.Pincer, 0f);
             Define(EyesStart + i, 10, 8, MantleCrabMaterial.Eye, 0f);
         }
         Reset();
@@ -98,15 +98,33 @@ public sealed class MantleCrabGraphics : GraphicsModule
         for (int i = PincersStart; i < SpriteCount; i++) container.AddChild(leaser.sprites[i]);
     }
 
-    private Vector2 EyeAnchor(int i) => crab.bodyChunks[2].pos + crab.Axis * (i == 0 ? -18f : 18f) + Vector2.up * 17f;
-    private Vector2 ThreadAnchor(int i) => Vector2.Lerp(crab.bodyChunks[1].pos, crab.bodyChunks[3].pos, i / 5f) + Vector2.down * 16f;
+    private Vector2 EyeAnchor(int i) => Local(new Vector2(i == 0 ? -10f : 25f, 21f));
+    private Vector2 Local(Vector2 point) => crab.bodyChunks[2].pos + crab.Axis * point.x + new Vector2(-crab.Axis.y, crab.Axis.x) * point.y;
+    private Vector2 ThreadRest(int i, float t)
+    {
+        Vector2 a, control, b;
+        switch (i)
+        {
+            case 0: a = new(-63,-5); control = new(-61,-121); b = new(-44,-19); break;
+            case 1: a = new(-46,-21); control = new(-43,-88); b = new(-21,-24); break;
+            case 2: a = new(57,-6); control = new(65,-96); b = new(40,-18); break;
+            case 3: a = new(48,-11); control = new(55,-59); b = new(49,-65); break;
+            default:
+                float h = MantleCrabVisualGenome.Hash(1729, "Fringe" + i);
+                a = new Vector2(Mathf.Lerp(-43, 43, (i - 4) / 15f), -22 + h * 8);
+                control = a + new Vector2((h - .5f) * 10, -10 - h * 17);
+                b = a + new Vector2((h - .5f) * 6, -13 - h * 24);
+                break;
+        }
+        return Local(a * ((1-t)*(1-t)) + control * (2*t*(1-t)) + b * (t*t));
+    }
 
     public override void Reset()
     {
         base.Reset();
         for (int i = 0; i < 2; i++) eyes[i] = lastEyes[i] = EyeAnchor(i) + Vector2.down * 8f;
-        for (int i = 0; i < 6; i++)
-        for (int j = 0; j < 4; j++) threads[i, j] = lastThreads[i, j] = ThreadAnchor(i) + Vector2.down * j * (5f + i % 3);
+        for (int i = 0; i < ThreadCount; i++)
+        for (int j = 0; j < 5; j++) threads[i, j] = lastThreads[i, j] = ThreadRest(i, j / 4f);
     }
 
     public override void Update()
@@ -118,15 +136,14 @@ public sealed class MantleCrabGraphics : GraphicsModule
             Vector2 next = Vector2.Lerp(eyes[i] + (eyes[i] - lastEyes[i]) * .5f, desired, .32f);
             lastEyes[i] = eyes[i]; eyes[i] = desired + Vector2.ClampMagnitude(next - desired, 2.3f);
         }
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < ThreadCount; i++)
         {
-            Vector2 previous = ThreadAnchor(i);
-            for (int j = 0; j < 4; j++)
+            for (int j = 0; j < 5; j++)
             {
-                Vector2 next = threads[i, j] + (threads[i, j] - lastThreads[i, j]) * .85f + Vector2.down * .3f;
+                Vector2 rest = ThreadRest(i, j / 4f);
+                Vector2 next = threads[i,j] + (threads[i,j]-lastThreads[i,j]) * .8f + (rest-threads[i,j])*.08f;
                 lastThreads[i, j] = threads[i, j];
-                threads[i, j] = j == 0 ? previous : previous + (next - previous).normalized * (5f + i % 3);
-                previous = threads[i, j];
+                threads[i,j] = j == 0 || (i < 3 && j == 4) ? rest : rest + Vector2.ClampMagnitude(next-rest, 3f);
             }
         }
     }
@@ -147,25 +164,32 @@ public sealed class MantleCrabGraphics : GraphicsModule
     {
         for (int i = 0; i < 4; i++) DrawLeg(leaser, i, timeStacker, camPos);
         DrawShell((TriangleMesh)leaser.sprites[Shell], timeStacker, camPos);
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < ThreadCount; i++)
         {
             TriangleMesh mesh = (TriangleMesh)leaser.sprites[32 + i];
-            for (int j = 0; j < 4; j++)
+            for (int j = 0; j <= 16; j++)
             {
-                Vector2 point = Vector2.Lerp(lastThreads[i, j], threads[i, j], timeStacker) - camPos;
-                mesh.MoveVertice(j, point - Vector2.right * .5f);
-                mesh.MoveVertice(4 + j, point + Vector2.right * .5f);
+                float u = j / 4f; int k = Mathf.Min(3, (int)u); float t = u-k;
+                Vector2 a = ThreadPoint(i, Mathf.Max(0,k-1), timeStacker), b = ThreadPoint(i,k,timeStacker);
+                Vector2 c = ThreadPoint(i,k+1,timeStacker), d = ThreadPoint(i,Mathf.Min(4,k+2),timeStacker);
+                Vector2 point = .5f*((2*b)+(-a+c)*t+(2*a-5*b+4*c-d)*t*t+(-a+3*b-3*c+d)*t*t*t)-camPos;
+                float width = i < 4 ? .65f : Mathf.Lerp(1.3f,.15f,j/16f);
+                Vector2 cross = MantleCrabRenderingMath.Perpendicular((c-b).normalized)*width;
+                mesh.MoveVertice(j, point-cross); mesh.MoveVertice(17+j,point+cross);
             }
         }
         for (int i = 0; i < 2; i++)
         {
             DrawPincer(leaser, i, timeStacker, camPos);
             Vector2 eye = Vector2.Lerp(lastEyes[i], eyes[i], timeStacker);
-            Segment(leaser, 57 + i, EyeAnchor(i), eye, 1.3f, .65f, camPos);
+            // The thin continuation below each red eye is part of its hanging stalk.
+            Segment(leaser, EyesStart - 2 + i, eye, eye + new Vector2(i == 0 ? 3f : -7f,-22f), .8f, .25f, camPos);
             Round(leaser, EyesStart + i, eye, crab.Axis, phenotype.EyeSize * (i == 0 ? .98f : 1.02f),
                 phenotype.EyeSize * phenotype.EyeAspect, camPos);
         }
     }
+
+    private Vector2 ThreadPoint(int i, int j, float time) => Vector2.Lerp(lastThreads[i,j], threads[i,j], time);
 
     private void DrawShell(TriangleMesh mesh, float time, Vector2 camera)
     {
@@ -180,13 +204,18 @@ public sealed class MantleCrabGraphics : GraphicsModule
             Vector2 center = Vector2.Lerp(a, b, bodyU - station);
             if (u < 17f / 202f) center += axis * ((u * 202f - 17f) * phenotype.ShellWidth);
             if (u > 185f / 202f) center += axis * ((u * 202f - 185f) * phenotype.ShellWidth);
-            float half = MantleCrabRenderingMath.ShellHalfHeight(u);
+            float wing = Mathf.Abs(u*2-1);
             float edge = (MantleCrabRenderingMath.Noise(x * 3.7f + phenotype.NoiseSeed.x, 1f) - .5f) * phenotype.EdgeRoughness;
             center += up * (Mathf.Abs(u * 2f - 1f) * phenotype.WingAngle * 80f);
+            center += up * (8f - Mathf.Lerp(MantleCrab.ShellRest[station].y, MantleCrab.ShellRest[station+1].y, bodyU-station));
+            float top = 6f + 22f * Mathf.Exp(-Mathf.Pow(wing / .53f, 3f));
+            top += Mathf.Pow(Mathf.Max(0,Mathf.Sin(x*1.73f)),8f)*3.2f*Mathf.Clamp01(1-wing/.65f);
+            float bottom = 5f - 36f * Mathf.Pow(Mathf.Max(0,1-wing*wing),2.2f);
+            float fibers = Mathf.Pow(Mathf.Max(0,Mathf.Sin(x*2.17f+phenotype.StripePhase)),6f)*(1-wing)*2.8f;
             for (int y = 0; y <= p.Rows; y++)
             {
                 float v = y / (float)p.Rows;
-                float offset = Mathf.Lerp(-half - edge, half * .65f + edge * .4f, v);
+                float offset = Mathf.Lerp(bottom-edge-fibers, top+edge*.8f, v);
                 mesh.MoveVertice(y * (p.Columns + 1) + x, center + up * offset - camera);
             }
         }
@@ -200,17 +229,21 @@ public sealed class MantleCrabGraphics : GraphicsModule
         {
             Vector2 point = Vector2.Lerp(limb.LastPos[j], limb.Pos[j], time);
             int sprite = index * 8 + j;
-            Segment(leaser, sprite, previous, point, j == 3 ? 3.5f : 3.2f - j * .65f, .68f, camPos);
+            Part part = parts[sprite];
+            float width = (index < 2 ? 4.8f : 3.5f) * (j == 0 ? .85f : j == 1 ? 1f : .74f);
+            MantleCrabMeshBuilder.Chitin((TriangleMesh)leaser.sprites[sprite], part.Columns, part.Rows, previous, point, width, index+j, camPos);
             if (j < 3)
             {
-                Round(leaser, index * 8 + 4 + j, point, (point - previous).normalized,
-                    (4.8f - j * .6f) * phenotype.JointBulk, 3.3f, camPos);
+                Vector2 direction = (point-previous).normalized;
+                Vector2 next = (Vector2.Lerp(limb.LastPos[j+1],limb.Pos[j+1],time)-point).normalized;
+                Segment(leaser,index*8+4+j,point-direction*1.3f,point+next*1.2f,width*.78f,.65f,camPos);
             }
             previous = point;
         }
-        Vector2 normal = Vector2.Lerp(Vector2.up, limb.GroundNormal, .65f).normalized;
-        Vector2 footAxis = new(normal.y, -normal.x);
-        Round(leaser, index * 8 + 7, previous + normal * 18f, footAxis, 7.5f * phenotype.FootBulk, 19f, camPos, true);
+        Part foot = parts[index*8+7];
+        Vector2 ankle = Vector2.Lerp(limb.LastPos[2],limb.Pos[2],time);
+        MantleCrabMeshBuilder.Foot((TriangleMesh)leaser.sprites[index*8+7],foot.Columns,foot.Rows,ankle,previous,
+            (index < 2 ? 6.4f : 7f)*phenotype.FootBulk, limb.Side,limb.GroundNormal,camPos);
     }
 
     private void DrawPincer(RoomCamera.SpriteLeaser leaser, int index, float time, Vector2 camPos)
@@ -220,13 +253,17 @@ public sealed class MantleCrabGraphics : GraphicsModule
         for (int j = 0; j < 3; j++)
         {
             Vector2 point = Vector2.Lerp(limb.LastPos[j], limb.Pos[j], time);
-            Segment(leaser, start + j, previous, point, 2.5f - j * .45f, .7f, camPos);
-            Round(leaser, start + 3 + j, point, (point - previous).normalized, 3.5f, 2.8f, camPos);
+            Part part = parts[start+j];
+            float width = index == 0 ? 2.3f : 2.8f;
+            MantleCrabMeshBuilder.Chitin((TriangleMesh)leaser.sprites[start+j],part.Columns,part.Rows,previous,point,width,j+index,camPos);
+            Vector2 direction = (point-previous).normalized;
+            Vector2 next = (Vector2.Lerp(limb.LastPos[j+1],limb.Pos[j+1],time)-point).normalized;
+            Segment(leaser,start+3+j,point-direction*1.1f,point+next*1.1f,width*.8f,.6f,camPos);
             previous = point;
         }
         Vector2 tip = Vector2.Lerp(limb.LastPos[3], limb.Pos[3], time), axis = (tip - previous).normalized;
         Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
-        Segment(leaser, start + 6, previous, Vector2.Lerp(previous, tip, .4f), 4.1f, 1f, camPos);
+        Segment(leaser, start + 6, previous, Vector2.Lerp(previous, tip, .45f), index == 0 ? 3f : 5f, .8f, camPos);
         // Fourth segment is a palm plus two curved, separated jaws. No grip/attack state.
         for (int jaw = 0; jaw < 2; jaw++)
         {
@@ -236,8 +273,11 @@ public sealed class MantleCrabGraphics : GraphicsModule
             for (int y = 0; y <= p.Rows; y++)
             {
                 float u = x / (float)p.Columns, v = y / (float)p.Rows * 2f - 1f;
-                Vector2 center = Vector2.Lerp(previous, tip, .3f + u * .7f) + cross * side * (2f + Mathf.Sin(u * Mathf.PI) * 5f);
-                mesh.MoveVertice(y * (p.Columns + 1) + x, center + cross * v * Mathf.Lerp(2.3f, .2f, u) - camPos);
+                float spread = index == 0 ? 2f : 4.4f;
+                float length = jaw == 0 ? 1f : .83f;
+                Vector2 center = Vector2.Lerp(previous, tip, .34f + u * .66f * length) + cross * side * (spread * (.45f + u*.8f));
+                float blade = (index == 0 ? 1.5f : 2.6f) * Mathf.Pow(1-u,.7f) + .04f;
+                mesh.MoveVertice(y * (p.Columns + 1) + x, center + cross * v * blade - camPos);
             }
         }
     }
