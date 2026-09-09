@@ -77,6 +77,11 @@ internal static class DB_Tuning
     internal const float GrabEscapeImpulseMin = 4.6f, GrabEscapeImpulseMax = 6.8f;
     internal const int GrabEscapeRegrabBlockTicks = 16;
 
+    // A dehydrated player's grip is a player-side modifier. Pickup failure is sampled once per
+    // actual manual SlugcatGrab attempt and the retry window prevents held input from erasing it.
+    internal const int DehydratedPickupRetryMinTicks = 10, DehydratedPickupRetryMaxTicks = 14;
+    internal const float DehydratedPickupSlipImpulse = 2.25f;
+
     // Rescue is realized-only and uses the existing Combat PrimaryOwner. One victim may have
     // one primary and one delayed backup rescuer; all contact release still goes through the
     // victim's DB_RestraintRuntime exact-grasp authority.
@@ -95,6 +100,28 @@ internal static class DB_Tuning
     internal const float RescuePressureGainMin = 0.24f, RescuePressureGainMax = 0.62f;
     internal const float RescuePlayerImpulseMin = 0.35f, RescuePlayerImpulseMax = 1.15f;
     internal const float RescueRecoilMin = 3.8f, RescueRecoilMax = 6.2f;
+
+    // Dehydration feeding is aggregated per target. Severe dehydration exposes a small
+    // opportunistic window; Critical dehydration expands the room-level swarm budget.
+    internal const int FeedingCoordinatorRefreshTicks = 12;
+    internal const int FeedingScanMinTicks = 14, FeedingScanMaxTicks = 24;
+    internal const int FeedingSevereAttachCapacity = 3, FeedingSevereTotalCapacity = 4;
+    internal const int FeedingCriticalAttachCapacity = 6, FeedingCriticalTotalCapacity = 10;
+    internal const int FeedingCommitMaxTicks = 320;
+    internal const int FeedingAttachMaxTicks = 220;
+    internal const int FeedingCooldownTicks = 120;
+    internal const int FeedingShakeGraceTicks = 24, FeedingShakeCheckTicks = 12;
+    internal const float FeedingSevereRange = 330f, FeedingCriticalRange = 420f;
+    internal const float FeedingSevereMotivationThreshold = 0.58f;
+    internal const float FeedingCriticalMotivationThreshold = 0.36f;
+    internal const float FeedingApproachSpeedMin = 8.2f, FeedingApproachSpeedMax = 11.8f;
+    internal const float FeedingCloudSpeedMin = 6.5f, FeedingCloudSpeedMax = 8.6f;
+    internal const float FeedingContactPadding = 3.5f;
+    internal const float FeedingAttachValidationRange = 78f;
+    internal const float FeedingShakeSpeedMin = 8.5f, FeedingShakeSpeedMax = 15f;
+    internal const float FeedingShakeChanceMin = 0.06f, FeedingShakeChanceMax = 0.38f;
+    internal const float FeedingDebtPerSecondOne = 1.0f, FeedingDebtPerSecondMax = 3.0f;
+    internal const float FeedingThirstReliefPerSecond = 0.055f;
 
     internal const int RoostMinTicks = 160, RoostMaxTicks = 520;
     internal const float RoostMinChance = 0.012f, RoostMaxChance = 0.045f;
