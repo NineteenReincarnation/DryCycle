@@ -7,9 +7,12 @@ internal static partial class Program
     private static void RunSocialGuards()
     {
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
+        Type ambient = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AmbientSocialRuntime", true);
 
         Check(!TypeCallsForbiddenSocialMethod(social),
             "Social neutral social layer does not call Random/combat/trauma/damage APIs");
+        Check(!TypeCallsForbiddenSocialMethod(ambient),
+            "Ambient Social does not call Random/combat/trauma/damage APIs");
 
         Type roomRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SocialRoomRuntime", true);
@@ -18,13 +21,22 @@ internal static partial class Program
         Check(refreshInterval != null && (int)refreshInterval.GetRawConstantValue() == 20,
             "Social room-wide candidate/roost cache refresh remains 20 ticks, not per-frame per-bat");
 
+        FieldInfo sampleLimit = ambient.GetField("AmbientSampleLimit", Flags);
+        Check(sampleLimit != null && (int)sampleLimit.GetRawConstantValue() <= 8,
+            "Ambient Social samples a bounded peer subset instead of rescanning the whole flock per bat");
+        Check(ambient.GetMethod("ShouldOwn", Flags) != null &&
+              ambient.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              ambient.GetMethod("ParticipationProbability", Flags) != null &&
+              ambient.GetMethod("LooseFlockPreference", Flags) != null,
+            "Ambient Social exposes explicit ownership, execution and personality weighting boundaries");
+
         Type socialState = social.GetNestedType("State", Flags);
         Check(socialState != null && socialState.GetField("Partner", Flags) != null &&
               socialState.GetField("Anchor", Flags) != null && socialState.GetField("Token", Flags) != null,
             "Social partner/anchor/reservation state stays realized-only inside SocialLife");
 
         Console.WriteLine(
-            "Social guards: no random/combat/trauma calls in neutral social runtime; room cache cadence and realized-only state verified.");
+            "Social guards: event and ambient layers avoid forbidden APIs; shared cache cadence, bounded ambient sampling and realized-only state verified.");
     }
 
     private static bool TypeCallsForbiddenSocialMethod(Type type)
