@@ -127,6 +127,33 @@ internal static class HydrationWeakness
         return TryGetState(player, out DehydrationState state) && state.IsWeak;
     }
 
+    /// <summary>
+    /// Controlled ingress for external body-fluid loss. Callers never receive the state
+    /// object; normal debt clamping and lethal semantics stay owned here.
+    /// </summary>
+    internal static bool AddExternalDebt(Player player, float amount)
+    {
+        if (amount <= 0f || !IsStoryPlayer(player) || player.dead)
+        {
+            return false;
+        }
+
+        DehydrationState state = GetOrCreateState(player);
+        if (state == null || ThirstStore.For(player).Water > 0.0001f)
+        {
+            return false;
+        }
+
+        float before = state.Debt;
+        state.Debt = Mathf.Min(LethalDebt, state.Debt + amount);
+        if (state.Debt >= LethalDebt)
+        {
+            player.Die();
+        }
+
+        return state.Debt > before + 0.0001f;
+    }
+
     private static void Player_Update(On.Player.orig_Update orig, Player self, bool eu)
     {
         if (!IsStoryPlayer(self))
