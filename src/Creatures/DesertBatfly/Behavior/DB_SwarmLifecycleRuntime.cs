@@ -39,9 +39,9 @@ internal static class DB_SwarmLifecycleRuntime
     }
 
     /// <summary>
-    /// Called after vanilla IdleUpdate. Returns true only while a current Swarm bout is still
-    /// allowed to remain active. If vanilla itself ended Swarm, the bout is treated as complete
-    /// and a roaming interval begins.
+    /// Called after vanilla IdleUpdate/SwarmUpdate. Returns true only while a current Swarm
+    /// bout is still allowed to remain active. If vanilla itself ended Swarm, the bout is
+    /// treated as complete and a roaming interval begins.
     /// </summary>
     internal static bool AllowCurrentBehavior(DB_Creature bat, bool currentlySwarm)
     {
@@ -56,8 +56,15 @@ internal static class DB_SwarmLifecycleRuntime
             return true;
         }
 
+        // Vanilla can independently choose Swarm inside IdleUpdate. That transition must obey
+        // the same post-bout roaming gate as our compatibility entry path; otherwise native
+        // re-entry would bypass the lifecycle and recreate a permanent hover loop.
         if (!state.SwarmBoutActive)
+        {
+            if (tick < state.NextSwarmEligibleTick)
+                return false;
             BeginBout(bat, state, tick);
+        }
 
         if (tick < state.SwarmUntilTick)
             return true;
