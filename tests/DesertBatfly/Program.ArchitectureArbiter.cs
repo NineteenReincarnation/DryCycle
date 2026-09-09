@@ -31,14 +31,18 @@ internal static partial class Program
                      "Conscious", "Dead", "Restrained", "InShortcut", "InHive",
                      "NativeMovementMode", "NativeBehavior", "Personality", "PhysicalCapability",
                      "SevereInjury", "InjuryRecovering", "InjuryRecoveryTarget", "PostStunShock",
-                     "Thirst", "Trauma", "Grief", "BondStrength", "VisiblePlayerCount",
-                     "PredatorCandidateCount", "IncomingProjectile", "VisibilityFactor", "Travel",
-                     "SignalInfluence", "EnvironmentInfluence", "Threat", "Social", "Roost",
-                     "VengeanceActive", "ImmediateDanger", "HardSurvival", "CombatAllowed",
-                     "SocialAllowed", "CrossRoomOwned", "SpecialPhysicsOwner"
+                     "Thirst", "Trauma", "Grief", "BondStrength", "IncomingProjectile",
+                     "VisibilityFactor", "Travel", "SignalInfluence", "EnvironmentInfluence",
+                     "Threat", "Social", "Roost", "VengeanceActive", "ImmediateDanger",
+                     "HardSurvival", "CombatAllowed", "SocialAllowed", "CrossRoomOwned",
+                     "SpecialPhysicsOwner"
                  })
             Check(frame.GetField(name, Flags) != null,
                 "Architecture arbitration FrameContext contains approved current-frame fact " + name);
+        foreach (string retired in new[]
+                 { "VisiblePlayerCount", "NearestVisiblePlayer", "PredatorCandidateCount", "NearestPredator" })
+            Check(frame.GetField(retired, Flags) == null,
+                "Architecture arbitration FrameContext does not retain unused per-frame visibility fact " + retired);
         Check(frameRuntime.GetMethod("For", Flags) != null &&
               frameRuntime.GetMethod("Reset", Flags) != null &&
               frameRuntime.GetMethod("Forget", Flags) != null,
@@ -221,6 +225,6 @@ internal static partial class Program
             "Architecture arbitration architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Architecture arbitration: current domain owner checks, Feeding priority, special physics and rejected-proposal Observatory presentation are guarded; Rain World live validation remains.");
+            "Architecture arbitration: current domain owner checks, lean FrameContext, Feeding priority, special physics and rejected-proposal Observatory presentation are guarded; Rain World live validation remains.");
     }
 }
