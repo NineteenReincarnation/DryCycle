@@ -232,7 +232,7 @@ internal sealed class DB_RescueRuntime
     {
         if (bat?.room == null || bat.mainBodyChunk == null || bat.dead || !bat.Consious ||
             bat.stun > 0 || bat.inShortcut || bat.Injury.BlocksCombat ||
-            bat.DesertAI.RestrainedByNonFly() || bat.DesertAI.HasImmediateDanger ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(bat) || bat.DesertAI.HasImmediateDanger ||
             DB_FearRuntime.HasActiveFearSuppression(bat) || DB_VengeanceRuntime.IsActive(bat))
             return false;
 

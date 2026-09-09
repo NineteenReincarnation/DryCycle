@@ -350,7 +350,8 @@ internal sealed class DB_CombatRuntime
     internal bool TryExecuteOwned()
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Combat) ||
-            fly.room == null || fly.dead || !fly.Consious || ai.RestrainedByNonFly() ||
+            fly.room == null || fly.dead || !fly.Consious ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) ||
             fly.inShortcut || fly.Injury.BlocksCombat || !ai.Valid(target) ||
             ai.Mode is not (DB_AI.Activity.Observe or DB_AI.Activity.Approach or
                 DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or
@@ -534,7 +535,8 @@ internal sealed class DB_CombatRuntime
 
         if (ai.Mode != DB_AI.Activity.Attach) return;
         if (!ai.Valid(target) || attachedChunk == null || !fly.Consious ||
-            ai.RestrainedByNonFly() || fly.inShortcut || target.inShortcut || !hasSlot ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut ||
+            target.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 70f))
         {
             Finish(drainedWater > 0.001f);
@@ -609,9 +611,11 @@ internal sealed class DB_CombatRuntime
 
     private void UpdateInterference(bool eu)
     {
-        if (target is not Player player || ai.IsTraumatizedPlayer(player) ||
+        Player player = target as Player;
+        if (player == null || ai.IsTraumatizedPlayer(player) ||
             !ai.Valid(player) || attachedChunk == null || !fly.Consious ||
-            ai.RestrainedByNonFly() || fly.inShortcut || player.inShortcut || !hasSlot ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut ||
+            player.inShortcut || !hasSlot ||
             !Custom.DistLess(fly.mainBodyChunk.pos, attachedChunk.pos, 75f))
         {
             FinishRetaliation(false);

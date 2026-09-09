@@ -228,7 +228,7 @@ internal sealed class DB_DehydrationFeedingRuntime
             bat.stun > 0 || bat.inShortcut || bat.Restraint.IsPlayerHeld || bat.Rescue.Active ||
             bat.AI == null || bat.safariControlled || bat.AI.fleeFromRain || bat.AI.luredCounter > 0 ||
             bat.AI.behavior == FlyAI.Behavior.Burrow ||
-            bat.Injury.BlocksCombat || bat.DesertAI.RestrainedByNonFly() ||
+            bat.Injury.BlocksCombat || DB_RestraintPolicy.IsRestrainedByNonFly(bat) ||
             bat.DesertAI.HasImmediateDanger || DB_FearRuntime.HasActiveFearSuppression(bat) ||
             DB_VengeanceRuntime.IsActive(bat))
             return false;
