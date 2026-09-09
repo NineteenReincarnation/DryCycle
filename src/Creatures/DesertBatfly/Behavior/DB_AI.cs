@@ -29,10 +29,13 @@ internal sealed class DB_AI
     private readonly DB_InjuryRecovery injuryRecovery;
     internal DB_CombatRuntime Combat => combat;
     internal DB_CreaturePerception Perception => perception;
+    internal DB_InjuryRecovery InjuryRecovery => injuryRecovery;
     internal bool HasImmediateDanger => perception.Danger != null || retreat > 0 || Mode == Activity.Escape;
     internal Activity Mode { get; private set; }
     internal Creature Target => combat.Target;
     internal bool RetreatActive => retreat > 0;
+    internal int RetreatTicks => retreat;
+    internal Vector2 EscapeFrom => escapeFrom;
 
     private int retreat, ticks;
     private bool hasRoost;
@@ -58,7 +61,7 @@ internal sealed class DB_AI
     {
         combat.TickMemory();
 
-        if (!fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+        if (!fly.Consious || DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut)
         {
             if (IsInFlyChain(fly))
                 BreakHangChain(null, DB_Tuning.RetreatTicks);
@@ -71,11 +74,6 @@ internal sealed class DB_AI
         TickGrabMemory();
         if (retreat > 0) retreat--;
     }
-
-    // Query surface only; classification itself lives in the restraint domain so AI,
-    // FrameContext, Social and Travel cannot drift semantically.
-    internal bool RestrainedByNonFly()
-        => DB_RestraintPolicy.IsRestrainedByNonFly(fly);
 
     private void TickGrabMemory()
     {
@@ -245,8 +243,6 @@ internal sealed class DB_AI
         combat.ClearRetaliation();
     }
 
-    internal bool ExecuteInjuryRecoveryOwned() => injuryRecovery.ExecuteOwned();
-
     internal void SetRoostClaim(in DB_RoostAnchor anchor)
     {
         roost = anchor;
@@ -302,7 +298,7 @@ internal sealed class DB_AI
 
         // This phase may refresh species state and perception, but it must not steer ordinary
         // locomotion. All localGoal/velocity writes live behind the selected R3 owner below.
-        if (fly.Emergence.Active || RestrainedByNonFly() ||
+        if (fly.Emergence.Active || DB_RestraintPolicy.IsRestrainedByNonFly(fly) ||
             !fly.Consious || fly.inShortcut)
         {
             if (Mode == Activity.Roost)
@@ -405,7 +401,8 @@ internal sealed class DB_AI
     internal bool ExecuteImmediateDangerOwned()
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.ImmediateDanger) ||
-            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            fly.room == null || fly.dead || !fly.Consious ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut)
             return false;
         if (perception.Danger == null && retreat <= 0 && Mode != Activity.Escape)
             return false;
@@ -428,7 +425,7 @@ internal sealed class DB_AI
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.FearResponse) ||
             resolution.PrimaryOwner != DB_BehaviorOwner.FearResponse || fly.room == null ||
-            fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            fly.dead || !fly.Consious || DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut)
             return false;
 
         CancelPhysicalAttack();
@@ -447,13 +444,11 @@ internal sealed class DB_AI
             DB_BehaviorOwner.FearResponse);
     }
 
-    internal bool ExecuteCombatOwned()
-        => combat.TryExecuteOwned();
-
     internal bool ExecuteRoostOwned()
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.Roost) ||
-            fly.room == null || fly.dead || !fly.Consious || RestrainedByNonFly() || fly.inShortcut)
+            fly.room == null || fly.dead || !fly.Consious ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut)
             return false;
 
         if (Mode == Activity.Roost)
