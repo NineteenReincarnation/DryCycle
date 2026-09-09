@@ -1,4 +1,3 @@
-using System.Reflection;
 using DryCycle.Creatures.DesertBatfly;
 using UnityEngine;
 
@@ -8,11 +7,6 @@ namespace DryCycle.Debugging.AI;
 // injury, social memory, AI and movement.
 internal sealed class DB_ObservatorySource : IAIDebugSource
 {
-    private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static readonly FieldInfo RetreatField = typeof(DB_AI).GetField("retreat", PrivateInstance);
-    private static readonly FieldInfo PursuitField = typeof(DB_AI).GetField("pursuit", PrivateInstance);
-    private static readonly FieldInfo EscapeFromField = typeof(DB_AI).GetField("escapeFrom", PrivateInstance);
-
     public int Priority => 1000;
     public bool CanInspect(AbstractCreature creature) => creature?.realizedCreature is DB_Creature;
 
@@ -81,10 +75,10 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             .Add("field.target", "DB_AI.Target", AIDebugFormat.Creature(ai.Target))
             .Add("field.formal_attack", "DB_AI.FormalAttack", ai.FormalAttack)
             .Add("field.immediate_danger", "DB_AI.HasImmediateDanger", ai.HasImmediateDanger)
-            .Add("field.retreat", "DB_AI.retreat", Read<int>(RetreatField, ai))
+            .Add("field.retreat", "DB_AI.RetreatTicks", ai.RetreatTicks)
             .Add("field.memory", "DB_CombatRuntime.Memory", ai.Combat.Memory)
             .Add("field.interest", "DB_CombatRuntime.InterestTicks", ai.Combat.InterestTicks)
-            .Add("field.pursuit", "DB_AI.pursuit", Read<int>(PursuitField, ai))
+            .Add("field.pursuit", "DB_CreaturePerception.PursuitTicks", ai.Perception.PursuitTicks)
             .Add("field.unseen", "DB_CombatRuntime.UnseenTicks", ai.Combat.UnseenTicks)
             .Add("field.has_slot", "DB_CombatRuntime.HasSlot", ai.Combat.HasSlot));
 
@@ -115,7 +109,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Sections.Add(new AIDebugSection("section.movement")
             .Add("field.position", "mainBodyChunk.pos", bat.mainBodyChunk?.pos)
             .Add("field.velocity", "mainBodyChunk.vel", bat.mainBodyChunk?.vel)
-            .Add("field.escape_from", "DB_AI.escapeFrom", Read<Vector2>(EscapeFromField, ai))
+            .Add("field.escape_from", "DB_AI.EscapeFrom", ai.EscapeFrom)
             .Add("field.local_goal", "FlyAI.localGoal", bat.AI?.localGoal)
             .Add("field.behavior", "FlyAI.behavior", bat.AI?.behavior)
             .Add("field.flee_from_rain", "FlyAI.fleeFromRain", bat.AI?.fleeFromRain ?? false)
@@ -202,7 +196,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
     private static void BuildDecisionStack(AIDebugSnapshot snapshot, DB_Creature bat)
     {
         DB_Injury injury = bat.Injury;
-        bool restrained = RestrainedByNonFly(bat);
+        bool restrained = DB_RestraintPolicy.IsRestrainedByNonFly(bat);
         bool fear = DB_FearRuntime.HasActiveFearSuppression(bat);
         float trauma = ActiveTrauma(bat);
         bool traumatized = trauma >= DB_Tuning.TraumaAggressionBlock;
@@ -220,7 +214,7 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.restrained",
             restrained ? AIDebugDecisionState.Active : AIDebugDecisionState.Inactive,
             restrained ? "held by non-Fly creature" : null,
-            "Creature.grabbedBy", 1));
+            "DB_RestraintPolicy.IsRestrainedByNonFly", 1));
 
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.survival", AIDebugDecisionState.Active));
         snapshot.Decisions.Add(new AIDebugDecisionNode("decision.danger",
@@ -291,18 +285,6 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
             AIDebugFormat.Value(bat.AI?.localGoal), "FlyAI.localGoal"));
     }
 
-    private static bool RestrainedByNonFly(DB_Creature bat)
-    {
-        if (bat?.grabbedBy == null) return false;
-        for (int i = 0; i < bat.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = bat.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly)
-                return true;
-        }
-        return false;
-    }
-
     private static float ActiveTrauma(DB_Creature bat) => Mathf.Max(
         bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
         bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
@@ -316,12 +298,5 @@ internal sealed class DB_ObservatorySource : IAIDebugSource
         if (resolution.Clock != clock)
             return "R3 / unresolved";
         return $"{resolution.PrimaryOwner} / {resolution.WinningProposal.BehaviorKind}";
-    }
-
-    private static T Read<T>(FieldInfo field, object instance)
-    {
-        if (field == null || instance == null) return default;
-        object value = field.GetValue(instance);
-        return value is T typed ? typed : default;
     }
 }
