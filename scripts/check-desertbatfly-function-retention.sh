@@ -38,15 +38,26 @@ printf '%s\n' "${travel_drivers[@]}" | grep -q '^.*DB_RainWorldHooks.cs:'
 
 # -----------------------------------------------------------------------------
 # HB-03 — one life -> one mortality semantic event, with Damage -> Mortality order.
-# Rock remains excluded from lethal attribution.
+# Rock remains excluded from lethal attribution. The owned DB_Creature virtual lifecycle
+# must enter and complete the EventHub transaction directly; raw Creature hooks are not
+# part of the retention contract anymore.
 # -----------------------------------------------------------------------------
 grep -q 'internal bool TryMarkMortality()' "$EVENTS"
 grep -q 'if (MortalityPublished) return false;' "$EVENTS"
-grep -q '!state.TryMarkMortality()' "$EVENTS"
+grep -q '!transaction.state.TryMarkMortality()' "$EVENTS"
 grep -q 'state.ViolenceDepth++' "$EVENTS"
-grep -q 'state.PendingMortality = mortality;' "$EVENTS"
-grep -q 'FlushPendingMortality(state);' "$EVENTS"
+grep -q 'transaction.state.PendingMortality = mortality;' "$EVENTS"
+grep -q 'FlushPendingMortality(transaction.state);' "$EVENTS"
 grep -q 'sourceObject is not Rock' "$EVENTS"
+CREATURE="$SRC/Core/DB_Creature.cs"
+grep -q 'DB_EventHub.BeginViolence(' "$CREATURE"
+grep -q 'DB_EventHub.EndViolence(' "$CREATURE"
+grep -q 'DB_EventHub.PrepareMortality(' "$CREATURE"
+grep -q 'DB_EventHub.CompleteMortality(' "$CREATURE"
+if grep -q 'RockSurvivalHealthFloor = 0.12f;' "$CREATURE"; then
+    echo 'ERROR: HB-03 regressed to the old inflated Rock health floor.'
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # HB-04 — Peach tongue / grasp transfer stays one capture session; true recapture gets a
