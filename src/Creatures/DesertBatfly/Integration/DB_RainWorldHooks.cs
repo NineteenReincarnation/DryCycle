@@ -420,16 +420,6 @@ internal static class DB_RainWorldHooks
                 ownership.Reason);
     }
 
-    private static bool RestrainedByNonFly(DB_Creature fly)
-    {
-        for (int i = 0; i < fly.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = fly.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
-        }
-        return false;
-    }
-
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
     {
         if (self.fly is not DB_Creature) orig(self);
@@ -501,8 +491,8 @@ internal static class DB_RainWorldHooks
             return;
         }
 
-        // Do not execute Travel from this nested vanilla callback. If Travel wins, suppress
-        // native rain steering here and let the enclosing UpdateAI execute Travel exactly once.
+        // Travel is the single cross-room planner when it owns the enclosing frame. The
+        // nested vanilla callback must never execute a second steering controller.
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
         if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
         {
@@ -510,14 +500,11 @@ internal static class DB_RainWorldHooks
             return;
         }
 
+        // When Travel cannot own, preserve the complete native fallback. In particular,
+        // vanilla FleeFromRainUpdate selects MigrationDirection in rooms without a BatHive;
+        // suppressing orig here stranded bats in no-hive rooms during rain.
         DB_SocialRuntime.CancelForPriority(desert, "rain priority");
-        if (self.room.hives.Length > 0)
-        {
-            orig(self);
-            return;
-        }
-
-        self.afraid = Mathf.Max(self.afraid, 2f);
+        orig(self);
     }
 
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
