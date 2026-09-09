@@ -175,6 +175,8 @@ internal static partial class Program
             chunks[i] = Empty<BodyChunk>();
             chunks[i].mass = i == 2 ? 3f : 1.8f;
             chunks[i].pos = rest[i];
+            chunks[i].lastPos = rest[i];
+            chunks[i].vel = Vector2.zero;
         }
 
         List<PhysicalObject.BodyChunkConnection> constraints = new();
@@ -213,7 +215,6 @@ internal static partial class Program
         crab.bodyChunks = chunks;
         crab.ShellScale = 1f;
         SetField(crab, "supportAccelerations", new float[4]);
-        SetField(crab, "frameCorrections", new Vector2[5]);
 
         MantleCrabLimb[] legs = new MantleCrabLimb[4];
         for (int i = 0; i < legs.Length; i++)
@@ -224,15 +225,62 @@ internal static partial class Program
         }
         SetField(crab, "Legs", legs);
 
+        RigidProjectionContract(crab, chunks, rest);
+
         for (int feet = 4; feet >= 2; feet--)
         {
             StandingResult result = RunStandingSimulation(crab, chunks, constraints, rest, legs, feet);
             Check(result.FinalHeight > 265f && result.FinalHeight < 305f,
                 "Supported shell failed to reach stance with " + feet + " feet; height=" + result.FinalHeight);
             Check(result.LateOscillation < 2f,
-                "Supported frame sustained oscillation with " + feet + " feet; amplitude=" + result.LateOscillation);
+                "Supported rigid frame sustained oscillation with " + feet + " feet; amplitude=" + result.LateOscillation);
             standingCases++;
         }
+    }
+
+    private static void RigidProjectionContract(MantleCrab crab, BodyChunk[] chunks, Vector2[] rest)
+    {
+        for (int i = 0; i < chunks.Length; i++)
+        {
+            chunks[i].pos = rest[i] + new Vector2(130f, 90f);
+            chunks[i].vel = new Vector2(2f, -1f);
+        }
+
+        // Inject the exact deformation that used to produce the visible jelly response:
+        // independent shell stations are displaced and given conflicting velocities.
+        chunks[0].pos += new Vector2(8f, 19f);
+        chunks[2].pos += new Vector2(-3f, -14f);
+        chunks[4].pos += new Vector2(-11f, 23f);
+        chunks[0].vel += new Vector2(5f, 3f);
+        chunks[4].vel += new Vector2(-4f, -2f);
+
+        Vector2 momentumBefore = LinearMomentum(chunks);
+        crab.MaintainRigidShell();
+        Vector2 momentumAfter = LinearMomentum(chunks);
+
+        float maxDistanceError = 0f;
+        for (int i = 0; i < chunks.Length; i++)
+        for (int j = i + 1; j < chunks.Length; j++)
+        {
+            float expected = Vector2.Distance(rest[i], rest[j]);
+            float actual = Vector2.Distance(chunks[i].pos, chunks[j].pos);
+            maxDistanceError = Math.Max(maxDistanceError, Math.Abs(actual - expected));
+        }
+
+        Check(maxDistanceError < .01f,
+            "Rigid shell projection left visible internal deformation; max distance error=" + maxDistanceError);
+        Check(Vector2.Distance(momentumBefore, momentumAfter) < .01f,
+            "Rigid shell projection failed to preserve linear momentum");
+        Check(Finite(crab.Axis) && Math.Abs(crab.Axis.magnitude - 1f) < .001f,
+            "Rigid shell frame produced an invalid orientation axis");
+    }
+
+    private static Vector2 LinearMomentum(BodyChunk[] chunks)
+    {
+        Vector2 momentum = Vector2.zero;
+        foreach (BodyChunk chunk in chunks)
+            momentum += chunk.vel * chunk.mass;
+        return momentum;
     }
 
     private static StandingResult RunStandingSimulation(
@@ -250,6 +298,7 @@ internal static partial class Program
         for (int i = 0; i < chunks.Length; i++)
         {
             chunks[i].pos = rest[i] + new Vector2(0f, 240f);
+            chunks[i].lastPos = chunks[i].pos;
             chunks[i].vel = Vector2.zero;
         }
 
@@ -267,8 +316,11 @@ internal static partial class Program
             foreach (PhysicalObject.BodyChunkConnection connection in constraints)
                 connection.Update();
 
-            crab.StabilizeShell();
+            crab.MaintainRigidShell();
             crab.ApplySupport(.9f);
+            // Match production Update(): support impulses are immediately collapsed back into
+            // rigid translation/rotation instead of becoming internal shell vibration.
+            crab.MaintainRigidShell();
 
             if (tick > 1000)
             {
