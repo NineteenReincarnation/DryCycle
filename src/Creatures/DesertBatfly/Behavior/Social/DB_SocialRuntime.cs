@@ -386,7 +386,7 @@ internal static class DB_SocialRuntime
         if (DB_EnvironmentalPolicy.BlocksNeutralSocial(bat)) return "environmental survival priority";
         if (bat.DesertAI.HasImmediateDanger || bat.DesertAI.Mode == DB_AI.Activity.Escape)
             return "immediate danger";
-        if (DB_TravelRuntime.HasIntent(bat.abstractCreature)) return "cross-room travel priority";
+        if (DB_TravelRuntime.CanOwnRealizedFrame(bat, out _)) return "cross-room travel priority";
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "severe injury / recovery";
@@ -403,7 +403,6 @@ internal static class DB_SocialRuntime
                 DB_AI.Activity.Circle or DB_AI.Activity.FakeDive or DB_AI.Activity.Dive or
                 DB_AI.Activity.Attach or DB_AI.Activity.RetaliationCharge or DB_AI.Activity.Interfere)
             return "formal attack / harassment";
-        if (bat.DesertState.Cooldown > 0) return "post-attack cooldown";
         if (DB_VengeanceRuntime.IsActive(bat) ||
             DB_FearRuntime.HasActiveFearSuppression(bat))
             return "fear / vengeance suppression";
@@ -1258,13 +1257,12 @@ internal static class DB_SocialRuntime
     {
         if (!DB_SocialRoomRuntime.ValidMember(bat) || !bat.Consious || bat.AI == null || bat.DesertAI == null)
             return false;
-        if (DB_TravelRuntime.HasIntent(bat.abstractCreature) ||
+        if (DB_TravelRuntime.CanOwnRealizedFrame(bat, out _) ||
             bat.DesertAI.HasImmediateDanger ||
             bat.Injury.IsSeverelyInjured ||
             bat.Injury.IsRecovering ||
             bat.DesertAI.Target != null ||
             bat.DesertAI.FormalAttack ||
-            bat.DesertState.Cooldown > 0 ||
             bat.AI.fleeFromRain ||
             bat.AI.luredCounter > 0 ||
             bat.safariControlled ||
@@ -1277,7 +1275,8 @@ internal static class DB_SocialRuntime
     }
 
     private static bool CanPlayChase(DB_Creature bat)
-        => bat != null && !bat.Injury.IsSeverelyInjured && !bat.Injury.IsRecovering &&
+        => bat != null && bat.DesertState.Cooldown <= 0 &&
+           !bat.Injury.IsSeverelyInjured && !bat.Injury.IsRecovering &&
            bat.Injury.PostStunShock < 0.28f && bat.Injury.PhysicalCapability >= 0.72f &&
            DB_EnvironmentalPolicy.AllowsPlayChase(bat);
 
