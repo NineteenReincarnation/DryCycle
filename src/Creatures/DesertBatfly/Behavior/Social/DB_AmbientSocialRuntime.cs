@@ -5,14 +5,6 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal enum DB_AmbientSocialKind
-{
-    None,
-    PeerDrift,
-    LooseFlock,
-    RoostLoiter
-}
-
 /// <summary>
 /// Background neutral social ecology for Desert Batflies.
 ///
@@ -22,8 +14,8 @@ internal enum DB_AmbientSocialKind
 /// event SocialDrive/Cooldown, and only executes when the frame Arbiter selects Social.
 ///
 /// Candidate discovery is consumed from DB_SocialRoomRuntime's shared 20-tick room cache.
-/// Each bat samples at most AmbientSampleLimit peers per frame, so ambient life does not
-/// reintroduce an all-bats-per-bat scan.
+/// Each selector samples only a bounded peer subset, so ambient life never performs an
+/// unbounded all-bats scan for every realized bat every frame.
 /// </summary>
 internal static class DB_AmbientSocialRuntime
 {
@@ -109,11 +101,10 @@ internal static class DB_AmbientSocialRuntime
         float flockPreference = LooseFlockPreference(bat.Personality, social.CandidateCount);
         float flockRoll = Stable01(bat.Personality.VisualSeed, planEpoch * 193 + 0x4F31);
         if (flockRoll <= flockPreference &&
-            TryBuildLooseFlockGoal(bat, candidates, planEpoch, side, out Vector2 flockGoal, out int flockPeers))
+            TryBuildLooseFlockGoal(bat, candidates, planEpoch, side, out Vector2 flockGoal))
         {
             float speed = Mathf.Lerp(4.15f, 5.25f, bat.Personality.Nerve);
-            return Guide(bat, flockGoal, speed, side,
-                $"ambient loose flock; sampledPeers={flockPeers}");
+            return Guide(bat, flockGoal, speed, side);
         }
 
         float roostRoll = Stable01(bat.Personality.VisualSeed, planEpoch * 211 + 0x6C17);
@@ -122,13 +113,13 @@ internal static class DB_AmbientSocialRuntime
         if (roostRoll <= roostChance &&
             TryBuildRoostLoiterGoal(bat, roomState, planEpoch, side, out Vector2 roostGoal))
         {
-            return Guide(bat, roostGoal, 4.15f, side, "ambient roost loiter");
+            return Guide(bat, roostGoal, 4.15f, side);
         }
 
         if (TryBuildPeerDriftGoal(bat, candidates, planEpoch, side, out Vector2 peerGoal))
         {
             float speed = Mathf.Lerp(4.0f, 4.9f, bat.Personality.Nerve);
-            return Guide(bat, peerGoal, speed, side, "ambient peer drift");
+            return Guide(bat, peerGoal, speed, side);
         }
 
         return false;
@@ -139,11 +130,10 @@ internal static class DB_AmbientSocialRuntime
         IReadOnlyList<DB_Creature> candidates,
         int epoch,
         int side,
-        out Vector2 goal,
-        out int peerCount)
+        out Vector2 goal)
     {
         goal = default;
-        peerCount = 0;
+        int peerCount = 0;
         int count = candidates.Count;
         int samples = Math.Min(AmbientSampleLimit, count);
         int start = StableInt(bat.Personality.VisualSeed, epoch * 83 + 0x3115, 0, count);
@@ -301,8 +291,7 @@ internal static class DB_AmbientSocialRuntime
         DB_Creature bat,
         Vector2 goal,
         float speed,
-        int preferredSide,
-        string reason)
+        int preferredSide)
     {
         if (bat?.room == null || bat.AI == null || bat.mainBodyChunk == null ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
@@ -327,24 +316,20 @@ internal static class DB_AmbientSocialRuntime
         bat.AI.followingDijkstraMap = -1;
         bat.movMode = Fly.MovementMode.BatFlight;
 
-        bool guided = DB_FlightMotor.TryGuideNative(
+        return DB_FlightMotor.TryGuideNative(
             bat,
             DB_BehaviorOwner.Social,
             goal,
             speed);
-        if (guided && bat.abstractCreature != null)
-        {
-            // DecisionReason for discrete event state remains owned by DB_SocialRuntime.
-            // Ambient ownership is visible through Arbiter PrimaryOwner and FlightMotor goal;
-            // no second persistent/debug state is created here.
-            _ = reason;
-        }
-        return guided;
     }
 
     private static bool Obstructed(Room room, Vector2 point)
-        => room == null || room.GetTile(point).Solid ||
-           (room.terrain != null && room.terrain.Contains(point));
+    {
+        if (room == null) return true;
+        IntVector2 tile = room.GetTilePosition(point);
+        if (room.GetTile(tile).Solid) return true;
+        return room.terrain != null && room.terrain.ObstructsTile(tile);
+    }
 
     private static float Stable01(int seed, int salt)
     {
