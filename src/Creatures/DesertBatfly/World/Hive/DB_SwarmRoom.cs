@@ -31,6 +31,22 @@ internal sealed class DB_SwarmRoom
         return room != null && rooms.TryGetValue(room, out colony);
     }
 
+    /// <summary>
+    /// Handles the Desert Batfly specialization of vanilla UpdateFollowDijsktra. Rain World's
+    /// method is nonvirtual, so Integration owns the hook boundary while this Hive domain owns
+    /// the species rule that chooses one of the room's authored hive maps.
+    /// </summary>
+    internal static bool TryHandleNativeFollowDijkstra(FlyAI ai, DB_Creature bat)
+    {
+        if (ai?.room == null || bat == null || !ReferenceEquals(ai.fly, bat) ||
+            !IsDB_SwarmRoom(ai.room.abstractRoom) || ai.room.hives.Length == 0)
+            return false;
+
+        if (ai.followingDijkstraMap < 0)
+            ai.followingDijkstraMap = ai.room.exitAndDenIndex.Length + Random.Range(0, ai.room.hives.Length);
+        return true;
+    }
+
     internal static void Reset()
     {
         rooms = new();
