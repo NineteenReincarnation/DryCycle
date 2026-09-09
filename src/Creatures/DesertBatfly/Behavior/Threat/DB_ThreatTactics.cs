@@ -102,28 +102,6 @@ internal static class DB_ThreatTactics
         return Mathf.Clamp01(baseChance + bonus * (1f - baseChance));
     }
 
-    internal static bool TryApplyOrdinaryProjectileEvade(DB_Creature bat)
-    {
-        if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
-            DB_VengeanceRuntime.IsActive(bat) ||
-            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
-            return false;
-
-        if (!DB_ThreatRuntime.TryGetDebugState(
-                bat,
-                out DB_ThreatDebugState threat) ||
-            !threat.Cue.ProjectileThreat ||
-            threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f ||
-            !DB_ThreatRuntime.ValidSlot(threat.Cue.PlayerSlot))
-            return false;
-
-        Player player = PlayerBySlot(bat.room, threat.Cue.PlayerSlot);
-        if (player == null || !TryIncomingProjectileEvade(bat, player, out Vector2 evade))
-            return false;
-
-        return ApplyProjectileEvadeOwned(bat, evade);
-    }
-
     internal static bool ApplyProjectileEvadeOwned(DB_Creature bat, Vector2 evade)
     {
         if (bat?.room == null || bat.AI == null || bat.dead || !bat.Consious || bat.inShortcut ||
@@ -309,12 +287,6 @@ internal static class DB_ThreatTactics
             visibleStartle,
             visibleShock);
         return true;
-    }
-
-    private static Player PlayerBySlot(Room room, int slot)
-    {
-        if (!DB_ThreatRuntime.ValidSlot(slot)) return null;
-        return DB_RoomContext.For(room)?.PlayerBySlot(slot);
     }
 
     private static float StableSide(DB_Creature bat, int slot)
