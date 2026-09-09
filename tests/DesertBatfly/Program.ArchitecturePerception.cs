@@ -29,6 +29,8 @@ internal static partial class Program
             "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
         Type signalRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
+        Type signalDefinition = mod.GetType(
+            "DryCycle.Creatures.DesertBatfly.DB_SignalDefinition", true);
         Type signalRoomRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SignalRoomRuntime", true);
         Type environmentRuntime = mod.GetType(
@@ -180,10 +182,12 @@ internal static partial class Program
             "Architecture shared perception Threat tactics receives an already-selected player and reuses shared held-item perception");
 
         MethodInfo signalPerceive = signalRuntime.GetMethod("TryPerceive", Flags);
-        Check(signalRuntime.GetMethod("VisualRadius", Flags) != null &&
+        Check(signalRuntime.GetMethod("VisualRadius", Flags) == null &&
+              signalDefinition.GetMethod("For", Flags) != null &&
+              MethodCallOffset(signalPerceive, signalDefinition, "For") >= 0 &&
               MethodCallOffset(signalPerceive, visibility, "EffectiveRange") >= 0 &&
               MethodCallOffset(signalPerceive, visibility, "CanObserve") >= 0,
-            "Architecture shared perception Signals visual signal perception uses the central visibility authority while acoustic fallback stays local");
+            "Architecture shared perception Signals reads range from DB_SignalDefinition and uses the central visibility authority without a duplicate VisualRadius facade");
 
         MethodInfo updateRoom = hooks.GetMethod("UpdateRoom", Flags);
         int swarmUpdate = MethodCallOffset(updateRoom, swarmRoom, "UpdateRoom");
