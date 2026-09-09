@@ -1,5 +1,4 @@
 using DryCycle.Debugging.AI;
-using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
@@ -46,7 +45,6 @@ internal static class DB_RainWorldHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.SwarmUpdate += Swarm;
         On.FlyAI.UpdateFollowDijsktra += Follow;
-        On.FlyAI.FleeFromRainUpdate += Rain;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
@@ -64,7 +62,6 @@ internal static class DB_RainWorldHooks
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.SwarmUpdate -= Swarm;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
-        On.FlyAI.FleeFromRainUpdate -= Rain;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
@@ -370,6 +367,13 @@ internal static class DB_RainWorldHooks
             DB_BehaviorOwner.VanillaFallback))
             return false;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(desert, owner)) return false;
+
+        // NativeSpecial already declares its social suppression in the winning proposal.
+        // Keep that semantic at the accepted top-level owner instead of re-hooking nested
+        // FleeFromRainUpdate solely to cancel Social a second time.
+        if (ownership.WinningProposal.SuppressSocial)
+            DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=" + owner);
+
         orig(self);
         return true;
     }
@@ -401,96 +405,23 @@ internal static class DB_RainWorldHooks
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)
     {
         orig(self);
-        if (self.fly is not DB_Creature desert) return;
-
-        DB_SocialRoomRuntime.RoomState socialRoom =
-            DB_SocialRoomRuntime.For(self.room);
-        if (socialRoom?.IsReserved(desert) == true)
-            return;
-
-        if (!DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom))
-        {
-            if (self.behavior == FlyAI.Behavior.Swarm)
-                self.ChangeBehavior(FlyAI.Behavior.Idle);
-            DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, false);
-            return;
-        }
-
-        bool currentlySwarm = self.behavior == FlyAI.Behavior.Swarm;
-        if (!DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, currentlySwarm))
-        {
-            if (currentlySwarm)
-                self.ChangeBehavior(FlyAI.Behavior.Idle);
-            return;
-        }
-
-        // A live bout remains under native SwarmFlight until vanilla ends it, a higher owner
-        // interrupts it, or the bounded lifecycle expires. Do not continually re-run entry.
-        if (self.behavior == FlyAI.Behavior.Swarm)
-            return;
-
-        if (self.behavior == FlyAI.Behavior.Idle && !self.fleeFromRain &&
-            DB_SwarmLifecycleRuntime.CanEnterSwarm(desert) &&
-            self.ValidSwarmPosition(self.localGoal))
-        {
-            self.ChangeBehavior(FlyAI.Behavior.Swarm);
-            DB_SwarmLifecycleRuntime.EnteredSwarm(desert);
-        }
+        if (self.fly is DB_Creature desert)
+            DB_SwarmLifecycleRuntime.AfterNativeIdleUpdate(self, desert);
     }
 
     private static void Swarm(On.FlyAI.orig_SwarmUpdate orig, FlyAI self)
     {
         orig(self);
-        if (self.fly is not DB_Creature desert) return;
-
-        if (!DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom))
-        {
-            if (self.behavior == FlyAI.Behavior.Swarm)
-                self.ChangeBehavior(FlyAI.Behavior.Idle);
-            DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, false);
-            return;
-        }
-
-        bool currentlySwarm = self.behavior == FlyAI.Behavior.Swarm;
-        if (!DB_SwarmLifecycleRuntime.AllowCurrentBehavior(desert, currentlySwarm) && currentlySwarm)
-            self.ChangeBehavior(FlyAI.Behavior.Idle);
-    }
-
-    private static void Rain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
-    {
-        if (self.fly is not DB_Creature desert)
-        {
-            orig(self);
-            return;
-        }
-
-        // Travel is the single cross-room planner when it owns the enclosing frame. The
-        // nested vanilla callback must never execute a second steering controller.
-        DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
-        if (ownership.PrimaryOwner == DB_BehaviorOwner.Travel)
-        {
-            DB_SocialRuntime.CancelForPriority(desert, "travel owns enclosing AI frame");
-            return;
-        }
-
-        // When Travel cannot own, preserve the complete native fallback. In particular,
-        // vanilla FleeFromRainUpdate selects MigrationDirection in rooms without a BatHive;
-        // suppressing orig here stranded bats in no-hive rooms during rain.
-        DB_SocialRuntime.CancelForPriority(desert, "rain priority");
-        orig(self);
+        if (self.fly is DB_Creature desert)
+            DB_SwarmLifecycleRuntime.AfterNativeSwarmUpdate(self, desert);
     }
 
     private static void Follow(On.FlyAI.orig_UpdateFollowDijsktra orig, FlyAI self)
     {
-        if (self.fly is not DB_Creature ||
-            !DB_SwarmRoom.IsDB_SwarmRoom(self.room.abstractRoom) ||
-            self.room.hives.Length == 0)
-        {
-            orig(self);
+        if (self.fly is DB_Creature desert &&
+            DB_SwarmRoom.TryHandleNativeFollowDijkstra(self, desert))
             return;
-        }
-        if (self.followingDijkstraMap < 0)
-            self.followingDijkstraMap = self.room.exitAndDenIndex.Length + UnityEngine.Random.Range(0, self.room.hives.Length);
+        orig(self);
     }
 
     private static void UpdateRoom(On.Room.orig_Update orig, Room self)

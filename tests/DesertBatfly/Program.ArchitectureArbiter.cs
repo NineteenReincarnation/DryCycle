@@ -24,6 +24,10 @@ internal static partial class Program
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Runtime", true);
         Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
+        Type perception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
+        Type restraintPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RestraintPolicy", true);
+        Type swarmLifecycle = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SwarmLifecycleRuntime", true);
+        Type swarmRoom = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SwarmRoom", true);
 
         foreach (string name in new[]
                  {
@@ -165,19 +169,25 @@ internal static partial class Program
               MethodCallOffset(combatExecute, arbiter, "IsPrimaryOwner") >= 0 &&
               MethodCallOffset(combatAfterPhysics, arbiter, "IsPrimaryOwner") >= 0,
             "Architecture arbitration Combat domain owns both formal execution and Attach/Interfere post-physics owner checks");
-        MethodInfo aiCombatFacade = desertAI.GetMethod("ExecuteCombatOwned", Flags);
-        Check(aiCombatFacade == null || MethodCallOffset(aiCombatFacade, combatRuntime, "TryExecuteOwned") >= 0,
-            "Architecture arbitration any retained AI Combat forwarding surface may only delegate to DB_CombatRuntime");
+        Check(desertAI.GetMethod("ExecuteCombatOwned", Flags) == null,
+            "Architecture arbitration DB_AI has no redundant Combat forwarding facade");
 
-        MethodInfo aiInjuryExecutor = desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags);
+        PropertyInfo injuryOwner = desertAI.GetProperty("InjuryRecovery", Flags);
         MethodInfo injuryExecute = injuryRecovery.GetMethod("ExecuteOwned", Flags);
-        Check(aiInjuryExecutor != null && injuryExecute != null &&
-              MethodCallOffset(aiInjuryExecutor, injuryRecovery, "ExecuteOwned") >= 0 &&
+        Check(injuryOwner?.PropertyType == injuryRecovery && injuryExecute != null &&
               MethodCallOffset(injuryExecute, arbiter, "IsPrimaryOwner") >= 0 &&
+              desertAI.GetMethod("ExecuteInjuryRecoveryOwned", Flags) == null &&
               desertAI.GetMethod("TryInjuryRecovery", Flags) == null,
-            "Architecture arbitration severe injury movement delegates to one Injury-domain owner-gated executor");
-        Check(MethodCallOffset(behaviorExecution.GetMethod("TryInjuryRecovery", Flags), desertAI, "ExecuteInjuryRecoveryOwned") >= 0,
-            "Architecture arbitration central execution routes InjuryRecovery through the species query surface into DB_InjuryRecovery");
+            "Architecture arbitration severe injury execution belongs directly to DB_InjuryRecovery");
+        Check(MethodCallOffset(behaviorExecution.GetMethod("TryInjuryRecovery", Flags), injuryRecovery, "ExecuteOwned") >= 0,
+            "Architecture arbitration central execution routes InjuryRecovery directly to its domain owner");
+        Check(desertAI.GetMethod("RestrainedByNonFly", Flags) == null &&
+              restraintPolicy.GetMethod("IsRestrainedByNonFly", Flags) != null,
+            "Architecture arbitration restraint classification has one canonical policy surface");
+        Check(perception.GetProperty("PursuitTicks", Flags) != null &&
+              desertAI.GetProperty("RetreatTicks", Flags) != null &&
+              desertAI.GetProperty("EscapeFrom", Flags) != null,
+            "Architecture arbitration debug facts are exposed by their current owners without private reflection");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -209,8 +219,16 @@ internal static partial class Program
               MethodCallOffset(updateAI, desertAI, "Update") < 0,
             "Architecture arbitration hook has no legacy projectile or monolithic DB_AI executor pipeline");
         MethodInfo executeNativeOwned = hooks.GetMethod("ExecuteNativeOwned", Flags);
-        Check(executeNativeOwned != null && MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0,
-            "Architecture arbitration vanilla FlyAI.Update is itself restricted to an accepted NativeSpecial/Ordinary/Fallback owner");
+        Check(executeNativeOwned != null &&
+              MethodCallOffset(executeNativeOwned, arbiter, "IsPrimaryOwner") >= 0 &&
+              MethodCallOffset(executeNativeOwned, socialLife, "CancelForPriority") >= 0,
+            "Architecture arbitration vanilla FlyAI.Update is owner-gated and carries proposal-driven social suppression");
+        Check(hooks.GetMethod("Rain", Flags) == null,
+            "Architecture arbitration has no redundant nested FleeFromRainUpdate hook");
+        Check(MethodCallOffset(hooks.GetMethod("Idle", Flags), swarmLifecycle, "AfterNativeIdleUpdate") >= 0 &&
+              MethodCallOffset(hooks.GetMethod("Swarm", Flags), swarmLifecycle, "AfterNativeSwarmUpdate") >= 0 &&
+              MethodCallOffset(hooks.GetMethod("Follow", Flags), swarmRoom, "TryHandleNativeFollowDijkstra") >= 0,
+            "Architecture arbitration nonvirtual Idle/Swarm/Follow hooks are thin adapters into species domains");
 
         Type observatory = mod.GetType("DryCycle.Debugging.AI.DB_ObservatorySource", true);
         Check(MethodCallOffset(observatory.GetMethod("ControlOwner", Flags), arbiter, "TryGetResolution") >= 0,
@@ -218,6 +236,13 @@ internal static partial class Program
         Check(observatory.GetMethod("BuildArbiterSection", Flags) != null &&
               MethodCallOffset(observatory.GetMethod("BuildArbiterSection", Flags), arbiter, "TryGetDebugState") >= 0,
             "Architecture arbitration Observatory formally presents winner plus rejected arbiter proposals");
+        Check(observatory.GetMethod("Read", Flags) == null &&
+              observatory.GetMethod("RestrainedByNonFly", Flags) == null &&
+              observatory.GetField("RetreatField", Flags) == null &&
+              observatory.GetField("PursuitField", Flags) == null &&
+              observatory.GetField("EscapeFromField", Flags) == null &&
+              MethodCallOffset(observatory.GetMethod("BuildDecisionStack", Flags), restraintPolicy, "IsRestrainedByNonFly") >= 0,
+            "Architecture arbitration Observatory reads project-owned state directly and shares canonical restraint classification");
 
         Check(frame.Name.StartsWith("DB_", StringComparison.Ordinal) &&
               proposal.Name.StartsWith("DB_", StringComparison.Ordinal) &&
@@ -225,6 +250,6 @@ internal static partial class Program
             "Architecture arbitration architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Architecture arbitration: current domain owner checks, lean FrameContext, Feeding priority, special physics and rejected-proposal Observatory presentation are guarded; Rain World live validation remains.");
+            "Architecture arbitration: current domain owners, thin native hooks, direct Observatory queries, lean FrameContext, Feeding priority, special physics and rejected-proposal presentation are guarded; Rain World live validation remains.");
     }
 }

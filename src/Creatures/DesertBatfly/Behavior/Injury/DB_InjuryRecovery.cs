@@ -43,8 +43,9 @@ internal sealed class DB_InjuryRecovery
         }
 
         // Higher-priority preemption must not erase recovery state or an active travel intent.
-        if (fly.dead || !fly.Consious || fly.room == null || brain.RestrainedByNonFly() ||
-            fly.inShortcut || fly.Emergence?.Active == true || brain.HasImmediateDanger)
+        if (fly.dead || !fly.Consious || fly.room == null ||
+            DB_RestraintPolicy.IsRestrainedByNonFly(fly) || fly.inShortcut ||
+            fly.Emergence?.Active == true || brain.HasImmediateDanger)
             return false;
 
         brain.CancelPhysicalAttack();

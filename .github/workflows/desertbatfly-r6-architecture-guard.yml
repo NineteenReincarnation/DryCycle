@@ -179,7 +179,7 @@ jobs:
           execution_tokens = (
               'internal static class DB_BehaviorExecution',
               'ExecuteImmediateDangerOwned()',
-              'ExecuteInjuryRecoveryOwned()',
+              'bat.DesertAI.InjuryRecovery.ExecuteOwned()',
               'DB_EnvironmentRuntime.ApplyOwnedBehavior(bat)',
               'ExecuteFearOwned(resolution)',
               'DB_VengeanceRuntime.ExecuteOwned(bat)',
@@ -207,6 +207,7 @@ jobs:
               'PrimaryOwner == DB_BehaviorOwner.Vengeance',
               'PrimaryOwner == DB_BehaviorOwner.EnvironmentLocalSurvival',
               'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
+              'PrimaryOwner == DB_BehaviorOwner.Feeding',
               'PrimaryOwner == DB_BehaviorOwner.Combat',
               'PrimaryOwner == DB_BehaviorOwner.Roost',
               'PrimaryOwner == DB_BehaviorOwner.Social'

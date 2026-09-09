@@ -39,6 +39,68 @@ internal static class DB_SwarmLifecycleRuntime
     }
 
     /// <summary>
+    /// Applies Desert Batfly's post-vanilla IdleUpdate swarm lifecycle rules. Integration
+    /// hooks only provide the nonvirtual Rain World boundary; all species decisions stay here.
+    /// </summary>
+    internal static void AfterNativeIdleUpdate(FlyAI ai, DB_Creature bat)
+    {
+        if (ai?.room == null || bat == null) return;
+
+        DB_SocialRoomRuntime.RoomState socialRoom = DB_SocialRoomRuntime.For(ai.room);
+        if (socialRoom?.IsReserved(bat) == true)
+            return;
+
+        if (!DB_SwarmRoom.IsDB_SwarmRoom(ai.room.abstractRoom))
+        {
+            if (ai.behavior == FlyAI.Behavior.Swarm)
+                ai.ChangeBehavior(FlyAI.Behavior.Idle);
+            AllowCurrentBehavior(bat, false);
+            return;
+        }
+
+        bool currentlySwarm = ai.behavior == FlyAI.Behavior.Swarm;
+        if (!AllowCurrentBehavior(bat, currentlySwarm))
+        {
+            if (currentlySwarm)
+                ai.ChangeBehavior(FlyAI.Behavior.Idle);
+            return;
+        }
+
+        // A live bout remains under native SwarmFlight until vanilla ends it, a higher owner
+        // interrupts it, or the bounded lifecycle expires. Do not continually re-run entry.
+        if (ai.behavior == FlyAI.Behavior.Swarm)
+            return;
+
+        if (ai.behavior == FlyAI.Behavior.Idle && !ai.fleeFromRain &&
+            CanEnterSwarm(bat) && ai.ValidSwarmPosition(ai.localGoal))
+        {
+            ai.ChangeBehavior(FlyAI.Behavior.Swarm);
+            EnteredSwarm(bat);
+        }
+    }
+
+    /// <summary>
+    /// Applies Desert Batfly's post-vanilla SwarmUpdate lifecycle gate. The hook itself has no
+    /// species policy beyond forwarding this nonvirtual callback.
+    /// </summary>
+    internal static void AfterNativeSwarmUpdate(FlyAI ai, DB_Creature bat)
+    {
+        if (ai?.room == null || bat == null) return;
+
+        if (!DB_SwarmRoom.IsDB_SwarmRoom(ai.room.abstractRoom))
+        {
+            if (ai.behavior == FlyAI.Behavior.Swarm)
+                ai.ChangeBehavior(FlyAI.Behavior.Idle);
+            AllowCurrentBehavior(bat, false);
+            return;
+        }
+
+        bool currentlySwarm = ai.behavior == FlyAI.Behavior.Swarm;
+        if (!AllowCurrentBehavior(bat, currentlySwarm) && currentlySwarm)
+            ai.ChangeBehavior(FlyAI.Behavior.Idle);
+    }
+
+    /// <summary>
     /// Called after vanilla IdleUpdate/SwarmUpdate. Returns true only while a current Swarm
     /// bout is still allowed to remain active. If vanilla itself ended Swarm, the bout is
     /// treated as complete and a roaming interval begins.
@@ -83,7 +145,7 @@ internal static class DB_SwarmLifecycleRuntime
         return tick >= state.NextSwarmEligibleTick;
     }
 
-    /// <summary>Records a hook-driven Idle -> Swarm transition.</summary>
+    /// <summary>Records a domain-approved Idle -> Swarm transition.</summary>
     internal static void EnteredSwarm(DB_Creature bat)
     {
         if (bat?.room == null) return;
