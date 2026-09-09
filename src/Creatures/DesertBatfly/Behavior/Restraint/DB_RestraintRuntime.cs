@@ -1,3 +1,4 @@
+using DryCycle.Thirst;
 using RWCustom;
 using UnityEngine;
 
@@ -23,7 +24,7 @@ internal sealed class DB_RestraintRuntime
     internal bool IsPlayerHeld => holder != null && IsCurrentGrasp();
     internal Player Holder => IsPlayerHeld ? holder : null;
     internal float EscapePressure => escapePressure;
-    internal float EscapeThreshold => escapeThreshold;
+    internal float EscapeThreshold => EffectiveEscapeThreshold();
     internal int HoldTicks => holdTicks;
 
     internal DB_RestraintRuntime(DB_Creature bat)
@@ -90,14 +91,15 @@ internal sealed class DB_RestraintRuntime
 
         if (holdTicks < DB_Tuning.GrabEscapeMinimumHoldTicks) return;
 
-        float pressureT = Mathf.Clamp01(escapePressure / Mathf.Max(0.01f, escapeThreshold));
+        float effectiveThreshold = EffectiveEscapeThreshold();
+        float pressureT = Mathf.Clamp01(escapePressure / Mathf.Max(0.01f, effectiveThreshold));
         float burstChance = Mathf.Lerp(
             DB_Tuning.GrabEscapeBurstChanceMin,
             DB_Tuning.GrabEscapeBurstChanceMax,
             pressureT * pressureT) * Mathf.Lerp(0.78f, 1.22f, drive);
 
         int burstSalt = 0x2D51 + pulseSerial * 43 + holdSerial * 131;
-        if (escapePressure >= escapeThreshold || Stable01(burstSalt) < burstChance)
+        if (escapePressure >= effectiveThreshold || Stable01(burstSalt) < burstChance)
             Release(DB_GrabEscapeCause.SelfStruggle, 0f);
     }
 
@@ -119,7 +121,7 @@ internal sealed class DB_RestraintRuntime
 
         bool forceRelease = closingSpeed >= DB_Tuning.RescueStrongImpactSpeed &&
                             rescuer.Personality.RescueDrive >= DB_Tuning.RescueStrongImpactDrive;
-        if (!forceRelease && escapePressure < escapeThreshold) return false;
+        if (!forceRelease && escapePressure < EffectiveEscapeThreshold()) return false;
         return Release(DB_GrabEscapeCause.RescueImpact, closingSpeed);
     }
 
@@ -202,6 +204,13 @@ internal sealed class DB_RestraintRuntime
             return false;
         int index = grasp.graspUsed;
         return index >= 0 && index < holder.grasps.Length && ReferenceEquals(holder.grasps[index], grasp);
+    }
+
+    private float EffectiveEscapeThreshold()
+    {
+        if (holder == null || !IsCurrentGrasp()) return escapeThreshold;
+        float grip = PlayerDehydrationFacts.For(holder).GripStrength;
+        return Mathf.Max(0.45f, escapeThreshold * grip);
     }
 
     private void PrepareThreshold()
