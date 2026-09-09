@@ -47,6 +47,7 @@ internal static class DB_BehaviorArbiter
         DB_BehaviorOwner.Vengeance => 80,
         DB_BehaviorOwner.EnvironmentLocalSurvival => 90,
         DB_BehaviorOwner.ImmediateProjectileEvade => 100,
+        DB_BehaviorOwner.Feeding => 105,
         DB_BehaviorOwner.Combat => 110,
         DB_BehaviorOwner.Roost => 120,
         DB_BehaviorOwner.Social => 130,
@@ -194,6 +195,7 @@ internal static class DB_BehaviorArbiter
         DB_BehaviorOwner.Vengeance => "rejected by higher-priority Vengeance",
         DB_BehaviorOwner.EnvironmentLocalSurvival => "rejected by higher-priority EnvironmentLocalSurvival",
         DB_BehaviorOwner.ImmediateProjectileEvade => "rejected by higher-priority ImmediateProjectileEvade",
+        DB_BehaviorOwner.Feeding => "rejected by higher-priority Feeding",
         DB_BehaviorOwner.Combat => "rejected by higher-priority Combat",
         DB_BehaviorOwner.Roost => "rejected by higher-priority Roost",
         DB_BehaviorOwner.Social => "rejected by higher-priority Social",
@@ -374,6 +376,26 @@ internal static class DB_BehaviorArbiter
                 suppressSocial: true,
                 commitment: 0.90f));
         }
+
+        if (bat?.Feeding?.Active == true)
+            proposals.Add(DB_BehaviorProposal.Create(
+                DB_BehaviorOwner.Feeding,
+                DB_BehaviorKind.Feeding,
+                bat.Feeding.Attached
+                    ? "attached to dehydrated player"
+                    : bat.Feeding.Role == DB_FeedingRole.Cloud
+                        ? "critical dehydration feeding cloud"
+                        : "approaching dehydrated player feeding slot",
+                bat.Feeding.Goal,
+                nominalSpeed: bat.Feeding.Attached
+                    ? 0f
+                    : Mathf.Lerp(
+                        DB_Tuning.FeedingApproachSpeedMin,
+                        DB_Tuning.FeedingApproachSpeedMax,
+                        bat.Feeding.Motivation),
+                suppressCombat: true,
+                suppressSocial: true,
+                commitment: bat.Feeding.Commitment));
 
         bool rescue = bat?.Rescue?.Active == true;
         if (ai != null && (rescue || ai.FormalAttack || IsCombatMode(ai.Mode)))
