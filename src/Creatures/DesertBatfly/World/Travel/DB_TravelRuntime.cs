@@ -73,7 +73,7 @@ internal static class DB_TravelRuntime
             reason = "scheduled / staggered departure remains Travel-owned";
             return true;
         }
-        if (RestrainedByNonFly(bat))
+        if (DB_RestraintPolicy.IsRestrainedByNonFly(bat))
         {
             reason = "Travel yielded: restrained by non-Fly";
             return false;
@@ -230,7 +230,7 @@ internal static class DB_TravelRuntime
             intent.StatusReason = "scheduled / staggered departure";
             return true;
         }
-        if (RestrainedByNonFly(bat))
+        if (DB_RestraintPolicy.IsRestrainedByNonFly(bat))
         {
             Suspend(intent, "suspended: restrained by non-Fly");
             return false;
@@ -869,17 +869,6 @@ internal static class DB_TravelRuntime
     {
         if (intent == null || roomIndex < 0 || !intent.Route.Valid) return false;
         return intent.Route.Rooms[intent.Route.Rooms.Length - 1] == roomIndex;
-    }
-
-    private static bool RestrainedByNonFly(DB_Creature bat)
-    {
-        if (bat?.grabbedBy == null) return false;
-        for (int i = 0; i < bat.grabbedBy.Count; i++)
-        {
-            Creature.Grasp grasp = bat.grabbedBy[i];
-            if (grasp?.grabber != null && grasp.grabber is not Fly) return true;
-        }
-        return false;
     }
 
     private static void RemoveEvacuationKeys(string homeColony)
