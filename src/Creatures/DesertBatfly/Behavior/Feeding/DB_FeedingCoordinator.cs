@@ -92,6 +92,7 @@ internal static class DB_FeedingCoordinator
     {
         internal readonly List<TargetEntry> Targets = new(4);
         internal readonly List<Reservation> Reservations = new(20);
+        internal int MaintenanceClock = int.MinValue;
         internal int TargetRefreshClock = int.MinValue;
         internal int DrainClock = int.MinValue;
     }
@@ -109,8 +110,7 @@ internal static class DB_FeedingCoordinator
         if (!CurrentBat(bat)) return false;
 
         RoomState state = rooms.GetValue(bat.room, _ => new RoomState());
-        RefreshTargets(bat.room, state);
-        Prune(bat.room, state);
+        MaintainRoomState(bat.room, state);
 
         Reservation existing = FindReservation(state, bat);
         if (existing != null)
@@ -190,8 +190,7 @@ internal static class DB_FeedingCoordinator
     {
         assignment = default;
         if (!CurrentBat(bat) || !rooms.TryGetValue(bat.room, out RoomState state)) return false;
-        RefreshTargets(bat.room, state);
-        Prune(bat.room, state);
+        MaintainRoomState(bat.room, state);
         Reservation reservation = FindReservation(state, bat);
         if (reservation == null) return false;
         assignment = ToAssignment(state, reservation);
@@ -266,16 +265,21 @@ internal static class DB_FeedingCoordinator
     internal static void Release(DB_Creature bat)
     {
         if (bat?.room == null || !rooms.TryGetValue(bat.room, out RoomState state)) return;
+        bool removed = false;
         for (int i = state.Reservations.Count - 1; i >= 0; i--)
-            if (ReferenceEquals(state.Reservations[i].Bat, bat))
-                state.Reservations.RemoveAt(i);
+        {
+            if (!ReferenceEquals(state.Reservations[i].Bat, bat)) continue;
+            state.Reservations.RemoveAt(i);
+            removed = true;
+        }
+        if (removed)
+            PromoteCloudReservations(state);
     }
 
     internal static void UpdateRoom(Room room)
     {
         if (room == null || !rooms.TryGetValue(room, out RoomState state)) return;
-        RefreshTargets(room, state);
-        Prune(room, state);
+        MaintainRoomState(room, state);
 
         int clock = room.game?.clock ?? 0;
         if (state.DrainClock == clock) return;
@@ -318,6 +322,20 @@ internal static class DB_FeedingCoordinator
                     reservation.Bat.DesertState.Thirst - relief);
             }
         }
+    }
+
+    /// <summary>
+    /// Room aggregation maintenance is allowed to run at most once per Rain World clock tick,
+    /// regardless of how many Desert Batflies query their assignment during that frame.
+    /// Event-driven Release may still promote a waiting Cloud reservation immediately.
+    /// </summary>
+    private static void MaintainRoomState(Room room, RoomState state)
+    {
+        int clock = room?.game?.clock ?? 0;
+        if (state.MaintenanceClock == clock) return;
+        state.MaintenanceClock = clock;
+        RefreshTargets(room, state);
+        Prune(room, state);
     }
 
     private static void RefreshTargets(Room room, RoomState state)
