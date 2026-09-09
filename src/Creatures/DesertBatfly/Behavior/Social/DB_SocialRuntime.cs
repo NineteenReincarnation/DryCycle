@@ -149,12 +149,6 @@ internal static class DB_SocialRuntime
         DB_SocialRoomRuntime.Reset();
     }
 
-    internal static void Update(DB_Creature bat)
-    {
-        RefreshState(bat);
-        ApplyOwnedBehavior(bat);
-    }
-
     internal static void RefreshState(DB_Creature bat)
     {
         if (bat == null) return;
