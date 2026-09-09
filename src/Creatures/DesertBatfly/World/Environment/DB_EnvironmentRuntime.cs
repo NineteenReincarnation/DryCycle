@@ -746,18 +746,8 @@ internal static class DB_EnvironmentRuntime
         }
         if (bestHive < 0 || bestMap < 0) return false;
 
-        bool onHiveTile = bat.room.GetTile(bat.mainBodyChunk.pos).hive;
-        if (onHiveTile && burrow)
-        {
-            DB_SocialRuntime.CancelForPriority(bat, "environmental Burrow priority");
-            bat.DesertAI.CancelAttack();
-            bat.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
-            bat.burrowOrHangSpot = bat.mainBodyChunk.pos;
-            bat.movMode = Fly.MovementMode.Burrow;
-            bat.AI.afraid = Mathf.Max(bat.AI.afraid, influence.HardSurvival ? 1.25f : 0.62f);
-            return true;
-        }
-
+        // Final hive-tile contact and the Burrow transition are owned exclusively by
+        // DB_HiveDocking. Environment only selects and follows the native BatHive map.
         if (!seekHome && influence.BurrowDrive < 0.45f) return false;
         if (bat.DesertAI.FormalAttack && !influence.HardSurvival) return false;
 
