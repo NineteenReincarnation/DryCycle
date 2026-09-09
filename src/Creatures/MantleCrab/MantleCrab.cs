@@ -11,11 +11,26 @@ public sealed class MantleCrab : Creature
     internal readonly MantleCrabLimb[] Legs = new MantleCrabLimb[4];
     internal readonly MantleCrabLimb[] Pincers = new MantleCrabLimb[2];
     private readonly float[] supportAccelerations = new float[4];
-    private readonly Vector2[] frameCorrections = new Vector2[5];
+
+    private Vector2 shellRestCenter;
+    private float shellRestInertia;
+    private Vector2 shellCenter;
+    private Vector2 shellAxis = Vector2.right;
+    private bool shellFrameInitialized;
+
     internal float ShellScale = 1f;
     internal readonly Rendering.MantleCrabVisualPhenotype Phenotype;
     internal int SupportingFeet { get; private set; }
-    internal Vector2 Axis => (bodyChunks[4].pos - bodyChunks[0].pos).normalized;
+    internal Vector2 Axis
+    {
+        get
+        {
+            if (shellFrameInitialized) return shellAxis;
+            if (bodyChunks == null || bodyChunks.Length < 5) return Vector2.right;
+            Vector2 fallback = bodyChunks[4].pos - bodyChunks[0].pos;
+            return fallback.sqrMagnitude > 0.0001f ? fallback.normalized : Vector2.right;
+        }
+    }
 
     public MantleCrab(AbstractCreature creature, World world) : base(creature, world)
     {
@@ -24,13 +39,17 @@ public sealed class MantleCrab : Creature
         bodyChunks = new BodyChunk[5];
         for (int i = 0; i < 5; i++)
             bodyChunks[i] = new BodyChunk(this, i, ShellRest[i] * ShellScale, Radii[i] * ShellScale, i == 2 ? 3f : 1.8f);
-        // Complete distance graph, as in MirosBird's torso: adjacent AND cross-node braces.
+
+        // The complete distance graph remains as collision-time bracing, but it is no longer
+        // responsible for visible shell stiffness. MaintainRigidShell removes all internal
+        // deformation after Creature physics resolves the frame.
         bodyChunkConnections = new BodyChunkConnection[10];
         int connection = 0;
         for (int i = 0; i < 5; i++)
         for (int j = i + 1; j < 5; j++)
             bodyChunkConnections[connection++] = new BodyChunkConnection(bodyChunks[i], bodyChunks[j],
                 Vector2.Distance(ShellRest[i], ShellRest[j]) * ShellScale, BodyChunkConnection.Type.Normal, .85f, -1f);
+
         for (int i = 0; i < 4; i++) Legs[i] = new MantleCrabLimb(i, false);
         for (int i = 0; i < 2; i++) Pincers[i] = new MantleCrabLimb(i, true);
         airFriction = .995f;
@@ -53,16 +72,19 @@ public sealed class MantleCrab : Creature
             bodyChunks[i].vel = Vector2.zero;
         }
 
+        ResetRigidShellFrame();
+
         // DevConsole and ordinary realization both enter through PlaceInRoom. If a normal
         // standing surface is already reachable, plant the visual legs immediately so the
-        // first gravity frames do not make the tall passive prototype crumple before its
-        // support springs engage. A genuinely airborne spawn still falls normally.
+        // first gravity frames do not make the tall passive prototype crumple before support
+        // engages. A genuinely airborne spawn still falls normally.
         ResetLimbs(snapWalkingToSupport: true);
     }
 
     public override void NewRoom(Room newRoom)
     {
         base.NewRoom(newRoom);
+        ResetRigidShellFrame();
         ResetLimbs(snapWalkingToSupport: false);
     }
 
@@ -83,14 +105,23 @@ public sealed class MantleCrab : Creature
         graphicsModule?.Reset();
     }
 
-    internal Vector2 Anchor(MantleCrabLimb limb) => bodyChunks[2].pos +
-        Axis * limb.Rest[0].x + new Vector2(-Axis.y, Axis.x) * limb.Rest[0].y;
+    internal Vector2 Anchor(MantleCrabLimb limb)
+    {
+        Vector2 axis = Axis;
+        Vector2 up = new(-axis.y, axis.x);
+        return bodyChunks[2].pos + axis * limb.Rest[0].x + up * limb.Rest[0].y;
+    }
 
     public override void Update(bool eu)
     {
         base.Update(eu);
         if (room == null) return;
-        StabilizeShell();
+
+        // Collision is allowed to move any shell chunk during Creature.Update, but before
+        // limbs or graphics observe the frame we remove all internal deformation. The shell
+        // keeps the collision's linear and angular response, never its bend/compression modes.
+        MaintainRigidShell();
+
         SupportingFeet = 0;
         foreach (MantleCrabLimb leg in Legs)
         {
@@ -98,8 +129,14 @@ public sealed class MantleCrab : Creature
             if (leg.Planted) SupportingFeet++;
         }
         foreach (MantleCrabLimb pincer in Pincers) pincer.Update(this, Anchor(pincer));
+
         if (!Consious || SupportingFeet == 0) return;
         ApplySupport(gravity * room.gravity);
+
+        // Support is applied at individual shell stations to create legitimate torque. Project
+        // those impulses back to rigid-body velocities immediately so they cannot seed a new
+        // internal vibration for the next frame.
+        RigidifyShellVelocities();
     }
 
     internal void ApplySupport(float effectiveGravity)
@@ -107,16 +144,22 @@ public sealed class MantleCrab : Creature
         float totalMass = TotalMass;
         Vector2 center = Vector2.zero, velocity = Vector2.zero;
         foreach (BodyChunk chunk in bodyChunks)
-        { center += chunk.pos * chunk.mass; velocity += chunk.vel * chunk.mass; }
-        center /= totalMass; velocity /= totalMass;
+        {
+            center += chunk.pos * chunk.mass;
+            velocity += chunk.vel * chunk.mass;
+        }
+        center /= totalMass;
+        velocity /= totalMass;
+
         float angularMomentum = 0f, inertia = 0f;
         foreach (BodyChunk chunk in bodyChunks)
         {
             Vector2 offset = chunk.pos - center, relativeVelocity = chunk.vel - velocity;
-            angularMomentum += chunk.mass * (offset.x * relativeVelocity.y - offset.y * relativeVelocity.x);
+            angularMomentum += chunk.mass * Cross(offset, relativeVelocity);
             inertia += chunk.mass * offset.sqrMagnitude;
         }
         float angularVelocity = angularMomentum / Mathf.Max(1f, inertia);
+
         for (int i = 0; i < Legs.Length; i++)
         {
             MantleCrabLimb leg = Legs[i];
@@ -124,59 +167,171 @@ public sealed class MantleCrab : Creature
             if (!leg.Planted) continue;
             BodyChunk anchor = bodyChunks[leg.AnchorChunk];
             float extensionError = leg.StandHeight - (Anchor(leg).y - leg.Tip.y);
-            // Distance constraints exchange local velocities even at rest. Damping the fitted
-            // rigid-frame velocity avoids interpreting those impulses as upward body motion.
             float stationVelocity = velocity.y + angularVelocity * (anchor.pos.x - center.x);
             supportAccelerations[i] = MantleCrabRigMath.SupportAcceleration(extensionError,
                 stationVelocity, effectiveGravity, SupportingFeet);
         }
+
         // Evaluate every leg against the same velocity snapshot. Paired legs share a chunk;
-        // applying the first force before evaluating the second made support order-dependent.
+        // applying the first force before evaluating the second would make support order-dependent.
         for (int i = 0; i < Legs.Length; i++)
         {
             MantleCrabLimb leg = Legs[i];
             if (!leg.Planted) continue;
             BodyChunk anchor = bodyChunks[leg.AnchorChunk];
-            // Forces act at the attached shell station; asymmetric contacts can tilt the body.
             anchor.vel.y += supportAccelerations[i] * totalMass / anchor.mass;
-            if (SupportingFeet >= 2) anchor.vel.x -= Mathf.Clamp(anchor.vel.x * .08f, -.35f, .35f);
+            if (SupportingFeet >= 2)
+                anchor.vel.x -= Mathf.Clamp(anchor.vel.x * .08f, -.35f, .35f);
         }
     }
 
-    internal void StabilizeShell()
+    /// <summary>
+    /// Projects the five collision chunks onto the single rigid shell frame that best fits
+    /// their post-collision positions. The projection preserves mass-centre translation and
+    /// angular momentum, while deleting every internal stretch, bend and compression mode.
+    /// </summary>
+    internal void MaintainRigidShell()
     {
-        // A nearly collinear distance graph can bow far with very little length error.
-        // Fit the species frame to the current axis, then restore only its deformation.
-        // This is internal elasticity, not a world-space orientation or height lock.
-        Vector2 center = Vector2.zero, velocity = Vector2.zero, restCenter = Vector2.zero;
-        float mass = TotalMass;
-        for (int i = 0; i < 5; i++)
+        if (bodyChunks == null || bodyChunks.Length != ShellRest.Length) return;
+        EnsureRigidShellMetrics();
+
+        float mass = 0f;
+        Vector2 center = Vector2.zero;
+        Vector2 velocity = Vector2.zero;
+        for (int i = 0; i < bodyChunks.Length; i++)
         {
-            center += bodyChunks[i].pos * bodyChunks[i].mass;
-            velocity += bodyChunks[i].vel * bodyChunks[i].mass;
-            restCenter += ShellRest[i] * ShellScale * bodyChunks[i].mass;
+            BodyChunk chunk = bodyChunks[i];
+            if (chunk == null) return;
+            mass += chunk.mass;
+            center += chunk.pos * chunk.mass;
+            velocity += chunk.vel * chunk.mass;
         }
-        center /= mass; velocity /= mass; restCenter /= mass;
-        Vector2 axis = Axis, up = new(-axis.y, axis.x);
-        Vector2 net = Vector2.zero;
-        float limit = 1f;
-        for (int i = 0; i < 5; i++)
+        if (mass <= 0.0001f) return;
+        center /= mass;
+        velocity /= mass;
+
+        float fitDot = 0f;
+        float fitCross = 0f;
+        float angularMomentum = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
         {
-            Vector2 local = ShellRest[i] * ShellScale - restCenter;
-            Vector2 error = center + axis * local.x + up * local.y - bodyChunks[i].pos;
-            // Only the component normal to the shell corrects bowing; the main links own span.
-            frameCorrections[i] = up * (.32f * Vector2.Dot(error, up) -
-                .16f * Vector2.Dot(bodyChunks[i].vel - velocity, up));
-            net += frameCorrections[i] * bodyChunks[i].mass;
+            BodyChunk chunk = bodyChunks[i];
+            Vector2 local = ShellRest[i] * ShellScale - shellRestCenter;
+            Vector2 current = chunk.pos - center;
+            fitDot += chunk.mass * Vector2.Dot(local, current);
+            fitCross += chunk.mass * Cross(local, current);
+
+            Vector2 relativeVelocity = chunk.vel - velocity;
+            angularMomentum += chunk.mass * Cross(current, relativeVelocity);
         }
-        net /= mass;
-        for (int i = 0; i < 5; i++)
+
+        Vector2 axis;
+        if (fitDot * fitDot + fitCross * fitCross > 0.0001f)
         {
-            frameCorrections[i] -= net;
-            limit = Mathf.Min(limit, 4f / Mathf.Max(4f, frameCorrections[i].magnitude));
+            float angle = Mathf.Atan2(fitCross, fitDot);
+            axis = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
         }
-        for (int i = 0; i < 5; i++) bodyChunks[i].vel += frameCorrections[i] * limit;
+        else
+        {
+            axis = shellFrameInitialized ? shellAxis : Vector2.right;
+        }
+        Vector2 up = new(-axis.y, axis.x);
+        float angularVelocity = angularMomentum / Mathf.Max(1f, shellRestInertia);
+
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            Vector2 local = ShellRest[i] * ShellScale - shellRestCenter;
+            Vector2 offset = axis * local.x + up * local.y;
+
+            // Intentionally assign pos rather than HardSetPosition: lastPos remains the previous
+            // rigid frame, so normal Rain World render interpolation stays smooth.
+            chunk.pos = center + offset;
+            chunk.vel = velocity + new Vector2(-offset.y, offset.x) * angularVelocity;
+        }
+
+        shellCenter = center;
+        shellAxis = axis;
+        shellFrameInitialized = true;
     }
+
+    private void RigidifyShellVelocities()
+    {
+        if (bodyChunks == null || bodyChunks.Length != ShellRest.Length) return;
+        EnsureRigidShellMetrics();
+
+        float mass = 0f;
+        Vector2 center = Vector2.zero;
+        Vector2 velocity = Vector2.zero;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            if (chunk == null) return;
+            mass += chunk.mass;
+            center += chunk.pos * chunk.mass;
+            velocity += chunk.vel * chunk.mass;
+        }
+        if (mass <= 0.0001f) return;
+        center /= mass;
+        velocity /= mass;
+
+        float angularMomentum = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            Vector2 offset = chunk.pos - center;
+            angularMomentum += chunk.mass * Cross(offset, chunk.vel - velocity);
+        }
+        float angularVelocity = angularMomentum / Mathf.Max(1f, shellRestInertia);
+
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            Vector2 offset = bodyChunks[i].pos - center;
+            bodyChunks[i].vel = velocity + new Vector2(-offset.y, offset.x) * angularVelocity;
+        }
+
+        shellCenter = center;
+    }
+
+    private void ResetRigidShellFrame()
+    {
+        shellFrameInitialized = false;
+        shellRestInertia = 0f;
+        EnsureRigidShellMetrics();
+        MaintainRigidShell();
+
+        // Spawn/room transfer should not inherit an artificial interpolation bend. The current
+        // chunk positions are already the canonical rigid shape here.
+        for (int i = 0; i < bodyChunks.Length; i++)
+            bodyChunks[i].lastPos = bodyChunks[i].pos;
+    }
+
+    private void EnsureRigidShellMetrics()
+    {
+        if (shellRestInertia > 0.0001f) return;
+        if (bodyChunks == null || bodyChunks.Length != ShellRest.Length) return;
+
+        float mass = 0f;
+        shellRestCenter = Vector2.zero;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = bodyChunks[i];
+            if (chunk == null) return;
+            mass += chunk.mass;
+            shellRestCenter += ShellRest[i] * ShellScale * chunk.mass;
+        }
+        if (mass <= 0.0001f) return;
+        shellRestCenter /= mass;
+
+        shellRestInertia = 0f;
+        for (int i = 0; i < bodyChunks.Length; i++)
+        {
+            Vector2 local = ShellRest[i] * ShellScale - shellRestCenter;
+            shellRestInertia += bodyChunks[i].mass * local.sqrMagnitude;
+        }
+    }
+
+    private static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
 
     public override void InitiateGraphicsModule()
     {
