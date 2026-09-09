@@ -5,11 +5,6 @@ using DryCycle.Creatures.MantleCrab.Rendering;
 
 internal static partial class Program
 {
-    private static readonly FieldInfo[] PhenotypeFields = typeof(MantleCrabVisualPhenotype)
-        .GetFields(Flags)
-        .Where(field => field.FieldType == typeof(float) || field.FieldType == typeof(UnityEngine.Vector4))
-        .ToArray();
-
     private static MantleCrabVisualPhenotype CreatePhenotype(int seed, float dominance = .5f)
     {
         AbstractCreature creature = Empty<AbstractCreature>();
@@ -29,6 +24,10 @@ internal static partial class Program
 
     private static void GenomeTests()
     {
+        FieldInfo[] phenotypeFields = typeof(MantleCrabVisualPhenotype)
+            .GetFields(Flags)
+            .Where(field => field.FieldType == typeof(float) || field.FieldType == typeof(UnityEngine.Vector4))
+            .ToArray();
         string[] channels = { "ShellHue", "StripePhase", "PlateSeed", "EyeSize" };
 
         for (int seed = -32; seed < 32; seed++)
@@ -44,7 +43,7 @@ internal static partial class Program
             MantleCrabVisualPhenotype a = CreatePhenotype(seed);
             MantleCrabVisualPhenotype b = CreatePhenotype(seed);
             bool identical = true;
-            foreach (FieldInfo field in PhenotypeFields)
+            foreach (FieldInfo field in phenotypeFields)
             {
                 if (!Equals(field.GetValue(a), field.GetValue(b)))
                 {
