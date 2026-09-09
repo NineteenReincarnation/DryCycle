@@ -77,12 +77,59 @@ internal sealed class DB_SwarmRoom
             if (member is DB_Creature resting && !resting.dead)
                 resting.Injury.Recover(0.0032f / 40f);
 
-        Hive.Update(eu);
+        if (SuppressThermalHiveEmergence())
+            UpdateHiveWithoutEmergence();
+        else
+            Hive.Update(eu);
 
         if (--flockRefresh <= 0)
         {
             Flock = DB_FlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
             flockRefresh = 30;
+        }
+    }
+
+    private bool SuppressThermalHiveEmergence()
+    {
+        if (!DB_EnvironmentRoomRuntime.TryGetContext(
+                room, out DB_EnvironmentContext context))
+            return false;
+
+        if (context.Weather is not (
+                DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat))
+            return false;
+
+        // Early Advisory heat remains ecologically active. Once the room reaches actual
+        // preparation/shelter pressure, a bat that committed to the hive must be allowed to
+        // stay there instead of FliesRoomAI's vanilla 2.5%-per-frame random emergence undoing
+        // the environmental decision immediately.
+        return context.Phase is DB_EnvironmentPhase.Preparation or
+               DB_EnvironmentPhase.Sheltering or
+               DB_EnvironmentPhase.Acute;
+    }
+
+    private void UpdateHiveWithoutEmergence()
+    {
+        // This mirrors the non-emergence maintenance portion of FliesRoomAI.Update. Burrowed
+        // occupants are kept unrealized in the room while active-list bookkeeping remains
+        // clean. Normal Hive.Update resumes as soon as thermal shelter pressure ends.
+        for (int i = Hive.inHive.Count - 1; i >= 0; i--)
+        {
+            Fly member = Hive.inHive[i];
+            if (member == null || member.slatedForDeletetion || member.dead)
+            {
+                Hive.inHive.RemoveAt(i);
+                continue;
+            }
+            if (member.room == room)
+                member.RemoveFromRoom();
+        }
+
+        for (int i = Hive.flies.Count - 1; i >= 0; i--)
+        {
+            Fly member = Hive.flies[i];
+            if (member == null || member.room != room)
+                Hive.flies.RemoveAt(i);
         }
     }
 }
