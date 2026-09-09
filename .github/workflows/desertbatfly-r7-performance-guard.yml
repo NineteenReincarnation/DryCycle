@@ -8,13 +8,19 @@ on:
     paths:
       - 'src/Creatures/DesertBatfly/**'
       - 'src/Debug/AIDebugger/Sources/**'
+      - 'src/DryCycle.csproj'
+      - 'src/Directory.Build.targets'
       - 'scripts/check-desertbatfly-r7-performance.sh'
+      - 'scripts/check-drycycle-build-contract.sh'
       - '.github/workflows/desertbatfly-r7-performance-guard.yml'
   pull_request:
     paths:
       - 'src/Creatures/DesertBatfly/**'
       - 'src/Debug/AIDebugger/Sources/**'
+      - 'src/DryCycle.csproj'
+      - 'src/Directory.Build.targets'
       - 'scripts/check-desertbatfly-r7-performance.sh'
+      - 'scripts/check-drycycle-build-contract.sh'
       - '.github/workflows/desertbatfly-r7-performance-guard.yml'
   workflow_dispatch:
 
@@ -31,6 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/check-desertbatfly-r7-performance.sh
+      - name: Compile-only build isolation contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-drycycle-build-contract.sh
       - name: Roslyn syntax parse Desert Batfly and Observatory sources
         shell: bash
         run: |
