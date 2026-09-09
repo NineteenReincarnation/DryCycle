@@ -126,13 +126,21 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
             DesertAI.Threatened(attacker, true);
 
         float healthBefore = DesertState.health;
+        DB_EventHub.ViolenceTransaction eventTransaction =
+            DB_EventHub.BeginViolence(this, source, type, damage, stunBonus);
+        bool vanillaCompleted = false;
         resolvingRockViolence = rockHit;
         try
         {
             base.Violence(source, momentum, hitChunk, appendage, type, damage, stunBonus);
+            vanillaCompleted = true;
         }
         finally
         {
+            // End the semantic transaction before applying the rock survival floor. This
+            // preserves the old hook ordering: vanilla Violence -> Damage event -> rock floor.
+            DB_EventHub.EndViolence(eventTransaction, vanillaCompleted);
+
             // Creature.Violence can call Die() both through quick-death rolls and the
             // instant-death damage limit. Die() is suppressed only while this exact rock
             // Violence call is resolving; afterwards the bat remains fully killable by
@@ -220,10 +228,14 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         Restraint.ClearTransient();
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
-        base.Die();
 
-        // DB_EventHub observes the confirmed live -> dead transition inside base.Die(),
-        // owns killer attribution and dispatches all mortality-domain reactions once.
+        // Capture chain witnesses and killer attribution at the exact point where the former
+        // On.Creature.Die hook observed this lifecycle: immediately before base.Die.
+        DB_EventHub.MortalityTransaction mortalityTransaction =
+            DB_EventHub.PrepareMortality(this);
+        base.Die();
+        DB_EventHub.CompleteMortality(mortalityTransaction);
+
         if (!wasDead && dead)
             injury?.ClearTransient();
     }
