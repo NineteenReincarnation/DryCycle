@@ -8,6 +8,7 @@ SRC='src/Creatures/DesertBatfly'
 TESTS='tests/DesertBatfly'
 HOOKS="$SRC/Integration/DB_RainWorldHooks.cs"
 INJURY="$SRC/Behavior/Injury/DB_InjuryRecovery.cs"
+ROOST="$SRC/Behavior/DB_RoostPolicy.cs"
 EVENTS="$SRC/Core/Runtime/DB_EventHub.cs"
 CORPSE="$SRC/Core/Runtime/DB_CorpseWarningRuntime.cs"
 CONSUMERS="$SRC/Core/Runtime/DB_EventConsumers.cs"
@@ -130,4 +131,12 @@ grep -q 'resolution.PrimaryOwner' "$OBSERVATORY"
 grep -q 'resolution.WinningProposal.BehaviorKind' "$OBSERVATORY"
 grep -q 'debug.Rejected' "$OBSERVATORY"
 
-echo 'DesertBatfly function-retention audit passed: HB-01..HB-10 protected.'
+# -----------------------------------------------------------------------------
+# HB-11 — Floor roost ownership stays on the Floor tile while the realized hang coordinate
+# stays on that tile's underside. Do not regress Floor.Middle - 10 back to Floor.Top.
+# -----------------------------------------------------------------------------
+grep -q 'DB_RoostAnchorKind.FloorUnderside' "$ROOST"
+grep -q 'room.MiddleOfTile(floorTile) + Vector2.down \* 10f' "$ROOST"
+! grep -q 'room.MiddleOfTile(floorTile) + Vector2.up \* 10f' "$ROOST"
+
+echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 protected.'
