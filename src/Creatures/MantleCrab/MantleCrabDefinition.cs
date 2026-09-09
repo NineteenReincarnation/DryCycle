@@ -1,3 +1,4 @@
+using DryCycle.Creatures.Platforming;
 using DryCycle.Registration;
 
 namespace DryCycle.Creatures.MantleCrab;
@@ -22,7 +23,15 @@ internal sealed class MantleCrabDefinition : CreatureDefinition
         return template;
     }
 
-    internal override Creature CreateRealizedCreature(AbstractCreature creature) => new MantleCrab(creature, creature.world);
+    internal override Creature CreateRealizedCreature(AbstractCreature creature)
+    {
+        MantleCrab crab = new(creature, creature.world);
+        // Room resolves Creature-to-Creature collisions after each object's Update. Register a
+        // provider-local finalizer so the generic platform runtime can restore the hard shell
+        // before reconciling riders, without taking a MantleCrab dependency itself.
+        WalkableDynamicSurfaceRuntime.RegisterPostPhysicsFinalizer(crab, crab.MaintainRigidShell);
+        return crab;
+    }
 
     internal override void LoadResources(RainWorld rainWorld)
     {

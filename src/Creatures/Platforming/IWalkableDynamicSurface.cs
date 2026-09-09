@@ -49,3 +49,21 @@ public interface IWalkableDynamicSurface
     /// <summary>Re-sample a previously acquired provider coordinate after the surface moves.</summary>
     bool TrySample(float coordinate, out WalkableSurfaceSample sample);
 }
+
+/// <summary>
+/// Optional owner contract for adapter-backed surfaces. Creature providers that directly inherit
+/// PhysicalObject need not implement it; the runtime uses the provider itself as the owner.
+/// </summary>
+public interface IWalkableDynamicSurfaceOwner
+{
+    PhysicalObject SurfaceOwner { get; }
+}
+
+/// <summary>
+/// Optional companion contract for providers whose collision representation needs one final
+/// projection after Room finishes PhysicalObject-to-PhysicalObject collision resolution.
+/// </summary>
+public interface IPostRoomPhysicsWalkableSurface
+{
+    void FinalizeSurfacePhysics();
+}

@@ -26,6 +26,7 @@ internal static partial class Program
             RigTests();
             TerrainTests();
             PlatformSurfaceTests();
+            PlatformRuntimeTests();
             GeometryTests();
 
             Console.WriteLine(
@@ -37,10 +38,11 @@ internal static partial class Program
                 "; standing cases=" + standingCases +
                 "; spawn-support cases=" + spawnSupportCases +
                 "; platform-surface cases=" + platformSurfaceCases +
+                "; platform-runtime cases=" + platformRuntimeCases +
                 "; geometry meshes=" + geometryMeshes +
                 "; atlas pixels=" + atlasPixels +
                 "; assertions=" + assertions +
-                ". Managed math/geometry validation; no in-game collision loop.");
+                ". Managed math/geometry/runtime-contract validation; no in-game Room collision loop.");
             return 0;
         }
         catch (Exception ex)
