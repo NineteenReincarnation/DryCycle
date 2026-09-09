@@ -60,6 +60,10 @@ internal sealed class DB_Runtime
         bat.Emergence.Update(eu);
         if (!extremeVengeance)
         {
+            // Feeding pinning is explicit special physics and only runs after the Feeding
+            // PrimaryOwner has already been selected/executed by the AI frame.
+            bat.Feeding.AfterPhysics(eu);
+
             // Confirm rescue contact after Fly physics. If the hit succeeds, Rescue moves the
             // bat to Escape before Combat.AfterPhysics can apply ordinary Attach/Interfere.
             bat.Rescue.AfterPhysics();
