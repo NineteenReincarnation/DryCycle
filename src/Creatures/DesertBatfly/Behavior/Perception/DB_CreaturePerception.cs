@@ -10,6 +10,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// </summary>
 internal sealed class DB_CreaturePerception
 {
+    internal const int ScanIntervalTicks = 8;
+
     private readonly DB_AI brain;
     private readonly DB_Creature fly;
     private int scan, pursuit;
@@ -21,19 +23,21 @@ internal sealed class DB_CreaturePerception
     {
         this.brain = brain;
         this.fly = fly;
+        ResetScanPhase();
     }
 
     internal void Reset()
     {
         Danger = null;
-        scan = pursuit = 0;
+        pursuit = 0;
+        ResetScanPhase();
     }
 
     internal void ClearPursuit() => pursuit = 0;
 
     internal void UpdateScan()
     {
-        if (++scan < 8) return;
+        if (++scan < ScanIntervalTicks) return;
         scan = 0;
         ScanCreatures();
     }
@@ -63,15 +67,16 @@ internal sealed class DB_CreaturePerception
             if (creature == fly || creature is DB_Creature || !Valid(creature))
                 continue;
 
-            float distance = Vector2.Distance(fly.mainBodyChunk.pos, creature.mainBodyChunk.pos);
             DB_VisibilityChannel channel = creature is Player
                 ? DB_VisibilityChannel.Player
                 : DB_VisibilityChannel.Creature;
-            if (distance > DB_Tuning.SightRange ||
-                !DB_VisibilityPolicy.CanObserve(
+            if (!DB_VisibilityPolicy.CanObserve(
                     fly, creature.mainBodyChunk.pos, DB_Tuning.SightRange, channel))
                 continue;
 
+            // Only visible, in-range candidates need an exact scalar distance. The shared
+            // visibility policy already rejected impossible pairs using squared distance.
+            float distance = Vector2.Distance(fly.mainBodyChunk.pos, creature.mainBodyChunk.pos);
             CreatureTemplate.Relationship relation = fly.Template.CreatureRelationship(creature.Template);
             CreatureTemplate.Relationship reverse = creature.Template.CreatureRelationship(fly.Template);
             bool predator = creature is not Player &&
@@ -134,5 +139,28 @@ internal sealed class DB_CreaturePerception
         }
 
         brain.Combat.CompleteCandidateScan(brain.RetreatActive);
+    }
+
+    private void ResetScanPhase()
+    {
+        // Historically every realized bat started at scan=0 and therefore all performed
+        // the same full creature scan every eighth tick. A stable 1..8 initial phase keeps
+        // the original steady-state cadence and never delays first recognition beyond the
+        // old eight-tick maximum, while dispersing swarm CPU spikes.
+        scan = ScanIntervalTicks - ScanPhase(fly?.Personality?.VisualSeed ?? 0);
+    }
+
+    internal static int ScanPhase(int visualSeed)
+    {
+        unchecked
+        {
+            uint x = (uint)visualSeed ^ 0x6D2B79F5u;
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return 1 + (int)(x % (uint)ScanIntervalTicks);
+        }
     }
 }
