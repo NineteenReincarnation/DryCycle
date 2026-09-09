@@ -74,6 +74,16 @@ internal static class DB_BehaviorExecution
         return DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value);
     }
 
+    internal static bool TryFeeding(DB_Creature bat, in DB_BehaviorResolution resolution)
+    {
+        if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Feeding ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Feeding))
+            return false;
+        DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Feeding");
+        bat.DesertAI.CancelPhysicalAttack();
+        return bat.Feeding.ApplyOwnedBehavior();
+    }
+
     internal static bool TryCombat(DB_Creature bat, in DB_BehaviorResolution resolution)
     {
         if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Combat ||
