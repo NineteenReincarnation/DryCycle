@@ -169,10 +169,10 @@ internal static partial class Program
               feedingStage > socialStage && resolveStage > feedingStage,
             "realized R3 refresh pipeline stays Environment -> AI decision -> Threat -> Social -> Feeding -> Arbiter");
         Check(threat.GetMethod("Update", Flags) == null &&
-              signals.GetMethod("Update", Flags) == null &&
               behavior.GetMethod("Update", Flags) == null &&
-              social.GetMethod("Update", Flags) == null,
-            "Environment regression forbids restoring legacy combined-update facades outside the R3 refresh/arbitrate/execute pipeline");
+              social.GetMethod("Update", Flags) == null &&
+              signals.GetMethod("Update", Flags) != null,
+            "Environment regression distinguishes retired combined-update facades from the retained post-resolution Signal information tick");
 
         Type state = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
         Check(state.GetFields(Flags).All(f =>
