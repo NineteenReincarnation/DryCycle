@@ -173,12 +173,11 @@ internal static partial class Program
         Check(MethodCallOffset(nearestVisible, visibility, "CanObserve") >= 0,
             "Architecture shared perception Threat player recognition uses the central visibility policy");
 
-        MethodInfo tacticPlayerBySlot = tactics.GetMethod("PlayerBySlot", Flags);
         MethodInfo tryProfile = tactics.GetMethod("TryProfile", Flags);
-        Check(MethodCallOffset(tacticPlayerBySlot, roomContext, "For") >= 0,
-            "Architecture shared perception Threat tactics reuses shared room player observation instead of walking game players");
+        Check(tactics.GetMethod("PlayerBySlot", Flags) == null,
+            "Architecture shared perception Threat tactics no longer owns the retired player-lookup helper from the ordinary evade facade");
         Check(MethodCallOffset(tryProfile, weaponPerception, "TryObserveHeldThreats") >= 0,
-            "Architecture shared perception Threat tactics reuses shared held-item perception instead of reclassifying its own observation path");
+            "Architecture shared perception Threat tactics receives an already-selected player and reuses shared held-item perception");
 
         MethodInfo signalPerceive = signalRuntime.GetMethod("TryPerceive", Flags);
         Check(signalRuntime.GetMethod("VisualRadius", Flags) != null &&
