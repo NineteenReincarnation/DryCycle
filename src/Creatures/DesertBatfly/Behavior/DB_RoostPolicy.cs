@@ -80,7 +80,9 @@ internal static class DB_RoostPolicy
 
         // Desert Batfly extension. Normal AI asks about its current Air tile, while spatial
         // searches may encounter the Floor tile directly. Normalize both observations to the
-        // Floor tile because Rain World's one-way collision plane is that tile's top edge.
+        // Floor tile for ownership, but keep the realized hang point on the Floor tile's
+        // underside. With 20 px tiles that is Floor.Middle - 10 px, equivalent to the old
+        // Air-below candidate's Middle + 10 px.
         IntVector2 floorTile;
         if (current.Terrain == Room.Tile.TerrainType.Floor)
         {
@@ -102,7 +104,7 @@ internal static class DB_RoostPolicy
         anchor = new DB_RoostAnchor(
             floorTile,
             DB_RoostAnchorKind.FloorUnderside,
-            room.MiddleOfTile(floorTile) + Vector2.up * 10f);
+            room.MiddleOfTile(floorTile) + Vector2.down * 10f);
         return true;
     }
 
