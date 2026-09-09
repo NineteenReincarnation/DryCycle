@@ -68,9 +68,11 @@ internal sealed class DB_RestraintRuntime
         bat.SandSpit.UpdateHeldStruggle(holder);
         holdTicks++;
 
-        // Unconscious/stunned animals stay grabbable; shock and injury reduce effective
-        // struggle rather than being bypassed by an unrelated escape timer.
-        if (!bat.Consious || bat.stun > 0 || bat.inShortcut) return;
+        // Player edible grasps are pacifying. Vanilla Creature.Update keeps the grabbed
+        // creature at stun 10 while that grasp exists, which also makes Consious false.
+        // That restraint-only pacification must not disable the escape system; genuine
+        // stun/unconsciousness (rocks, weapons, injury, shortcuts) still does.
+        if (HasBlockingHeldIncapacitation()) return;
         if (--pulseTicks > 0) return;
         pulseSerial++;
         pulseTicks = NextPulseInterval();
@@ -106,7 +108,7 @@ internal sealed class DB_RestraintRuntime
     internal bool RegisterRescueImpact(DB_Creature rescuer, Player struckHolder, float closingSpeed)
     {
         if (rescuer == null || struckHolder == null || holder != struckHolder || !IsCurrentGrasp() ||
-            bat.dead || !bat.Consious)
+            bat.dead || HasBlockingHeldIncapacitation())
             return false;
 
         float impactT = Mathf.InverseLerp(
@@ -204,6 +206,19 @@ internal sealed class DB_RestraintRuntime
             return false;
         int index = grasp.graspUsed;
         return index >= 0 && index < holder.grasps.Length && ReferenceEquals(holder.grasps[index], grasp);
+    }
+
+    private bool HasBlockingHeldIncapacitation()
+    {
+        if (bat.inShortcut) return true;
+
+        // Slugcat's pacifying edible grasp writes a vanilla stun floor of 10 every update.
+        // Ignore only that floor. Any stronger stun remains a real incapacitation and keeps
+        // both self-escape and rescue-assisted release suspended until it has recovered.
+        bool vanillaGrabPacification = grasp != null && grasp.pacifying && bat.stun <= 10;
+        if (vanillaGrabPacification) return false;
+
+        return !bat.Consious || bat.stun > 0;
     }
 
     private float EffectiveEscapeThreshold()
