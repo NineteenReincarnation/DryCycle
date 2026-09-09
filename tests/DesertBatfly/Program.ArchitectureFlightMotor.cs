@@ -12,7 +12,9 @@ internal static partial class Program
         Type arbiter = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type injury = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Injury", true);
+        Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
         Type creature = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Creature", true);
+        Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Runtime", true);
         Type environment = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentRuntime", true);
         Type survival = environment;
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
@@ -47,11 +49,18 @@ internal static partial class Program
               injury.GetMethod("ApplyFlight", Flags) == null &&
               injury.GetMethod("ModifyFlight", Flags) != null,
             "Architecture flight motor Injury stays a pure flight modifier");
-        Check(MethodCallOffset(creature.GetMethod("Update", Flags), motor, "ApplyPostPhysics") >= 0,
-            "Architecture flight motor creature final injury pass goes through DB_FlightMotor");
+
+        MethodInfo runtimeAfter = runtime.GetMethod("AfterVanillaUpdate", Flags);
+        Check(runtimeAfter != null &&
+              MethodCallOffset(runtimeAfter, motor, "ApplyPostPhysics") >= 0 &&
+              MethodCallOffset(creature.GetMethod("Update", Flags), runtime, "AfterVanillaUpdate") >= 0,
+            "Architecture flight motor final injury pass is sequenced once through DB_Runtime after native Fly physics");
         Check(MethodCallOffset(ai.GetMethod("SteerOwned", Flags), motor, "TrySteer") >= 0 &&
-              MethodCallOffset(ai.GetMethod("TryDriveRecoveryHive", Flags), motor, "TrySteer") >= 0,
+              MethodCallOffset(injuryRecovery.GetMethod("TryDriveRecoveryHive", Flags), motor, "TrySteer") >= 0,
             "core species steering and InjuryRecovery use FlightMotor");
+        Check(ai.GetMethod("TryDriveRecoveryHive", Flags) == null,
+            "Architecture flight motor retired DB_AI injury-hive steering entry point stays absent");
+
         Check(MethodCallOffset(environment.GetMethod("ApplyLocalBehavior", Flags), motor, "TryGuideNative") >= 0,
             "Environment shelter navigation preserves native flight while centralizing its goal write");
         Check(MethodCallOffset(social.GetMethod("SocialSteer", Flags), motor, "TryGuideNative") >= 0,
@@ -68,6 +77,7 @@ internal static partial class Program
             "same-room environmental Home retreat uses FlightMotor while native Burrow stays special physics");
         Check(Enum.IsDefined(special, "NativeBurrow") && Enum.IsDefined(special, "NativeChain"),
             "Architecture flight motor explicitly classifies native Burrow and Chain as special-physics owners");
+
         Check(combatRuntime.GetProperty("Target", Flags) != null &&
               combatRuntime.GetMethod("BeginCandidateScan", Flags) != null &&
               combatRuntime.GetMethod("ConsiderCandidate", Flags) != null &&
@@ -85,11 +95,14 @@ internal static partial class Program
             "Architecture flight motor Combat runtime owns formal phase execution, contact physics and formal-attack state");
         Check(MethodCallOffset(behaviorExecution.GetMethod("TryCombat", Flags), combatRuntime, "TryExecuteOwned") >= 0,
             "Architecture flight motor Combat executor calls DB_CombatRuntime rather than old AI state-machine implementation");
-        Check(MethodCallOffset(creature.GetMethod("Update", Flags), combatRuntime, "AfterPhysics") >= 0,
-            "Architecture flight motor post-physics Attach/Interfere execution calls DB_CombatRuntime directly");
-        Check(ai.GetMethod("FindContact", Flags) == null && ai.GetMethod("AcquireSlot", Flags) == null &&
+        Check(MethodCallOffset(runtimeAfter, combatRuntime, "AfterPhysics") >= 0 &&
+              MethodCallOffset(creature.GetMethod("Update", Flags), runtime, "AfterVanillaUpdate") >= 0,
+            "Architecture flight motor post-physics Attach/Interfere execution is sequenced through DB_Runtime and owned by DB_CombatRuntime");
+        Check(ai.GetMethod("AfterPhysics", Flags) == null &&
+              ai.GetMethod("FindContact", Flags) == null && ai.GetMethod("AcquireSlot", Flags) == null &&
               ai.GetMethod("UpdateInterference", Flags) == null && ai.GetMethod("Finish", Flags) == null,
-            "Architecture flight motor old AI shell no longer owns combat contact/slot/finish implementation");
+            "Architecture flight motor old AI shell no longer owns combat post-physics/contact/slot/finish implementation");
+
         Check(motorDebug.GetField("Owner", Flags) != null &&
               motorDebug.GetField("Goal", Flags) != null &&
               motorDebug.GetField("NominalSpeed", Flags) != null &&
@@ -102,11 +115,20 @@ internal static partial class Program
               debugSource.GetField("UnseenField", Flags) == null &&
               debugSource.GetField("HasSlotField", Flags) == null,
             "Architecture flight motor Observatory no longer reflects Combat fields from the old AI shell");
+
+        MethodInfo runtimeBeforeNewRoom = runtime.GetMethod("BeforeNewRoom", Flags);
         Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), motor, "Reset") >= 0 &&
               MethodCallOffset(hooks.GetMethod("Disable", Flags), motor, "Reset") >= 0 &&
-              MethodCallOffset(hooks.GetMethod("FlyNewRoom", Flags), motor, "Forget") >= 0,
-            "FlightMotor/Fog transient state follows species lifecycle");
+              runtimeBeforeNewRoom != null &&
+              MethodCallOffset(runtimeBeforeNewRoom, motor, "Forget") >= 0 &&
+              MethodCallOffset(creature.GetMethod("NewRoom", Flags), runtime, "BeforeNewRoom") >= 0,
+            "FlightMotor transient state follows species enable/disable and virtual NewRoom lifecycle");
+        Check(MethodCallOffset(motor.GetMethod("Reset", Flags), fog, "Reset") >= 0 &&
+              MethodCallOffset(motor.GetMethod("Forget", Flags), fog, "Forget") >= 0,
+            "FlightMotor owns FogGoalModifier reset/forget lifecycle instead of a second hook path");
+        Check(hooks.GetMethod("FlyNewRoom", Flags) == null,
+            "Architecture flight motor retired Fly.NewRoom detour stays absent");
 
-        Console.WriteLine("Architecture flight motor code-side complete: single ordinary FlightMotor boundary, Combat extraction, Observatory motor/debug migration and source writer audit are all guarded; live validation is deferred to final refactor acceptance.");
+        Console.WriteLine("Architecture flight motor code-side complete: single ordinary FlightMotor boundary, Runtime post-physics sequencing, Combat extraction and lifecycle ownership are guarded; live validation remains deferred to final acceptance.");
     }
 }
