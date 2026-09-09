@@ -1,213 +1,356 @@
 # MantleCrab — Codex 任务规格
 
-> 目标：为 DryCycle 设计/实现全新大型生物 **Mantle Crab**。本文件只记录已确认设计与实现约束；未确认内容禁止 Codex 自行补全。
+> 目标：为 DryCycle 设计/实现全新大型生物 **Mantle Crab**。
 > 路径：`src/Creatures/MantleCrab/`
-> 原则：优先复用 Rain World 原生生命/图形范式，但允许使用 DryCycle 已有 Shader/Compute/AssetBundle 管线提升表现。
+> 文档原则：**设计信息完整性第一，可执行性第二，token 消耗第三。** 只能压缩重复解释、口语和无效铺垫；不得为了省 token 删除已确认的设计点、工程约束、反例、阶段边界或 TBD。未确认内容禁止 Codex 自行补全。
+> 技术原则：优先复用 Rain World 原生生命/图形范式；允许使用 DryCycle 已有 Shader/Compute/AssetBundle 管线提高表现，但不能为了“新技术”破坏 Futile/Rain World 的渲染与生命周期集成。
 
-## 0. 当前阶段与禁止越界
+## 0. 当前阶段 / 禁止越界
 
-当前只优先解决：
+当前优先解决：
 
-1. 生物可见外形/程序化材质；
+1. 玩家最终看到的外形、程序化材质和光影；
 2. 壳体物理碰撞；
-3. 四条步行腿的分节、接地与支撑骨架；
+3. 四条步行腿的分节、接地、支撑骨架；
 4. 两条钳肢的视觉/结构骨架。
 
-**暂不实现/不得擅自设计：** AI、生态关系、攻击、钳取/夹取/伤害、腿能否受伤/折断、世界前后景切换、顶部原版物品、特殊交互、食物链、Arena/Safari 等。上述均为 TBD。
+**暂不实现、不得擅自设计：** AI、生态关系、攻击、钳取/夹取/伤害、腿能否受伤/折断、世界前后景切换或背景层移动、顶部原版物品、特殊交互、食物链、Arena/Safari 等。以上均为 TBD。
+
+注意：**生物内部的局部绘制前后层次已经确定，可实现；“进入世界背景层/前景层”仍是 TBD。两者不可混淆。**
 
 ## 1. 项目接入基线
 
-- 这是**独立新生物**，不是某个原版生物换皮。
-- 未来注册走 DryCycle 自有 `CreatureDefinition -> CreatureRegistry -> DryCycleContent`，不要引入第三方内容注册框架。
-- 新生物实现路线参考 `src/Creatures/MossySpider/`，而不是 `DesertBatfly` 的 Fly 变种路线。
-- 需要参考原版/Watcher 源码时，重点看：
-  - `DrillCrab` / `DrillCrabGraphics`：分节长腿、IK/Segment、足端接地、动态 Mesh；
-  - `Deer` / `DeerGraphics`：超长支撑腿、视觉深度渐变；
-  - `MirosBird` / `Vulture`：多个 BodyChunk 组成稳定非圆形主体；
-  - `MoonCloak`：带纹理的可变形 Grid `TriangleMesh`；
-  - Watcher 生物自定义 shader：动态 mesh + vertex data + shader 的组合。
+- MantleCrab 是**独立新生物**，不是原版生物换皮。
+- 注册走 DryCycle 自有 `CreatureDefinition -> CreatureRegistry -> DryCycleContent`，不要引入第三方注册框架。
+- 实现路线优先参考 `src/Creatures/MossySpider/` 的独立 Creature 架构，不走 `DesertBatfly` 的 Fly 变种路线。
+- 编码前检查当前 `main`，不要复制已有系统形成第二套注册/Shader/资源框架。
+- 原版/Watcher 重点参考：
+  - `DrillCrab` / `DrillCrabGraphics`：分节长腿、Segment/IK、足端地形接触、动态 Mesh；
+  - `Deer` / `DeerGraphics`：超长支撑腿、视觉深度与渐变；
+  - `MirosBird` / `Vulture`：多个 BodyChunk 组成稳定的非圆形主体；
+  - `MoonCloak`：带 UV 的可变形 Grid `TriangleMesh`；
+  - Watcher 自定义 shader 生物：动态 mesh + vertex data + shader。
 
 ## 2. 已确认外形
 
 ### 2.1 总体轮廓
 
-- 上方是横向很宽、纵向较薄的暗色“披幕/伞盖”式蟹壳主体；中央厚、两翼向外延展并收尖。
-- 主体下方悬挂四条极长步行腿，使整只生物呈“高、轻、悬、诡异”的轮廓。
+- 上方主体为横向很宽、纵向较薄的暗色**披幕/伞盖式蟹壳**；中央视觉上更厚，两翼向外展开、收尖。
+- 主体由四条极长步行腿架高，整体轮廓必须体现：**高、轻、悬、诡异，但足端有明显承重感。**
 - 正面另有两条细长钳肢；钳肢不是步行腿。
-- 两个醒目的红色部分是**眼睛**。
-- 壳下有少量下垂丝状/流苏结构；它们主要属于视觉细节。
-- 参考图壳顶的原版物品目前**完全忽略**，不要实现、不要烘进壳体外观。
+- 两个红色垂下结构是**眼睛**，是核心“脸部”视觉锚点。
+- 壳下有少量丝状/流苏状垂挂结构。
+- 参考图壳顶的原版物品目前**完全忽略**：不要实现、不要烘进壳体轮廓、不要为其预设玩法。
 
 ### 2.2 四条步行腿
 
-- 固定为 **4 条**。
-- 每条腿固定为 **4 个视觉/运动段**；各腿段长度、比例、弯折与轮廓允许不同，但必须保持同一物种语言。
-- 腿非常细长，整体为蓝灰/深蓝紫甲壳色。
-- 最底一段/足端必须明显**块状且比上方节肢粗**，承担强烈的视觉承重感。
-- 四腿存在明显的内部前后深度关系：后层腿更冷、更灰、更低对比；前层腿更深、更清晰。不要用高透明度制造“幽灵腿”。
+- 固定 **4 条**。
+- 每条腿固定 **4 个视觉/运动段**。
+- 各腿、各段的长度、比例、弯折与轮廓允许不同，但必须保持同一物种语言；禁止四腿简单复制粘贴，也禁止随机得像不同物种。
+- 腿极细长，整体色域为蓝灰 / 深蓝 / 蓝紫甲壳色。
+- **最底段/足端必须块状、明显粗于上方节肢**，是重要识别特征和承重视觉来源。
+- 四腿有明确内部视觉深度：后层腿更冷、更灰、低对比、弱高光；前层腿更实、更深、更清晰。
+- 深度差异不得主要依靠高透明 alpha；不能画成“幽灵腿”。
 
 ### 2.3 两条钳肢
 
-- 固定为 **2 条**，位于前方。
-- 每条钳肢同样按 **4 段结构**设计，其中末端蟹钳计入四段体系。
-- 钳肢色调明显区别于普通腿：暗红、酒红、紫红、近黑红。
-- 当前只建立分节位置、朝向和绘制骨架；**不决定**钳、抓、刺、搬运、攻击等互动。
+- 固定 **2 条**，位于身体前方。
+- 每条同样为 **4 段结构**，末端蟹钳算入四段体系。
+- 与步行腿明显区分：暗红、酒红、紫红、近黑红为主。
+- 当前只建立关节、段长、位置、速度、方向和绘制骨架。
+- **不决定**抓、钳、刺、搬运、攻击、玩家/武器碰撞等功能；全部留扩展点。
 
 ### 2.4 眼睛
 
-- 固定两个红色眼睛，位于主体正面偏下，是核心视觉锚点。
-- 眼睛允许轻微惯性/悬垂感，但不要大幅摆动。
-- 颜色始终保持红色系；个体差异只允许小范围改变尺寸、纵横比、红色色温和亮核比例。
-- 可有小范围 emission/高光以保证暗处可读，但 **Emission != LightSource**；是否真正照亮环境为 TBD。
+- 固定两个红眼，主体正面偏下。
+- 可有轻微惯性/悬垂感，禁止大幅甩动。
+- 始终保持红色系；ID 只允许小范围改变尺寸、纵横比、红色色温、亮核比例和极轻微左右差异。
+- 可使用高饱和红、小范围 gloss/emission 维持暗处可读性。
+- **Emission != LightSource**；默认不照亮周围环境，真实发光照明为 TBD。
 
-## 3. 物理/碰撞骨架（当前预期）
+### 2.5 壳缘 / 垂挂物
 
-### 3.1 壳体
+- 固定壳缘可以有细碎、不规则、略带纤维/毛边的 silhouette。
+- 少量较长垂丝可独立轻微摆动。
+- 它们当前均为视觉组件，不承担硬碰撞。
 
-- 不要用 1 个巨大 BodyChunk 代表宽壳。
-- 第一版目标：约 **5 个 BodyChunk** 横向组成扁平主体（中央最大，越向外半径越小），通过多条 `BodyChunkConnection` 保持为“略有弹性但基本刚性”的宽壳框架。
-- 壳可以整体倾斜、轻微晃动/变形，但禁止像毛毛虫一样折叠。
-- 视觉壳缘可略超出最外侧碰撞，但不能出现明显大面积穿模。
+## 3. 物理 / 碰撞骨架
 
-### 3.2 步行腿
+### 3.1 壳体：多 BodyChunk 扁平框架
 
-- **绝对不要**把每个腿关节做成 BodyChunk；4×4 段会导致过多实体碰撞、卡墙/卡杆/互相挤压。
-- 每条腿使用独立 Segment/控制点系统，思路接近 Watcher `DrillCrab.Leg`：位置、上一帧位置、速度、段长约束、IK/Verlet 混合。
-- 形式：`ShellAnchor -> P0 -> P1 -> P2 -> P3(Foot)`，对应四段。
-- 该生物是硬节肢，不应表现成软绳；优先 **IK + 轻物理惯性/阻尼**，保证关节清晰。
-- 真正可靠的地形接触重点放在足端；腿身不要默认成为四堵实体墙。
-- 足端可使用小型 terrain probe（单点或少量采样点）处理平地、坡面、砖块边缘与台阶。
-- 腿提供真实支撑力给壳体：基于目标高度/伸展误差的弹簧 + 阻尼，不要单纯把 gravity 调小。
-- 支撑应允许 4/3/2 脚稳定、1 脚明显失稳、0 脚正常下落；具体阈值后调。
-- 玩家原则上应能从腿间穿行；壳体才是主要硬碰撞主体。
+- 不得用 1 个巨大 BodyChunk 代表整片宽壳。
+- 第一版约 **5 个 BodyChunk** 横向覆盖主体：中央最大，向左右外侧半径逐渐减小；具体尺寸需实机调试，不把讨论中的示意数字当最终参数。
+- BodyChunk 只是物理骨架，不直接等于最终可见 sprite/mesh。
+- 连接不能只是 `L2-L1-C-R1-R2` 的单链，否则会像香肠一样折叠。
+- 必须存在**横向主连接 + 跨节点/交叉稳定约束**，形成扁平框架，例如概念上：
 
-### 3.3 钳肢
+```text
+L2 —— L1 ===== C ===== R1 —— R2
+       ╲       │       ╱
+        ╲______│______╱
+```
 
-- 使用与腿类似的分节控制点骨架，但当前不承担主体支撑和玩家硬碰撞。
-- 为未来互动预留端点位置/速度/方向，不提前决定 `Appendage`、抓取或伤害。
+- 不要求严格照图固定连线，但必须达到：整体可倾斜、受撞有小幅弹性/晃动，却基本保持宽壳形状，不能像柔性链折起来。
+- 视觉壳缘可略超过最外 BodyChunk；不能出现大面积“看得到壳却完全穿过去”的错位。
 
-## 4. 玩家最终看到的外观：核心渲染方案
+### 3.2 步行腿：Segment + IK + 轻物理
 
-### 4.1 关键约束
+- **绝对不要**把 4×4 腿段全部做成 BodyChunk；避免卡墙、卡杆、多腿互撞、死亡爆链等问题。
+- 每腿使用独立控制点/Segment 系统，参考 `DrillCrab.Leg`：位置、lastPos、速度、段长约束、IK/Verlet 类轻物理。
+- 结构：`ShellAnchor -> P0 -> P1 -> P2 -> P3(Foot)`，四条连线对应四段。
+- MantleCrab 是硬质节肢，不是软绳；以 **IK/长度约束确定硬关节姿态 + 少量惯性/阻尼提供生命感**。
+- 真正可靠的 terrain contact 重点在足端，腿身默认不是玩家/生物的实体墙。
+- 足端可使用单点或少量 terrain probes 处理平地、斜坡、台阶和边缘。
 
-**用户无法进行人工绘制。** 因此：
+### 3.3 视觉足端与接地点必须解耦
 
-- 不依赖手工绘制的 `Crab_Color.png / Normal.png / Surface.png`；
-- 不要求人工 atlas 美术；
-- 主体、花纹、材质、Normal、AO、粗糙度、眼睛等均应可由程序生成；
-- 允许存在纯程序生成的运行时 RenderTexture/Atlas，但不是人工资源。
+块状大脚是**视觉体积**，不等于同尺寸的巨大硬碰撞体：
 
-目标不是简单 `FSprite.color` 或纯顶点渐变，而是：
+```text
+████████     <- 玩家看到的块状足端
+ ●  ●  ●     <- 可选的小型地形采样/支撑点
+```
 
-> **参数化几何/SDF + 稳定 VisualGenome + 程序材质生成 + 动态 UV Mesh + Rain World 风格实时 2.5D Shader**。
+- 不要因为脚看起来大就给它一个大 BodyChunk 或大圆形实体碰撞。
+- 视觉脚可覆盖多个 probe；probe 只负责找地/支撑稳定。
+- 这样可保持足端重量感，同时避免细腿和大脚成为不合理的空气墙。
 
-### 4.2 几何呈现
+### 3.4 腿对壳体的真实支撑
 
-**壳体：**
-- 使用可轻微变形的 Grid `TriangleMesh`/参数网格；参考 `MoonCloak` 的 textured grid mesh 思路。
-- 壳体 alpha/轮廓通过参数化曲线/SDF 生成：宽扁主体、中央厚、两翼尖、边缘少量不规则。
-- 网格跟随壳体 BodyChunk 框架产生整体位移、旋转和轻度弯曲；不要做布料式大变形。
+- 腿应实际给壳体施加支撑，而不是简单把 Creature gravity 调小。
+- 支撑基本模型：目标高度/腿伸展误差的弹簧项 + 竖向速度阻尼 + 最大支撑限制。
+- 多腿共同分担，不要求四脚同时严格锁死，否则不平地形会高频抖动。
+- 预期手感：4/3 脚很稳；2 脚仍可支撑；1 脚明显失稳；0 脚正常受重力。具体函数/阈值实机调。
+- 玩家原则上可以从腿之间穿行；**壳体是主要 Creature 硬碰撞主体。**
 
-**腿：**
-- 每段单独动态 mesh，沿关节点拉伸/旋转；视觉上保留真实四节结构。
-- 关节处有单独程序几何/JointCap，遮接缝并形成节肢膨大。
-- 足端使用独立参数化 polygon mesh，轮廓厚、块状，可随地面法线轻微调整朝向。
+### 3.5 钳肢物理骨架
 
-**钳肢：**
-- 与腿同类的分节 mesh，但使用独立色彩/材质参数；末端钳形使用参数化/SDF/polygon 生成。
+- 使用与腿相似的分节控制点思想，但当前不承担身体支撑。
+- 当前不成为主要玩家硬碰撞。
+- 保留末端位置、lastPos、速度、方向等数据，使未来抓取/攻击不需重写 Graphics 骨架。
+- 是否使用 `Appendage`、是否可被武器击中均为 TBD。
 
-**壳缘/流苏：**
-- 固定细碎毛边可由 SDF/边缘噪声直接形成 silhouette；
-- 少量真正会摆动的长丝使用轻量 2~5 点 mesh/rope 视觉模拟；无硬碰撞。
+## 4. 玩家最终看到的外观：总体渲染架构
 
-### 4.3 程序材质：两阶段
+### 4.1 零人工绘制依赖
 
-#### A. 个体首次创建/Graphics 初始化：一次性“长皮肤”
+**用户无法承担人工绘制。核心版本必须在 0 张人工生物纹理下成立。**
 
-`EntityID + Personality -> MantleCrabVisualGenome -> GPU/CPU Material Baker -> 个体材质缓存`
+不得要求用户制作：
 
-首选使用 Compute Shader 一次性生成小型个体材质 atlas / RenderTexture；若硬件不支持 Compute，必须保留 CPU/fragment fallback 或简化程序材质路径。
+- Color/Albedo atlas；
+- Normal Map；
+- Surface/Roughness/AO 图；
+- 手绘关节/足端/眼睛 sprite；
+- 固定花纹图。
 
-建议生成：
+允许：程序在运行时生成 RenderTexture / atlas / mask /材质缓存；这些不是人工资源。
 
-- `PatternAtlas`: RGB = 基础/花纹颜色，A = Height；
+核心路线：
+
+> **参数化几何 / SDF 轮廓 + EntityID/Personality VisualGenome + 程序材质 + 动态 UV Mesh + Rain World 环境驱动的 Stylized 2.5D Shader。**
+
+### 4.2 必须继续使用 Rain World/Futile 图形体系
+
+首选：`TriangleMesh + FSprite/FContainer/SpriteLeaser + Custom Shader + 可选 Compute Material Baker`。
+
+明确不采用：
+
+- 3D Model 作为主体；
+- Unity Standard/PBR 角色材质；
+- 为了“更新技术”无理由绕开 Futile/FContainer/SpriteLeaser 的 `DrawProcedural/ComputeBuffer/SV_VertexID` 独立渲染体系；
+- 真实 Z-buffer/3D ShadowCaster 作为主要解决方案。
+
+只有出现无法由 Futile Mesh 合理解决、且收益明确的问题时，才允许重新评估低层 GPU procedural draw；不能作为默认架构。
+
+### 4.3 壳体几何呈现
+
+- 使用可轻微变形的 Grid `TriangleMesh` / 参数网格，参考 `MoonCloak` textured grid mesh 的 UV 变形思想。
+- 壳体 alpha/轮廓由参数曲线/SDF 生成：横向宽、纵向薄、中央厚、翼端渐尖、边缘轻微不规则。
+- 物种固定形状占主导；ID 只能做小范围宽度、翼角、边缘粗糙、不对称等变化，不得破坏 MantleCrab 剪影。
+- Mesh 跟随 BodyChunk 框架产生位移、旋转、轻度弯曲/压缩；禁止布料式大幅飘动。
+
+### 4.4 腿 / 关节 / 足端绘制
+
+- 每个腿段为独立动态 mesh，按相邻关节点实时拉伸、旋转、变形。
+- 每段可有独立 taper/bulge/轮廓参数，保证四节结构清晰。
+- 关节使用单独参数化 JointCap / polygon/SDF 形体，遮盖 mesh 接缝并形成节肢膨大。
+- 足端必须是独立参数化 polygon/mesh，厚、块状，不能只把最后一节 TriangleMesh 拉粗。
+- 足端可依据地面法线有限旋转，使其在斜坡上有“落地面”。
+
+### 4.5 钳肢绘制
+
+- 与腿采用同类分节 mesh，但独立 VisualGenome/material 参数。
+- 钳端使用参数化 polygon/SDF 生成真正的钳形，而非普通腿段末端变粗。
+- 当前只保证结构和视觉，不绑定功能。
+
+### 4.6 壳缘 / 流苏
+
+- 固定细碎壳缘优先用 SDF/边缘噪声形成**清晰 alpha silhouette**。
+- 不依赖宽范围 Gaussian/柔软半透明毛边；避免 Futile 排序/环境光下出现“发虚、幽灵边”。
+- 若需要软化，可用少量空间稳定 dither/细碎 silhouette，而不是大面积低 alpha。
+- 少量真正会动的长丝可使用 2~5 点轻量 mesh/rope 视觉模拟，无硬碰撞。
+
+### 4.7 生物内部局部 Draw Order
+
+这是**生物内部视觉层级**，不是世界背景层机制。默认建立可调整的 LocalDepth，例如：
+
+```text
+Rear walking legs
+    ↓
+rear/underside danglers
+    ↓
+Shell / underside
+    ↓
+Front walking legs + Pincers
+    ↓
+Eyes
+    ↓
+Future top attachments (当前不存在，仅保留最后层概念)
+```
+
+- 具体四腿哪条属于 Rear/Front 可按参考图与姿态确定。
+- LocalDepth 同时驱动 draw order 与 depth tint；世界级背景/前景切换仍禁止实现。
+
+## 5. 程序材质：出生/初始化时烘焙 + 每帧环境着色
+
+### 5.1 阶段 A：个体“长皮肤”
+
+`EntityID + 原版 Personality -> MantleCrabVisualGenome -> MantleCrabVisualPhenotype -> Material Baker -> 个体材质缓存`
+
+首选使用 Compute Shader 一次性生成小型个体材质 atlas / RenderTexture；Compute 不可用时必须有 CPU/fragment fallback 或较简化的程序材质路径。
+
+建议缓存：
+
+- `PatternAtlas`: RGB = 基础色/花纹，A = Height；
 - `SurfaceAtlas`: R = AO，G = Roughness/Gloss control，B = Material mask，A = Emission。
 
-**不要每帧重新执行大量 octave noise。** 复杂 Simplex/Worley/Domain Warp 应尽量一次烘焙；每帧 shader 只做环境光/材质响应。
+约束：
 
-#### B. 每帧实时着色
+- 复杂 Simplex/Worley/Ridged/Domain Warp **尽量只烘焙一次**；
+- 不要每帧对每个像素重新跑大量 octave noise；
+- 缓存生命周期要可释放，避免大量个体永久占用 RenderTexture；
+- 核心外观不能因 Compute 缺失而完全消失。
 
-`Generated Material + current mesh pose + RW palette/light/darkness/local light/depth -> MantleCrabSurface.shader`
+### 5.2 阶段 B：每帧实时 2.5D 环境着色
 
-必须接入 Rain World 环境而不是固定“左上光”：
+`Generated Material + Current Mesh Pose + RW Environment -> MantleCrabSurface.shader`
+
+必须使用 Rain World 环境，而不是固定左上光：
 
 - 当前 palette / `_PalTex`；
-- `room.lightAngle` / Rain World 现有方向光信息；
+- `room.lightAngle` / Rain World 方向光信息；
 - `room.Darkness(pos)`；
 - `room.LightSourceExposure(pos)`；
-- 可用时采样局部 `LightSourceColor(pos)`；
-- 每条腿/壳体可在若干控制点采样局部环境，vertex data 负责传递局部亮度/深度，fragment shader 负责像素级材质响应。
+- 可用时 `room.LightSourceColor(pos)`；
+- 壳体和各腿段可在有限控制点采样环境亮度/颜色，再通过 vertex data 插值到 fragment。
+
+CPU/Graphics 侧负责“这个部位当前环境有多亮/多深”；fragment shader 负责“该像素的甲壳 normal/material 对这束光如何响应”。
 
 禁止：
-- Unity Standard/PBR 直接套用；
+
 - GrabPass；
-- 每个生物每帧 Compute；
-- 依赖真实 3D 光源/Z-buffer；
-- 把预设阴影烘死在一张图片中。
+- 每只 MantleCrab 每帧运行 Compute；
+- Unity Standard/PBR；
+- 真实 3D 光源/Z-buffer 依赖；
+- 把固定方向阴影烘死进一张图。
 
-视觉目标为 **Rain World 风格的 Stylized 2.5D Lighting**，不是写实 Unity 资产。
+视觉目标是 **Rain World 风格 Stylized 2.5D Lighting**，不是写实 Unity 资产商店角色。
 
-## 5. 程序化材质规则
+## 6. 程序化颜色 / 花纹 / 表面
 
-### 5.1 多尺度细节
+### 6.1 多尺度分层
 
-必须分层，禁止“一张 Perlin noise 覆盖全身”。
+禁止“一层 Perlin/Worley noise 覆盖全身”。细节至少分三尺度：
 
-- **Macro (大尺度)**：壳中央->翼端的色域、主红紫条纹、大块暗区；
-- **Meso (中尺度)**：甲壳板片、次级色带、轻微斑驳；
-- **Micro (微尺度)**：细脊、颗粒、孔洞、粗糙度、高光破碎；Micro 主要进入 Height/Normal/Roughness，不要把颜色做脏。
+- **Macro**：壳中央->翼端的综合色域、主红紫条纹、大块暗区；决定远距离识别；
+- **Meso**：甲壳板片、次级色带、轻斑驳；
+- **Micro**：细脊、颗粒、微孔、粗糙度、高光破碎；Micro 主要进入 Height/Normal/Roughness，避免把 RGB 做脏。
 
-建议工具：Simplex/gradient noise、Worley/cellular、ridged noise、domain warping；噪声必须受解剖坐标约束，不可裸噪声阈值化。
+可使用：Simplex/gradient noise、Worley/cellular、ridged noise、domain warp。Noise 是工具，不是最终花纹；必须受身体结构和解剖坐标控制。
 
-### 5.2 解剖坐标/生长方向
+### 6.2 解剖坐标 / 生长方向
 
-- 壳：纹样从中央向左右翼端扩展/弯曲；
-- 腿：纹理从根部沿节肢向足端发展；
-- 钳：从根部/关节沿向钳尖发展。
+- 壳：以中央->左右翼端为主要流向；红紫主纹沿这个方向展开/弯曲。
+- 腿：根部->足端。
+- 钳：根部/关节->钳尖。
 
-主壳参考图必须保持：深紫黑中央 + 两翼向外展开的红紫方向性纹样。
+主壳固定视觉必须保留：**深紫黑中央 + 两翼向外展开的红紫方向性纹样**。
 
-### 5.3 程序 Height -> Normal
+程序条纹建议由基础 band/周期 + 曲率场 + 低频 domain warp + 局部 break/mutation 构成，而不是直接 threshold(noise)。
 
-- Normal 不依赖人工 Normal Map。
-- 用程序 Height Field（壳曲率 + ridge + plate + pores + joint groove）求局部梯度生成 pseudo-normal。
-- 腿应有“假圆柱/节肢横截面”宏观 normal，再叠 ridge/plate/micro normal；腿旋转/网格变形时 normal 必须随当前 UV/TBN/屏幕切线正确变换。
-- 壳体使用扁平伞状 pseudo-normal，使房间光方向变化时高光方向同步变化。
+### 6.3 程序 Height -> Normal
 
-### 5.4 材质差异
+Normal 不依赖人工 Normal Map。
+
+程序 Height Field 可组合：
+
+- 壳体宏观曲率；
+- ridge；
+- plate/cellular structure；
+- pore/granulation；
+- joint groove；
+- undershell/cavity transitions。
+
+由 Height 梯度或可用的解析 noise gradient 生成 pseudo-normal。
+
+不同部位必须有不同宏观 normal：
+
+- **壳体**：扁平伞状/缓拱 pseudo-normal；
+- **腿段**：假圆柱/节肢横截面 normal，再叠 ridge/plate/micro；
+- **足端**：不能继续用腿的圆柱 normal，使用**厚块/box/wedge-like pseudo-normal**，形成顶面、侧面、底面不同明暗；
+- **钳**：硬壳楔形/弧面 normal；
+- **眼睛**：圆润高 gloss normal。
+
+腿/钳 mesh 旋转和轻微变形时，normal 必须跟随当前 UV/TBN/屏幕空间切线正确转换，禁止“腿转了但高光方向没转”。
+
+### 6.4 AO / 自遮蔽
+
+- 关节缝、甲壳板片接缝使用较强 AO，避免正面受光时所有凹槽被洗平。
+- 壳体 underside 本身应更暗，并在腿的壳体连接根部提供一段**近壳强、向下逐渐恢复**的 undershell AO/遮蔽。
+- AO 是材质/结构信息，不等同于把整个部位固定染黑。
+
+### 6.5 材质类型
 
 至少区分：
 
 - 壳中央：暗、粗糙、吸光、低 specular；
-- 壳两翼：略硬质/薄甲壳感，中低 specular，红紫纹明显；
-- 步行腿：硬质节肢甲壳，中等宽高光、关节强 AO；
-- 足端：更厚重、更深紫、AO 更强；
-- 钳肢：暖暗红/紫红、可更锐利；
-- 眼睛：高饱和红 + 小范围 gloss/emission，暗房仍可读。
+- 壳两翼：更硬/薄甲壳感，中低 specular，红紫纹清楚；
+- 步行腿：硬质节肢甲壳，中等**宽高光带**，关节 AO 强；
+- 足端：厚重、深紫、AO 更强，块体光照明显；
+- 钳肢：暖暗红/酒红/紫红，边缘可更锐利；
+- 眼睛：高饱和红、高 gloss、小范围 emission。
 
-高光使用 stylized wide highlight，避免现实 PBR 的尖锐白色镜面点。
+高光采用 stylized wide highlight；避免现实 PBR 的尖锐白点和金属感。
 
-### 5.5 Rain World 化
+### 6.6 Rain World 化 / Dither
 
-- 最终色必须受 palette、darkness、fog/depth 影响；不同房间/昼夜不能像贴着同一张截图。
-- 内部前后腿深度用 **depth tint / fog-color shift / contrast/specular attenuation** 表达，不默认使用 alpha 透明。
-- 可加入很轻的空间稳定 blue-noise dither / quantization，避免过度现代化的 Photoshop 平滑渐变；不能逐帧抖动造成闪烁。
+- 最终色必须受 palette、darkness、fog/depth/local light 影响；换房间、昼夜和附近灯光时不能像贴着同一张截图。
+- 轮廓保持清晰；内部光影可平滑。
+- 如果使用生成 atlas，可让 silhouette 主要由 mesh/SDF 控制，material map 可按需要双线性采样；不要因为 material 平滑而把整个生物边缘糊掉。
+- 可使用很轻的**空间稳定 blue-noise dither / quantization** 抑制过度现代的平滑渐变；不能逐帧随机导致表面闪烁。
 
-## 6. VisualGenome：ID + 原版 Personality
+## 7. 内部视觉深度
 
-### 6.1 只用原版性格
+四条腿的背景->前层渐变是已确认视觉特征，不属于 Personality。
 
-不要新增性格系统。使用原版 `AbstractCreature.Personality` 六项：
+建议 `localVisualDepth` 同时影响：
+
+- FContainer/sprite draw order；
+- 向 fog/depth color 的偏移；
+- 对比度；
+- specular/highlight 强度；
+- 必要时轻微饱和度。
+
+后腿：更冷、更灰、更低对比、更弱高光；前腿：更实、更清晰。
+
+**不要把 localVisualDepth 简化成 `alpha = 0.5`。**
+
+## 8. VisualGenome：EntityID + 原版 Personality
+
+### 8.1 只使用原版六项 Personality
+
+禁止新增 MantleCrab 专属性格系统。读取原版 `AbstractCreature.Personality`：
 
 - `energy`
 - `bravery`
@@ -216,57 +359,99 @@
 - `nervous`
 - `aggression`
 
-总体规则：
+原则：
 
-> **Species Rules 保证物种识别；EntityID 决定主要个体随机；Personality 只作为偏置。**
+> **Species Rules 保证物种识别；EntityID 决定主要遗传随机；Personality 只作为表现倾向。**
 
-建议视觉差异权重约 `ID 70% / Personality 30%`，不是硬编码比例，核心是 Personality 不能覆盖物种固定特征。
+`ID ≈ 70% / Personality ≈ 30%` 只是设计倾向，不是要求所有公式硬编码 0.7/0.3。
 
-### 6.2 物种固定视觉（不可随机掉）
+### 8.2 Species Rules：永远不可随机掉
 
-- 宽扁暗色壳；
-- 4 条四节长腿；
+- 宽扁暗色披幕壳；
+- 4 条四节超长步行腿；
 - 2 条四节暗红钳肢；
 - 2 个红眼；
-- 蓝灰/深蓝紫步行腿；
+- 蓝灰/深蓝紫腿；
 - 深紫黑主体；
-- 两翼红紫方向性纹样；
+- 两翼红紫方向性主纹；
 - 粗大块状足端；
-- 后腿->前腿的深度渐变。
+- 后腿->前腿的视觉深度关系。
 
-### 6.3 EntityID 主要控制
+### 8.3 EntityID 负责主要个体差异
 
-可稳定决定：基础色相细偏移、条纹 seed/count/width/phase/curvature/warp、斑驳位置、甲壳细胞纹、micro ridge、腿色细偏移、关节/足端细节、钳色差、眼睛小范围差异、左右微变异。
+可稳定控制：
 
-**不要用顺序 `Random.value` 作为长期视觉参数源。** 使用命名稳定 Hash：
+- 壳宽/翼角/边缘粗糙等小范围形体变化；
+- base hue 细偏移；
+- 主纹 seed/count/width/phase/curvature/warp；
+- 斑驳位置；
+- 甲壳 cell/plate 结构；
+- micro ridge/pores；
+- 腿色、关节与足端细节；
+- 钳色差；
+- 眼睛小范围差异；
+- 左右局部 mutation。
+
+不同 ID 要明显但不过度不同；远看仍首先识别为同一物种。
+
+### 8.4 稳定随机：禁止长期依赖顺序 Random.value
+
+不要把长期视觉基因建立在：
+
+```text
+Random.InitState(seed)
+a = Random.value
+b = Random.value
+...
+```
+
+因为中间新增参数会改变后续所有旧个体外观。
+
+使用命名稳定 Hash：
 
 `Hash(ID.RandomSeed, VisualChannel)`
 
-如 `ShellHue / StripePhase / LeftRearLegMicro / EyeAspect`。以后新增 channel 不得改变旧个体已有外观。
+例如：`ShellHue / StripePhase / LeftRearLegMicro / EyeAspect / FootBulk`。
 
-### 6.4 左右对称规则
+新增 VisualChannel 不应改变现有 channel 的结果，使同一 EntityID 在版本升级后尽量保持已有外观。
 
-使用：`SharedGenome + LeftMutation + RightMutation`。
+### 8.5 Shared Genome + 左右 Mutation
 
-- Macro 约高度对称；
+左右不是完全独立随机：
+
+`SharedGenome + LeftMutation + RightMutation`
+
+- Macro 高度对称；
 - Meso 有有限差异；
-- Micro 可明显不同；
-- 禁止左右两边像两个完全不同物种。
+- Micro 可更明显不同；
+- 整体看起来是自然双侧结构而不是镜像贴图，也不能左右像两个物种。
 
-### 6.5 Personality -> 视觉职责
+### 8.6 Personality -> 视觉职责
 
-避免多个相关性格重复控制同一参数。
+避免多个相关 Personality 重复堆叠同一视觉参数。
 
-- `dominance`：大尺度/厚重感；主纹更宽、足端/关节视觉体积略强；不直接决定颜色。
+- `dominance`：大尺度/厚重感；主纹更宽、足端和关节视觉体积略强；不直接决定颜色。
 - `aggression`：纹样尖锐度、红紫暖色强调、钳肢攻击性色彩/边缘；不直接决定体型。
-- `bravery`：主纹展示强度、完整度、对比度和延伸范围；不等于 aggression。
+- `bravery`：主纹展示强度、完整度、对比和延伸范围；不等同 aggression。
 - `nervous`：domain warp、局部断裂、细碎副纹、微不对称；不大幅改变身体形状。
-- `energy`：Meso/Micro 细节频率、二级纹/细脊密度；不简单等于“更亮”。
-- `sympathy`：纹样曲线/过渡平滑度、综合色彩协调、边缘圆润倾向；不是“可爱程度”。
+- `energy`：Meso/Micro 细节频率、次级纹与细脊密度；不简单等于“更亮”。
+- `sympathy`：纹样曲线/综合色彩过渡平滑度、协调度、边缘圆润倾向；不是“可爱程度”。
 
-不要把 `aggression/dominance/bravery` 都叠加成“更红更大更亮”，原版 Personality 本身存在相关性。
+原版 Personality 本身存在相关性，禁止把 `aggression/dominance/bravery` 全部重复映射成“更红、更大、更亮”然后叠加爆表。
 
-## 7. 预期代码/资源拆分（实现时可微调）
+### 8.7 先生成 Phenotype，再给 Shader
+
+不要让 shader 直接接收六个 Personality 后自行决定美术规则。
+
+推荐：
+
+`EntityID + Personality -> VisualGenome -> VisualPhenotype -> Baker/Shader`
+
+Phenotype 应暴露清晰可调的美术参数，例如：`MotifScale / MotifSharpness / MotifContrast / MotifWarp / Fragmentation / Asymmetry / ChitinRoughness / LegDetail / PincerAccent`。
+
+Shader 只负责按明确 phenotype 和环境信息绘制，便于长期调参和保持视觉一致性。
+
+## 9. 资源 / 代码拆分（实现时可合理微调）
 
 ```text
 src/Creatures/MantleCrab/
@@ -283,50 +468,64 @@ src/Creatures/MantleCrab/
    └─ MantleCrabRenderingMath.cs
 ```
 
-Shader 资产建议独立于 weather：
+Shader 资产与 weather 分开：
 
 ```text
 shader-src/Assets/DryCycle/Creatures/MantleCrab/
 ├─ MantleCrabMaterialBake.compute
 ├─ MantleCrabSurface.shader
-└─ MantleCrabEye.shader   # 仅在确有必要时拆分
+└─ MantleCrabEye.shader   # 只有确有独立材质需求时再拆
 ```
 
-可使用独立 creature AssetBundle；不要把生物 shader 逻辑硬塞进 weather 命名/模块。复用 DryCycle 现有 `RainWorld.LoadResources` 后加载 AssetBundle/FShader 的安全管线。
+- 可建立独立 creature AssetBundle；不要把生物 shader 硬塞进 weather 命名/模块。
+- 复用 DryCycle 已有 `RainWorld.LoadResources` 后 AssetBundle/FShader 安全加载管线。
+- Compute 是个体材质一次性生成工具，不是每帧生物模拟核心。
 
-## 8. 推荐开发顺序
+## 10. 推荐开发顺序
 
-1. **Body Prototype**：5-chunk 左右的宽壳，验证比例、倾斜、墙角碰撞；
-2. **Standing Prototype**：4×4 段腿 + 足端 probe，只要求能稳定站在平地/坡/台阶；
-3. **Procedural Silhouette**：壳、腿、关节、足端、双钳、双眼全部无人工贴图可见；
-4. **VisualGenome**：ID 稳定个体差异 + Personality 偏置；
-5. **Material Baker**：程序 Color/Height/AO/Roughness/Emission；
-6. **Runtime Shader**：RW palette + room light + darkness + local light + visual depth；
-7. **Polish**：壳缘、流苏、blue-noise/dither、性能/cache/fallback；
-8. **之后再讨论移动/AI/钳互动等机制**，不要提前实现。
+1. **Body Prototype**：约 5-chunk 宽壳 + 交叉稳定约束；验证宽度、倾斜、墙角碰撞；
+2. **Standing Prototype**：4×4 段腿 + 足端 probes + 支撑力；只要求平地/坡/台阶稳定站立；
+3. **Procedural Silhouette**：壳、四腿、JointCap、块状足、双钳、双红眼、局部 draw order；0 人工纹理即可读；
+4. **VisualGenome/Phenotype**：稳定 ID 差异 + 原版 Personality 偏置；
+5. **Material Baker**：程序 Base Color / Height / AO / Roughness / Material / Emission；
+6. **Runtime Shader**：RW palette + lightAngle + darkness + local light + visual depth；
+7. **Polish**：undershell AO、壳缘/流苏、box-foot normal、blue-noise/dither、cache/fallback/performance；
+8. **之后再讨论移动策略、AI、钳互动、生态等**，不得提前扩展。
 
-## 9. 第一阶段验收标准
+## 11. 第一阶段验收标准
 
-完成“外观/碰撞原型”时至少满足：
+完成“外观/碰撞原型”至少满足：
 
-- 静止时即能一眼认出参考图轮廓：宽幕壳 + 四长腿 + 双钳 + 双红眼；
-- 4 条腿均可明确读出四节，足端明显粗大块状；
-- 壳体硬碰撞与视觉宽度基本一致，不能只有中央一个圆；
-- 腿不会因使用大量 BodyChunk 导致卡墙/卡杆/互撞；
-- 站在平地、斜坡、台阶上不会持续高频抖动；
-- 玩家可从腿间穿行，壳体为主要阻挡；
-- **零人工绘制生物纹理依赖**；
-- 同一 `EntityID` 每次加载视觉必须稳定；不同 ID 应明显但不过度不同；
-- Personality 只产生统计倾向，不能一眼形成“某性格固定皮肤”；
-- 后腿低对比冷色、前腿更实，且不是简单 alpha 透明；
-- 换 palette、明暗房间或附近局部光源后，壳/腿光影与环境一致；
-- 程序花纹必须沿解剖方向生长，不能表现为裸 Perlin/Worley 噪声；
+- 静止即能一眼识别：宽幕壳 + 四超长腿 + 双钳 + 双红眼；
+- 4 条腿都明确读出四节，且各腿比例/姿态不是机械复制；
+- 足端明显块状粗大，但实际地形 probe/碰撞保持轻量，不变成大空气墙；
+- 壳体碰撞覆盖主要视觉宽度，不能只有中央一个圆；
+- 壳体多 chunk 框架不会像链条折叠；
+- 腿不用大量 BodyChunk，不因细长结构频繁卡墙/卡杆/互撞；
+- 平地、斜坡、台阶站立不会持续高频抖动；
+- 玩家原则上可从腿间穿行，壳为主要阻挡；
+- **0 人工绘制生物纹理依赖**；
+- 壳、腿、关节、足端、钳、眼睛均可由程序几何/材质形成；
+- 同一 EntityID 重载视觉稳定；不同 ID 有明显个体性但保持 Species Rules；
+- Personality 只形成统计倾向，不出现“某性格固定皮肤”；
+- 主纹沿壳中央->翼端生长，腿纹沿根->足，禁止裸噪声感；
+- Macro/Meso/Micro 层级可读，Micro 不把 RGB 做脏；
+- 壳中心暗粗糙、翼面略硬、腿呈硬甲壳宽高光、足端有厚块光照、钳偏暖暗红；
+- 关节/壳下 AO 有结构性，不是固定黑贴图；
+- 后腿低对比冷色、前腿更实，并具有正确 local draw order；不是简单 alpha；
+- 换 palette、明暗房间、方向光或附近局部光源后，光影方向/综合色应随环境变化；
+- Mesh 旋转后 pseudo-normal/highlight 方向正确；
 - 眼睛暗处可读但默认不照亮环境；
-- 不实现任何本任务明确列为 TBD 的机制。
+- 壳缘不依赖宽大半透明柔边；
+- 不使用 3D Model/PBR/GrabPass/默认 DrawProcedural 替代 Futile；
+- 不实现任何本任务列为 TBD 的玩法。
 
-## 10. Codex 行为约束
+## 12. Codex 行为约束
 
-- 开始写代码前先检查当前 `main` 的 `MossySpider`、Registration 和 shader asset pipeline，复用现有约定，不复制旧代码形成第二套注册/资源系统。
-- 每完成一个阶段先保证可编译/可测试，再进入下一阶段；不要一次性把 AI、寻路、战斗、生态全部写入。
-- 所有“未确认玩法”必须留为清晰扩展点，不自行猜设定。
-- 优先可读、模块化、稳定 seed、可调参数；避免把视觉公式硬塞进一个超大 `DrawSprites()`。
+- **完整执行本任务书，不要为了缩短实现自行删规格。**
+- 开工前先检查当前 `main` 的 `MossySpider`、Registration、shader asset pipeline 和相关原版/Watcher 类。
+- 每完成一个阶段先保证可编译、可生成、可测试，再进入下一阶段。
+- 不一次性把 AI、寻路、战斗、生态塞进当前任务。
+- 所有未确认玩法保留清晰扩展点，禁止猜设定。
+- 优先模块化、稳定 seed、参数可调、资源可释放；避免把 VisualGenome、腿几何、光照公式全部硬塞入一个超大 `DrawSprites()`。
+- 遇到任务书与当前代码冲突时，先报告冲突与可选方案，不要静默改设计。
