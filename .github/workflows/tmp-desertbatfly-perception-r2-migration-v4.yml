@@ -1,0 +1,194 @@
+name: Temporary DesertBatfly Perception R2 migration v4
+
+on:
+  push:
+    branches:
+      - refactor/desertbatfly-neutral-ecology-20260910
+    paths:
+      - '.github/workflows/tmp-desertbatfly-perception-r2-migration-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/desertbatfly-neutral-ecology-20260910
+          fetch-depth: 0
+      - name: Complete migration and remove temporary runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Reuse the already-reviewed migration program, but tolerate the two R7 guard
+          # edits that were independently modernized and defer its residual mirror check
+          # until the extra callers below are migrated too.
+          workflow = Path('.github/workflows/tmp-desertbatfly-perception-r2-migration.yml')
+          text = workflow.read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          start = text.index(marker) + len(marker)
+          end = text.index("\n          PY\n", start)
+          lines = text[start:end].splitlines()
+          program = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+
+          old_guard = """    if count != 1:\n        raise SystemExit(f'{label}: expected exactly one match, found {count}')\n"""
+          new_guard = """    if label in (\n        'performance remove weapon source read',\n        'performance perception current facts',\n    ) and count == 0:\n        return\n    if count != 1:\n        raise SystemExit(f'{label}: expected exactly one match, found {count}')\n"""
+          if old_guard not in program:
+              raise SystemExit('could not patch migration replace_once guard')
+          program = program.replace(old_guard, new_guard, 1)
+
+          old_leftovers = """if leftovers:\n    raise SystemExit('forbidden current-observation mirror remains:\\n' + '\\n'.join(leftovers))\n"""
+          new_leftovers = """if leftovers:\n    print('residual current-observation callers queued for final migration:')\n    print('\\n'.join(leftovers))\n"""
+          if old_leftovers not in program:
+              raise SystemExit('could not defer residual mirror check')
+          program = program.replace(old_leftovers, new_leftovers, 1)
+          exec(compile(program, '<perception-r2-migration>', 'exec'), {'__name__': '__main__'})
+
+          perception = Path('src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs')
+          threat = Path('src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatRuntime.cs')
+          frame = Path('src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs')
+          trace = Path('src/Creatures/DesertBatfly/Debug/DB_ThreatTrace.cs')
+
+          # Expose a slot-specific read so Threat can match temporal memory to a currently
+          # observed player without reopening RoomContext/visibility scanning.
+          replace_once(
+              perception,
+              '''    internal bool TryGetHeldThreats(Player player, out DB_HeldThreatObservation observation)\n    {\n''',
+              '''    internal bool TryGetObservedPlayerBySlot(int slot, float maxDistance, out Player player)\n    {\n        player = null;\n        if (!ObservedPlayersFresh() || maxDistance < 0f ||\n            slot < 0 || slot >= observedPlayers.Length)\n            return false;\n        Player candidate = observedPlayers[slot];\n        if (!ValidObservedPlayer(candidate) || observedPlayerDistances[slot] > maxDistance)\n            return false;\n        player = candidate;\n        return true;\n    }\n\n    internal bool TryGetHeldThreats(Player player, out DB_HeldThreatObservation observation)\n    {\n''',
+              'Perception slot-specific observed-player read')
+
+          # Threat held-item caution reads the same bounded current observation that produced
+          # the selected temporal cue; it no longer reacquires the Player through RoomContext.
+          replace_once(
+              threat,
+              '''        Player player = DB_RoomContext.For(bat.room)?.PlayerBySlot(cue.PlayerSlot);\n        if (player == null) return;\n\n        DB_HeldThreatObservation held = default;\n        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);\n''',
+              '''        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;\n        if (perception == null ||\n            !perception.TryGetObservedPlayerBySlot(cue.PlayerSlot, 430f, out Player player))\n            return;\n\n        DB_HeldThreatObservation held = default;\n        perception.TryGetHeldThreats(player, out held);\n''',
+              'Threat held caution current player ownership')
+
+          # Pursuit history is still Threat-owned, but the fact that a Player is currently
+          # visible comes exclusively from Perception R2.
+          replace_once(
+              threat,
+              '''        DB_RoomContext context = DB_RoomContext.For(bat.room);\n        Player player = context != null\n            ? NearestVisiblePlayer(bat, context.Players, 300f)\n            : null;\n''',
+              '''        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;\n        Player player = null;\n        if (perception != null)\n            perception.TryGetObservedPlayer(null, 300f, out player);\n''',
+              'Threat pursuit visibility ownership')
+
+          replace_once(
+              threat,
+              '''        int slot = PlayerSlot(player);\n        if (!ValidSlot(slot) ||\n            !DB_VisibilityPolicy.CanObserve(\n                bat, player.mainBodyChunk.pos, 360f, DB_VisibilityChannel.Player))\n        {\n            ResetEncounter(state);\n            return;\n        }\n\n        float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);\n''',
+              '''        int slot = PlayerSlot(player);\n        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;\n        if (!ValidSlot(slot) || perception == null ||\n            !perception.TryGetObservedPlayer(player, 360f, out Player observedPlayer) ||\n            !ReferenceEquals(observedPlayer, player))\n        {\n            ResetEncounter(state);\n            return;\n        }\n\n        float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);\n''',
+              'Threat encounter visibility ownership')
+
+          # Learned tactical math may combine Threat memory with current Perception facts, but
+          # those facts are not copied back into DB_ThreatCue.
+          replace_once(
+              threat,
+              '''        DB_ThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;\n        float nerve = bat.Personality.Nerve;\n''',
+              '''        DB_ThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;\n        DB_HeldThreatObservation held = default;\n        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);\n        DB_PerceptionSnapshot perceptionSnapshot = bat.DesertAI?.Perception?.Snapshot ?? default;\n        bool currentProjectileThreat = perceptionSnapshot.HasIncomingProjectile &&\n            ReferenceEquals(perceptionSnapshot.IncomingProjectile.Observation.Instigator, player);\n        float nerve = bat.Personality.Nerve;\n''',
+              'Threat tactical current perception facts')
+
+          threat_text = threat.read_text(encoding='utf-8')
+          for old, new in (
+              ('cue.VisibleSpear', 'held.VisibleSpear'),
+              ('cue.VisibleRock', 'held.VisibleRock'),
+              ('cue.VisibleExplosive', 'held.VisibleExplosive'),
+              ('cue.VisibleStartle', 'held.VisibleStartle'),
+              ('cue.VisibleShock', 'held.VisibleShock'),
+              ('cue.ProjectileThreat', 'currentProjectileThreat'),
+          ):
+              threat_text = threat_text.replace(old, new)
+          threat.write_text(threat_text, encoding='utf-8')
+
+          replace_once(
+              threat,
+              '''                    ShouldAbortDive(bat, slot, caution, counterRisk, cue))\n''',
+              '''                    ShouldAbortDive(bat, slot, caution, counterRisk, held, currentProjectileThreat))\n''',
+              'Threat dive abort perception arguments')
+
+          replace_once(
+              threat,
+              '''        float caution,\n        float counterRisk,\n        in DB_ThreatCue cue)\n    {\n        float chance = caution * 0.30f + counterRisk * 0.18f;\n        if (held.VisibleSpear) chance += 0.12f;\n        if (currentProjectileThreat) chance += 0.28f;\n''',
+              '''        float caution,\n        float counterRisk,\n        in DB_HeldThreatObservation held,\n        bool currentProjectileThreat)\n    {\n        float chance = caution * 0.30f + counterRisk * 0.18f;\n        if (held.VisibleSpear) chance += 0.12f;\n        if (currentProjectileThreat) chance += 0.28f;\n''',
+              'Threat dive abort signature')
+
+          # Remove the now-unused Threat-local Player visibility selector entirely.
+          replace_once(
+              threat,
+              '''    private static Player NearestVisiblePlayer(\n        DB_Creature bat,\n        IReadOnlyList<Player> players,\n        float maxDistance = 430f)\n    {\n        if (bat == null || players == null) return null;\n        Player best = null;\n        float bestDistance = maxDistance;\n        for (int i = 0; i < players.Count; i++)\n        {\n            Player player = players[i];\n            if (player == null || player.dead || player.room != bat.room) continue;\n            float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);\n            if (distance >= bestDistance ||\n                !DB_VisibilityPolicy.CanObserve(\n                    bat, player.mainBodyChunk.pos, maxDistance, DB_VisibilityChannel.Player))\n                continue;\n            bestDistance = distance;\n            best = player;\n        }\n        return best;\n    }\n\n''',
+              '',
+              'remove Threat-local visible-player selector')
+
+          replace_once(
+              frame,
+              '''            incomingProjectile || (hasThreat && threatDebug.Cue.ProjectileThreat),\n''',
+              '''            incomingProjectile,\n''',
+              'FrameContext current projectile from Perception only')
+
+          replace_once(
+              trace,
+              '''            CueText(threat.Cue),\n            "current observable cue only; never persisted as Threat Signature Memory");\n''',
+              '''            CueText(threat.Cue),\n            "temporal Threat cue only; current observation lives in Perception R2");\n''',
+              'Threat trace cue description')
+          old_cue_text_start = trace.read_text(encoding='utf-8').index('    private static string CueText(in DB_ThreatCue cue)')
+          old_cue_text_end = trace.read_text(encoding='utf-8').index('    private static string AcuteText', old_cue_text_start)
+          trace_text = trace.read_text(encoding='utf-8')
+          new_cue_text = '''    private static string CueText(in DB_ThreatCue cue)\n    {\n        return $"P{cue.PlayerSlot}" +\n               (cue.RecentSpearThrow ? "+RecentSpear" : "") +\n               (cue.RecentRockThrow ? "+RecentRock" : "") +\n               (cue.RecentExplosion ? "+RecentExplosion" : "") +\n               (cue.RecentGrabAttempt ? "+RecentGrab" : "") +\n               (cue.PlayerRetreating ? "+Retreating" : "");\n    }\n\n'''
+          trace.write_text(
+              trace_text[:old_cue_text_start] + new_cue_text + trace_text[old_cue_text_end:],
+              encoding='utf-8')
+
+          # Final production boundary: no transitional selector or mirrored current cue fields.
+          forbidden = (
+              'DB_WeaponPerception', '.Cue.ProjectileThreat', '.Cue.ProjectileThreatDirection',
+              'cue.VisibleSpear', 'cue.VisibleRock', 'cue.VisibleExplosive',
+              'cue.VisibleStartle', 'cue.VisibleShock', 'cue.ProjectileThreat',
+          )
+          leftovers = []
+          for root in (Path('src/Creatures/DesertBatfly'), Path('src/Debug/AIDebugger/Sources')):
+              for path in root.rglob('*.cs'):
+                  source = path.read_text(encoding='utf-8')
+                  for token in forbidden:
+                      if token in source:
+                          leftovers.append(f'{path}: {token}')
+          if leftovers:
+              raise SystemExit('final Perception R2 boundary violation:\n' + '\n'.join(leftovers))
+
+          # Threat history may use current observations only through Perception APIs.
+          threat_source = threat.read_text(encoding='utf-8')
+          for token in ('TryGetObservedPlayer(', 'TryGetObservedPlayerBySlot(', 'TryGetHeldThreats('):
+              if token not in threat_source:
+                  raise SystemExit('Threat lost Perception boundary call: ' + token)
+          if 'private static Player NearestVisiblePlayer' in threat_source:
+              raise SystemExit('Threat-local visible-player selector survived migration')
+
+          print('Final Perception R2 ownership boundary migrated.')
+          PY
+
+          bash scripts/check-desertbatfly-function-retention.sh
+          bash scripts/check-desertbatfly-internal-hook-cleanup.sh
+          bash scripts/check-desertbatfly-r7-performance.sh
+
+          # Remove all temporary migration machinery before the branch is published.
+          rm -f \
+            .github/workflows/tmp-desertbatfly-perception-r2-migration.yml \
+            .github/workflows/tmp-desertbatfly-perception-r2-migration-v2.yml \
+            .github/workflows/tmp-desertbatfly-perception-r2-migration-v3.yml \
+            .github/workflows/tmp-desertbatfly-perception-r2-migration-v4.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Complete DesertBatfly Perception R2 migration'
+          git push origin HEAD:refactor/desertbatfly-neutral-ecology-20260910
