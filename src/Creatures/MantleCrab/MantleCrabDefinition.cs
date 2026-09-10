@@ -1,39 +1,65 @@
 using DryCycle.Creatures.Platforming;
-using DryCycle.Registration;
+using DryCycle.Framework.Creature.Core;
+using CreatureTemplateBuilder = DryCycle.Registration.CreatureTemplateBuilder;
 
 namespace DryCycle.Creatures.MantleCrab;
 
-internal sealed class MantleCrabDefinition : CreatureDefinition
+internal static class MantleCrabDefinition
 {
-    internal MantleCrabDefinition() : base(MantleCrabEnums.Type) { }
-
-    internal override CreatureTemplate CreateTemplate()
+    /// <summary>
+    /// 把 MantleCrab 的核心注册信息交给新的 CreatureRegistry。
+    /// 资源加载仍然留在 MantleCrab 自己的代码里，不塞进 Core Registry。
+    ///
+    /// Registers MantleCrab's core descriptor through the new CreatureRegistry.
+    /// Resource loading stays owned by MantleCrab instead of the core registry.
+    /// </summary>
+    internal static CreatureDescriptor Register()
     {
-        CreatureTemplate template = new CreatureTemplateBuilder(Type, "Mantle Crab")
+        CreatureDescriptor descriptor = new CreatureDescriptor(
+                MantleCrabEnums.Type,
+                DryCycle.Plugin.ModId)
+            .Name("Mantle Crab")
+            .Template(CreateTemplate)
+            .Realized(CreateRealizedCreature);
+
+        return CreatureRegistry.Register(descriptor);
+    }
+
+    private static CreatureTemplate CreateTemplate()
+    {
+        CreatureTemplate template = new CreatureTemplateBuilder(MantleCrabEnums.Type, "Mantle Crab")
         {
-            HasAI = false, RequireAIMap = false, DoPreBakedPathing = false
+            HasAI = false,
+            RequireAIMap = false,
+            DoPreBakedPathing = false
         }.Build();
+
         template.grasps = 0;
         template.bodySize = 6f;
         template.canAutoAbstractPath = false;
-        template.roamInRoomChance = template.roamBetweenRoomsChance = 0f;
+        template.roamInRoomChance = 0f;
+        template.roamBetweenRoomsChance = 0f;
         template.forbidStandardShortcutEntry = true;
         template.doesNotUseDens = true;
-        // No ecology, unlocks, sandbox, AI or combat policy in the appearance prototype.
+
+        // 当前 MantleCrab 仍然只是外观与物理原型，不在这里加入生态、Sandbox、AI 或战斗策略。
+        // MantleCrab is still an appearance/physics prototype; ecology, sandbox, AI, and combat policy stay out of this definition.
         return template;
     }
 
-    internal override Creature CreateRealizedCreature(AbstractCreature creature)
+    private static Creature CreateRealizedCreature(AbstractCreature creature)
     {
         MantleCrab crab = new(creature, creature.world);
-        // Room resolves Creature-to-Creature collisions after each object's Update. Register a
-        // provider-local finalizer so the generic platform runtime can restore the hard shell
-        // before reconciling riders, without taking a MantleCrab dependency itself.
+
+        // Room 会在每个物体 Update 后处理 Creature-to-Creature 碰撞；这里登记物种侧的最终修正，
+        // 让通用平台运行时能在处理骑乘者之前重新维持硬壳形状，而不反向依赖 MantleCrab。
+        // Room resolves Creature-to-Creature collisions after each object's Update. Register a provider-local
+        // finalizer so the generic platform runtime can restore the rigid shell before reconciling riders.
         WalkableDynamicSurfaceRuntime.RegisterPostPhysicsFinalizer(crab, crab.MaintainRigidShell);
         return crab;
     }
 
-    internal override void LoadResources(RainWorld rainWorld)
+    internal static void LoadResources(RainWorld rainWorld)
     {
         DryCycle.Rendering.DryCycleShaderAssets.EnsureCreatureAssets(rainWorld);
         Rendering.MantleCrabMaterialCache.Enable();
