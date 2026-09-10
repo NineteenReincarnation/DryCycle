@@ -22,6 +22,69 @@ internal enum DB_PerceptionModality
     Predicted
 }
 
+/// <summary>
+/// Immutable current weapon fact shared by Perception R2 consumers. Selection and ranking are
+/// perception responsibilities; this value never owns movement or persistent Threat memory.
+/// </summary>
+internal readonly struct DB_WeaponObservation
+{
+    internal readonly Weapon Weapon;
+    internal readonly Creature Instigator;
+    internal readonly Vector2 Position;
+    internal readonly Vector2 Velocity;
+    internal readonly float ClosestApproachSqr;
+    internal readonly bool Thrown;
+    internal readonly bool HeldMovingSpear;
+
+    internal DB_WeaponObservation(
+        Weapon weapon,
+        Creature instigator,
+        Vector2 position,
+        Vector2 velocity,
+        float closestApproachSqr,
+        bool thrown,
+        bool heldMovingSpear)
+    {
+        Weapon = weapon;
+        Instigator = instigator;
+        Position = position;
+        Velocity = velocity;
+        ClosestApproachSqr = Mathf.Max(0f, closestApproachSqr);
+        Thrown = thrown;
+        HeldMovingSpear = heldMovingSpear;
+    }
+}
+
+/// <summary>
+/// Direct visual held-item facts for one player. They are transient observations only; Threat
+/// decides how learned history changes the meaning of the currently visible items.
+/// </summary>
+internal readonly struct DB_HeldThreatObservation
+{
+    internal readonly bool VisibleSpear;
+    internal readonly bool VisibleRock;
+    internal readonly bool VisibleExplosive;
+    internal readonly bool VisibleStartle;
+    internal readonly bool VisibleShock;
+
+    internal DB_HeldThreatObservation(
+        bool visibleSpear,
+        bool visibleRock,
+        bool visibleExplosive,
+        bool visibleStartle,
+        bool visibleShock)
+    {
+        VisibleSpear = visibleSpear;
+        VisibleRock = visibleRock;
+        VisibleExplosive = visibleExplosive;
+        VisibleStartle = visibleStartle;
+        VisibleShock = visibleShock;
+    }
+
+    internal bool Any => VisibleSpear || VisibleRock || VisibleExplosive ||
+                         VisibleStartle || VisibleShock;
+}
+
 internal readonly struct DB_PerceptionTrack
 {
     internal readonly Creature Target;
