@@ -127,6 +127,7 @@ internal static class DB_BehaviorExecution
         return bat.DesertAI.ExecuteRoostOwned();
     }
 
+    /// <summary>Executes only reserved/formal Social events.</summary>
     internal static bool TrySocial(DB_Creature bat, in DB_BehaviorResolution resolution)
     {
         if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Social ||
@@ -136,6 +137,7 @@ internal static class DB_BehaviorExecution
         return DB_SocialRuntime.ApplyOwnedBehavior(bat);
     }
 
+    /// <summary>Executes only short background ecology; it never consumes Social reservations.</summary>
     internal static bool TryNeutralEcology(DB_Creature bat, in DB_BehaviorResolution resolution)
     {
         if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.NeutralEcology ||
