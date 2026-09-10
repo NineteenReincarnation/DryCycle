@@ -310,7 +310,7 @@ internal static class DB_FrameContextRuntime
             hasThreat || reportedAnonymousHazard,
             hasThreat ? threatDebug.PlayerSlot : -1,
             hasThreat ? threatDebug.Confidence : signalPerception.AlarmPressure,
-            incomingProjectile || (hasThreat && threatDebug.Cue.ProjectileThreat),
+            incomingProjectile,
             acuteThreat,
             hazardCenter);
 

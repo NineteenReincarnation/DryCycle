@@ -13,7 +13,7 @@ internal static partial class Program
         Type arbiterType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorArbiter", true);
         Type behaviorExecutionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_BehaviorExecution", true);
         Type frameRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
-        Type weaponPerceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Type perceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);
 
         MethodInfo learnedFakeDive = tacticsType.GetMethod("LearnedFakeDiveChance", Flags);
         Check(learnedFakeDive != null,
@@ -73,14 +73,16 @@ internal static partial class Program
         Check(MethodCallsThreat(behaviorExecutionType.GetMethod("TryProjectileEvade", Flags),
                   tacticsType, "ApplyProjectileEvadeOwned"),
             "central R3 execution routes ImmediateProjectileEvade directly into the formal Threat tactics owner surface");
-        Check(MethodCallsThreat(frameRuntimeType.GetMethod("Capture", Flags),
-                  weaponPerceptionType, "TryFindIncomingProjectile"),
-            "FrameContext captures real incoming-projectile geometry before arbitration through shared WeaponPerception");
+        Check(!MethodCallsThreat(frameRuntimeType.GetMethod("Capture", Flags),
+                  perceptionType, "RefreshState"),
+            "FrameContext consumes the already-refreshed Perception snapshot without triggering another receiver pass");
         Check(MethodCallsThreat(adjustVengeance, tacticsType, "TryIncomingProjectileEvade") &&
-              MethodCallsThreat(projectileGeometry, threatRuntimeType, "TryGetDebugState"),
-            "Extreme Vengeance retains its tactical projectile geometry without restoring an ordinary evade executor");
-        Check(MethodCallsThreat(tryProfile, weaponPerceptionType, "TryObserveHeldThreats"),
-            "Threat tactical profile uses shared held-item perception rather than a private scan");
+              !MethodCallsThreat(projectileGeometry, threatRuntimeType, "TryGetDebugState"),
+            "Extreme Vengeance reads current projectile geometry from Perception rather than Threat debug state");
+        Check(MethodCallsThreat(tryProfile, perceptionType, "TryGetHeldThreats"),
+            "Threat tactical profile consumes held-item facts through Perception R2 rather than a private scan");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,
+            "Threat tactics has no WeaponPerception compatibility shell");
         Check(!TypeCallsForbiddenThreatInput(tacticsType),
             "Threat tactics never inspect player input/controller state or hidden intent");
 

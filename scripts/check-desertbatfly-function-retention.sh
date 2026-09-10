@@ -71,6 +71,10 @@ test "${#physical_scanners[@]}" -eq 1
 test "${physical_scanners[0]}" = "$SRC/Core/Runtime/DB_RoomContext.cs"
 grep -q 'context?.ThrownWeapons' "$PERCEPTION"
 grep -q 'DB_PerceptionScoring.ProjectileRisk' "$PERCEPTION"
+grep -q 'internal bool TryGetObservedPlayer' "$PERCEPTION"
+grep -q 'internal bool TryGetHeldThreats' "$PERCEPTION"
+! test -e "$SRC/Behavior/Perception/DB_WeaponPerception.cs"
+! grep -RIn --include='*.cs' 'DB_WeaponPerception' "$SRC"
 
 grep -q 'DB_RoomContext.TryGetExisting(self, out DB_RoomContext context)' "$HOOKS"
 grep -q 'context.Bats.Count == 0' "$HOOKS"

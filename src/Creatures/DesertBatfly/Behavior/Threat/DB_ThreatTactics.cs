@@ -202,15 +202,14 @@ internal static class DB_ThreatTactics
             return false;
 
         int slot = DB_ThreatRuntime.PlayerSlot(player);
-        if (!DB_ThreatRuntime.TryGetDebugState(
-                bat,
-                out DB_ThreatDebugState threat) ||
-            threat.Cue.PlayerSlot != slot ||
-            !threat.Cue.ProjectileThreat ||
-            threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f)
+        DB_PerceptionSnapshot snapshot = bat.DesertAI?.Perception?.Snapshot ?? default;
+        if (!snapshot.HasIncomingProjectile) return false;
+        DB_WeaponObservation projectile = snapshot.IncomingProjectile.Observation;
+        if (!ReferenceEquals(projectile.Instigator, player) ||
+            projectile.Velocity.sqrMagnitude < 0.5f)
             return false;
 
-        Vector2 projectileDirection = threat.Cue.ProjectileThreatDirection.normalized;
+        Vector2 projectileDirection = projectile.Velocity.normalized;
         Vector2 perpendicular = new Vector2(-projectileDirection.y, projectileDirection.x);
         Vector2 playerToBat = bat.mainBodyChunk.pos - player.mainBodyChunk.pos;
         float sideDot = Vector2.Dot(playerToBat, perpendicular);
@@ -237,11 +236,8 @@ internal static class DB_ThreatTactics
         DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(bat.DesertState, slot);
         if (memory == null || memory.Confidence <= 0.001f) return false;
 
-        DB_WeaponPerception.TryObserveHeldThreats(
-            bat,
-            player,
-            DB_Tuning.SightRange,
-            out DB_HeldThreatObservation held);
+        DB_HeldThreatObservation held = default;
+        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);
 
         bool visibleSpear = held.VisibleSpear;
         bool visibleRock = held.VisibleRock;

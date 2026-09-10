@@ -14,7 +14,6 @@ internal static partial class Program
         Type perceptionScoring = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionScoring", true);
         Type perceptionSource = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionSource", true);
         Type perceptionModality = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionModality", true);
-        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
         Type heldObservation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
         Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
@@ -164,18 +163,20 @@ internal static partial class Program
             "Perception R2 receiver never writes BodyChunk velocity or owns locomotion");
 
         // Long-term threat memory and signal transport stay in their existing domains while
-        // receiver semantics live behind the R2 snapshot. Held-item observation is the one
-        // remaining WeaponPerception migration bridge and is removed in the next cleanup.
+        // all current direct player, held-item and projectile facts live behind Perception R2.
         Check(threat.GetMethod("RefreshState", Flags) != null &&
               signalDefinition.GetMethod("For", Flags) != null &&
               signalRuntime.GetMethod("EmitAlarm", Flags) != null,
             "Perception R2 preserves Threat memory/assessment and Signal emission/transport domain boundaries");
-        Check(weaponPerception.GetMethod("TryObserveHeldThreats", Flags) != null &&
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,
+            "retired DB_WeaponPerception bridge is absent after current-observation migration");
+        Check(perception.GetMethod("TryGetObservedPlayer", Flags) != null &&
+              perception.GetMethod("TryGetHeldThreats", Flags) != null &&
               heldObservation.GetField("VisibleSpear", Flags) != null,
-            "Perception R2 retains only the explicit held-item migration bridge for current Threat consumers");
+            "Perception R2 owns bounded current observed-player and held-item facts");
         Check(ai.GetMethod("ScanWeapons", Flags) == null && ai.GetMethod("ScanCreatures", Flags) == null,
             "Perception R2 does not resurrect DB_AI scanning facades");
 
-        Console.WriteLine("Architecture Perception R2: direct DB_AI ownership, fixed perception slots, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.");
+        Console.WriteLine("Architecture Perception R2: direct DB_AI ownership, fixed perception slots, bounded observed-player/held-item facts, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.");
     }
 }

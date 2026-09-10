@@ -22,13 +22,18 @@ internal class DB_PerceptionRuntime
 
     private readonly DB_AI brain;
     private readonly DB_Creature fly;
-    private readonly int[] pursuitByPlayer = new int[4];
+    private const int ObservedPlayerCapacity = 4;
+    private readonly int[] pursuitByPlayer = new int[ObservedPlayerCapacity];
+    private readonly Player[] observedPlayers = new Player[ObservedPlayerCapacity];
+    private readonly float[] observedPlayerDistances = new float[ObservedPlayerCapacity];
+    private readonly DB_HeldThreatObservation[] observedHeldThreats = new DB_HeldThreatObservation[ObservedPlayerCapacity];
     private readonly int[] signalGenerations = new int[SignalGenerationHistorySize];
 
     private int scan;
     private int creatureScanCount;
     private int projectileScanCount;
     private int signalScanCount;
+    private int observedPlayersTick = int.MinValue;
     private DB_PerceptionTrack primaryThreat;
     private DB_PerceptionTrack secondaryThreat;
     private DB_PerceptionTrack lostThreat;
@@ -110,6 +115,7 @@ internal class DB_PerceptionRuntime
     internal void Reset()
     {
         for (int i = 0; i < pursuitByPlayer.Length; i++) pursuitByPlayer[i] = 0;
+        ClearObservedPlayers();
         for (int i = 0; i < signalGenerations.Length; i++) signalGenerations[i] = int.MinValue;
         primaryThreat = default;
         secondaryThreat = default;
@@ -157,6 +163,7 @@ internal class DB_PerceptionRuntime
         if (fly?.room == null || fly.mainBodyChunk == null)
         {
             incomingProjectile = default;
+            ClearObservedPlayers();
             return;
         }
 
@@ -187,6 +194,61 @@ internal class DB_PerceptionRuntime
     {
         observation = incomingProjectile.Observation;
         return incomingProjectile.Valid;
+    }
+
+    internal bool TryGetObservedPlayer(Player preferred, float maxDistance, out Player player)
+    {
+        player = null;
+        if (!ObservedPlayersFresh() || maxDistance < 0f) return false;
+
+        int preferredSlot = ObservedPlayerSlot(preferred);
+        if (preferredSlot >= 0 &&
+            ReferenceEquals(observedPlayers[preferredSlot], preferred) &&
+            observedPlayerDistances[preferredSlot] <= maxDistance &&
+            ValidObservedPlayer(preferred))
+        {
+            player = preferred;
+            return true;
+        }
+
+        float bestDistance = float.MaxValue;
+        int bestSlot = int.MaxValue;
+        for (int i = 0; i < observedPlayers.Length; i++)
+        {
+            Player candidate = observedPlayers[i];
+            float distance = observedPlayerDistances[i];
+            if (!ValidObservedPlayer(candidate) || distance > maxDistance) continue;
+            if (distance > bestDistance + 0.0001f ||
+                (Mathf.Abs(distance - bestDistance) <= 0.0001f && i >= bestSlot))
+                continue;
+            player = candidate;
+            bestDistance = distance;
+            bestSlot = i;
+        }
+        return player != null;
+    }
+
+    internal bool TryGetObservedPlayerBySlot(int slot, float maxDistance, out Player player)
+    {
+        player = null;
+        if (!ObservedPlayersFresh() || maxDistance < 0f ||
+            slot < 0 || slot >= observedPlayers.Length)
+            return false;
+        Player candidate = observedPlayers[slot];
+        if (!ValidObservedPlayer(candidate) || observedPlayerDistances[slot] > maxDistance)
+            return false;
+        player = candidate;
+        return true;
+    }
+
+    internal bool TryGetHeldThreats(Player player, out DB_HeldThreatObservation observation)
+    {
+        observation = default;
+        if (!ObservedPlayersFresh() || !ValidObservedPlayer(player)) return false;
+        int slot = ObservedPlayerSlot(player);
+        if (slot < 0 || !ReferenceEquals(observedPlayers[slot], player)) return false;
+        observation = observedHeldThreats[slot];
+        return true;
     }
 
     internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)
@@ -315,8 +377,7 @@ internal class DB_PerceptionRuntime
         if (brain.Mode == DB_AI.Activity.Escape || brain.RetreatActive) return false;
         if (fly.Injury.IsSeverelyInjured || DB_TravelRuntime.HasIntent(fly.abstractCreature)) return false;
         if (DB_ThreatRuntime.TryGetDebugState(fly, out DB_ThreatDebugState threat) &&
-            (threat.Cue.ProjectileThreat ||
-             threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||
+            (threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||
              threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||
              threat.AcuteShockTimer > 0))
             return false;
@@ -326,6 +387,7 @@ internal class DB_PerceptionRuntime
     private void ScanCreatures()
     {
         creatureScanCount++;
+        BeginObservedPlayerScan();
         DB_PerceptionTrack previousPrimary = primaryThreat;
         DB_PerceptionTrack directBest = default;
         DB_PerceptionTrack directSecond = default;
@@ -367,7 +429,11 @@ internal class DB_PerceptionRuntime
 
             float distance = Vector2.Distance(origin, creature.mainBodyChunk.pos);
             brain.Combat.ConsiderCandidate(creature, distance);
-            if (creature is Player observedPlayer) TrackPlayerApproach(observedPlayer, distance);
+            if (creature is Player observedPlayer)
+            {
+                RecordObservedPlayer(observedPlayer, distance);
+                TrackPlayerApproach(observedPlayer, distance);
+            }
 
             if (!TryBuildThreatTrack(creature, distance, visibility, out DB_PerceptionTrack track))
                 continue;
@@ -517,6 +583,80 @@ internal class DB_PerceptionRuntime
             DB_PerceptionModality.Visual,
             true);
         return true;
+    }
+
+    private void BeginObservedPlayerScan()
+    {
+        for (int i = 0; i < observedPlayers.Length; i++)
+        {
+            observedPlayers[i] = null;
+            observedPlayerDistances[i] = float.MaxValue;
+            observedHeldThreats[i] = default;
+        }
+        observedPlayersTick = fly?.room?.game?.clock ?? int.MinValue;
+    }
+
+    private void ClearObservedPlayers()
+    {
+        for (int i = 0; i < observedPlayers.Length; i++)
+        {
+            observedPlayers[i] = null;
+            observedPlayerDistances[i] = float.MaxValue;
+            observedHeldThreats[i] = default;
+        }
+        observedPlayersTick = int.MinValue;
+    }
+
+    private void RecordObservedPlayer(Player player, float distance)
+    {
+        int slot = ObservedPlayerSlot(player);
+        if (slot < 0 || distance < 0f || distance > observedPlayerDistances[slot]) return;
+        observedPlayers[slot] = player;
+        observedPlayerDistances[slot] = distance;
+        observedHeldThreats[slot] = ObserveHeldThreats(player);
+    }
+
+    private DB_HeldThreatObservation ObserveHeldThreats(Player player)
+    {
+        bool spear = false;
+        bool rock = false;
+        bool explosive = false;
+        bool startle = false;
+        bool shock = false;
+
+        if (player?.grasps != null)
+        {
+            for (int i = 0; i < player.grasps.Length; i++)
+            {
+                PhysicalObject held = player.grasps[i]?.grabbed;
+                if (held == null) continue;
+                DB_ThreatEvidence evidence = DB_ThreatClassifier.Classify(held, null, 0f, 0f, false);
+                spear |= held is Spear;
+                rock |= held is Rock;
+                explosive |= evidence.Explosion > 0.15f;
+                startle |= evidence.Startle > 0.15f;
+                shock |= evidence.Shock > 0.15f;
+            }
+        }
+
+        return new DB_HeldThreatObservation(spear, rock, explosive, startle, shock);
+    }
+
+    private bool ObservedPlayersFresh()
+    {
+        int clock = fly?.room?.game?.clock ?? int.MinValue;
+        return observedPlayersTick != int.MinValue && clock >= observedPlayersTick &&
+               clock - observedPlayersTick <= ScanIntervalTicks + 1;
+    }
+
+    private bool ValidObservedPlayer(Player player)
+        => player != null && !player.dead && !player.slatedForDeletetion &&
+           player.room == fly?.room && !player.inShortcut;
+
+    private static int ObservedPlayerSlot(Player player)
+    {
+        int slot = player?.playerState?.playerNumber ?? -1;
+        return slot >= 0 && slot < ObservedPlayerCapacity ? slot : -1;
     }
 
     private void TrackPlayerApproach(Player player, float distance)
