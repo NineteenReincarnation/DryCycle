@@ -14,6 +14,44 @@ internal enum DB_NeutralMode
     ShortSwarm
 }
 
+internal readonly struct DB_NeutralDebugState
+{
+    internal readonly DB_NeutralMode Mode;
+    internal readonly bool Active;
+    internal readonly int RemainingTicks;
+    internal readonly int NextDecisionTicks;
+    internal readonly int PeerCooldownTicks;
+    internal readonly int FlockCooldownTicks;
+    internal readonly int SwarmCooldownTicks;
+    internal readonly string Peer;
+    internal readonly Vector2 Anchor;
+    internal readonly int Side;
+
+    internal DB_NeutralDebugState(
+        DB_NeutralMode mode,
+        bool active,
+        int remainingTicks,
+        int nextDecisionTicks,
+        int peerCooldownTicks,
+        int flockCooldownTicks,
+        int swarmCooldownTicks,
+        string peer,
+        Vector2 anchor,
+        int side)
+    {
+        Mode = mode;
+        Active = active;
+        RemainingTicks = Math.Max(0, remainingTicks);
+        NextDecisionTicks = Math.Max(0, nextDecisionTicks);
+        PeerCooldownTicks = Math.Max(0, peerCooldownTicks);
+        FlockCooldownTicks = Math.Max(0, flockCooldownTicks);
+        SwarmCooldownTicks = Math.Max(0, swarmCooldownTicks);
+        Peer = peer ?? "—";
+        Anchor = anchor;
+        Side = side;
+    }
+}
+
 /// <summary>
 /// Single state machine for low-priority Desert Batfly ecology. Formal Social events stay in
 /// DB_SocialRuntime; this runtime owns only short peer drift, loose flock and custom swarm
@@ -158,6 +196,30 @@ internal static class DB_NeutralBehaviorRuntime
             !states.TryGetValue(bat, out State state) || !ReferenceEquals(state.Room, bat.room))
             return false;
         return state.Mode != DB_NeutralMode.Roam && frame.Clock < state.Until;
+    }
+
+    internal static bool TryGetDebugState(DB_Creature bat, out DB_NeutralDebugState debug)
+    {
+        debug = default;
+        if (bat?.room == null || !states.TryGetValue(bat, out State state) ||
+            !ReferenceEquals(state.Room, bat.room))
+            return false;
+
+        int clock = Math.Max(0, bat.room.game?.clock ?? 0);
+        debug = new DB_NeutralDebugState(
+            state.Mode,
+            state.Mode != DB_NeutralMode.Roam && clock < state.Until,
+            state.Until - clock,
+            state.NextDecision - clock,
+            state.PeerCooldown - clock,
+            state.FlockCooldown - clock,
+            state.SwarmCooldown - clock,
+            state.Peer?.abstractCreature == null
+                ? "—"
+                : $"{state.Peer.abstractCreature.ID.spawner}:{state.Peer.abstractCreature.ID.number}",
+            state.Anchor,
+            state.Side);
+        return true;
     }
 
     internal static bool ApplyOwnedBehavior(DB_Creature bat)
