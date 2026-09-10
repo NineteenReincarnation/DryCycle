@@ -25,10 +25,10 @@ internal sealed class DB_AI
 
     private readonly DB_Creature fly;
     private readonly DB_CombatRuntime combat;
-    private readonly DB_CreaturePerception perception;
+    private readonly DB_PerceptionRuntime perception;
     private readonly DB_InjuryRecovery injuryRecovery;
     internal DB_CombatRuntime Combat => combat;
-    internal DB_CreaturePerception Perception => perception;
+    internal DB_PerceptionRuntime Perception => perception;
     internal DB_InjuryRecovery InjuryRecovery => injuryRecovery;
     internal bool HasImmediateDanger => perception.Danger != null || retreat > 0 || Mode == Activity.Escape;
     internal Activity Mode { get; private set; }
@@ -53,7 +53,7 @@ internal sealed class DB_AI
     {
         this.fly = fly;
         combat = new DB_CombatRuntime(this, fly);
-        perception = new DB_CreaturePerception(this, fly);
+        perception = new DB_PerceptionRuntime(this, fly);
         injuryRecovery = new DB_InjuryRecovery(this, fly);
     }
 
@@ -315,7 +315,7 @@ internal sealed class DB_AI
             return;
         }
 
-        perception.UpdateScan();
+        perception.RefreshState();
 
         bool recoveryBurrow = fly.AI.behavior == FlyAI.Behavior.Burrow &&
                               fly.Injury.RecoveryState == DB_InjuryRecoveryState.Hive;
