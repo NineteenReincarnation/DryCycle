@@ -102,7 +102,12 @@ internal sealed class MantleCrabPincerRig
         Vector2 beforeWrist = Point(Pos.Length - 2, timeStacker);
         Vector2 wrist = Point(Pos.Length - 1, timeStacker);
         Vector2 axis = wrist - beforeWrist;
-        return axis.sqrMagnitude > .0001f ? axis.normalized : Vector2.down;
+        if (axis.sqrMagnitude < .0001f) axis = Vector2.down;
+        else axis.Normalize();
+
+        // A real chela has a carpal articulation: the manus is allowed to sit at an authored
+        // angle to the terminal arm shaft instead of reading as the same rod continued farther.
+        return Rotate(axis, MantleCrabPincerAnatomy.PalmRestAngleDegrees[Index] * Mathf.Deg2Rad);
     }
 
     private Vector2 WorldRestPoint(MantleCrab crab, Vector2 anchor, int restIndex)
@@ -111,5 +116,12 @@ internal sealed class MantleCrabPincerRig
         Vector2 up = new(-axis.y, axis.x);
         Vector2 local = Rest[restIndex] - Rest[0];
         return anchor + axis * local.x + up * local.y;
+    }
+
+    private static Vector2 Rotate(Vector2 vector, float radians)
+    {
+        float sin = Mathf.Sin(radians);
+        float cos = Mathf.Cos(radians);
+        return new Vector2(vector.x * cos - vector.y * sin, vector.x * sin + vector.y * cos);
     }
 }
