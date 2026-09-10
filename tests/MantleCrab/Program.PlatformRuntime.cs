@@ -26,6 +26,17 @@ internal static partial class Program
         Check(!WalkableDynamicSurfaceRuntime.IsSurfaceContactNormal(Vector2.right),
             "Horizontal endpoint normal must release the rider instead of wrapping under the surface");
 
+        Vector2 shallowNormal = new(-.5f, .8660254f);
+        Vector2 restingSlopeVelocity = WalkableDynamicSurfaceRuntime.ResolveGroundContactVelocity(
+            new Vector2(0f, -.9f), shallowNormal, .5f, .05f, .9f);
+        Check(Mathf.Abs(restingSlopeVelocity.x) < .001f && Mathf.Abs(restingSlopeVelocity.y) < .001f,
+            "Gravity-only velocity on a shallow dynamic curve must settle instead of becoming downhill motion");
+
+        Vector2 climbingSlopeVelocity = WalkableDynamicSurfaceRuntime.ResolveGroundContactVelocity(
+            new Vector2(2f, 0f), shallowNormal, .5f, .05f, .9f);
+        Check(climbingSlopeVelocity.x > 0f && climbingSlopeVelocity.y > 0f,
+            "Grounded horizontal locomotion must follow the shallow curve instead of being flattened");
+
         Check(WalkableDynamicSurfaceRuntime.ShouldAcquireContact(6f, -30f, -20f),
             "Swept high-speed landing from above must acquire the platform");
         Check(WalkableDynamicSurfaceRuntime.ShouldAcquireContact(4f, 2f, -1f),
@@ -61,6 +72,6 @@ internal static partial class Program
               !WalkableDynamicSurfaceRuntime.IsSurfaceSpeedRideable(new Vector2(12.1f, 0f)),
             "Dynamic ground must reject surface speeds that cannot be restored exactly on detach");
 
-        platformRuntimeCases += 20;
+        platformRuntimeCases += 22;
     }
 }
