@@ -73,20 +73,23 @@ internal readonly struct DB_SocialDebugState
 }
 
 /// <summary>
-/// Neutral social-life layer. All state is realized-only and non-persistent.
-/// Survival, cross-room travel, injury, combat and committed roost behavior remain owned by
-/// their existing systems. This layer only chooses temporary neutral local goals; vanilla
-/// Fly.BatFlight remains the locomotion implementation.
+/// Formal realized-only social-event layer. Background peer drift, loose flocking and short
+/// swarm motion belong to DB_NeutralBehaviorRuntime; this domain owns only temporary reserved
+/// interactions such as companion drift, greeting passes, play chase, microflocks and roost
+/// invitations. Vanilla Fly.BatFlight remains the locomotion implementation.
 /// </summary>
 internal static class DB_SocialRuntime
 {
     private const int ScanIntervalMin = 16;
     private const int ScanIntervalMax = 30;
     private const int GroupMin = 3;
-    private const int GroupMax = 6;
+    private const int GroupMax = 5;
     private const float SocialRange = 240f;
     private const float CloseNegotiationRange = 62f;
+    private const float GroupCloseSeparationRadius = 52f;
 
+    // Retained as the ordinary microflock bias. A second isotropic close-separation term below
+    // prevents actual overlap/vertical stacking without turning the whole formation vertical.
     internal const float GroupSeparationXWeight = 1.00f;
     internal const float GroupSeparationYWeight = 0.24f;
 
@@ -220,7 +223,7 @@ internal static class DB_SocialRuntime
         float activeRatio = roomState.CandidateCount <= 0
             ? 0f
             : roomState.ActiveMemberCount / (float)Mathf.Max(1, roomState.CandidateCount);
-        if (activeRatio > 0.68f)
+        if (activeRatio > 0.64f)
         {
             state.DecisionReason = "room social soft cap";
             return;
@@ -300,21 +303,32 @@ internal static class DB_SocialRuntime
     }
 
     // Pure helpers are intentionally internal so the managed regression suite can verify
-    // neutral social behavior without constructing a full Unity room/game loop.
+    // social cadence without constructing a full Unity room/game loop.
     internal static float SocialDrivePerTick(DB_Personality personality)
     {
         if (personality == null) return 0f;
-        return 0.00175f *
-            Mathf.Lerp(0.82f, 1.28f, personality.Conformity) *
-            Mathf.Lerp(0.94f, 1.08f, personality.Temperament);
+        return 0.00230f *
+            Mathf.Lerp(0.84f, 1.24f, personality.Conformity) *
+            Mathf.Lerp(0.95f, 1.07f, personality.Temperament);
     }
 
     internal static float StartThreshold(DB_Personality personality)
     {
         if (personality == null) return 1f;
-        float value = Mathf.Lerp(0.72f, 0.52f, personality.Conformity) -
-            Mathf.InverseLerp(0.75f, 1f, personality.Temperament) * 0.04f;
-        return Mathf.Clamp(value, 0.46f, 0.78f);
+        float value = Mathf.Lerp(0.68f, 0.48f, personality.Conformity) -
+            Mathf.InverseLerp(0.75f, 1f, personality.Temperament) * 0.03f;
+        return Mathf.Clamp(value, 0.46f, 0.72f);
+    }
+
+    /// <summary>
+    /// A recently social individual remains a valid partner but is less attractive. This keeps
+    /// one completed group from removing most of the room's candidate pool while still avoiding
+    /// immediate ping-pong interactions with the same recently active bats.
+    /// </summary>
+    internal static float PartnerCooldownWeight(int cooldown)
+    {
+        if (cooldown <= 0) return 1f;
+        return Mathf.Lerp(0.72f, 0.30f, Mathf.InverseLerp(0f, 260f, cooldown));
     }
 
     internal static int StablePairSide(EntityID a, EntityID b)
@@ -364,7 +378,7 @@ internal static class DB_SocialRuntime
     {
         return new State
         {
-            Drive = Mathf.Lerp(0.08f, 0.30f, Stable01(bat.Personality.VisualSeed, 0x2F13)),
+            Drive = Mathf.Lerp(0.10f, 0.34f, Stable01(bat.Personality.VisualSeed, 0x2F13)),
             LastRoom = bat.room
         };
     }
@@ -429,6 +443,7 @@ internal static class DB_SocialRuntime
             if (distance > SocialRange) continue;
             if (distance > 70f && !bat.room.VisualContact(bat.mainBodyChunk.pos, other.mainBodyChunk.pos)) continue;
 
+            float availability = PartnerAvailability(other);
             float bond = Mathf.Max(
                 DB_SocialBond.GetBondStrength(bat, other),
                 DB_SocialBond.GetBondStrength(other, bat));
@@ -438,7 +453,7 @@ internal static class DB_SocialRuntime
                 bond,
                 Mathf.InverseLerp(55f, SocialRange, distance)) *
                 (0.65f + state.Drive * 0.55f) *
-                RepeatScale(state, DB_SocialMode.CompanionDrift, other);
+                RepeatScale(state, DB_SocialMode.CompanionDrift, other) * availability;
             if (companionWeight > companion.Weight)
                 companion = new Choice(DB_SocialMode.CompanionDrift, other, companionWeight);
 
@@ -448,7 +463,7 @@ internal static class DB_SocialRuntime
             {
                 float passWeight = (0.30f + Mathf.Clamp01(closing / 6f) * 0.45f +
                     bat.Personality.Nerve * 0.16f + (1f - bat.Personality.Conformity) * 0.10f) *
-                    RepeatScale(state, DB_SocialMode.PassBy, other);
+                    RepeatScale(state, DB_SocialMode.PassBy, other) * availability;
                 if (passWeight > passBy.Weight)
                     passBy = new Choice(DB_SocialMode.PassBy, other, passWeight);
             }
@@ -459,7 +474,7 @@ internal static class DB_SocialRuntime
             {
                 float chaseWeight = (0.04f + bat.Personality.AggressionDrive * 0.62f +
                     bat.Personality.Nerve * 0.22f) * (0.55f + state.Drive * 0.55f) *
-                    RepeatScale(state, DB_SocialMode.SocialChase, other);
+                    RepeatScale(state, DB_SocialMode.SocialChase, other) * availability;
                 if (chaseWeight > chase.Weight)
                     chase = new Choice(DB_SocialMode.SocialChase, other, chaseWeight);
             }
@@ -469,7 +484,7 @@ internal static class DB_SocialRuntime
                 State otherState = states.GetValue(other, CreateState);
                 float joinPreference = Mathf.Clamp01(
                     GroupJoinPreference(other.Personality.Conformity, otherState.Drive) *
-                    DB_EnvironmentalPolicy.GroupCohesionScale(bat));
+                    DB_EnvironmentalPolicy.GroupCohesionScale(bat) * Mathf.Lerp(0.65f, 1f, availability));
                 float joinGate = 0.20f + Stable01(
                     other.Personality.VisualSeed,
                     state.ScanSerial * 97 + bat.Personality.VisualSeed) * 0.55f;
@@ -497,9 +512,9 @@ internal static class DB_SocialRuntime
                 (1f - bat.Personality.Temperament) * 0.20f + state.Drive * 0.18f) *
                 RepeatScale(state, DB_SocialMode.GroupDrift, null)
             : 0f;
-        float capScale = activeRatio <= 0.50f
+        float capScale = activeRatio <= 0.46f
             ? 1f
-            : Mathf.Lerp(1f, 0.22f, Mathf.InverseLerp(0.50f, 0.68f, activeRatio));
+            : Mathf.Lerp(1f, 0.20f, Mathf.InverseLerp(0.46f, 0.64f, activeRatio));
 
         float wc = companion.Weight * capScale;
         float wp = passBy.Weight;
@@ -600,8 +615,8 @@ internal static class DB_SocialRuntime
         int duration = StableInt(
             initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed,
             0x33A9,
-            80,
-            241) + Mathf.RoundToInt(bond * 30f);
+            70,
+            201) + Mathf.RoundToInt(bond * 24f);
         AssignPair(
             token,
             anchor,
@@ -654,7 +669,7 @@ internal static class DB_SocialRuntime
             DB_SocialMode.SocialChase,
             PairRole.Chaser,
             PairRole.Chased,
-            StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x6715, 40, 121),
+            StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x6715, 40, 111),
             StablePairSide(chaser.abstractCreature.ID, chased.abstractCreature.ID));
         TraceStart(chaser, DB_SocialMode.SocialChase, chased, "temperament/nerve play chase");
     }
@@ -665,7 +680,7 @@ internal static class DB_SocialRuntime
         DB_SocialRoomRuntime.RoomState roomState)
     {
         if (!roomState.TryReserveGroup(state.GroupScratch, out var token)) return;
-        int duration = StableInt(initiator.Personality.VisualSeed, state.ScanSerial * 17 + 0x7123, 120, 321);
+        int duration = StableInt(initiator.Personality.VisualSeed, state.ScanSerial * 17 + 0x7123, 90, 241);
         for (int i = 0; i < token.Members.Count; i++)
         {
             DB_Creature member = token.Members[i];
@@ -716,7 +731,7 @@ internal static class DB_SocialRuntime
             mode,
             PairRole.Invitee,
             token,
-            StableInt(target.Personality.VisualSeed ^ source.Personality.VisualSeed, 0x1957, 80, 221),
+            StableInt(target.Personality.VisualSeed ^ source.Personality.VisualSeed, 0x1957, 70, 191),
             source,
             source,
             StablePairSide(target.abstractCreature.ID, source.abstractCreature.ID));
@@ -956,32 +971,55 @@ internal static class DB_SocialRuntime
         averageVelocity /= count;
 
         Vector2 separation = Vector2.zero;
+        Vector2 closeSeparation = Vector2.zero;
         for (int i = 0; i < token.Members.Count; i++)
         {
             DB_Creature member = token.Members[i];
             if (member == bat || !ValidSocialPeer(member, bat)) continue;
             Vector2 delta = bat.mainBodyChunk.pos - member.mainBodyChunk.pos;
             float distance = delta.magnitude;
+            if (distance <= 0.01f)
+            {
+                int tieSide = StablePairSide(bat.abstractCreature.ID, member.abstractCreature.ID);
+                int tieVertical = DB_SocialRoomRuntime.Key(bat) < DB_SocialRoomRuntime.Key(member) ? -1 : 1;
+                closeSeparation += new Vector2(tieSide * 0.55f, tieVertical * 0.85f);
+                continue;
+            }
+
             float preferred = Mathf.Lerp(42f, 62f, 1f - bat.Personality.Nerve);
-            if (distance <= 0.01f || distance >= preferred) continue;
-            float strength = 1f - distance / preferred;
-            separation.x += Mathf.Sign(delta.x == 0f ? state.Side : delta.x) * strength * GroupSeparationXWeight;
-            separation.y += Mathf.Sign(delta.y) * strength * GroupSeparationYWeight;
+            if (distance < preferred)
+            {
+                float strength = 1f - distance / preferred;
+                separation.x += Mathf.Sign(delta.x == 0f ? state.Side : delta.x) * strength * GroupSeparationXWeight;
+                separation.y += Mathf.Sign(delta.y) * strength * GroupSeparationYWeight;
+            }
+            if (distance < GroupCloseSeparationRadius)
+            {
+                float closeStrength = Mathf.Pow(1f - distance / GroupCloseSeparationRadius, 2f);
+                closeSeparation += delta / distance * closeStrength;
+            }
         }
 
         Vector2 alignment = averageVelocity.sqrMagnitude > 0.5f
             ? averageVelocity.normalized
             : Vector2.right * state.Side;
+        alignment.y *= 0.62f;
+        if (Mathf.Abs(alignment.x) < 0.32f)
+            alignment.x = state.Side * 0.32f;
+
         Vector2 cohesion = center - bat.mainBodyChunk.pos;
         Vector2 social =
-            alignment * 48f +
+            alignment * 46f +
             new Vector2(
-                Mathf.Clamp(cohesion.x * 0.16f, -28f, 28f),
-                Mathf.Clamp(cohesion.y * 0.06f, -10f, 10f)) +
+                Mathf.Clamp(cohesion.x * 0.14f, -25f, 25f),
+                Mathf.Clamp(cohesion.y * 0.045f, -8f, 8f)) +
             new Vector2(
                 Mathf.Clamp(separation.x * 58f, -70f, 70f),
-                Mathf.Clamp(separation.y * 24f, -10f, 10f));
-        social.x += state.Side * StableRange(bat.Personality.VisualSeed, token.Id + 0x833, 5f, 15f);
+                Mathf.Clamp(separation.y * 24f, -10f, 10f)) +
+            new Vector2(
+                Mathf.Clamp(closeSeparation.x * 86f, -92f, 92f),
+                Mathf.Clamp(closeSeparation.y * 78f, -86f, 86f));
+        social.x += state.Side * StableRange(bat.Personality.VisualSeed, token.Id + 0x833, 7f, 17f);
         if (!SocialSteer(
                 bat,
                 bat.mainBodyChunk.pos + social,
@@ -991,7 +1029,7 @@ internal static class DB_SocialRuntime
             LeaveGroupParticipant(bat, state, "member left microflock: local path blocked");
             return;
         }
-        state.DecisionReason = "microflock active: alignment + weak cohesion + horizontal separation";
+        state.DecisionReason = "microflock active: alignment + weak cohesion + close 2D separation";
     }
 
     private static void UpdateRoostInvitation(DB_Creature bat, State state)
@@ -1056,7 +1094,7 @@ internal static class DB_SocialRuntime
     }
 
     /// <summary>
-    /// Neutral social behavior owns only the temporary goal, not flight physics. No velocity is
+    /// Formal social behavior owns only its temporary goal, not flight physics. No velocity is
     /// written here: Fly.Act calls vanilla BatFlight after FlyAI.Update and follows localGoal.
     /// </summary>
     private static bool SocialSteer(DB_Creature bat, Vector2 goal, float speed, int preferredSide)
@@ -1240,11 +1278,18 @@ internal static class DB_SocialRuntime
             roomState.IsReserved(candidate))
             return false;
         if (states.TryGetValue(candidate, out State candidateState) &&
-            (candidateState.Mode != DB_SocialMode.None || candidateState.Cooldown > 0))
+            candidateState.Mode != DB_SocialMode.None)
             return false;
         if (!DB_EnvironmentalPolicy.WithinActivityRange(source, candidate, SocialRange))
             return false;
         return SameRipple(source, candidate);
+    }
+
+    private static float PartnerAvailability(DB_Creature candidate)
+    {
+        if (candidate == null || !states.TryGetValue(candidate, out State candidateState))
+            return 1f;
+        return PartnerCooldownWeight(candidateState.Cooldown);
     }
 
     private static bool IsNeutralCandidate(DB_Creature bat)
@@ -1383,8 +1428,8 @@ internal static class DB_SocialRuntime
             ? DB_SocialRoomRuntime.Key(state.Partner)
             : long.MinValue;
         state.Drive = completed
-            ? Mathf.Clamp01(state.Drive * 0.22f)
-            : Mathf.Max(0.12f, state.Drive * 0.55f);
+            ? Mathf.Clamp01(state.Drive * 0.30f)
+            : Mathf.Max(0.14f, state.Drive * 0.60f);
         state.Cooldown = SocialCooldown(bat, mode, completed);
         EndStateOnly(state, reason);
 
@@ -1415,12 +1460,12 @@ internal static class DB_SocialRuntime
     private static int SocialCooldown(DB_Creature bat, DB_SocialMode mode, bool completed)
     {
         int salt = (int)mode * 193 + (completed ? 0x71 : 0x35);
-        int min = mode == DB_SocialMode.SocialChase ? 220 : 120;
-        int max = mode == DB_SocialMode.SocialChase ? 401 : 321;
+        int min = mode == DB_SocialMode.SocialChase ? 140 : 70;
+        int max = mode == DB_SocialMode.SocialChase ? 301 : 211;
         int value = StableInt(bat?.Personality?.VisualSeed ?? 0, salt, min, max);
         if (bat != null)
-            value = Mathf.RoundToInt(value * Mathf.Lerp(1.10f, 0.90f, bat.Personality.Conformity));
-        return Mathf.Clamp(value, 90, 420);
+            value = Mathf.RoundToInt(value * Mathf.Lerp(1.08f, 0.90f, bat.Personality.Conformity));
+        return Mathf.Clamp(value, 55, 320);
     }
 
     private static float RepeatScale(State state, DB_SocialMode mode, DB_Creature partner)
