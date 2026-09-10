@@ -29,6 +29,7 @@ internal static partial class Program
             PlatformSurfaceTests();
             PlatformRuntimeTests();
             MaterialTests();
+            AppendageMeshTests();
             GeometryTests();
 
             Console.WriteLine(
