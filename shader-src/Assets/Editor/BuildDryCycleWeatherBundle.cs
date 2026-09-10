@@ -7,15 +7,21 @@ using UnityEngine;
 namespace DryCycle.Editor
 {
     /// <summary>
-    /// Builds the platform-specific weather shader bundle directly into mod/assets so
-    /// the normal DryCycle MSBuild target can copy it into the active Rain World mod.
-    /// The script intentionally uses conservative C# syntax so it can compile in the
-    /// older Unity editor versions used by Rain World releases.
+    /// Builds the platform-specific weather/creature shader bundles directly into mod/assets so
+    /// the normal DryCycle MSBuild target can copy them into the active Rain World mod. The script
+    /// intentionally uses conservative C# syntax for the Unity editor version used by Rain World.
     /// </summary>
     public static class BuildDryCycleWeatherBundle
     {
         private const string BundleName = "drycycleweather";
         private const string VersionSidecarName = "drycycleweather.version.txt";
+        private const string CreatureBundleName = "drycyclecreatures";
+        private const string CreatureVersionSidecarName = "drycyclecreatures.version.txt";
+        private const string MantleCrabSurfaceAsset =
+            "Assets/DryCycle/Creatures/MantleCrab/MantleCrabSurface.shader";
+        private const string MantleCrabBakeAsset =
+            "Assets/DryCycle/Creatures/MantleCrab/MantleCrabMaterialBake.compute";
+        private const string MantleCrabBakeKernel = "BakeV3";
 
         private static readonly string[] WeatherAssets =
         {
@@ -27,10 +33,22 @@ namespace DryCycle.Editor
             "Assets/DryCycle/Shaders/DryCycleDehydrationComposite.shader"
         };
 
+        private static readonly string[] CreatureAssets =
+        {
+            MantleCrabSurfaceAsset,
+            MantleCrabBakeAsset
+        };
+
         [MenuItem("DryCycle/Build Weather AssetBundle (Windows x64)")]
         public static void BuildFromMenu()
         {
             Build(BuildTarget.StandaloneWindows64);
+        }
+
+        [MenuItem("DryCycle/Build Creature AssetBundle (Windows x64)")]
+        public static void BuildCreaturesFromMenu()
+        {
+            Build(BuildTarget.StandaloneWindows64, true);
         }
 
         // Entry point for:
@@ -48,7 +66,9 @@ namespace DryCycle.Editor
 
         private static void Build(BuildTarget target, bool creaturesOnly = false)
         {
-            if (!creaturesOnly) ValidateSourceAssets();
+            if (!creaturesOnly)
+                ValidateSourceAssets();
+            ValidateCreatureAssets();
 
             DirectoryInfo projectDirectory = Directory.GetParent(Application.dataPath);
             string projectRoot = projectDirectory == null ? null : projectDirectory.FullName;
@@ -60,28 +80,21 @@ namespace DryCycle.Editor
                 : repositoryDirectory.FullName;
 
             if (string.IsNullOrEmpty(repositoryRoot))
-            {
                 throw new InvalidOperationException("Could not resolve DryCycle repository root.");
-            }
 
             string output = Path.Combine(repositoryRoot, "mod", "assets", "drycycle");
             Directory.CreateDirectory(output);
 
-            AssetBundleBuild build = new AssetBundleBuild
+            AssetBundleBuild weather = new AssetBundleBuild
             {
                 assetBundleName = BundleName,
                 assetNames = WeatherAssets
             };
-            string[] creatureAssets = {
-                "Assets/DryCycle/Creatures/MantleCrab/MantleCrabSurface.shader",
-                "Assets/DryCycle/Creatures/MantleCrab/MantleCrabMaterialBake.compute"
+            AssetBundleBuild creatures = new AssetBundleBuild
+            {
+                assetBundleName = CreatureBundleName,
+                assetNames = CreatureAssets
             };
-            Shader creatureShader = AssetDatabase.LoadAssetAtPath<Shader>(creatureAssets[0]);
-            if (creatureShader == null || ShaderUtil.ShaderHasError(creatureShader))
-                throw new InvalidOperationException("MantleCrab surface shader failed to import/compile.");
-            if (AssetDatabase.LoadAssetAtPath<ComputeShader>(creatureAssets[1]) == null)
-                throw new InvalidOperationException("MantleCrab compute shader failed to import.");
-            AssetBundleBuild creatures = new AssetBundleBuild { assetBundleName = "drycyclecreatures", assetNames = creatureAssets };
 
             BuildAssetBundleOptions options =
                 BuildAssetBundleOptions.ChunkBasedCompression |
@@ -89,74 +102,90 @@ namespace DryCycle.Editor
 
             AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(
                 output,
-                creaturesOnly ? new AssetBundleBuild[] { creatures } : new AssetBundleBuild[] { build, creatures },
+                creaturesOnly
+                    ? new AssetBundleBuild[] { creatures }
+                    : new AssetBundleBuild[] { weather, creatures },
                 options,
                 target);
 
-            string bundlePath = Path.Combine(output, creaturesOnly ? "drycyclecreatures" : BundleName);
+            string primaryBundle = creaturesOnly ? CreatureBundleName : BundleName;
+            string bundlePath = Path.Combine(output, primaryBundle);
             if (manifest == null || !File.Exists(bundlePath))
+                throw new InvalidOperationException(
+                    "DryCycle AssetBundle build failed. Expected '" + bundlePath + "'.");
+
+            if (!File.Exists(Path.Combine(output, CreatureBundleName)))
+                throw new InvalidOperationException("Creature bundle output missing.");
+
+            string sidecarPath = Path.Combine(
+                output,
+                creaturesOnly ? CreatureVersionSidecarName : VersionSidecarName);
+            File.WriteAllText(sidecarPath, Application.unityVersion + Environment.NewLine);
+            File.WriteAllText(
+                Path.Combine(output, CreatureVersionSidecarName),
+                Application.unityVersion + Environment.NewLine);
+
+            Debug.Log(
+                "DryCycle AssetBundle built with Unity " +
+                Application.unityVersion + ": " + bundlePath);
+            Debug.Log("DryCycle AssetBundle version metadata: " + sidecarPath);
+        }
+
+        private static void ValidateCreatureAssets()
+        {
+            Shader creatureShader = AssetDatabase.LoadAssetAtPath<Shader>(MantleCrabSurfaceAsset);
+            if (creatureShader == null || ShaderUtil.ShaderHasError(creatureShader))
+                throw new InvalidOperationException(
+                    "MantleCrab surface shader failed to import/compile: " + MantleCrabSurfaceAsset);
+
+            ComputeShader compute = AssetDatabase.LoadAssetAtPath<ComputeShader>(MantleCrabBakeAsset);
+            if (compute == null)
+                throw new InvalidOperationException(
+                    "MantleCrab compute shader failed to import: " + MantleCrabBakeAsset);
+
+            try
+            {
+                compute.FindKernel(MantleCrabBakeKernel);
+            }
+            catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    "DryCycle weather AssetBundle build failed. Expected '" +
-                    bundlePath + "'.");
+                    "MantleCrab compute shader is not V3-compatible; missing kernel '" +
+                    MantleCrabBakeKernel + "'. Reimport/rebuild the creature shader sources.", ex);
             }
-
-            string sidecarPath = Path.Combine(output, creaturesOnly ? "drycyclecreatures.version.txt" : VersionSidecarName);
-            File.WriteAllText(sidecarPath, Application.unityVersion + Environment.NewLine);
-            if (!File.Exists(Path.Combine(output, "drycyclecreatures")))
-                throw new InvalidOperationException("Creature bundle output missing.");
-            File.WriteAllText(Path.Combine(output, "drycyclecreatures.version.txt"), Application.unityVersion + Environment.NewLine);
-
-            Debug.Log(
-                "DryCycle weather AssetBundle built with Unity " +
-                Application.unityVersion + ": " + bundlePath);
-            Debug.Log(
-                "DryCycle weather AssetBundle version metadata: " + sidecarPath);
         }
 
         private static void ValidateSourceAssets()
         {
             Shader fogShader = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[0]);
             if (fogShader == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle fog composite shader could not be imported: " + WeatherAssets[0]);
-            }
 
             ComputeShader fluid = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[1]);
             if (fluid == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle fog fluid compute shader could not be imported: " + WeatherAssets[1]);
-            }
 
             ComputeShader noise = AssetDatabase.LoadAssetAtPath<ComputeShader>(WeatherAssets[2]);
             if (noise == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle fog noise compute shader could not be imported: " + WeatherAssets[2]);
-            }
 
             Shader heatAtmosphere = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[3]);
             if (heatAtmosphere == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle HeatWave atmosphere shader could not be imported: " + WeatherAssets[3]);
-            }
 
             Shader intenseHeatAtmosphere = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[4]);
             if (intenseHeatAtmosphere == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle IntenseHeat atmosphere shader could not be imported: " + WeatherAssets[4]);
-            }
 
             Shader dehydrationComposite = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[5]);
             if (dehydrationComposite == null)
-            {
                 throw new InvalidOperationException(
                     "DryCycle dehydration composite shader could not be imported: " + WeatherAssets[5]);
-            }
 
             Debug.Log(
                 "DryCycle weather source assets imported successfully. " +
