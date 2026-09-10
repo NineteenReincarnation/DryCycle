@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using DryCycle.Framework.Creature.Core;
+using CreatureCoreRegistry = DryCycle.Framework.Creature.Core.CreatureRegistry;
 
 namespace DryCycle.Registration;
 
 /// <summary>
-/// Optional Dev Console integration for every creature registered through
-/// DryCycleContent. Reflection keeps DevConsole a soft dependency while custom
-/// creatures automatically gain `spawn <CreatureTemplate.Type>` support.
+/// 为通过 Creature Core Framework 登记的生物提供可选的 Dev Console 生成支持。
+/// 这里通过反射接入 DevConsole，因此 DevConsole 仍然只是软依赖；已经登记的生物会自动获得 `spawn <CreatureTemplate.Type>` 入口。
+///
+/// Optional Dev Console spawn integration for creatures registered through the Creature Core Framework.
+/// Reflection keeps DevConsole a soft dependency while registered creatures automatically gain `spawn <CreatureTemplate.Type>` support.
 /// </summary>
 internal static class CreatureDevConsoleSupport
 {
@@ -61,15 +65,15 @@ internal static class CreatureDevConsoleSupport
                 return;
             }
 
-            foreach (CreatureDefinition definition in CreatureRegistry.Registered)
+            foreach (CreatureDescriptor descriptor in CreatureCoreRegistry.Registered)
             {
-                if (definition?.Type == null || RegisteredTypes.Contains(definition.Type))
+                if (descriptor?.Type == null || RegisteredTypes.Contains(descriptor.Type))
                 {
                     continue;
                 }
 
-                RegisterDefinition(
-                    definition,
+                RegisterDescriptor(
+                    descriptor,
                     simpleSpawnerInfoType,
                     registerSpawner);
             }
@@ -87,8 +91,8 @@ internal static class CreatureDevConsoleSupport
         }
     }
 
-    private static void RegisterDefinition(
-        CreatureDefinition definition,
+    private static void RegisterDescriptor(
+        CreatureDescriptor descriptor,
         Type simpleSpawnerInfoType,
         MethodInfo registerSpawner)
     {
@@ -97,7 +101,7 @@ internal static class CreatureDevConsoleSupport
 
         Func<AbstractPhysicalObject.AbstractObjectType, string[], EntityID, AbstractRoom, WorldCoordinate, AbstractPhysicalObject> spawn =
             (ignoredObjectType, args, id, room, pos) => Spawn(
-                definition,
+                descriptor,
                 args,
                 id,
                 room,
@@ -112,13 +116,13 @@ internal static class CreatureDevConsoleSupport
             null,
             new object[]
             {
-                definition.Type,
+                descriptor.Type,
                 spawnerInfo
             });
 
-        RegisteredTypes.Add(definition.Type);
+        RegisteredTypes.Add(descriptor.Type);
         Plugin.Logger?.LogInfo(
-            $"Dev Console support enabled: use `spawn {definition.Type.value}`.");
+            $"Dev Console support enabled: use `spawn {descriptor.Type.value}`.");
     }
 
     private static MethodInfo FindCreatureRegisterSpawner(
@@ -152,14 +156,15 @@ internal static class CreatureDevConsoleSupport
         AbstractPhysicalObject.AbstractObjectType ignoredObjectType,
         string[] args)
     {
-        // The CreatureTemplate.Type registration itself supplies the spawn command
-        // autocomplete entry. Creature-specific spawn arguments can be added later
-        // without changing this central registration path.
+        // CreatureTemplate.Type 本身已经提供 spawn 命令的生物名称补全。
+        // 以后如果某个生物需要额外生成参数，可以在不改这条统一注册路径的前提下单独扩展。
+        // CreatureTemplate.Type itself supplies the creature-name autocomplete entry for the spawn command.
+        // Creature-specific spawn arguments can be extended later without changing this central registration path.
         return null;
     }
 
     private static AbstractPhysicalObject Spawn(
-        CreatureDefinition definition,
+        CreatureDescriptor descriptor,
         string[] args,
         EntityID id,
         AbstractRoom room,
@@ -168,14 +173,14 @@ internal static class CreatureDevConsoleSupport
         if (room?.world == null)
         {
             throw new ArgumentException(
-                $"Cannot spawn {definition.Type.value} without a valid room/world.");
+                $"Cannot spawn {descriptor.Type.value} without a valid room/world.");
         }
 
-        CreatureTemplate template = StaticWorld.GetCreatureTemplate(definition.Type);
+        CreatureTemplate template = StaticWorld.GetCreatureTemplate(descriptor.Type);
         if (template == null)
         {
             throw new InvalidOperationException(
-                $"{definition.Type.value} CreatureTemplate has not been initialized yet.");
+                $"{descriptor.Type.value} CreatureTemplate has not been initialized yet.");
         }
 
         bool validNode = pos.NodeDefined &&
@@ -188,9 +193,10 @@ internal static class CreatureDevConsoleSupport
 
         if (!validNode)
         {
-            // During staged creature development MovementConnection rules may not
-            // have been authored yet, leaving no mapped room node. -1 is valid for
-            // a tile-defined Dev Console spawn and avoids inventing pathing rules.
+            // 分阶段开发生物时，MovementConnection 规则可能还没写完整，导致没有可映射的房间节点。
+            // 对一个已经给出 tile 的 Dev Console 生成位置来说，-1 是合法值，也避免在这里凭空发明寻路规则。
+            // During staged creature development, MovementConnection rules may not yet provide a mapped room node.
+            // -1 is valid for a tile-defined Dev Console spawn and avoids inventing pathing rules here.
             pos.abstractNode = room.RandomRelevantNode(template);
         }
 
@@ -211,7 +217,8 @@ internal static class CreatureDevConsoleSupport
             }
             catch
             {
-                // Optional story-only flags should not prevent a development spawn.
+                // 可选的故事模式自定义标志不应该阻止开发阶段通过 Dev Console 生成生物。
+                // Optional story-only custom flags should not prevent a development spawn.
             }
         }
 
