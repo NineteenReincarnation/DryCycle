@@ -1,279 +1,136 @@
 # Creature Core 开发进度
 
-这个文件记录 Creature Core 框架已经真正完成并进入仓库的功能，以及现有生物迁移到这套框架后的实际改动。
-
-记录规则：
-
-- 按文件分别记录，不把多个文件的职责混在一条里。
-- 只写已经实现并提交的内容，不把计划中的功能写成已完成。
-- 每一条都说明实际完成了什么，不使用“等地方”“之类”“相关功能”这类无法判断具体范围的说法。
-- 后续每完成一个 Creature Core 任务，都同步更新这个文件。
-
----
+本文件只记录已经真正写入代码并完成的内容。
+记录按照文件分类。每一项都写清楚当前代码已经能做什么，不使用“等地方”“之类”“相关功能”这类含糊说法。
 
 ## `src/Framework/Creature/Core/CreatureDescriptor.cs`
 
-这个文件负责描述“一种生物要怎样接入 Creature Core Framework”，本身不负责执行 Rain World Hook。
-
-### 已完成
-
-- 完成了生物类型登记：每份描述必须保存一个有效的 `CreatureTemplate.Type`，注册前会检查该类型是否已经取得有效的 ExtEnum 编号。
-- 完成了所属 Mod 登记：每份描述必须填写 `OwnerId`，用于注册冲突和 Factory 报错时明确指出是哪一个 Mod 提供了这只生物。
-- 完成了显示名称登记：`DisplayName` 默认使用 `CreatureTemplate.Type.value`，开发者可以在注册前修改显示名称。
-- 完成了别名登记：可以给同一只生物添加一个或多个文本别名。
-- 完成了别名清理：别名会去掉首尾空格，空字符串和纯空白字符串会直接被拒绝。
-- 完成了别名去重：同一份描述中的别名使用不区分大小写的比较方式去重，`Crab` 和 `crab` 不会被保存成两个别名。
-- 完成了别名顺序保留：多个别名按照第一次成功添加的顺序保存。
-- 完成了别名只读保护：外部代码取得 `Aliases` 后只能读取，不能通过取得集合引用绕过 Descriptor 修改内部别名。
-- 完成了单个别名删除：注册前可以通过 `RemoveAlias` 删除指定别名，删除时不区分大小写。
-- 完成了全部别名清空：注册前可以通过 `ClearAliases` 清除这份描述中的全部额外别名。
-- 完成了 `CreatureTemplate` 创建方式登记：`TemplateFactory` 是唯一必须提供的 Factory，Registry 会通过它取得最终写入 `StaticWorld.creatureTemplates` 的模板。
-- 完成了 `CreatureState` 创建方式登记：开发者可以选择提供 `StateFactory`；没有提供时，不替换 Rain World 原本创建的 State。
-- 完成了实际 `Creature` 创建方式登记：开发者可以选择提供 `CreatureFactory`；没有提供时，不接管 Rain World 原本的 Realize 实体创建路径。
-- 完成了 `AbstractCreatureAI` 创建方式登记：开发者可以选择提供 `AbstractAIFactory`；没有提供时，不替换 Rain World 原本创建的 AbstractAI。
-- 完成了实际 `ArtificialIntelligence` 创建方式登记：开发者可以选择提供 `RealizedAIFactory`；没有提供时，`InitiateAI` 继续使用 Rain World 原本的 AI 分派。
-- 完成了四个可选 Factory 的清除入口：State、实际 Creature、AbstractAI、实际 AI 的 Factory 都可以在正式注册前恢复为空，让该部分重新交还 Rain World 原版流程。
-- 完成了注册前修改、注册后冻结：Descriptor 在交给 Registry 成功登记之前可以配置；成功登记后 `IsFrozen` 变为 true，后续修改名称、别名和 Factory 都会被拒绝。
-- 完成了注册前完整性检查：无效的 Creature Type 和缺少 `TemplateFactory` 的 Descriptor 不能进入 Registry。
-- 完成了简写语法 `Name`：功能与 `SetDisplayName` 相同。
-- 完成了简写语法 `Alias`：功能与 `AddAlias` 相同。
-- 完成了简写语法 `Aliases(params string[])`：可以一次写入多个别名，并继续使用同一套去重、清理和冻结规则。
-- 完成了简写语法 `Template`：功能与 `SetTemplateFactory` 相同。
-- 完成了简写语法 `State`：功能与 `SetStateFactory` 相同。
-- 完成了简写语法 `Realized`：功能与 `SetCreatureFactory` 相同，用名称明确区分 `AbstractCreature` 和房间中实际存在的 `Creature`。
-- 完成了简写语法 `AbstractAI`：功能与 `SetAbstractAIFactory` 相同。
-- 完成了简写语法 `AI`：功能与 `SetRealizedAIFactory` 相同。
-- 所有公开说明和关键内部说明已经使用“中文在上、英文在下”的双语注释格式。
-
----
+- 完成了单个生物的核心注册说明书。每一种生物都可以用一份 `CreatureDescriptor` 说明自己的 Rain World 生物类型、所属 Mod、显示名称、文本别名和核心对象创建方式。
+- 完成了生物类型登记。Descriptor 保存一个确定的 `CreatureTemplate.Type`，创建 Descriptor 后不能把它换成别的生物类型。
+- 完成了所属 Mod 登记。Descriptor 保存 `OwnerId`，注册冲突和工厂报错时可以明确指出是哪一个 Mod 提交的生物。
+- 完成了显示名称登记。默认显示名称使用 `CreatureTemplate.Type.value`，开发者可以通过 `SetDisplayName` 或短写法 `Name` 主动修改。
+- 完成了单个别名登记。开发者可以通过 `AddAlias` 或短写法 `Alias` 添加一个别名。
+- 完成了批量别名登记。开发者可以通过 `AddAliases(IEnumerable<string>)` 或短写法 `Aliases(params string[])` 一次添加多个别名。
+- 完成了别名清理。开发者可以在注册前删除一个别名，也可以清空全部别名。
+- 完成了别名规范化。别名会去掉首尾空白；空字符串和纯空白字符串会被拒绝。
+- 完成了别名忽略大小写去重。`MossySpider`、`mossyspider` 如果作为别名重复加入，只保留第一次成功加入的文本。
+- 完成了别名声明顺序保留。对外读取别名时，顺序与第一次成功登记时一致。
+- 完成了别名只读保护。外部代码拿到 `Aliases` 后不能直接修改 Descriptor 内部保存的别名集合。
+- 完成了 `CreatureTemplate` 创建方式登记。`TemplateFactory` 是 Descriptor 唯一强制要求的工厂；没有模板创建方式的 Descriptor 不能正式注册。
+- 完成了 `CreatureState` 创建方式登记。开发者可以通过 `SetStateFactory` 或 `State` 提供自定义 State；没有填写时由 Registry 保留 Rain World 原本创建的 State。
+- 完成了实际 `Creature` 创建方式登记。开发者可以通过 `SetCreatureFactory` 或 `Realized` 提供房间内实际生物的创建方式；没有填写时由 Registry继续走 Rain World 原本的 Realize 流程。
+- 完成了 `AbstractCreatureAI` 创建方式登记。开发者可以通过 `SetAbstractAIFactory` 或 `AbstractAI` 提供自定义抽象 AI；没有填写时保留 Rain World 原本的 AbstractAI。
+- 完成了实际 `ArtificialIntelligence` 创建方式登记。开发者可以通过 `SetRealizedAIFactory` 或 `AI` 提供实际 AI；没有填写时由 Registry继续走 Rain World 原本的 AI 创建流程。
+- 完成了四个可选工厂的清除接口。State、实际 Creature、AbstractAI、实际 AI 都可以在注册前撤销自定义工厂并恢复“交给原版处理”的配置状态。
+- 完成了注册前验证。生物 Type 必须已经拥有有效 ExtEnum Index，Descriptor 必须已经填写 TemplateFactory。
+- 完成了注册后冻结。Descriptor 被 Registry 成功接收后，显示名称、别名和所有工厂都不能继续修改，避免 Registry 已建立索引后注册信息再次变化。
+- 完成了短写语法糖。`Name`、`Alias`、`Aliases`、`Template`、`State`、`Realized`、`AbstractAI`、`AI` 都直接调用对应的完整 API，不复制第二套校验逻辑。
+- 完成了中英文双语 XML 注释。公开类型、公开属性、公开配置方法和内部冻结、验证方法均采用中文说明在上、英文说明在下的格式。
 
 ## `src/Framework/Creature/Core/CreatureRegistry.cs`
 
-这个文件负责保存 `CreatureDescriptor`，并把 Rain World 的核心生物创建流程转接到对应 Descriptor 提供的 Factory。
-
-### 已完成
-
-- 完成了统一生物登记入口：开发者通过 `CreatureRegistry.Register(CreatureDescriptor)` 把一份生物描述正式加入框架。
-- 完成了注册顺序保存：Registry 使用有序列表保存 Descriptor，`Registered` 按实际登记顺序返回结果。
-- 完成了注册列表只读保护：外部代码可以遍历 `Registered`，但不能直接修改 Registry 内部列表。
-- 完成了同一 Descriptor 重复注册的幂等处理：同一个 Descriptor 对象再次调用 `Register` 时直接返回原对象，不重复写入索引，也不制造重复注册错误。
-- 完成了 Creature Type 标准名称索引：Registry 按 `CreatureTemplate.Type.value` 保存 Descriptor，可以通过 Type 查回对应描述。
-- 完成了 Creature Type 编号索引：Registry 保存 `CreatureTemplate.Type.Index` 对应的 Descriptor，用于检查两个不同注册项是否占用了同一个 ExtEnum 编号。
-- 完成了文本名称索引：标准 Type 名称和 Descriptor 中声明的 Alias 会提前进入不区分大小写的字典，不需要在解析一次名称时遍历所有生物和所有别名。
-- 完成了 `TryGet(CreatureTemplate.Type, out CreatureDescriptor)`：按 Type 查询已经登记的 Descriptor。
-- 完成了 `TryGet(string, out CreatureDescriptor)`：按标准 Type 名称或 Alias 查询 Descriptor，查询时会去除输入首尾空格并忽略大小写。
-- 完成了 `Get(CreatureTemplate.Type)`：找不到时抛出包含目标 Type 的明确异常。
-- 完成了 `Get(string)`：找不到时抛出包含输入名称的明确异常。
-- 完成了 Type 名称冲突检查：两个不同 Descriptor 使用相同 `CreatureTemplate.Type.value` 时拒绝后注册者。
-- 完成了 Type 编号冲突检查：两个不同 Descriptor 使用相同 `CreatureTemplate.Type.Index` 时拒绝后注册者。
-- 完成了标准名称与 Alias 冲突检查：一个生物的标准 Type 名称不能占用另一只生物已经登记的 Alias。
-- 完成了 Alias 与 Alias 冲突检查：两只不同生物不能登记同一个不区分大小写的 Alias。
-- 完成了冲突来源说明：注册冲突异常会同时写出已有注册项的 `OwnerId`、已有生物 Type、新注册项的 `OwnerId` 和新生物 Type。
-- 完成了先检查、后写入的注册流程：Type、编号、标准名称和全部 Alias 都通过冲突检查后才会真正写入 Registry。
-- 完成了晚期注册保护：`StaticWorld.creatureTemplates` 已经建立，或者 Registry 已经进入模板初始化阶段以后，不再允许登记新的 Creature Type。
-- 完成了 Registry 启用状态查询：`IsEnabled` 可以判断核心 Hook 当前是否已经挂上。
-- 完成了注册窗口状态查询：`IsRegistrationOpen` 可以判断当前是否仍允许登记新的 Descriptor。
-- 完成了幂等 `Enable`：重复调用不会重复挂同一批 Rain World Hook。
-- 完成了幂等 `Disable`：重复调用不会重复卸载 Hook；Disable 不删除已经登记的 Descriptor，也不会重新开放已经关闭的晚期注册窗口。
-- 完成了 `StaticWorld.InitCustomTemplates` 接入：在 Rain World 建立自定义模板时，Registry 会调用每一份 Descriptor 的 `TemplateFactory`。
-- 完成了模板 Factory 异常包装：`TemplateFactory` 自己抛出异常时，外层异常会补充生物 Type 和 `OwnerId`。
-- 完成了空模板检查：`TemplateFactory` 返回 null 时立即报告是哪只生物和哪个 Owner 返回了空模板。
-- 完成了模板 Type 一致性检查：Factory 返回模板的 Type value 和 Type index 必须与 Descriptor 登记的 Type 一致。
-- 完成了模板数组范围检查：模板 Type index 必须落在当前 `StaticWorld.creatureTemplates` 数组范围内。
-- 完成了 AI 配置一致性检查：模板 `AI == false` 时不允许 Descriptor 同时声明 AbstractAI Factory 或实际 AI Factory。
-- 完成了无祖先实体创建检查：模板没有 ancestor 时必须提供实际 Creature Factory，否则 Registry 会在模板初始化阶段直接报告这只生物没有实体创建来源。
-- 完成了无祖先 AI 创建检查：模板启用 AI、没有 ancestor 且没有实际 AI Factory 时，Registry 会在模板初始化阶段直接报告没有 AI 创建来源。
-- 完成了模板安装回滚：一批 Descriptor 安装模板时，如果后面的模板创建或验证失败，Registry 会把这一批过程中已经改写的 `StaticWorld.creatureTemplates` 槽位恢复成进入安装前的内容。
-- 完成了 `AbstractCreature` 构造接入：先运行 Rain World 原构造函数，再根据 Descriptor 是否提供 Factory 决定是否替换 State 和 AbstractAI。
-- 完成了自定义 State 创建：存在 `StateFactory` 时调用一次 Factory，并把结果写入 `AbstractCreature.state`。
-- 完成了 State Factory 空结果检查和异常包装：返回 null 或内部抛错都会指出生物 Type、Owner 和出错的是 State Factory。
-- 完成了自定义 AbstractAI 创建：存在 `AbstractAIFactory` 时调用 Factory 并替换 `AbstractCreature.abstractAI`。
-- 完成了 AbstractAI Factory 空结果检查和异常包装。
-- 完成了出生巢穴位置保留：Rain World 原构造阶段已经写入默认 AbstractAI 的 `privDenPos` 会在替换成自定义 AbstractAI 时复制过去，避免自定义 AI 丢失出生巢穴位置。
-- 完成了 `AbstractCreature.Realize` 接入：只有 Descriptor 明确提供 `CreatureFactory` 时才接管实际 Creature 创建；没有提供时完整调用 Rain World 原版 Realize。
-- 完成了自定义实际 Creature Factory 空结果检查和异常包装。
-- 完成了自定义实体创建后的 Rain World 检查保留：设置自定义 `realizedObject` 后仍调用原版 Realize，让原版在“实体已经存在”提前返回之前执行它自己的检查。
-- 完成了 MSC 挑战模式自定义标志保留：DLCShared 开启时调用 `MSCRealizeCustom()`，保留其在已存在实体检查之前执行的挑战模式 `setCustomFlags()` 行为，同时不会让它覆盖已经创建的自定义实体。
-- 完成了实体创建后的 AI 启动：自定义实际 Creature 建立后调用 `InitiateAI()`，保持 Rain World 创建实体后启动 AI 的生命周期语义。
-- 完成了 stuck object Realize：自定义实体建立以后会继续 Realize `stuckObjects` 两端尚未 Realize 的对象，保持原版同阶段处理。
-- 完成了 `AbstractCreature.InitiateAI` 接入：只有 Descriptor 提供 `RealizedAIFactory` 时才接管实际 AI 创建；没有提供时继续调用 Rain World 原版 AI 分派。
-- 完成了实际 AI 前置检查：模板必须启用 AI，并且当前 `AbstractCreature.abstractAI` 不能为空。
-- 完成了实际 AI 重复创建保护：`abstractAI.RealAI` 已经存在时不再重复调用开发者提供的 `RealizedAIFactory`。
-- 完成了实际 AI Factory 空结果检查和异常包装。
-- 完成了 `WorldLoader.CreatureTypeFromString` 接入：先用 Registry 已建立的标准名称/Alias 索引查询自定义生物，查不到时交回 Rain World 原解析函数。
-- Core Registry 当前只挂 `StaticWorld.InitCustomTemplates`、`AbstractCreature.ctor`、`AbstractCreature.Realize`、`AbstractCreature.InitiateAI`、`WorldLoader.CreatureTypeFromString` 五条核心 Hook，没有把食物链关系、资源加载、Sandbox、DevTools、图标或生态规则塞进这个文件。
-- 关键实现说明已经使用“中文在上、英文在下”的双语注释格式。
-
----
+- 完成了统一生物登记入口。开发者把配置好的 `CreatureDescriptor` 交给 `CreatureRegistry.Register` 后，Registry 负责保存、建立索引并冻结 Descriptor。
+- 完成了按注册顺序保存 Descriptor。`Registered` 返回只读列表，外部代码不能直接增删 Registry 内部内容。
+- 完成了按 `CreatureTemplate.Type.value` 查找 Descriptor。查找不要求调用方必须持有注册时的同一个 Type 对象实例。
+- 完成了按 ExtEnum Index 建立内部索引，用于注册阶段检测两个不同 Descriptor 是否占用了同一个生物编号。
+- 完成了按标准 Type 名称和 Alias 建立忽略大小写的名称索引。名称查找不再逐个遍历所有生物和所有别名。
+- 完成了 `TryGet(CreatureTemplate.Type)`、`TryGet(string)`、`Get(CreatureTemplate.Type)`、`Get(string)` 四种查询入口。
+- 完成了同一 Descriptor 重复注册的幂等处理。同一个 Descriptor 实例再次交给 Registry 时直接返回，不会重复写索引。
+- 完成了 Type 名称冲突检查。两个不同 Descriptor 使用相同 `CreatureTemplate.Type.value` 时直接报错，不允许后注册者静默覆盖前注册者。
+- 完成了 Type Index 冲突检查。两个不同 Descriptor 占用同一个 ExtEnum Index 时直接报错。
+- 完成了标准名称与 Alias 冲突检查。一个生物的 Type 名称或 Alias 如果已经被另一个 Descriptor 占用，注册直接失败。
+- 完成了冲突报错信息。错误中会写出冲突值、已经占用该值的 OwnerId 和 Creature Type、新提交 Descriptor 的 OwnerId 和 Creature Type。
+- 完成了注册事务式检查。所有 Type、Index、名称、Alias 冲突检查全部通过后，Registry 才会把 Descriptor 写入各个索引并冻结；校验失败不会留下半份注册记录。
+- 完成了注册时机保护。`StaticWorld.InitCustomTemplates` 开始后关闭新增生物注册；开发者如果再提交新的 Descriptor，会收到明确的“注册太晚”错误。
+- 完成了 Registry Hook 的幂等启用。`Enable` 重复调用不会重复挂 Hook。
+- 完成了 Registry Hook 的卸载。`Disable` 会移除本 Registry 安装的五个 Core Hook，但保留已经登记的 Descriptor，也不会重新开放已经关闭的注册阶段。
+- 完成了 `On.StaticWorld.InitCustomTemplates` 接入。Registry 在原版初始化执行后，为每个已登记 Descriptor 调用一次 TemplateFactory，并把结果写入对应的 `StaticWorld.creatureTemplates` 槽位。
+- 完成了模板空值检查。TemplateFactory 返回 `null` 时立即报出具体 Creature Type 和 OwnerId。
+- 完成了模板 Type 一致性检查。工厂返回的模板必须和 Descriptor 登记的 Type 名称、Type Index 一致。
+- 完成了模板数组边界检查。自定义 Type Index 超出 `StaticWorld.creatureTemplates` 长度时直接报告该生物注册过晚以及实际 Index、数组长度。
+- 完成了模板 AI 配置检查。模板的 `AI` 为 `false` 时，不允许 Descriptor 同时声明 AbstractAIFactory 或 RealizedAIFactory。
+- 完成了无祖先实体创建检查。模板没有 ancestor 时，Descriptor 必须提供实际 Creature 工厂，否则 Registry 会拒绝这个没有任何实际实体创建来源的注册结果。
+- 完成了无祖先 AI 创建检查。模板启用 AI、没有 ancestor 时，Descriptor 必须提供实际 AI 工厂，否则 Registry 会拒绝这个没有 AI 实现来源的注册结果。
+- 完成了模板安装回滚。一次 StaticWorld 模板安装过程中如果后面的 Descriptor 失败，Registry 会把本轮已经覆盖的 `StaticWorld.creatureTemplates` 槽位恢复成安装前的内容，避免留下半套模板。
+- 完成了 `On.AbstractCreature.ctor` 接入。Rain World 原版构造先执行；只有 Descriptor 明确填写 StateFactory 或 AbstractAIFactory 时，Registry 才替换对应对象。
+- 完成了 State 原版回退。Descriptor 没有 StateFactory 时，Registry 不覆盖 `AbstractCreature.state`。
+- 完成了自定义 State 创建失败包装。StateFactory 抛出的异常会被包装成包含 Creature Type、OwnerId 和 factory 阶段的信息；返回 `null` 会直接报错。
+- 完成了 AbstractAI 原版回退。Descriptor 没有 AbstractAIFactory 时，Registry 不覆盖原版 `AbstractCreature.abstractAI`。
+- 完成了 AbstractAI 的 Den 信息保留。Rain World 原版构造阶段如果已经给默认 AbstractAI 写入 `privDenPos`，替换成自定义 AbstractAI 时会把这个巢穴位置迁过去。
+- 完成了 `On.AbstractCreature.Realize` 接入。Descriptor 没有实际 Creature 工厂时完整调用原版 Realize；有实际 Creature 工厂时由 Registry 创建并赋给 `realizedObject`。
+- 完成了实际 Creature 工厂空值和异常检查。返回 `null` 或抛异常时会明确指出 Creature Type、OwnerId 和 realized creature factory 阶段。
+- 完成了自定义 Realize 后的原版流程保留。Registry 会继续执行原版针对已经存在 realized object 的检查，并保留 MSC 自定义 Realize 产生的挑战模式标记处理。
+- 完成了自定义 Realize 后的 AI 初始化。生物模板启用 AI 且存在 AbstractAI 时，Registry 会调用 `InitiateAI`。
+- 完成了自定义 Realize 后的 stuck object 实体化。与该 AbstractCreature 连接的 stuck object 两端如果尚未实体化，Registry 会继续调用它们的 `Realize`，保留 Rain World 原本的连接对象行为。
+- 完成了 `On.AbstractCreature.InitiateAI` 接入。Descriptor 没有实际 AI 工厂时调用原版 AI 创建流程；声明实际 AI 工厂时由 Registry 创建并写入 `abstractAI.RealAI`。
+- 完成了实际 AI 重复创建保护。`abstractAI.RealAI` 已经存在时不会再次调用 RealizedAIFactory。
+- 完成了实际 AI 前置条件检查。声明实际 AI 工厂但当前 `AbstractCreature` 没有 AbstractAI 时直接报错。
+- 完成了实际 AI 工厂空值和异常检查。返回 `null` 或抛异常时会明确指出 Creature Type、OwnerId 和 realized AI factory 阶段。
+- 完成了 `On.WorldLoader.CreatureTypeFromString` 接入。Registry 先调用 Rain World 原本的名称解析；原版已经识别成功时直接尊重原版结果，不让自定义 Alias 抢走原版名称。
+- 完成了自定义名称解析回退。只有原版名称解析没有得到结果时，Registry 才按已建立的标准名称和 Alias 索引查找自定义生物。
+- 完成了中英文双语 XML 注释。公开 Registry API 采用中文说明在上、英文说明在下的格式。
+- Registry 当前只处理 CreatureDescriptor 登记、模板创建、State 创建、实际 Creature 创建、AbstractAI 创建、实际 AI 创建和 world 文件名称解析。它没有接管 Creature relationship、资源加载、Sandbox、DevTools、图标、Expedition 和生物行为逻辑。
 
 ## `src/Creatures/MantleCrab/MantleCrabDefinition.cs`
 
-这个文件已经从旧 `CreatureDefinition` 继承模式迁移到新的 `CreatureDescriptor + CreatureRegistry`。
-
-### 已完成
-
-- 删除了对旧 `CreatureDefinition` 基类的继承，改成物种自己的静态注册入口。
-- 使用 `MantleCrabEnums.Type` 登记 MantleCrab 的 Creature Type。
-- 使用 `DryCycle.Plugin.ModId` 登记这只生物的 Owner。
-- 登记显示名称 `Mantle Crab`。
-- 登记 MantleCrab 的 `CreatureTemplate` 创建函数。
-- 登记 MantleCrab 的实际 Creature 创建函数。
-- 没有登记 State Factory，因此 MantleCrab 保留 Rain World 原本的 State 创建结果。
-- 没有登记 AbstractAI Factory 和实际 AI Factory，因为当前 MantleCrab 外观/物理原型的模板明确设置 `AI = false`。
-- 保留了原模板配置：`grasps = 0`、`bodySize = 6f`、`canAutoAbstractPath = false`、房间内自动游荡概率为 0、跨房间自动游荡概率为 0、禁止标准 Shortcut 入口、`doesNotUseDens = true`。
-- 保留了实际 MantleCrab 创建后的硬壳平台收尾注册：仍然把 `crab.MaintainRigidShell` 交给 `WalkableDynamicSurfaceRuntime.RegisterPostPhysicsFinalizer`。
-- 保留了 MantleCrab 自己的资源加载入口：仍然调用 `DryCycleShaderAssets.EnsureCreatureAssets` 和 `MantleCrabMaterialCache.Enable`。
-- MantleCrab 的资源加载没有进入 Creature Core Registry。
-
----
+- 完成了 MantleCrab 从旧生物 Definition 注册方式到 `CreatureDescriptor + CreatureRegistry` 的迁移。
+- MantleCrab 使用 `MantleCrabEnums.Type` 作为 Type，使用 `DryCycle.Plugin.ModId` 作为 OwnerId，显示名称登记为 `Mantle Crab`。
+- MantleCrab 的 CreatureTemplate 创建方式已经通过 `.Template(CreateTemplate)` 交给新 Descriptor。
+- MantleCrab 原有的 `HealthState` 创建行为已经通过 `.State(CreateState)` 保留下来，迁移后仍为每个 MantleCrab AbstractCreature 创建 `HealthState`。
+- MantleCrab 的实际实体创建已经通过 `.Realized(CreateRealizedCreature)` 交给新 Descriptor。
+- MantleCrab 实体创建时仍会把 `MaintainRigidShell` 登记到 `WalkableDynamicSurfaceRuntime.RegisterPostPhysicsFinalizer`，保持硬壳与动态可行走表面的原有衔接。
+- MantleCrab 当前 `CreatureTemplate.AI` 为 `false`，没有向 Core Registry 登记 AbstractAIFactory 或 RealizedAIFactory。
+- MantleCrab 的 Shader 生物资源加载和 `MantleCrabMaterialCache.Enable()` 仍由 `MantleCrabDefinition.LoadResources` 自己负责，没有塞进 Creature Core Registry。
 
 ## `src/Creatures/MossySpider/MossySpiderDefinition.cs`
 
-这个文件已经从旧 `CreatureDefinition` 继承模式迁移到新的 `CreatureDescriptor + CreatureRegistry`。
-
-### 已完成
-
-- 删除了对旧 `CreatureDefinition` 基类的继承，改成物种自己的静态注册入口。
-- 使用 `MossySpiderEnums.Type` 登记 MossySpider 的 Creature Type。
-- 使用 `DryCycle.Plugin.ModId` 登记 Owner。
-- 登记显示名称 `Mossy Spider`。
-- 登记带空格的 Alias `mossy spider`；标准名称 `MossySpider` 已经由 Registry 的标准 Type 名称索引负责，并且文本查询不区分大小写，因此不再重复登记 `MossySpider` 和 `mossyspider` 两个同义 Alias。
-- 登记 MossySpider 的 `CreatureTemplate` 创建函数。
-- 登记 MossySpider 的实际 Creature 创建函数。
-- 登记 MossySpider 的 `MossySpiderAbstractAI` 创建函数。
-- 登记 MossySpider 的 `MossySpiderAI` 创建函数。
-- 没有登记自定义 State Factory，因此继续保留 Rain World 原本创建的 State。
-- 保留了原模板的 Deer pre-baked pathing ancestor 配置。
-- 保留了原模板对 OffScreen、Floor、CurvedFloor、Corridor、Climb、Wall、Ceiling、Air、Solid、Sand 十种 tile accessibility 的精确通行设置。
-- 保留了原模板对 Standard、OpenDiagonal、OutsideRoom、SideHighway、OffScreenMovement、BetweenRooms 六种 MovementConnection 的通行设置。
-- 保留了 `canAutoAbstractPath = false`、房间内自动游荡概率 0、跨房间自动游荡概率 0、`offScreenSpeed = 0.55f`、`abstractedLaziness = 60`、`doesNotUseDens = true`、`hibernateOffScreen = false`、禁止标准 Shortcut 入口。
-- 保留了 `bodySize = 12f`、`grasps = 0`、`visualRadius = 700f`、`movementBasedVision = 0f`、`dangerousToPlayer = 0f`、`communityInfluence = 0f`。
-- 保留了两栖、水中可游泳、水路代价 1、不飞行的水体和移动配置。
-- 保留了 `MossySpiderTileAccessibilityOverride`，继续明确排除 Wall 和 Climb。
-- 保留了 `meatPoints = 12`、`countsAsAKill = 1`、shortcut 颜色、`shortcutSegments = 8`、`scaryness = 0.8f`、`deliciousness = 0.1f`。
-
----
+- 完成了 MossySpider 从旧生物 Definition 注册方式到 `CreatureDescriptor + CreatureRegistry` 的迁移。
+- MossySpider 使用 `MossySpiderEnums.Type` 作为 Type，使用 `DryCycle.Plugin.ModId` 作为 OwnerId，显示名称登记为 `Mossy Spider`。
+- MossySpider 保留文本别名 `mossy spider`，该别名已经通过 `.Alias("mossy spider")` 登记到新 Registry。
+- MossySpider 的 CreatureTemplate 创建方式已经通过 `.Template(CreateTemplate)` 交给新 Descriptor，原有 Tile Accessibility、MovementConnection、AI-map、抗伤、抗眩晕、房间迁移、水中移动、体型、肉量和 shortcut 参数仍在原模板构建函数中保留。
+- MossySpider 的实际实体创建已经通过 `.Realized(CreateRealizedCreature)` 交给新 Descriptor。
+- MossySpider 的 `MossySpiderAbstractAI` 创建已经通过 `.AbstractAI(CreateAbstractAI)` 交给新 Descriptor。
+- MossySpider 的 `MossySpiderAI` 创建已经通过 `.AI(CreateRealizedAI)` 交给新 Descriptor。
+- MossySpider 没有声明自定义 StateFactory，因此 Registry 保留 Rain World 根据模板构造出来的原始 State，不额外覆盖。
 
 ## `src/Creatures/DesertBatfly/Core/DB_Definition.cs`
 
-这个文件已经从旧 `CreatureDefinition` 继承模式迁移到新的 `CreatureDescriptor + CreatureRegistry`。
-
-### 已完成
-
-- 保留 `CreatureType = new("DesertBatfly", true)` 作为 DesertBatfly 的稳定 Creature Type 定义。
-- 删除了对旧 `CreatureDefinition` 基类的继承，改成物种自己的静态注册入口。
-- 使用 `DryCycle.Plugin.ModId` 登记 Owner。
-- 登记显示名称 `Desert Batfly`。
-- 登记 DesertBatfly 的 `CreatureTemplate` 创建函数。
-- 登记 `DB_State` 创建函数。
-- 登记 `DB_Creature` 实际实体创建函数。
-- 没有登记 AbstractAI Factory 和实际 AI Factory，因为 DesertBatfly 的模板保持 `AI = false`，继续复用 Fly 的非 `ArtificialIntelligence` 控制生命周期。
-- 保留 Fly 作为模板 ancestor。
-- 保留 `quantified = false`、`AI = false`、Fly pre-baked pathing ancestor、`doPreBakedPathing = false`。
-- 保留 `bodySize = 0.18f`、`grasps = 1`、`meatPoints = 0`。
-- 保留基础伤害抗性 `0.3f`、基础眩晕抗性 `1f`、即时死亡伤害阈值 `0.9f`、`quickDeath = true`。
-- 保留原来的 shortcut 颜色 `(0.65f, 0.48f, 0.29f)`。
-- 原先混在这个 Definition 里的食物链关系已经移出 Core 定义，不再要求通用 CreatureRegistry 管理 DesertBatfly 的生态规则。
-
----
+- 完成了 DesertBatfly 从旧生物 Definition 注册方式到 `CreatureDescriptor + CreatureRegistry` 的迁移。
+- DesertBatfly 继续使用字符串 `DesertBatfly` 创建自己的 `CreatureTemplate.Type`，使用 `DryCycle.Plugin.ModId` 作为 OwnerId，显示名称登记为 `Desert Batfly`。
+- DesertBatfly 的 CreatureTemplate 创建方式已经通过 `.Template(CreateTemplate)` 交给新 Descriptor。
+- DesertBatfly 的 `DB_State` 创建已经通过 `.State(CreateState)` 交给新 Descriptor。
+- DesertBatfly 的 `DB_Creature` 创建已经通过 `.Realized(CreateRealizedCreature)` 交给新 Descriptor。
+- DesertBatfly 继续以原版 `Fly` 作为模板 ancestor，并保留 `preBakedPathingAncestor`、身体大小、抓取数、伤害抗性、眩晕抗性、快速死亡阈值和 shortcut 颜色设置。
+- DesertBatfly 的模板继续设置 `AI = false`。它没有向 Core Registry 登记 AbstractAIFactory 或 RealizedAIFactory，因此不会把 Fly 使用的非 `ArtificialIntelligence` 控制方式强行改造成 Framework AI。
 
 ## `src/Creatures/DesertBatfly/Integration/DB_Relationships.cs`
 
-这个文件是迁移时新增的 DesertBatfly 生态接入文件，用来接住旧 Definition 中的关系初始化职责。
-
-### 已完成
-
-- 完成了独立的 `Enable` 和 `Disable`，重复调用不会重复挂载或重复卸载 `StaticWorld.InitStaticWorld` Hook。
-- 在 `StaticWorld.InitStaticWorld` 原逻辑完成后建立 DesertBatfly 食物链关系，保持旧注册系统原本的初始化时机。
-- 继续以 Fly 的关系表作为 DesertBatfly 的基础关系模板。
-- 对 StaticWorld 中每一个有效的其他生物，继续把 Fly 对该生物的关系复制给 DesertBatfly。
-- 对 StaticWorld 中每一个有效的其他生物，继续把该生物对 Fly 的关系复制成它对 DesertBatfly 的基础关系。
-- 继续让所有 TopAncestor 为 Scavenger 的生物以 `DB_Tuning.ScavengerHostility` 强度攻击 DesertBatfly。
-- Watcher 可用且 Peach Lizard Type 有效时，继续让 Peach Lizard 以 `0.32f` 强度把 DesertBatfly 视为食物。
-- Watcher 可用且 Peach Lizard Type 有效时，继续让 DesertBatfly 以 `0.90f` 强度害怕 Peach Lizard。
-- 继续让 DesertBatfly 忽略 Slugcat。
-- 继续让 DesertBatfly 忽略同种 DesertBatfly。
-- 继续让 DesertBatfly 忽略普通 Fly。
-- 增加了 DesertBatfly 模板或 Fly 模板没有正确初始化时的空值保护。
-- 这套生态关系不进入 `Framework/Creature/Core/CreatureRegistry.cs`，保持 Core Registry 只负责核心注册生命周期。
-
----
-
-## `src/Registration/CreatureDevConsoleSupport.cs`
-
-这个文件保留 DevConsole 软依赖能力，但已经不再依赖旧的 `CreatureDefinition` 和旧 Creature Registry。
-
-### 已完成
-
-- `TryRegisterAll` 改为读取新的 `DryCycle.Framework.Creature.Core.CreatureRegistry.Registered`。
-- DevConsole 注册对象从旧 `CreatureDefinition` 改为新的 `CreatureDescriptor`。
-- 继续通过反射查找 `DevConsole.ObjectSpawner`，没有安装 DevConsole 时不会产生硬依赖。
-- 继续通过反射查找 `ObjectSpawner.SpawnerInfo` 和 `ObjectSpawner.SimpleSpawnerInfo`。
-- 继续查找参数签名为 `CreatureTemplate.Type + SpawnerInfo` 的 `RegisterSpawner`。
-- 每个通过新 Registry 登记的 Descriptor 都可以继续获得 `spawn <CreatureTemplate.Type>` 的 DevConsole 生成入口。
-- 同一 Creature Type 在一次 DevConsole 注册周期中不会重复登记。
-- 生成时直接使用 Descriptor 的 `Type` 从 `StaticWorld` 取得已经初始化的 `CreatureTemplate`。
-- 生成位置已有合法生物节点时保留该节点；没有合法节点时继续使用 `room.RandomRelevantNode(template)` 处理开发阶段尚未完成寻路规则的生物。
-- DevConsole 带额外参数生成时继续把参数写入 `AbstractCreature.spawnData`。
-- 写入 `spawnData` 后继续尝试调用 `setCustomFlags()`；故事模式专用标志处理失败不会阻止开发阶段生成生物。
-- 最终继续通过 `AbstractCreature.Move(pos)` 把新建的 AbstractCreature 放到指定位置。
-
----
-
-## `src/Registration/DryCycleContent.cs`
-
-这个文件已经退出生物注册职责，只保留它仍然实际负责的旧内容系统。
-
-### 已完成
-
-- 删除了 `Register(CreatureDefinition)` 生物注册入口。
-- 删除了对旧 Creature Registry 的 Enable 调用。
-- 删除了对旧 Creature Registry 的 Disable 调用。
-- 删除了遍历旧 CreatureDefinition 加载生物资源的逻辑。
-- 继续保留 `ItemDefinition` 注册入口。
-- 继续负责 `ItemRegistry.Enable()` 和 `ItemRegistry.Disable()`。
-- 继续负责 `WalkableDynamicSurfaceRuntime.Enable()` 和 `WalkableDynamicSurfaceRuntime.Disable()`。
-- `LoadResources` 现在只遍历 `ItemRegistry.Registered` 并调用物品自己的资源加载函数。
-
----
+- 完成了 DesertBatfly 生态关系从旧 Definition 生命周期中的拆分。关系初始化没有进入 Creature Core Registry，而是由 `DB_Relationships` 单独监听 `StaticWorld.InitStaticWorld`。
+- DesertBatfly 会先复制原版 Fly 对其他生物的关系，并把其他生物针对 Fly 的关系复制到 DesertBatfly。
+- 拾荒者 TopAncestor 会把 DesertBatfly 视为可攻击目标，关系强度使用 `DB_Tuning.ScavengerHostility`。
+- Watcher 启用且 Peach Lizard 可用时，Peach Lizard 对 DesertBatfly 设置 `Eats, 0.32f`，DesertBatfly 对 Peach Lizard 设置 `Afraid, 0.90f`。
+- DesertBatfly 对 Slugcat、DesertBatfly 自身和原版 Fly 的关系明确设置为 `Ignores, 0f`。
+- `Enable` 和 `Disable` 都具有幂等保护，不会重复挂载或重复卸载 `StaticWorld.InitStaticWorld` Hook。
 
 ## `src/Plugin.cs`
 
-这个文件已经把 DryCycle 当前通过统一注册系统管理的三只生物切换到 Creature Core Framework。
+- 完成了三个现有自定义生物的项目入口迁移。首次启用内容时分别调用 `MossySpiderDefinition.Register()`、`MantleCrabDefinition.Register()`、`DB_Definition.Register()`，不再实例化旧 `CreatureDefinition` 子类。
+- 完成了新 Creature Core Registry 的运行时启用。`OnEnable` 调用 `CreatureCoreRegistry.Enable()` 安装新 Registry 的五个 Core Hook。
+- 完成了新 Creature Core Registry 的运行时卸载。`OnDisable` 调用 `CreatureCoreRegistry.Disable()` 移除新 Registry 的五个 Core Hook。
+- DesertBatfly 的生态关系通过 `DB_Relationships.Enable()` 和 `DB_Relationships.Disable()` 单独管理，不让 Creature Core Registry 承担生态关系职责。
+- MantleCrab 的资源加载在 `RainWorld_OnModsInit` 中单独调用 `MantleCrabDefinition.LoadResources(self)`，不让 Creature Core Registry 承担资源加载职责。
+- `DryCycleContent` 仍然负责项目里原有的物品内容和动态可行走表面运行时；三个生物不再通过 `DryCycleContent.Register(CreatureDefinition)` 注册。
 
-### 已完成
+## `src/Registration/DryCycleContent.cs`
 
-- MossySpider 改为调用 `MossySpiderDefinition.Register()`，不再创建旧 `CreatureDefinition` 对象交给 `DryCycleContent`。
-- MantleCrab 改为调用 `MantleCrabDefinition.Register()`。
-- DesertBatfly 改为调用 `DB_Definition.Register()`。
-- 在 `OnEnable` 中启用新的 `DryCycle.Framework.Creature.Core.CreatureRegistry`。
-- 在 `OnDisable` 中卸载新的 Creature Core Registry Hook。
-- 在 `OnEnable` 中启用 `DB_Relationships`，让 DesertBatfly 的生态关系继续在 StaticWorld 初始化阶段写入。
-- 在 `OnDisable` 中卸载 `DB_Relationships` Hook。
-- `DryCycleContent` 继续启用，因为它仍负责 ItemRegistry 和 `WalkableDynamicSurfaceRuntime`，但不再负责三只生物的核心注册。
-- `RainWorld_OnModsInit` 中继续调用 `DryCycleContent.LoadResources(self)` 处理物品资源。
-- `RainWorld_OnModsInit` 中新增 `MantleCrabDefinition.LoadResources(self)`，保留 MantleCrab 原先由旧 CreatureDefinition 触发的 Creature Asset 和 Material Cache 初始化。
-- DesertBatfly 原有 `DB_RainWorldHooks` 继续独立启用和卸载，它负责 Fly 非虚方法适配与 DesertBatfly 自己的运行时逻辑，没有塞进 Creature Core Registry。
-- MossySpider 原有 `MossySpiderBackPlatform` 继续独立启用和卸载，没有塞进 Creature Core Registry。
+- 已经移除生物 Definition 的登记职责。
+- 当前只提供 `Register(ItemDefinition)` 给物品注册使用。
+- `Enable` 当前只启用 `ItemRegistry` 和 `WalkableDynamicSurfaceRuntime`。
+- `Disable` 当前只关闭 `WalkableDynamicSurfaceRuntime` 和 `ItemRegistry`，并重置物品资源加载状态。
+- `LoadResources` 当前只遍历 `ItemRegistry.Registered` 并调用每个 `ItemDefinition.LoadResources`。
+- 文件注释已经明确说明生物注册迁移到了 `DryCycle.Framework.Creature.Core.CreatureRegistry`。
 
----
+## 已移除的旧生物注册文件
 
-## 已删除：`src/Registration/CreatureDefinition.cs`
-
-### 已完成
-
-- 三只现有生物已经不再继承这个旧基类。
-- DevConsole 生物生成支持已经改用 `CreatureDescriptor`。
-- `DryCycleContent` 已经不再接收 `CreatureDefinition`。
-- 旧基类已经从仓库删除，避免后续新生物继续误用旧注册方式。
-
----
-
-## 已删除：`src/Registration/CreatureRegistry.cs`
-
-### 已完成
-
-- 三只现有生物的核心模板、State、实际 Creature、AbstractAI、实际 AI 和文本名称解析已经交给新的 `Framework/Creature/Core/CreatureRegistry.cs`。
-- `DryCycleContent` 已经不再启用或卸载旧 Registry。
-- `CreatureDevConsoleSupport` 已经不再读取旧 Registry 的 Registered 列表。
-- 旧 Registry 已经从仓库删除，避免同一批 Creature Hook 同时存在两套实现。
+- `src/Registration/CreatureDefinition.cs` 已经从当前项目树中移除，三个现有自定义生物不再依赖旧的继承式 CreatureDefinition。
+- `src/Registration/CreatureRegistry.cs` 已经从当前项目树中移除，三个现有自定义生物不再通过旧 Registry 创建模板、State、实际 Creature、AbstractAI 和实际 AI。
