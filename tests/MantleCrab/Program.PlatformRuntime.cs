@@ -48,6 +48,13 @@ internal static partial class Program
         Check(!WalkableDynamicSurfaceRuntime.ShouldAcquireContact(3f, -55f, -25f),
             "Implausibly deep endpoint penetration must not be treated as a landing");
 
+        Check(WalkableDynamicSurfaceRuntime.ShouldAcquireDuringCooldown(4f, -3f, -6f),
+            "Jump cooldown must not suppress a genuine downward crossing back onto the dynamic surface");
+        Check(!WalkableDynamicSurfaceRuntime.ShouldAcquireDuringCooldown(4f, -3f, 2f),
+            "Jump cooldown must still reject an upward crossing through the one-way surface");
+        Check(!WalkableDynamicSurfaceRuntime.ShouldAcquireDuringCooldown(.2f, .1f, -1f),
+            "Cooldown must not reattach from mere near-surface proximity without a fresh crossing");
+
         Check(WalkableDynamicSurfaceRuntime.ShouldDetachAfterMovement(.5f, 1.2f, 3f),
             "Upward separation after movement must detach from dynamic ground");
         Check(!WalkableDynamicSurfaceRuntime.ShouldDetachAfterMovement(.5f, .6f, 3f),
@@ -72,6 +79,6 @@ internal static partial class Program
               !WalkableDynamicSurfaceRuntime.IsSurfaceSpeedRideable(new Vector2(12.1f, 0f)),
             "Dynamic ground must reject surface speeds that cannot be restored exactly on detach");
 
-        platformRuntimeCases += 22;
+        platformRuntimeCases += 25;
     }
 }
