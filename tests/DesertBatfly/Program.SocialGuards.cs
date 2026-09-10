@@ -7,12 +7,12 @@ internal static partial class Program
     private static void RunSocialGuards()
     {
         Type social = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRuntime", true);
-        Type ambient = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AmbientSocialRuntime", true);
+        Type neutral = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_NeutralBehaviorRuntime", true);
 
         Check(!TypeCallsForbiddenSocialMethod(social),
-            "Social neutral social layer does not call Random/combat/trauma/damage APIs");
-        Check(!TypeCallsForbiddenSocialMethod(ambient),
-            "Ambient Social does not call Random/combat/trauma/damage APIs");
+            "Formal Social event layer does not call Random/combat/trauma/damage APIs");
+        Check(!TypeCallsForbiddenSocialMethod(neutral),
+            "NeutralEcology does not call Random/combat/trauma/damage APIs");
 
         Type roomRuntime = mod.GetType(
             "DryCycle.Creatures.DesertBatfly.DB_SocialRoomRuntime", true);
@@ -21,22 +21,26 @@ internal static partial class Program
         Check(refreshInterval != null && (int)refreshInterval.GetRawConstantValue() == 20,
             "Social room-wide candidate/roost cache refresh remains 20 ticks, not per-frame per-bat");
 
-        FieldInfo sampleLimit = ambient.GetField("AmbientSampleLimit", Flags);
+        FieldInfo sampleLimit = neutral.GetField("SampleLimit", Flags);
         Check(sampleLimit != null && (int)sampleLimit.GetRawConstantValue() <= 8,
-            "Ambient Social samples a bounded peer subset instead of rescanning the whole flock per bat");
-        Check(ambient.GetMethod("ShouldOwn", Flags) != null &&
-              ambient.GetMethod("ApplyOwnedBehavior", Flags) != null &&
-              ambient.GetMethod("ParticipationProbability", Flags) != null &&
-              ambient.GetMethod("LooseFlockPreference", Flags) != null,
-            "Ambient Social exposes explicit ownership, execution and personality weighting boundaries");
+            "NeutralEcology samples a bounded peer subset instead of rescanning the whole flock per bat");
+        Check(neutral.GetMethod("ShouldOwn", Flags) != null &&
+              neutral.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              neutral.GetMethod("ParticipationProbability", Flags) != null &&
+              neutral.GetMethod("LooseFlockPreference", Flags) != null &&
+              neutral.GetMethod("CancelForPriority", Flags) != null,
+            "NeutralEcology exposes explicit ownership, execution, cancellation and personality weighting boundaries");
 
         Type socialState = social.GetNestedType("State", Flags);
         Check(socialState != null && socialState.GetField("Partner", Flags) != null &&
               socialState.GetField("Anchor", Flags) != null && socialState.GetField("Token", Flags) != null,
-            "Social partner/anchor/reservation state stays realized-only inside SocialLife");
+            "Social partner/anchor/reservation state stays realized-only inside formal Social");
+
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AmbientSocialRuntime", false) == null,
+            "Retired Ambient Social facade is removed after NeutralEcology gained independent ownership");
 
         Console.WriteLine(
-            "Social guards: event and ambient layers avoid forbidden APIs; shared cache cadence, bounded ambient sampling and realized-only state verified.");
+            "Social guards: formal Social and NeutralEcology avoid forbidden APIs; shared cache cadence, bounded neutral sampling, realized-only event state and retired ambient facade verified.");
     }
 
     private static bool TypeCallsForbiddenSocialMethod(Type type)
