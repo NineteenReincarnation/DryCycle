@@ -54,7 +54,7 @@ internal static class DB_ThreatTrace
             AIDebugEventCategory.Perception,
             "ThreatCueChanged",
             CueText(threat.Cue),
-            "current observable cue only; never persisted as Threat Signature Memory");
+            "temporal Threat cue only; current observation lives in Perception R2");
 
         AIDebugTrace.RecordChange(
             creature,
@@ -93,16 +93,10 @@ internal static class DB_ThreatTrace
     private static string CueText(in DB_ThreatCue cue)
     {
         return $"P{cue.PlayerSlot}" +
-               (cue.VisibleSpear ? "+Spear" : "") +
-               (cue.VisibleRock ? "+Rock" : "") +
-               (cue.VisibleExplosive ? "+Explosive" : "") +
-               (cue.VisibleStartle ? "+Startle" : "") +
-               (cue.VisibleShock ? "+Shock" : "") +
                (cue.RecentSpearThrow ? "+RecentSpear" : "") +
                (cue.RecentRockThrow ? "+RecentRock" : "") +
                (cue.RecentExplosion ? "+RecentExplosion" : "") +
                (cue.RecentGrabAttempt ? "+RecentGrab" : "") +
-               (cue.ProjectileThreat ? "+ProjectileThreat" : "") +
                (cue.PlayerRetreating ? "+Retreating" : "");
     }
 

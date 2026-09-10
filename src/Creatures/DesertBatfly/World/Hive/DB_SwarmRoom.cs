@@ -11,6 +11,7 @@ internal sealed class DB_SwarmRoom
     private bool ecologyInitialized;
     private int ecologySampleTimer;
     private int flockRefresh;
+    private int neutralRouteSerial;
     internal DB_FlockSnapshot Flock { get; private set; }
     internal int SnapshotAge => 30 - flockRefresh;
 
@@ -32,19 +33,109 @@ internal sealed class DB_SwarmRoom
     }
 
     /// <summary>
-    /// Handles the Desert Batfly specialization of vanilla UpdateFollowDijsktra. Rain World's
-    /// method is nonvirtual, so Integration owns the hook boundary while this Hive domain owns
-    /// the species rule that chooses one of the room's authored hive maps.
+    /// DESERTSWARMROOM is not a vanilla swarmRoom, so FlyAI.InActiveSwarmRoom cannot choose
+    /// the intended node set by itself. Mirror vanilla route retention while avoiding the old
+    /// specialization that always picked a BatHive and collapsed the colony onto one point.
     /// </summary>
     internal static bool TryHandleNativeFollowDijkstra(FlyAI ai, DB_Creature bat)
     {
         if (ai?.room == null || bat == null || !ReferenceEquals(ai.fly, bat) ||
-            !IsDB_SwarmRoom(ai.room.abstractRoom) || ai.room.hives.Length == 0)
+            !IsDB_SwarmRoom(ai.room.abstractRoom))
             return false;
 
-        if (ai.followingDijkstraMap < 0)
-            ai.followingDijkstraMap = ai.room.exitAndDenIndex.Length + Random.Range(0, ai.room.hives.Length);
+        if (ai.leaveRoomDijkstra >= 0)
+        {
+            ai.followingDijkstraMap = ai.leaveRoomDijkstra;
+            return true;
+        }
+
+        int relevant = ai.room.abstractRoom.NodesRelevantToCreature(bat.Template);
+        if (relevant <= 0)
+        {
+            ai.followingDijkstraMap = -1;
+            return true;
+        }
+
+        int current = ai.followingDijkstraMap;
+        if (current >= 0 && current < relevant)
+        {
+            int distance = ai.room.aimap.ExitDistanceForCreature(ai.FlyPos, current, bat.Template);
+            int completionDistance = ai.CurrentFollowDijkstraIsToHive ? 7 : 18;
+            if (ai.behavior != FlyAI.Behavior.Idle || distance >= completionDistance)
+                return true;
+        }
+
+        // Independent Random.Range calls let a large flock repeatedly land on the same map by
+        // chance. Use one room-scoped rotor instead: ordinary exits/dens are still preferred,
+        // hives remain occasional legal destinations, but consecutive completed routes are
+        // spread across the available maps instead of producing a new artificial gathering
+        // point. No per-bat list allocation or room-wide scan is required here.
+        ai.followingDijkstraMap = For(ai.room).NextNeutralFollowMap(ai, bat, relevant, current);
         return true;
+    }
+
+    private int NextNeutralFollowMap(FlyAI ai, DB_Creature bat, int relevant, int current)
+    {
+        int ordinaryCount = 0;
+        for (int specific = 0; specific < relevant; specific++)
+        {
+            if (IsOrdinaryFollowMap(ai.room, bat.Template, specific))
+                ordinaryCount++;
+        }
+
+        // Keep some hive traffic so DESERTSWARMROOM still behaves like a real colony room,
+        // while making normal exits/dens the dominant neutral routing target.
+        bool ordinaryPool = ordinaryCount > 0 &&
+            (ordinaryCount == relevant || Random.value < 0.72f);
+        int poolCount = ordinaryPool ? ordinaryCount : relevant;
+        if (poolCount <= 0) return -1;
+
+        int serial = neutralRouteSerial++;
+        int seedOffset = bat.Personality?.VisualSeed ?? bat.abstractCreature?.ID.RandomSeed ?? 0;
+        int ordinal = (int)(((uint)serial + (uint)seedOffset) % (uint)poolCount);
+        int next = ordinaryPool
+            ? SpecificMapAtOrdinaryOrdinal(ai.room, bat.Template, relevant, ordinal)
+            : ordinal;
+
+        if (next < 0 || next >= relevant)
+            next = (int)((uint)serial % (uint)relevant);
+
+        if (next != current || relevant <= 1)
+            return next;
+
+        if (ordinaryPool && ordinaryCount > 1)
+        {
+            ordinal = (ordinal + 1) % ordinaryCount;
+            next = SpecificMapAtOrdinaryOrdinal(ai.room, bat.Template, relevant, ordinal);
+            if (next >= 0 && next != current)
+                return next;
+        }
+
+        // A room can have only one ordinary exit/den. Once that route completes, do not pin the
+        // bat to the same Dijkstra map forever: rotate through the remaining relevant maps.
+        int step = 1 + (int)((uint)serial % (uint)(relevant - 1));
+        return (current + step) % relevant;
+    }
+
+    private static int SpecificMapAtOrdinaryOrdinal(
+        Room room,
+        CreatureTemplate template,
+        int relevant,
+        int ordinal)
+    {
+        for (int specific = 0; specific < relevant; specific++)
+        {
+            if (!IsOrdinaryFollowMap(room, template, specific)) continue;
+            if (ordinal-- == 0) return specific;
+        }
+        return -1;
+    }
+
+    private static bool IsOrdinaryFollowMap(Room room, CreatureTemplate template, int specific)
+    {
+        if (room?.abstractRoom == null || template == null || specific < 0) return false;
+        int common = room.abstractRoom.CreatureSpecificToCommonNodeIndex(specific, template);
+        return common >= 0 && common < room.exitAndDenIndex.Length;
     }
 
     internal static void Reset()

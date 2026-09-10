@@ -5,7 +5,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// <summary>
 /// Domains that may become the single ordinary movement owner for one Desert Batfly frame.
 /// Signal and Threat-memory are intentionally absent: they are information/modifier layers,
-/// never locomotion owners.
+/// never locomotion owners. Formal Social events and background NeutralEcology are separate
+/// owners so short flocking cannot masquerade as a reserved social interaction.
 /// </summary>
 internal enum DB_BehaviorOwner
 {
@@ -27,6 +28,7 @@ internal enum DB_BehaviorOwner
     Combat,
     Roost,
     Social,
+    NeutralEcology,
     Ordinary,
     VanillaFallback
 }
@@ -47,6 +49,7 @@ internal enum DB_BehaviorKind
     Combat,
     Roost,
     Social,
+    NeutralEcology,
     Idle,
     Native
 }

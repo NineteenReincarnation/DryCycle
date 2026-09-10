@@ -159,13 +159,18 @@ internal static partial class Program
 
         foreach (string cue in new[]
         {
-            "PlayerSlot", "VisibleSpear", "VisibleRock", "VisibleExplosive", "VisibleStartle",
-            "VisibleShock", "RecentSpearThrow", "RecentRockThrow", "RecentExplosion",
-            "RecentGrabAttempt", "ProjectileThreat", "ProjectileThreatDirection",
-            "CurrentHazardCenter", "PlayerRetreating"
+            "PlayerSlot", "RecentSpearThrow", "RecentRockThrow", "RecentExplosion",
+            "RecentGrabAttempt", "CurrentHazardCenter", "PlayerRetreating"
         })
             Check(cueType.GetField(cue, Flags) != null,
-                "Threat Current Cue exposes " + cue);
+                "Threat temporal cue exposes " + cue);
+        foreach (string retired in new[]
+        {
+            "VisibleSpear", "VisibleRock", "VisibleExplosive", "VisibleStartle", "VisibleShock",
+            "ProjectileThreat", "ProjectileThreatDirection"
+        })
+            Check(cueType.GetField(retired, Flags) == null,
+                "Threat no longer mirrors current Perception fact " + retired);
 
         Type runtimeState = runtimeType.GetNestedType("RuntimeState", Flags);
         Check(runtimeState != null &&
@@ -191,15 +196,16 @@ internal static partial class Program
             "Threat RoomState owns temporal evidence only and cannot become a second room scanner");
 
         Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);
-        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Type perceptionRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);
         Check(roomContext.GetProperty("Players", Flags) != null &&
               roomContext.GetProperty("ThrownWeapons", Flags) != null,
-            "Threat current perception reuses the shared room player/projectile snapshot");
+            "shared RoomContext still owns raw player/projectile room snapshots");
         MethodInfo updateCue = runtimeType.GetMethod("UpdateCue", Flags);
-        Check(MethodCallOffset(updateCue, roomContext, "For") >= 0 &&
-              MethodCallOffset(updateCue, weaponPerception, "TryObserveHeldThreats") >= 0 &&
-              MethodCallOffset(updateCue, weaponPerception, "TryFindIncomingProjectileFrom") >= 0,
-            "Threat Current Cue consumes shared RoomContext and WeaponPerception rather than rescanning the room");
+        Check(MethodCallOffset(updateCue, perceptionRuntime, "TryGetObservedPlayer") >= 0 &&
+              MethodCallOffset(updateCue, roomContext, "For") < 0,
+            "Threat temporal cue consumes current player facts only through Perception R2");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,
+            "Threat migration leaves no WeaponPerception compatibility shell");
         Check((int)runtimeType.GetField("CueRefreshTicks", Flags).GetRawConstantValue() >= 8 &&
               runtimeType.GetMethod("CueRefreshPhase", Flags) != null,
             "Threat per-bat cue refresh remains low-frequency and phase-staggered");

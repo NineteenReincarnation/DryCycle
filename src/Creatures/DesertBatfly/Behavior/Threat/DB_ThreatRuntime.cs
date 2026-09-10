@@ -9,17 +9,10 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal struct DB_ThreatCue
 {
     internal int PlayerSlot;
-    internal bool VisibleSpear;
-    internal bool VisibleRock;
-    internal bool VisibleExplosive;
-    internal bool VisibleStartle;
-    internal bool VisibleShock;
     internal bool RecentSpearThrow;
     internal bool RecentRockThrow;
     internal bool RecentExplosion;
     internal bool RecentGrabAttempt;
-    internal bool ProjectileThreat;
-    internal Vector2 ProjectileThreatDirection;
     internal Vector2? CurrentHazardCenter;
     internal bool PlayerRetreating;
 }
@@ -681,35 +674,23 @@ internal static class DB_ThreatRuntime
 
         Room room = bat.room;
         RoomState roomState = RoomFor(room);
-        DB_RoomContext context = DB_RoomContext.For(room);
-        if (context == null)
-        {
-            state.Cue = default;
-            return;
-        }
-
-        Player player = bat.DesertAI.Target as Player;
-        if (player == null || player.dead || player.room != room ||
-            !DB_VisibilityPolicy.CanObserve(
-                bat, player.mainBodyChunk.pos, 430f, DB_VisibilityChannel.Player))
-            player = NearestVisiblePlayer(bat, context.Players);
-
+        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;
+        Player preferred = bat.DesertAI?.Target as Player;
         DB_ThreatCue cue = default;
-        cue.PlayerSlot = PlayerSlot(player);
-        if (player == null || !ValidSlot(cue.PlayerSlot))
+        cue.PlayerSlot = -1;
+
+        if (perception == null ||
+            !perception.TryGetObservedPlayer(preferred, 430f, out Player player))
         {
             state.Cue = cue;
             return;
         }
 
-        if (DB_WeaponPerception.TryObserveHeldThreats(
-                bat, player, 430f, out DB_HeldThreatObservation held))
+        cue.PlayerSlot = PlayerSlot(player);
+        if (!ValidSlot(cue.PlayerSlot))
         {
-            cue.VisibleSpear = held.VisibleSpear;
-            cue.VisibleRock = held.VisibleRock;
-            cue.VisibleExplosive = held.VisibleExplosive;
-            cue.VisibleStartle = held.VisibleStartle;
-            cue.VisibleShock = held.VisibleShock;
+            state.Cue = cue;
+            return;
         }
 
         int clock = room.game?.clock ?? 0;
@@ -720,27 +701,25 @@ internal static class DB_ThreatRuntime
         cue.CurrentHazardCenter = state.HazardTimer > 0 ? state.HazardCenter : null;
         cue.PlayerRetreating = state.EncounterPlayerSlot == cue.PlayerSlot && state.RetreatTicks > 12;
 
-        if (DB_WeaponPerception.TryFindIncomingProjectileFrom(
-                bat,
-                player,
-                ProjectileNearMissMaxDistance,
-                ProjectileNearMissRadius,
-                16f,
-                out DB_WeaponObservation projectile))
+        DB_ProjectilePercept incoming = perception.Snapshot.IncomingProjectile;
+        if (incoming.Valid)
         {
-            cue.ProjectileThreat = true;
-            cue.ProjectileThreatDirection = projectile.Velocity.normalized;
-            LearnNearMiss(bat, state, projectile.Weapon, player, clock);
-        }
+            DB_WeaponObservation projectile = incoming.Observation;
+            bool samePlayer = ReferenceEquals(projectile.Instigator, player);
+            bool fastEnough = projectile.Velocity.sqrMagnitude >= 16f;
+            bool closeEnough = incoming.ClosestDistance <= ProjectileNearMissRadius &&
+                               (projectile.Position - bat.mainBodyChunk.pos).sqrMagnitude <=
+                               ProjectileNearMissMaxDistance * ProjectileNearMissMaxDistance;
+            if (samePlayer && fastEnough && closeEnough)
+                LearnNearMiss(bat, state, projectile.Weapon, player, clock);
 
-        state.Cue = cue;
-        if (cue.ProjectileThreat)
-        {
-            // Real trajectory is a current-frame Arbiter fact. Do not pre-promote it into
-            // DesertAI Escape here or ImmediateDanger would starve ProjectileEvade.
+            // Real trajectory is a current-frame Perception/Arbiter fact. Threat records
+            // learned evidence only and never mirrors projectile geometry into DB_ThreatCue.
             DB_SocialRuntime.CancelForPriority(bat, "incoming projectile");
             state.ModifierReason = "real incoming projectile queued for R3 arbitration";
         }
+
+        state.Cue = cue;
     }
 
     private static void ApplyHeldThreatPriority(DB_Creature bat, RuntimeState state)
@@ -751,15 +730,20 @@ internal static class DB_ThreatRuntime
             DB_ThreatMemoryStore.For(bat.DesertState, cue.PlayerSlot);
         if (memory == null || memory.Confidence < 0.08f) return;
 
-        Player player = DB_RoomContext.For(bat.room)?.PlayerBySlot(cue.PlayerSlot);
-        if (player == null) return;
+        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;
+        if (perception == null ||
+            !perception.TryGetObservedPlayerBySlot(cue.PlayerSlot, 430f, out Player player))
+            return;
+
+        DB_HeldThreatObservation held = default;
+        perception.TryGetHeldThreats(player, out held);
 
         float heldRisk = 0f;
-        if (cue.VisibleSpear) heldRisk += memory.PiercingPressure * 0.48f;
-        if (cue.VisibleRock) heldRisk += memory.BluntStunPressure * 0.24f;
-        if (cue.VisibleExplosive) heldRisk += memory.ExplosionPressure * 0.65f;
-        if (cue.VisibleStartle) heldRisk += memory.StartlePressure * 0.46f;
-        if (cue.VisibleShock) heldRisk += memory.ShockPressure * 0.50f;
+        if (held.VisibleSpear) heldRisk += memory.PiercingPressure * 0.48f;
+        if (held.VisibleRock) heldRisk += memory.BluntStunPressure * 0.24f;
+        if (held.VisibleExplosive) heldRisk += memory.ExplosionPressure * 0.65f;
+        if (held.VisibleStartle) heldRisk += memory.StartlePressure * 0.46f;
+        if (held.VisibleShock) heldRisk += memory.ShockPressure * 0.50f;
         heldRisk *= Mathf.Lerp(1.15f, 0.72f, bat.Personality.Nerve);
         heldRisk *= Mathf.Lerp(0.70f, 1f, memory.Confidence);
         heldRisk = Mathf.Clamp01(heldRisk);
@@ -826,10 +810,10 @@ internal static class DB_ThreatRuntime
         if (state.PreviousMode != DB_AI.Activity.Escape)
             state.PursuitDisengageExtended = false;
 
-        DB_RoomContext context = DB_RoomContext.For(bat.room);
-        Player player = context != null
-            ? NearestVisiblePlayer(bat, context.Players, 300f)
-            : null;
+        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;
+        Player player = null;
+        if (perception != null)
+            perception.TryGetObservedPlayer(null, 300f, out player);
         if (player == null)
         {
             state.PursuitTicks = 0;
@@ -899,9 +883,10 @@ internal static class DB_ThreatRuntime
         }
 
         int slot = PlayerSlot(player);
-        if (!ValidSlot(slot) ||
-            !DB_VisibilityPolicy.CanObserve(
-                bat, player.mainBodyChunk.pos, 360f, DB_VisibilityChannel.Player))
+        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;
+        if (!ValidSlot(slot) || perception == null ||
+            !perception.TryGetObservedPlayer(player, 360f, out Player observedPlayer) ||
+            !ReferenceEquals(observedPlayer, player))
         {
             ResetEncounter(state);
             return;
@@ -995,6 +980,11 @@ internal static class DB_ThreatRuntime
         if (memory == null || memory.Confidence <= 0.02f) return;
 
         DB_ThreatCue cue = state.Cue.PlayerSlot == slot ? state.Cue : default;
+        DB_HeldThreatObservation held = default;
+        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);
+        DB_PerceptionSnapshot perceptionSnapshot = bat.DesertAI?.Perception?.Snapshot ?? default;
+        bool currentProjectileThreat = perceptionSnapshot.HasIncomingProjectile &&
+            ReferenceEquals(perceptionSnapshot.IncomingProjectile.Observation.Instigator, player);
         float nerve = bat.Personality.Nerve;
         float projectileRisk = Mathf.Clamp01(
             memory.ProjectilePressure * 0.35f + memory.PiercingPressure * 0.65f);
@@ -1009,9 +999,9 @@ internal static class DB_ThreatRuntime
             explosionRisk * 0.22f + counterRisk * 0.18f);
         caution *= Mathf.Lerp(1.18f, 0.72f, nerve) *
                    Mathf.Lerp(0.72f, 1f, memory.Confidence);
-        if (cue.VisibleSpear) caution += memory.PiercingPressure * 0.18f;
-        if (cue.VisibleExplosive) caution += memory.ExplosionPressure * 0.18f;
-        if (cue.VisibleStartle) caution += memory.StartlePressure * 0.10f;
+        if (held.VisibleSpear) caution += memory.PiercingPressure * 0.18f;
+        if (held.VisibleExplosive) caution += memory.ExplosionPressure * 0.18f;
+        if (held.VisibleStartle) caution += memory.StartlePressure * 0.10f;
         caution = Mathf.Clamp01(caution);
 
         float confidenceRelief = memory.NonAggressionConfidence * 0.10f +
@@ -1043,7 +1033,7 @@ internal static class DB_ThreatRuntime
                 }
 
                 float scale = 1f + caution * 0.48f +
-                    (cue.VisibleSpear ? memory.PiercingPressure * 0.22f : 0f);
+                    (held.VisibleSpear ? memory.PiercingPressure * 0.22f : 0f);
                 Vector2 offset = currentOffset.normalized *
                     Mathf.Max(currentOffset.magnitude, 135f) * scale;
                 offset.y *= 0.72f;
@@ -1100,7 +1090,7 @@ internal static class DB_ThreatRuntime
                 state.ModifierReason = "learned dive geometry";
                 state.AttackGeometryAdjustment = "straight dive reduced";
                 if (!extremeVengeance && state.PreviousMode != DB_AI.Activity.Dive &&
-                    ShouldAbortDive(bat, slot, caution, counterRisk, cue))
+                    ShouldAbortDive(bat, slot, caution, counterRisk, held, currentProjectileThreat))
                 {
                     bat.DesertAI.CancelAttack();
                     Vector2 evade = bat.mainBodyChunk.pos +
@@ -1166,11 +1156,12 @@ internal static class DB_ThreatRuntime
         int slot,
         float caution,
         float counterRisk,
-        in DB_ThreatCue cue)
+        in DB_HeldThreatObservation held,
+        bool currentProjectileThreat)
     {
         float chance = caution * 0.30f + counterRisk * 0.18f;
-        if (cue.VisibleSpear) chance += 0.12f;
-        if (cue.ProjectileThreat) chance += 0.28f;
+        if (held.VisibleSpear) chance += 0.12f;
+        if (currentProjectileThreat) chance += 0.28f;
         chance *= Mathf.Lerp(1.12f, 0.58f, bat.Personality.Nerve);
         chance *= Mathf.Lerp(1.05f, 0.70f, bat.Personality.Temperament);
         return Stable01(bat, slot, 0x19C7) < Mathf.Clamp01(chance);
@@ -1215,29 +1206,6 @@ internal static class DB_ThreatRuntime
         if (source != null && sourceOwners.TryGetValue(source, out SourceOwner remembered))
             return remembered.Player;
         return null;
-    }
-
-    private static Player NearestVisiblePlayer(
-        DB_Creature bat,
-        IReadOnlyList<Player> players,
-        float maxDistance = 430f)
-    {
-        if (bat == null || players == null) return null;
-        Player best = null;
-        float bestDistance = maxDistance;
-        for (int i = 0; i < players.Count; i++)
-        {
-            Player player = players[i];
-            if (player == null || player.dead || player.room != bat.room) continue;
-            float distance = Vector2.Distance(bat.mainBodyChunk.pos, player.mainBodyChunk.pos);
-            if (distance >= bestDistance ||
-                !DB_VisibilityPolicy.CanObserve(
-                    bat, player.mainBodyChunk.pos, maxDistance, DB_VisibilityChannel.Player))
-                continue;
-            bestDistance = distance;
-            best = player;
-        }
-        return best;
     }
 
     private static int CueRefreshPhase(DB_Creature bat)

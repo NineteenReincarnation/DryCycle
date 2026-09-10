@@ -14,7 +14,9 @@ for f in \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelIntent.cs \
   src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs \
   src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs \
-  src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs \
+  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs \
+  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionTypes.cs \
+  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionScoring.cs \
   src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs \
   src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
   src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
@@ -54,13 +56,15 @@ grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/D
 ! grep -q 'base.Update' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 ! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
 
-grep -q 'internal sealed class DB_CreaturePerception' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-grep -q 'internal Creature Danger' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-grep -q 'DB_VisibilityPolicy.CanObserve' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-! grep -n -E '\bdanger[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
-! grep -n '\.localGoal[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs
+PERCEPTION=src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs
+grep -q 'internal class DB_PerceptionRuntime' "$PERCEPTION"
+grep -q 'internal Creature Danger' "$PERCEPTION"
+grep -q 'DB_RoomContext context' "$PERCEPTION"
+grep -q 'DB_VisibilityPolicy.CanObserve' "$PERCEPTION"
+grep -q 'DB_PerceptionScoring.ThreatAttentionScore' "$PERCEPTION"
+grep -q 'DB_PerceptionScoring.ProjectileRisk' "$PERCEPTION"
+! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$PERCEPTION"
+! grep -n '\.localGoal[[:space:]]*=' "$PERCEPTION"
 ! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 ! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 
@@ -89,8 +93,6 @@ grep -q '"FeedingRole"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 grep -q '"FeedingGroup"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 grep -q 'DB_FeedingCoordinator.TryPeekTarget' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
 
-# Collision auto-capture must pass through the same dehydration grip gate without
-# letting vanilla emit a false successful-catch side effect before SlugcatGrab.
 grep -q 'On.Player.Collide += PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
 grep -q 'On.Player.Collide -= PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
 grep -q 'VanillaAutoCaptureWouldAttempt' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
@@ -139,8 +141,6 @@ for token in (
     if token not in grip:
         raise SystemExit('Dehydrated collision pickup contract missing: ' + token)
 
-# R3's execution precedence must keep Feeding between immediate projectile evade and Combat.
-# A simple presence check is insufficient because moving Feeding below Combat changes gameplay.
 owner_order = (
     'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
     'PrimaryOwner == DB_BehaviorOwner.Feeding',

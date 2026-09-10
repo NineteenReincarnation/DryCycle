@@ -22,7 +22,7 @@ internal static class DB_RainWorldHooks
         DB_FearRuntime.Reset();
         DB_RefugePolicy.Reset();
         DB_SocialRuntime.Reset();
-        DB_SwarmLifecycleRuntime.Reset();
+        DB_NeutralBehaviorRuntime.Reset();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
@@ -42,6 +42,7 @@ internal static class DB_RainWorldHooks
         On.Fly.Burrowed += Burrow;
         On.FlyAI.Update += UpdateAI;
         On.FlyAI.UpdateThreats += Threats;
+        On.FlyAI.ConsiderOtherFly += ConsiderOtherFly;
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.SwarmUpdate += Swarm;
         On.FlyAI.UpdateFollowDijsktra += Follow;
@@ -59,6 +60,7 @@ internal static class DB_RainWorldHooks
         On.Fly.Burrowed -= Burrow;
         On.FlyAI.Update -= UpdateAI;
         On.FlyAI.UpdateThreats -= Threats;
+        On.FlyAI.ConsiderOtherFly -= ConsiderOtherFly;
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.SwarmUpdate -= Swarm;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
@@ -74,7 +76,7 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRoomRuntime.Reset();
         DB_FeedingCoordinator.Reset();
         DB_SocialRuntime.Reset();
-        DB_SwarmLifecycleRuntime.Reset();
+        DB_NeutralBehaviorRuntime.Reset();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
@@ -119,7 +121,7 @@ internal static class DB_RainWorldHooks
         {
             desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
-            DB_SwarmLifecycleRuntime.Forget(desert);
+            DB_NeutralBehaviorRuntime.Forget(desert);
             DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
         }
@@ -136,7 +138,7 @@ internal static class DB_RainWorldHooks
 
         desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
-        DB_SwarmLifecycleRuntime.Forget(desert);
+        DB_NeutralBehaviorRuntime.Forget(desert);
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
@@ -152,13 +154,15 @@ internal static class DB_RainWorldHooks
             return;
         }
 
-        // R3 order is deliberate: refresh state/facts first, resolve one owner, then execute.
-        // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
+        // Refresh mutable domain state exactly once before the read-only proposal pass.
+        // Urgency/commitment domains refresh before interaction schedulers so Social cannot
+        // reserve a bat in the same frame that Feeding has already claimed.
         DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DB_ThreatRuntime.RefreshState(desert);
-        DB_SocialRuntime.RefreshState(desert);
         desert.Feeding.RefreshState();
+        DB_SocialRuntime.RefreshState(desert);
+        DB_NeutralBehaviorRuntime.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
 
@@ -172,6 +176,7 @@ internal static class DB_RainWorldHooks
             DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
         {
             DB_SocialRuntime.CancelForPriority(desert, PrimaryOwnerBlockReason(ownership.PrimaryOwner));
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
             CompleteR3Frame(desert, ownership);
             return;
         }
@@ -212,6 +217,7 @@ internal static class DB_RainWorldHooks
             if (DB_TravelRuntime.TryDriveRealized(desert))
             {
                 DB_SocialRuntime.CancelForPriority(desert, "travel priority");
+                DB_NeutralBehaviorRuntime.CancelForPriority(desert);
                 desert.DesertAI.CancelAttack();
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -329,6 +335,19 @@ internal static class DB_RainWorldHooks
                 "Social executor yielded after reservation/state recheck");
         }
 
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.NeutralEcology)
+        {
+            if (DB_BehaviorExecution.TryNeutralEcology(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.NeutralEcology,
+                "NeutralEcology executor yielded after local-goal recheck");
+        }
+
         if (ExecuteNativeOwned(orig, self, desert, ownership))
         {
             CompleteR3Frame(desert, ownership);
@@ -368,11 +387,11 @@ internal static class DB_RainWorldHooks
             return false;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(desert, owner)) return false;
 
-        // NativeSpecial already declares its social suppression in the winning proposal.
-        // Keep that semantic at the accepted top-level owner instead of re-hooking nested
-        // FleeFromRainUpdate solely to cancel Social a second time.
         if (ownership.WinningProposal.SuppressSocial)
+        {
             DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=" + owner);
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
+        }
 
         orig(self);
         return true;
@@ -400,6 +419,23 @@ internal static class DB_RainWorldHooks
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
     {
         if (self.fly is not DB_Creature) orig(self);
+    }
+
+    private static void ConsiderOtherFly(On.FlyAI.orig_ConsiderOtherFly orig, FlyAI self)
+    {
+        if (self.fly is DB_Creature)
+        {
+            // Desert Batflies are intentionally absent from Room.fliesRoomAi. Allowing the
+            // vanilla neighbor pass to sample an ordinary Fly would nevertheless import that
+            // Fly's Dijkstra map, FlockBehavior, localGoal and chain attraction into DB idle
+            // flight. DB Threat/Signal/Social/NeutralEcology already own those semantics, so
+            // clear the transient vanilla neighbor instead of letting a mixed-species room
+            // recreate the old fixed-point flocking leak.
+            self.otherFly = null;
+            return;
+        }
+
+        orig(self);
     }
 
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)

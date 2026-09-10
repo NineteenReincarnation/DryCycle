@@ -51,6 +51,7 @@ internal static class DB_BehaviorArbiter
         DB_BehaviorOwner.Combat => 110,
         DB_BehaviorOwner.Roost => 120,
         DB_BehaviorOwner.Social => 130,
+        DB_BehaviorOwner.NeutralEcology => 135,
         DB_BehaviorOwner.Ordinary => 140,
         DB_BehaviorOwner.VanillaFallback => 150,
         _ => int.MaxValue
@@ -207,6 +208,7 @@ internal static class DB_BehaviorArbiter
         DB_BehaviorOwner.Combat => "rejected by higher-priority Combat",
         DB_BehaviorOwner.Roost => "rejected by higher-priority Roost",
         DB_BehaviorOwner.Social => "rejected by higher-priority Social",
+        DB_BehaviorOwner.NeutralEcology => "rejected by higher-priority NeutralEcology",
         DB_BehaviorOwner.Ordinary => "rejected by higher-priority Ordinary",
         DB_BehaviorOwner.VanillaFallback => "rejected by higher-priority VanillaFallback",
         _ => "rejected by higher-priority owner"
@@ -436,23 +438,30 @@ internal static class DB_BehaviorArbiter
                 commitment: 0.82f));
 
         bool activeSocialEvent = frame.HasSocialState && frame.Social.Mode != DB_SocialMode.None;
-        bool ambientSocial = !activeSocialEvent && DB_AmbientSocialRuntime.ShouldOwn(frame);
-        if (activeSocialEvent || ambientSocial)
+        if (activeSocialEvent)
             proposals.Add(DB_BehaviorProposal.Create(
                 DB_BehaviorOwner.Social,
                 DB_BehaviorKind.Social,
-                ambientSocial ? "ambient neutral social ecology" : frame.Social.DecisionReason,
-                activeSocialEvent ? frame.Social.RoostTarget ?? frame.CurrentGoal : frame.CurrentGoal,
-                nominalSpeed: ambientSocial ? 4.6f : 5f,
-                preserveGoal: ambientSocial || frame.Social.RoostTarget == null,
-                commitment: ambientSocial
-                    ? DB_AmbientSocialRuntime.Commitment(frame.Personality)
-                    : Mathf.Clamp01(frame.Social.SocialDrive)));
+                frame.Social.DecisionReason,
+                frame.Social.RoostTarget ?? frame.CurrentGoal,
+                nominalSpeed: 5f,
+                preserveGoal: frame.Social.RoostTarget == null,
+                commitment: Mathf.Clamp01(frame.Social.SocialDrive)));
+
+        if (!activeSocialEvent && DB_NeutralBehaviorRuntime.ShouldOwn(frame))
+            proposals.Add(DB_BehaviorProposal.Create(
+                DB_BehaviorOwner.NeutralEcology,
+                DB_BehaviorKind.NeutralEcology,
+                "short neutral ecology bout",
+                frame.CurrentGoal,
+                nominalSpeed: 4.6f,
+                preserveGoal: true,
+                commitment: DB_NeutralBehaviorRuntime.Commitment(frame.Personality)));
 
         proposals.Add(DB_BehaviorProposal.Create(
             DB_BehaviorOwner.Ordinary,
             DB_BehaviorKind.Idle,
-            "ordinary Desert Batfly / vanilla swarm fallback",
+            "ordinary Desert Batfly / vanilla idle fallback",
             frame.CurrentGoal,
             desiredNativeBehavior: frame.NativeBehavior,
             preserveGoal: true,

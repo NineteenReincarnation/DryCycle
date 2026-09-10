@@ -19,11 +19,28 @@ internal enum DB_SocialMode
     ChainSocialization
 }
 
+/// <summary>
+/// Broad need family used only to diversify formal social choices. SocialDrive answers
+/// "do I want social contact now?"; the fatigue axes answer "what kind of contact have I
+/// recently had enough of?". PositionNegotiation is coordination, not need satisfaction.
+/// </summary>
+internal enum DB_SocialNeedAxis
+{
+    None,
+    Affiliation,
+    Play,
+    Greeting
+}
+
 internal readonly struct DB_SocialDebugState
 {
     internal readonly bool Eligible;
     internal readonly float SocialDrive;
     internal readonly int SocialCooldown;
+    internal readonly int NegotiationCooldown;
+    internal readonly float AffiliationFatigue;
+    internal readonly float PlayFatigue;
+    internal readonly float GreetingFatigue;
     internal readonly DB_SocialMode Mode;
     internal readonly int InteractionTicks;
     internal readonly int Duration;
@@ -32,6 +49,9 @@ internal readonly struct DB_SocialDebugState
     internal readonly int MicroFlockId;
     internal readonly int MicroFlockSize;
     internal readonly DB_SocialMode LastInteractionType;
+    internal readonly DB_SocialMode RecentInteraction0;
+    internal readonly DB_SocialMode RecentInteraction1;
+    internal readonly DB_SocialMode RecentInteraction2;
     internal readonly string DecisionReason;
     internal readonly int CandidateCount;
     internal readonly Vector2? RoostTarget;
@@ -41,6 +61,10 @@ internal readonly struct DB_SocialDebugState
         bool eligible,
         float socialDrive,
         int socialCooldown,
+        int negotiationCooldown,
+        float affiliationFatigue,
+        float playFatigue,
+        float greetingFatigue,
         DB_SocialMode mode,
         int interactionTicks,
         int duration,
@@ -49,6 +73,9 @@ internal readonly struct DB_SocialDebugState
         int microFlockId,
         int microFlockSize,
         DB_SocialMode lastInteractionType,
+        DB_SocialMode recentInteraction0,
+        DB_SocialMode recentInteraction1,
+        DB_SocialMode recentInteraction2,
         string decisionReason,
         int candidateCount,
         Vector2? roostTarget,
@@ -57,6 +84,10 @@ internal readonly struct DB_SocialDebugState
         Eligible = eligible;
         SocialDrive = socialDrive;
         SocialCooldown = socialCooldown;
+        NegotiationCooldown = negotiationCooldown;
+        AffiliationFatigue = Mathf.Clamp01(affiliationFatigue);
+        PlayFatigue = Mathf.Clamp01(playFatigue);
+        GreetingFatigue = Mathf.Clamp01(greetingFatigue);
         Mode = mode;
         InteractionTicks = interactionTicks;
         Duration = duration;
@@ -65,6 +96,9 @@ internal readonly struct DB_SocialDebugState
         MicroFlockId = microFlockId;
         MicroFlockSize = microFlockSize;
         LastInteractionType = lastInteractionType;
+        RecentInteraction0 = recentInteraction0;
+        RecentInteraction1 = recentInteraction1;
+        RecentInteraction2 = recentInteraction2;
         DecisionReason = decisionReason ?? string.Empty;
         CandidateCount = candidateCount;
         RoostTarget = roostTarget;
@@ -73,20 +107,33 @@ internal readonly struct DB_SocialDebugState
 }
 
 /// <summary>
-/// Neutral social-life layer. All state is realized-only and non-persistent.
-/// Survival, cross-room travel, injury, combat and committed roost behavior remain owned by
-/// their existing systems. This layer only chooses temporary neutral local goals; vanilla
-/// Fly.BatFlight remains the locomotion implementation.
+/// Formal realized-only social-event layer. Background peer drift, loose flocking and short
+/// swarm motion belong to DB_NeutralBehaviorRuntime; this domain owns only temporary reserved
+/// interactions such as companion drift, greeting passes, play chase, microflocks and roost
+/// invitations. Vanilla Fly.BatFlight remains the locomotion implementation.
+///
+/// One SocialDrive controls overall event cadence. Three temporary need-fatigue axes and a
+/// three-event history diversify the selected event without erasing personality preferences.
+/// A completed interaction satisfies SocialDrive by an amount appropriate to its duration and
+/// meaning; PositionNegotiation consumes no SocialDrive because it is collision coordination.
 /// </summary>
 internal static class DB_SocialRuntime
 {
     private const int ScanIntervalMin = 16;
     private const int ScanIntervalMax = 30;
     private const int GroupMin = 3;
-    private const int GroupMax = 6;
+    private const int GroupMax = 5;
     private const float SocialRange = 240f;
     private const float CloseNegotiationRange = 62f;
+    private const float GroupCloseSeparationRadius = 52f;
 
+    private const float AffiliationFatigueRecovery = 0.00155f;
+    private const float PlayFatigueRecovery = 0.00135f;
+    private const float GreetingFatigueRecovery = 0.00220f;
+    private const float FatigueWeightFloor = 0.32f;
+
+    // Retained as the ordinary microflock bias. A second isotropic close-separation term below
+    // prevents actual overlap/vertical stacking without turning the whole formation vertical.
     internal const float GroupSeparationXWeight = 1.00f;
     internal const float GroupSeparationYWeight = 0.24f;
 
@@ -107,6 +154,11 @@ internal static class DB_SocialRuntime
     {
         internal float Drive;
         internal int Cooldown;
+        internal int NegotiationCooldown;
+        internal float AffiliationFatigue;
+        internal float PlayFatigue;
+        internal float GreetingFatigue;
+
         internal DB_SocialMode Mode;
         internal PairRole Role;
         internal int Ticks;
@@ -116,8 +168,16 @@ internal static class DB_SocialRuntime
         internal DB_Creature Partner;
         internal DB_Creature Anchor;
         internal DB_SocialRoomRuntime.Reservation Token;
+        internal bool InitiatedInteraction;
+
         internal DB_SocialMode LastMode;
-        internal long LastPartnerKey = long.MinValue;
+        internal DB_SocialMode RecentMode0;
+        internal DB_SocialMode RecentMode1;
+        internal DB_SocialMode RecentMode2;
+        internal long RecentPartner0 = long.MinValue;
+        internal long RecentPartner1 = long.MinValue;
+        internal long RecentPartner2 = long.MinValue;
+
         internal string DecisionReason = "initial neutral state";
         internal int CandidateCount;
         internal int Side;
@@ -154,10 +214,16 @@ internal static class DB_SocialRuntime
         if (bat == null) return;
         State state = states.GetValue(bat, CreateState);
         if (state.Cooldown > 0) state.Cooldown--;
+        if (state.NegotiationCooldown > 0) state.NegotiationCooldown--;
 
         if (state.LastRoom != null && state.LastRoom != bat.room && state.Mode != DB_SocialMode.None)
             CancelForPriorityState(bat, state, "room transition");
         state.LastRoom = bat.room;
+
+        // Need fatigue is satiation, not a permission timer. It recovers whenever the bat is not
+        // actively socializing, including while danger/weather temporarily suppresses social life.
+        if (state.Mode == DB_SocialMode.None)
+            RecoverNeedFatigue(state);
 
         string block = PriorityBlockReason(bat);
         if (block != null)
@@ -203,7 +269,10 @@ internal static class DB_SocialRuntime
             return;
         }
 
+        // Collision coordination is deliberately outside the SocialDrive economy. It can run
+        // while the ordinary social cooldown is active, but has its own short anti-ping-pong gate.
         if (TryStartPositionNegotiation(bat, state, roomState, candidates)) return;
+
         if (state.Cooldown > 0)
         {
             state.DecisionReason = "social cooldown";
@@ -220,7 +289,7 @@ internal static class DB_SocialRuntime
         float activeRatio = roomState.CandidateCount <= 0
             ? 0f
             : roomState.ActiveMemberCount / (float)Mathf.Max(1, roomState.CandidateCount);
-        if (activeRatio > 0.68f)
+        if (activeRatio > 0.64f)
         {
             state.DecisionReason = "room social soft cap";
             return;
@@ -259,6 +328,10 @@ internal static class DB_SocialRuntime
             PriorityBlockReason(bat) == null,
             state.Drive,
             state.Cooldown,
+            state.NegotiationCooldown,
+            state.AffiliationFatigue,
+            state.PlayFatigue,
+            state.GreetingFatigue,
             state.Mode,
             state.Ticks,
             state.Duration,
@@ -267,6 +340,9 @@ internal static class DB_SocialRuntime
             state.Token?.Active == true && state.Token.Mode == DB_SocialMode.GroupDrift ? state.Token.Id : 0,
             groupSize,
             state.LastMode,
+            state.RecentMode0,
+            state.RecentMode1,
+            state.RecentMode2,
             state.DecisionReason,
             state.CandidateCount,
             debugRoostTarget,
@@ -289,6 +365,14 @@ internal static class DB_SocialRuntime
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "SocialCooldown", cooldownBucket, "quantized 20-tick cooldown bucket");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
+            "SocialNeedFatigue",
+            $"A={social.AffiliationFatigue:0.00};P={social.PlayFatigue:0.00};G={social.GreetingFatigue:0.00}",
+            "temporary need fatigue; lower is fresher");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
+            "SocialRecentModes",
+            $"{social.RecentInteraction0}/{social.RecentInteraction1}/{social.RecentInteraction2}",
+            "three-event diversity history");
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "SocialMode", social.Mode, social.DecisionReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "SocialPartner", social.Partner, social.DecisionReason);
@@ -299,22 +383,126 @@ internal static class DB_SocialRuntime
             "SocialReason", social.DecisionReason, social.Mode.ToString());
     }
 
-    // Pure helpers are intentionally internal so the managed regression suite can verify
-    // neutral social behavior without constructing a full Unity room/game loop.
+    // Pure helpers are internal so managed/probability tests can exercise the motivation math
+    // without constructing a Unity room/game loop.
     internal static float SocialDrivePerTick(DB_Personality personality)
     {
         if (personality == null) return 0f;
-        return 0.00175f *
-            Mathf.Lerp(0.82f, 1.28f, personality.Conformity) *
-            Mathf.Lerp(0.94f, 1.08f, personality.Temperament);
+        return 0.00230f *
+            Mathf.Lerp(0.84f, 1.24f, personality.Conformity) *
+            Mathf.Lerp(0.95f, 1.07f, personality.Temperament);
     }
 
     internal static float StartThreshold(DB_Personality personality)
     {
         if (personality == null) return 1f;
-        float value = Mathf.Lerp(0.72f, 0.52f, personality.Conformity) -
-            Mathf.InverseLerp(0.75f, 1f, personality.Temperament) * 0.04f;
-        return Mathf.Clamp(value, 0.46f, 0.78f);
+        float value = Mathf.Lerp(0.68f, 0.48f, personality.Conformity) -
+            Mathf.InverseLerp(0.75f, 1f, personality.Temperament) * 0.03f;
+        return Mathf.Clamp(value, 0.46f, 0.72f);
+    }
+
+    internal static DB_SocialNeedAxis NeedAxisOf(DB_SocialMode mode) => mode switch
+    {
+        DB_SocialMode.CompanionDrift => DB_SocialNeedAxis.Affiliation,
+        DB_SocialMode.GroupDrift => DB_SocialNeedAxis.Affiliation,
+        DB_SocialMode.RoostInvitation => DB_SocialNeedAxis.Affiliation,
+        DB_SocialMode.ChainSocialization => DB_SocialNeedAxis.Affiliation,
+        DB_SocialMode.SocialChase => DB_SocialNeedAxis.Play,
+        DB_SocialMode.PassBy => DB_SocialNeedAxis.Greeting,
+        _ => DB_SocialNeedAxis.None
+    };
+
+    internal static float NeedFreshness(float fatigue)
+        => Mathf.Lerp(1f, FatigueWeightFloor, Mathf.Clamp01(fatigue));
+
+    internal static float ModeNoveltyScale(
+        DB_SocialMode mode,
+        float affiliationFatigue,
+        float playFatigue,
+        float greetingFatigue,
+        DB_SocialMode recent0,
+        DB_SocialMode recent1,
+        DB_SocialMode recent2)
+    {
+        if (mode == DB_SocialMode.None || mode == DB_SocialMode.PositionNegotiation)
+            return 1f;
+
+        float fatigue = NeedAxisOf(mode) switch
+        {
+            DB_SocialNeedAxis.Affiliation => affiliationFatigue,
+            DB_SocialNeedAxis.Play => playFatigue,
+            DB_SocialNeedAxis.Greeting => greetingFatigue,
+            _ => 0f
+        };
+        float history = recent0 == mode ? 0.35f :
+            recent1 == mode ? 0.62f :
+            recent2 == mode ? 0.80f : 1f;
+        return NeedFreshness(fatigue) * history;
+    }
+
+    internal static float SocialSatisfactionFraction(
+        DB_SocialMode mode,
+        bool initiated,
+        float currentDrive)
+    {
+        currentDrive = Mathf.Clamp01(currentDrive);
+        return mode switch
+        {
+            DB_SocialMode.PassBy => 0.16f,
+            DB_SocialMode.SocialChase => 0.42f,
+            DB_SocialMode.CompanionDrift => 0.50f,
+            DB_SocialMode.GroupDrift when initiated => 0.62f,
+            DB_SocialMode.GroupDrift => Mathf.Lerp(
+                0.24f, 0.44f, Mathf.InverseLerp(0.25f, 0.75f, currentDrive)),
+            DB_SocialMode.RoostInvitation => 0.46f,
+            DB_SocialMode.ChainSocialization => 0.58f,
+            DB_SocialMode.PositionNegotiation => 0f,
+            _ => 0f
+        };
+    }
+
+    internal static float DriveAfterInteraction(
+        float currentDrive,
+        DB_SocialMode mode,
+        bool completed,
+        bool initiated)
+    {
+        currentDrive = Mathf.Clamp01(currentDrive);
+        float satisfaction = SocialSatisfactionFraction(mode, initiated, currentDrive);
+        if (!completed) satisfaction *= 0.22f;
+        return Mathf.Clamp01(currentDrive * (1f - satisfaction));
+    }
+
+    internal static float NeedFatigueGain(
+        DB_SocialMode mode,
+        bool completed,
+        bool initiated,
+        float currentDrive)
+    {
+        float gain = mode switch
+        {
+            DB_SocialMode.PassBy => 0.42f,
+            DB_SocialMode.SocialChase => 0.62f,
+            DB_SocialMode.CompanionDrift => 0.55f,
+            DB_SocialMode.GroupDrift when initiated => 0.72f,
+            DB_SocialMode.GroupDrift => Mathf.Lerp(
+                0.38f, 0.54f, Mathf.InverseLerp(0.25f, 0.75f, Mathf.Clamp01(currentDrive))),
+            DB_SocialMode.RoostInvitation => 0.48f,
+            DB_SocialMode.ChainSocialization => 0.62f,
+            _ => 0f
+        };
+        return completed ? gain : gain * 0.25f;
+    }
+
+    /// <summary>
+    /// A recently social individual remains a valid partner but is less attractive. This keeps
+    /// one completed group from removing most of the room's candidate pool while still avoiding
+    /// immediate ping-pong interactions with the same recently active bats.
+    /// </summary>
+    internal static float PartnerCooldownWeight(int cooldown)
+    {
+        if (cooldown <= 0) return 1f;
+        return Mathf.Lerp(0.72f, 0.30f, Mathf.InverseLerp(0f, 260f, cooldown));
     }
 
     internal static int StablePairSide(EntityID a, EntityID b)
@@ -364,10 +552,43 @@ internal static class DB_SocialRuntime
     {
         return new State
         {
-            Drive = Mathf.Lerp(0.08f, 0.30f, Stable01(bat.Personality.VisualSeed, 0x2F13)),
+            Drive = Mathf.Lerp(0.10f, 0.34f, Stable01(bat.Personality.VisualSeed, 0x2F13)),
             LastRoom = bat.room
         };
     }
+
+    private static void RecoverNeedFatigue(State state)
+    {
+        state.AffiliationFatigue = Mathf.Max(0f, state.AffiliationFatigue - AffiliationFatigueRecovery);
+        state.PlayFatigue = Mathf.Max(0f, state.PlayFatigue - PlayFatigueRecovery);
+        state.GreetingFatigue = Mathf.Max(0f, state.GreetingFatigue - GreetingFatigueRecovery);
+    }
+
+    private static float ModeNoveltyScale(State state, DB_SocialMode mode)
+        => ModeNoveltyScale(
+            mode,
+            state.AffiliationFatigue,
+            state.PlayFatigue,
+            state.GreetingFatigue,
+            state.RecentMode0,
+            state.RecentMode1,
+            state.RecentMode2);
+
+    private static float PartnerHistoryScale(State state, DB_SocialMode mode, DB_Creature partner)
+    {
+        if (partner?.abstractCreature == null) return 1f;
+        long key = DB_SocialRoomRuntime.Key(partner);
+        if (key == state.RecentPartner0)
+            return mode == DB_SocialMode.SocialChase ? 0.32f : 0.55f;
+        if (key == state.RecentPartner1)
+            return mode == DB_SocialMode.SocialChase ? 0.55f : 0.72f;
+        if (key == state.RecentPartner2)
+            return 0.86f;
+        return 1f;
+    }
+
+    private static float ChoiceDiversityScale(State state, DB_SocialMode mode, DB_Creature partner)
+        => ModeNoveltyScale(state, mode) * PartnerHistoryScale(state, mode, partner);
 
     private static string PriorityBlockReason(DB_Creature bat)
     {
@@ -384,6 +605,8 @@ internal static class DB_SocialRuntime
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "severe injury / recovery";
+        if (bat.Feeding?.Active == true) return "dehydrated-player feeding commitment";
+        if (bat.Rescue?.Active == true) return "companion rescue commitment";
         if (bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
             bat.AI.luredCounter > 0 || bat.safariControlled)
             return "vanilla priority";
@@ -429,16 +652,17 @@ internal static class DB_SocialRuntime
             if (distance > SocialRange) continue;
             if (distance > 70f && !bat.room.VisualContact(bat.mainBodyChunk.pos, other.mainBodyChunk.pos)) continue;
 
+            float availability = PartnerAvailability(other);
             float bond = Mathf.Max(
                 DB_SocialBond.GetBondStrength(bat, other),
                 DB_SocialBond.GetBondStrength(other, bat));
             float companionWeight = PartnerPreference(
-                bat.Personality.Conformity,
-                1f - bat.Personality.Temperament,
-                bond,
-                Mathf.InverseLerp(55f, SocialRange, distance)) *
+                    bat.Personality.Conformity,
+                    1f - bat.Personality.Temperament,
+                    bond,
+                    Mathf.InverseLerp(55f, SocialRange, distance)) *
                 (0.65f + state.Drive * 0.55f) *
-                RepeatScale(state, DB_SocialMode.CompanionDrift, other);
+                ChoiceDiversityScale(state, DB_SocialMode.CompanionDrift, other) * availability;
             if (companionWeight > companion.Weight)
                 companion = new Choice(DB_SocialMode.CompanionDrift, other, companionWeight);
 
@@ -447,8 +671,8 @@ internal static class DB_SocialRuntime
             if (distance <= 105f && closing > 0.8f)
             {
                 float passWeight = (0.30f + Mathf.Clamp01(closing / 6f) * 0.45f +
-                    bat.Personality.Nerve * 0.16f + (1f - bat.Personality.Conformity) * 0.10f) *
-                    RepeatScale(state, DB_SocialMode.PassBy, other);
+                        bat.Personality.Nerve * 0.16f + (1f - bat.Personality.Conformity) * 0.10f) *
+                    ChoiceDiversityScale(state, DB_SocialMode.PassBy, other) * availability;
                 if (passWeight > passBy.Weight)
                     passBy = new Choice(DB_SocialMode.PassBy, other, passWeight);
             }
@@ -458,8 +682,8 @@ internal static class DB_SocialRuntime
                 distance >= 55f && distance <= 190f)
             {
                 float chaseWeight = (0.04f + bat.Personality.AggressionDrive * 0.62f +
-                    bat.Personality.Nerve * 0.22f) * (0.55f + state.Drive * 0.55f) *
-                    RepeatScale(state, DB_SocialMode.SocialChase, other);
+                        bat.Personality.Nerve * 0.22f) * (0.55f + state.Drive * 0.55f) *
+                    ChoiceDiversityScale(state, DB_SocialMode.SocialChase, other) * availability;
                 if (chaseWeight > chase.Weight)
                     chase = new Choice(DB_SocialMode.SocialChase, other, chaseWeight);
             }
@@ -467,9 +691,12 @@ internal static class DB_SocialRuntime
             if (distance <= 220f && state.GroupScratch.Count < GroupMax && !roomState.IsReserved(other))
             {
                 State otherState = states.GetValue(other, CreateState);
+                float groupFreshness = ModeNoveltyScale(otherState, DB_SocialMode.GroupDrift);
                 float joinPreference = Mathf.Clamp01(
                     GroupJoinPreference(other.Personality.Conformity, otherState.Drive) *
-                    DB_EnvironmentalPolicy.GroupCohesionScale(bat));
+                    DB_EnvironmentalPolicy.GroupCohesionScale(bat) *
+                    Mathf.Lerp(0.65f, 1f, availability) *
+                    Mathf.Lerp(0.62f, 1f, groupFreshness));
                 float joinGate = 0.20f + Stable01(
                     other.Personality.VisualSeed,
                     state.ScanSerial * 97 + bat.Personality.VisualSeed) * 0.55f;
@@ -486,20 +713,21 @@ internal static class DB_SocialRuntime
                 ? DB_SocialMode.ChainSocialization
                 : DB_SocialMode.RoostInvitation;
             float weight = (0.08f + bat.Personality.RoostAffinity * 0.52f +
-                bat.Personality.Conformity * 0.24f + (1f - bat.Personality.Temperament) * 0.10f +
-                roostBond * 0.20f + Mathf.Clamp01(chainSize / 4f) * 0.12f) *
-                (0.55f + state.Drive * 0.60f) * RepeatScale(state, mode, roostSource);
+                    bat.Personality.Conformity * 0.24f + (1f - bat.Personality.Temperament) * 0.10f +
+                    roostBond * 0.20f + Mathf.Clamp01(chainSize / 4f) * 0.12f) *
+                (0.55f + state.Drive * 0.60f) *
+                ChoiceDiversityScale(state, mode, roostSource);
             roost = new Choice(mode, roostSource, weight);
         }
 
         float groupWeight = state.GroupScratch.Count >= GroupMin
             ? (0.10f + bat.Personality.Conformity * 0.62f +
                 (1f - bat.Personality.Temperament) * 0.20f + state.Drive * 0.18f) *
-                RepeatScale(state, DB_SocialMode.GroupDrift, null)
+                ModeNoveltyScale(state, DB_SocialMode.GroupDrift)
             : 0f;
-        float capScale = activeRatio <= 0.50f
+        float capScale = activeRatio <= 0.46f
             ? 1f
-            : Mathf.Lerp(1f, 0.22f, Mathf.InverseLerp(0.50f, 0.68f, activeRatio));
+            : Mathf.Lerp(1f, 0.20f, Mathf.InverseLerp(0.46f, 0.64f, activeRatio));
 
         float wc = companion.Weight * capScale;
         float wp = passBy.Weight;
@@ -544,7 +772,7 @@ internal static class DB_SocialRuntime
         DB_SocialRoomRuntime.RoomState roomState,
         IReadOnlyList<DB_Creature> candidates)
     {
-        if (state.Cooldown > 0) return false;
+        if (state.NegotiationCooldown > 0) return false;
         DB_Creature best = null;
         float bestTime = float.MaxValue;
         for (int i = 0; i < candidates.Count; i++)
@@ -578,8 +806,9 @@ internal static class DB_SocialRuntime
             PairRole.PassA,
             PairRole.PassB,
             StableInt(bat.Personality.VisualSeed ^ best.Personality.VisualSeed, 0x1221, 20, 51),
-            side);
-        TraceStart(bat, DB_SocialMode.PositionNegotiation, best, "predicted close-spacing conflict");
+            side,
+            bat);
+        TraceStart(bat, DB_SocialMode.PositionNegotiation, best, "predicted close-spacing conflict; no SocialDrive cost");
         return true;
     }
 
@@ -600,8 +829,8 @@ internal static class DB_SocialRuntime
         int duration = StableInt(
             initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed,
             0x33A9,
-            80,
-            241) + Mathf.RoundToInt(bond * 30f);
+            70,
+            201) + Mathf.RoundToInt(bond * 24f);
         AssignPair(
             token,
             anchor,
@@ -610,9 +839,10 @@ internal static class DB_SocialRuntime
             PairRole.Anchor,
             PairRole.Companion,
             duration,
-            StablePairSide(anchor.abstractCreature.ID, companion.abstractCreature.ID));
+            StablePairSide(anchor.abstractCreature.ID, companion.abstractCreature.ID),
+            initiator);
         TraceStart(initiator, DB_SocialMode.CompanionDrift, partner,
-            $"conformity/bond neutral pairing; bond={bond:0.00}");
+            $"conformity/bond pairing; bond={bond:0.00}");
     }
 
     private static void StartPassBy(
@@ -631,7 +861,8 @@ internal static class DB_SocialRuntime
             PairRole.PassA,
             PairRole.PassB,
             StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x4553, 20, 49),
-            side);
+            side,
+            initiator);
         TraceStart(initiator, DB_SocialMode.PassBy, partner, "closing trajectories / greeting pass");
     }
 
@@ -654,8 +885,9 @@ internal static class DB_SocialRuntime
             DB_SocialMode.SocialChase,
             PairRole.Chaser,
             PairRole.Chased,
-            StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x6715, 40, 121),
-            StablePairSide(chaser.abstractCreature.ID, chased.abstractCreature.ID));
+            StableInt(initiator.Personality.VisualSeed ^ partner.Personality.VisualSeed, 0x6715, 40, 111),
+            StablePairSide(chaser.abstractCreature.ID, chased.abstractCreature.ID),
+            initiator);
         TraceStart(chaser, DB_SocialMode.SocialChase, chased, "temperament/nerve play chase");
     }
 
@@ -665,7 +897,7 @@ internal static class DB_SocialRuntime
         DB_SocialRoomRuntime.RoomState roomState)
     {
         if (!roomState.TryReserveGroup(state.GroupScratch, out var token)) return;
-        int duration = StableInt(initiator.Personality.VisualSeed, state.ScanSerial * 17 + 0x7123, 120, 321);
+        int duration = StableInt(initiator.Personality.VisualSeed, state.ScanSerial * 17 + 0x7123, 90, 241);
         for (int i = 0; i < token.Members.Count; i++)
         {
             DB_Creature member = token.Members[i];
@@ -678,8 +910,10 @@ internal static class DB_SocialRuntime
                 duration,
                 null,
                 null,
-                StablePairSide(member.abstractCreature.ID, initiator.abstractCreature.ID));
-            TraceGroupEvent(member, "MicroFlockJoined", token, "microflock reservation joined");
+                StablePairSide(member.abstractCreature.ID, initiator.abstractCreature.ID),
+                member == initiator);
+            TraceGroupEvent(member, "MicroFlockJoined", token,
+                member == initiator ? "microflock initiator" : "microflock participant");
         }
         TraceStart(initiator, DB_SocialMode.GroupDrift, null,
             $"microflock created; size={token.Members.Count}, id={token.Id}");
@@ -716,10 +950,11 @@ internal static class DB_SocialRuntime
             mode,
             PairRole.Invitee,
             token,
-            StableInt(target.Personality.VisualSeed ^ source.Personality.VisualSeed, 0x1957, 80, 221),
+            StableInt(target.Personality.VisualSeed ^ source.Personality.VisualSeed, 0x1957, 70, 191),
             source,
             source,
-            StablePairSide(target.abstractCreature.ID, source.abstractCreature.ID));
+            StablePairSide(target.abstractCreature.ID, source.abstractCreature.ID),
+            true);
 
         Vector2 targetSpot;
         if (approachingChain)
@@ -743,12 +978,15 @@ internal static class DB_SocialRuntime
         PairRole roleA,
         PairRole roleB,
         int duration,
-        int sideA)
+        int sideA,
+        DB_Creature initiator)
     {
         State sa = states.GetValue(a, CreateState);
         State sb = states.GetValue(b, CreateState);
-        BeginState(sa, mode, roleA, token, duration, b, roleA == PairRole.Anchor ? a : null, sideA);
-        BeginState(sb, mode, roleB, token, duration, a, roleB == PairRole.Anchor ? b : null, -sideA);
+        BeginState(sa, mode, roleA, token, duration, b,
+            roleA == PairRole.Anchor ? a : null, sideA, a == initiator);
+        BeginState(sb, mode, roleB, token, duration, a,
+            roleB == PairRole.Anchor ? b : null, -sideA, b == initiator);
         if (mode == DB_SocialMode.CompanionDrift)
         {
             if (roleA == PairRole.Companion) sa.Anchor = b;
@@ -766,7 +1004,8 @@ internal static class DB_SocialRuntime
         int duration,
         DB_Creature partner,
         DB_Creature anchor,
-        int side)
+        int side,
+        bool initiated)
     {
         state.Mode = mode;
         state.Role = role;
@@ -776,6 +1015,7 @@ internal static class DB_SocialRuntime
         state.Partner = partner;
         state.Anchor = anchor;
         state.Side = side == 0 ? 1 : Math.Sign(side);
+        state.InitiatedInteraction = initiated;
         state.RoostAnchor = null;
         state.ChainApproachTarget = null;
         state.DecisionReason = "interaction active";
@@ -956,32 +1196,55 @@ internal static class DB_SocialRuntime
         averageVelocity /= count;
 
         Vector2 separation = Vector2.zero;
+        Vector2 closeSeparation = Vector2.zero;
         for (int i = 0; i < token.Members.Count; i++)
         {
             DB_Creature member = token.Members[i];
             if (member == bat || !ValidSocialPeer(member, bat)) continue;
             Vector2 delta = bat.mainBodyChunk.pos - member.mainBodyChunk.pos;
             float distance = delta.magnitude;
+            if (distance <= 0.01f)
+            {
+                int tieSide = StablePairSide(bat.abstractCreature.ID, member.abstractCreature.ID);
+                int tieVertical = DB_SocialRoomRuntime.Key(bat) < DB_SocialRoomRuntime.Key(member) ? -1 : 1;
+                closeSeparation += new Vector2(tieSide * 0.55f, tieVertical * 0.85f);
+                continue;
+            }
+
             float preferred = Mathf.Lerp(42f, 62f, 1f - bat.Personality.Nerve);
-            if (distance <= 0.01f || distance >= preferred) continue;
-            float strength = 1f - distance / preferred;
-            separation.x += Mathf.Sign(delta.x == 0f ? state.Side : delta.x) * strength * GroupSeparationXWeight;
-            separation.y += Mathf.Sign(delta.y) * strength * GroupSeparationYWeight;
+            if (distance < preferred)
+            {
+                float strength = 1f - distance / preferred;
+                separation.x += Mathf.Sign(delta.x == 0f ? state.Side : delta.x) * strength * GroupSeparationXWeight;
+                separation.y += Mathf.Sign(delta.y) * strength * GroupSeparationYWeight;
+            }
+            if (distance < GroupCloseSeparationRadius)
+            {
+                float closeStrength = Mathf.Pow(1f - distance / GroupCloseSeparationRadius, 2f);
+                closeSeparation += delta / distance * closeStrength;
+            }
         }
 
         Vector2 alignment = averageVelocity.sqrMagnitude > 0.5f
             ? averageVelocity.normalized
             : Vector2.right * state.Side;
+        alignment.y *= 0.62f;
+        if (Mathf.Abs(alignment.x) < 0.32f)
+            alignment.x = state.Side * 0.32f;
+
         Vector2 cohesion = center - bat.mainBodyChunk.pos;
         Vector2 social =
-            alignment * 48f +
+            alignment * 46f +
             new Vector2(
-                Mathf.Clamp(cohesion.x * 0.16f, -28f, 28f),
-                Mathf.Clamp(cohesion.y * 0.06f, -10f, 10f)) +
+                Mathf.Clamp(cohesion.x * 0.14f, -25f, 25f),
+                Mathf.Clamp(cohesion.y * 0.045f, -8f, 8f)) +
             new Vector2(
                 Mathf.Clamp(separation.x * 58f, -70f, 70f),
-                Mathf.Clamp(separation.y * 24f, -10f, 10f));
-        social.x += state.Side * StableRange(bat.Personality.VisualSeed, token.Id + 0x833, 5f, 15f);
+                Mathf.Clamp(separation.y * 24f, -10f, 10f)) +
+            new Vector2(
+                Mathf.Clamp(closeSeparation.x * 86f, -92f, 92f),
+                Mathf.Clamp(closeSeparation.y * 78f, -86f, 86f));
+        social.x += state.Side * StableRange(bat.Personality.VisualSeed, token.Id + 0x833, 7f, 17f);
         if (!SocialSteer(
                 bat,
                 bat.mainBodyChunk.pos + social,
@@ -991,7 +1254,7 @@ internal static class DB_SocialRuntime
             LeaveGroupParticipant(bat, state, "member left microflock: local path blocked");
             return;
         }
-        state.DecisionReason = "microflock active: alignment + weak cohesion + horizontal separation";
+        state.DecisionReason = "microflock active: alignment + weak cohesion + close 2D separation";
     }
 
     private static void UpdateRoostInvitation(DB_Creature bat, State state)
@@ -1056,7 +1319,7 @@ internal static class DB_SocialRuntime
     }
 
     /// <summary>
-    /// Neutral social behavior owns only the temporary goal, not flight physics. No velocity is
+    /// Formal social behavior owns only its temporary goal, not flight physics. No velocity is
     /// written here: Fly.Act calls vanilla BatFlight after FlyAI.Update and follows localGoal.
     /// </summary>
     private static bool SocialSteer(DB_Creature bat, Vector2 goal, float speed, int preferredSide)
@@ -1240,11 +1503,18 @@ internal static class DB_SocialRuntime
             roomState.IsReserved(candidate))
             return false;
         if (states.TryGetValue(candidate, out State candidateState) &&
-            (candidateState.Mode != DB_SocialMode.None || candidateState.Cooldown > 0))
+            candidateState.Mode != DB_SocialMode.None)
             return false;
         if (!DB_EnvironmentalPolicy.WithinActivityRange(source, candidate, SocialRange))
             return false;
         return SameRipple(source, candidate);
+    }
+
+    private static float PartnerAvailability(DB_Creature candidate)
+    {
+        if (candidate == null || !states.TryGetValue(candidate, out State candidateState))
+            return 1f;
+        return PartnerCooldownWeight(candidateState.Cooldown);
     }
 
     private static bool IsNeutralCandidate(DB_Creature bat)
@@ -1255,6 +1525,8 @@ internal static class DB_SocialRuntime
             bat.DesertAI.HasImmediateDanger ||
             bat.Injury.IsSeverelyInjured ||
             bat.Injury.IsRecovering ||
+            bat.Feeding?.Active == true ||
+            bat.Rescue?.Active == true ||
             bat.DesertAI.Target != null ||
             bat.DesertAI.FormalAttack ||
             bat.AI.fleeFromRain ||
@@ -1298,9 +1570,9 @@ internal static class DB_SocialRuntime
         {
             DB_Creature member = token.Members[i];
             if (member == null || !states.TryGetValue(member, out State memberState)) continue;
-            DB_SocialMode completed = memberState.Mode;
+            DB_SocialMode completedMode = memberState.Mode;
             FinalizeParticipant(member, memberState, reason, true);
-            if (completed == DB_SocialMode.GroupDrift)
+            if (completedMode == DB_SocialMode.GroupDrift)
                 TraceGroupEvent(member, "MicroFlockLeft", token, reason);
         }
         if (preserveRoost && bat?.AI?.behavior == FlyAI.Behavior.Chain &&
@@ -1344,9 +1616,9 @@ internal static class DB_SocialRuntime
             {
                 DB_Creature member = token.Members[i];
                 if (member == null || !states.TryGetValue(member, out State memberState)) continue;
-                DB_SocialMode cancelled = memberState.Mode;
+                DB_SocialMode cancelledMode = memberState.Mode;
                 FinalizeParticipant(member, memberState, reason, false);
-                if (cancelled == DB_SocialMode.GroupDrift)
+                if (cancelledMode == DB_SocialMode.GroupDrift)
                     TraceGroupEvent(member, "MicroFlockLeft", token, reason);
             }
             return;
@@ -1378,23 +1650,68 @@ internal static class DB_SocialRuntime
         bool completed)
     {
         DB_SocialMode mode = state.Mode;
+        bool initiated = state.InitiatedInteraction;
+        float beforeDrive = state.Drive;
         state.LastMode = mode;
-        state.LastPartnerKey = state.Partner != null
-            ? DB_SocialRoomRuntime.Key(state.Partner)
-            : long.MinValue;
-        state.Drive = completed
-            ? Mathf.Clamp01(state.Drive * 0.22f)
-            : Mathf.Max(0.12f, state.Drive * 0.55f);
-        state.Cooldown = SocialCooldown(bat, mode, completed);
-        EndStateOnly(state, reason);
 
-        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
-        AIDebugTrace.Record(
-            bat.abstractCreature,
-            AIDebugEventCategory.Social,
-            completed ? "SocialInteractionCompleted" : "SocialInteractionCancelled",
-            mode,
-            reason);
+        if (mode == DB_SocialMode.PositionNegotiation)
+        {
+            // Coordination has its own anti-ping-pong timer. It neither satisfies nor fatigues
+            // social needs, and it does not overwrite an existing formal-social cooldown.
+            state.NegotiationCooldown = NegotiationCooldown(bat, completed);
+            EndStateOnly(state, reason);
+            TraceFinalize(bat, mode, completed, reason, beforeDrive, beforeDrive);
+            return;
+        }
+
+        if (mode != DB_SocialMode.None)
+        {
+            // Only completed events count toward the three-event novelty history. A cancelled
+            // attempt already receives a cooldown and a small fatigue gain; treating it as a
+            // full recent experience would suppress an interaction the bat never actually had.
+            if (completed)
+            {
+                long partnerKey = state.Partner != null
+                    ? DB_SocialRoomRuntime.Key(state.Partner)
+                    : long.MinValue;
+                PushHistory(state, mode, partnerKey);
+            }
+
+            state.Drive = DriveAfterInteraction(beforeDrive, mode, completed, initiated);
+            ApplyNeedFatigue(state, mode,
+                NeedFatigueGain(mode, completed, initiated, beforeDrive));
+            state.Cooldown = SocialCooldown(bat, mode, completed, initiated);
+        }
+        EndStateOnly(state, reason);
+        TraceFinalize(bat, mode, completed, reason, beforeDrive, state.Drive);
+    }
+
+    private static void PushHistory(State state, DB_SocialMode mode, long partnerKey)
+    {
+        if (mode == DB_SocialMode.None || mode == DB_SocialMode.PositionNegotiation) return;
+        state.RecentMode2 = state.RecentMode1;
+        state.RecentMode1 = state.RecentMode0;
+        state.RecentMode0 = mode;
+        state.RecentPartner2 = state.RecentPartner1;
+        state.RecentPartner1 = state.RecentPartner0;
+        state.RecentPartner0 = partnerKey;
+    }
+
+    private static void ApplyNeedFatigue(State state, DB_SocialMode mode, float gain)
+    {
+        if (gain <= 0f) return;
+        switch (NeedAxisOf(mode))
+        {
+            case DB_SocialNeedAxis.Affiliation:
+                state.AffiliationFatigue = Mathf.Clamp01(state.AffiliationFatigue + gain);
+                break;
+            case DB_SocialNeedAxis.Play:
+                state.PlayFatigue = Mathf.Clamp01(state.PlayFatigue + gain);
+                break;
+            case DB_SocialNeedAxis.Greeting:
+                state.GreetingFatigue = Mathf.Clamp01(state.GreetingFatigue + gain);
+                break;
+        }
     }
 
     private static void EndStateOnly(State state, string reason)
@@ -1407,34 +1724,77 @@ internal static class DB_SocialRuntime
         state.Partner = null;
         state.Anchor = null;
         state.Side = 0;
+        state.InitiatedInteraction = false;
         state.RoostAnchor = null;
         state.ChainApproachTarget = null;
         state.DecisionReason = reason;
     }
 
-    private static int SocialCooldown(DB_Creature bat, DB_SocialMode mode, bool completed)
+    private static int SocialCooldown(
+        DB_Creature bat,
+        DB_SocialMode mode,
+        bool completed,
+        bool initiated)
     {
         int salt = (int)mode * 193 + (completed ? 0x71 : 0x35);
-        int min = mode == DB_SocialMode.SocialChase ? 220 : 120;
-        int max = mode == DB_SocialMode.SocialChase ? 401 : 321;
+        int min;
+        int max;
+        switch (mode)
+        {
+            case DB_SocialMode.PassBy:
+                min = 48; max = 131;
+                break;
+            case DB_SocialMode.SocialChase:
+                min = 135; max = 301;
+                break;
+            case DB_SocialMode.RoostInvitation:
+            case DB_SocialMode.ChainSocialization:
+                min = 80; max = 221;
+                break;
+            default:
+                min = 70; max = 211;
+                break;
+        }
+
         int value = StableInt(bat?.Personality?.VisualSeed ?? 0, salt, min, max);
         if (bat != null)
-            value = Mathf.RoundToInt(value * Mathf.Lerp(1.10f, 0.90f, bat.Personality.Conformity));
-        return Mathf.Clamp(value, 90, 420);
+            value = Mathf.RoundToInt(value * Mathf.Lerp(1.08f, 0.90f, bat.Personality.Conformity));
+        if (mode == DB_SocialMode.GroupDrift && !initiated)
+            value = Mathf.RoundToInt(value * 0.72f);
+        if (!completed)
+            value = Mathf.RoundToInt(value * 0.70f);
+        return Mathf.Clamp(value, 38, 320);
     }
 
-    private static float RepeatScale(State state, DB_SocialMode mode, DB_Creature partner)
+    private static int NegotiationCooldown(DB_Creature bat, bool completed)
     {
-        float scale = state.LastMode == mode ? 0.38f : 1f;
-        if (partner != null && state.LastPartnerKey == DB_SocialRoomRuntime.Key(partner))
-            scale *= mode == DB_SocialMode.SocialChase ? 0.25f : 0.55f;
-        return scale;
+        int seed = bat?.Personality?.VisualSeed ?? 0;
+        return completed
+            ? StableInt(seed, 0x4A31, 28, 56)
+            : StableInt(seed, 0x4A37, 16, 33);
     }
 
     private static float ActiveTrauma(DB_Creature bat)
         => Mathf.Max(
             bat.DesertState.PlayerTraumaTicks > 0 ? bat.DesertState.PlayerTraumaStrength : 0f,
             bat.DesertState.PredatorTraumaTicks > 0 ? bat.DesertState.PredatorTraumaStrength : 0f);
+
+    private static void TraceFinalize(
+        DB_Creature bat,
+        DB_SocialMode mode,
+        bool completed,
+        string reason,
+        float beforeDrive,
+        float afterDrive)
+    {
+        if (bat?.abstractCreature == null || !AIDebugTrace.IsWatched(bat.abstractCreature)) return;
+        AIDebugTrace.Record(
+            bat.abstractCreature,
+            AIDebugEventCategory.Social,
+            completed ? "SocialInteractionCompleted" : "SocialInteractionCancelled",
+            mode,
+            $"{reason}; drive={beforeDrive:0.00}->{afterDrive:0.00}");
+    }
 
     private static void TraceStart(
         DB_Creature bat,

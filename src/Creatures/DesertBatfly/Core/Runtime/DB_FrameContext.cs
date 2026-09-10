@@ -104,11 +104,13 @@ internal readonly struct DB_FrameContext
     internal readonly float Grief;
     internal readonly float BondStrength;
 
+    internal readonly DB_PerceptionSnapshot Perception;
     internal readonly bool IncomingProjectile;
     internal readonly DB_WeaponObservation IncomingProjectileObservation;
     internal readonly float VisibilityFactor;
 
     internal readonly DB_TravelFrameSummary Travel;
+    // Transitional compatibility view for consumers not yet moved to Perception.Signals.
     internal readonly bool HasSignalInfluence;
     internal readonly DB_SignalInfluence SignalInfluence;
     internal readonly bool HasEnvironmentInfluence;
@@ -153,6 +155,7 @@ internal readonly struct DB_FrameContext
         float trauma,
         float grief,
         float bondStrength,
+        in DB_PerceptionSnapshot perception,
         bool incomingProjectile,
         in DB_WeaponObservation incomingProjectileObservation,
         float visibilityFactor,
@@ -199,6 +202,7 @@ internal readonly struct DB_FrameContext
         Trauma = Mathf.Clamp01(trauma);
         Grief = Mathf.Clamp01(grief);
         BondStrength = Mathf.Clamp01(bondStrength);
+        Perception = perception;
         IncomingProjectile = incomingProjectile;
         IncomingProjectileObservation = incomingProjectileObservation;
         VisibilityFactor = Mathf.Clamp01(visibilityFactor);
@@ -261,28 +265,54 @@ internal static class DB_FrameContextRuntime
         DB_AI ai = bat.DesertAI;
         DB_State persistent = bat.DesertState;
 
-        bool incomingProjectile = DB_WeaponPerception.TryFindIncomingProjectile(
-            bat, 230f, 42f, 16f, out DB_WeaponObservation projectile);
+        DB_PerceptionSnapshot perception = ai?.Perception?.Snapshot ?? default;
+        bool incomingProjectile = perception.HasIncomingProjectile;
+        DB_WeaponObservation projectile = incomingProjectile
+            ? perception.IncomingProjectile.Observation
+            : default;
 
         bool hasEnvironment = DB_EnvironmentRuntime.TryGetInfluence(
             bat, out DB_EnvironmentInfluence environment);
         if (!hasEnvironment) environment = DB_EnvironmentInfluence.Neutral;
-        bool hasSignal = DB_SignalRuntime.TryGetInfluence(
-            bat, out DB_SignalInfluence signal);
+
+        DB_PerceptionSignalContext signalPerception = perception.Signals;
+        bool hasSignal = ai?.Perception?.TryGetSignalContext(out signalPerception) == true;
+        DB_SignalInfluence signal = new(
+            signalPerception.AlarmPressure,
+            signalPerception.AlarmOrigin,
+            signalPerception.AlarmThreat,
+            signalPerception.DistressInterest,
+            signalPerception.DistressSource,
+            signalPerception.RallyInterest,
+            signalPerception.RallySource,
+            signalPerception.RallyTarget,
+            signalPerception.RoostInterest,
+            signalPerception.RoostSource,
+            signalPerception.HarassInterest,
+            signalPerception.HarassSource,
+            signalPerception.HarassTarget,
+            signalPerception.SafeConfidence,
+            signalPerception.LastReason);
 
         bool hasThreat = DB_ThreatRuntime.TryGetDebugState(
             bat, out DB_ThreatDebugState threatDebug);
-        bool acuteThreat = hasThreat && (
+        bool directAcuteThreat = hasThreat && (
             threatDebug.AcuteExplosionTimer > 0 || threatDebug.AcuteStartleTimer > 0 ||
             threatDebug.AcuteMassCasualtyTimer > 0 || threatDebug.AcuteCaptureTimer > 0 ||
             threatDebug.AcuteShockTimer > 0);
+        bool reportedAnonymousHazard = signalPerception.AlarmThreat == null &&
+            signalPerception.AlarmPressure >= DB_PerceptionRuntime.ReportedAnonymousHazardThreshold;
+        bool acuteThreat = directAcuteThreat || reportedAnonymousHazard;
+        Vector2? hazardCenter = hasThreat && threatDebug.HazardCenter.HasValue
+            ? threatDebug.HazardCenter
+            : reportedAnonymousHazard ? signalPerception.AlarmOrigin : null;
         DB_ThreatFrameSummary threat = new(
-            hasThreat,
+            hasThreat || reportedAnonymousHazard,
             hasThreat ? threatDebug.PlayerSlot : -1,
-            hasThreat ? threatDebug.Confidence : 0f,
-            hasThreat && threatDebug.Cue.ProjectileThreat,
+            hasThreat ? threatDebug.Confidence : signalPerception.AlarmPressure,
+            incomingProjectile,
             acuteThreat,
-            hasThreat ? threatDebug.HazardCenter : null);
+            hazardCenter);
 
         bool hasSocial = DB_SocialRuntime.TryGetDebugState(
             bat, out DB_SocialDebugState social);
@@ -348,6 +378,7 @@ internal static class DB_FrameContextRuntime
             trauma,
             persistent.GriefStrength,
             persistent.SocialBondStrength,
+            perception,
             incomingProjectile,
             projectile,
             hasEnvironment ? environment.VisibilityConfidence : 1f,

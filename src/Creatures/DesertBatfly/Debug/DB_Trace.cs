@@ -24,12 +24,17 @@ internal static class DB_Trace
         bool hasSocial = DB_SocialRuntime.TryGetDebugState(
             bat, out DB_SocialDebugState social) &&
             social.Mode != DB_SocialMode.None;
+        bool hasNeutral = DB_NeutralBehaviorRuntime.TryGetDebugState(
+            bat, out DB_NeutralDebugState neutral);
+        bool activeNeutral = hasNeutral && neutral.Active;
         DB_FeedingTargetDebugState feedingGroup = default;
         bool hasFeedingGroup = bat.Feeding.Target != null &&
             DB_FeedingCoordinator.TryPeekTarget(bat.Feeding.Target, out feedingGroup);
         string suppression = Suppression(bat, hasTravel, travel);
-        string modeReason = ModeReason(bat, suppression, hasTravel, travel, hasSocial, social);
-        string controlOwner = ControlOwner(bat, suppression, hasTravel, travel, hasSocial, social);
+        string modeReason = ModeReason(
+            bat, suppression, hasTravel, travel, hasSocial, social, activeNeutral, neutral);
+        string controlOwner = ControlOwner(
+            bat, suppression, hasTravel, travel, hasSocial, social, activeNeutral, neutral);
 
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.State,
             "Mode", bat.DesertAI.Mode, modeReason);
@@ -37,6 +42,13 @@ internal static class DB_Trace
             "ControlOwner", controlOwner, modeReason);
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Social,
             "Suppression", suppression, SuppressionReason(bat, suppression, hasTravel, travel));
+        AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Decision,
+            "NeutralMode", hasNeutral ? neutral.Mode.ToString() : "—",
+            activeNeutral
+                ? $"remaining={neutral.RemainingTicks}; peer={neutral.Peer}; side={neutral.Side}"
+                : hasNeutral
+                    ? $"roam; next={neutral.NextDecisionTicks}; peerCd={neutral.PeerCooldownTicks}; flockCd={neutral.FlockCooldownTicks}; swarmCd={neutral.SwarmCooldownTicks}"
+                    : "neutral runtime not initialized");
         AIDebugTrace.RecordChange(bat.abstractCreature, AIDebugEventCategory.Combat,
             "FormalAttack", bat.DesertAI.FormalAttack, bat.DesertAI.Target == null
                 ? "no target" : AIDebugFormat.Creature(bat.DesertAI.Target));
@@ -149,7 +161,9 @@ internal static class DB_Trace
         bool hasTravel,
         in DB_TravelDebugState travel,
         bool hasSocial,
-        in DB_SocialDebugState social)
+        in DB_SocialDebugState social,
+        bool activeNeutral,
+        in DB_NeutralDebugState neutral)
     {
         switch (suppression)
         {
@@ -173,8 +187,9 @@ internal static class DB_Trace
         if (bat.Rescue.Active) return "companion rescue uses Combat PrimaryOwner";
         if (bat.DesertAI.FormalAttack) return "formal attack state machine";
         if (hasSocial) return string.IsNullOrEmpty(social.DecisionReason)
-            ? "neutral social interaction"
+            ? "formal social interaction"
             : social.DecisionReason;
+        if (activeNeutral) return "neutral ecology / " + neutral.Mode;
         return "DB_AI state machine";
     }
 
@@ -211,7 +226,9 @@ internal static class DB_Trace
         bool hasTravel,
         in DB_TravelDebugState travel,
         bool hasSocial,
-        in DB_SocialDebugState social)
+        in DB_SocialDebugState social,
+        bool activeNeutral,
+        in DB_NeutralDebugState neutral)
     {
         switch (suppression)
         {
@@ -232,6 +249,7 @@ internal static class DB_Trace
             default:
                 if (bat.Rescue.Active) return "Combat / Rescue";
                 if (hasSocial) return "Social / " + social.Mode;
+                if (activeNeutral) return "Neutral / " + neutral.Mode;
                 return "DB_AI";
         }
     }

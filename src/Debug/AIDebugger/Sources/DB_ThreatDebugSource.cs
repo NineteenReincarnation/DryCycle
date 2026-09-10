@@ -58,23 +58,36 @@ internal sealed class DB_ThreatDebugSource : IAIDebugSource
         snapshot.Sections.Add(memory);
 
         DB_ThreatCue cue = hasThreat ? threat.Cue : default;
-        var current = new AIDebugSection("Threat Current Threat Cue / 当前威胁线索")
-            .Add("Visible spear / 可见矛", "ThreatCue.VisibleSpear", cue.VisibleSpear)
-            .Add("Visible rock / 可见石头", "ThreatCue.VisibleRock", cue.VisibleRock)
-            .Add("Visible explosive / 可见爆炸物", "ThreatCue.VisibleExplosive", cue.VisibleExplosive)
-            .Add("Visible startle / 可见惊吽物", "ThreatCue.VisibleStartle", cue.VisibleStartle)
-            .Add("Visible shock / 可见电击物", "ThreatCue.VisibleShock", cue.VisibleShock)
+        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;
+        Player observedPlayer = null;
+        DB_HeldThreatObservation held = default;
+        if (perception != null && perception.TryGetObservedPlayer(
+                bat.DesertAI?.Target as Player, 430f, out observedPlayer))
+            perception.TryGetHeldThreats(observedPlayer, out held);
+        DB_ProjectilePercept incoming = perception?.Snapshot.IncomingProjectile ?? default;
+
+        var current = new AIDebugSection("Perception Current Threat Facts / 当前威胁观察")
+            .Add("Observed player / 可见玩家", "PerceptionThreat.ObservedPlayer",
+                observedPlayer != null ? observedPlayer.playerState?.playerNumber ?? -1 : -1)
+            .Add("Visible spear / 可见矛", "PerceptionThreat.VisibleSpear", held.VisibleSpear)
+            .Add("Visible rock / 可见石头", "PerceptionThreat.VisibleRock", held.VisibleRock)
+            .Add("Visible explosive / 可见爆炸物", "PerceptionThreat.VisibleExplosive", held.VisibleExplosive)
+            .Add("Visible startle / 可见惊吽物", "PerceptionThreat.VisibleStartle", held.VisibleStartle)
+            .Add("Visible shock / 可见电击物", "PerceptionThreat.VisibleShock", held.VisibleShock)
+            .Add("Incoming projectile / 投射物威胁", "PerceptionThreat.ProjectileThreat", incoming.Valid)
+            .Add("Projectile direction / 投射方向", "PerceptionThreat.ProjectileDirection",
+                incoming.Valid ? incoming.Observation.Velocity.normalized.ToString() : "—");
+        snapshot.Sections.Add(current);
+
+        var temporal = new AIDebugSection("Threat Temporal Cue / 历史威胁线索")
             .Add("Recent spear throw / 近期投矛", "ThreatCue.RecentSpearThrow", cue.RecentSpearThrow)
             .Add("Recent rock throw / 近期投石", "ThreatCue.RecentRockThrow", cue.RecentRockThrow)
             .Add("Recent explosion / 近期爆炸", "ThreatCue.RecentExplosion", cue.RecentExplosion)
             .Add("Recent grab / 近期抓取", "ThreatCue.RecentGrabAttempt", cue.RecentGrabAttempt)
-            .Add("Projectile threat / 投射物威胁", "ThreatCue.ProjectileThreat", cue.ProjectileThreat)
-            .Add("Projectile direction / 投射方向", "ThreatCue.ProjectileThreatDirection",
-                cue.ProjectileThreat ? cue.ProjectileThreatDirection.ToString() : "—")
             .Add("Player retreating / 玩家退避", "ThreatCue.PlayerRetreating", cue.PlayerRetreating)
             .Add("Hazard center / 危险中心", "ThreatCue.CurrentHazardCenter",
                 cue.CurrentHazardCenter.HasValue ? cue.CurrentHazardCenter.Value.ToString() : "—");
-        snapshot.Sections.Add(current);
+        snapshot.Sections.Add(temporal);
 
         var acute = new AIDebugSection("Threat Acute Event State / 急性事件")
             .Add("Explosion timer / 爆炸", "ThreatAcute.ExplosionTimer",
@@ -111,10 +124,10 @@ internal sealed class DB_ThreatDebugSource : IAIDebugSource
                 hasThreat && !string.IsNullOrEmpty(threat.LastWitnessReason) ? threat.LastWitnessReason : "—");
         snapshot.Sections.Add(decision);
 
-        bool acuteActive = hasThreat &&
+        bool acuteActive = incoming.Valid || hasThreat &&
             (threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||
              threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||
-             threat.AcuteShockTimer > 0 || cue.ProjectileThreat);
+             threat.AcuteShockTimer > 0);
         snapshot.Decisions.Add(new AIDebugDecisionNode(
             "Threat learned threat / 威胁学习",
             acuteActive || (hasThreat && !string.IsNullOrEmpty(threat.ModifierReason))

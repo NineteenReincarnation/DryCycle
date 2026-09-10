@@ -36,9 +36,20 @@ internal readonly struct DB_RoostAnchor
 /// species extension is the underside of Rain World's one-way Floor terrain. The extension
 /// does not modify FlyAI.ChainTile. An Air candidate immediately below a Floor and the Floor
 /// tile itself are normalized to one immutable Floor-owned anchor fact.
+///
+/// New independent roosts also obey a small physical occupancy envelope. Explicit Fly chains
+/// remain legal: the envelope prevents several independently chosen tile anchors from collapsing
+/// onto the same tiny patch, while social chain attachment is still governed by its own chain cap.
 /// </summary>
 internal static class DB_RoostPolicy
 {
+    // These are structural occupancy limits rather than personality/environment tuning. Keep
+    // them beside the legality policy so every route into a new independent roost shares the
+    // exact same spatial contract.
+    internal const float IndependentMinSpacing = 42f;
+    internal const float IndependentNeighborhoodRadius = 96f;
+    internal const int IndependentNeighborhoodCapacity = 3;
+
     internal static bool TryGetAnchor(DB_Creature fly, IntVector2 tile, out DB_RoostAnchor anchor)
     {
         anchor = default;
@@ -59,7 +70,7 @@ internal static class DB_RoostPolicy
                     tile,
                     DB_RoostAnchorKind.HorizontalBeam,
                     new Vector2(middle.x, middle.y - 4f));
-                return true;
+                return AcceptNewAnchor(fly, ref anchor);
             }
 
             if (above.verticalBeam && !current.verticalBeam)
@@ -68,14 +79,14 @@ internal static class DB_RoostPolicy
                     tile,
                     DB_RoostAnchorKind.VerticalBeam,
                     middle + Vector2.up * 10f);
-                return true;
+                return AcceptNewAnchor(fly, ref anchor);
             }
 
             anchor = new DB_RoostAnchor(
                 tile,
                 DB_RoostAnchorKind.SolidCeiling,
                 middle + Vector2.up * 10f);
-            return true;
+            return AcceptNewAnchor(fly, ref anchor);
         }
 
         // Desert Batfly extension. Normal AI asks about its current Air tile, while spatial
@@ -105,7 +116,7 @@ internal static class DB_RoostPolicy
             floorTile,
             DB_RoostAnchorKind.FloorUnderside,
             room.MiddleOfTile(floorTile) + Vector2.down * 10f);
-        return true;
+        return AcceptNewAnchor(fly, ref anchor);
     }
 
     internal static bool IsStillValid(DB_Creature fly, in DB_RoostAnchor anchor)
@@ -116,6 +127,52 @@ internal static class DB_RoostPolicy
         return current.Kind == anchor.Kind &&
                current.Tile.x == anchor.Tile.x && current.Tile.y == anchor.Tile.y &&
                (current.Spot - anchor.Spot).sqrMagnitude <= 0.01f;
+    }
+
+    /// <summary>
+    /// Live occupancy check for a newly selected independent tile roost. This uses the shared
+    /// room observation cache rather than introducing another direct room scan. Ordinary Fly
+    /// chain members count as physical occupants too, so a mixed BatFly room cannot stack a
+    /// Desert Batfly directly on top of an existing vanilla roost.
+    /// </summary>
+    internal static bool CanStartIndependentRoost(DB_Creature fly, Vector2 spot)
+    {
+        if (fly?.room == null) return false;
+
+        DB_RoomContext context = DB_RoomContext.For(fly.room);
+        if (context == null) return true;
+
+        float minSpacingSq = IndependentMinSpacing * IndependentMinSpacing;
+        float neighborhoodSq = IndependentNeighborhoodRadius * IndependentNeighborhoodRadius;
+        int nearby = 0;
+        var creatures = context.Creatures;
+        for (int i = 0; i < creatures.Count; i++)
+        {
+            if (creatures[i] is not Fly other || ReferenceEquals(other, fly) ||
+                other.slatedForDeletetion || other.room != fly.room)
+                continue;
+            if (other.AI?.behavior != FlyAI.Behavior.Chain &&
+                other.movMode != Fly.MovementMode.Hang)
+                continue;
+            if (SameFlyChain(fly, other))
+                continue;
+
+            Vector2 otherSpot;
+            if (other.burrowOrHangSpot.HasValue)
+                otherSpot = other.burrowOrHangSpot.Value;
+            else if (other.mainBodyChunk != null)
+                otherSpot = other.mainBodyChunk.pos;
+            else
+                continue;
+
+            float distanceSq = (otherSpot - spot).sqrMagnitude;
+            if (distanceSq < minSpacingSq)
+                return false;
+            if (distanceSq < neighborhoodSq && ++nearby >= IndependentNeighborhoodCapacity)
+                return false;
+        }
+
+        return true;
     }
 
     // Compatibility/read-only projection for callers that only need the realized coordinate.
@@ -130,6 +187,27 @@ internal static class DB_RoostPolicy
 
         spot = default;
         return false;
+    }
+
+    private static bool AcceptNewAnchor(DB_Creature fly, ref DB_RoostAnchor anchor)
+    {
+        // Once a bat is already hanging, TryGetAnchor is a geometry-validity query. Applying
+        // crowding at that point would make an attached chain invalidate its own support.
+        if (fly?.AI?.behavior == FlyAI.Behavior.Chain ||
+            CanStartIndependentRoost(fly, anchor.Spot))
+            return true;
+
+        anchor = default;
+        return false;
+    }
+
+    private static bool SameFlyChain(Fly a, Fly b)
+    {
+        if (a?.AI?.behavior != FlyAI.Behavior.Chain || b?.AI?.behavior != FlyAI.Behavior.Chain)
+            return false;
+        Fly firstA = a.FirstInChain();
+        Fly firstB = b.FirstInChain();
+        return firstA != null && ReferenceEquals(firstA, firstB);
     }
 
     private static bool InBounds(Room room, IntVector2 tile)
