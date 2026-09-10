@@ -9,7 +9,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
     internal static readonly Vector2[] ShellRest =
     [new(-84, 0), new(-44, 5), new(0, 8), new(44, 5), new(84, 0)];
     private static readonly float[] Radii = [17, 26, 30, 26, 17];
-    private const int WalkableCurvePointCount = 35;
+    private const int WalkableCurvePointCount = 42;
     private const float VisualShellWidth = 202f;
     private const float VisualBodyStart = 17f;
     private const float VisualBodyEnd = 185f;
@@ -355,7 +355,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
     /// Finite top-shell curve used by the shared moving-surface runtime. The provider exposes only
     /// geometry; nearest-segment projection, endpoint roll-off and normalized rider coordinates are
     /// owned by DynamicWalkableCurveSampler so future creatures can reuse the same collision model.
-    /// The curve follows the broad visible mantle crown rather than the old artificially flat deck.
+    /// The curve follows the broad visible mantle crown all the way to the rendered shell tips.
     /// </summary>
     internal bool TrySampleWalkableSurface(Vector2 worldPosition, out WalkableSurfaceSample sample) =>
         DynamicWalkableCurveSampler.TrySample(this, this, worldPosition, out sample);
@@ -369,10 +369,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         if (index < 0 || index >= WalkableCurvePointCount || bodyChunks == null || bodyChunks.Length != 5)
             return false;
 
-        float curveT = index / (WalkableCurvePointCount - 1f);
-        float minU = VisualBodyStart / VisualShellWidth;
-        float maxU = VisualBodyEnd / VisualShellWidth;
-        float u = Mathf.Lerp(minU, maxU, curveT);
+        float u = index / (WalkableCurvePointCount - 1f);
         return TryGetSmoothShellTopPoint(u, previous, out point);
     }
 
