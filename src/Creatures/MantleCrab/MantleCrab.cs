@@ -4,11 +4,16 @@ using UnityEngine;
 namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>Passive shell and standing rig. All real collision masses belong to the shell.</summary>
-public sealed class MantleCrab : Creature, IWalkableDynamicSurface
+public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalkableCurveGeometry
 {
     internal static readonly Vector2[] ShellRest =
     [new(-84, 0), new(-44, 5), new(0, 8), new(44, 5), new(84, 0)];
     private static readonly float[] Radii = [17, 26, 30, 26, 17];
+    private const int WalkableCurvePointCount = 35;
+    private const float VisualShellWidth = 202f;
+    private const float VisualBodyStart = 17f;
+    private const float VisualBodyEnd = 185f;
+    private const float VisualBodyWidth = VisualBodyEnd - VisualBodyStart;
     internal readonly MantleCrabLimb[] Legs = new MantleCrabLimb[4];
     internal readonly MantleCrabLimb[] Pincers = new MantleCrabLimb[2];
     private readonly float[] supportAccelerations = new float[4];
@@ -41,6 +46,11 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface
 
     bool IWalkableDynamicSurface.TrySample(float coordinate, out WalkableSurfaceSample sample) =>
         TrySampleWalkableSurface(coordinate, out sample);
+
+    int IDynamicWalkableCurveGeometry.CurvePointCount => WalkableCurvePointCount;
+
+    bool IDynamicWalkableCurveGeometry.TryGetCurvePoint(int index, bool previous, out Vector2 point) =>
+        TryGetWalkableCurvePoint(index, previous, out point);
 
     public MantleCrab(AbstractCreature creature, World world) : base(creature, world)
     {
@@ -342,54 +352,69 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface
     }
 
     /// <summary>
-    /// Continuous top surface used by the shared player moving-platform runtime. It is flatter
-    /// than the decorative mantle mesh on purpose: the visual wing tips are not stable footing.
+    /// Finite top-shell curve used by the shared moving-surface runtime. The provider exposes only
+    /// geometry; nearest-segment projection, endpoint roll-off and normalized rider coordinates are
+    /// owned by DynamicWalkableCurveSampler so future creatures can reuse the same collision model.
+    /// The curve follows the broad visible mantle crown rather than the old artificially flat deck.
     /// </summary>
-    internal bool TrySampleWalkableSurface(Vector2 worldPosition, out WalkableSurfaceSample sample)
-    {
-        sample = default;
-        if (!TryFitShellFrame(previous: false, out Vector2 center, out Vector2 axis)) return false;
-        float coordinate = Vector2.Dot(worldPosition - center, axis);
-        return TrySampleWalkableSurface(coordinate, out sample);
-    }
+    internal bool TrySampleWalkableSurface(Vector2 worldPosition, out WalkableSurfaceSample sample) =>
+        DynamicWalkableCurveSampler.TrySample(this, this, worldPosition, out sample);
 
-    internal bool TrySampleWalkableSurface(float coordinate, out WalkableSurfaceSample sample)
+    internal bool TrySampleWalkableSurface(float coordinate, out WalkableSurfaceSample sample) =>
+        DynamicWalkableCurveSampler.TrySample(this, this, coordinate, out sample);
+
+    private bool TryGetWalkableCurvePoint(int index, bool previous, out Vector2 point)
     {
-        sample = default;
-        if (!TryFitShellFrame(previous: false, out Vector2 center, out Vector2 axis) ||
-            !TryFitShellFrame(previous: true, out Vector2 previousCenter, out Vector2 previousAxis))
+        point = default;
+        if (index < 0 || index >= WalkableCurvePointCount || bodyChunks == null || bodyChunks.Length != 5)
             return false;
 
-        float halfWidth = Mathf.Max(48f, 78f * ShellScale);
-        if (Mathf.Abs(coordinate) > halfWidth) return false;
+        float curveT = index / (WalkableCurvePointCount - 1f);
+        float minU = VisualBodyStart / VisualShellWidth;
+        float maxU = VisualBodyEnd / VisualShellWidth;
+        float u = Mathf.Lerp(minU, maxU, curveT);
+        return TryGetSmoothShellTopPoint(u, previous, out point);
+    }
 
-        float localY = WalkableSurfaceHeight(coordinate, halfWidth);
-        float slope = WalkableSurfaceSlope(coordinate, halfWidth);
+    /// <summary>
+    /// Broad collision envelope shared conceptually with MantleCrabGraphics.DrawShell. Fine edge
+    /// noise and the tiny crown teeth remain visual-only so they cannot make a standing BodyChunk
+    /// jitter, while crown, wing droop, phenotype tilt and large asymmetry remain physical.
+    /// </summary>
+    private bool TryGetSmoothShellTopPoint(float u, bool previous, out Vector2 point)
+    {
+        point = default;
+        if (!TryFitShellFrame(previous, out _, out Vector2 axis)) return false;
+
         Vector2 up = new(-axis.y, axis.x);
-        Vector2 previousUp = new(-previousAxis.y, previousAxis.x);
-        Vector2 point = center + axis * coordinate + up * localY;
-        Vector2 previousPoint = previousCenter + previousAxis * coordinate + previousUp * localY;
-        Vector2 tangent = (axis + up * slope).normalized;
-        Vector2 normal = new(-tangent.y, tangent.x);
-        if (Vector2.Dot(normal, up) < 0f) normal = -normal;
+        float shellX = Mathf.Clamp01(u) * VisualShellWidth;
+        float bodyU = Mathf.Clamp01((shellX - VisualBodyStart) / VisualBodyWidth) * 4f;
+        int station = Mathf.Min(3, Mathf.FloorToInt(bodyU));
+        float stationT = bodyU - station;
 
-        sample = new WalkableSurfaceSample(this, coordinate, point, previousPoint, normal, tangent);
+        Vector2 a = previous ? bodyChunks[station].lastPos : bodyChunks[station].pos;
+        Vector2 b = previous ? bodyChunks[station + 1].lastPos : bodyChunks[station + 1].pos;
+        Vector2 center = Vector2.Lerp(a, b, stationT);
+
+        if (u < VisualBodyStart / VisualShellWidth)
+            center += axis * ((shellX - VisualBodyStart) * ShellScale);
+        if (u > VisualBodyEnd / VisualShellWidth)
+            center += axis * ((shellX - VisualBodyEnd) * ShellScale);
+
+        float signed = u * 2f - 1f;
+        float wing = Mathf.Abs(signed);
+        float crownBase = Mathf.Max(0f, 1f - Mathf.Pow(wing / .82f, 2f));
+        float crown = Mathf.Pow(crownBase, 1.25f);
+        float wingAngle = Phenotype == null ? 0f : Phenotype.WingAngle;
+        float asymmetry = Phenotype == null ? 0f : Phenotype.Asymmetry;
+        float largeAsymmetry = signed * asymmetry * 18f;
+
+        center += up * (-5.5f * Mathf.Pow(wing, 1.7f) + wingAngle * 70f + largeAsymmetry);
+        center += up * (8f - Mathf.Lerp(ShellRest[station].y, ShellRest[station + 1].y, stationT));
+
+        float top = 5.5f + 30f * crown;
+        point = center + up * top;
         return true;
-    }
-
-    private static float WalkableSurfaceHeight(float coordinate, float halfWidth)
-    {
-        float n = Mathf.Clamp01(Mathf.Abs(coordinate) / Mathf.Max(1f, halfWidth));
-        return 39.5f - 8f * n * n - 5f * n * n * n * n;
-    }
-
-    private static float WalkableSurfaceSlope(float coordinate, float halfWidth)
-    {
-        if (Mathf.Abs(coordinate) < 0.0001f) return 0f;
-        float width = Mathf.Max(1f, halfWidth);
-        float n = Mathf.Clamp01(Mathf.Abs(coordinate) / width);
-        float magnitude = (16f * n + 20f * n * n * n) / width;
-        return -Mathf.Sign(coordinate) * magnitude;
     }
 
     private bool TryFitShellFrame(bool previous, out Vector2 center, out Vector2 axis)
