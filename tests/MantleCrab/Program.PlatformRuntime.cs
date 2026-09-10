@@ -17,6 +17,15 @@ internal static partial class Program
               !WalkableDynamicSurfaceRuntime.IsGroundCompatibleBodyMode(Player.BodyModeIndex.ZeroG),
             "Dynamic ground body-mode whitelist admitted a non-ground locomotion mode");
 
+        Check(WalkableDynamicSurfaceRuntime.IsGroundingNormal(Vector2.up),
+            "Upward dynamic-curve normal must retain ordinary ground semantics");
+        Vector2 steepNormal = new(.8f, .6f);
+        Check(!WalkableDynamicSurfaceRuntime.IsGroundingNormal(steepNormal) &&
+              WalkableDynamicSurfaceRuntime.IsSurfaceContactNormal(steepNormal),
+            "Steep dynamic curve must remain a sliding contact without granting ground state");
+        Check(!WalkableDynamicSurfaceRuntime.IsSurfaceContactNormal(Vector2.right),
+            "Horizontal endpoint normal must release the rider instead of wrapping under the surface");
+
         Check(WalkableDynamicSurfaceRuntime.ShouldAcquireContact(6f, -30f, -20f),
             "Swept high-speed landing from above must acquire the platform");
         Check(WalkableDynamicSurfaceRuntime.ShouldAcquireContact(4f, 2f, -1f),
@@ -52,6 +61,6 @@ internal static partial class Program
               !WalkableDynamicSurfaceRuntime.IsSurfaceSpeedRideable(new Vector2(12.1f, 0f)),
             "Dynamic ground must reject surface speeds that cannot be restored exactly on detach");
 
-        platformRuntimeCases += 17;
+        platformRuntimeCases += 20;
     }
 }
