@@ -27,6 +27,7 @@ internal enum DB_BehaviorOwner
     Combat,
     Roost,
     Social,
+    NeutralEcology,
     Ordinary,
     VanillaFallback
 }
@@ -47,6 +48,7 @@ internal enum DB_BehaviorKind
     Combat,
     Roost,
     Social,
+    NeutralEcology,
     Idle,
     Native
 }
