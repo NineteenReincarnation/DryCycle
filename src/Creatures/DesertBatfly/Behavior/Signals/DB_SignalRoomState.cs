@@ -62,10 +62,6 @@ internal static class DB_SignalRoomRuntime
             int clock = room.game?.clock ?? 0;
             Prune(room);
 
-            // A continuous capture/escape may call the same alarm source every frame.
-            // Keep one live generation for the same emitter+threat until it expires.
-            // Separate directly affected bats from one acute event still collapse through
-            // the bounded 14-tick / 58px root merge below.
             if (kind == DB_SignalKind.AlarmFlutter && hop == 0 && generation == 0)
             {
                 float radiusSq = AlarmRootMergeRadius * AlarmRootMergeRadius;
@@ -88,9 +84,6 @@ internal static class DB_SignalRoomRuntime
                 }
             }
 
-            // Neutral/display signals from the same emitter are refreshed rather than
-            // allocating a new generation every scan. Urgent relays carry their original
-            // generation and therefore bypass this merge when hop > 0.
             if (hop == 0 && generation == 0)
             {
                 for (int i = 0; i < ActiveSignals.Count; i++)
@@ -170,7 +163,8 @@ internal static class DB_SignalRoomRuntime
                         receiver.room != room || receiver.inShortcut)
                         continue;
 
-                    if (!DB_SignalRuntime.ReceivePacket(receiver, packet, out bool relay))
+                    DB_PerceptionRuntime perception = receiver.DesertAI?.Perception;
+                    if (perception == null || !perception.ReceiveSignal(packet, out bool relay))
                         continue;
                     DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
                     if (!relay || !definition.CanRelay || packet.Hop >= definition.MaxRelayHops)
