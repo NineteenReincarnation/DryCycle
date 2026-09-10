@@ -398,6 +398,8 @@ internal static class DB_SocialRuntime
         if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
             bat.DesertAI.Mode == DB_AI.Activity.InjuryRecovery)
             return "severe injury / recovery";
+        if (bat.Feeding?.Active == true) return "dehydrated-player feeding commitment";
+        if (bat.Rescue?.Active == true) return "companion rescue commitment";
         if (bat.AI.fleeFromRain || bat.AI.behavior == FlyAI.Behavior.Burrow ||
             bat.AI.luredCounter > 0 || bat.safariControlled)
             return "vanilla priority";
@@ -1300,6 +1302,8 @@ internal static class DB_SocialRuntime
             bat.DesertAI.HasImmediateDanger ||
             bat.Injury.IsSeverelyInjured ||
             bat.Injury.IsRecovering ||
+            bat.Feeding?.Active == true ||
+            bat.Rescue?.Active == true ||
             bat.DesertAI.Target != null ||
             bat.DesertAI.FormalAttack ||
             bat.AI.fleeFromRain ||
