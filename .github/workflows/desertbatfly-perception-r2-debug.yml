@@ -1,0 +1,23 @@
+name: DesertBatfly Perception R2 Debug
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desertbatfly-perception-r2-debug.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace function-retention failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -x scripts/check-desertbatfly-function-retention.sh
