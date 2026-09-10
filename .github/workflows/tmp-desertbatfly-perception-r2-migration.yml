@@ -1,0 +1,224 @@
+name: Temporary DesertBatfly Perception R2 migration
+
+on:
+  push:
+    branches:
+      - refactor/desertbatfly-neutral-ecology-20260910
+    paths:
+      - '.github/workflows/tmp-desertbatfly-perception-r2-migration.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/desertbatfly-neutral-ecology-20260910
+          fetch-depth: 0
+      - name: Apply final Perception R2 migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          perception = Path('src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs')
+          threat = Path('src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatRuntime.cs')
+          tactics = Path('src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs')
+          debug = Path('src/Debug/AIDebugger/Sources/DB_ThreatDebugSource.cs')
+          arch_perception = Path('tests/DesertBatfly/Program.ArchitecturePerception.cs')
+          threat_test = Path('tests/DesertBatfly/Program.Threat.cs')
+          tactics_test = Path('tests/DesertBatfly/Program.ThreatTactics.cs')
+          retention = Path('scripts/check-desertbatfly-function-retention.sh')
+          perf = Path('scripts/check-desertbatfly-r7-performance.sh')
+          weapon = Path('src/Creatures/DesertBatfly/Behavior/Perception/DB_WeaponPerception.cs')
+
+          replace_once(
+              perception,
+              '    private readonly int[] pursuitByPlayer = new int[4];\n    private readonly int[] signalGenerations = new int[SignalGenerationHistorySize];\n',
+              '    private const int ObservedPlayerCapacity = 4;\n    private readonly int[] pursuitByPlayer = new int[ObservedPlayerCapacity];\n    private readonly Player[] observedPlayers = new Player[ObservedPlayerCapacity];\n    private readonly float[] observedPlayerDistances = new float[ObservedPlayerCapacity];\n    private readonly DB_HeldThreatObservation[] observedHeldThreats = new DB_HeldThreatObservation[ObservedPlayerCapacity];\n    private readonly int[] signalGenerations = new int[SignalGenerationHistorySize];\n',
+              'perception observed-player fields')
+
+          replace_once(
+              perception,
+              '    private int signalScanCount;\n    private DB_PerceptionTrack primaryThreat;\n',
+              '    private int signalScanCount;\n    private int observedPlayersTick = int.MinValue;\n    private DB_PerceptionTrack primaryThreat;\n',
+              'perception observed-player tick')
+
+          replace_once(
+              perception,
+              '        for (int i = 0; i < pursuitByPlayer.Length; i++) pursuitByPlayer[i] = 0;\n        for (int i = 0; i < signalGenerations.Length; i++) signalGenerations[i] = int.MinValue;\n',
+              '        for (int i = 0; i < pursuitByPlayer.Length; i++) pursuitByPlayer[i] = 0;\n        ClearObservedPlayers();\n        for (int i = 0; i < signalGenerations.Length; i++) signalGenerations[i] = int.MinValue;\n',
+              'perception reset observed players')
+
+          replace_once(
+              perception,
+              '        if (fly?.room == null || fly.mainBodyChunk == null)\n        {\n            incomingProjectile = default;\n            return;\n        }\n',
+              '        if (fly?.room == null || fly.mainBodyChunk == null)\n        {\n            incomingProjectile = default;\n            ClearObservedPlayers();\n            return;\n        }\n',
+              'perception unavailable clear')
+
+          replace_once(
+              perception,
+              '    internal bool TryGetIncomingProjectile(out DB_WeaponObservation observation)\n    {\n        observation = incomingProjectile.Observation;\n        return incomingProjectile.Valid;\n    }\n\n    internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)\n',
+              '''    internal bool TryGetIncomingProjectile(out DB_WeaponObservation observation)\n    {\n        observation = incomingProjectile.Observation;\n        return incomingProjectile.Valid;\n    }\n\n    internal bool TryGetObservedPlayer(Player preferred, float maxDistance, out Player player)\n    {\n        player = null;\n        if (!ObservedPlayersFresh() || maxDistance < 0f) return false;\n\n        int preferredSlot = ObservedPlayerSlot(preferred);\n        if (preferredSlot >= 0 &&\n            ReferenceEquals(observedPlayers[preferredSlot], preferred) &&\n            observedPlayerDistances[preferredSlot] <= maxDistance &&\n            ValidObservedPlayer(preferred))\n        {\n            player = preferred;\n            return true;\n        }\n\n        float bestDistance = float.MaxValue;\n        int bestSlot = int.MaxValue;\n        for (int i = 0; i < observedPlayers.Length; i++)\n        {\n            Player candidate = observedPlayers[i];\n            float distance = observedPlayerDistances[i];\n            if (!ValidObservedPlayer(candidate) || distance > maxDistance) continue;\n            if (distance > bestDistance + 0.0001f ||\n                (Mathf.Abs(distance - bestDistance) <= 0.0001f && i >= bestSlot))\n                continue;\n            player = candidate;\n            bestDistance = distance;\n            bestSlot = i;\n        }\n        return player != null;\n    }\n\n    internal bool TryGetHeldThreats(Player player, out DB_HeldThreatObservation observation)\n    {\n        observation = default;\n        if (!ObservedPlayersFresh() || !ValidObservedPlayer(player)) return false;\n        int slot = ObservedPlayerSlot(player);\n        if (slot < 0 || !ReferenceEquals(observedPlayers[slot], player)) return false;\n        observation = observedHeldThreats[slot];\n        return true;\n    }\n\n    internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)\n''',
+              'perception public observed-player APIs')
+
+          replace_once(
+              perception,
+              '            (threat.Cue.ProjectileThreat ||\n             threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||\n',
+              '            (threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||\n',
+              'perception safe signal no threat projectile mirror')
+
+          replace_once(
+              perception,
+              '    private void ScanCreatures()\n    {\n        creatureScanCount++;\n',
+              '    private void ScanCreatures()\n    {\n        creatureScanCount++;\n        BeginObservedPlayerScan();\n',
+              'perception begin observed-player scan')
+
+          replace_once(
+              perception,
+              '            float distance = Vector2.Distance(origin, creature.mainBodyChunk.pos);\n            brain.Combat.ConsiderCandidate(creature, distance);\n            if (creature is Player observedPlayer) TrackPlayerApproach(observedPlayer, distance);\n',
+              '            float distance = Vector2.Distance(origin, creature.mainBodyChunk.pos);\n            brain.Combat.ConsiderCandidate(creature, distance);\n            if (creature is Player observedPlayer)\n            {\n                RecordObservedPlayer(observedPlayer, distance);\n                TrackPlayerApproach(observedPlayer, distance);\n            }\n',
+              'perception record observed players')
+
+          replace_once(
+              perception,
+              '    private void TrackPlayerApproach(Player player, float distance)\n    {\n',
+              '''    private void BeginObservedPlayerScan()\n    {\n        for (int i = 0; i < observedPlayers.Length; i++)\n        {\n            observedPlayers[i] = null;\n            observedPlayerDistances[i] = float.MaxValue;\n            observedHeldThreats[i] = default;\n        }\n        observedPlayersTick = fly?.room?.game?.clock ?? int.MinValue;\n    }\n\n    private void ClearObservedPlayers()\n    {\n        for (int i = 0; i < observedPlayers.Length; i++)\n        {\n            observedPlayers[i] = null;\n            observedPlayerDistances[i] = float.MaxValue;\n            observedHeldThreats[i] = default;\n        }\n        observedPlayersTick = int.MinValue;\n    }\n\n    private void RecordObservedPlayer(Player player, float distance)\n    {\n        int slot = ObservedPlayerSlot(player);\n        if (slot < 0 || distance < 0f || distance > observedPlayerDistances[slot]) return;\n        observedPlayers[slot] = player;\n        observedPlayerDistances[slot] = distance;\n        observedHeldThreats[slot] = ObserveHeldThreats(player);\n    }\n\n    private DB_HeldThreatObservation ObserveHeldThreats(Player player)\n    {\n        bool spear = false;\n        bool rock = false;\n        bool explosive = false;\n        bool startle = false;\n        bool shock = false;\n\n        if (player?.grasps != null)\n        {\n            for (int i = 0; i < player.grasps.Length; i++)\n            {\n                PhysicalObject held = player.grasps[i]?.grabbed;\n                if (held == null) continue;\n                DB_ThreatEvidence evidence = DB_ThreatClassifier.Classify(held, null, 0f, 0f, false);\n                spear |= held is Spear;\n                rock |= held is Rock;\n                explosive |= evidence.Explosion > 0.15f;\n                startle |= evidence.Startle > 0.15f;\n                shock |= evidence.Shock > 0.15f;\n            }\n        }\n\n        return new DB_HeldThreatObservation(spear, rock, explosive, startle, shock);\n    }\n\n    private bool ObservedPlayersFresh()\n    {\n        int clock = fly?.room?.game?.clock ?? int.MinValue;\n        return observedPlayersTick != int.MinValue && clock >= observedPlayersTick &&\n               clock - observedPlayersTick <= ScanIntervalTicks + 1;\n    }\n\n    private bool ValidObservedPlayer(Player player)\n        => player != null && !player.dead && !player.slatedForDeletetion &&\n           player.room == fly?.room && !player.inShortcut;\n\n    private static int ObservedPlayerSlot(Player player)\n    {\n        int slot = player?.playerState?.playerNumber ?? -1;\n        return slot >= 0 && slot < ObservedPlayerCapacity ? slot : -1;\n    }\n\n    private void TrackPlayerApproach(Player player, float distance)\n    {\n''',
+              'perception observed-player implementation')
+
+          old_cue_fields = '''internal struct DB_ThreatCue\n{\n    internal int PlayerSlot;\n    internal bool VisibleSpear;\n    internal bool VisibleRock;\n    internal bool VisibleExplosive;\n    internal bool VisibleStartle;\n    internal bool VisibleShock;\n    internal bool RecentSpearThrow;\n    internal bool RecentRockThrow;\n    internal bool RecentExplosion;\n    internal bool RecentGrabAttempt;\n    internal bool ProjectileThreat;\n    internal Vector2 ProjectileThreatDirection;\n    internal Vector2? CurrentHazardCenter;\n    internal bool PlayerRetreating;\n}\n'''
+          new_cue_fields = '''internal struct DB_ThreatCue\n{\n    internal int PlayerSlot;\n    internal bool RecentSpearThrow;\n    internal bool RecentRockThrow;\n    internal bool RecentExplosion;\n    internal bool RecentGrabAttempt;\n    internal Vector2? CurrentHazardCenter;\n    internal bool PlayerRetreating;\n}\n'''
+          replace_once(threat, old_cue_fields, new_cue_fields, 'threat cue durable-only fields')
+
+          old_update_cue = '''        Room room = bat.room;\n        RoomState roomState = RoomFor(room);\n        DB_RoomContext context = DB_RoomContext.For(room);\n        if (context == null)\n        {\n            state.Cue = default;\n            return;\n        }\n\n        Player player = bat.DesertAI.Target as Player;\n        if (player == null || player.dead || player.room != room ||\n            !DB_VisibilityPolicy.CanObserve(\n                bat, player.mainBodyChunk.pos, 430f, DB_VisibilityChannel.Player))\n            player = NearestVisiblePlayer(bat, context.Players);\n\n        DB_ThreatCue cue = default;\n        cue.PlayerSlot = PlayerSlot(player);\n        if (player == null || !ValidSlot(cue.PlayerSlot))\n        {\n            state.Cue = cue;\n            return;\n        }\n\n        if (DB_WeaponPerception.TryObserveHeldThreats(\n                bat, player, 430f, out DB_HeldThreatObservation held))\n        {\n            cue.VisibleSpear = held.VisibleSpear;\n            cue.VisibleRock = held.VisibleRock;\n            cue.VisibleExplosive = held.VisibleExplosive;\n            cue.VisibleStartle = held.VisibleStartle;\n            cue.VisibleShock = held.VisibleShock;\n        }\n\n        int clock = room.game?.clock ?? 0;\n        cue.RecentSpearThrow = Recent(roomState.RecentSpearThrow[cue.PlayerSlot], clock, ProjectileCueTicks);\n        cue.RecentRockThrow = Recent(roomState.RecentRockThrow[cue.PlayerSlot], clock, ProjectileCueTicks);\n        cue.RecentExplosion = Recent(roomState.RecentExplosion[cue.PlayerSlot], clock, ExplosionCueTicks);\n        cue.RecentGrabAttempt = Recent(roomState.RecentGrab[cue.PlayerSlot], clock, GrabCueTicks);\n        cue.CurrentHazardCenter = state.HazardTimer > 0 ? state.HazardCenter : null;\n        cue.PlayerRetreating = state.EncounterPlayerSlot == cue.PlayerSlot && state.RetreatTicks > 12;\n\n        if (DB_WeaponPerception.TryFindIncomingProjectileFrom(\n                bat,\n                player,\n                ProjectileNearMissMaxDistance,\n                ProjectileNearMissRadius,\n                16f,\n                out DB_WeaponObservation projectile))\n        {\n            cue.ProjectileThreat = true;\n            cue.ProjectileThreatDirection = projectile.Velocity.normalized;\n            LearnNearMiss(bat, state, projectile.Weapon, player, clock);\n        }\n\n        state.Cue = cue;\n        if (cue.ProjectileThreat)\n        {\n            // Real trajectory is a current-frame Arbiter fact. Do not pre-promote it into\n            // DesertAI Escape here or ImmediateDanger would starve ProjectileEvade.\n            DB_SocialRuntime.CancelForPriority(bat, "incoming projectile");\n            state.ModifierReason = "real incoming projectile queued for R3 arbitration";\n        }\n'''
+          new_update_cue = '''        Room room = bat.room;\n        RoomState roomState = RoomFor(room);\n        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;\n        Player preferred = bat.DesertAI?.Target as Player;\n        DB_ThreatCue cue = default;\n        cue.PlayerSlot = -1;\n\n        if (perception == null ||\n            !perception.TryGetObservedPlayer(preferred, 430f, out Player player))\n        {\n            state.Cue = cue;\n            return;\n        }\n\n        cue.PlayerSlot = PlayerSlot(player);\n        if (!ValidSlot(cue.PlayerSlot))\n        {\n            state.Cue = cue;\n            return;\n        }\n\n        int clock = room.game?.clock ?? 0;\n        cue.RecentSpearThrow = Recent(roomState.RecentSpearThrow[cue.PlayerSlot], clock, ProjectileCueTicks);\n        cue.RecentRockThrow = Recent(roomState.RecentRockThrow[cue.PlayerSlot], clock, ProjectileCueTicks);\n        cue.RecentExplosion = Recent(roomState.RecentExplosion[cue.PlayerSlot], clock, ExplosionCueTicks);\n        cue.RecentGrabAttempt = Recent(roomState.RecentGrab[cue.PlayerSlot], clock, GrabCueTicks);\n        cue.CurrentHazardCenter = state.HazardTimer > 0 ? state.HazardCenter : null;\n        cue.PlayerRetreating = state.EncounterPlayerSlot == cue.PlayerSlot && state.RetreatTicks > 12;\n\n        DB_ProjectilePercept incoming = perception.Snapshot.IncomingProjectile;\n        if (incoming.Valid)\n        {\n            DB_WeaponObservation projectile = incoming.Observation;\n            bool samePlayer = ReferenceEquals(projectile.Instigator, player);\n            bool fastEnough = projectile.Velocity.sqrMagnitude >= 16f;\n            bool closeEnough = incoming.ClosestDistance <= ProjectileNearMissRadius &&\n                               (projectile.Position - bat.mainBodyChunk.pos).sqrMagnitude <=\n                               ProjectileNearMissMaxDistance * ProjectileNearMissMaxDistance;\n            if (samePlayer && fastEnough && closeEnough)\n                LearnNearMiss(bat, state, projectile.Weapon, player, clock);\n\n            // Real trajectory is a current-frame Perception/Arbiter fact. Threat records\n            // learned evidence only and never mirrors projectile geometry into DB_ThreatCue.\n            DB_SocialRuntime.CancelForPriority(bat, "incoming projectile");\n            state.ModifierReason = "real incoming projectile queued for R3 arbitration";\n        }\n\n        state.Cue = cue;\n'''
+          replace_once(threat, old_update_cue, new_update_cue, 'threat UpdateCue perception ownership')
+
+          old_held_priority = '''        float heldRisk = 0f;\n        if (cue.VisibleSpear) heldRisk += memory.PiercingPressure * 0.48f;\n        if (cue.VisibleRock) heldRisk += memory.BluntStunPressure * 0.24f;\n        if (cue.VisibleExplosive) heldRisk += memory.ExplosionPressure * 0.65f;\n        if (cue.VisibleStartle) heldRisk += memory.StartlePressure * 0.46f;\n        if (cue.VisibleShock) heldRisk += memory.ShockPressure * 0.50f;\n'''
+          new_held_priority = '''        DB_HeldThreatObservation held = default;\n        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);\n\n        float heldRisk = 0f;\n        if (held.VisibleSpear) heldRisk += memory.PiercingPressure * 0.48f;\n        if (held.VisibleRock) heldRisk += memory.BluntStunPressure * 0.24f;\n        if (held.VisibleExplosive) heldRisk += memory.ExplosionPressure * 0.65f;\n        if (held.VisibleStartle) heldRisk += memory.StartlePressure * 0.46f;\n        if (held.VisibleShock) heldRisk += memory.ShockPressure * 0.50f;\n'''
+          replace_once(threat, old_held_priority, new_held_priority, 'threat held priority uses perception')
+
+          old_projectile_geometry = '''        int slot = DB_ThreatRuntime.PlayerSlot(player);\n        if (!DB_ThreatRuntime.TryGetDebugState(\n                bat,\n                out DB_ThreatDebugState threat) ||\n            threat.Cue.PlayerSlot != slot ||\n            !threat.Cue.ProjectileThreat ||\n            threat.Cue.ProjectileThreatDirection.sqrMagnitude < 0.5f)\n            return false;\n\n        Vector2 projectileDirection = threat.Cue.ProjectileThreatDirection.normalized;\n'''
+          new_projectile_geometry = '''        int slot = DB_ThreatRuntime.PlayerSlot(player);\n        DB_PerceptionSnapshot snapshot = bat.DesertAI?.Perception?.Snapshot ?? default;\n        if (!snapshot.HasIncomingProjectile) return false;\n        DB_WeaponObservation projectile = snapshot.IncomingProjectile.Observation;\n        if (!ReferenceEquals(projectile.Instigator, player) ||\n            projectile.Velocity.sqrMagnitude < 0.5f)\n            return false;\n\n        Vector2 projectileDirection = projectile.Velocity.normalized;\n'''
+          replace_once(tactics, old_projectile_geometry, new_projectile_geometry, 'tactics projectile geometry uses perception')
+
+          replace_once(
+              tactics,
+              '''        DB_WeaponPerception.TryObserveHeldThreats(\n            bat,\n            player,\n            DB_Tuning.SightRange,\n            out DB_HeldThreatObservation held);\n''',
+              '''        DB_HeldThreatObservation held = default;\n        bat.DesertAI?.Perception?.TryGetHeldThreats(player, out held);\n''',
+              'tactics held profile uses perception')
+
+          old_debug_current = '''        DB_ThreatCue cue = hasThreat ? threat.Cue : default;\n        var current = new AIDebugSection("Threat Current Threat Cue / 当前威胁线索")\n            .Add("Visible spear / 可见矛", "ThreatCue.VisibleSpear", cue.VisibleSpear)\n            .Add("Visible rock / 可见石头", "ThreatCue.VisibleRock", cue.VisibleRock)\n            .Add("Visible explosive / 可见爆炸物", "ThreatCue.VisibleExplosive", cue.VisibleExplosive)\n            .Add("Visible startle / 可见惊吽物", "ThreatCue.VisibleStartle", cue.VisibleStartle)\n            .Add("Visible shock / 可见电击物", "ThreatCue.VisibleShock", cue.VisibleShock)\n            .Add("Recent spear throw / 近期投矛", "ThreatCue.RecentSpearThrow", cue.RecentSpearThrow)\n            .Add("Recent rock throw / 近期投石", "ThreatCue.RecentRockThrow", cue.RecentRockThrow)\n            .Add("Recent explosion / 近期爆炸", "ThreatCue.RecentExplosion", cue.RecentExplosion)\n            .Add("Recent grab / 近期抓取", "ThreatCue.RecentGrabAttempt", cue.RecentGrabAttempt)\n            .Add("Projectile threat / 投射物威胁", "ThreatCue.ProjectileThreat", cue.ProjectileThreat)\n            .Add("Projectile direction / 投射方向", "ThreatCue.ProjectileThreatDirection",\n                cue.ProjectileThreat ? cue.ProjectileThreatDirection.ToString() : "—")\n            .Add("Player retreating / 玩家退避", "ThreatCue.PlayerRetreating", cue.PlayerRetreating)\n            .Add("Hazard center / 危险中心", "ThreatCue.CurrentHazardCenter",\n                cue.CurrentHazardCenter.HasValue ? cue.CurrentHazardCenter.Value.ToString() : "—");\n        snapshot.Sections.Add(current);\n'''
+          new_debug_current = '''        DB_ThreatCue cue = hasThreat ? threat.Cue : default;\n        DB_PerceptionRuntime perception = bat.DesertAI?.Perception;\n        Player observedPlayer = null;\n        DB_HeldThreatObservation held = default;\n        if (perception != null && perception.TryGetObservedPlayer(\n                bat.DesertAI?.Target as Player, 430f, out observedPlayer))\n            perception.TryGetHeldThreats(observedPlayer, out held);\n        DB_ProjectilePercept incoming = perception?.Snapshot.IncomingProjectile ?? default;\n\n        var current = new AIDebugSection("Perception Current Threat Facts / 当前威胁观察")\n            .Add("Observed player / 可见玩家", "PerceptionThreat.ObservedPlayer",\n                observedPlayer != null ? observedPlayer.playerState?.playerNumber ?? -1 : -1)\n            .Add("Visible spear / 可见矛", "PerceptionThreat.VisibleSpear", held.VisibleSpear)\n            .Add("Visible rock / 可见石头", "PerceptionThreat.VisibleRock", held.VisibleRock)\n            .Add("Visible explosive / 可见爆炸物", "PerceptionThreat.VisibleExplosive", held.VisibleExplosive)\n            .Add("Visible startle / 可见惊吽物", "PerceptionThreat.VisibleStartle", held.VisibleStartle)\n            .Add("Visible shock / 可见电击物", "PerceptionThreat.VisibleShock", held.VisibleShock)\n            .Add("Incoming projectile / 投射物威胁", "PerceptionThreat.ProjectileThreat", incoming.Valid)\n            .Add("Projectile direction / 投射方向", "PerceptionThreat.ProjectileDirection",\n                incoming.Valid ? incoming.Observation.Velocity.normalized.ToString() : "—");\n        snapshot.Sections.Add(current);\n\n        var temporal = new AIDebugSection("Threat Temporal Cue / 历史威胁线索")\n            .Add("Recent spear throw / 近期投矛", "ThreatCue.RecentSpearThrow", cue.RecentSpearThrow)\n            .Add("Recent rock throw / 近期投石", "ThreatCue.RecentRockThrow", cue.RecentRockThrow)\n            .Add("Recent explosion / 近期爆炸", "ThreatCue.RecentExplosion", cue.RecentExplosion)\n            .Add("Recent grab / 近期抓取", "ThreatCue.RecentGrabAttempt", cue.RecentGrabAttempt)\n            .Add("Player retreating / 玩家退避", "ThreatCue.PlayerRetreating", cue.PlayerRetreating)\n            .Add("Hazard center / 危险中心", "ThreatCue.CurrentHazardCenter",\n                cue.CurrentHazardCenter.HasValue ? cue.CurrentHazardCenter.Value.ToString() : "—");\n        snapshot.Sections.Add(temporal);\n'''
+          replace_once(debug, old_debug_current, new_debug_current, 'debug split perception current/threat temporal')
+
+          replace_once(
+              debug,
+              '''        bool acuteActive = hasThreat &&\n            (threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||\n             threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||\n             threat.AcuteShockTimer > 0 || cue.ProjectileThreat);\n''',
+              '''        bool acuteActive = incoming.Valid || hasThreat &&\n            (threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||\n             threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||\n             threat.AcuteShockTimer > 0);\n''',
+              'debug acute projectile from perception')
+
+          replace_once(
+              arch_perception,
+              '        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);\n',
+              '',
+              'architecture perception remove bridge type')
+
+          replace_once(
+              arch_perception,
+              '''        Check(weaponPerception.GetMethod("TryObserveHeldThreats", Flags) != null &&\n              heldObservation.GetField("VisibleSpear", Flags) != null,\n            "Perception R2 retains only the explicit held-item migration bridge for current Threat consumers");\n''',
+              '''        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,\n            "retired DB_WeaponPerception bridge is absent after current-observation migration");\n        Check(perception.GetMethod("TryGetObservedPlayer", Flags) != null &&\n              perception.GetMethod("TryGetHeldThreats", Flags) != null &&\n              heldObservation.GetField("VisibleSpear", Flags) != null,\n            "Perception R2 owns bounded current observed-player and held-item facts");\n''',
+              'architecture perception final ownership')
+
+          replace_once(
+              arch_perception,
+              '        // Long-term threat memory and signal transport stay in their existing domains while\n        // receiver semantics live behind the R2 snapshot. Held-item observation is the one\n        // remaining WeaponPerception migration bridge and is removed in the next cleanup.\n',
+              '        // Long-term threat memory and signal transport stay in their existing domains while\n        // all current direct player, held-item and projectile facts live behind Perception R2.\n',
+              'architecture perception comment')
+
+          replace_once(
+              arch_perception,
+              'Architecture Perception R2: direct DB_AI ownership, fixed perception slots, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.',
+              'Architecture Perception R2: direct DB_AI ownership, fixed perception slots, bounded observed-player/held-item facts, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.',
+              'architecture perception console')
+
+          old_threat_cue_test = '''        foreach (string cue in new[]\n        {\n            "PlayerSlot", "VisibleSpear", "VisibleRock", "VisibleExplosive", "VisibleStartle",\n            "VisibleShock", "RecentSpearThrow", "RecentRockThrow", "RecentExplosion",\n            "RecentGrabAttempt", "ProjectileThreat", "ProjectileThreatDirection",\n            "CurrentHazardCenter", "PlayerRetreating"\n        })\n            Check(cueType.GetField(cue, Flags) != null,\n                "Threat Current Cue exposes " + cue);\n'''
+          new_threat_cue_test = '''        foreach (string cue in new[]\n        {\n            "PlayerSlot", "RecentSpearThrow", "RecentRockThrow", "RecentExplosion",\n            "RecentGrabAttempt", "CurrentHazardCenter", "PlayerRetreating"\n        })\n            Check(cueType.GetField(cue, Flags) != null,\n                "Threat temporal cue exposes " + cue);\n        foreach (string retired in new[]\n        {\n            "VisibleSpear", "VisibleRock", "VisibleExplosive", "VisibleStartle", "VisibleShock",\n            "ProjectileThreat", "ProjectileThreatDirection"\n        })\n            Check(cueType.GetField(retired, Flags) == null,\n                "Threat no longer mirrors current Perception fact " + retired);\n'''
+          replace_once(threat_test, old_threat_cue_test, new_threat_cue_test, 'threat test cue shape')
+
+          old_threat_perception_test = '''        Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);\n        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);\n        Check(roomContext.GetProperty("Players", Flags) != null &&\n              roomContext.GetProperty("ThrownWeapons", Flags) != null,\n            "Threat current perception reuses the shared room player/projectile snapshot");\n        MethodInfo updateCue = runtimeType.GetMethod("UpdateCue", Flags);\n        Check(MethodCallOffset(updateCue, roomContext, "For") >= 0 &&\n              MethodCallOffset(updateCue, weaponPerception, "TryObserveHeldThreats") >= 0 &&\n              MethodCallOffset(updateCue, weaponPerception, "TryFindIncomingProjectileFrom") >= 0,\n            "Threat Current Cue consumes shared RoomContext and WeaponPerception rather than rescanning the room");\n'''
+          new_threat_perception_test = '''        Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);\n        Type perceptionRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);\n        Check(roomContext.GetProperty("Players", Flags) != null &&\n              roomContext.GetProperty("ThrownWeapons", Flags) != null,\n            "shared RoomContext still owns raw player/projectile room snapshots");\n        MethodInfo updateCue = runtimeType.GetMethod("UpdateCue", Flags);\n        Check(MethodCallOffset(updateCue, perceptionRuntime, "TryGetObservedPlayer") >= 0 &&\n              MethodCallOffset(updateCue, roomContext, "For") < 0,\n            "Threat temporal cue consumes current player facts only through Perception R2");\n        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,\n            "Threat migration leaves no WeaponPerception compatibility shell");\n'''
+          replace_once(threat_test, old_threat_perception_test, new_threat_perception_test, 'threat test final perception boundary')
+
+          replace_once(
+              tactics_test,
+              '        Type weaponPerceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);\n',
+              '        Type perceptionType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);\n',
+              'tactics test perception type')
+
+          old_tactics_calls = '''        Check(MethodCallsThreat(frameRuntimeType.GetMethod("Capture", Flags),\n                  weaponPerceptionType, "TryFindIncomingProjectile"),\n            "FrameContext captures real incoming-projectile geometry before arbitration through shared WeaponPerception");\n        Check(MethodCallsThreat(adjustVengeance, tacticsType, "TryIncomingProjectileEvade") &&\n              MethodCallsThreat(projectileGeometry, threatRuntimeType, "TryGetDebugState"),\n            "Extreme Vengeance retains its tactical projectile geometry without restoring an ordinary evade executor");\n        Check(MethodCallsThreat(tryProfile, weaponPerceptionType, "TryObserveHeldThreats"),\n            "Threat tactical profile uses shared held-item perception rather than a private scan");\n'''
+          new_tactics_calls = '''        Check(!MethodCallsThreat(frameRuntimeType.GetMethod("Capture", Flags),\n                  perceptionType, "RefreshState"),\n            "FrameContext consumes the already-refreshed Perception snapshot without triggering another receiver pass");\n        Check(MethodCallsThreat(adjustVengeance, tacticsType, "TryIncomingProjectileEvade") &&\n              !MethodCallsThreat(projectileGeometry, threatRuntimeType, "TryGetDebugState"),\n            "Extreme Vengeance reads current projectile geometry from Perception rather than Threat debug state");\n        Check(MethodCallsThreat(tryProfile, perceptionType, "TryGetHeldThreats"),\n            "Threat tactical profile consumes held-item facts through Perception R2 rather than a private scan");\n        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", false) == null,\n            "Threat tactics has no WeaponPerception compatibility shell");\n'''
+          replace_once(tactics_test, old_tactics_calls, new_tactics_calls, 'tactics test final perception boundary')
+
+          replace_once(
+              perf,
+              "weapon = read('Behavior/Perception/DB_WeaponPerception.cs')\n",
+              "weapon_path = root / 'Behavior/Perception/DB_WeaponPerception.cs'\nif weapon_path.exists():\n    failures.append('retired DB_WeaponPerception bridge returned')\n",
+              'performance remove weapon source read')
+
+          replace_once(
+              perf,
+              '''if 'context.ThrownWeapons' not in weapon or 'context.Weapons' not in weapon:\n    failures.append('DB_WeaponPerception no longer consumes shared DB_RoomContext weapon views')\n''',
+              '''for token in ('TryGetObservedPlayer(', 'TryGetHeldThreats(', 'player.grasps'):\n    if token not in perception:\n        failures.append('Perception R2 current-player/held-item ownership missing: ' + token)\n''',
+              'performance perception current facts')
+
+          replace_once(
+              retention,
+              "grep -q 'DB_PerceptionScoring.ProjectileRisk' \"$PERCEPTION\"\n",
+              "grep -q 'DB_PerceptionScoring.ProjectileRisk' \"$PERCEPTION\"\ngrep -q 'internal bool TryGetObservedPlayer' \"$PERCEPTION\"\ngrep -q 'internal bool TryGetHeldThreats' \"$PERCEPTION\"\n! test -e \"$SRC/Behavior/Perception/DB_WeaponPerception.cs\"\n! grep -RIn --include='*.cs' 'DB_WeaponPerception' \"$SRC\"\n",
+              'retention final perception bridge guard')
+
+          if not weapon.exists():
+              raise SystemExit('DB_WeaponPerception.cs already absent before migration')
+          weapon.unlink()
+
+          forbidden_source = ('DB_WeaponPerception', '.Cue.ProjectileThreat', '.Cue.ProjectileThreatDirection',
+                              'cue.VisibleSpear', 'cue.VisibleRock', 'cue.VisibleExplosive',
+                              'cue.VisibleStartle', 'cue.VisibleShock')
+          source_roots = [Path('src/Creatures/DesertBatfly'), Path('src/Debug/AIDebugger/Sources')]
+          leftovers = []
+          for root in source_roots:
+              for path in root.rglob('*.cs'):
+                  text = path.read_text(encoding='utf-8')
+                  for token in forbidden_source:
+                      if token in text:
+                          leftovers.append(f'{path}: {token}')
+          if leftovers:
+              raise SystemExit('forbidden current-observation mirror remains:\n' + '\n'.join(leftovers))
+
+          print('Perception R2 migration applied with no source-side WeaponPerception/current-cue mirrors.')
+          PY
+
+          bash scripts/check-desertbatfly-function-retention.sh
+          bash scripts/check-desertbatfly-r7-performance.sh
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No migration changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Complete DesertBatfly Perception R2 migration'
+          git push origin HEAD:refactor/desertbatfly-neutral-ecology-20260910
