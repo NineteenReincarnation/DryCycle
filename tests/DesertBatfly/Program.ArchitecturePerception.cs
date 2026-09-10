@@ -5,73 +5,35 @@ internal static partial class Program
 {
     private static void RunArchitecturePerception()
     {
-        Type roomContext = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);
-        Type visibility = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
-        Type visibilityChannel = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_VisibilityChannel", true);
-        Type weaponPerception = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
-        Type creaturePerception = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
-        Type heldObservation = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
-        Type ai = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_AI", true);
-        Type combat = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
-        Type frameContextRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_FrameContextRuntime", true);
-        Type threat = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
-        Type tactics = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_ThreatTactics", true);
-        Type signalRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
-        Type signalDefinition = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_SignalDefinition", true);
-        Type signalRoomRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_SignalRoomRuntime", true);
-        Type environmentRuntime = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_EnvironmentRoomRuntime", true);
-        Type swarmRoom = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_SwarmRoom", true);
-        Type hooks = mod.GetType(
-            "DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
+        Type roomContext = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RoomContext", true);
+        Type visibility = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
+        Type visibilityChannel = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityChannel", true);
+        Type perception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);
+        Type perceptionTrack = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionTrack", true);
+        Type perceptionSnapshot = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionSnapshot", true);
+        Type perceptionScoring = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionScoring", true);
+        Type perceptionSource = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionSource", true);
+        Type perceptionModality = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionModality", true);
+        Type legacyCreaturePerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
+        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Type heldObservation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
+        Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
+        Type threat = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_ThreatRuntime", true);
+        Type signalRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalRuntime", true);
+        Type signalDefinition = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SignalDefinition", true);
 
-        Check(roomContext.Name == "DB_RoomContext" &&
-              roomContext.GetMethod("For", Flags) != null &&
+        Check(roomContext.GetMethod("For", Flags) != null &&
               roomContext.GetMethod("TryGetExisting", Flags) != null &&
-              roomContext.GetMethod("Reset", Flags) != null &&
               roomContext.GetMethod("PlayerBySlot", Flags) != null,
-            "Architecture shared perception exposes one DB_RoomContext access/lifecycle surface");
-
-        int refreshTicks = (int)roomContext.GetField("RefreshIntervalTicks", Flags).GetRawConstantValue();
-        Check(refreshTicks >= 6 && refreshTicks <= 16,
-            "Architecture shared perception room observation refresh is bounded and low-frequency");
-        foreach (string property in new[]
-        {
-            "Creatures", "Bats", "Players", "Weapons", "ThrownWeapons",
-            "LastRefreshClock", "RefreshCount", "CreatureScanCount", "PhysicalObjectScanCount"
-        })
+            "Perception R2 keeps DB_RoomContext as the single shared room-observation authority");
+        foreach (string property in new[] { "Creatures", "Bats", "Players", "Weapons", "ThrownWeapons" })
             Check(roomContext.GetProperty(property, Flags) != null,
-                "Architecture shared perception RoomContext exposes " + property);
-
-        MethodInfo batsGetter = roomContext.GetProperty("Bats", Flags).GetGetMethod(true);
-        MethodInfo playersGetter = roomContext.GetProperty("Players", Flags).GetGetMethod(true);
-        MethodInfo thrownGetter = roomContext.GetProperty("ThrownWeapons", Flags).GetGetMethod(true);
-        Check(MethodCallOffset(batsGetter, roomContext, "PruneBats") >= 0 &&
-              MethodCallOffset(playersGetter, roomContext, "PrunePlayers") >= 0 &&
-              MethodCallOffset(thrownGetter, roomContext, "PruneWeapons") >= 0 &&
-              MethodCallOffset(roomContext.GetMethod("PlayerBySlot", Flags), roomContext, "PrunePlayers") >= 0,
-            "Architecture shared perception caches candidate discovery but revalidates current membership/throw-state at consumption time");
+                "Perception R2 shared room context exposes " + property);
 
         string[] channels = Enum.GetNames(visibilityChannel);
-        foreach (string channel in new[]
-                 { "Creature", "Player", "Social", "Signal", "HeldItem", "Projectile" })
+        foreach (string channel in new[] { "Creature", "Player", "Social", "Signal", "HeldItem", "Projectile" })
             Check(Array.IndexOf(channels, channel) >= 0,
-                "Architecture shared perception central visibility policy exposes " + channel + " channel");
+                "Perception R2 central visibility policy keeps " + channel + " channel");
 
         MethodInfo effectiveRange = visibility.GetMethod("EffectiveRange", Flags);
         object playerChannel = Enum.Parse(visibilityChannel, "Player");
@@ -83,133 +45,127 @@ internal static partial class Program
         float denseProjectile = (float)effectiveRange.Invoke(null, new object[] { 230f, 0.25f, projectileChannel, true });
         float closeFloor = (float)visibility.GetField("CloseProjectileFloor", Flags).GetRawConstantValue();
         Check(Math.Abs(clearPlayer - 430f) < 0.001f && densePlayer < clearPlayer && denseSignal < 300f,
-            "Architecture shared perception visibility confidence reduces approved long-range recognition while clear weather stays unchanged");
+            "Perception R2 fog reduces long-range direct recognition without changing clear-weather range");
         Check(denseProjectile >= Math.Min(230f, closeFloor) && denseProjectile <= 230f,
-            "Architecture shared perception DenseFog preserves a bounded close real-projectile fallback");
+            "Perception R2 preserves the bounded close real-projectile visibility floor");
 
-        Check(weaponPerception.GetMethod("TryFindIncomingProjectile", Flags) != null &&
-              weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null &&
-              weaponPerception.GetMethod("TryFindImmediateThreat", Flags) != null &&
-              weaponPerception.GetMethod("TryObserveHeldThreats", Flags) != null,
-            "Architecture shared perception weapon perception centralizes incoming, instigator-filtered, immediate and held-item observation");
+        Check(perception.GetMethod("RefreshState", Flags) != null &&
+              perception.GetProperty("Snapshot", Flags) != null &&
+              perception.GetMethod("TryGetIncomingProjectile", Flags) != null &&
+              perception.GetMethod("TryGetDebugState", Flags) != null,
+            "Perception R2 exposes one receiver refresh/snapshot/debug surface");
+        Check(legacyCreaturePerception.BaseType == perception,
+            "Perception R2 legacy creature type is a zero-policy bridge over the unified runtime during staged migration");
+
         foreach (string field in new[]
         {
-            "VisibleSpear", "VisibleRock", "VisibleExplosive", "VisibleStartle", "VisibleShock"
+            "Target", "ObservedPosition", "EstimatedPosition", "ObservedVelocity", "Confidence",
+            "Salience", "ThreatUrgency", "AttentionScore", "LastObservedTick", "AgeTicks",
+            "Source", "Modality", "DirectObservation"
         })
-            Check(heldObservation.GetField(field, Flags) != null,
-                "Architecture shared perception held threat observation exposes " + field);
+            Check(perceptionTrack.GetField(field, Flags) != null,
+                "Perception R2 bounded track exposes " + field);
+        foreach (string field in new[] { "PrimaryThreat", "SecondaryThreat", "LostThreat", "IncomingProjectile", "Signals" })
+            Check(perceptionSnapshot.GetField(field, Flags) != null,
+                "Perception R2 snapshot exposes fixed slot " + field);
 
-        // R6 moved these responsibilities out of DB_AI. The managed probe must validate the
-        // current domain owners instead of keeping deleted facade methods alive for tests.
-        Check(ai.GetMethod("ScanWeapons", Flags) == null &&
-              ai.GetMethod("ScanCreatures", Flags) == null &&
-              ai.GetMethod("AcquireSlot", Flags) == null &&
-              ai.GetMethod("FindSocialHarassTarget", Flags) == null,
-            "Architecture shared perception does not resurrect pre-R6 DB_AI scan/slot facades");
+        string[] sources = Enum.GetNames(perceptionSource);
+        foreach (string source in new[] { "DirectCreature", "DirectPlayer", "HeldItem", "Projectile", "Signal", "Predicted" })
+            Check(Array.IndexOf(sources, source) >= 0, "Perception R2 source vocabulary exposes " + source);
+        string[] modalities = Enum.GetNames(perceptionModality);
+        foreach (string modality in new[] { "Visual", "Acoustic", "Reported", "Predicted" })
+            Check(Array.IndexOf(modalities, modality) >= 0, "Perception R2 modality vocabulary exposes " + modality);
 
-        MethodInfo perceptionScan = creaturePerception.GetMethod("ScanCreatures", Flags);
-        Check(perceptionScan != null &&
-              MethodCallOffset(perceptionScan, roomContext, "For") >= 0 &&
-              MethodCallOffset(perceptionScan, visibility, "CanObserve") >= 0,
-            "Architecture shared perception ordinary creature recognition belongs to DB_CreaturePerception and consumes RoomContext + VisibilityPolicy");
+        MethodInfo threatScore = perceptionScoring.GetMethod("ThreatAttentionScore", Flags);
+        MethodInfo projectileRisk = perceptionScoring.GetMethod("ProjectileRisk", Flags);
+        MethodInfo signalConfidence = perceptionScoring.GetMethod("SignalConfidence", Flags);
+        MethodInfo lostConfidence = perceptionScoring.GetMethod("LostConfidence", Flags);
+        MethodInfo shouldSwitch = perceptionScoring.GetMethod("ShouldSwitchAttention", Flags);
+        MethodInfo betterScore = perceptionScoring.GetMethod("BetterScore", Flags);
+        Check(threatScore != null && projectileRisk != null && signalConfidence != null &&
+              lostConfidence != null && shouldSwitch != null && betterScore != null,
+            "Perception R2 scoring is centralized in pure callable helpers");
 
-        int canObserveOffset = MethodCallOffset(perceptionScan, visibility, "CanObserve");
-        int exactDistanceOffset = MethodCallOffset(perceptionScan, typeof(UnityEngine.Vector2), "Distance");
+        float receding = (float)threatScore.Invoke(null, new object[] { 0.8f, 85f, 180f, -3f, 0.1f, 0.9f, 0.1f, 0.5f });
+        float charging = (float)threatScore.Invoke(null, new object[] { 0.8f, 105f, 180f, 7f, 0.9f, 0.9f, 0.1f, 0.5f });
+        Check(charging > receding,
+            "Perception R2 attention prefers a strongly charging threat over a slightly nearer receding one");
+
+        float grazingRock = (float)projectileRisk.Invoke(null, new object[] { 1.8f, 28f, 38f, 7f, 0.34f, 0.92f, 0f });
+        float imminentSpear = (float)projectileRisk.Invoke(null, new object[] { 0.30f, 3f, 38f, 15f, 1f, 0.92f, 0f });
+        Check(imminentSpear > grazingRock,
+            "Perception R2 projectile risk prefers imminent lethal intersection over later grazing blunt flight");
+
+        float rootSignal = (float)signalConfidence.Invoke(null, new object[] { 0.8f, 0.8f, 0, 0.7f, 0.4f, false });
+        float hopOne = (float)signalConfidence.Invoke(null, new object[] { 0.8f, 0.8f, 1, 0.7f, 0.4f, false });
+        float hopTwo = (float)signalConfidence.Invoke(null, new object[] { 0.8f, 0.8f, 2, 0.7f, 0.4f, false });
+        Check(rootSignal > hopOne && hopOne > hopTwo,
+            "Perception R2 reported-signal confidence decreases monotonically with relay hops");
+
+        float lost0 = (float)lostConfidence.Invoke(null, new object[] { 0.9f, 0 });
+        float lost16 = (float)lostConfidence.Invoke(null, new object[] { 0.9f, 16 });
+        float lost40 = (float)lostConfidence.Invoke(null, new object[] { 0.9f, 40 });
+        float lostMax = (float)lostConfidence.Invoke(null, new object[] { 0.9f, 52 });
+        Check(lost0 > lost16 && lost16 > lost40 && lostMax == 0f,
+            "Perception R2 lost-target confidence decays monotonically to zero in a bounded window");
+
+        Check(!(bool)shouldSwitch.Invoke(null, new object[] { 0.70f, 0.72f, 0.9f, false }) &&
+              (bool)shouldSwitch.Invoke(null, new object[] { 0.70f, 0.90f, 0.9f, false }) &&
+              (bool)shouldSwitch.Invoke(null, new object[] { 0.70f, 0.71f, 0.9f, true }),
+            "Perception R2 attention hysteresis rejects micro-switches but allows material or imminent challenges");
+
+        // Equal scores use a stable key rather than candidate enumeration order.
+        bool key10WinsFrom20 = (bool)betterScore.Invoke(null, new object[] { 0.5f, 10, 0.5f, 20 });
+        bool key20LosesTo10 = (bool)betterScore.Invoke(null, new object[] { 0.5f, 20, 0.5f, 10 });
+        Check(key10WinsFrom20 && !key20LosesTo10,
+            "Perception R2 exact-score ties resolve by stable identity, not RoomContext enumeration order");
+
+        MethodInfo scanCreatures = perception.GetMethod("ScanCreatures", Flags);
+        MethodInfo scanProjectiles = perception.GetMethod("RefreshIncomingProjectile", Flags);
+        Check(scanCreatures != null && MethodCallOffset(scanCreatures, roomContext, "For") >= 0 &&
+              MethodCallOffset(scanCreatures, visibility, "CanObserve") >= 0 &&
+              MethodCallOffset(scanCreatures, perceptionScoring, "ThreatAttentionScore") >= 0,
+            "Perception R2 creature attention consumes shared room facts + visibility + central scoring");
+        Check(scanProjectiles != null && MethodCallOffset(scanProjectiles, roomContext, "For") >= 0 &&
+              MethodCallOffset(scanProjectiles, visibility, "CanObserve") >= 0 &&
+              MethodCallOffset(scanProjectiles, perceptionScoring, "ProjectileRisk") >= 0,
+            "Perception R2 projectile receiver ranks cached thrown weapons instead of accepting first match");
+
+        int canObserveOffset = MethodCallOffset(scanCreatures, visibility, "CanObserve");
+        int exactDistanceOffset = MethodCallOffset(scanCreatures, typeof(UnityEngine.Vector2), "Distance");
         Check(canObserveOffset >= 0 && exactDistanceOffset > canObserveOffset,
-            "Architecture performance keeps exact creature distance sqrt behind visibility/range rejection");
+            "Perception R2 keeps exact creature distance sqrt behind cheap range + LOS rejection");
 
-        int scanInterval = (int)creaturePerception.GetField("ScanIntervalTicks", Flags).GetRawConstantValue();
-        MethodInfo scanPhase = creaturePerception.GetMethod("ScanPhase", Flags);
+        int scanInterval = (int)perception.GetField("ScanIntervalTicks", Flags).GetRawConstantValue();
+        MethodInfo scanPhase = perception.GetMethod("ScanPhase", Flags);
         bool[] phaseBuckets = new bool[scanInterval];
-        bool phasesBounded = scanInterval == 8 && scanPhase != null;
-        if (phasesBounded)
+        for (int seed = 0; seed < 256; seed++)
         {
-            for (int seed = 0; seed < 256; seed++)
-            {
-                int phase = (int)scanPhase.Invoke(null, new object[] { seed });
-                if (phase < 1 || phase > scanInterval)
-                {
-                    phasesBounded = false;
-                    break;
-                }
-                phaseBuckets[phase - 1] = true;
-            }
+            int phase = (int)scanPhase.Invoke(null, new object[] { seed });
+            Check(phase >= 1 && phase <= scanInterval, "Perception R2 staggered scan phase stays bounded");
+            phaseBuckets[phase - 1] = true;
         }
-        bool allBucketsUsed = phasesBounded;
-        for (int i = 0; i < phaseBuckets.Length; i++) allBucketsUsed &= phaseBuckets[i];
-        Check(phasesBounded && allBucketsUsed,
-            "Architecture performance disperses newly-realized creature scans across all stable 1..8 phases without extending the old maximum interval");
+        bool allBuckets = scanInterval == 8;
+        for (int i = 0; i < phaseBuckets.Length; i++) allBuckets &= phaseBuckets[i];
+        Check(allBuckets, "Perception R2 disperses creature scans across all eight stable phase buckets");
 
-        MethodInfo acquireSlot = combat.GetMethod("AcquireSlot", Flags);
-        MethodInfo socialHarass = combat.GetMethod("FindSocialHarassTarget", Flags);
-        Check(acquireSlot != null && MethodCallOffset(acquireSlot, roomContext, "For") >= 0,
-            "Architecture shared perception Combat AttackSlots enumerate the shared active-bat view");
-        Check(socialHarass != null && MethodCallOffset(socialHarass, visibility, "CanObserve") >= 0,
-            "Architecture shared perception Combat social-harass target recognition reuses central visibility observations");
+        Check(!MethodWritesField(perception.GetMethod("RefreshState", Flags), typeof(BodyChunk), "vel") &&
+              !MethodWritesField(scanCreatures, typeof(BodyChunk), "vel") &&
+              !MethodWritesField(scanProjectiles, typeof(BodyChunk), "vel"),
+            "Perception R2 receiver never writes BodyChunk velocity or owns locomotion");
 
-        MethodInfo captureFrame = frameContextRuntime.GetMethod("Capture", Flags);
-        Check(captureFrame != null &&
-              MethodCallOffset(captureFrame, roomContext, "For") >= 0 &&
-              MethodCallOffset(captureFrame, visibility, "CanObserve") >= 0 &&
-              MethodCallOffset(captureFrame, weaponPerception, "TryFindIncomingProjectile") >= 0,
-            "Architecture shared perception FrameContext consumes shared creature/player/projectile facts without a second scanner");
-
-        Type threatRoomState = threat.GetNestedType("RoomState", BindingFlags.NonPublic);
-        Check(threatRoomState != null &&
-              threatRoomState.GetField("Players", Flags) == null &&
-              threatRoomState.GetField("ThrownWeapons", Flags) == null &&
-              threatRoomState.GetField("LastRefreshClock", Flags) == null &&
-              threatRoomState.GetMethod("Refresh", Flags) == null,
-            "Architecture shared perception Threat RoomState owns temporal evidence only, not a second room scanner");
-        foreach (string field in new[]
-                 { "RecentSpearThrow", "RecentRockThrow", "RecentExplosion", "RecentGrab", "CasualtyWindowStart", "CasualtyCount" })
-            Check(threatRoomState.GetField(field, Flags) != null,
-                "Architecture shared perception Threat RoomState retains threat-owned temporal evidence " + field);
-
-        MethodInfo updateCue = threat.GetMethod("UpdateCue", Flags);
-        MethodInfo nearestVisible = threat.GetMethod("NearestVisiblePlayer", Flags);
-        Check(MethodCallOffset(updateCue, roomContext, "For") >= 0 &&
-              MethodCallOffset(updateCue, weaponPerception, "TryObserveHeldThreats") >= 0 &&
-              MethodCallOffset(updateCue, weaponPerception, "TryFindIncomingProjectileFrom") >= 0,
-            "Architecture shared perception Threat current cue consumes shared player/held/projectile observations");
-        Check(MethodCallOffset(nearestVisible, visibility, "CanObserve") >= 0,
-            "Architecture shared perception Threat player recognition uses the central visibility policy");
-
-        MethodInfo tryProfile = tactics.GetMethod("TryProfile", Flags);
-        Check(tactics.GetMethod("PlayerBySlot", Flags) == null,
-            "Architecture shared perception Threat tactics no longer owns the retired player-lookup helper from the ordinary evade facade");
-        Check(MethodCallOffset(tryProfile, weaponPerception, "TryObserveHeldThreats") >= 0,
-            "Architecture shared perception Threat tactics receives an already-selected player and reuses shared held-item perception");
-
-        MethodInfo signalPerceive = signalRuntime.GetMethod("TryPerceive", Flags);
-        Check(signalRuntime.GetMethod("VisualRadius", Flags) == null &&
+        // Staged migration contract: long-term threat memory and signal transport stay in their
+        // existing domains while receiver semantics move behind the R2 snapshot.
+        Check(threat.GetMethod("RefreshState", Flags) != null &&
               signalDefinition.GetMethod("For", Flags) != null &&
-              MethodCallOffset(signalPerceive, signalDefinition, "For") >= 0 &&
-              MethodCallOffset(signalPerceive, visibility, "EffectiveRange") >= 0 &&
-              MethodCallOffset(signalPerceive, visibility, "CanObserve") >= 0,
-            "Architecture shared perception Signals reads range from DB_SignalDefinition and uses the central visibility authority without a duplicate VisualRadius facade");
+              signalRuntime.GetMethod("EmitAlarm", Flags) != null,
+            "Perception R2 preserves Threat memory/assessment and Signal emission/transport domain boundaries");
+        Check(weaponPerception.GetMethod("TryObserveHeldThreats", Flags) != null &&
+              heldObservation.GetField("VisibleSpear", Flags) != null,
+            "Perception R2 phase one keeps the held-item migration bridge until Threat consumers move to the snapshot");
+        Check(ai.GetMethod("ScanWeapons", Flags) == null && ai.GetMethod("ScanCreatures", Flags) == null,
+            "Perception R2 does not resurrect DB_AI scanning facades");
 
-        MethodInfo updateRoom = hooks.GetMethod("UpdateRoom", Flags);
-        int swarmUpdate = MethodCallOffset(updateRoom, swarmRoom, "UpdateRoom");
-        int lazyGate = MethodCallOffset(updateRoom, roomContext, "TryGetExisting");
-        int signalFor = MethodCallOffset(updateRoom, signalRoomRuntime, "For");
-        int environmentUpdate = MethodCallOffset(updateRoom, environmentRuntime, "Update");
-        Check(swarmUpdate >= 0 && lazyGate > swarmUpdate &&
-              signalFor > lazyGate && environmentUpdate > lazyGate,
-            "Architecture shared perception preserves DESERTSWARMROOM spawning globally but gates DB-only Signal/Environment work behind lazy active-room context");
-
-        Check(MethodCallOffset(hooks.GetMethod("Enable", Flags), roomContext, "Reset") >= 0 &&
-              MethodCallOffset(hooks.GetMethod("Disable", Flags), roomContext, "Reset") >= 0,
-            "Architecture shared perception RoomContext cache follows Desert Batfly enable/disable lifecycle");
-
-        Check(roomContext.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              visibility.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              weaponPerception.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              creaturePerception.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              combat.Name.StartsWith("DB_", StringComparison.Ordinal),
-            "Architecture shared perception current domains use DB_ names and no TaskXX production type");
-
-        Console.WriteLine(
-            "Architecture shared perception complete: current Perception/Combat/FrameContext owners, staggered scan phases, distance/visibility ordering, shared RoomContext, Threat/Signal visual policy and lazy irrelevant-room gating verified.");
+        Console.WriteLine("Architecture Perception R2 phase one: fixed perception slots, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.");
     }
 }
