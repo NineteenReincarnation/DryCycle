@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.MantleCrab;
 
-/// <summary>Passive shell and standing rig. All real collision masses belong to the shell.</summary>
+/// <summary>Rigid shell, articulated limbs and low-level walking motor for MantleCrab.</summary>
 public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalkableCurveGeometry
 {
     internal static readonly Vector2[] ShellRest =
@@ -16,6 +16,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
     private const float VisualBodyWidth = VisualBodyEnd - VisualBodyStart;
     internal readonly MantleCrabLimb[] Legs = new MantleCrabLimb[4];
     internal readonly MantleCrabLimb[] Pincers = new MantleCrabLimb[2];
+    internal readonly MantleCrabLocomotion Locomotion;
     private readonly float[] supportAccelerations = new float[4];
 
     private Vector2 shellRestCenter;
@@ -72,6 +73,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
 
         for (int i = 0; i < 4; i++) Legs[i] = new MantleCrabLimb(i, false);
         for (int i = 0; i < 2; i++) Pincers[i] = new MantleCrabLimb(i, true);
+        Locomotion = new MantleCrabLocomotion(this);
         airFriction = .995f;
         gravity = .9f;
         bounce = .05f;
@@ -122,6 +124,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         foreach (MantleCrabLimb pincer in Pincers)
             pincer.Reset(Anchor(pincer));
 
+        Locomotion.Reset();
         graphicsModule?.Reset();
     }
 
@@ -131,6 +134,8 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         Vector2 up = new(-axis.y, axis.x);
         return bodyChunks[2].pos + axis * limb.Rest[0].x + up * limb.Rest[0].y;
     }
+
+    internal void SetLocomotionIntent(float move, float turn) => Locomotion.SetIntent(move, turn);
 
     public override void Update(bool eu)
     {
@@ -142,6 +147,14 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         // keeps the collision's linear and angular response, never its bend/compression modes.
         MaintainRigidShell();
 
+        // Safari is currently the direct test surface for the low-level motor. Horizontal input
+        // walks along the shell axis; vertical input applies the deliberately slow reorientation
+        // requested by the C locomotion model. A future AI can call SetLocomotionIntent directly.
+        if (safariControlled && inputWithDiagonals.HasValue)
+            SetLocomotionIntent(inputWithDiagonals.Value.x, inputWithDiagonals.Value.y);
+
+        Locomotion.UpdateStepPlanning();
+
         SupportingFeet = 0;
         foreach (MantleCrabLimb leg in Legs)
         {
@@ -152,10 +165,11 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
 
         if (!Consious || SupportingFeet == 0) return;
         ApplySupport(gravity * room.gravity);
+        Locomotion.ApplyGroundForces();
 
-        // Support is applied at individual shell stations to create legitimate torque. Project
-        // those impulses back to rigid-body velocities immediately so they cannot seed a new
-        // internal vibration for the next frame.
+        // Support and locomotion are applied at individual shell stations so they can create
+        // legitimate translation and torque. Project those impulses back to rigid-body velocities
+        // immediately so they cannot seed a new internal vibration for the next frame.
         RigidifyShellVelocities();
     }
 
@@ -200,8 +214,6 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
             if (!leg.Planted) continue;
             BodyChunk anchor = bodyChunks[leg.AnchorChunk];
             anchor.vel.y += supportAccelerations[i] * totalMass / anchor.mass;
-            if (SupportingFeet >= 2)
-                anchor.vel.x -= Mathf.Clamp(anchor.vel.x * .08f, -.35f, .35f);
         }
     }
 
