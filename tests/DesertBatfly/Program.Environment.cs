@@ -126,10 +126,11 @@ internal static partial class Program
             "Environment same-room Home/Hive/Burrow executes through the Environment-owned behavior path");
 
         Type visibilityPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_VisibilityPolicy", true);
-        Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
+        Type perception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);
         Check(visibilityPolicy.GetMethod("CanObserve", Flags) != null &&
-              weaponPerception.GetMethod("TryFindIncomingProjectileFrom", Flags) != null,
-            "Environment Fog/DenseFog visibility and close projectile recognition now use shared R2 perception policy");
+              perception.GetMethod("TryGetIncomingProjectile", Flags) != null &&
+              perception.GetProperty("Snapshot", Flags) != null,
+            "Environment Fog/DenseFog visibility and close projectile recognition use shared Perception R2 policy");
         Check(environmentalPolicy.GetMethod("AggressionAuthorized", Flags) != null &&
               environmentalPolicy.GetMethod("CombatMotivation", Flags) != null &&
               environmentalPolicy.GetMethod("AllowsHarassCandidate", Flags) != null &&
@@ -185,7 +186,7 @@ internal static partial class Program
         foreach (Type type in new[]
                  {
                      behavior, roomRuntime, profile, environmentalPolicy,
-                     visibilityPolicy, weaponPerception,
+                     visibilityPolicy, perception,
                      mod.GetType("DryCycle.Creatures.DesertBatfly.DB_EnvironmentExposure", true)
                  })
             Check(!TypeCallsEnvironmentForbidden(type),
