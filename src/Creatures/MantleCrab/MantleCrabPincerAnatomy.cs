@@ -29,27 +29,27 @@ internal static class MantleCrabPincerAnatomy
         [5.15f, 4.4f, 3.8f, 3.05f]
     ];
 
-    // Joint plates are wider than their adjacent shafts so every articulation remains readable at
-    // Rain World's camera scale. The root connection is hidden under the mantle and is not drawn as
-    // a separate plate; these values correspond to the elbow/intermediate/wrist-side joints.
+    // Capture-arm joints are narrow overlapping collars, not the broad bearing capsules used by
+    // the walking legs. They only slightly exceed the adjoining shaft width, matching the source
+    // design's long red articulated appendages instead of creating conspicuous horizontal knobs.
     internal static readonly float[][] JointWidths =
     [
-        [6.7f, 6.05f, 5.35f],
-        [7.0f, 6.35f, 5.65f]
+        [5.25f, 4.70f, 4.15f],
+        [5.65f, 5.05f, 4.50f]
     ];
 
-    // V3 chela proportions. The old fingers were longer than the palm and therefore read as two
-    // needles continuing the arm. A true chela first forms a broad manus, then grows two short,
-    // inward-curving digits around a visible cavity.
-    internal static readonly float[] PalmLengths = [23.5f, 27.0f];
-    internal static readonly float[] PalmWidths = [6.8f, 8.4f];
-    internal static readonly float[] FingerLengths = [16.5f, 20.0f];
-    internal static readonly float[] FingerWidths = [2.65f, 3.35f];
+    // V3 chela proportions. The left appendage keeps the source's slender fork-like chela, while
+    // the right appendage is distinctly more massive. Both still obey true manus-first anatomy:
+    // the palm is longer than either digit and the digits curve around a real cavity.
+    internal static readonly float[] PalmLengths = [20.0f, 27.0f];
+    internal static readonly float[] PalmWidths = [5.55f, 8.40f];
+    internal static readonly float[] FingerLengths = [15.0f, 20.0f];
+    internal static readonly float[] FingerWidths = [2.25f, 3.35f];
 
     // The palm is not merely a continuation of the last shaft. A small authored carpal angle gives
     // the left claw a restrained inward set and the right claw the pronounced reference-like bend.
     internal static readonly float[] PalmRestAngleDegrees = [-5.5f, 12.0f];
-    internal static readonly float[] IdleOpen = [.13f, .18f];
+    internal static readonly float[] IdleOpen = [.11f, .18f];
 
     internal static Vector2[] Landmarks(int index) => Chains[index];
     internal static float SegmentWidth(int index, int segment) => SegmentWidths[index][segment];
