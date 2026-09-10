@@ -46,7 +46,31 @@ internal static class MantleCrabMeshBuilder
     {
         Vector2 direction = end - start;
         if (direction.sqrMagnitude < .0001f) direction = Vector2.down;
-        Vector2 cross = MantleCrabRenderingMath.Perpendicular(direction.normalized);
+        Vector2 axis = direction.normalized;
+        Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
+
+        // Walking-leg joint sprites arrive here as very short, relatively wide segments. Treat
+        // those as actual exoskeletal hinge capsules rather than miniature tapered rods. Eye
+        // stalks remain in the ordinary thin-segment branch below.
+        bool hinge = width >= 1.25f && taper >= .45f;
+        if (hinge)
+        {
+            Vector2 center = (start + end) * .5f;
+            float halfLength = Mathf.Max(direction.magnitude * .5f, width * 1.08f);
+            for (int y = 0; y <= rows; y++)
+            for (int x = 0; x <= columns; x++)
+            {
+                float u = x / (float)columns * 2f - 1f;
+                float v = y / (float)rows * 2f - 1f;
+                float cap = Mathf.Sqrt(Mathf.Max(0f, 1f - u * u));
+                float waist = .78f + cap * .30f;
+                float bevel = 1f - .08f * Mathf.Abs(v);
+                mesh.MoveVertice(
+                    y * (columns + 1) + x,
+                    center + axis * (u * halfLength) + cross * (v * width * waist * bevel) - camera);
+            }
+            return;
+        }
 
         for (int y = 0; y <= rows; y++)
         for (int x = 0; x <= columns; x++)
@@ -71,19 +95,31 @@ internal static class MantleCrabMeshBuilder
         Vector2 camera,
         bool block = false)
     {
+        if (axis.sqrMagnitude < .0001f) axis = Vector2.down;
+        axis.Normalize();
         Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
         for (int y = 0; y <= rows; y++)
         for (int x = 0; x <= columns; x++)
         {
             float u = x / (float)columns * 2f - 1f;
             float v = y / (float)rows * 2f - 1f;
-            Vector2 p = block
-                ? new Vector2(
-                    u * (.9f - .25f * v) * (1f - .1f * Mathf.Abs(v)),
-                    v * (1f - .08f * Mathf.Abs(u)))
-                : new Vector2(
+            Vector2 p;
+            if (block)
+            {
+                // Pincer-arm joints use a faceted hinge plate with a slight central waist. It is
+                // deliberately asymmetric in the longitudinal direction so it reads as two shell
+                // pieces overlapping around an articulation rather than a generic oval bead.
+                float cap = Mathf.Sqrt(Mathf.Max(0f, 1f - u * u));
+                float longitudinal = u * (.88f + .08f * (1f - Mathf.Abs(v)));
+                float lateral = v * (.78f + cap * .28f) * (1f - .07f * Mathf.Abs(u));
+                p = new Vector2(longitudinal, lateral);
+            }
+            else
+            {
+                p = new Vector2(
                     u * Mathf.Sqrt(1f - v * v * .5f),
                     v * Mathf.Sqrt(1f - u * u * .5f));
+            }
             mesh.MoveVertice(
                 y * (columns + 1) + x,
                 center + axis * (p.x * width) + cross * (p.y * height) - camera);
@@ -110,20 +146,23 @@ internal static class MantleCrabMeshBuilder
             float u = x / (float)columns;
             float v = y / (float)rows * 2f - 1f;
 
-            // A long Mantle Crab limb is not a uniform pipe. It leaves the joint with some
-            // mass, narrows through the shaft, then gains a small terminal collar before the
-            // next articulation. This profile is intentionally subtle; the authored joint
-            // positions provide the actual bend.
+            // V3 exoskeletal profile: collar -> load-bearing belly -> narrowed shaft -> terminal
+            // collar. The difference is intentionally visible at normal Rain World zoom, so the
+            // long legs read as plates joined by hinges instead of four straight pipes.
             float profile;
-            if (u < .16f)
-                profile = Mathf.Lerp(.78f, 1.06f, Mathf.SmoothStep(0f, 1f, u / .16f));
-            else if (u < .76f)
-                profile = Mathf.Lerp(1.06f, .68f, Mathf.SmoothStep(0f, 1f, (u - .16f) / .60f));
+            if (u < .14f)
+                profile = Mathf.Lerp(.72f, 1.04f, Mathf.SmoothStep(0f, 1f, u / .14f));
+            else if (u < .48f)
+                profile = Mathf.Lerp(1.04f, .91f, Mathf.SmoothStep(0f, 1f, (u - .14f) / .34f));
+            else if (u < .80f)
+                profile = Mathf.Lerp(.91f, .66f, Mathf.SmoothStep(0f, 1f, (u - .48f) / .32f));
             else
-                profile = Mathf.Lerp(.68f, .86f, Mathf.SmoothStep(0f, 1f, (u - .76f) / .24f));
+                profile = Mathf.Lerp(.66f, .88f, Mathf.SmoothStep(0f, 1f, (u - .80f) / .20f));
 
-            float organicBow = Mathf.Sin(u * Mathf.PI) * width * (variant % 2 == 0 ? .07f : -.055f);
-            Vector2 point = Vector2.Lerp(start, end, u) + cross * (organicBow + v * width * profile);
+            float organicBow = Mathf.Sin(u * Mathf.PI) * width * (variant % 2 == 0 ? .055f : -.045f);
+            float faceting = 1f - .055f * Mathf.Abs(v);
+            Vector2 point = Vector2.Lerp(start, end, u) + cross *
+                            (organicBow + v * width * profile * faceting);
             mesh.MoveVertice(y * (columns + 1) + x, point - camera);
         }
     }
@@ -153,22 +192,25 @@ internal static class MantleCrabMeshBuilder
             float u = x / (float)columns;
             float v = y / (float)rows * 2f - 1f;
             float profile;
-            if (u < .18f)
-                profile = Mathf.Lerp(.72f, 1.10f, Mathf.SmoothStep(0f, 1f, u / .18f));
-            else if (u < .70f)
-                profile = Mathf.Lerp(1.10f, .70f, Mathf.SmoothStep(0f, 1f, (u - .18f) / .52f));
+            if (u < .16f)
+                profile = Mathf.Lerp(.70f, 1.10f, Mathf.SmoothStep(0f, 1f, u / .16f));
+            else if (u < .68f)
+                profile = Mathf.Lerp(1.10f, .72f, Mathf.SmoothStep(0f, 1f, (u - .16f) / .52f));
             else
-                profile = Mathf.Lerp(.70f, .90f, Mathf.SmoothStep(0f, 1f, (u - .70f) / .30f));
+                profile = Mathf.Lerp(.72f, .93f, Mathf.SmoothStep(0f, 1f, (u - .68f) / .32f));
 
-            float bow = Mathf.Sin(u * Mathf.PI) * width * (variant % 2 == 0 ? .045f : -.04f);
-            Vector2 point = Vector2.Lerp(start, end, u) + cross * (bow + v * width * profile);
+            float bow = Mathf.Sin(u * Mathf.PI) * width * (variant % 2 == 0 ? .042f : -.037f);
+            float faceting = 1f - .045f * Mathf.Abs(v);
+            Vector2 point = Vector2.Lerp(start, end, u) + cross *
+                            (bow + v * width * profile * faceting);
             mesh.MoveVertice(y * (columns + 1) + x, point - camera);
         }
     }
 
     /// <summary>
-    /// The fixed finger mesh also carries the palm. A broad palm followed by a short tapered digit
-    /// produces the reference's claw silhouette without spending another sprite slot.
+    /// The fixed-finger mesh also carries the manus. The manus now occupies most of the mesh and
+    /// expands abruptly after the carpal joint; only the distal portion becomes the short fixed
+    /// digit. This is intentionally a chela, not a terminal fork.
     /// </summary>
     internal static void PincerPalmAndFixedFinger(
         TriangleMesh mesh,
@@ -188,8 +230,15 @@ internal static class MantleCrabMeshBuilder
         axis.Normalize();
         Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
         Vector2 palmEnd = wrist + axis * palmLength;
-        float fingerAngle = Mathf.Lerp(4f, 13f, Mathf.Clamp01(open)) * handedness * Mathf.Deg2Rad;
-        Vector2 fingerAxis = Rotate(axis, fingerAngle);
+        float clampedOpen = Mathf.Clamp01(open);
+
+        Vector2 fixedRoot = palmEnd + cross * handedness * palmWidth * .38f;
+        Vector2 fixedTip = palmEnd + axis * fingerLength +
+                           cross * handedness * palmWidth * Mathf.Lerp(.06f, .18f, clampedOpen);
+        Vector2 fixedControlA = fixedRoot + axis * fingerLength * .38f +
+                                cross * handedness * fingerLength * .07f;
+        Vector2 fixedControlB = palmEnd + axis * fingerLength * .76f +
+                                cross * handedness * palmWidth * .16f;
 
         for (int x = 0; x <= columns; x++)
         for (int y = 0; y <= rows; y++)
@@ -197,24 +246,33 @@ internal static class MantleCrabMeshBuilder
             float u = x / (float)columns;
             float v = y / (float)rows * 2f - 1f;
             Vector2 center;
+            Vector2 localCross = cross;
             float halfWidth;
 
-            if (u < .44f)
+            if (u < .62f)
             {
-                float t = u / .44f;
+                float t = u / .62f;
                 center = Vector2.Lerp(wrist, palmEnd, t);
-                float palmProfile = .58f + .48f * Mathf.Sin(t * Mathf.PI);
+                float palmProfile;
+                if (t < .18f)
+                    palmProfile = Mathf.Lerp(.42f, .78f, Mathf.SmoothStep(0f, 1f, t / .18f));
+                else if (t < .64f)
+                    palmProfile = Mathf.Lerp(.78f, 1.08f, Mathf.SmoothStep(0f, 1f, (t - .18f) / .46f));
+                else
+                    palmProfile = Mathf.Lerp(1.08f, .84f, Mathf.SmoothStep(0f, 1f, (t - .64f) / .36f));
                 halfWidth = palmWidth * palmProfile;
             }
             else
             {
-                float t = (u - .44f) / .56f;
-                center = palmEnd + fingerAxis * (fingerLength * t);
-                center += cross * handedness * Mathf.Sin(t * Mathf.PI) * fingerLength * .035f;
-                halfWidth = fingerWidth * Mathf.Pow(1f - t, .72f) + .07f;
+                float t = (u - .62f) / .38f;
+                center = Bezier(fixedRoot, fixedControlA, fixedControlB, fixedTip, t);
+                Vector2 tangent = BezierTangent(fixedRoot, fixedControlA, fixedControlB, fixedTip, t);
+                if (tangent.sqrMagnitude > .0001f)
+                    localCross = MantleCrabRenderingMath.Perpendicular(tangent.normalized);
+                halfWidth = fingerWidth * Mathf.Pow(1f - t, .68f) + .065f;
             }
 
-            mesh.MoveVertice(y * (columns + 1) + x, center + cross * (v * halfWidth) - camera);
+            mesh.MoveVertice(y * (columns + 1) + x, center + localCross * (v * halfWidth) - camera);
         }
     }
 
@@ -236,19 +294,28 @@ internal static class MantleCrabMeshBuilder
         axis.Normalize();
         Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
         Vector2 palmEnd = wrist + axis * palmLength;
-        float fingerAngle = -Mathf.Lerp(8f, 29f, Mathf.Clamp01(open)) * handedness * Mathf.Deg2Rad;
-        Vector2 fingerAxis = Rotate(axis, fingerAngle);
-        Vector2 root = palmEnd - cross * handedness * palmWidth * .38f;
+        float clampedOpen = Mathf.Clamp01(open);
+
+        Vector2 root = palmEnd - cross * handedness * palmWidth * .36f;
+        float tipSpread = Mathf.Lerp(.07f, .82f, clampedOpen) * palmWidth;
+        Vector2 tip = palmEnd + axis * (fingerLength * .94f) - cross * handedness * tipSpread;
+        Vector2 controlA = root + axis * fingerLength * .34f -
+                           cross * handedness * fingerLength * Mathf.Lerp(.04f, .18f, clampedOpen);
+        Vector2 controlB = palmEnd + axis * fingerLength * .72f -
+                           cross * handedness * palmWidth * Mathf.Lerp(.05f, .62f, clampedOpen);
 
         for (int x = 0; x <= columns; x++)
         for (int y = 0; y <= rows; y++)
         {
             float u = x / (float)columns;
             float v = y / (float)rows * 2f - 1f;
-            float curve = Mathf.Sin(u * Mathf.PI) * fingerLength * .045f;
-            Vector2 center = root + fingerAxis * (fingerLength * .92f * u) - cross * handedness * curve;
-            float halfWidth = fingerWidth * .92f * Mathf.Pow(1f - u, .70f) + .055f;
-            mesh.MoveVertice(y * (columns + 1) + x, center + cross * (v * halfWidth) - camera);
+            Vector2 center = Bezier(root, controlA, controlB, tip, u);
+            Vector2 tangent = BezierTangent(root, controlA, controlB, tip, u);
+            Vector2 localCross = tangent.sqrMagnitude > .0001f
+                ? MantleCrabRenderingMath.Perpendicular(tangent.normalized)
+                : cross;
+            float halfWidth = fingerWidth * .94f * Mathf.Pow(1f - u, .68f) + .06f;
+            mesh.MoveVertice(y * (columns + 1) + x, center + localCross * (v * halfWidth) - camera);
         }
     }
 
@@ -270,45 +337,58 @@ internal static class MantleCrabMeshBuilder
 
         Vector2 shank = tip - ankle;
         if (shank.sqrMagnitude < .0001f) shank = -normal;
-        Vector2 shankCross = MantleCrabRenderingMath.Perpendicular(shank.normalized);
+        Vector2 shankDirection = shank.normalized;
+        Vector2 shankCross = MantleCrabRenderingMath.Perpendicular(shankDirection);
         if (Vector2.Dot(shankCross, tangent) < 0f) shankCross = -shankCross;
+
+        // The old renderer painted Foot material across the entire fourth leg link. Keep the IK
+        // endpoint unchanged, but visually reserve only the terminal 39% for the actual foot.
+        Vector2 footRoot = Vector2.Lerp(ankle, tip, .61f);
 
         for (int x = 0; x <= columns; x++)
         for (int y = 0; y <= rows; y++)
         {
             float u = x / (float)columns;
             float v = y / (float)rows * 2f - 1f;
-            float plant = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.48f, 1f, u));
+            float plant = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.40f, .92f, u));
 
-            // Thin ankle -> expanded bearing pad. The centre line bows slightly outward but
-            // still terminates exactly at the terrain contact used by the physical rig.
             float bulk;
-            if (u < .34f)
-                bulk = Mathf.Lerp(.22f, .46f, Mathf.SmoothStep(0f, 1f, u / .34f));
-            else if (u < .72f)
-                bulk = Mathf.Lerp(.46f, 1f, Mathf.SmoothStep(0f, 1f, (u - .34f) / .38f));
+            if (u < .18f)
+                bulk = Mathf.Lerp(.28f, .50f, Mathf.SmoothStep(0f, 1f, u / .18f));
+            else if (u < .66f)
+                bulk = Mathf.Lerp(.50f, 1.08f, Mathf.SmoothStep(0f, 1f, (u - .18f) / .48f));
             else
-                bulk = Mathf.Lerp(1f, .82f, Mathf.SmoothStep(0f, 1f, (u - .72f) / .28f));
+                bulk = Mathf.Lerp(1.08f, .90f, Mathf.SmoothStep(0f, 1f, (u - .66f) / .34f));
 
-            Vector2 center = Vector2.Lerp(ankle, tip, u);
-            center += tangent * (Mathf.Sin(u * Mathf.PI) * width * .22f * plant);
+            Vector2 center = Vector2.Lerp(footRoot, tip, u);
+            center += tangent * (Mathf.Sin(u * Mathf.PI) * width * .17f);
+            center += normal * (Mathf.Sin(u * Mathf.PI) * width * .28f * plant);
 
-            Vector2 cross = Vector2.Lerp(shankCross, tangent, plant).normalized;
-            Vector2 point = center + cross * (v * width * bulk);
+            Vector2 localCross = Vector2.Lerp(shankCross, tangent, plant);
+            if (localCross.sqrMagnitude < .0001f) localCross = tangent;
+            else localCross.Normalize();
 
-            // The terminal half progressively conforms to the terrain plane, producing a
-            // real bearing face instead of rotating a rectangular shoe at the end of the leg.
-            float flatten = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.58f, 1f, u));
-            point -= normal * Vector2.Dot(point - tip, normal) * flatten;
+            // A slight outer-side expansion gives each foot a planted, non-mirrored silhouette.
+            float lateralBias = Mathf.Lerp(1f, v > 0f ? 1.08f : .94f, plant);
+            Vector2 point = center + localCross * (v * width * bulk * lateralBias);
 
+            // Only the final edge collapses onto the terrain plane, producing a broad sole while
+            // preserving visible volume through the heel/body instead of flattening half the mesh.
+            float sole = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.86f, 1f, u));
+            point -= normal * Vector2.Dot(point - tip, normal) * sole;
             mesh.MoveVertice(y * (columns + 1) + x, point - camera);
         }
     }
 
-    private static Vector2 Rotate(Vector2 vector, float radians)
+    private static Vector2 Bezier(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float t)
     {
-        float sin = Mathf.Sin(radians);
-        float cos = Mathf.Cos(radians);
-        return new Vector2(vector.x * cos - vector.y * sin, vector.x * sin + vector.y * cos);
+        float s = 1f - t;
+        return a * (s * s * s) + b * (3f * s * s * t) + c * (3f * s * t * t) + d * (t * t * t);
+    }
+
+    private static Vector2 BezierTangent(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float t)
+    {
+        float s = 1f - t;
+        return (b - a) * (3f * s * s) + (c - b) * (6f * s * t) + (d - c) * (3f * t * t);
     }
 }
