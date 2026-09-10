@@ -155,6 +155,13 @@ public sealed class CreatureDescriptor
     }
 
     /// <summary>
+    /// 设置显示名称的简写语法糖；行为与 <see cref="SetDisplayName"/> 完全一致。
+    ///
+    /// Fluent shorthand for setting the display name; behavior is identical to <see cref="SetDisplayName"/>.
+    /// </summary>
+    public CreatureDescriptor Name(string displayName) => SetDisplayName(displayName);
+
+    /// <summary>
     /// 添加一个 world.txt 等文本入口可使用的生物别名。
     /// 别名忽略大小写去重，但保留第一次声明时的文本与顺序。
     ///
@@ -173,6 +180,13 @@ public sealed class CreatureDescriptor
 
         return this;
     }
+
+    /// <summary>
+    /// 添加单个别名的简写语法糖；行为与 <see cref="AddAlias"/> 完全一致。
+    ///
+    /// Fluent shorthand for adding one alias; behavior is identical to <see cref="AddAlias"/>.
+    /// </summary>
+    public CreatureDescriptor Alias(string alias) => AddAlias(alias);
 
     /// <summary>
     /// 一次添加多个生物别名。
@@ -195,6 +209,15 @@ public sealed class CreatureDescriptor
 
         return this;
     }
+
+    /// <summary>
+    /// 批量添加别名的简写语法糖，可直接写 <c>.Aliases("name1", "name2")</c>。
+    /// 保持与 <see cref="AddAliases"/> 相同的去重、顺序与冻结规则。
+    ///
+    /// Fluent shorthand for adding multiple aliases, allowing calls such as <c>.Aliases("name1", "name2")</c>.
+    /// It preserves the same deduplication, ordering, and freeze rules as <see cref="AddAliases"/>.
+    /// </summary>
+    public CreatureDescriptor Aliases(params string[] aliases) => AddAliases(aliases);
 
     /// <summary>
     /// 删除一个已声明的生物别名；比较时忽略大小写。
@@ -254,6 +277,13 @@ public sealed class CreatureDescriptor
     }
 
     /// <summary>
+    /// 设置 CreatureTemplate 工厂的简写语法糖。
+    ///
+    /// Fluent shorthand for setting the CreatureTemplate factory.
+    /// </summary>
+    public CreatureDescriptor Template(Func<CreatureTemplate> factory) => SetTemplateFactory(factory);
+
+    /// <summary>
     /// 设置可选的 CreatureState 工厂。
     ///
     /// Sets the optional CreatureState factory.
@@ -264,6 +294,13 @@ public sealed class CreatureDescriptor
         StateFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
+
+    /// <summary>
+    /// 设置 CreatureState 工厂的简写语法糖。
+    ///
+    /// Fluent shorthand for setting the CreatureState factory.
+    /// </summary>
+    public CreatureDescriptor State(Func<AbstractCreature, CreatureState> factory) => SetStateFactory(factory);
 
     /// <summary>
     /// 清除自定义 CreatureState 工厂，使该部分重新回退到 Rain World 原版流程。
@@ -290,6 +327,15 @@ public sealed class CreatureDescriptor
     }
 
     /// <summary>
+    /// 设置实体 Creature 工厂的简写语法糖。
+    /// 使用 Realized 这个名称用于明确区分 AbstractCreature 与房间中实际存在的 Creature。
+    ///
+    /// Fluent shorthand for setting the realized Creature factory.
+    /// The name Realized explicitly distinguishes it from AbstractCreature.
+    /// </summary>
+    public CreatureDescriptor Realized(Func<AbstractCreature, global::Creature> factory) => SetCreatureFactory(factory);
+
+    /// <summary>
     /// 清除自定义实体 Creature 工厂，使 Realize 重新回退到 Rain World 原版流程。
     ///
     /// Clears the custom realized Creature factory so realization falls back to Rain World's original flow.
@@ -314,6 +360,13 @@ public sealed class CreatureDescriptor
     }
 
     /// <summary>
+    /// 设置 AbstractCreatureAI 工厂的简写语法糖。
+    ///
+    /// Fluent shorthand for setting the AbstractCreatureAI factory.
+    /// </summary>
+    public CreatureDescriptor AbstractAI(Func<AbstractCreature, AbstractCreatureAI> factory) => SetAbstractAIFactory(factory);
+
+    /// <summary>
     /// 清除自定义 AbstractCreatureAI 工厂，使该部分重新回退到 Rain World 原版流程。
     ///
     /// Clears the custom AbstractCreatureAI factory so this part falls back to Rain World's original flow.
@@ -336,6 +389,13 @@ public sealed class CreatureDescriptor
         RealizedAIFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
+
+    /// <summary>
+    /// 设置实际 ArtificialIntelligence 工厂的简写语法糖。
+    ///
+    /// Fluent shorthand for setting the realized ArtificialIntelligence factory.
+    /// </summary>
+    public CreatureDescriptor AI(Func<AbstractCreature, ArtificialIntelligence> factory) => SetRealizedAIFactory(factory);
 
     /// <summary>
     /// 清除自定义实际 AI 工厂，使 AI 创建重新回退到 Rain World 原版分派流程。
