@@ -47,7 +47,7 @@ public static class CreatureRegistry
     /// True while new creature descriptors may still be registered.
     /// Registration closes once StaticWorld starts building creature templates.
     /// </summary>
-    public static bool IsRegistrationOpen => !_registrationClosed;
+    public static bool IsRegistrationOpen => !_registrationClosed && StaticWorld.creatureTemplates == null;
 
     /// <summary>
     /// 登记一份生物说明书。
@@ -70,8 +70,9 @@ public static class CreatureRegistry
             return descriptor;
         }
 
-        if (_registrationClosed)
+        if (_registrationClosed || StaticWorld.creatureTemplates != null)
         {
+            _registrationClosed = true;
             throw new InvalidOperationException(
                 $"Creature '{descriptor.Type?.value ?? "<null>"}' owned by '{descriptor.OwnerId}' was registered too late. " +
                 "Register custom creatures before StaticWorld starts creating creature templates.");
@@ -97,7 +98,7 @@ public static class CreatureRegistry
         for (int i = 0; i < descriptor.Aliases.Count; i++)
         {
             string alias = descriptor.Aliases[i];
-            if (!StringComparer.OrdinalIgnoreCase.Equals(alias, descriptor.Type.value))
+            if (!StringComparer.OrdinalIgnoreCase.Equals(alias, descriptor.Type.value.Trim()))
             {
                 AddNameIndex(alias, descriptor);
             }
@@ -232,7 +233,7 @@ public static class CreatureRegistry
 
         HashSet<string> incomingNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            descriptor.Type.value
+            descriptor.Type.value.Trim()
         };
 
         for (int i = 0; i < descriptor.Aliases.Count; i++)
@@ -296,6 +297,8 @@ public static class CreatureRegistry
         }
         catch
         {
+            // 如果后面的模板创建失败，把前面已经写入的槽位全部还原，避免留下“注册一半”的 StaticWorld。
+            // If a later template fails, restore every slot already changed so StaticWorld is not left half-registered.
             foreach (KeyValuePair<int, CreatureTemplate> pair in previousTemplates)
             {
                 StaticWorld.creatureTemplates[pair.Key] = pair.Value;
@@ -414,8 +417,8 @@ public static class CreatureRegistry
                 throw FactoryReturnedNull(descriptor, "abstract AI");
             }
 
-            // Rain World may write the den position after constructing its default AbstractCreatureAI.
-            // Preserve that constructor-stage information when replacing the AI object.
+            // Rain World 会在默认 AbstractCreatureAI 构造完成后再把出生巢穴位置写进去，替换 AI 时必须把这份信息带过去。
+            // Rain World may write the den position after constructing its default AbstractCreatureAI, so preserve it when replacing the AI object.
             if (originalAI != null && originalAI.privDenPos.HasValue)
             {
                 customAI.privDenPos = originalAI.privDenPos;
@@ -454,18 +457,19 @@ public static class CreatureRegistry
 
         self.realizedObject = creature;
 
-        // Let Rain World keep the checks that happen before its early return for an already-realized creature.
+        // 让原版继续执行“发现已经 Realize 后提前返回”之前的检查，例如 MSC 的 Void Sea Arena 标记。
+        // Let vanilla keep the checks that run before its early return for an already-realized creature.
         orig(self);
 
-        // MSCRealizeCustom performs challenge-mode flag setup before it notices that the creature
-        // has already been realized, so it is safe and preserves that vanilla side effect.
+        // MSCRealizeCustom 会先处理挑战模式标记，再发现实体已经存在并返回，因此这里调用不会覆盖我们的自定义实体。
+        // MSCRealizeCustom handles challenge-mode flags before noticing the existing entity, so this preserves that vanilla side effect safely.
         if (ModManager.DLCShared)
         {
             self.MSCRealizeCustom();
         }
 
-        // Vanilla Realize calls InitiateAI unconditionally after creating the room entity.
-        // Our InitiateAI hook will either use the descriptor factory or fall back to vanilla dispatch.
+        // 原版 Realize 创建实体后会无条件调用 InitiateAI；这里保持同样语义。
+        // Vanilla Realize calls InitiateAI unconditionally after creating the room entity; preserve that behavior here.
         self.InitiateAI();
 
         for (int i = 0; i < self.stuckObjects.Count; i++)
@@ -505,7 +509,8 @@ public static class CreatureRegistry
                 $"Creature '{descriptor.Type.value}' owned by '{descriptor.OwnerId}' cannot create its realized AI because AbstractCreatureAI is null.");
         }
 
-        // InitiateAI can be reached more than once. Do not call a user factory again while a realized AI already exists.
+        // InitiateAI 可能被重复调用；已有实际 AI 时不再重复调用开发者提供的 Factory。
+        // InitiateAI may be reached more than once; do not invoke the user factory again while a realized AI already exists.
         if (self.abstractAI.RealAI != null)
         {
             return;
