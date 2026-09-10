@@ -32,18 +32,51 @@ internal sealed class DB_SwarmRoom
     }
 
     /// <summary>
-    /// Handles the Desert Batfly specialization of vanilla UpdateFollowDijsktra. Rain World's
-    /// method is nonvirtual, so Integration owns the hook boundary while this Hive domain owns
-    /// the species rule that chooses one of the room's authored hive maps.
+    /// DESERTSWARMROOM is not a vanilla swarmRoom, so FlyAI.InActiveSwarmRoom cannot choose
+    /// the intended node set by itself. Mirror vanilla route retention while avoiding the old
+    /// specialization that always picked a BatHive and collapsed the colony onto one point.
     /// </summary>
     internal static bool TryHandleNativeFollowDijkstra(FlyAI ai, DB_Creature bat)
     {
         if (ai?.room == null || bat == null || !ReferenceEquals(ai.fly, bat) ||
-            !IsDB_SwarmRoom(ai.room.abstractRoom) || ai.room.hives.Length == 0)
+            !IsDB_SwarmRoom(ai.room.abstractRoom))
             return false;
 
-        if (ai.followingDijkstraMap < 0)
-            ai.followingDijkstraMap = ai.room.exitAndDenIndex.Length + Random.Range(0, ai.room.hives.Length);
+        if (ai.leaveRoomDijkstra >= 0)
+        {
+            ai.followingDijkstraMap = ai.leaveRoomDijkstra;
+            return true;
+        }
+
+        int relevant = ai.room.abstractRoom.NodesRelevantToCreature(bat.Template);
+        if (relevant <= 0)
+        {
+            ai.followingDijkstraMap = -1;
+            return true;
+        }
+
+        int current = ai.followingDijkstraMap;
+        if (current >= 0 && current < relevant)
+        {
+            int distance = ai.room.aimap.ExitDistanceForCreature(ai.FlyPos, current, bat.Template);
+            int completionDistance = ai.CurrentFollowDijkstraIsToHive ? 7 : 18;
+            if (ai.behavior != FlyAI.Behavior.Idle || distance >= completionDistance)
+                return true;
+        }
+
+        int nonHiveCount = Mathf.Clamp(ai.room.exitAndDenIndex.Length, 0, relevant);
+        int next;
+        // Home-room routing should distribute neutral traffic. Hives remain possible targets,
+        // but most refreshes use exits/dens instead of making every bat seek a hive node.
+        if (nonHiveCount > 0 && Random.value < 0.65f)
+            next = Random.Range(0, nonHiveCount);
+        else
+            next = Random.Range(0, relevant);
+
+        if (relevant > 1 && next == current)
+            next = (next + 1 + Random.Range(0, relevant - 1)) % relevant;
+
+        ai.followingDijkstraMap = next;
         return true;
     }
 
