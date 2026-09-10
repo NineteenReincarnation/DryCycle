@@ -12,6 +12,8 @@ internal static partial class Program
         Type socialModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialMode", true);
         Type socialDebugType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialDebugState", true);
         Type roomRuntimeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SocialRoomRuntime", true);
+        Type neutralType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_NeutralBehaviorRuntime", true);
+        Type neutralModeType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_NeutralMode", true);
         Type personalityType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Personality", true);
         Type stateType = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_State", true);
 
@@ -34,6 +36,14 @@ internal static partial class Program
               !actualModes.Contains("Follower"),
             "Social social modes are temporary interactions, never rejected social roles");
 
+        string[] neutralModes = Enum.GetNames(neutralModeType);
+        Check(new[] { "Roam", "PeerDrift", "LooseFlock", "ShortSwarm" }.All(neutralModes.Contains),
+            "NeutralEcology owns the four background ecology modes outside formal Social");
+        Check(neutralType.GetMethod("ShouldOwn", Flags) != null &&
+              neutralType.GetMethod("ApplyOwnedBehavior", Flags) != null &&
+              neutralType.GetMethods(Flags).Any(method => method.Name == "RefreshState"),
+            "NeutralEcology exposes pre-arbiter refresh, pure ownership query and owner-gated execution");
+
         object lowConformity = Activator.CreateInstance(personalityType, Flags, null, new object[] { 101 }, null);
         object highConformity = null;
         FieldInfo conformity = personalityType.GetField("Conformity", Flags);
@@ -55,10 +65,18 @@ internal static partial class Program
         float highThreshold = (float)threshold.Invoke(null, new[] { highConformity });
         Check(lowDrive > 0f && highDrive > 0f,
             "Social eligible neutral flight accumulates positive SocialDrive");
-        Check(highDrive > lowDrive * 0.70f,
-            "Social SocialDrive remains gradual instead of a zero/one trigger");
-        Check(highThreshold >= 0.46f && highThreshold <= 0.78f,
-            "Social interaction threshold stays in bounded neutral-life range");
+        Check(highDrive > lowDrive * 0.70f && highDrive > 0.0018f,
+            "SocialDrive is gradual but fast enough for visible formal interactions");
+        Check(highThreshold >= 0.46f && highThreshold <= 0.72f,
+            "Social interaction threshold stays in the retuned bounded event range");
+
+        MethodInfo cooldownWeight = socialType.GetMethod("PartnerCooldownWeight", Flags);
+        float freshPartner = (float)cooldownWeight.Invoke(null, new object[] { 0 });
+        float recoveringPartner = (float)cooldownWeight.Invoke(null, new object[] { 120 });
+        float justFinishedPartner = (float)cooldownWeight.Invoke(null, new object[] { 260 });
+        Check(Math.Abs(freshPartner - 1f) < 0.0001f &&
+              recoveringPartner > justFinishedPartner && justFinishedPartner >= 0.28f,
+            "Social cooldown discounts partner selection instead of deleting recent participants from the pool");
 
         MethodInfo priority = socialType.GetMethod("PriorityAllowsSocialFlags", Flags);
         Check((bool)priority.Invoke(null, new object[] { false, false, false, false, false, false, false }),
@@ -99,10 +117,16 @@ internal static partial class Program
               Mathf.Abs(leftOffset.x) > Mathf.Abs(leftOffset.y) * 4f,
             "Social CompanionDrift has a dominant horizontal offset instead of vertical stacking");
 
+        FieldInfo groupMax = socialType.GetField("GroupMax", Flags);
+        Check((int)groupMax.GetRawConstantValue() == 5,
+            "Social microflocks cap at five so one event cannot reserve most of a medium colony");
         FieldInfo separationX = socialType.GetField("GroupSeparationXWeight", Flags);
         FieldInfo separationY = socialType.GetField("GroupSeparationYWeight", Flags);
+        FieldInfo closeRadius = socialType.GetField("GroupCloseSeparationRadius", Flags);
         Check((float)separationX.GetValue(null) > (float)separationY.GetValue(null) * 3f,
-            "Social GroupDrift separation is explicitly horizontal-biased");
+            "Social GroupDrift retains a horizontal formation bias");
+        Check((float)closeRadius.GetRawConstantValue() >= 50f,
+            "Social GroupDrift adds an isotropic close-separation zone against vertical overlap");
 
         Type roomStateType = roomRuntimeType.GetNestedType("RoomState", Flags);
         Check(roomRuntimeType.GetNestedType("Reservation", Flags) != null && roomStateType != null,
@@ -118,7 +142,7 @@ internal static partial class Program
             "Social exposes cleanup hooks for death/travel/disable lifecycle");
 
         MethodInfo socialSteer = socialType.GetMethod("SocialSteer", Flags);
-        Check(socialSteer != null, "Social has one centralized neutral social steering bridge");
+        Check(socialSteer != null, "Social has one centralized formal-event steering bridge");
         Check(!MethodWritesField(socialSteer, typeof(BodyChunk), "vel"),
             "Social SocialSteer never writes BodyChunk.vel; vanilla BatFlight owns flight physics");
 
@@ -145,7 +169,7 @@ internal static partial class Program
               mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreatureSocialRoles", false) == null,
             "Social does not revive any rejected social-role design social-role runtime type");
 
-        Console.WriteLine("Social: temporary modes, SocialDrive/priority, weak Bond preference, stable horizontal pairing, room caches/reservations, vanilla-locomotion ownership, non-persistence and debug shape verified.");
+        Console.WriteLine("Social: formal events are separated from NeutralEcology; faster bounded cadence, soft cooldown partner reuse, five-member microflocks, close 2D separation, room reservations, vanilla locomotion ownership and non-persistence verified.");
     }
 
     private static bool MethodWritesField(MethodInfo method, Type declaringType, string fieldName)
