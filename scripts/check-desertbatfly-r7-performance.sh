@@ -9,7 +9,6 @@ import sys
 root = Path('src/Creatures/DesertBatfly')
 failures = []
 
-
 def read(rel):
     path = root / rel
     if not path.exists():
@@ -23,7 +22,6 @@ performance_probe = read('Core/Runtime/DB_PerformanceProbe.cs')
 fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
 perception = read('Behavior/Perception/DB_PerceptionRuntime.cs')
-weapon = read('Behavior/Perception/DB_WeaponPerception.cs')
 visibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')
 arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
@@ -40,7 +38,6 @@ if not debug_environment_path.exists():
 else:
     debug_environment = debug_environment_path.read_text(encoding='utf-8')
 
-# Shared room observation remains bounded and is the sole ordinary physicalObjects scanner.
 match = re.search(r'RefreshIntervalTicks\s*=\s*(\d+)', room_context)
 if not match or not (4 <= int(match.group(1)) <= 20):
     failures.append('DB_RoomContext refresh cadence must remain bounded to 4..20 ticks')
@@ -56,11 +53,7 @@ for path in sorted(root.rglob('*.cs')):
 if physical_scan_owners != ['Core/Runtime/DB_RoomContext.cs']:
     failures.append('physicalObjects scan authority changed: ' + ', '.join(physical_scan_owners))
 
-if 'context.ThrownWeapons' not in weapon or 'context.Weapons' not in weapon:
-    failures.append('DB_WeaponPerception no longer consumes shared DB_RoomContext weapon views')
-
-# Visibility is called from several O(bats*candidates) paths. Reject impossible distance
-# pairs before asking Rain World to traverse terrain for VisualContact.
+# Visibility must cull range before terrain LOS.
 distance_gate = visibility.find('if ((targetPosition - origin).sqrMagnitude > range * range)')
 los_gate = visibility.find('return observer.room.VisualContact(origin, targetPosition);')
 if min(distance_gate, los_gate) < 0 or distance_gate > los_gate:
@@ -68,8 +61,7 @@ if min(distance_gate, los_gate) < 0 or distance_gate > los_gate:
 if 'if (!observer.room.VisualContact(origin, targetPosition))' in visibility:
     failures.append('visibility reintroduced terrain LOS before exact distance rejection')
 
-# Perception R2 keeps the O(bats*creatures) scan staggered. Exact distance sqrt belongs after
-# visibility, and projectile ranking consumes only the cached RoomContext thrown-weapon view.
+# Perception R2 keeps expensive creature work staggered and owns current projectile ranking.
 for token in (
     'internal const int ScanIntervalTicks = 8;',
     'ResetScanPhase();',
@@ -84,29 +76,28 @@ if min(perception_visibility, perception_distance) < 0 or perception_visibility 
     failures.append('Perception R2 creature scan must validate visibility before exact Vector2.Distance sqrt')
 if 'context?.ThrownWeapons' not in perception or 'DB_PerceptionScoring.ProjectileRisk' not in perception:
     failures.append('Perception R2 projectile ranking must consume cached thrown weapons through central scoring')
+if 'DB_WeaponPerception.TryFindIncomingProjectile(' in perception:
+    failures.append('Perception R2 must not delegate current projectile selection back to the retired selector')
 
-# FrameContext is captured for every realized bat every AI frame. It may copy already-owned
-# domain facts, but it must not recreate a player/predator/projectile scan. Perception R2 is the
-# sole current projectile selector and FrameContext only copies its immutable snapshot.
+# FrameContext only copies Perception R2 facts; it must never rescan the room/projectiles.
 for retired in ('VisiblePlayerCount', 'NearestVisiblePlayer', 'PredatorCandidateCount', 'NearestPredator'):
     if retired in frame_context:
         failures.append('FrameContext retained unused per-frame visibility fact: ' + retired)
-for token in ('roomContext.Players', 'roomContext.Creatures', 'DB_RoomContext.For(room)'):
+for token in ('roomContext.Players', 'roomContext.Creatures', 'DB_RoomContext.For(room)', 'DB_WeaponPerception.TryFindIncomingProjectile('):
     if token in frame_context:
-        failures.append('FrameContext reintroduced per-bat room visibility scanning: ' + token)
-if 'DB_PerceptionSnapshot perception = ai?.Perception?.Snapshot ?? default;' not in frame_context or \
-        'perception.IncomingProjectile.Observation' not in frame_context:
-    failures.append('FrameContext no longer copies incoming-projectile arbitration facts from Perception R2 snapshot')
-if 'DB_WeaponPerception.TryFindIncomingProjectile(' in frame_context:
-    failures.append('FrameContext reintroduced a second projectile scan outside Perception R2')
+        failures.append('FrameContext reintroduced perception scanning: ' + token)
+if 'DB_PerceptionSnapshot perception = ai?.Perception?.Snapshot ?? default;' not in frame_context:
+    failures.append('FrameContext no longer consumes Perception R2 snapshot')
+if 'bool incomingProjectile = perception.HasIncomingProjectile;' not in frame_context:
+    failures.append('FrameContext no longer copies incoming-projectile availability from Perception R2')
+if 'perception.IncomingProjectile.Observation' not in frame_context:
+    failures.append('FrameContext no longer copies ranked projectile observation from Perception R2')
 
-# Realized Fear/PTSD target discovery must reuse the room snapshot instead of doing a per-bat room scan.
 if 'DB_RoomContext.For(bat?.room)' not in fear or 'roomContext.Creatures' not in fear:
     failures.append('Fear trauma target scan no longer uses shared DB_RoomContext creatures')
 if 'bat.room.abstractRoom.creatures' in fear:
     failures.append('Fear reintroduced a per-bat abstractRoom.creatures scan')
 
-# Behavior/Core hot paths may not grow another direct realized-room creature scanner.
 for directory in (root / 'Behavior', root / 'Core'):
     for path in sorted(directory.rglob('*.cs')):
         if path.name == 'DB_RoomContext.cs':
