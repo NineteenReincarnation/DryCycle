@@ -1,0 +1,85 @@
+name: DesertBatfly Perception R2 Finalizer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desertbatfly-perception-r2-finalizer.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Apply final Perception R2 cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one replacement, found {count}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace_once(
+              'src/Creatures/DesertBatfly/Behavior/Combat/DB_CombatRuntime.cs',
+              '''    private Player FindSocialHarassTarget()\n    {\n        if (fly.room == null || fly.Injury.BlocksCombat ||\n            DB_FearRuntime.HasActiveFearSuppression(fly) ||\n            !DB_SignalRuntime.TryGetInfluence(fly, out DB_SignalInfluence influence) ||\n            influence.HarassInterest < 0.20f)\n            return null;\n\n        Player target = influence.HarassTarget;\n''',
+              '''    private Player FindSocialHarassTarget()\n    {\n        DB_PerceptionRuntime perception = ai.Perception;\n        if (fly.room == null || fly.Injury.BlocksCombat ||\n            DB_FearRuntime.HasActiveFearSuppression(fly) ||\n            perception == null ||\n            !perception.TryGetSignalContext(out DB_PerceptionSignalContext signal) ||\n            signal.HarassInterest < 0.20f)\n            return null;\n\n        Player target = signal.HarassTarget;\n''')
+
+          replace_once(
+              'src/Creatures/DesertBatfly/Behavior/Social/DB_SocialRuntime.cs',
+              '''        if (bat == null || bat.room == null ||\n            !DB_SignalRuntime.TryGetInfluence(bat, out DB_SignalInfluence influence) ||\n            influence.RoostInterest < 0.16f)\n            return null;\n\n        DB_Creature source = influence.RoostSource;\n''',
+              '''        DB_PerceptionRuntime perception = bat?.DesertAI?.Perception;\n        if (bat == null || bat.room == null || perception == null ||\n            !perception.TryGetSignalContext(out DB_PerceptionSignalContext signal) ||\n            signal.RoostInterest < 0.16f)\n            return null;\n\n        DB_Creature source = signal.RoostSource;\n''')
+
+          replace_once(
+              'src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs',
+              '''    // Temporary call-shape compatibility while DB_AI is migrated to the R2 type directly.\n    internal void UpdateScan() => RefreshState();\n\n''',
+              '')
+
+          replace_once(
+              'tests/DesertBatfly/Program.ArchitecturePerception.cs',
+              '''        Check(ai.GetProperty("Perception", Flags)?.PropertyType == perception,\n            "DB_AI now owns DB_PerceptionRuntime directly with no transitional creature-perception type");\n''',
+              '''        Check(ai.GetProperty("Perception", Flags)?.PropertyType == perception,\n            "DB_AI now owns DB_PerceptionRuntime directly with no transitional creature-perception type");\n        Check(perception.GetMethod("UpdateScan", Flags) == null,\n            "Perception R2 exposes no transitional UpdateScan facade");\n''')
+
+          replace_once(
+              'scripts/check-desertbatfly-r6-b1.sh',
+              '''! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs\n\n# Immediate projectile response''',
+              '''! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs\n! grep -q 'internal void UpdateScan()' "$PERCEPTION"\nSIGNAL_RT=src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs\n! grep -q 'internal static bool ReceivePacket' "$SIGNAL_RT"\n! grep -q 'internal static bool TryGetInfluence' "$SIGNAL_RT"\n! grep -q 'internal static bool TryGetDebugState' "$SIGNAL_RT"\n! grep -RIn --include='*.cs' 'DB_SignalInfluence' src/Creatures/DesertBatfly\n! grep -RIn --include='*.cs' 'DB_SignalPerception' src/Creatures/DesertBatfly\n! grep -RIn --include='*.cs' 'DB_SignalDebugState' src/Creatures/DesertBatfly\n\n# Immediate projectile response''')
+
+          replace_once(
+              'scripts/check-desertbatfly-r7-performance.sh',
+              '''perception = read('Behavior/Perception/DB_PerceptionRuntime.cs')\nvisibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')\n''',
+              '''perception = read('Behavior/Perception/DB_PerceptionRuntime.cs')\nvisibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')\nsignal_runtime = read('Behavior/Signals/DB_SignalRuntime.cs')\nsignal_types = read('Behavior/Signals/DB_SignalTypes.cs')\n''')
+
+          replace_once(
+              'scripts/check-desertbatfly-r7-performance.sh',
+              '''if 'DB_WeaponPerception.TryFindIncomingProjectile(' in perception:\n    failures.append('Perception R2 must not delegate current projectile selection back to the retired selector')\n\n# FrameContext only copies Perception R2 facts; it must never rescan the room/projectiles.\n''',
+              '''if 'DB_WeaponPerception.TryFindIncomingProjectile(' in perception:\n    failures.append('Perception R2 must not delegate current projectile selection back to the retired selector')\nif 'internal void UpdateScan()' in perception:\n    failures.append('Perception R2 retained the transitional UpdateScan facade')\nfor retired in ('ReceivePacket(', 'TryGetInfluence(', 'TryGetDebugState(', 'DB_SignalInfluence', 'DB_SignalPerception', 'DB_SignalDebugState'):\n    if retired in signal_runtime or retired in signal_types:\n        failures.append('Signal transport retained receiver compatibility surface: ' + retired)\nif 'internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)' not in perception or \\\n   'internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)' not in perception:\n    failures.append('Perception R2 no longer owns direct Signal receiver belief APIs')\n\n# FrameContext only copies Perception R2 facts; it must never rescan the room/projectiles.\n''')
+          PY
+
+          rm -f docs/Discussion/DesertBatfly-Perception-R2-Residuals.md
+          rm -f .github/workflows/desertbatfly-perception-r2-finalizer.yml
+
+      - name: Commit cleanup directly to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Orrhisk"
+          git config user.email "164201860+NineteenReincarnation@users.noreply.github.com"
+          git add -A
+          git commit -m "Finalize DesertBatfly Perception R2 cleanup"
+          git push origin HEAD:main
