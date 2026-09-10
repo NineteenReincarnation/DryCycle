@@ -1,4 +1,4 @@
-#pragma kernel Bake
+#pragma kernel BakeV3
 
 RWTexture2D<float4> _Atlas;
 float4 _Motif, _Pattern, _Material, _Eye, _NoiseSeed;
@@ -30,7 +30,7 @@ float plateSeam(float2 p)
 // Surface atlas layout remains two 128px layers. Layer 0 = albedo.rgb + height.a.
 // Layer 1 = AO.r + roughness.g + anatomical mask.b + emission.a.
 [numthreads(8,8,1)]
-void Bake(uint3 id : SV_DispatchThreadID)
+void BakeV3(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= 896 || id.y >= 128) return;
     uint kind = id.x / 128;
