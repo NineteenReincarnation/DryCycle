@@ -1,4 +1,4 @@
-#pragma kernel BakeV3
+#pragma kernel BakeV4
 
 RWTexture2D<float4> _Atlas;
 float4 _Motif, _Pattern, _Material, _Eye, _NoiseSeed;
@@ -30,7 +30,7 @@ float plateSeam(float2 p)
 // Surface atlas layout remains two 128px layers. Layer 0 = albedo.rgb + height.a.
 // Layer 1 = AO.r + roughness.g + anatomical mask.b + emission.a.
 [numthreads(8,8,1)]
-void BakeV3(uint3 id : SV_DispatchThreadID)
+void BakeV4(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= 896 || id.y >= 128) return;
     uint kind = id.x / 128;
@@ -41,8 +41,8 @@ void BakeV3(uint3 id : SV_DispatchThreadID)
     float meso=noise(float2(u*17+_NoiseSeed.x,v*12+_NoiseSeed.y));
     float micro=noise(float2(u*83+mutation,v*91+_NoiseSeed.y));
     float plate=plateSeam(float2((kind==0?wing:u)*12+_NoiseSeed.x,v*(kind==0?8:3)+_NoiseSeed.y+mutation*_Pattern.w));
-    float band=pow(.5+.5*cos(wing*(_Motif.x+8)*3.141593+(1-v)*(2+wing*(2+2*_Pattern.z))+(n-.5)*_Motif.w*3+_Pattern.y),_Motif.y+1);
-    band *= smoothstep(_Pattern.x,_Pattern.x+.18,meso);
+    float band=pow(.5+.5*cos(wing*(_Motif.x+15)*3.141593+(1-v)*(6+wing*(8+5*_Pattern.z))+(1-v)*(1-v)*7*wing+(n-.5)*_Motif.w*3+_Pattern.y),_Motif.y+1);
+    band *= .76+.24*smoothstep(_Pattern.x,_Pattern.x+.18,meso);
     float endCollar=pow(abs(u*2-1),12), ridge=abs(sin((u*_Material.y+meso*.12)*6.283185));
     float height=.45+(meso-.5)*.12+(micro-.5)*.025;
     float ao=.8, rough=_Material.x, emission=0, anatomy=0;
@@ -50,11 +50,11 @@ void BakeV3(uint3 id : SV_DispatchThreadID)
 
     if (kind==0)
     {
-        float wingMask=smoothstep(.38,.8,wing);
-        color=lerp(float3(.018,.015,.042),float3(.20,.22,.28),wingMask);
-        color=lerp(color,float3(.38,.075,.15+_Material.w),band*_Motif.z*wingMask*(.55+v*.45));
+        float wingMask=smoothstep(.30,.69,wing);
+        color=lerp(float3(.021,.018,.048),float3(.24,.27,.33),wingMask);
+        color=lerp(color,float3(.48,.065,.17+_Material.w),band*_Motif.z*wingMask*(.55+v*.45));
         float crown=smoothstep(.65,.95,v)*(1-wingMask);
-        color=lerp(color,float3(.14,.052,.08),crown*.75);
+        color=lerp(color,float3(.24,.070,.125),crown*.75);
         height+=band*.08;
         ao=lerp(.4,.95,smoothstep(0,1,v*3));
         rough=lerp(.94,.68,wing);
@@ -62,14 +62,17 @@ void BakeV3(uint3 id : SV_DispatchThreadID)
     }
     else if (kind==4)
     {
-        float shaftVariation=.82+.18*meso;
-        color=lerp(float3(.052,.010,.030),float3(.27,.038,.085),saturate(_Material.z*shaftVariation+.10));
-        float centerGroove=1-smoothstep(.08,.52,abs(lateral));
-        color*=lerp(1,.72,centerGroove*.35);
-        anatomy=smoothstep(.52,.94,abs(lateral))*smoothstep(.28,.95,u);
-        ao=.91-.34*endCollar-centerGroove*.10;
-        rough=.50;
-        height+=ridge*.055;
+        float face=smoothstep(-.65,.48,lateral);
+        float pigment=noise(float2(u*5+_NoiseSeed.x,v*2+_NoiseSeed.y));
+        float3 front=lerp(float3(.49,.067,.18),float3(.30,.060,.19),pigment*.30);
+        color=lerp(float3(.070,.048,.125),front,face)*(.82+.30*_Material.z);
+        color*=.94+.09*n;
+        float coolEdge=1-smoothstep(-.99,-.80,lateral);
+        color=lerp(color,float3(.10,.17,.23),coolEdge*.38);
+        anatomy=smoothstep(.72,.98,abs(lateral));
+        ao=.97-.10*endCollar;
+        rough=.72;
+        height=.48+sqrt(max(0,1-lateral*lateral))*.075+(n-.5)*.018+(micro-.5)*.006;
     }
     else if (kind==5)
     {
@@ -90,39 +93,41 @@ void BakeV3(uint3 id : SV_DispatchThreadID)
         color=lerp(color,float3(.07,.055,.105),ankleBand*.32);
         ao=.76-sole*.28-ankleBand*.10;
         rough=lerp(.68,.94,sole);
+        float growthBand=pow(max(0,cos((u*2.6+.3)*3.141593)),8)*saturate((u-.25)/.6);
+        color=lerp(color,float3(.075,.025,.115),growthBand*.55);
         height+=heelPlate*.045;
         anatomy=sole;
     }
     else if (kind==2)
     {
-        float dx=(u-.5)/.52, dy=(v-.5)/.72;
-        float radial=sqrt(dx*dx+dy*dy);
-        float cavity=1-smoothstep(.16,.72,radial);
-        color=lerp(float3(.105,.105,.185),float3(.026,.018,.045),cavity*.78);
-        ao=lerp(.72,.30,cavity);
-        rough=lerp(.62,.90,cavity);
-        height-=cavity*.10;
-        anatomy=cavity;
+        float lip=1-smoothstep(.04,.30,u);
+        color=lerp(float3(.022,.014,.038),float3(.12,.105,.19),lip*.70);
+        color*=.94+meso*.08;
+        ao=.72;
+        rough=.86;
+        height=.48+lip*.018;
+        anatomy=1-lip;
     }
     else if (kind==6)
     {
-        color=float3(.11,.055,.16);
+        color=float3(.075,.10,.15);
         ao=.65;
         rough=.76;
     }
     else
     {
-        color=lerp(float3(.105,.17,.23+_Material.w),float3(.23,.31,.38),meso*.15);
+        color=lerp(float3(.20,.32,.39+_Material.w),float3(.29,.43,.50),meso*.15);
         ao=.96-endCollar*.16;
         rough=.52;
-        height+=ridge*.018;
+        color*=lerp(.62,1.16,smoothstep(-.25,.15,lateral));
+        height+=(1-abs(lateral))*.035;
         anatomy=saturate(plate*.65+endCollar*.20);
     }
 
     if(kind!=5)
     {
-        height-=plate*(kind==2?.018:.045);
-        ao*=1-plate*(kind==3?.09:.18);
+        height-=plate*(kind==0?.025:.006);
+        ao*=1-plate*(kind==0?.10:.025);
         rough=saturate(rough+(micro-.5)*.08);
     }
 

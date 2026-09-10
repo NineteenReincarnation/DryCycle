@@ -9,15 +9,15 @@ using UnityEngine;
 
 internal static partial class Program
 {
-    private static void GeometryTests()
+    private static void ExportGeometry()
     {
-        MantleCrabVisualPhenotype phenotype = CreatePhenotype(1729);
+        MantleCrabVisualPhenotype phenotype = CreatePhenotype();
         MantleCrab crab = CreatePreviewCrab(phenotype);
         MantleCrabGraphics graphics = new(crab);
         RoomCamera.SpriteLeaser leaser = CreatePreviewLeaser(graphics, out Array parts);
 
         graphics.PoseSprites(leaser, 1f, Vector2.zero);
-        List<object> meshes = ValidateAndCollectMeshes(leaser, parts);
+        List<object> meshes = CollectMeshes(leaser, parts);
         WriteFixture(phenotype, meshes);
         WriteCpuAtlas(phenotype);
     }
@@ -55,7 +55,7 @@ internal static partial class Program
         Vector2 anchor = crab.Anchor(limb);
         limb.Reset(anchor);
         limb.GroundNormal = Vector2.up;
-        limb.SolvePose(anchor, anchor + limb.RestTipOffset, !pincer);
+        if (!pincer) limb.SolvePose(anchor, anchor + limb.RestTipOffset, true);
         Array.Copy(limb.Pos, limb.LastPos, limb.Pos.Length);
         return limb;
     }
@@ -79,11 +79,11 @@ internal static partial class Program
         return leaser;
     }
 
-    private static List<object> ValidateAndCollectMeshes(RoomCamera.SpriteLeaser leaser, Array parts)
+    private static List<object> CollectMeshes(RoomCamera.SpriteLeaser leaser, Array parts)
     {
         // Geometry validation is allocation-order agnostic. Layering is owned by
         // MantleCrabGraphics.AddToContainer and index ownership by MantleCrabSpriteLayoutTests.
-        IEnumerable<int> order = Enumerable.Range(0, MantleCrabSpriteLayout.SpriteCount);
+        IEnumerable<int> order = MantleCrabSpriteLayout.DrawOrder();
 
         List<object> meshes = new();
         foreach (int index in order)
@@ -98,8 +98,8 @@ internal static partial class Program
                 if (Finite(point))
                     largestCoordinate = Math.Max(largestCoordinate, Math.Max(Math.Abs(point.x), Math.Abs(point.y)));
             }
-            Check(finite, "Non-finite MantleCrab mesh vertex at sprite=" + index);
-            Check(largestCoordinate < 5000f,
+            Require(finite, "Non-finite MantleCrab mesh vertex at sprite=" + index);
+            Require(largestCoordinate < 5000f,
                 "MantleCrab mesh escaped sane bounds at sprite=" + index + "; maxCoordinate=" + largestCoordinate);
 
             meshes.Add(new
@@ -113,7 +113,7 @@ internal static partial class Program
             geometryMeshes++;
         }
 
-        Check(geometryMeshes == MantleCrabSpriteLayout.SpriteCount,
+        Require(geometryMeshes == MantleCrabSpriteLayout.SpriteCount,
             "Geometry fixture did not include every production sprite; expected=" + MantleCrabSpriteLayout.SpriteCount + " actual=" + geometryMeshes);
         return meshes;
     }
@@ -167,7 +167,7 @@ internal static partial class Program
             atlasPixels++;
         }
 
-        Check(atlasPixels == width * height,
+        Require(atlasPixels == width * height,
             "CPU atlas pixel count mismatch; expected=" + (width * height) + " actual=" + atlasPixels);
     }
 

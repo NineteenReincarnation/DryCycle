@@ -99,7 +99,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
 
         for (int i = 0; i < ThreadCount; i++)
             Define(MantleCrabSpriteLayout.Thread(i), 16, 1, MantleCrabMaterial.Fringe, .3f);
-        Define(Shell, 96, 20, MantleCrabMaterial.Shell, 0f);
+        Define(Shell, 192, 20, MantleCrabMaterial.Shell, 0f);
 
         for (int pincer = 0; pincer < MantleCrabSpriteLayout.PincerCount; pincer++)
         {
@@ -116,7 +116,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
                     MantleCrabSpriteLayout.PincerJoint(pincer, joint),
                     8,
                     6,
-                    MantleCrabMaterial.Pincer,
+                    MantleCrabMaterial.Joint,
                     pincer == 0 ? .08f : 0f);
 
             Define(
@@ -192,47 +192,8 @@ public sealed class MantleCrabGraphics : GraphicsModule
         foreach (FSprite sprite in leaser.sprites)
             sprite.RemoveFromContainer();
 
-        AddLegLayer(container, leaser, 0);
-        AddLegLayer(container, leaser, 1);
-
-        // The first red shaft starts under the mantle. Drawing only that root link before the shell
-        // makes the capture appendage emerge from beneath the body instead of being pasted on top.
-        for (int pincer = 0; pincer < MantleCrabSpriteLayout.PincerCount; pincer++)
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.PincerShaft(pincer, 0)]);
-
-        for (int i = 0; i < ThreadCount; i++)
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.Thread(i)]);
-        container.AddChild(leaser.sprites[Shell]);
-
-        AddLegLayer(container, leaser, 2);
-        AddLegLayer(container, leaser, 3);
-
-        // Distal capture-arm links sit in front of the walking limbs; all fitted joint capsules are
-        // added after the shafts so there are no visible T-junctions at the authored bends.
-        for (int pincer = 0; pincer < MantleCrabSpriteLayout.PincerCount; pincer++)
-        {
-            for (int segment = 1; segment < MantleCrabPincerAnatomy.SegmentCount; segment++)
-                container.AddChild(leaser.sprites[MantleCrabSpriteLayout.PincerShaft(pincer, segment)]);
-            for (int joint = 0; joint < 3; joint++)
-                container.AddChild(leaser.sprites[MantleCrabSpriteLayout.PincerJoint(pincer, joint)]);
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.PincerPalm(pincer)]);
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.PincerMovableFinger(pincer)]);
-        }
-
-        for (int eye = 0; eye < 2; eye++)
-        {
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.EyeStalk(eye)]);
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.Eye(eye)]);
-        }
-    }
-
-    private static void AddLegLayer(FContainer container, RoomCamera.SpriteLeaser leaser, int leg)
-    {
-        for (int segment = 0; segment < MantleCrabSpriteLayout.LegShaftCount; segment++)
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.LegShaft(leg, segment)]);
-        container.AddChild(leaser.sprites[MantleCrabSpriteLayout.LegFoot(leg)]);
-        for (int joint = 0; joint < MantleCrabSpriteLayout.LegJointCount; joint++)
-            container.AddChild(leaser.sprites[MantleCrabSpriteLayout.LegJoint(leg, joint)]);
+        foreach (int index in MantleCrabSpriteLayout.DrawOrder())
+            container.AddChild(leaser.sprites[index]);
     }
 
     private Vector2 EyeAnchor(int i) => Local(new Vector2(i == 0 ? -16f : 23f, i == 0 ? 18f : 19f));
@@ -250,9 +211,9 @@ public sealed class MantleCrabGraphics : GraphicsModule
         switch (i)
         {
             case 0:
-                a = new Vector2(-72f, -8f);
-                control = new Vector2(-78f, -108f);
-                b = new Vector2(-47f, -20f);
+                a = new Vector2(-64f, -8f);
+                control = new Vector2(-69f, -117f);
+                b = new Vector2(-53f, -20f);
                 break;
             case 1:
                 a = new Vector2(-55f, -18f);
@@ -260,9 +221,9 @@ public sealed class MantleCrabGraphics : GraphicsModule
                 b = new Vector2(-31f, -24f);
                 break;
             case 2:
-                a = new Vector2(70f, -8f);
-                control = new Vector2(78f, -104f);
-                b = new Vector2(47f, -20f);
+                a = new Vector2(60f, -8f);
+                control = new Vector2(64f, -101f);
+                b = new Vector2(43f, -20f);
                 break;
             case 3:
                 a = new Vector2(56f, -15f);
@@ -271,13 +232,13 @@ public sealed class MantleCrabGraphics : GraphicsModule
                 break;
             case 4:
                 a = new Vector2(-27f, -26f);
-                control = new Vector2(-33f, -72f);
-                b = new Vector2(-20f, -84f);
+                control = new Vector2(-33f, -58f);
+                b = new Vector2(-20f, -61f);
                 break;
             case 5:
                 a = new Vector2(29f, -25f);
-                control = new Vector2(36f, -74f);
-                b = new Vector2(23f, -82f);
+                control = new Vector2(36f, -58f);
+                b = new Vector2(23f, -62f);
                 break;
             default:
             {
@@ -289,7 +250,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
                 {
                     int slot = i - 6;
                     float f = (slot + .5f) / 8f;
-                    float length = Mathf.Lerp(28f, 58f, h);
+                    float length = Mathf.Lerp(18f, 39f, h);
                     a = new Vector2(Mathf.Lerp(-58f, 58f, f), -22f + h * 6f);
                     control = a + new Vector2(bend * 22f, -length * .55f);
                     b = a + new Vector2(bend * 9f, -length);
@@ -403,9 +364,9 @@ public sealed class MantleCrabGraphics : GraphicsModule
 
                 float width;
                 if (i < 6)
-                    width = Mathf.Lerp(.82f, .35f, j / 16f);
+                    width = Mathf.Lerp(1.05f, .52f, j / 16f);
                 else if (i < 14)
-                    width = Mathf.Lerp(1.05f, .16f, j / 16f);
+                    width = Mathf.Lerp(1.25f, .22f, j / 16f);
                 else
                     width = Mathf.Lerp(1.30f, .10f, j / 16f);
 
@@ -461,8 +422,6 @@ public sealed class MantleCrabGraphics : GraphicsModule
             float signed = u * 2f - 1f;
             float wing = Mathf.Abs(signed);
             float broad = Mathf.Pow(Mathf.Max(0f, 1f - wing * wing), 1.12f);
-            float crownBase = Mathf.Max(0f, 1f - Mathf.Pow(wing / .82f, 2f));
-            float crown = Mathf.Pow(crownBase, 1.25f);
             float edgeNoise =
                 (MantleCrabRenderingMath.Noise(x * 3.7f + phenotype.NoiseSeed.x, 1f) - .5f) *
                 phenotype.EdgeRoughness;
@@ -477,11 +436,9 @@ public sealed class MantleCrabGraphics : GraphicsModule
                     MantleCrab.ShellRest[station + 1].y,
                     bodyU - station));
 
-            float top = 5.5f + 30f * crown;
-            top += Mathf.Pow(Mathf.Max(0f, Mathf.Sin(x * 1.73f)), 8f) *
-                   3.4f * Mathf.Clamp01(1f - wing / .68f);
+            float top = MantleCrabShellProfile.Top(wing) + MantleCrabShellProfile.Crest(u);
 
-            float bottom = 4.5f - 47f * Mathf.Pow(broad, 1.25f);
+            float bottom = 4f - 35f * Mathf.Pow(broad, 1.25f);
             float lowerTeeth = Mathf.Pow(
                 Mathf.Max(0f, Mathf.Sin(x * 2.17f + phenotype.StripePhase)),
                 8f) * (1f - wing) * 5.5f;
@@ -522,7 +479,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
 
         int footSprite = MantleCrabSpriteLayout.LegFoot(index);
         Part foot = parts[footSprite];
-        float footWidth = (index < 2 ? 8.2f : 7.4f) * phenotype.FootBulk;
+        float footWidth = (index < 2 ? 6.5f : 6.0f) * phenotype.FootBulk;
         MantleCrabMeshBuilder.Foot(
             (TriangleMesh)leaser.sprites[footSprite],
             foot.Columns,
@@ -580,10 +537,10 @@ public sealed class MantleCrabGraphics : GraphicsModule
             (TriangleMesh)leaser.sprites[sprite],
             part.Columns,
             part.Rows,
-            center,
+            center - (center - before).normalized * MantleCrabMeshBuilder.WalkingJointTrim(LegJointWidth(joint, pairScale)),
             center - before,
             after - center,
-            LegJointWidth(joint, pairScale),
+            LegSegmentWidth(joint, pairScale) * .85f,
             false,
             camPos);
     }
@@ -595,7 +552,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
             0 => .68f,
             1 => 1.00f,
             2 => .77f,
-            _ => .43f
+            _ => .53f
         };
         return 4.9f * pairScale * segmentScale;
     }
@@ -621,13 +578,15 @@ public sealed class MantleCrabGraphics : GraphicsModule
         DrawPincerShaft(leaser, index, 0, anchor, p0, 0f, PincerJointWidth(index, 0), camPos);
         DrawPincerShaft(leaser, index, 1, p0, p1, PincerJointWidth(index, 0), PincerJointWidth(index, 1), camPos);
         DrawPincerShaft(leaser, index, 2, p1, p2, PincerJointWidth(index, 1), PincerJointWidth(index, 2), camPos);
-        DrawPincerShaft(leaser, index, 3, p2, p3, PincerJointWidth(index, 2), 0f, camPos);
+        // The fourth link is the chela itself. This short cuff belongs to its wrist, not an
+        // extra long shaft with a fifth segment appended at p3.
+        Vector2 palmAxis = rig.PalmAxis(time);
+        DrawPincerShaft(leaser, index, 3, p2, p2 + palmAxis * 3f, 0f, 0f, camPos);
 
         DrawPincerJoint(leaser, index, 0, anchor, p0, p1, camPos);
         DrawPincerJoint(leaser, index, 1, p0, p1, p2, camPos);
         DrawPincerJoint(leaser, index, 2, p1, p2, p3, camPos);
 
-        Vector2 palmAxis = rig.PalmAxis(time);
         float open = rig.InterpolatedOpen(time);
         float palmLength = MantleCrabPincerAnatomy.PalmLengths[index];
         float palmWidth = MantleCrabPincerAnatomy.PalmWidths[index];
@@ -640,7 +599,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
             (TriangleMesh)leaser.sprites[palmSprite],
             fixedPart.Columns,
             fixedPart.Rows,
-            p3,
+            p2,
             palmAxis,
             palmLength,
             palmWidth,
@@ -656,7 +615,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
             (TriangleMesh)leaser.sprites[movingSprite],
             movingPart.Columns,
             movingPart.Rows,
-            p3,
+            p2,
             palmAxis,
             palmLength,
             palmWidth,
@@ -692,7 +651,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
             part.Rows,
             drawStart,
             drawEnd,
-            MantleCrabPincerAnatomy.SegmentWidth(pincer, segment),
+            MantleCrabPincerAnatomy.SegmentWidth(pincer, segment) * (segment == 3 ? .5f : 1f),
             pincer * 4 + segment,
             camPos);
     }
@@ -712,10 +671,10 @@ public sealed class MantleCrabGraphics : GraphicsModule
             (TriangleMesh)leaser.sprites[sprite],
             part.Columns,
             part.Rows,
-            center,
+            center - (center - before).normalized * MantleCrabMeshBuilder.PincerJointTrim(PincerJointWidth(pincer, joint)),
             center - before,
             after - center,
-            PincerJointWidth(pincer, joint),
+            MantleCrabPincerAnatomy.SegmentWidth(pincer, joint) * .955f,
             true,
             camPos);
     }
@@ -796,7 +755,7 @@ public sealed class MantleCrabGraphics : GraphicsModule
         float exposure = room.LightSourceExposure(position);
         Color local = room.LightSourceColor(position);
         Color ambient = Color.Lerp(Color.white, camera.currentPalette.skyColor, .2f) *
-                        Mathf.Lerp(1f, .12f, darkness);
+                        Mathf.Lerp(1f, .22f, darkness);
         ambient = Color.Lerp(
             ambient,
             Color.Lerp(Color.white, local, .6f),

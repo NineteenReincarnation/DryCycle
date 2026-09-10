@@ -41,6 +41,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="MantleCrab.Tests" />
+    <InternalsVisibleTo Include="DryCycle.MantleCrab.Preview" />
   </ItemGroup>
 
   <ItemGroup>

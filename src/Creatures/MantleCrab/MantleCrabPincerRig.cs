@@ -27,8 +27,8 @@ internal sealed class MantleCrabPincerRig
     internal float LastOpen;
     internal float TargetOpen;
 
-    internal Vector2 Wrist => Pos[Pos.Length - 1];
-    internal Vector2 RestWristOffset => Rest[Rest.Length - 1] - Rest[0];
+    internal Vector2 Wrist => Pos[Pos.Length - 2];
+    internal Vector2 RestWristOffset => Rest[Rest.Length - 2] - Rest[0];
 
     internal MantleCrabPincerRig(int index)
     {

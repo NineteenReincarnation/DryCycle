@@ -24,7 +24,7 @@ internal sealed class DB_Runtime
     internal void BeforeNewRoom()
     {
         DB_SocialRuntime.CancelForPriority(bat, "room transition");
-        DB_SwarmLifecycleRuntime.Forget(bat);
+        DB_NeutralBehaviorRuntime.Forget(bat);
         DB_SignalRuntime.Forget(bat);
         DB_ThreatRuntime.Forget(bat);
         DB_EnvironmentRuntime.Forget(bat);

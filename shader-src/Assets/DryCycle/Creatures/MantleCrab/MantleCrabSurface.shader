@@ -43,9 +43,9 @@ Shader "DryCycle/MantleCrabSurface"
                 if (kind<.5)
                     n=normalize(float3(xy.x*.38,xy.y*.65,.85));
                 else if (kind==1)
-                    n=normalize(float3(xy.x*.12,xy.y*.68,.88));
+                    n=normalize(float3(xy.x*.06,xy.y*.78,.88));
                 else if (kind==2)
-                    n=normalize(float3(xy.x*.34,xy.y*.78,lerp(.82,.60,anatomy)));
+                    n=normalize(float3(.86,xy.y*.22,.32));
                 else if (kind==3)
                 {
                     float sideBevel=smoothstep(.35,.76,abs(xy.y));
@@ -53,7 +53,7 @@ Shader "DryCycle/MantleCrabSurface"
                     n=normalize(float3(toeBevel*.34,sign(xy.y)*sideBevel*.82,1));
                 }
                 else if (kind==4)
-                    n=normalize(float3(xy.x*.16,xy.y*.72,.84));
+                    n=normalize(float3(xy.x*.06,xy.y*.82,.90));
                 else if (kind==5)
                     n=normalize(float3(xy*.8,sqrt(saturate(1-dot(xy,xy)*.45))+.2));
                 else
@@ -62,7 +62,7 @@ Shader "DryCycle/MantleCrabSurface"
                 float2 grad=float2(
                     heightAt(i.uv+float2(1.0/896,0),kind)-heightAt(i.uv-float2(1.0/896,0),kind),
                     heightAt(i.uv+float2(0,1.0/256),kind)-heightAt(i.uv-float2(0,1.0/256),kind));
-                float reliefScale=kind==2?2.4:(kind==3?2.8:3.5);
+                float reliefScale=kind==0?2.5:(kind==3?1.8:.8);
                 n=normalize(n-float3(grad*reliefScale,0));
 
                 // Derive the UV frame from the deformed mesh, including mirrored limbs. This makes
@@ -122,7 +122,7 @@ Shader "DryCycle/MantleCrabSurface"
                 {
                     // Cutting edge: small cool hard-chitin glint, strongest toward distal UVs.
                     float cutting=anatomy*(.45+.55*axialEdge);
-                    color+=float3(.18,.08,.11)*cutting*highlight*.40*(1-depth*.7);
+                    color+=float3(.14,.08,.11)*cutting*highlight*.16*i.env.rgb*(1-depth*.7);
                 }
 
                 float3 black=tex2D(_PalTex,float2(2.5/32,7.5/16)).rgb;

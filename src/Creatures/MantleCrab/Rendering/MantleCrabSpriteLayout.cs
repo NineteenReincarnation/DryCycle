@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace DryCycle.Creatures.MantleCrab.Rendering;
 
 /// <summary>
@@ -13,7 +15,7 @@ internal static class MantleCrabSpriteLayout
     internal const int LegJointCount = 3;
     internal const int LegStart = 0;
 
-    internal const int ThreadCount = 28;
+    internal const int ThreadCount = 22;
     internal const int ThreadStart = LegStart + LegCount * LegStride;
     internal const int Shell = ThreadStart + ThreadCount;
 
@@ -40,4 +42,26 @@ internal static class MantleCrabSpriteLayout
 
     internal static bool IsLegSprite(int index) => index >= LegStart && index < ThreadStart;
     internal static bool IsRearLeg(int leg) => leg < 2;
+
+    // Shared by Futile and the offscreen production-mesh preview; allocation order is not depth.
+    internal static IEnumerable<int> DrawOrder()
+    {
+        for (int leg = 0; leg < LegCount; leg++)
+        {
+            for (int shaft = 0; shaft < LegShaftCount; shaft++) yield return LegShaft(leg, shaft);
+            yield return LegFoot(leg);
+            for (int joint = 0; joint < LegJointCount; joint++) yield return LegJoint(leg, joint);
+        }
+        for (int pincer = 0; pincer < PincerCount; pincer++) yield return PincerShaft(pincer, 0);
+        for (int thread = 0; thread < ThreadCount; thread++) yield return Thread(thread);
+        yield return Shell;
+        for (int pincer = 0; pincer < PincerCount; pincer++)
+        {
+            for (int shaft = 1; shaft < 4; shaft++) yield return PincerShaft(pincer, shaft);
+            yield return PincerPalm(pincer);
+            yield return PincerMovableFinger(pincer);
+            for (int joint = 0; joint < 3; joint++) yield return PincerJoint(pincer, joint);
+        }
+        for (int eye = 0; eye < 2; eye++) { yield return EyeStalk(eye); yield return Eye(eye); }
+    }
 }

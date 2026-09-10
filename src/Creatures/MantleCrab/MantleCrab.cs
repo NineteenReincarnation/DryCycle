@@ -400,8 +400,6 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
 
         float signed = u * 2f - 1f;
         float wing = Mathf.Abs(signed);
-        float crownBase = Mathf.Max(0f, 1f - Mathf.Pow(wing / .82f, 2f));
-        float crown = Mathf.Pow(crownBase, 1.25f);
         float wingAngle = Phenotype == null ? 0f : Phenotype.WingAngle;
         float asymmetry = Phenotype == null ? 0f : Phenotype.Asymmetry;
         float largeAsymmetry = signed * asymmetry * 18f;
@@ -409,7 +407,7 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         center += up * (-5.5f * Mathf.Pow(wing, 1.7f) + wingAngle * 70f + largeAsymmetry);
         center += up * (8f - Mathf.Lerp(ShellRest[station].y, ShellRest[station + 1].y, stationT));
 
-        float top = 5.5f + 30f * crown;
+        float top = MantleCrabShellProfile.Top(wing);
         point = center + up * top;
         return true;
     }

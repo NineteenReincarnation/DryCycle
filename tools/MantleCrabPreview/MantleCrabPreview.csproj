@@ -3,7 +3,7 @@
     <TargetFramework>net48</TargetFramework>
     <OutputType>Exe</OutputType>
     <LangVersion>13</LangVersion>
-    <AssemblyName>MantleCrab.Tests</AssemblyName>
+    <AssemblyName>DryCycle.MantleCrab.Preview</AssemblyName>
     <RainWorldDir Condition="'$(RainWorldDir)' == ''">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
   </PropertyGroup>
   <ItemGroup>

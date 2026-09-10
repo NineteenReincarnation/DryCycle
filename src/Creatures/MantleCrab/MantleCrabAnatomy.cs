@@ -15,10 +15,10 @@ internal static class MantleCrabAnatomy
     // deliberately staggered.
     internal static readonly Vector2[][] Walking =
     [
-        [new(-34f, -24f), new(-56f, -82f), new(-78f, -188f), new(-68f, -262f), new(-78f, -302f)],
-        [new(35f, -25f), new(57f, -84f), new(66f, -190f), new(54f, -263f), new(66f, -302f)],
-        [new(-18f, -27f), new(-36f, -94f), new(-52f, -192f), new(-39f, -266f), new(-44f, -302f)],
-        [new(20f, -27f), new(34f, -92f), new(48f, -191f), new(38f, -264f), new(45f, -302f)]
+        [new(-34f, -24f), new(-59f, -97f), new(-79f, -204f), new(-72f, -266f), new(-69f, -302f)],
+        [new(35f, -25f), new(43f, -91f), new(47f, -194f), new(38f, -260f), new(42f, -302f)],
+        [new(-18f, -27f), new(-47f, -99f), new(-61f, -202f), new(-49f, -268f), new(-42f, -302f)],
+        [new(20f, -27f), new(32f, -96f), new(27f, -194f), new(17f, -260f), new(22f, -302f)]
     ];
 
     internal static readonly Vector2[][] Claws = MantleCrabPincerAnatomy.Chains;

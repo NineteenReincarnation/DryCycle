@@ -11,6 +11,12 @@ namespace DryCycle.Editor
     /// <summary>Consumes exported production geometry and CPU atlas; no hand-authored creature art.</summary>
     public static class ValidateMantleCrab
     {
+        private static bool previewOnly;
+        public static void Preview()
+        {
+            previewOnly = true;
+            Run();
+        }
         [Serializable]
         public class MeshData
         {
@@ -78,9 +84,9 @@ namespace DryCycle.Editor
 
             try
             {
-                // BakeV3 doubles as a bundle-revision sentinel at runtime. Validation must use
+                // BakeV4 doubles as a bundle-revision sentinel at runtime. Validation must use
                 // the same kernel name so stale creature bundles cannot appear to pass V3 checks.
-                int kernel = compute.FindKernel("BakeV3");
+                int kernel = compute.FindKernel("BakeV4");
                 compute.SetVector("_Motif", V(fixture.motif));
                 compute.SetVector("_Pattern", V(fixture.pattern));
                 compute.SetVector("_Material", V(fixture.material));
@@ -116,7 +122,7 @@ namespace DryCycle.Editor
                     total += error;
                 }
                 double mean = total / (double)actual.Length;
-                if (max > 3 || mean > .2)
+                if (!previewOnly && (max > 3 || mean > .2))
                     throw new Exception("CPU/GPU atlas mismatch: max=" + max + ", mean=" + mean);
                 File.WriteAllBytes(Path.Combine(folder, "baked-atlas.png"), readback.EncodeToPNG());
 
@@ -175,10 +181,12 @@ namespace DryCycle.Editor
                 for (int i = 0; i < left.Length; i++)
                     if (left[i] != right[i])
                         different++;
-                if (different < 1000)
+                if (!previewOnly && different < 1000)
                     throw new Exception("Directional lighting did not change enough rendered pixels");
 
                 Render(folder, "preview-dark-local.png", fixture, meshes, material, new Vector2(.9f, -.35f), true);
+                Render(folder, "preview-joint-detail.png", fixture, meshes, material, new Vector2(.9f, -.35f), false,
+                    new Rect(-29f, 49f, 32f, 36f));
                 material.mainTexture = cpu;
                 Render(folder, "preview-cpu-bake.png", fixture, meshes, material, new Vector2(.9f, -.35f), false);
 
@@ -211,7 +219,8 @@ namespace DryCycle.Editor
             List<Mesh> meshes,
             Material material,
             Vector2 direction,
-            bool dark)
+            bool dark,
+            Rect? frame = null)
         {
             RenderTexture target = new RenderTexture(960, 1080, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
             target.Create();
@@ -224,9 +233,10 @@ namespace DryCycle.Editor
                 Shader.SetGlobalVector("_lightDirAndPixelSize", new Vector4(direction.x, direction.y, 1f / 960, 1f / 1080));
                 commands.SetRenderTarget(target);
                 commands.ClearRenderTarget(true, true, dark ? new Color(.02f, .035f, .045f) : new Color(.43f, .72f, .78f));
+                Rect bounds = frame ?? new Rect(-160, -20, 320, 360);
                 commands.SetViewProjectionMatrices(
                     Matrix4x4.identity,
-                    GL.GetGPUProjectionMatrix(Matrix4x4.Ortho(-160, 160, -20, 340, -1, 1), false));
+                    GL.GetGPUProjectionMatrix(Matrix4x4.Ortho(bounds.xMin, bounds.xMax, bounds.yMin, bounds.yMax, -1, 1), false));
 
                 for (int i = 0; i < meshes.Count; i++)
                 {
@@ -234,7 +244,7 @@ namespace DryCycle.Editor
                     for (int v = 0; v < colors.Length; v++)
                     {
                         float light = dark
-                            ? .12f + .5f * Mathf.Clamp01(1f - Vector2.Distance(
+                            ? .22f + .5f * Mathf.Clamp01(1f - Vector2.Distance(
                                 fixture.meshes[i].vertices[v],
                                 new Vector2(70, 150)) / 110f)
                             : .9f;

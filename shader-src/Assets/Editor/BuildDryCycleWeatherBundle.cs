@@ -21,7 +21,7 @@ namespace DryCycle.Editor
             "Assets/DryCycle/Creatures/MantleCrab/MantleCrabSurface.shader";
         private const string MantleCrabBakeAsset =
             "Assets/DryCycle/Creatures/MantleCrab/MantleCrabMaterialBake.compute";
-        private const string MantleCrabBakeKernel = "BakeV3";
+        private const string MantleCrabBakeKernel = "BakeV4";
 
         private static readonly string[] WeatherAssets =
         {
