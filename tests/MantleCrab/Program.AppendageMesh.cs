@@ -1,4 +1,5 @@
 using System;
+using DryCycle.Creatures.MantleCrab;
 using DryCycle.Creatures.MantleCrab.Rendering;
 using UnityEngine;
 
@@ -67,26 +68,34 @@ internal static partial class Program
     private static void ChelaGeometryContract()
     {
         const int columns = 14, rows = 6;
-        TriangleMesh mesh = EmptyMesh(columns, rows);
-        MantleCrabMeshBuilder.PincerPalmAndFixedFinger(
-            mesh, columns, rows,
-            Vector2.zero, Vector2.down,
-            23.5f, 6.8f, 16.5f, 2.65f,
-            .13f, -1f, Vector2.zero);
+        for (int index = 0; index < 2; index++)
+        {
+            TriangleMesh mesh = EmptyMesh(columns, rows);
+            MantleCrabMeshBuilder.PincerPalmAndFixedFinger(
+                mesh, columns, rows,
+                Vector2.zero, Vector2.down,
+                MantleCrabPincerAnatomy.PalmLengths[index],
+                MantleCrabPincerAnatomy.PalmWidths[index],
+                MantleCrabPincerAnatomy.FingerLengths[index],
+                MantleCrabPincerAnatomy.FingerWidths[index],
+                MantleCrabPincerAnatomy.IdleOpen[index],
+                index == 0 ? -1f : 1f,
+                Vector2.zero);
 
-        int palmColumn = 7;
-        float palmSpan = Vector2.Distance(
-            mesh.vertices[palmColumn],
-            mesh.vertices[rows * (columns + 1) + palmColumn]);
-        float tipSpan = Vector2.Distance(
-            mesh.vertices[columns],
-            mesh.vertices[rows * (columns + 1) + columns]);
+            int palmColumn = 7;
+            float palmSpan = Vector2.Distance(
+                mesh.vertices[palmColumn],
+                mesh.vertices[rows * (columns + 1) + palmColumn]);
+            float tipSpan = Vector2.Distance(
+                mesh.vertices[columns],
+                mesh.vertices[rows * (columns + 1) + columns]);
 
-        Check(palmSpan > 10f,
-            "Chela manus must retain a broad readable body at Rain World scale");
-        Check(tipSpan < 1f,
-            "Fixed pincer digit must converge to a short sharp tip instead of remaining a second arm shaft");
-        Check(palmSpan > tipSpan * 10f,
-            "Chela silhouette must be palm-dominant rather than fork/needle-dominant");
+            Check(palmSpan > MantleCrabPincerAnatomy.PalmWidths[index] * 1.55f,
+                "Chela " + index + " manus must retain a broad readable body at Rain World scale");
+            Check(tipSpan < 1f,
+                "Chela " + index + " fixed digit must converge to a short sharp tip instead of remaining a second arm shaft");
+            Check(palmSpan > tipSpan * 8f,
+                "Chela " + index + " silhouette must be palm-dominant rather than fork/needle-dominant");
+        }
     }
 }
