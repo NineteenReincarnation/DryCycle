@@ -402,7 +402,7 @@ internal static class WalkableDynamicSurfaceRuntime
             if (player.bodyChunks[i] != null)
                 player.bodyChunks[i].vel = ToRiderVelocity(player.bodyChunks[i].vel, surfaceVelocity);
 
-        CancelInwardNormalVelocity(player, sample);
+        ResolveContactVelocity(player, feet, sample, applySlideFriction: true);
         ApplyVanillaSurfaceState(player, surface, sample);
     }
 
@@ -418,36 +418,68 @@ internal static class WalkableDynamicSurfaceRuntime
         if (Mathf.Abs(correction) > 0.01f)
             TranslatePlayerAndResolveTerrain(player, sample.Normal * correction);
 
-        CancelInwardNormalVelocity(player, sample);
-        if (applySlideFriction && !IsGroundingNormal(sample.Normal))
-            ApplySlidingFriction(player, feet, sample);
-
+        ResolveContactVelocity(player, feet, sample, applySlideFriction);
         ApplyVanillaSurfaceState(player, surface, sample);
     }
 
-    private static void CancelInwardNormalVelocity(Player player, WalkableSurfaceSample sample)
-    {
-        if (player?.bodyChunks == null) return;
-
-        for (int i = 0; i < player.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = player.bodyChunks[i];
-            if (chunk == null) continue;
-            float normalVelocity = Vector2.Dot(chunk.vel, sample.Normal);
-            if (normalVelocity < 0f)
-                chunk.vel += sample.Normal * -normalVelocity;
-        }
-    }
-
-    private static void ApplySlidingFriction(Player player, BodyChunk feet, WalkableSurfaceSample sample)
+    private static void ResolveContactVelocity(
+        Player player,
+        BodyChunk feet,
+        WalkableSurfaceSample sample,
+        bool applySlideFriction)
     {
         if (player == null || feet == null) return;
 
-        // Match BodyChunk's TerrainCurve steep-slope convention: remove a portion of tangential
-        // velocity according to the player's own surfaceFriction while leaving gravity free to
-        // accelerate the chunk down the tangent on later frames.
-        float friction = Mathf.Clamp01(1f - player.surfaceFriction * 2f);
-        feet.vel -= Vector2.Dot(feet.vel, sample.Tangent) * friction * sample.Tangent;
+        // BodyChunk's TerrainCurve collision has two deliberately different responses. A shallow
+        // surface is ground: downward gravity is cancelled without being projected into downhill
+        // motion, while horizontal locomotion is converted into the required vertical slope motion.
+        // Only a steep surface uses normal/tangent projection and is allowed to slide.
+        feet.vel = IsGroundingNormal(sample.Normal)
+            ? ResolveGroundContactVelocity(feet.vel, sample.Normal, player.surfaceFriction, player.bounce, player.gravity)
+            : ResolveSlidingContactVelocity(feet.vel, sample.Normal, player.surfaceFriction, player.bounce, applySlideFriction);
+    }
+
+    internal static Vector2 ResolveGroundContactVelocity(
+        Vector2 velocity,
+        Vector2 normal,
+        float surfaceFriction,
+        float bounce,
+        float gravity)
+    {
+        if (normal.y <= 0.0001f) return velocity;
+
+        // Mirrors BodyChunk's ordinary TerrainCurve ground branch. In particular, a pure downward
+        // velocity must resolve to rest instead of gaining a horizontal component on a shallow
+        // slope. Horizontal velocity alone contributes the vertical amount needed to follow it.
+        float magnitude = velocity.magnitude;
+        float slopeTransfer = velocity.x * -normal.x / normal.y;
+        velocity.y -= slopeTransfer;
+        velocity.y = Mathf.Abs(velocity.y) * bounce;
+        if (velocity.y < gravity || velocity.y < 1f + 9f * (1f - bounce))
+            velocity.y = 0f;
+        velocity.y += slopeTransfer;
+        velocity.x *= Mathf.Clamp(surfaceFriction * 2f, 0f, 1f);
+        return Vector2.ClampMagnitude(velocity, magnitude);
+    }
+
+    internal static Vector2 ResolveSlidingContactVelocity(
+        Vector2 velocity,
+        Vector2 normal,
+        float surfaceFriction,
+        float bounce,
+        bool applyFriction)
+    {
+        // Mirrors BodyChunk's steep TerrainCurve branch. Normal response prevents penetration;
+        // tangential friction is applied only once per frame because Room finalization may run a
+        // second contact reconciliation pass after Player movement.
+        velocity -= normal * Mathf.Min(0f, Vector2.Dot(velocity, normal) * (1f + bounce * 0.2f));
+        if (applyFriction)
+        {
+            Vector2 tangent = new(-normal.y, normal.x);
+            velocity -= Vector2.Dot(velocity, tangent) *
+                        Mathf.Clamp01(1f - surfaceFriction * 2f) * tangent;
+        }
+        return velocity;
     }
 
     private static void ApplyVanillaSurfaceState(
