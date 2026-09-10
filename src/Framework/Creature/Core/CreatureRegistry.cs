@@ -52,11 +52,12 @@ public static class CreatureRegistry
     /// <summary>
     /// 登记一份生物说明书。
     /// 同一个对象重复登记属于无害操作；不同对象如果撞了 Type、Type.Index 或名称/别名，会直接报错而不是静默覆盖。
-    /// 所有冲突检查通过以后才会真正写入 Registry，并冻结 Descriptor。
+    /// 所有冲突检查通过以后才开始写入；如果写入或最终冻结失败，本次已经写入的内容会全部撤回。
     ///
     /// Registers one creature descriptor.
     /// Re-registering the same instance is harmless; conflicting type, type index, canonical name,
     /// or alias registrations throw instead of silently overwriting an existing creature.
+    /// After validation, registry mutations are committed transactionally and rolled back if commit or final freeze fails.
     /// </summary>
     public static CreatureDescriptor Register(CreatureDescriptor descriptor)
     {
@@ -85,26 +86,78 @@ public static class CreatureRegistry
         }
 
         descriptor.ValidateForRegistration();
-        ValidateRegistrationCollisions(descriptor);
 
-        descriptor.Freeze();
+        List<string> registrationNames = CollectRegistrationNames(descriptor);
+        ValidateRegistrationCollisions(descriptor, registrationNames);
 
-        _descriptors.Add(descriptor);
-        _descriptorSet.Add(descriptor);
-        _byTypeValue.Add(descriptor.Type.value, descriptor);
-        _byTypeIndex.Add(descriptor.Type.Index, descriptor);
+        bool descriptorListAdded = false;
+        bool descriptorSetAdded = false;
+        bool typeValueAdded = false;
+        bool typeIndexAdded = false;
+        List<string> addedNames = new(registrationNames.Count);
 
-        AddNameIndex(descriptor.Type.value, descriptor);
-        for (int i = 0; i < descriptor.Aliases.Count; i++)
+        try
         {
-            string alias = descriptor.Aliases[i];
-            if (!StringComparer.OrdinalIgnoreCase.Equals(alias, descriptor.Type.value.Trim()))
-            {
-                AddNameIndex(alias, descriptor);
-            }
-        }
+            _descriptors.Add(descriptor);
+            descriptorListAdded = true;
 
-        return descriptor;
+            if (!_descriptorSet.Add(descriptor))
+            {
+                throw new InvalidOperationException(
+                    $"Creature descriptor '{descriptor.Type.value}' owned by '{descriptor.OwnerId}' became registered while its registration was being committed.");
+            }
+
+            descriptorSetAdded = true;
+
+            _byTypeValue.Add(descriptor.Type.value, descriptor);
+            typeValueAdded = true;
+
+            _byTypeIndex.Add(descriptor.Type.Index, descriptor);
+            typeIndexAdded = true;
+
+            for (int i = 0; i < registrationNames.Count; i++)
+            {
+                string name = registrationNames[i];
+                _byName.Add(name, descriptor);
+                addedNames.Add(name);
+            }
+
+            // 冻结放在所有 Registry 写入完成之后。Freeze 自身如果失败，catch 会撤回本次全部写入，
+            // 因此失败注册不会留下“Descriptor 已冻结但 Registry 没注册完整”的半状态。
+            // Freeze is deliberately the final commit step. If it fails, the catch block rolls back every
+            // registry mutation, so a failed registration cannot leave a frozen-but-partially-registered descriptor.
+            descriptor.Freeze();
+            return descriptor;
+        }
+        catch
+        {
+            for (int i = addedNames.Count - 1; i >= 0; i--)
+            {
+                _byName.Remove(addedNames[i]);
+            }
+
+            if (typeIndexAdded)
+            {
+                _byTypeIndex.Remove(descriptor.Type.Index);
+            }
+
+            if (typeValueAdded)
+            {
+                _byTypeValue.Remove(descriptor.Type.value);
+            }
+
+            if (descriptorSetAdded)
+            {
+                _descriptorSet.Remove(descriptor);
+            }
+
+            if (descriptorListAdded)
+            {
+                _descriptors.Remove(descriptor);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -211,7 +264,37 @@ public static class CreatureRegistry
         _enabled = false;
     }
 
-    private static void ValidateRegistrationCollisions(CreatureDescriptor descriptor)
+    /// <summary>
+    /// 把标准 Type 名称和 Descriptor 内的 Alias 整理成这次注册真正要写入的名称集合。
+    /// 标准名称固定排在第一位；同一 Descriptor 内忽略大小写的重复名称只保留一次。
+    ///
+    /// Builds the exact canonical-name and alias set that will be committed for one descriptor.
+    /// The canonical name is first and case-insensitive duplicates inside the same descriptor are removed.
+    /// </summary>
+    private static List<string> CollectRegistrationNames(CreatureDescriptor descriptor)
+    {
+        List<string> names = new(descriptor.Aliases.Count + 1);
+        HashSet<string> uniqueNames = new(StringComparer.OrdinalIgnoreCase);
+
+        string canonicalName = descriptor.Type.value.Trim();
+        uniqueNames.Add(canonicalName);
+        names.Add(canonicalName);
+
+        for (int i = 0; i < descriptor.Aliases.Count; i++)
+        {
+            string alias = descriptor.Aliases[i].Trim();
+            if (uniqueNames.Add(alias))
+            {
+                names.Add(alias);
+            }
+        }
+
+        return names;
+    }
+
+    private static void ValidateRegistrationCollisions(
+        CreatureDescriptor descriptor,
+        IReadOnlyList<string> registrationNames)
     {
         if (_byTypeValue.TryGetValue(descriptor.Type.value, out CreatureDescriptor typeOwner))
         {
@@ -231,18 +314,9 @@ public static class CreatureRegistry
                 descriptor);
         }
 
-        HashSet<string> incomingNames = new(StringComparer.OrdinalIgnoreCase)
+        for (int i = 0; i < registrationNames.Count; i++)
         {
-            descriptor.Type.value.Trim()
-        };
-
-        for (int i = 0; i < descriptor.Aliases.Count; i++)
-        {
-            incomingNames.Add(descriptor.Aliases[i]);
-        }
-
-        foreach (string name in incomingNames)
-        {
+            string name = registrationNames[i];
             if (_byName.TryGetValue(name, out CreatureDescriptor nameOwner))
             {
                 throw RegistrationCollision(
@@ -264,11 +338,6 @@ public static class CreatureRegistry
             $"Creature registration collision for {kind} '{value}'. " +
             $"Existing owner: '{existing.OwnerId}' ({existing.Type.value}). " +
             $"Incoming owner: '{incoming.OwnerId}' ({incoming.Type.value}).");
-    }
-
-    private static void AddNameIndex(string name, CreatureDescriptor descriptor)
-    {
-        _byName.Add(name.Trim(), descriptor);
     }
 
     private static void StaticWorld_InitCustomTemplates(On.StaticWorld.orig_InitCustomTemplates orig)
@@ -395,6 +464,14 @@ public static class CreatureRegistry
                 throw FactoryReturnedNull(descriptor, "state");
             }
 
+            if (!ReferenceEquals(state.creature, self))
+            {
+                throw FactoryOwnershipMismatch(
+                    descriptor,
+                    "state",
+                    "CreatureState.creature does not reference the AbstractCreature currently being constructed");
+            }
+
             self.state = state;
         }
 
@@ -415,6 +492,22 @@ public static class CreatureRegistry
             if (customAI == null)
             {
                 throw FactoryReturnedNull(descriptor, "abstract AI");
+            }
+
+            if (!ReferenceEquals(customAI.parent, self))
+            {
+                throw FactoryOwnershipMismatch(
+                    descriptor,
+                    "abstract AI",
+                    "AbstractCreatureAI.parent does not reference the AbstractCreature currently being constructed");
+            }
+
+            if (!ReferenceEquals(customAI.world, self.world))
+            {
+                throw FactoryOwnershipMismatch(
+                    descriptor,
+                    "abstract AI",
+                    "AbstractCreatureAI.world does not reference the current AbstractCreature's World");
             }
 
             // Rain World 会在默认 AbstractCreatureAI 构造完成后再把出生巢穴位置写进去，替换 AI 时必须把这份信息带过去。
@@ -453,6 +546,14 @@ public static class CreatureRegistry
         if (creature == null)
         {
             throw FactoryReturnedNull(descriptor, "realized creature");
+        }
+
+        if (!ReferenceEquals(creature.abstractCreature, self))
+        {
+            throw FactoryOwnershipMismatch(
+                descriptor,
+                "realized creature",
+                "Creature.abstractCreature does not reference the AbstractCreature currently being realized");
         }
 
         self.realizedObject = creature;
@@ -526,6 +627,14 @@ public static class CreatureRegistry
             throw FactoryReturnedNull(descriptor, "realized AI");
         }
 
+        if (!ReferenceEquals(ai.creature, self))
+        {
+            throw FactoryOwnershipMismatch(
+                descriptor,
+                "realized AI",
+                "ArtificialIntelligence.creature does not reference the AbstractCreature currently initiating AI");
+        }
+
         self.abstractAI.RealAI = ai;
     }
 
@@ -564,5 +673,22 @@ public static class CreatureRegistry
     {
         return new InvalidOperationException(
             $"Creature {factoryName} factory returned null for '{descriptor.Type.value}' owned by '{descriptor.OwnerId}'.");
+    }
+
+    /// <summary>
+    /// 报告工厂返回了一个归属于其他 AbstractCreature 或其他 World 的对象。
+    /// 这种错误在对象真正写回 Rain World 之前就会被拦截，避免错误状态继续运行到后续帧才暴露。
+    ///
+    /// Reports a factory result that is bound to another AbstractCreature or World.
+    /// The mismatch is rejected before the object is assigned back into Rain World state.
+    /// </summary>
+    private static InvalidOperationException FactoryOwnershipMismatch(
+        CreatureDescriptor descriptor,
+        string factoryName,
+        string detail)
+    {
+        return new InvalidOperationException(
+            $"Creature {factoryName} factory returned an object with invalid ownership for '{descriptor.Type.value}' owned by '{descriptor.OwnerId}'. " +
+            detail + ".");
     }
 }
