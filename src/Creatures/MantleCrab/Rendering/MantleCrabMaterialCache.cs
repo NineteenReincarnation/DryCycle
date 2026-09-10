@@ -34,8 +34,12 @@ internal sealed class MantleCrabMaterialCache
                 try { texture = BakeCompute(phenotype); }
                 catch (Exception ex)
                 {
+                    // BakeV3 is intentionally a versioned kernel name. A checked-in or locally
+                    // installed V2 creature bundle therefore fails here cleanly and falls back to
+                    // the current CPU baker instead of silently producing obsolete foot/joint
+                    // material data. Rebuilding drycyclecreatures restores GPU baking.
                     computeFailed = true;
-                    Plugin.Logger?.LogWarning("MantleCrab compute bake failed; using CPU baker: " + ex.Message);
+                    Plugin.Logger?.LogWarning("MantleCrab V3 compute bake unavailable; using CPU baker until the creature bundle is rebuilt: " + ex.Message);
                 }
             }
             texture ??= MantleCrabMaterialBaker.BakeCPU(phenotype);
@@ -88,7 +92,7 @@ internal sealed class MantleCrabMaterialCache
         {
             if (!target.Create()) throw new InvalidOperationException("Atlas RenderTexture.Create failed");
             ComputeShader shader = DryCycleShaderAssets.MantleCrabBake;
-            int kernel = shader.FindKernel("Bake");
+            int kernel = shader.FindKernel("BakeV3");
             shader.SetVector("_Motif", new Vector4(p.MotifScale, p.MotifSharpness, p.MotifContrast, p.MotifWarp));
             shader.SetVector("_Pattern", new Vector4(p.Fragmentation, p.StripePhase, p.Curvature, p.Asymmetry));
             shader.SetVector("_Material", new Vector4(p.ChitinRoughness, p.LegDetail, p.PincerAccent, p.Hue));
