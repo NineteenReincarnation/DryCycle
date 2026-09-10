@@ -150,4 +150,11 @@ grep -q 'DB_RoostAnchorKind.FloorUnderside' "$ROOST"
 grep -q 'room.MiddleOfTile(floorTile) + Vector2.down \* 10f' "$ROOST"
 ! grep -q 'room.MiddleOfTile(floorTile) + Vector2.up \* 10f' "$ROOST"
 
-echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 protected.'
+# -----------------------------------------------------------------------------
+# Social diversity — overall SocialDrive remains one cadence signal, while need fatigue,
+# completed-event history and mode-specific satiation prevent a single easy interaction from
+# monopolizing that drive. The deterministic prediction also protects personality specialization.
+# -----------------------------------------------------------------------------
+python3 "$TESTS/check_social_diversity.py"
+
+echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus social-diversity prediction protected.'
