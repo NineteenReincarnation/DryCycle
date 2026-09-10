@@ -5,8 +5,8 @@ namespace DryCycle.Creatures.MantleCrab;
 /// <summary>
 /// Authored anatomy for the two long capture appendages. Walking legs and pincers deliberately
 /// do not share silhouette data: they only share low-level articulated-chain math. Each pincer
-/// consists of four rigid arm segments ending at a wrist, followed by a separate palm and two
-/// fingers owned by the renderer/animation layer.
+/// consists of four rigid arm segments ending at a wrist, followed by a separately articulated
+/// palm and two fingers owned by the renderer/animation layer.
 /// </summary>
 internal static class MantleCrabPincerAnatomy
 {
@@ -14,7 +14,7 @@ internal static class MantleCrabPincerAnatomy
 
     // Reference-oriented rest silhouettes. They are intentionally not exact mirror copies: both
     // appendages share the same anatomical plan while keeping the asymmetric, multi-bend hanging
-    // posture visible in the source design.
+    // posture visible in the source design. The right capture arm carries the stronger distal bend.
     internal static readonly Vector2[][] Chains =
     [
         [new(-23f, -24f), new(-31f, -82f), new(-18f, -151f), new(-31f, -224f), new(-27f, -263f)],
@@ -38,11 +38,18 @@ internal static class MantleCrabPincerAnatomy
         [7.0f, 6.35f, 5.65f]
     ];
 
-    internal static readonly float[] PalmLengths = [17.5f, 19f];
-    internal static readonly float[] PalmWidths = [6.0f, 6.7f];
-    internal static readonly float[] FingerLengths = [23f, 25f];
-    internal static readonly float[] FingerWidths = [2.75f, 3.05f];
-    internal static readonly float[] IdleOpen = [.20f, .24f];
+    // V3 chela proportions. The old fingers were longer than the palm and therefore read as two
+    // needles continuing the arm. A true chela first forms a broad manus, then grows two short,
+    // inward-curving digits around a visible cavity.
+    internal static readonly float[] PalmLengths = [23.5f, 27.0f];
+    internal static readonly float[] PalmWidths = [6.8f, 8.4f];
+    internal static readonly float[] FingerLengths = [16.5f, 20.0f];
+    internal static readonly float[] FingerWidths = [2.65f, 3.35f];
+
+    // The palm is not merely a continuation of the last shaft. A small authored carpal angle gives
+    // the left claw a restrained inward set and the right claw the pronounced reference-like bend.
+    internal static readonly float[] PalmRestAngleDegrees = [-5.5f, 12.0f];
+    internal static readonly float[] IdleOpen = [.13f, .18f];
 
     internal static Vector2[] Landmarks(int index) => Chains[index];
     internal static float SegmentWidth(int index, int segment) => SegmentWidths[index][segment];
