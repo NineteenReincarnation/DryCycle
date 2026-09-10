@@ -2,64 +2,11 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal readonly struct DB_WeaponObservation
-{
-    internal readonly Weapon Weapon;
-    internal readonly Creature Instigator;
-    internal readonly Vector2 Position;
-    internal readonly Vector2 Velocity;
-    internal readonly float ClosestApproachSqr;
-    internal readonly bool Thrown;
-    internal readonly bool HeldMovingSpear;
-
-    internal DB_WeaponObservation(
-        Weapon weapon,
-        Creature instigator,
-        Vector2 position,
-        Vector2 velocity,
-        float closestApproachSqr,
-        bool thrown,
-        bool heldMovingSpear)
-    {
-        Weapon = weapon;
-        Instigator = instigator;
-        Position = position;
-        Velocity = velocity;
-        ClosestApproachSqr = Mathf.Max(0f, closestApproachSqr);
-        Thrown = thrown;
-        HeldMovingSpear = heldMovingSpear;
-    }
-}
-
-internal readonly struct DB_HeldThreatObservation
-{
-    internal readonly bool VisibleSpear;
-    internal readonly bool VisibleRock;
-    internal readonly bool VisibleExplosive;
-    internal readonly bool VisibleStartle;
-    internal readonly bool VisibleShock;
-
-    internal DB_HeldThreatObservation(
-        bool visibleSpear,
-        bool visibleRock,
-        bool visibleExplosive,
-        bool visibleStartle,
-        bool visibleShock)
-    {
-        VisibleSpear = visibleSpear;
-        VisibleRock = visibleRock;
-        VisibleExplosive = visibleExplosive;
-        VisibleStartle = visibleStartle;
-        VisibleShock = visibleShock;
-    }
-
-    internal bool Any => VisibleSpear || VisibleRock || VisibleExplosive ||
-                         VisibleStartle || VisibleShock;
-}
-
 /// <summary>
-/// Shared weapon observation over DB_RoomContext. This class never trains Threat memory and
-/// never writes movement; it only validates currently observable held/thrown weapon facts.
+/// Transitional weapon-observation adapter while Threat consumers move to Perception R2.
+/// Observation value types now belong to DB_PerceptionTypes. The central R2 runtime already
+/// owns current all-projectile ranking used by FrameContext; these specialized legacy queries
+/// remain only for Threat near-miss/held-item migration and never write movement or memory.
 /// </summary>
 internal static class DB_WeaponPerception
 {
@@ -147,8 +94,8 @@ internal static class DB_WeaponPerception
         DB_RoomContext context = DB_RoomContext.For(observer?.room);
         if (observer?.mainBodyChunk == null || context == null) return false;
 
-        // Preserve the old close moving-held-spear reaction without rescanning physicalObjects
-        // for every bat. This path is intentionally stronger than general held-item caution.
+        // Preserve the close moving-held-spear reaction while Threat is migrated. This path is
+        // intentionally stronger than general held-item caution and does not scan physicalObjects.
         var weapons = context.Weapons;
         for (int i = 0; i < weapons.Count; i++)
         {
@@ -208,8 +155,7 @@ internal static class DB_WeaponPerception
         {
             PhysicalObject held = player.grasps[i]?.grabbed;
             if (held == null) continue;
-            DB_ThreatEvidence evidence =
-                DB_ThreatClassifier.Classify(held, null, 0f, 0f, false);
+            DB_ThreatEvidence evidence = DB_ThreatClassifier.Classify(held, null, 0f, 0f, false);
             spear |= held is Spear;
             rock |= held is Rock;
             explosive |= evidence.Explosion > 0.15f;
