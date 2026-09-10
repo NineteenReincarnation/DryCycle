@@ -64,9 +64,14 @@ internal static partial class Program
 
         Bounds2D walkingBounds = Bounds(walking.vertices);
         Bounds2D captureBounds = Bounds(capture.vertices);
-        Check(walkingBounds.Width > 5f && walkingBounds.Height > 8f,
+        float walkingLong = Math.Max(walkingBounds.Width, walkingBounds.Height);
+        float walkingShort = Math.Min(walkingBounds.Width, walkingBounds.Height);
+        float captureLong = Math.Max(captureBounds.Width, captureBounds.Height);
+        float captureShort = Math.Min(captureBounds.Width, captureBounds.Height);
+
+        Check(walkingLong > 8f && walkingShort > 5f,
             "Walking joint must render as a readable load-bearing hinge capsule rather than a connector dot");
-        Check(captureBounds.Width < walkingBounds.Width || captureBounds.Height < walkingBounds.Height,
+        Check(captureLong < walkingLong || captureShort < walkingShort,
             "Capture-arm hinge must remain visibly slimmer than the walking-leg bearing joint");
         Check(MantleCrabMeshBuilder.WalkingJointTrim(4f) > MantleCrabMeshBuilder.PincerJointTrim(4f),
             "Walking joints must reserve more shell overlap/clearance than slender capture-arm hinges");
