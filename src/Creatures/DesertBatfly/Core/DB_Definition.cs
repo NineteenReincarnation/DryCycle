@@ -1,20 +1,44 @@
 using System.Collections.Generic;
-using DryCycle.Registration;
-using Watcher;
+using DryCycle.Framework.Creature.Core;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
-internal sealed class DB_Definition : CreatureDefinition
+internal static class DB_Definition
 {
     internal static readonly CreatureTemplate.Type CreatureType = new("DesertBatfly", true);
-    internal DB_Definition() : base(CreatureType) { }
 
-    internal override CreatureTemplate CreateTemplate()
+    /// <summary>
+    /// 把 DesertBatfly 的模板、状态和实际生物创建方式登记到新的 CreatureRegistry。
+    /// DesertBatfly 继续复用 Fly 的原版 AI 生命周期，因此这里不登记 AbstractAI 或实际 AI 工厂。
+    ///
+    /// Registers DesertBatfly's template, state, and realized creature through the new CreatureRegistry.
+    /// DesertBatfly keeps Fly's vanilla AI lifecycle, so no abstract or realized AI factory is declared here.
+    /// </summary>
+    internal static CreatureDescriptor Register()
     {
-        var ancestor = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
+        CreatureDescriptor descriptor = new CreatureDescriptor(
+                CreatureType,
+                DryCycle.Plugin.ModId)
+            .Name("Desert Batfly")
+            .Template(CreateTemplate)
+            .State(CreateState)
+            .Realized(CreateRealizedCreature);
+
+        return CreatureRegistry.Register(descriptor);
+    }
+
+    private static CreatureTemplate CreateTemplate()
+    {
+        CreatureTemplate ancestor = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
+
         // Fly owns a non-ArtificialIntelligence controller; retain that lifecycle.
-        var template = new CreatureTemplate(Type, ancestor, new List<TileTypeResistance>(),
-            new List<TileConnectionResistance>(), new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Ignores, 0f));
+        CreatureTemplate template = new(
+            CreatureType,
+            ancestor,
+            new List<TileTypeResistance>(),
+            new List<TileConnectionResistance>(),
+            new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Ignores, 0f));
+
         template.name = "Desert Batfly";
         template.quantified = false;
         template.AI = false;
@@ -31,48 +55,13 @@ internal sealed class DB_Definition : CreatureDefinition
         return template;
     }
 
-    internal override Creature CreateRealizedCreature(AbstractCreature creature) => new DB_Creature(creature, creature.world);
-    internal override CreatureState CreateState(AbstractCreature creature) => new DB_State(creature);
-
-    internal override void EstablishRelationships()
+    private static Creature CreateRealizedCreature(AbstractCreature creature)
     {
-        var desert = StaticWorld.GetCreatureTemplate(Type);
-        var fly = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
-        foreach (var other in StaticWorld.creatureTemplates)
-        {
-            if (other == null || other == desert) continue;
-            desert.relationships[other.type.Index] = fly.CreatureRelationship(other).Duplicate();
-            other.relationships[Type.Index] = other.CreatureRelationship(fly).Duplicate();
-            if (other.TopAncestor().type == CreatureTemplate.Type.Scavenger)
-                other.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Attacks, DB_Tuning.ScavengerHostility);
-        }
+        return new DB_Creature(creature, creature.world);
+    }
 
-        // Peach Lizard is a deliberate ecological predator of Desert Batflies. Its
-        // intensity is comparable to Watcher's own Peach->Frog relationship: enough
-        // for PreyTracker/Hunt/tongue logic to engage without making a tiny flying
-        // prey override every other useful target in the room. The reverse Afraid
-        // relationship also plugs directly into DB_AI's predator detection,
-        // so even nasty individuals flee instead of trying to harass their predator.
-        if (ModManager.Watcher &&
-            WatcherEnums.CreatureTemplateType.PeachLizard != null &&
-            WatcherEnums.CreatureTemplateType.PeachLizard.Index >= 0 &&
-            WatcherEnums.CreatureTemplateType.PeachLizard.Index < StaticWorld.creatureTemplates.Length)
-        {
-            CreatureTemplate peach = StaticWorld.GetCreatureTemplate(
-                WatcherEnums.CreatureTemplateType.PeachLizard);
-            if (peach != null)
-            {
-                peach.relationships[Type.Index] = new(
-                    CreatureTemplate.Relationship.Type.Eats,
-                    0.32f);
-                desert.relationships[peach.type.Index] = new(
-                    CreatureTemplate.Relationship.Type.Afraid,
-                    0.90f);
-            }
-        }
-
-        desert.relationships[CreatureTemplate.Type.Slugcat.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
-        desert.relationships[Type.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
-        desert.relationships[CreatureTemplate.Type.Fly.Index] = new(CreatureTemplate.Relationship.Type.Ignores, 0f);
+    private static CreatureState CreateState(AbstractCreature creature)
+    {
+        return new DB_State(creature);
     }
 }
