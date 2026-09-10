@@ -6,8 +6,8 @@ using UnityEngine;
 namespace DryCycle.Creatures.Platforming;
 
 /// <summary>
-/// Shared player-side moving-ground integration. Providers supply continuous geometry only;
-/// this runtime owns rider state, vanilla ground injection, carry, one-way landing and the
+/// Shared player-side moving-surface integration. Providers supply continuous geometry only;
+/// this runtime owns rider state, vanilla ground/slide semantics, carry, one-way landing and the
 /// post-Room-physics reconciliation pass.
 /// </summary>
 internal static class WalkableDynamicSurfaceRuntime
@@ -24,7 +24,7 @@ internal static class WalkableDynamicSurfaceRuntime
     private const float MaxAcquireUpwardVelocity = 2.5f;
     private const float MaxCarryPerPhase = 28f;
     private const float MaxInheritedSurfaceSpeed = 12f;
-    private const float MinimumWalkableNormalY = 0.48f;
+    private const float MinimumContactNormalY = 0.05f;
     private const int JumpDetachCooldown = 6;
     private const int EdgeDetachCooldown = 2;
 
@@ -136,9 +136,12 @@ internal static class WalkableDynamicSurfaceRuntime
                 BodyChunk acquisitionFeet = Feet(player);
                 if (acquisitionFeet != null && TryAcquireSurface(player, acquisitionFeet, state))
                 {
+                    // World-space re-sampling matters at finite curve endpoints: coordinate-only
+                    // sampling has no rider position from which to reconstruct the radial cap normal.
                     if (state.Surface != null &&
-                        state.Surface.TrySample(state.Coordinate, out WalkableSurfaceSample acquiredSample))
-                        InjectVanillaGroundState(player, state.Surface, acquiredSample);
+                        state.Surface.TrySample(acquisitionFeet.pos, out WalkableSurfaceSample acquiredSample) &&
+                        IsSurfaceContactNormal(acquiredSample.Normal))
+                        ApplyVanillaSurfaceState(player, state.Surface, acquiredSample);
                     else
                         Detach(player, state, default, EdgeDetachCooldown, inheritSurfaceVelocity: true);
                 }
@@ -148,7 +151,6 @@ internal static class WalkableDynamicSurfaceRuntime
 
         if (!CanRide(player) || !SurfaceStillValid(player, state.Surface) ||
             !state.Surface.TrySample(state.Coordinate, out WalkableSurfaceSample carriedSample) ||
-            carriedSample.Normal.y < MinimumWalkableNormalY ||
             !IsSurfaceSpeedRideable(carriedSample.Velocity))
         {
             Detach(player, state, default, EdgeDetachCooldown, inheritSurfaceVelocity: true);
@@ -166,7 +168,7 @@ internal static class WalkableDynamicSurfaceRuntime
 
         BodyChunk feet = Feet(player);
         if (feet == null || !state.Surface.TrySample(feet.pos, out WalkableSurfaceSample sample) ||
-            sample.Normal.y < MinimumWalkableNormalY)
+            !IsSurfaceContactNormal(sample.Normal))
         {
             Detach(player, state, carriedSample, EdgeDetachCooldown, inheritSurfaceVelocity: true);
             return;
@@ -183,7 +185,7 @@ internal static class WalkableDynamicSurfaceRuntime
         state.LastSurfacePoint = sample.Point;
         state.LastSurfaceVelocity = EffectiveSurfaceVelocity(sample.Velocity);
         state.DistanceBeforeMovement = distance;
-        InjectVanillaGroundState(player, state.Surface, sample);
+        ApplyVanillaSurfaceState(player, state.Surface, sample);
     }
 
     private static void ResolveAfterVanillaMovement(Player player, RiderState state)
@@ -201,6 +203,7 @@ internal static class WalkableDynamicSurfaceRuntime
         {
             if (!SurfaceStillValid(player, state.Surface) ||
                 !state.Surface.TrySample(feet.pos, out WalkableSurfaceSample sample) ||
+                !IsSurfaceContactNormal(sample.Normal) ||
                 !IsSurfaceSpeedRideable(sample.Velocity))
             {
                 Detach(player, state, default, EdgeDetachCooldown, inheritSurfaceVelocity: true);
@@ -215,14 +218,15 @@ internal static class WalkableDynamicSurfaceRuntime
                 return;
             }
 
-            if (sample.Normal.y < MinimumWalkableNormalY || !WithinMaintainedContact(distance))
+            if (!WithinMaintainedContact(distance))
             {
                 Detach(player, state, sample, EdgeDetachCooldown, inheritSurfaceVelocity: true);
                 return;
             }
 
-            ResolveSupportedContact(player, feet, state.Surface, sample, distance);
+            ResolveSupportedContact(player, feet, state.Surface, sample, distance, applySlideFriction: true);
             if (!state.Surface.TrySample(feet.pos, out WalkableSurfaceSample resolvedSample) ||
+                !IsSurfaceContactNormal(resolvedSample.Normal) ||
                 !NearResolvedContact(SignedFootDistance(feet, resolvedSample)))
             {
                 Detach(player, state, sample, EdgeDetachCooldown, inheritSurfaceVelocity: true);
@@ -232,7 +236,7 @@ internal static class WalkableDynamicSurfaceRuntime
             state.Coordinate = resolvedSample.Coordinate;
             state.LastSurfacePoint = resolvedSample.Point;
             state.LastSurfaceVelocity = EffectiveSurfaceVelocity(resolvedSample.Velocity);
-            ClearOwnedJumpChunk(player, state.Surface);
+            ApplyVanillaSurfaceState(player, state.Surface, resolvedSample);
             return;
         }
 
@@ -253,7 +257,7 @@ internal static class WalkableDynamicSurfaceRuntime
             IWalkableDynamicSurface surface = surfaceBuffer[i];
             if (!SurfaceStillValid(player, surface) || ReferenceEquals(SurfaceOwner(surface), player) ||
                 !surface.TrySample(feet.pos, out WalkableSurfaceSample sample) ||
-                sample.Normal.y < MinimumWalkableNormalY ||
+                !IsSurfaceContactNormal(sample.Normal) ||
                 !IsSurfaceSpeedRideable(sample.Velocity))
                 continue;
 
@@ -275,6 +279,7 @@ internal static class WalkableDynamicSurfaceRuntime
         float bestDistance = SignedFootDistance(feet, bestSample);
         ResolveAcquiredContact(player, feet, bestSurface, bestSample, bestDistance);
         if (!bestSurface.TrySample(feet.pos, out WalkableSurfaceSample resolvedSample) ||
+            !IsSurfaceContactNormal(resolvedSample.Normal) ||
             !NearResolvedContact(SignedFootDistance(feet, resolvedSample)))
         {
             // ResolveAcquiredContact has already converted velocity into the moving frame. If
@@ -288,6 +293,7 @@ internal static class WalkableDynamicSurfaceRuntime
         state.LastSurfacePoint = resolvedSample.Point;
         state.LastSurfaceVelocity = EffectiveSurfaceVelocity(resolvedSample.Velocity);
         state.DistanceBeforeMovement = SignedFootDistance(feet, resolvedSample);
+        ApplyVanillaSurfaceState(player, bestSurface, resolvedSample);
         TrackRider(player);
         return true;
     }
@@ -340,6 +346,7 @@ internal static class WalkableDynamicSurfaceRuntime
 
         BodyChunk feet = Feet(player);
         if (feet == null || !state.Surface.TrySample(feet.pos, out WalkableSurfaceSample sample) ||
+            !IsSurfaceContactNormal(sample.Normal) ||
             !IsSurfaceSpeedRideable(sample.Velocity))
         {
             Detach(player, state, coordinateSample, EdgeDetachCooldown, inheritSurfaceVelocity: true);
@@ -348,8 +355,7 @@ internal static class WalkableDynamicSurfaceRuntime
 
         float distance = SignedFootDistance(feet, sample);
         float riderNormalVelocity = RiderNormalVelocity(feet, sample);
-        if (sample.Normal.y < MinimumWalkableNormalY ||
-            ShouldDetachAfterMovement(state.DistanceBeforeMovement, distance, riderNormalVelocity) ||
+        if (ShouldDetachAfterMovement(state.DistanceBeforeMovement, distance, riderNormalVelocity) ||
             !WithinMaintainedContact(distance))
         {
             Detach(player, state, sample,
@@ -358,8 +364,11 @@ internal static class WalkableDynamicSurfaceRuntime
             return;
         }
 
-        ResolveSupportedContact(player, feet, state.Surface, sample, distance);
+        // Finalization exists to undo late Room collision displacement. Do not apply slide
+        // friction twice in one frame; the player-side movement pass already did that.
+        ResolveSupportedContact(player, feet, state.Surface, sample, distance, applySlideFriction: false);
         if (!state.Surface.TrySample(feet.pos, out WalkableSurfaceSample resolvedSample) ||
+            !IsSurfaceContactNormal(resolvedSample.Normal) ||
             !NearResolvedContact(SignedFootDistance(feet, resolvedSample)))
         {
             Detach(player, state, sample, EdgeDetachCooldown, inheritSurfaceVelocity: true);
@@ -369,7 +378,7 @@ internal static class WalkableDynamicSurfaceRuntime
         state.Coordinate = resolvedSample.Coordinate;
         state.LastSurfacePoint = resolvedSample.Point;
         state.LastSurfaceVelocity = EffectiveSurfaceVelocity(resolvedSample.Velocity);
-        ClearOwnedJumpChunk(player, state.Surface);
+        ApplyVanillaSurfaceState(player, state.Surface, resolvedSample);
     }
 
     private static void ResolveAcquiredContact(
@@ -393,16 +402,8 @@ internal static class WalkableDynamicSurfaceRuntime
             if (player.bodyChunks[i] != null)
                 player.bodyChunks[i].vel = ToRiderVelocity(player.bodyChunks[i].vel, surfaceVelocity);
 
-        float riderNormalVelocity = RiderNormalVelocity(feet, sample);
-        if (riderNormalVelocity < 0f)
-        {
-            Vector2 cancel = sample.Normal * -riderNormalVelocity;
-            for (int i = 0; i < player.bodyChunks.Length; i++)
-                if (player.bodyChunks[i] != null)
-                    player.bodyChunks[i].vel += cancel;
-        }
-
-        ClearOwnedJumpChunk(player, surface);
+        CancelInwardNormalVelocity(player, sample);
+        ApplyVanillaSurfaceState(player, surface, sample);
     }
 
     private static void ResolveSupportedContact(
@@ -410,25 +411,46 @@ internal static class WalkableDynamicSurfaceRuntime
         BodyChunk feet,
         IWalkableDynamicSurface surface,
         WalkableSurfaceSample sample,
-        float signedDistance)
+        float signedDistance,
+        bool applySlideFriction)
     {
         float correction = ContactCorrection(signedDistance);
         if (Mathf.Abs(correction) > 0.01f)
             TranslatePlayerAndResolveTerrain(player, sample.Normal * correction);
 
-        float riderNormalVelocity = RiderNormalVelocity(feet, sample);
-        if (riderNormalVelocity < 0f)
-        {
-            Vector2 cancel = sample.Normal * -riderNormalVelocity;
-            for (int i = 0; i < player.bodyChunks.Length; i++)
-                if (player.bodyChunks[i] != null)
-                    player.bodyChunks[i].vel += cancel;
-        }
+        CancelInwardNormalVelocity(player, sample);
+        if (applySlideFriction && !IsGroundingNormal(sample.Normal))
+            ApplySlidingFriction(player, feet, sample);
 
-        ClearOwnedJumpChunk(player, surface);
+        ApplyVanillaSurfaceState(player, surface, sample);
     }
 
-    private static void InjectVanillaGroundState(
+    private static void CancelInwardNormalVelocity(Player player, WalkableSurfaceSample sample)
+    {
+        if (player?.bodyChunks == null) return;
+
+        for (int i = 0; i < player.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = player.bodyChunks[i];
+            if (chunk == null) continue;
+            float normalVelocity = Vector2.Dot(chunk.vel, sample.Normal);
+            if (normalVelocity < 0f)
+                chunk.vel += sample.Normal * -normalVelocity;
+        }
+    }
+
+    private static void ApplySlidingFriction(Player player, BodyChunk feet, WalkableSurfaceSample sample)
+    {
+        if (player == null || feet == null) return;
+
+        // Match BodyChunk's TerrainCurve steep-slope convention: remove a portion of tangential
+        // velocity according to the player's own surfaceFriction while leaving gravity free to
+        // accelerate the chunk down the tangent on later frames.
+        float friction = Mathf.Clamp01(1f - player.surfaceFriction * 2f);
+        feet.vel -= Vector2.Dot(feet.vel, sample.Tangent) * friction * sample.Tangent;
+    }
+
+    private static void ApplyVanillaSurfaceState(
         Player player,
         IWalkableDynamicSurface surface,
         WalkableSurfaceSample sample)
@@ -436,10 +458,12 @@ internal static class WalkableDynamicSurfaceRuntime
         BodyChunk feet = Feet(player);
         if (feet == null) return;
 
-        // MovementUpdate itself derives canJump and Stand/Crawl from ContactPoint. Do not write
-        // player.standing or canJump here: those are locomotion state, not platform state.
-        feet.contactPoint.y = -1;
+        // BodyChunk uses TerrainCurve.maxSlideNormalY (cos 45 degrees) to distinguish ground from
+        // a steep sliding contact. Reuse that exact rule instead of inventing a creature-specific
+        // angle: shallow curve sections participate in Player ground movement; steep sections keep
+        // terrainCurveNormal but deliberately do not grant floor contact or a ground jump.
         feet.terrainCurveNormal = sample.Normal;
+        feet.contactPoint.y = IsGroundingNormal(sample.Normal) ? -1 : 0;
         ClearOwnedJumpChunk(player, surface);
     }
 
@@ -569,6 +593,12 @@ internal static class WalkableDynamicSurfaceRuntime
 
     internal static bool IsSurfaceSpeedRideable(Vector2 surfaceVelocity) =>
         surfaceVelocity.magnitude <= MaxInheritedSurfaceSpeed;
+
+    internal static bool IsGroundingNormal(Vector2 normal) =>
+        normal.y >= TerrainCurve.maxSlideNormalY;
+
+    internal static bool IsSurfaceContactNormal(Vector2 normal) =>
+        normal.y >= MinimumContactNormalY;
 
     private static bool SurfaceStillValid(Player player, IWalkableDynamicSurface surface) =>
         surface != null && surface.SurfaceEnabled && surface.SurfaceRoom == player.room &&
