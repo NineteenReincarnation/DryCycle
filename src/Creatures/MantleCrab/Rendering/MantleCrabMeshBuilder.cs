@@ -128,6 +128,130 @@ internal static class MantleCrabMeshBuilder
         }
     }
 
+    /// <summary>
+    /// Capture-arm shaft profile. Compared with a walking leg, the pincer arm has a stronger
+    /// joint collar, a leaner middle shaft and a visible terminal collar so its four rigid links
+    /// remain readable instead of merging into one red wire.
+    /// </summary>
+    internal static void PincerShaft(
+        TriangleMesh mesh,
+        int columns,
+        int rows,
+        Vector2 start,
+        Vector2 end,
+        float width,
+        int variant,
+        Vector2 camera)
+    {
+        Vector2 direction = end - start;
+        if (direction.sqrMagnitude < .0001f) direction = Vector2.down;
+        Vector2 cross = MantleCrabRenderingMath.Perpendicular(direction.normalized);
+
+        for (int x = 0; x <= columns; x++)
+        for (int y = 0; y <= rows; y++)
+        {
+            float u = x / (float)columns;
+            float v = y / (float)rows * 2f - 1f;
+            float profile;
+            if (u < .18f)
+                profile = Mathf.Lerp(.72f, 1.10f, Mathf.SmoothStep(0f, 1f, u / .18f));
+            else if (u < .70f)
+                profile = Mathf.Lerp(1.10f, .70f, Mathf.SmoothStep(0f, 1f, (u - .18f) / .52f));
+            else
+                profile = Mathf.Lerp(.70f, .90f, Mathf.SmoothStep(0f, 1f, (u - .70f) / .30f));
+
+            float bow = Mathf.Sin(u * Mathf.PI) * width * (variant % 2 == 0 ? .045f : -.04f);
+            Vector2 point = Vector2.Lerp(start, end, u) + cross * (bow + v * width * profile);
+            mesh.MoveVertice(y * (columns + 1) + x, point - camera);
+        }
+    }
+
+    /// <summary>
+    /// The fixed finger mesh also carries the palm. A broad palm followed by a short tapered digit
+    /// produces the reference's claw silhouette without spending another sprite slot.
+    /// </summary>
+    internal static void PincerPalmAndFixedFinger(
+        TriangleMesh mesh,
+        int columns,
+        int rows,
+        Vector2 wrist,
+        Vector2 axis,
+        float palmLength,
+        float palmWidth,
+        float fingerLength,
+        float fingerWidth,
+        float open,
+        float handedness,
+        Vector2 camera)
+    {
+        if (axis.sqrMagnitude < .0001f) axis = Vector2.down;
+        axis.Normalize();
+        Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
+        Vector2 palmEnd = wrist + axis * palmLength;
+        float fingerAngle = Mathf.Lerp(4f, 13f, Mathf.Clamp01(open)) * handedness * Mathf.Deg2Rad;
+        Vector2 fingerAxis = Rotate(axis, fingerAngle);
+
+        for (int x = 0; x <= columns; x++)
+        for (int y = 0; y <= rows; y++)
+        {
+            float u = x / (float)columns;
+            float v = y / (float)rows * 2f - 1f;
+            Vector2 center;
+            float halfWidth;
+
+            if (u < .44f)
+            {
+                float t = u / .44f;
+                center = Vector2.Lerp(wrist, palmEnd, t);
+                float palmProfile = .58f + .48f * Mathf.Sin(t * Mathf.PI);
+                halfWidth = palmWidth * palmProfile;
+            }
+            else
+            {
+                float t = (u - .44f) / .56f;
+                center = palmEnd + fingerAxis * (fingerLength * t);
+                center += cross * handedness * Mathf.Sin(t * Mathf.PI) * fingerLength * .035f;
+                halfWidth = fingerWidth * Mathf.Pow(1f - t, .72f) + .07f;
+            }
+
+            mesh.MoveVertice(y * (columns + 1) + x, center + cross * (v * halfWidth) - camera);
+        }
+    }
+
+    internal static void PincerMovableFinger(
+        TriangleMesh mesh,
+        int columns,
+        int rows,
+        Vector2 wrist,
+        Vector2 axis,
+        float palmLength,
+        float palmWidth,
+        float fingerLength,
+        float fingerWidth,
+        float open,
+        float handedness,
+        Vector2 camera)
+    {
+        if (axis.sqrMagnitude < .0001f) axis = Vector2.down;
+        axis.Normalize();
+        Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
+        Vector2 palmEnd = wrist + axis * palmLength;
+        float fingerAngle = -Mathf.Lerp(8f, 29f, Mathf.Clamp01(open)) * handedness * Mathf.Deg2Rad;
+        Vector2 fingerAxis = Rotate(axis, fingerAngle);
+        Vector2 root = palmEnd - cross * handedness * palmWidth * .38f;
+
+        for (int x = 0; x <= columns; x++)
+        for (int y = 0; y <= rows; y++)
+        {
+            float u = x / (float)columns;
+            float v = y / (float)rows * 2f - 1f;
+            float curve = Mathf.Sin(u * Mathf.PI) * fingerLength * .045f;
+            Vector2 center = root + fingerAxis * (fingerLength * .92f * u) - cross * handedness * curve;
+            float halfWidth = fingerWidth * .92f * Mathf.Pow(1f - u, .70f) + .055f;
+            mesh.MoveVertice(y * (columns + 1) + x, center + cross * (v * halfWidth) - camera);
+        }
+    }
+
     internal static void Foot(
         TriangleMesh mesh,
         int columns,
@@ -179,5 +303,12 @@ internal static class MantleCrabMeshBuilder
 
             mesh.MoveVertice(y * (columns + 1) + x, point - camera);
         }
+    }
+
+    private static Vector2 Rotate(Vector2 vector, float radians)
+    {
+        float sin = Mathf.Sin(radians);
+        float cos = Mathf.Cos(radians);
+        return new Vector2(vector.x * cos - vector.y * sin, vector.x * sin + vector.y * cos);
     }
 }
