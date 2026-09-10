@@ -86,15 +86,19 @@ if 'context?.ThrownWeapons' not in perception or 'DB_PerceptionScoring.Projectil
     failures.append('Perception R2 projectile ranking must consume cached thrown weapons through central scoring')
 
 # FrameContext is captured for every realized bat every AI frame. It may copy already-owned
-# domain facts, but it must not recreate a player/predator room scan.
+# domain facts, but it must not recreate a player/predator/projectile scan. Perception R2 is the
+# sole current projectile selector and FrameContext only copies its immutable snapshot.
 for retired in ('VisiblePlayerCount', 'NearestVisiblePlayer', 'PredatorCandidateCount', 'NearestPredator'):
     if retired in frame_context:
         failures.append('FrameContext retained unused per-frame visibility fact: ' + retired)
 for token in ('roomContext.Players', 'roomContext.Creatures', 'DB_RoomContext.For(room)'):
     if token in frame_context:
         failures.append('FrameContext reintroduced per-bat room visibility scanning: ' + token)
-if 'DB_WeaponPerception.TryFindIncomingProjectile(' not in frame_context:
-    failures.append('FrameContext lost the real incoming-projectile fact consumed by arbitration')
+if 'DB_PerceptionSnapshot perception = ai?.Perception?.Snapshot ?? default;' not in frame_context or \
+        'perception.IncomingProjectile.Observation' not in frame_context:
+    failures.append('FrameContext no longer copies incoming-projectile arbitration facts from Perception R2 snapshot')
+if 'DB_WeaponPerception.TryFindIncomingProjectile(' in frame_context:
+    failures.append('FrameContext reintroduced a second projectile scan outside Perception R2')
 
 # Realized Fear/PTSD target discovery must reuse the room snapshot instead of doing a per-bat room scan.
 if 'DB_RoomContext.For(bat?.room)' not in fear or 'roomContext.Creatures' not in fear:
