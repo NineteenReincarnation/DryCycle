@@ -7,10 +7,10 @@ namespace DryCycle.Creatures.MantleCrab;
 internal static class MantleCrabDefinition
 {
     /// <summary>
-    /// 把 MantleCrab 的核心注册信息交给新的 CreatureRegistry。
+    /// 把 MantleCrab 的模板、状态和实际生物创建方式登记到新的 CreatureRegistry。
     /// 资源加载仍然留在 MantleCrab 自己的代码里，不塞进 Core Registry。
     ///
-    /// Registers MantleCrab's core descriptor through the new CreatureRegistry.
+    /// Registers MantleCrab's template, state, and realized-creature factories through the new CreatureRegistry.
     /// Resource loading stays owned by MantleCrab instead of the core registry.
     /// </summary>
     internal static CreatureDescriptor Register()
@@ -20,6 +20,7 @@ internal static class MantleCrabDefinition
                 DryCycle.Plugin.ModId)
             .Name("Mantle Crab")
             .Template(CreateTemplate)
+            .State(CreateState)
             .Realized(CreateRealizedCreature);
 
         return CreatureRegistry.Register(descriptor);
@@ -45,6 +46,11 @@ internal static class MantleCrabDefinition
         // 当前 MantleCrab 仍然只是外观与物理原型，不在这里加入生态、Sandbox、AI 或战斗策略。
         // MantleCrab is still an appearance/physics prototype; ecology, sandbox, AI, and combat policy stay out of this definition.
         return template;
+    }
+
+    private static CreatureState CreateState(AbstractCreature creature)
+    {
+        return new HealthState(creature);
     }
 
     private static Creature CreateRealizedCreature(AbstractCreature creature)
