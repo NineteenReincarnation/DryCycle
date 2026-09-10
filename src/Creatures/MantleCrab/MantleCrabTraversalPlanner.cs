@@ -148,7 +148,7 @@ internal sealed class MantleCrabTraversalPlanner
         {
             float delta = probePoint[significantIndex].y - baselineHeight;
             float maxRise = minimumReach * .35f;
-            if (!ReachableByLeadingLeg(probePoint[significantIndex], delta < 0f ? .82f : .90f) || delta > maxRise)
+            if (!ReachableByLeadingLeg(probePoint[significantIndex], delta < 0f ? .74f : .90f) || delta > maxRise)
             {
                 Mode = MantleCrabTraversalMode.Blocked;
             }
@@ -166,6 +166,13 @@ internal sealed class MantleCrabTraversalPlanner
             {
                 Mode = Roughness > .28f ? MantleCrabTraversalMode.Rough : MantleCrabTraversalMode.Level;
             }
+        }
+        else if (firstMissing >= 0 && firstHitAfterMissing < 0 && firstMissing <= 3)
+        {
+            // 前方支撑消失且在可探测距离内没有重新出现：把它当作悬崖/过宽沟，而不是继续冲。
+            // If support disappears and does not reappear inside the probing workspace, treat it
+            // as a cliff or over-wide gap instead of walking forward on optimism.
+            Mode = MantleCrabTraversalMode.Blocked;
         }
         else if (hits == 0 || (!shellClear && maxHeight <= baselineHeight + 20f * crab.ShellScale))
         {
@@ -193,8 +200,8 @@ internal sealed class MantleCrabTraversalPlanner
                 StanceHeightScale = LeadingSupportEstablished ? .97f : .90f;
                 break;
             case MantleCrabTraversalMode.StepDown:
-                SpeedScale = LeadingSupportEstablished ? .54f : .20f;
-                StanceHeightScale = LeadingSupportEstablished ? .90f : .82f;
+                SpeedScale = LeadingSupportEstablished ? .52f : .16f;
+                StanceHeightScale = LeadingSupportEstablished ? .88f : .76f;
                 break;
             case MantleCrabTraversalMode.BridgeGap:
                 SpeedScale = LeadingSupportEstablished ? .48f : .12f;
