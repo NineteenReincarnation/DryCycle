@@ -1472,12 +1472,13 @@ internal static class DB_SocialRuntime
     {
         chainSize = 0;
         bond = 0f;
-        if (bat == null || bat.room == null ||
-            !DB_SignalRuntime.TryGetInfluence(bat, out DB_SignalInfluence influence) ||
-            influence.RoostInterest < 0.16f)
+        DB_PerceptionRuntime perception = bat?.DesertAI?.Perception;
+        if (bat == null || bat.room == null || perception == null ||
+            !perception.TryGetSignalContext(out DB_PerceptionSignalContext signal) ||
+            signal.RoostInterest < 0.16f)
             return null;
 
-        DB_Creature source = influence.RoostSource;
+        DB_Creature source = signal.RoostSource;
         if (!ValidRoostSource(source, bat) ||
             Vector2.Distance(bat.mainBodyChunk.pos, source.mainBodyChunk.pos) > 230f)
             return null;

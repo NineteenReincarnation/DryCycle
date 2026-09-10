@@ -177,9 +177,6 @@ internal class DB_PerceptionRuntime
         ScanCreatures();
     }
 
-    // Temporary call-shape compatibility while DB_AI is migrated to the R2 type directly.
-    internal void UpdateScan() => RefreshState();
-
     internal bool Valid(Creature creature)
     {
         return creature != null && !creature.dead &&

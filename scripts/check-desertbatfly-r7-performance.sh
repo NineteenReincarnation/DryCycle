@@ -23,6 +23,8 @@ fear = read('Behavior/DB_FearRuntime.cs')
 threat = read('Behavior/Threat/DB_ThreatRuntime.cs')
 perception = read('Behavior/Perception/DB_PerceptionRuntime.cs')
 visibility = read('Behavior/Perception/DB_VisibilityPolicy.cs')
+signal_runtime = read('Behavior/Signals/DB_SignalRuntime.cs')
+signal_types = read('Behavior/Signals/DB_SignalTypes.cs')
 arbiter = read('Core/Runtime/DB_BehaviorArbiter.cs')
 hooks = read('Integration/DB_RainWorldHooks.cs')
 social_room = read('Behavior/Social/DB_SocialRoomState.cs')
@@ -78,6 +80,14 @@ if 'context?.ThrownWeapons' not in perception or 'DB_PerceptionScoring.Projectil
     failures.append('Perception R2 projectile ranking must consume cached thrown weapons through central scoring')
 if 'DB_WeaponPerception.TryFindIncomingProjectile(' in perception:
     failures.append('Perception R2 must not delegate current projectile selection back to the retired selector')
+if 'internal void UpdateScan()' in perception:
+    failures.append('Perception R2 retained the transitional UpdateScan facade')
+for retired in ('ReceivePacket(', 'TryGetInfluence(', 'TryGetDebugState(', 'DB_SignalInfluence', 'DB_SignalPerception', 'DB_SignalDebugState'):
+    if retired in signal_runtime or retired in signal_types:
+        failures.append('Signal transport retained receiver compatibility surface: ' + retired)
+if 'internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)' not in perception or \
+   'internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)' not in perception:
+    failures.append('Perception R2 no longer owns direct Signal receiver belief APIs')
 
 # FrameContext only copies Perception R2 facts; it must never rescan the room/projectiles.
 for retired in ('VisiblePlayerCount', 'NearestVisiblePlayer', 'PredatorCandidateCount', 'NearestPredator'):

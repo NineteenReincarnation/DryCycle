@@ -56,6 +56,8 @@ internal static partial class Program
             "Perception R2 exposes one receiver refresh/snapshot/signal/debug surface");
         Check(ai.GetProperty("Perception", Flags)?.PropertyType == perception,
             "DB_AI now owns DB_PerceptionRuntime directly with no transitional creature-perception type");
+        Check(perception.GetMethod("UpdateScan", Flags) == null,
+            "Perception R2 exposes no transitional UpdateScan facade");
         Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", false) == null,
             "retired DB_CreaturePerception bridge is absent after direct R2 ownership migration");
 

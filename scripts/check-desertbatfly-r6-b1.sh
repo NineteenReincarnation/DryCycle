@@ -67,6 +67,14 @@ grep -q 'DB_PerceptionScoring.ProjectileRisk' "$PERCEPTION"
 ! grep -n '\.localGoal[[:space:]]*=' "$PERCEPTION"
 ! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
 ! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
+! grep -q 'internal void UpdateScan()' "$PERCEPTION"
+SIGNAL_RT=src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
+! grep -q 'internal static bool ReceivePacket' "$SIGNAL_RT"
+! grep -q 'internal static bool TryGetInfluence' "$SIGNAL_RT"
+! grep -q 'internal static bool TryGetDebugState' "$SIGNAL_RT"
+! grep -RIn --include='*.cs' 'DB_SignalInfluence' src/Creatures/DesertBatfly
+! grep -RIn --include='*.cs' 'DB_SignalPerception' src/Creatures/DesertBatfly
+! grep -RIn --include='*.cs' 'DB_SignalDebugState' src/Creatures/DesertBatfly
 
 # Immediate projectile response is now a formal R3 owner. The retired ordinary facade used
 # to rediscover the same cue/player after arbitration and could become a second execution path.

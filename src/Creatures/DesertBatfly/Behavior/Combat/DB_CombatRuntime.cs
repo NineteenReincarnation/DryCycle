@@ -321,13 +321,15 @@ internal sealed class DB_CombatRuntime
 
     private Player FindSocialHarassTarget()
     {
+        DB_PerceptionRuntime perception = ai.Perception;
         if (fly.room == null || fly.Injury.BlocksCombat ||
             DB_FearRuntime.HasActiveFearSuppression(fly) ||
-            !DB_SignalRuntime.TryGetInfluence(fly, out DB_SignalInfluence influence) ||
-            influence.HarassInterest < 0.20f)
+            perception == null ||
+            !perception.TryGetSignalContext(out DB_PerceptionSignalContext signal) ||
+            signal.HarassInterest < 0.20f)
             return null;
 
-        Player target = influence.HarassTarget;
+        Player target = signal.HarassTarget;
         if (target == null || target.dead || target.room != fly.room || !CanHarass(target) ||
             !DB_VisibilityPolicy.CanObserve(
                 fly, target.mainBodyChunk.pos, DB_Tuning.SightRange, DB_VisibilityChannel.Player))
