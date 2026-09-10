@@ -25,6 +25,7 @@ internal static partial class Program
         TriangleMesh mesh = EmptyMesh(columns, rows);
         Vector2 ankle = new(0f, 100f);
         Vector2 tip = Vector2.zero;
+        Vector2 expectedRoot = MantleCrabMeshBuilder.FootRoot(ankle, tip);
         MantleCrabMeshBuilder.Foot(mesh, columns, rows, ankle, tip, 8f, 1f, Vector2.up, Vector2.zero);
 
         float firstColumnAverageY = 0f;
@@ -32,8 +33,10 @@ internal static partial class Program
             firstColumnAverageY += mesh.vertices[y * (columns + 1)].y;
         firstColumnAverageY /= rows + 1f;
 
-        Check(firstColumnAverageY < 50f && firstColumnAverageY > 30f,
-            "Foot mesh must begin near the terminal 39% of the final leg link, not at the ankle landmark");
+        Check(Math.Abs(firstColumnAverageY - expectedRoot.y) < .01f,
+            "Foot mesh must begin exactly at the anatomical foot root instead of repainting the whole distal leg link");
+        Check(Math.Abs(MantleCrabMeshBuilder.FootRootFraction - .61f) < .0001f,
+            "Foot root fraction changed without updating the distal-leg silhouette contract");
 
         float soleDeviation = 0f;
         for (int y = 0; y <= rows; y++)
@@ -44,25 +47,29 @@ internal static partial class Program
 
     private static void JointGeometryContract()
     {
-        const int columns = 6, rows = 4;
-        TriangleMesh mesh = EmptyMesh(columns, rows);
-        MantleCrabMeshBuilder.Segment(
-            mesh, columns, rows,
-            new Vector2(-1.4f, 0f), new Vector2(1.4f, 0f),
-            4f, .62f, Vector2.zero);
+        const int columns = 8, rows = 6;
+        TriangleMesh walking = EmptyMesh(columns, rows);
+        TriangleMesh capture = EmptyMesh(columns, rows);
+        Vector2 incoming = new(.30f, -1f);
+        Vector2 outgoing = new(-.28f, -1f);
 
-        float minX = float.MaxValue, maxX = float.MinValue;
-        float minY = float.MaxValue, maxY = float.MinValue;
-        foreach (Vector2 vertex in mesh.vertices)
-        {
-            minX = Math.Min(minX, vertex.x);
-            maxX = Math.Max(maxX, vertex.x);
-            minY = Math.Min(minY, vertex.y);
-            maxY = Math.Max(maxY, vertex.y);
-        }
+        MantleCrabMeshBuilder.JointCapsule(
+            walking, columns, rows,
+            Vector2.zero, incoming, outgoing,
+            4f, false, Vector2.zero);
+        MantleCrabMeshBuilder.JointCapsule(
+            capture, columns, rows,
+            Vector2.zero, incoming, outgoing,
+            4f, true, Vector2.zero);
 
-        Check(maxX - minX > 8f && maxY - minY > 7f,
-            "Walking joint must render as a readable hinge capsule rather than a tiny connector dot");
+        Bounds2D walkingBounds = Bounds(walking.vertices);
+        Bounds2D captureBounds = Bounds(capture.vertices);
+        Check(walkingBounds.Width > 5f && walkingBounds.Height > 8f,
+            "Walking joint must render as a readable load-bearing hinge capsule rather than a connector dot");
+        Check(captureBounds.Width < walkingBounds.Width || captureBounds.Height < walkingBounds.Height,
+            "Capture-arm hinge must remain visibly slimmer than the walking-leg bearing joint");
+        Check(MantleCrabMeshBuilder.WalkingJointTrim(4f) > MantleCrabMeshBuilder.PincerJointTrim(4f),
+            "Walking joints must reserve more shell overlap/clearance than slender capture-arm hinges");
     }
 
     private static void ChelaGeometryContract()
@@ -90,12 +97,43 @@ internal static partial class Program
                 mesh.vertices[columns],
                 mesh.vertices[rows * (columns + 1) + columns]);
 
+            Check(MantleCrabPincerAnatomy.PalmLengths[index] > MantleCrabPincerAnatomy.FingerLengths[index],
+                "Chela " + index + " must remain manus-first; a digit may not become longer than the palm again");
             Check(palmSpan > MantleCrabPincerAnatomy.PalmWidths[index] * 1.55f,
                 "Chela " + index + " manus must retain a broad readable body at Rain World scale");
             Check(tipSpan < 1f,
                 "Chela " + index + " fixed digit must converge to a short sharp tip instead of remaining a second arm shaft");
             Check(palmSpan > tipSpan * 8f,
                 "Chela " + index + " silhouette must be palm-dominant rather than fork/needle-dominant");
+        }
+    }
+
+    private static Bounds2D Bounds(Vector2[] vertices)
+    {
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
+        foreach (Vector2 vertex in vertices)
+        {
+            minX = Math.Min(minX, vertex.x);
+            maxX = Math.Max(maxX, vertex.x);
+            minY = Math.Min(minY, vertex.y);
+            maxY = Math.Max(maxY, vertex.y);
+        }
+        return new Bounds2D(minX, maxX, minY, maxY);
+    }
+
+    private readonly struct Bounds2D
+    {
+        internal readonly float MinX, MaxX, MinY, MaxY;
+        internal float Width => MaxX - MinX;
+        internal float Height => MaxY - MinY;
+
+        internal Bounds2D(float minX, float maxX, float minY, float maxY)
+        {
+            MinX = minX;
+            MaxX = maxX;
+            MinY = minY;
+            MaxY = maxY;
         }
     }
 }
