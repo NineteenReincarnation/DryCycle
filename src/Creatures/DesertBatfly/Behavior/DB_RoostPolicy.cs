@@ -43,13 +43,12 @@ internal readonly struct DB_RoostAnchor
 /// </summary>
 internal static class DB_RoostPolicy
 {
-    // Structural crowding bounds, expressed in world pixels. Three nearby independent roosts
-    // still permit a small communal patch; the fourth must select another part of the surface.
-    // Existing chains are not revalidated against these bounds so chain members cannot evict
-    // their own support anchor after joining.
-    private const float IndependentMinSpacing = 42f;
-    private const float IndependentNeighborhoodRadius = 96f;
-    private const int IndependentNeighborhoodCapacity = 3;
+    // These are structural occupancy limits rather than personality/environment tuning. Keep
+    // them beside the legality policy so every route into a new independent roost shares the
+    // exact same spatial contract.
+    internal const float IndependentMinSpacing = 42f;
+    internal const float IndependentNeighborhoodRadius = 96f;
+    internal const int IndependentNeighborhoodCapacity = 3;
 
     internal static bool TryGetAnchor(DB_Creature fly, IntVector2 tile, out DB_RoostAnchor anchor)
     {
