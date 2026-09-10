@@ -78,7 +78,9 @@ namespace DryCycle.Editor
 
             try
             {
-                int kernel = compute.FindKernel("Bake");
+                // BakeV3 doubles as a bundle-revision sentinel at runtime. Validation must use
+                // the same kernel name so stale creature bundles cannot appear to pass V3 checks.
+                int kernel = compute.FindKernel("BakeV3");
                 compute.SetVector("_Motif", V(fixture.motif));
                 compute.SetVector("_Pattern", V(fixture.pattern));
                 compute.SetVector("_Material", V(fixture.material));
