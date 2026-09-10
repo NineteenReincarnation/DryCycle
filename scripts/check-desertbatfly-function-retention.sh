@@ -18,6 +18,8 @@ SIGNAL_DEF="$SIGNALS/DB_SignalDefinition.cs"
 SIGNAL_RT="$SIGNALS/DB_SignalRuntime.cs"
 SIGNAL_PACKET="$SIGNALS/DB_SignalPacket.cs"
 SIGNAL_ROOM="$SIGNALS/DB_SignalRoomState.cs"
+SIGNAL_TYPES="$SIGNALS/DB_SignalTypes.cs"
+SIGNAL_DEBUG='src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs'
 OBSERVATORY='src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
 
 grep -q 'ProgressLocalGoalAlongDijkstraMap(dijkstraInput, bestMap)' "$INJURY"
@@ -102,6 +104,18 @@ grep -q 'perception.ReceiveSignal(packet, out bool relay)' "$SIGNAL_ROOM"
 ! grep -qE 'MaxAlarmHop|AlarmTtlTicks|AlarmHop1Scale|AlarmHop2Scale|NeutralSignalTtl|internal static float VisualRadius' "$SIGNAL_RT"
 ! grep -RInE 'DB_SignalRuntime\.(MaxAlarmHop|AlarmTtlTicks|AlarmHop1Scale|AlarmHop2Scale)' "$SIGNALS"
 
+# Perception R2 final ownership: no compatibility receiver API/DTO may return to Signals.
+! grep -q 'internal static bool ReceivePacket' "$SIGNAL_RT"
+! grep -q 'internal static bool TryGetInfluence' "$SIGNAL_RT"
+! grep -q 'internal static bool TryGetDebugState' "$SIGNAL_RT"
+! grep -RIn --include='*.cs' 'DB_SignalPerception' "$SRC"
+! grep -RIn --include='*.cs' 'DB_SignalInfluence' "$SRC"
+! grep -RIn --include='*.cs' 'DB_SignalDebugState' "$SRC"
+grep -q 'internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)' "$PERCEPTION"
+grep -q 'internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)' "$PERCEPTION"
+grep -q 'DB_PerceptionSignalContext signal = perception.Snapshot.Signals;' "$SIGNAL_DEBUG"
+! grep -q 'DB_SignalRuntime.TryGetDebugState' "$SIGNAL_DEBUG"
+
 ! grep -RIn 'intimidation.GetMethod("ArmVengeance"' "$TESTS"
 ! grep -RIn 'intimidation.GetMethod("ForceFlight"' "$TESTS"
 grep -q 'vengeance.GetMethod("ArmVengeance", Flags)' "$TESTS/Program.Signals.cs"
@@ -118,4 +132,4 @@ grep -q 'room.MiddleOfTile(floorTile) + Vector2.down \* 10f' "$ROOST"
 
 python3 "$TESTS/check_social_diversity.py"
 python3 "$TESTS/check_perception_r2.py"
-echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus social-diversity and Perception R2 prediction audits protected.'
+echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus Social diversity, Perception R2 and final Signal/Perception ownership protected.'
