@@ -5,6 +5,7 @@ using BepInEx.Logging;
 using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
 using DryCycle.Creatures.DesertBatfly;
+using DryCycle.Creatures.MantleCrab;
 using DryCycle.DayNight;
 using DryCycle.Debugging.AI;
 using DryCycle.HUD;
@@ -27,6 +28,7 @@ using DryCycle.Weather.HeatWave;
 using DryCycle.Weather.IntenseHeat;
 using DryCycle.Weather.Scheduling;
 using DryCycle.WorldLink.InternalGate;
+using CreatureCoreRegistry = DryCycle.Framework.Creature.Core.CreatureRegistry;
 
 #pragma warning disable CS0618
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
@@ -53,9 +55,9 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (!_contentRegistered)
         {
-            DryCycleContent.Register(new MossySpiderDefinition());
-            DryCycleContent.Register(new Creatures.MantleCrab.MantleCrabDefinition());
-            DryCycleContent.Register(new DB_Definition());
+            MossySpiderDefinition.Register();
+            MantleCrabDefinition.Register();
+            DB_Definition.Register();
             _contentRegistered = true;
         }
 
@@ -68,8 +70,10 @@ internal sealed class Plugin : BaseUnityPlugin
         PaletteDirectInputRuntime.Enable();
         DevUIShortcutInputGuard.Enable();
 
+        CreatureCoreRegistry.Enable();
         DryCycleContent.Enable();
         MossySpiderBackPlatform.Enable();
+        DB_Relationships.Enable();
         DB_RainWorldHooks.Enable();
         SpinebackLizardHooks.Enable();
         DewPodAudioHooks.InitializeSoundIds();
@@ -85,9 +89,11 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
-        DryCycleContent.Disable();
-        MossySpiderBackPlatform.Disable();
+        DB_Relationships.Disable();
         DB_RainWorldHooks.Disable();
+        MossySpiderBackPlatform.Disable();
+        CreatureCoreRegistry.Disable();
+        DryCycleContent.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
@@ -190,6 +196,7 @@ internal sealed class Plugin : BaseUnityPlugin
         try
         {
             DryCycleContent.LoadResources(self);
+            MantleCrabDefinition.LoadResources(self);
             KingVultureSpearHooks.Enable();
             RopeSpearHooks.Enable();
             DryCycleTokenRuntime.Enable();
