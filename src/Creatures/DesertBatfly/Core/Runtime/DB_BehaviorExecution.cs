@@ -13,6 +13,7 @@ internal static class DB_BehaviorExecution
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateDanger))
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=ImmediateDanger");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         return bat.DesertAI.ExecuteImmediateDangerOwned();
     }
 
@@ -24,6 +25,7 @@ internal static class DB_BehaviorExecution
             return false;
 
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=InjuryRecovery");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         bat.DesertAI.CancelPhysicalAttack();
         return bat.DesertAI.InjuryRecovery.ExecuteOwned();
     }
@@ -37,7 +39,10 @@ internal static class DB_BehaviorExecution
             return false;
 
         if (resolution.WinningProposal.SuppressSocial)
+        {
             DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=" + resolution.PrimaryOwner);
+            DB_NeutralBehaviorRuntime.CancelForPriority(bat);
+        }
         if (resolution.WinningProposal.SuppressCombat)
             bat.DesertAI.CancelPhysicalAttack();
 
@@ -55,6 +60,7 @@ internal static class DB_BehaviorExecution
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.FearResponse))
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=FearResponse");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         return bat.DesertAI.ExecuteFearOwned(resolution);
     }
 
@@ -66,6 +72,7 @@ internal static class DB_BehaviorExecution
             return false;
 
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Vengeance");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         bat.DesertAI.CancelAttack();
         return DB_VengeanceRuntime.ExecuteOwned(bat);
     }
@@ -77,6 +84,7 @@ internal static class DB_BehaviorExecution
         if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.ImmediateProjectileEvade))
             return false;
         if (!resolution.FinalGoal.HasValue) return false;
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         return DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value);
     }
 
@@ -86,6 +94,7 @@ internal static class DB_BehaviorExecution
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Feeding))
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Feeding");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         bat.DesertAI.CancelPhysicalAttack();
         return bat.Feeding.ApplyOwnedBehavior();
     }
@@ -96,6 +105,7 @@ internal static class DB_BehaviorExecution
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Combat))
             return false;
         DB_SocialRuntime.CancelForPriority(bat, "R3 PrimaryOwner=Combat");
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
 
         // Companion rescue is a specialized Combat-domain action, not a second locomotion
         // owner. It gets first execution choice inside Combat and still submits movement only
@@ -113,21 +123,24 @@ internal static class DB_BehaviorExecution
         if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Roost ||
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Roost))
             return false;
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
         return bat.DesertAI.ExecuteRoostOwned();
     }
 
     internal static bool TrySocial(DB_Creature bat, in DB_BehaviorResolution resolution)
     {
-        if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Social)
+        if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.Social ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
             return false;
-        if (!DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.Social))
-            return false;
+        DB_NeutralBehaviorRuntime.CancelForPriority(bat);
+        return DB_SocialRuntime.ApplyOwnedBehavior(bat);
+    }
 
-        // Discrete Social events get first execution choice. When no event is active,
-        // the same Social owner falls through to low-intensity ambient ecology rather than
-        // immediately returning the frame to Ordinary/vanilla.
-        if (DB_SocialRuntime.ApplyOwnedBehavior(bat))
-            return true;
-        return DB_AmbientSocialRuntime.ApplyOwnedBehavior(bat);
+    internal static bool TryNeutralEcology(DB_Creature bat, in DB_BehaviorResolution resolution)
+    {
+        if (bat == null || resolution.PrimaryOwner != DB_BehaviorOwner.NeutralEcology ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.NeutralEcology))
+            return false;
+        return DB_NeutralBehaviorRuntime.ApplyOwnedBehavior(bat);
     }
 }
