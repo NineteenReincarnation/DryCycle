@@ -3,10 +3,9 @@ using UnityEngine;
 namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>
-/// Species landmarks measured in shell-local units. These points describe the visual/IK
-/// skeleton only; the shell BodyChunks remain the collision and load-bearing body.
-/// Walking limbs are ordered rear-left, rear-right, front-left, front-right.
-/// Every chain is root -> proximal segment -> knee/elbow -> ankle/wrist -> terminal tip.
+/// Species landmarks for load-bearing walking legs. Capture-appendage anatomy lives in
+/// MantleCrabPincerAnatomy; the Claws alias is retained only for test/tool compatibility so there
+/// is still one authoritative pincer silhouette definition.
 /// </summary>
 internal static class MantleCrabAnatomy
 {
@@ -22,14 +21,8 @@ internal static class MantleCrabAnatomy
         [new(20f, -27f), new(34f, -92f), new(48f, -191f), new(38f, -264f), new(45f, -302f)]
     ];
 
-    // The red appendages remain very long, but V2 gives them an actual elbow and wrist.
-    // Their total reach stays close to the previous implementation so this is an appearance
-    // correction rather than a gameplay reach change.
-    internal static readonly Vector2[][] Claws =
-    [
-        [new(-22f, -23f), new(-34f, -78f), new(-20f, -132f), new(-35f, -214f), new(-40f, -278f)],
-        [new(28f, -23f), new(16f, -82f), new(31f, -133f), new(47f, -207f), new(61f, -275f)]
-    ];
+    internal static readonly Vector2[][] Claws = MantleCrabPincerAnatomy.Chains;
 
-    internal static Vector2[] Landmarks(int index, bool pincer) => pincer ? Claws[index] : Walking[index];
+    internal static Vector2[] Landmarks(int index, bool pincer) =>
+        pincer ? MantleCrabPincerAnatomy.Landmarks(index) : Walking[index];
 }
