@@ -22,7 +22,7 @@ internal static class DB_RainWorldHooks
         DB_FearRuntime.Reset();
         DB_RefugePolicy.Reset();
         DB_SocialRuntime.Reset();
-        DB_SwarmLifecycleRuntime.Reset();
+        DB_NeutralBehaviorRuntime.Reset();
         DB_SignalRuntime.Reset();
         DB_EnvironmentRoomRuntime.Reset();
         DB_EnvironmentRuntime.Reset();
@@ -74,7 +74,7 @@ internal static class DB_RainWorldHooks
         DB_EnvironmentRoomRuntime.Reset();
         DB_FeedingCoordinator.Reset();
         DB_SocialRuntime.Reset();
-        DB_SwarmLifecycleRuntime.Reset();
+        DB_NeutralBehaviorRuntime.Reset();
         DB_ColonyRuntime.Disable();
         DB_RefugePolicy.Reset();
         DB_CorpseWarningRuntime.Reset();
@@ -119,7 +119,7 @@ internal static class DB_RainWorldHooks
         {
             desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
-            DB_SwarmLifecycleRuntime.Forget(desert);
+            DB_NeutralBehaviorRuntime.Forget(desert);
             DB_SignalRuntime.Forget(desert);
             desert.DesertState.InHive = true;
         }
@@ -136,7 +136,7 @@ internal static class DB_RainWorldHooks
 
         desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
-        DB_SwarmLifecycleRuntime.Forget(desert);
+        DB_NeutralBehaviorRuntime.Forget(desert);
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
@@ -152,12 +152,14 @@ internal static class DB_RainWorldHooks
             return;
         }
 
-        // Refresh all mutable domain state exactly once before the read-only proposal pass.
+        // Refresh mutable domain state exactly once before the read-only proposal pass.
+        // Urgency/commitment domains refresh before interaction schedulers so Social cannot
+        // reserve a bat in the same frame that Feeding has already claimed.
         DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DB_ThreatRuntime.RefreshState(desert);
-        DB_SocialRuntime.RefreshState(desert);
         desert.Feeding.RefreshState();
+        DB_SocialRuntime.RefreshState(desert);
         DB_NeutralBehaviorRuntime.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
