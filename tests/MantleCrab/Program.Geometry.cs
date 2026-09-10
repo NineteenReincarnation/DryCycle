@@ -81,12 +81,9 @@ internal static partial class Program
 
     private static List<object> ValidateAndCollectMeshes(RoomCamera.SpriteLeaser leaser, Array parts)
     {
-        IEnumerable<int> order = Enumerable.Range(0, 16)
-            .Concat(Enumerable.Range(32, MantleCrabGraphics.Shell - 31))
-            .Concat(Enumerable.Range(16, 16))
-            .Concat(Enumerable.Range(
-                MantleCrabGraphics.PincersStart,
-                MantleCrabGraphics.SpriteCount - MantleCrabGraphics.PincersStart));
+        // Geometry validation is allocation-order agnostic. Layering is owned by
+        // MantleCrabGraphics.AddToContainer and index ownership by MantleCrabSpriteLayoutTests.
+        IEnumerable<int> order = Enumerable.Range(0, MantleCrabSpriteLayout.SpriteCount);
 
         List<object> meshes = new();
         foreach (int index in order)
@@ -116,8 +113,8 @@ internal static partial class Program
             geometryMeshes++;
         }
 
-        Check(geometryMeshes == MantleCrabGraphics.SpriteCount,
-            "Geometry fixture did not include every production sprite; expected=" + MantleCrabGraphics.SpriteCount + " actual=" + geometryMeshes);
+        Check(geometryMeshes == MantleCrabSpriteLayout.SpriteCount,
+            "Geometry fixture did not include every production sprite; expected=" + MantleCrabSpriteLayout.SpriteCount + " actual=" + geometryMeshes);
         return meshes;
     }
 
