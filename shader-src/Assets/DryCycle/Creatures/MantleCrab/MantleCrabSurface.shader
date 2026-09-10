@@ -31,42 +31,107 @@ Shader "DryCycle/MantleCrabSurface"
             {
                 float kind=min(6,floor(i.uv.x*7));
                 float2 uv=float2((i.uv.x*896-kind*128-.5)/127,(i.uv.y*256-.5)/127);
-                float4 pattern=tex2D(_MainTex,i.uv), surface=tex2D(_MainTex,i.uv+float2(0,.5));
+                float4 pattern=tex2D(_MainTex,i.uv);
+                // surface = AO, roughness, anatomical mask, emission
+                float4 surface=tex2D(_MainTex,i.uv+float2(0,.5));
                 float2 xy=uv*2-1;
+                float anatomy=surface.b;
+
+                // Coarse cross-section normals describe the mesh family. Height derivatives below
+                // add procedural plate relief on top of this silhouette-aware base normal.
                 float3 n;
-                if (kind<.5) n=normalize(float3(xy.x*.38,xy.y*.65,.85));
-                else if (kind==3) n=normalize(float3(sign(xy.x)*smoothstep(.35,.55,abs(xy.x))*.8,
-                    sign(xy.y)*smoothstep(.25,.45,abs(xy.y))*.9,1)); // flat crown, beveled sides, heavy sole
-                else if (kind==5) n=normalize(float3(xy*.8,sqrt(saturate(1-dot(xy,xy)*.45))+.2));
-                else if (kind==2) n=normalize(float3(xy.x*.3,sign(xy.y)*.55,.8));
-                else if (kind==4) n=normalize(float3(xy.x*.25,xy.y*.75,.7));
-                else n=normalize(float3(-.06,xy.y<-.25?-.75:xy.y>.25?.65:.05,xy.y<-.25?.55:xy.y>.25?.65:1));
-                float2 grad=float2(heightAt(i.uv+float2(1.0/896,0),kind)-heightAt(i.uv-float2(1.0/896,0),kind),
+                if (kind<.5)
+                    n=normalize(float3(xy.x*.38,xy.y*.65,.85));
+                else if (kind==1)
+                    n=normalize(float3(xy.x*.12,xy.y*.68,.88));
+                else if (kind==2)
+                    n=normalize(float3(xy.x*.34,xy.y*.78,lerp(.82,.60,anatomy)));
+                else if (kind==3)
+                {
+                    float sideBevel=smoothstep(.35,.76,abs(xy.y));
+                    float toeBevel=smoothstep(.58,.94,xy.x);
+                    n=normalize(float3(toeBevel*.34,sign(xy.y)*sideBevel*.82,1));
+                }
+                else if (kind==4)
+                    n=normalize(float3(xy.x*.16,xy.y*.72,.84));
+                else if (kind==5)
+                    n=normalize(float3(xy*.8,sqrt(saturate(1-dot(xy,xy)*.45))+.2));
+                else
+                    n=normalize(float3(xy.x*.08,xy.y*.64,.90));
+
+                float2 grad=float2(
+                    heightAt(i.uv+float2(1.0/896,0),kind)-heightAt(i.uv-float2(1.0/896,0),kind),
                     heightAt(i.uv+float2(0,1.0/256),kind)-heightAt(i.uv-float2(0,1.0/256),kind));
-                n=normalize(n-float3(grad*3.5,0));
-                // Derive UV frame from this deformed mesh, including mirrored segments. No fixed screen normal.
+                float reliefScale=kind==2?2.4:(kind==3?2.8:3.5);
+                n=normalize(n-float3(grad*reliefScale,0));
+
+                // Derive the UV frame from the deformed mesh, including mirrored limbs. This makes
+                // the procedural normal follow each bent segment rather than screen-space axes.
                 float2 du=ddx(uv), dv=ddy(uv), px=ddx(i.world), py=ddy(i.world);
                 float det=du.x*dv.y-du.y*dv.x;
                 float invDet=abs(det)>1e-8 ? 1/det : 0;
                 float2 t=(px*dv.y-py*du.y)*invDet;
                 float2 b=(-px*dv.x+py*du.x)*invDet;
-                t*=rsqrt(max(dot(t,t),1e-8)); b-=t*dot(t,b); b*=rsqrt(max(dot(b,b),1e-8));
+                t*=rsqrt(max(dot(t,t),1e-8));
+                b-=t*dot(t,b);
+                b*=rsqrt(max(dot(b,b),1e-8));
                 float3 normal=normalize(float3(t*n.x+b*n.y,n.z));
                 float3 light=normalize(float3(-_lightDirAndPixelSize.xy,.75));
                 float diffuse=smoothstep(-.2,.85,dot(normal,light));
-                float highlight=pow(saturate(dot(normal,normalize(light+float3(0,0,1)))),lerp(13,3,surface.g));
+
+                float roughness=surface.g;
+                if(kind==3) roughness=lerp(roughness,.98,anatomy); // planted sole
+                if(kind==2) roughness=lerp(roughness,.93,anatomy); // soft joint membrane
+                if(kind==4) roughness=lerp(roughness,.34,anatomy); // polished pincer cutting edge
+
+                float highlight=pow(saturate(dot(normal,normalize(light+float3(0,0,1)))),lerp(13,3,roughness));
+                float highlightScale=1-roughness;
+                if(kind==3) highlightScale*=lerp(1,.12,anatomy);
+                if(kind==2) highlightScale*=lerp(1,.20,anatomy);
+                if(kind==4) highlightScale*=lerp(1,1.45,anatomy);
+
                 float depth=saturate((1-i.env.a)*2);
                 float3 albedo=pattern.rgb;
                 float luminance=dot(albedo,float3(.299,.587,.114));
                 albedo=lerp(albedo,luminance*float3(.8,.98,1.2),depth*.4);
+
+                // UV-edge response is deliberately subtle and quantized later. It helps each
+                // exoskeletal plate read as a thin hard shell without turning Rain World into PBR.
+                float lateralEdge=smoothstep(.68,.98,abs(xy.y));
+                float axialEdge=smoothstep(.76,.98,abs(xy.x));
+                float shellRim=lateralEdge*(1-roughness)*.16;
+                if(kind==2) shellRim*=1-anatomy*.8;
+                if(kind==3) shellRim*=1-anatomy*.9;
+
                 float3 color=albedo*i.env.rgb*(.58+diffuse*.62)*lerp(.35,1,surface.r);
-                color+=albedo*highlight*(1-surface.g)*.85*i.env.rgb*(1-depth*.65);
+                color+=albedo*highlight*highlightScale*.90*i.env.rgb*(1-depth*.65);
+                color+=albedo*shellRim*i.env.rgb;
+
+                // Material-specific anatomical masks now carry actual local structure.
+                if(kind==2)
+                {
+                    // Recess the flexible membrane visually inside the hard joint plate.
+                    color*=lerp(1,.72,anatomy*.55);
+                }
+                else if(kind==3)
+                {
+                    // Heavy sole: dark, rough, almost no edge glint at the terrain-bearing end.
+                    color*=lerp(1,.78,anatomy*.42);
+                }
+                else if(kind==4)
+                {
+                    // Cutting edge: small cool hard-chitin glint, strongest toward distal UVs.
+                    float cutting=anatomy*(.45+.55*axialEdge);
+                    color+=float3(.18,.08,.11)*cutting*highlight*.40*(1-depth*.7);
+                }
+
                 float3 black=tex2D(_PalTex,float2(2.5/32,7.5/16)).rgb;
                 float3 fog=tex2D(_PalTex,float2(1.5/32,7.5/16)).rgb;
                 color=lerp(color,black,.08);
                 float fogAmount=1-tex2D(_PalTex,float2(9.5/32,7.5/16)).r;
                 color=lerp(color,fog,depth*.38+fogAmount*.06);
                 color+=pattern.rgb*surface.a; // emission only; never creates a LightSource
+
                 // Stable anatomical dither, not frame-random noise or transparent edges.
                 float2 pixel=floor(uv*128);
                 float dither=frac(52.9829189*frac(dot(pixel,float2(.06711056,.00583715))));
