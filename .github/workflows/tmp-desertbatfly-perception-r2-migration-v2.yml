@@ -1,0 +1,55 @@
+name: Temporary DesertBatfly Perception R2 migration v2
+
+on:
+  push:
+    branches:
+      - refactor/desertbatfly-neutral-ecology-20260910
+    paths:
+      - '.github/workflows/tmp-desertbatfly-perception-r2-migration-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/desertbatfly-neutral-ecology-20260910
+          fetch-depth: 0
+      - name: Apply migration program with current performance guard shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/tmp-desertbatfly-perception-r2-migration.yml')
+          text = workflow.read_text(encoding='utf-8')
+          marker = "          python3 - <<'PY'\n"
+          start = text.index(marker) + len(marker)
+          end = text.index("\n          PY\n", start)
+          lines = text[start:end].splitlines()
+          program = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+
+          old = """    if count != 1:\n        raise SystemExit(f'{label}: expected exactly one match, found {count}')\n"""
+          new = """    if label == 'performance remove weapon source read' and count == 0:\n        return\n    if count != 1:\n        raise SystemExit(f'{label}: expected exactly one match, found {count}')\n"""
+          if old not in program:
+              raise SystemExit('could not patch migration replace_once guard')
+          program = program.replace(old, new, 1)
+          exec(compile(program, '<perception-r2-migration>', 'exec'), {'__name__': '__main__'})
+          PY
+
+          bash scripts/check-desertbatfly-function-retention.sh
+          bash scripts/check-desertbatfly-r7-performance.sh
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No migration changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Complete DesertBatfly Perception R2 migration'
+          git push origin HEAD:refactor/desertbatfly-neutral-ecology-20260910
