@@ -17,10 +17,16 @@ internal sealed class MantleCrabLimb
     internal Vector2 TipDirection => (Pos[3] - Pos[2]).normalized;
     internal Vector2 Anchor, LastAnchor, GroundNormal = Vector2.up;
     internal bool Planted { get; private set; }
+    internal bool Swinging { get; private set; }
+    internal float SwingProgress { get; private set; }
+    internal Vector2 Contact => contact;
     internal MantleCrabPincerRig PincerRig => pincerRig;
+
     private Vector2 contact;
+    private Vector2 swingStart;
     private bool hasTarget;
     private int searchTick;
+    private float swingDuration;
 
     internal MantleCrabLimb(int index, bool pincer)
     {
@@ -63,7 +69,8 @@ internal sealed class MantleCrabLimb
         {
             pincerRig.Reset(null, anchor);
             Anchor = LastAnchor = anchor;
-            Planted = hasTarget = false;
+            Planted = hasTarget = Swinging = false;
+            SwingProgress = 0f;
             GroundNormal = Vector2.up;
             searchTick = Index;
             return;
@@ -75,7 +82,8 @@ internal sealed class MantleCrabLimb
             Pos[i] = LastPos[i] = anchor + Rest[i + 1] - Rest[0];
             Velocity[i] = Vector2.zero;
         }
-        Planted = hasTarget = false;
+        Planted = hasTarget = Swinging = false;
+        SwingProgress = 0f;
         GroundNormal = Vector2.up;
         searchTick = Index;
     }
@@ -86,7 +94,7 @@ internal sealed class MantleCrabLimb
             return false;
 
         Anchor = LastAnchor = anchor;
-        Vector2 desired = anchor + RestTipOffset;
+        Vector2 desired = anchor + TransformLocal(crab, RestTipOffset);
         hasTarget = MantleCrabTerrainProbe.Find(
             crab.room,
             anchor,
@@ -104,7 +112,7 @@ internal sealed class MantleCrabLimb
         // Placement/DevConsole realization should start from a valid standing pose rather than
         // spending several gravity frames dragging the feet toward the floor. This is not a
         // hover lock: if no reachable surface exists the caller leaves the creature unsupported.
-        SolvePose(anchor, contact, true);
+        SolveWalkingPose(crab, anchor, contact, true);
         for (int i = 0; i < 4; i++)
         {
             LastPos[i] = Pos[i];
@@ -112,8 +120,38 @@ internal sealed class MantleCrabLimb
         }
 
         Planted = Vector2.Distance(Tip, contact) < 1.2f;
+        Swinging = false;
+        SwingProgress = 0f;
         searchTick = 8 + Index;
         return Planted;
+    }
+
+    internal bool TryBeginStep(MantleCrab crab, Vector2 anchor, Vector2 desired)
+    {
+        if (IsPincer || Swinging || crab?.room == null)
+            return false;
+
+        if (!MantleCrabTerrainProbe.Find(
+                crab.room,
+                anchor,
+                desired,
+                Reach * .995f,
+                out Vector2 landing,
+                out Vector2 landingNormal))
+            return false;
+
+        if (hasTarget && Vector2.Distance(landing, contact) < 6f)
+            return false;
+
+        swingStart = Tip;
+        contact = landing;
+        GroundNormal = landingNormal;
+        hasTarget = true;
+        Planted = false;
+        Swinging = true;
+        SwingProgress = 0f;
+        swingDuration = Mathf.Lerp(11f, 19f, Mathf.InverseLerp(18f, 100f, Vector2.Distance(swingStart, contact)));
+        return true;
     }
 
     internal void Update(MantleCrab crab, Vector2 anchor)
@@ -123,7 +161,8 @@ internal sealed class MantleCrabLimb
             pincerRig.Update(crab, anchor);
             LastAnchor = pincerRig.LastAnchor;
             Anchor = pincerRig.Anchor;
-            Planted = false;
+            Planted = Swinging = false;
+            SwingProgress = 0f;
             return;
         }
 
@@ -135,6 +174,13 @@ internal sealed class MantleCrabLimb
             Pos[i] += Velocity[i] * .12f;
         }
 
+        if (Swinging)
+        {
+            UpdateSwing(crab, anchor);
+            UpdateVelocities();
+            return;
+        }
+
         if (hasTarget && (Vector2.Distance(anchor, contact) > Reach * .999f ||
             !MantleCrabTerrainProbe.StillSupported(crab.room, contact)))
             hasTarget = Planted = false;
@@ -142,7 +188,7 @@ internal sealed class MantleCrabLimb
         if (!hasTarget && searchTick-- <= 0)
         {
             searchTick = 8 + Index;
-            Vector2 desired = anchor + RestTipOffset;
+            Vector2 desired = anchor + TransformLocal(crab, RestTipOffset);
             hasTarget = MantleCrabTerrainProbe.Find(
                 crab.room,
                 anchor,
@@ -154,10 +200,47 @@ internal sealed class MantleCrabLimb
 
         Vector2 target = hasTarget
             ? Vector2.MoveTowards(LastPos[3], contact, 13f)
-            : Vector2.Lerp(LastPos[3], anchor + RestTipOffset, .08f);
+            : Vector2.Lerp(LastPos[3], anchor + TransformLocal(crab, RestTipOffset), .08f);
 
-        SolvePose(anchor, target, hasTarget);
+        SolveWalkingPose(crab, anchor, target, hasTarget);
         Planted = hasTarget && Vector2.Distance(Tip, contact) < 1.2f;
+        UpdateVelocities();
+    }
+
+    private void UpdateSwing(MantleCrab crab, Vector2 anchor)
+    {
+        SwingProgress = Mathf.Clamp01(SwingProgress + 1f / Mathf.Max(1f, swingDuration));
+        float t = SwingProgress * SwingProgress * (3f - 2f * SwingProgress);
+        Vector2 liftNormal = Vector2.Lerp(Vector2.up, GroundNormal, .35f).normalized;
+        float lift = Mathf.Sin(Mathf.PI * t) *
+            Mathf.Lerp(16f, 30f, Mathf.InverseLerp(20f, 100f, Vector2.Distance(swingStart, contact)));
+        Vector2 target = Vector2.Lerp(swingStart, contact, t) + liftNormal * lift;
+
+        SolveWalkingPose(crab, anchor, target, false);
+
+        if (SwingProgress < 1f)
+            return;
+
+        Swinging = false;
+        SwingProgress = 1f;
+
+        if (Vector2.Distance(anchor, contact) <= Reach * .999f &&
+            MantleCrabTerrainProbe.StillSupported(crab.room, contact))
+        {
+            SolveWalkingPose(crab, anchor, contact, true);
+            Planted = true;
+            hasTarget = true;
+        }
+        else
+        {
+            Planted = false;
+            hasTarget = false;
+            searchTick = 0;
+        }
+    }
+
+    private void UpdateVelocities()
+    {
         for (int i = 0; i < 4; i++)
             Velocity[i] = Vector2.ClampMagnitude(Pos[i] - LastPos[i], 18f);
     }
@@ -180,9 +263,7 @@ internal sealed class MantleCrabLimb
             return;
         }
 
-        // Keep the authored V2 bends as the solver seed. The old low-weight seed allowed a
-        // long hanging limb to converge into an almost straight mechanical rod even though
-        // the anatomy contained a knee. The solver still owns exact segment lengths.
+        // Compatibility path for tools that solve a walking leg without a creature frame.
         Vector2 walkingDisplacement = target - (anchor + RestTipOffset);
         float walkingAlong = 0f;
         for (int i = 0; i < 3; i++)
@@ -193,6 +274,29 @@ internal sealed class MantleCrabLimb
         }
 
         Vector2 restNormal = (Rest[3] - Rest[4]).normalized;
+        SolveWalkingEnd(anchor, target, grounded, restNormal);
+    }
+
+    private void SolveWalkingPose(MantleCrab crab, Vector2 anchor, Vector2 target, bool grounded)
+    {
+        Vector2 restTipOffset = TransformLocal(crab, RestTipOffset);
+        Vector2 walkingDisplacement = target - (anchor + restTipOffset);
+        float walkingAlong = 0f;
+
+        for (int i = 0; i < 3; i++)
+        {
+            walkingAlong += Lengths[i];
+            Vector2 restJoint = TransformLocal(crab, Rest[i + 1] - Rest[0]);
+            Vector2 preferred = anchor + restJoint + walkingDisplacement * (walkingAlong / Reach);
+            Pos[i] = Vector2.Lerp(Pos[i], preferred, grounded ? .80f : .72f);
+        }
+
+        Vector2 restNormal = TransformLocal(crab, Rest[3] - Rest[4]).normalized;
+        SolveWalkingEnd(anchor, target, grounded, restNormal);
+    }
+
+    private void SolveWalkingEnd(Vector2 anchor, Vector2 target, bool grounded, Vector2 restNormal)
+    {
         Vector2 terrainNormal = GroundNormal.sqrMagnitude > .0001f ? GroundNormal.normalized : Vector2.up;
         float normalWeight = grounded ? .84f : .38f;
         Vector2 endNormal = Vector2.Lerp(restNormal, terrainNormal, normalWeight).normalized;
@@ -207,5 +311,17 @@ internal sealed class MantleCrabLimb
         {
             MantleCrabRigMath.Solve(anchor, target, Lengths, Pos);
         }
+    }
+
+    private static Vector2 TransformLocal(MantleCrab crab, Vector2 local)
+    {
+        Vector2 axis = crab.Axis;
+        if (axis.sqrMagnitude <= .0001f)
+            axis = Vector2.right;
+        else
+            axis = axis.normalized;
+
+        Vector2 up = new(-axis.y, axis.x);
+        return axis * local.x + up * local.y;
     }
 }
