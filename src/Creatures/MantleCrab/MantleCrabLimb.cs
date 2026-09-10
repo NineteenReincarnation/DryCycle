@@ -6,7 +6,7 @@ internal sealed class MantleCrabLimb
 {
     internal readonly int Index, AnchorChunk;
     internal readonly bool IsPincer;
-    internal readonly float Side, StandHeight, Reach, LocalDepth;
+    internal readonly float Side, Reach, LocalDepth;
     internal readonly float[] Lengths;
     private readonly float[] upperLengths;
     private readonly MantleCrabPincerRig pincerRig;
@@ -21,12 +21,16 @@ internal sealed class MantleCrabLimb
     internal float SwingProgress { get; private set; }
     internal Vector2 Contact => contact;
     internal MantleCrabPincerRig PincerRig => pincerRig;
+    internal float NominalStandHeight => nominalStandHeight;
+    internal float StandHeight => nominalStandHeight * stanceHeightScale;
 
+    private readonly float nominalStandHeight;
     private Vector2 contact;
     private Vector2 swingStart;
     private bool hasTarget;
     private int searchTick;
     private float swingDuration;
+    private float stanceHeightScale = 1f;
 
     internal MantleCrabLimb(int index, bool pincer)
     {
@@ -60,11 +64,12 @@ internal sealed class MantleCrabLimb
 
         foreach (float length in Lengths) Reach += length;
         upperLengths = [Lengths[0], Lengths[1], Lengths[2]];
-        StandHeight = -RestTipOffset.y;
+        nominalStandHeight = -RestTipOffset.y;
     }
 
     internal void Reset(Vector2 anchor)
     {
+        stanceHeightScale = 1f;
         if (IsPincer)
         {
             pincerRig.Reset(null, anchor);
@@ -165,6 +170,14 @@ internal sealed class MantleCrabLimb
             SwingProgress = 0f;
             return;
         }
+
+        // 困难地形时先降低身体、增加关节余量；这是真实节肢动物常见的“先换姿态再落脚”。
+        // On difficult terrain the body crouches before the next reach, increasing articulated
+        // workspace instead of granting the foot an impossible longer leg.
+        stanceHeightScale = Mathf.MoveTowards(
+            stanceHeightScale,
+            crab.Locomotion.Traversal.StanceHeightScale,
+            .012f);
 
         LastAnchor = Anchor;
         Anchor = anchor;
