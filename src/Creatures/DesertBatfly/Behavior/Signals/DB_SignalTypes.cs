@@ -2,6 +2,8 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
+// Signal-side types intentionally contain only transport/display vocabulary.
+// Receiver belief and modality live in Perception R2.
 internal enum DB_SignalKind
 {
     AlarmFlutter,
