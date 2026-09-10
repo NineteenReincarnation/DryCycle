@@ -4,12 +4,9 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Perception R2 receiver. Owns current direct observations, attention ranking, bounded lost
-/// tracks and projectile risk. It never owns locomotion or behavior arbitration.
-///
-/// Signal-derived receiver state is intentionally represented in the same snapshot; transport
-/// migration from DB_SignalRuntime is performed independently so packet emission/relay remains
-/// a separate concern.
+/// Perception R2 receiver. Owns current direct observations, ranked attention, bounded lost
+/// tracks, projectile risk and received-signal beliefs. It never owns locomotion or behavior
+/// arbitration. Signal transport still owns emission, packet lifetime and relay creation.
 /// </summary>
 internal class DB_PerceptionRuntime
 {
@@ -17,10 +14,16 @@ internal class DB_PerceptionRuntime
     internal const float ProjectileScanRange = 240f;
     internal const float ProjectileMissRadius = 38f;
     internal const float ProjectileMinimumVelocitySqr = 1.6f;
+    internal const int SignalGenerationHistorySize = 12;
+    internal const int SignalScanMinTicks = 14;
+    internal const int SignalScanMaxTicks = 24;
+    internal const float ReportedThreatDangerThreshold = 0.30f;
+    internal const float ReportedAnonymousHazardThreshold = 0.34f;
 
     private readonly DB_AI brain;
     private readonly DB_Creature fly;
     private readonly int[] pursuitByPlayer = new int[4];
+    private readonly int[] signalGenerations = new int[SignalGenerationHistorySize];
 
     private int scan;
     private int creatureScanCount;
@@ -30,8 +33,32 @@ internal class DB_PerceptionRuntime
     private DB_PerceptionTrack secondaryThreat;
     private DB_PerceptionTrack lostThreat;
     private DB_ProjectilePercept incomingProjectile;
-    private DB_PerceptionSignalContext signalContext;
     private string lastAttentionReason = "not scanned";
+
+    private bool signalGenerationInitialized;
+    private int signalGenerationCursor;
+    private int nextSignalScan;
+    private int signalScanSerial;
+    private float alarmPressure;
+    private Vector2 alarmOrigin;
+    private Creature alarmThreat;
+    private float distressInterest;
+    private DB_Creature distressSource;
+    private float rallyInterest;
+    private DB_Creature rallySource;
+    private Creature rallyTarget;
+    private float roostInterest;
+    private DB_Creature roostSource;
+    private float harassInterest;
+    private DB_Creature harassSource;
+    private Player harassTarget;
+    private float safeConfidence;
+    private int lastSignalAlarmTick = int.MinValue;
+    private int lastSignalGeneration;
+    private DB_SignalKind lastSignalKind;
+    private DB_PerceptionModality lastSignalModality;
+    private int lastSignalHop;
+    private string lastSignalDecision = "no signal received";
 
     internal DB_PerceptionRuntime(DB_AI brain, DB_Creature fly)
     {
@@ -40,11 +67,27 @@ internal class DB_PerceptionRuntime
         ResetScanPhase();
     }
 
-    internal Creature Danger => primaryThreat.DirectObservation && primaryThreat.Valid
-        ? primaryThreat.Target
-        : null;
+    internal Creature Danger
+    {
+        get
+        {
+            if (primaryThreat.DirectObservation && primaryThreat.Valid) return primaryThreat.Target;
+            if (alarmPressure >= ReportedThreatDangerThreshold &&
+                alarmThreat != null && !alarmThreat.dead && alarmThreat.room == fly?.room)
+                return alarmThreat;
+            return null;
+        }
+    }
 
     internal bool IsScanFrame => scan == 0;
+    internal int LastSignalAlarmTick => lastSignalAlarmTick;
+    internal int LastSignalGeneration => lastSignalGeneration;
+    internal DB_SignalKind LastSignalKind => lastSignalKind;
+    internal DB_PerceptionModality LastSignalModality => lastSignalModality;
+    internal int LastSignalHop => lastSignalHop;
+    internal string LastSignalDecision => lastSignalDecision;
+    internal bool HasReportedAnonymousHazard =>
+        alarmPressure >= ReportedAnonymousHazardThreshold && alarmThreat == null;
 
     internal int PursuitTicks
     {
@@ -62,17 +105,41 @@ internal class DB_PerceptionRuntime
         secondaryThreat,
         lostThreat,
         incomingProjectile,
-        signalContext);
+        BuildSignalContext());
 
     internal void Reset()
     {
         for (int i = 0; i < pursuitByPlayer.Length; i++) pursuitByPlayer[i] = 0;
+        for (int i = 0; i < signalGenerations.Length; i++) signalGenerations[i] = int.MinValue;
         primaryThreat = default;
         secondaryThreat = default;
         lostThreat = default;
         incomingProjectile = default;
-        signalContext = default;
         lastAttentionReason = "reset";
+        signalGenerationInitialized = false;
+        signalGenerationCursor = 0;
+        nextSignalScan = 0;
+        signalScanSerial = 0;
+        alarmPressure = 0f;
+        alarmOrigin = Vector2.zero;
+        alarmThreat = null;
+        distressInterest = 0f;
+        distressSource = null;
+        rallyInterest = 0f;
+        rallySource = null;
+        rallyTarget = null;
+        roostInterest = 0f;
+        roostSource = null;
+        harassInterest = 0f;
+        harassSource = null;
+        harassTarget = null;
+        safeConfidence = 0f;
+        lastSignalAlarmTick = int.MinValue;
+        lastSignalGeneration = 0;
+        lastSignalKind = default;
+        lastSignalModality = DB_PerceptionModality.None;
+        lastSignalHop = 0;
+        lastSignalDecision = "reset";
         ResetScanPhase();
     }
 
@@ -82,8 +149,8 @@ internal class DB_PerceptionRuntime
     }
 
     /// <summary>
-    /// Per-frame receiver refresh. Projectile risk and lost-track decay are cheap/current;
-    /// creature LOS scans retain the old staggered eight-tick cadence.
+    /// Per-frame receiver refresh. Projectile risk and lost-track decay are current; ordinary
+    /// creature LOS and non-urgent signal packets retain independent staggered cadences.
     /// </summary>
     internal void RefreshState()
     {
@@ -95,6 +162,8 @@ internal class DB_PerceptionRuntime
 
         RefreshIncomingProjectile();
         RefreshLostTrack();
+        TickSignalInfluence();
+        RefreshSignalReception();
 
         if (++scan < ScanIntervalTicks) return;
         scan = 0;
@@ -120,6 +189,13 @@ internal class DB_PerceptionRuntime
         return incomingProjectile.Valid;
     }
 
+    internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)
+    {
+        context = BuildSignalContext();
+        return alarmPressure > 0f || distressInterest > 0f || rallyInterest > 0f ||
+               roostInterest > 0f || harassInterest > 0f || safeConfidence > 0f;
+    }
+
     internal bool TryGetDebugState(out DB_PerceptionDebugState debug)
     {
         debug = new DB_PerceptionDebugState(
@@ -129,6 +205,122 @@ internal class DB_PerceptionRuntime
             signalScanCount,
             lastAttentionReason);
         return fly != null;
+    }
+
+    /// <summary>
+    /// Receives an already transported packet. This method only updates perception beliefs and
+    /// relay willingness; it never calls ThreatenedAt, cancels Social or writes movement.
+    /// </summary>
+    internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)
+    {
+        relayAlarm = false;
+        if (!AvailableForSignals() || !fly.Consious || packet == null ||
+            packet.Emitter == fly || packet.Emitter?.room != fly.room ||
+            packet.Expired(fly.room.game?.clock ?? 0))
+            return false;
+        if (HasSignalGeneration(packet.Generation)) return false;
+        if (!TryPerceiveSignal(packet, out DB_PerceptionModality modality, out float attenuation))
+            return false;
+
+        RememberSignalGeneration(packet.Generation);
+        float response = SignalResponseStrength(packet, modality, attenuation);
+        lastSignalGeneration = packet.Generation;
+        lastSignalKind = packet.Kind;
+        lastSignalModality = modality;
+        lastSignalHop = packet.Hop;
+
+        if (response <= 0.015f)
+        {
+            lastSignalDecision = "perceived but receiver confidence was negligible";
+            TraceSignalReceive(packet, response);
+            return true;
+        }
+
+        switch (packet.Kind)
+        {
+            case DB_SignalKind.AlarmFlutter:
+                alarmPressure = Mathf.Max(alarmPressure, response);
+                alarmOrigin = packet.Origin;
+                alarmThreat = ValidReportedThreat(packet.Threat) ? packet.Threat : null;
+                lastSignalAlarmTick = fly.room.game?.clock ?? 0;
+                lastSignalDecision = alarmThreat != null
+                    ? "accepted reported threat belief"
+                    : "accepted anonymous hazard belief";
+                DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
+                relayAlarm = definition.CanRelay && packet.Hop < definition.MaxRelayHops &&
+                             ShouldRelayAlarm(packet, response);
+                break;
+
+            case DB_SignalKind.DistressCall:
+                distressInterest = Mathf.Max(distressInterest, response);
+                distressSource = packet.Subject ?? packet.Emitter;
+                lastSignalDecision = "accepted distress interest; behavior domains retain authority";
+                break;
+
+            case DB_SignalKind.RallySignal:
+                rallyInterest = Mathf.Max(rallyInterest, response);
+                rallySource = packet.Emitter;
+                rallyTarget = packet.Threat;
+                lastSignalDecision = "accepted rally target belief";
+                break;
+
+            case DB_SignalKind.RoostCall:
+                roostInterest = Mathf.Max(roostInterest, response);
+                roostSource = packet.Emitter;
+                lastSignalDecision = "accepted roost interest";
+                break;
+
+            case DB_SignalKind.HarassSignal:
+                harassInterest = Mathf.Max(harassInterest, response);
+                harassSource = packet.Emitter;
+                harassTarget = packet.PlayerTarget;
+                lastSignalDecision = "accepted harass target interest";
+                break;
+
+            case DB_SignalKind.SafeSignal:
+                if (CanAcceptSafeSignal())
+                {
+                    safeConfidence = Mathf.Max(safeConfidence, response);
+                    // Safe reports may only relax signal-derived uncertainty. Direct visual,
+                    // projectile, event and persistent Threat memory facts are untouched.
+                    alarmPressure *= Mathf.Lerp(1f, 0.48f, response);
+                    lastSignalDecision = "accepted SafeSignal for reported hazard only";
+                }
+                else
+                {
+                    lastSignalDecision = "ignored SafeSignal because direct/current danger remains";
+                }
+                break;
+        }
+
+        TraceSignalReceive(packet, response);
+        return true;
+    }
+
+    internal void NoteLocalAlarm(Creature threat, Vector2 origin, float intensity)
+    {
+        if (!AvailableForSignals()) return;
+        alarmPressure = Mathf.Max(alarmPressure, Mathf.Clamp01(intensity));
+        alarmOrigin = origin;
+        alarmThreat = ValidReportedThreat(threat) ? threat : null;
+        lastSignalAlarmTick = fly.room.game?.clock ?? 0;
+        lastSignalDecision = "local direct alarm recorded as receiver context";
+    }
+
+    internal bool CanAcceptSafeSignal()
+    {
+        if (!AvailableForSignals() || !fly.Consious || brain == null) return false;
+        if (primaryThreat.DirectObservation && primaryThreat.Valid) return false;
+        if (incomingProjectile.Valid) return false;
+        if (brain.Mode == DB_AI.Activity.Escape || brain.RetreatActive) return false;
+        if (fly.Injury.IsSeverelyInjured || DB_TravelRuntime.HasIntent(fly.abstractCreature)) return false;
+        if (DB_ThreatRuntime.TryGetDebugState(fly, out DB_ThreatDebugState threat) &&
+            (threat.Cue.ProjectileThreat ||
+             threat.AcuteExplosionTimer > 0 || threat.AcuteStartleTimer > 0 ||
+             threat.AcuteMassCasualtyTimer > 0 || threat.AcuteCaptureTimer > 0 ||
+             threat.AcuteShockTimer > 0))
+            return false;
+        return !DB_FearRuntime.HasActiveFearSuppression(fly);
     }
 
     private void ScanCreatures()
@@ -173,7 +365,6 @@ internal class DB_PerceptionRuntime
                     fly, creature.mainBodyChunk.pos, DB_Tuning.SightRange, channel))
                 continue;
 
-            // Keep the exact sqrt behind cheap range + LOS rejection.
             float distance = Vector2.Distance(origin, creature.mainBodyChunk.pos);
             brain.Combat.ConsiderCandidate(creature, distance);
             if (creature is Player observedPlayer) TrackPlayerApproach(observedPlayer, distance);
@@ -233,6 +424,8 @@ internal class DB_PerceptionRuntime
 
         primaryThreat = directBest;
         secondaryThreat = directSecond;
+        if (!directBest.Valid && !previousStillVisible)
+            lastAttentionReason = lostThreat.Valid ? "direct threat lost; bounded prediction retained" : "no directly observed threat";
     }
 
     private void ClearDirectThreats(in DB_PerceptionTrack previousPrimary, bool previousStillVisible)
@@ -241,7 +434,7 @@ internal class DB_PerceptionRuntime
             BeginLostTrack(previousPrimary);
         primaryThreat = default;
         secondaryThreat = default;
-        lastAttentionReason = "no directly observed threat";
+        lastAttentionReason = lostThreat.Valid ? "direct threat lost; bounded prediction retained" : "no directly observed threat";
     }
 
     private bool TryBuildThreatTrack(
@@ -258,8 +451,8 @@ internal class DB_PerceptionRuntime
              reverse.type == CreatureTemplate.Relationship.Type.Eats ||
              reverse.type == CreatureTemplate.Relationship.Type.Attacks);
 
-        float threatDistance = 0f;
-        float relationshipDanger = 0f;
+        float threatDistance;
+        float relationshipDanger;
         float memoryBias = 0f;
         DB_PerceptionSource source = creature is Player
             ? DB_PerceptionSource.DirectPlayer
@@ -271,8 +464,9 @@ internal class DB_PerceptionRuntime
             float nerveScale = Mathf.Lerp(1.15f, 0.58f, fly.Personality.Nerve);
             threatDistance = Mathf.Max(55f, ordinaryThreatDistance * nerveScale);
             if (distance >= threatDistance) return false;
-            relationshipDanger = relation.type == CreatureTemplate.Relationship.Type.Afraid ?
-                Mathf.Clamp01(Mathf.Max(0.45f, relation.intensity)) : 0.72f;
+            relationshipDanger = relation.type == CreatureTemplate.Relationship.Type.Afraid
+                ? Mathf.Clamp01(Mathf.Max(0.45f, relation.intensity))
+                : 0.72f;
         }
         else if (creature is Player player)
         {
@@ -289,10 +483,7 @@ internal class DB_PerceptionRuntime
             relationshipDanger = Mathf.Lerp(0.46f, 0.88f, fly.DesertState.GrabMemoryStrength);
             memoryBias = fly.DesertState.GrabMemoryStrength;
         }
-        else
-        {
-            return false;
-        }
+        else return false;
 
         Vector2 toFly = Custom.DirVec(creature.mainBodyChunk.pos, fly.mainBodyChunk.pos);
         float closing = Vector2.Dot(creature.mainBodyChunk.vel, toFly);
@@ -360,22 +551,33 @@ internal class DB_PerceptionRuntime
                 pursuitByPlayer[slot] = 0;
             }
         }
-        else
-        {
-            pursuitByPlayer[slot] = Mathf.Max(0, pursuitByPlayer[slot] - 2);
-        }
+        else pursuitByPlayer[slot] = Mathf.Max(0, pursuitByPlayer[slot] - 2);
     }
 
     private void BeginLostTrack(in DB_PerceptionTrack previous)
     {
         if (!previous.Valid || previous.Target == null) return;
         int clock = fly.room?.game?.clock ?? previous.LastObservedTick;
-        float confidence = DB_PerceptionScoring.LostConfidence(previous.Confidence, 1);
+        int age = previous.LastObservedTick == int.MinValue ? 1 : Mathf.Max(1, clock - previous.LastObservedTick);
+        float confidence = DB_PerceptionScoring.LostConfidence(previous.Confidence, age);
         Vector2 estimated = DB_PerceptionScoring.PredictLostPosition(
             previous.ObservedPosition,
             previous.ObservedVelocity,
-            1);
-        lostThreat = previous.AsPredicted(clock, confidence, estimated);
+            age);
+        lostThreat = new DB_PerceptionTrack(
+            previous.Target,
+            previous.ObservedPosition,
+            estimated,
+            previous.ObservedVelocity,
+            confidence,
+            previous.Salience,
+            previous.ThreatUrgency * Mathf.Clamp01(confidence / Mathf.Max(0.01f, previous.Confidence)),
+            previous.AttentionScore * Mathf.Clamp01(confidence / Mathf.Max(0.01f, previous.Confidence)),
+            previous.LastObservedTick,
+            age,
+            DB_PerceptionSource.Predicted,
+            DB_PerceptionModality.Predicted,
+            false);
     }
 
     private void RefreshLostTrack()
@@ -395,17 +597,17 @@ internal class DB_PerceptionRuntime
         int age = lostThreat.LastObservedTick == int.MinValue
             ? DB_PerceptionScoring.LostTrackMaxTicks
             : Mathf.Max(0, clock - lostThreat.LastObservedTick);
-        float confidence = DB_PerceptionScoring.LostConfidence(lostThreat.Confidence, age - lostThreat.AgeTicks);
-        // Rebase from the original observation confidence when possible so decay is monotonic
-        // and does not depend on how many Update calls happened in a frame.
-        if (lostThreat.AgeTicks > 0)
+        if (age >= DB_PerceptionScoring.LostTrackMaxTicks)
         {
-            float priorLife = 1f - Mathf.Clamp01(lostThreat.AgeTicks / (float)DB_PerceptionScoring.LostTrackMaxTicks);
-            float baseConfidence = priorLife > 0.001f
-                ? Mathf.Clamp01(lostThreat.Confidence / (priorLife * priorLife))
-                : 0f;
-            confidence = DB_PerceptionScoring.LostConfidence(baseConfidence, age);
+            lostThreat = default;
+            return;
         }
+
+        float priorLife = 1f - Mathf.Clamp01(lostThreat.AgeTicks / (float)DB_PerceptionScoring.LostTrackMaxTicks);
+        float originalConfidence = priorLife > 0.001f
+            ? Mathf.Clamp01(lostThreat.Confidence / (priorLife * priorLife))
+            : 0f;
+        float confidence = DB_PerceptionScoring.LostConfidence(originalConfidence, age);
         if (confidence <= 0.01f)
         {
             lostThreat = default;
@@ -416,6 +618,7 @@ internal class DB_PerceptionRuntime
             lostThreat.ObservedPosition,
             lostThreat.ObservedVelocity,
             age);
+        float ratio = confidence / Mathf.Max(0.01f, lostThreat.Confidence);
         lostThreat = new DB_PerceptionTrack(
             lostThreat.Target,
             lostThreat.ObservedPosition,
@@ -423,8 +626,8 @@ internal class DB_PerceptionRuntime
             lostThreat.ObservedVelocity,
             confidence,
             lostThreat.Salience,
-            lostThreat.ThreatUrgency * 0.96f,
-            lostThreat.AttentionScore * 0.96f,
+            lostThreat.ThreatUrgency * Mathf.Clamp01(ratio),
+            lostThreat.AttentionScore * Mathf.Clamp01(ratio),
             lostThreat.LastObservedTick,
             age,
             DB_PerceptionSource.Predicted,
@@ -450,7 +653,6 @@ internal class DB_PerceptionRuntime
         float maxDistanceSqr = ProjectileScanRange * ProjectileScanRange;
         float missRadiusSqr = ProjectileMissRadius * ProjectileMissRadius;
         float visibility = Mathf.Clamp01(DB_EnvironmentRuntime.VisibilityScale(fly));
-
         float bestRisk = 0f;
         float bestClosest = float.MaxValue;
         float bestTime = float.MaxValue;
@@ -469,42 +671,25 @@ internal class DB_PerceptionRuntime
             Vector2 velocity = weapon.firstChunk.vel;
             float velocitySqr = velocity.sqrMagnitude;
             if (velocitySqr < ProjectileMinimumVelocitySqr) continue;
-
             Vector2 delta = origin - position;
             if (delta.sqrMagnitude > maxDistanceSqr) continue;
 
-            float time = Mathf.Clamp(
-                Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocitySqr),
-                0f,
-                5f);
+            float time = Mathf.Clamp(Vector2.Dot(delta, velocity) / Mathf.Max(1f, velocitySqr), 0f, 5f);
             float closestSqr = (delta - velocity * time).sqrMagnitude;
             if (closestSqr >= missRadiusSqr) continue;
             if (!DB_VisibilityPolicy.CanObserve(
-                    fly,
-                    position,
-                    ProjectileScanRange,
-                    DB_VisibilityChannel.Projectile,
-                    realProjectile: true))
+                    fly, position, ProjectileScanRange, DB_VisibilityChannel.Projectile, realProjectile: true))
                 continue;
 
             float distance = Mathf.Sqrt(delta.sqrMagnitude);
             float confidence = DB_PerceptionScoring.DirectConfidence(
-                ProjectileScanRange,
-                distance,
-                Mathf.Max(visibility, 0.38f));
+                ProjectileScanRange, distance, Mathf.Max(visibility, 0.38f));
             float closest = Mathf.Sqrt(closestSqr);
             float speed = Mathf.Sqrt(velocitySqr);
             Creature instigator = ResolveInstigator(weapon);
-            float memory = InstigatorThreatMemory(instigator);
-            float lethality = ProjectileLethality(weapon);
             float risk = DB_PerceptionScoring.ProjectileRisk(
-                time,
-                closest,
-                ProjectileMissRadius,
-                speed,
-                lethality,
-                confidence,
-                memory);
+                time, closest, ProjectileMissRadius, speed, ProjectileLethality(weapon),
+                confidence, InstigatorThreatMemory(instigator));
             int key = StableWeaponKey(weapon);
 
             bool better = risk > bestRisk + 0.0001f ||
@@ -521,22 +706,186 @@ internal class DB_PerceptionRuntime
             bestKey = key;
             bestConfidence = confidence;
             bestObservation = new DB_WeaponObservation(
-                weapon,
-                instigator,
-                position,
-                velocity,
-                closestSqr,
-                thrown: true,
-                heldMovingSpear: false);
+                weapon, instigator, position, velocity, closestSqr, true, false);
         }
 
         if (bestObservation.Weapon != null)
             incomingProjectile = new DB_ProjectilePercept(
-                bestObservation,
-                bestTime,
-                bestClosest,
-                bestRisk,
-                bestConfidence);
+                bestObservation, bestTime, bestClosest, bestRisk, bestConfidence);
+    }
+
+    private void RefreshSignalReception()
+    {
+        if (!AvailableForSignals() || !fly.Consious) return;
+        int clock = fly.room.game?.clock ?? 0;
+        if (nextSignalScan == 0)
+            nextSignalScan = clock + StableInt(0x2B19, SignalScanMinTicks, SignalScanMaxTicks + 1);
+        if (clock < nextSignalScan) return;
+
+        nextSignalScan = clock + StableInt(
+            0x41C7 + ++signalScanSerial * 31,
+            SignalScanMinTicks,
+            SignalScanMaxTicks + 1);
+        signalScanCount++;
+
+        DB_SignalRoomRuntime.RoomState roomState = DB_SignalRoomRuntime.For(fly.room);
+        roomState?.Prune(fly.room);
+        if (roomState == null) return;
+        for (int i = 0; i < roomState.ActiveSignals.Count; i++)
+        {
+            DB_SignalPacket packet = roomState.ActiveSignals[i];
+            if (packet == null || packet.Emitter == fly || packet.Expired(clock)) continue;
+            ReceiveSignal(packet, out _);
+        }
+    }
+
+    private bool TryPerceiveSignal(
+        DB_SignalPacket packet,
+        out DB_PerceptionModality modality,
+        out float attenuation)
+    {
+        modality = DB_PerceptionModality.None;
+        attenuation = 0f;
+        if (packet?.Emitter?.mainBodyChunk == null || fly.mainBodyChunk == null) return false;
+        DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
+        float distance = Vector2.Distance(fly.mainBodyChunk.pos, packet.Emitter.mainBodyChunk.pos);
+        float visibility = DB_EnvironmentRuntime.VisibilityScale(fly);
+        float visualRadius = DB_VisibilityPolicy.EffectiveRange(
+            definition.VisualRange, visibility, DB_VisibilityChannel.Signal);
+
+        if (distance <= visualRadius && DB_VisibilityPolicy.CanObserve(
+                fly, packet.Emitter.mainBodyChunk.pos, definition.VisualRange, DB_VisibilityChannel.Signal))
+        {
+            modality = DB_PerceptionModality.Visual;
+            attenuation = Mathf.Lerp(1f, 0.34f, Mathf.Clamp01(distance / Mathf.Max(1f, visualRadius)));
+            return true;
+        }
+
+        float acousticRadius = definition.CloseAcousticRange;
+        if (acousticRadius <= 0f || distance > acousticRadius) return false;
+        modality = DB_PerceptionModality.Acoustic;
+        attenuation = Mathf.Lerp(0.62f, 0.30f, Mathf.Clamp01(distance / acousticRadius));
+        return true;
+    }
+
+    private float SignalResponseStrength(
+        DB_SignalPacket packet,
+        DB_PerceptionModality modality,
+        float attenuation)
+    {
+        float c = fly.Personality.Conformity;
+        float n = fly.Personality.Nerve;
+        float t = fly.Personality.Temperament;
+        float bond = packet.Emitter != null ? DB_SocialBond.GetBondStrength(fly, packet.Emitter) : 0f;
+        float confidence = DB_PerceptionScoring.SignalConfidence(
+            packet.Intensity,
+            attenuation,
+            packet.Hop,
+            c,
+            n,
+            modality == DB_PerceptionModality.Acoustic);
+
+        float semanticScale = packet.Kind switch
+        {
+            DB_SignalKind.AlarmFlutter => 1f,
+            DB_SignalKind.DistressCall => 0.62f + bond * 0.52f + t * 0.20f + n * 0.14f,
+            DB_SignalKind.RallySignal => 0.40f + t * 0.34f + n * 0.24f + bond * 0.18f,
+            DB_SignalKind.RoostCall => 0.44f + fly.Personality.RoostAffinity * 0.38f + bond * 0.18f,
+            DB_SignalKind.HarassSignal => 0.30f + t * 0.38f + n * 0.22f,
+            DB_SignalKind.SafeSignal => 0.44f + n * 0.26f,
+            _ => 1f
+        };
+        float response = Mathf.Clamp01(confidence * semanticScale);
+
+        Player player = packet.PlayerTarget ?? packet.Threat as Player;
+        if (player != null)
+        {
+            int slot = DB_ThreatRuntime.PlayerSlot(player);
+            if (DB_ThreatRuntime.ValidSlot(slot))
+            {
+                DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(fly.DesertState, slot);
+                if (memory != null && memory.Confidence >= 0.04f)
+                {
+                    float caution = Mathf.Clamp01(
+                        memory.PiercingPressure * 0.30f + memory.CounterKillPressure * 0.34f +
+                        memory.ExplosionPressure * 0.17f + memory.GrabCapturePressure * 0.10f +
+                        memory.PursuitPressure * 0.09f) * memory.Confidence;
+                    response *= packet.Kind switch
+                    {
+                        DB_SignalKind.AlarmFlutter => 1f + caution * 0.24f,
+                        DB_SignalKind.DistressCall => 1f - caution * 0.22f,
+                        DB_SignalKind.RallySignal => 1f - caution * 0.52f,
+                        DB_SignalKind.HarassSignal => 1f - caution * 0.62f,
+                        _ => 1f
+                    };
+                }
+            }
+        }
+        return Mathf.Clamp01(response);
+    }
+
+    private bool ShouldRelayAlarm(DB_SignalPacket packet, float response)
+    {
+        DB_SignalDefinition definition = DB_SignalDefinition.For(packet.Kind);
+        if (!definition.CanRelay || packet.Hop >= definition.MaxRelayHops || response < 0.24f) return false;
+        float chance = Mathf.Clamp01(
+            0.14f + fly.Personality.Conformity * 0.58f +
+            (1f - fly.Personality.Nerve) * 0.18f + response * 0.18f);
+        return Stable01(packet.Generation ^ (packet.Hop + 1) * 0x6D2B) < chance;
+    }
+
+    private void TickSignalInfluence()
+    {
+        alarmPressure = Mathf.Max(0f, alarmPressure - 0.0032f);
+        distressInterest = Mathf.Max(0f, distressInterest - 0.0050f);
+        rallyInterest = Mathf.Max(0f, rallyInterest - 0.0038f);
+        roostInterest = Mathf.Max(0f, roostInterest - 0.0022f);
+        harassInterest = Mathf.Max(0f, harassInterest - 0.0030f);
+        safeConfidence = Mathf.Max(0f, safeConfidence - 0.0035f);
+
+        if (alarmPressure <= 0f) alarmThreat = null;
+        if (distressInterest <= 0f) distressSource = null;
+        if (rallyInterest <= 0f) { rallySource = null; rallyTarget = null; }
+        if (roostInterest <= 0f) roostSource = null;
+        if (harassInterest <= 0f) { harassSource = null; harassTarget = null; }
+    }
+
+    private DB_PerceptionSignalContext BuildSignalContext() => new(
+        alarmPressure,
+        alarmOrigin,
+        alarmThreat,
+        distressInterest,
+        distressSource,
+        rallyInterest,
+        rallySource,
+        rallyTarget,
+        roostInterest,
+        roostSource,
+        harassInterest,
+        harassSource,
+        harassTarget,
+        safeConfidence,
+        lastSignalModality,
+        lastSignalHop,
+        lastSignalDecision);
+
+    private bool HasSignalGeneration(int generation)
+    {
+        if (!signalGenerationInitialized) return false;
+        for (int i = 0; i < signalGenerations.Length; i++)
+            if (signalGenerations[i] == generation) return true;
+        return false;
+    }
+
+    private void RememberSignalGeneration(int generation)
+    {
+        if (!signalGenerationInitialized)
+        {
+            for (int i = 0; i < signalGenerations.Length; i++) signalGenerations[i] = int.MinValue;
+            signalGenerationInitialized = true;
+        }
+        signalGenerations[signalGenerationCursor] = generation;
+        signalGenerationCursor = (signalGenerationCursor + 1) % signalGenerations.Length;
     }
 
     private float InstigatorThreatMemory(Creature instigator)
@@ -547,10 +896,8 @@ internal class DB_PerceptionRuntime
         DB_PlayerThreatMemory memory = DB_ThreatMemoryStore.For(fly.DesertState, slot);
         if (memory == null) return 0f;
         return Mathf.Clamp01(memory.Confidence * (
-            memory.ProjectilePressure * 0.40f +
-            memory.PiercingPressure * 0.30f +
-            memory.CounterKillPressure * 0.20f +
-            memory.BluntStunPressure * 0.10f));
+            memory.ProjectilePressure * 0.40f + memory.PiercingPressure * 0.30f +
+            memory.CounterKillPressure * 0.20f + memory.BluntStunPressure * 0.10f));
     }
 
     private static float ProjectileLethality(Weapon weapon)
@@ -567,6 +914,12 @@ internal class DB_PerceptionRuntime
             return weapon.grabbedBy[0]?.grabber;
         return null;
     }
+
+    private bool ValidReportedThreat(Creature threat)
+        => threat != null && !threat.dead && !threat.slatedForDeletetion && threat.room == fly.room;
+
+    private bool AvailableForSignals()
+        => fly != null && !fly.dead && !fly.slatedForDeletetion && fly.room != null && !fly.inShortcut;
 
     private static int StableCreatureKey(Creature creature)
         => creature?.abstractCreature?.ID.number ?? int.MaxValue;
@@ -593,6 +946,36 @@ internal class DB_PerceptionRuntime
         }
     }
 
-    // Signal migration uses this counter/debug surface without giving Signal locomotion authority.
-    internal void NoteSignalScan() => signalScanCount++;
+    private int StableInt(int salt, int min, int max)
+    {
+        if (max <= min) return min;
+        return min + Mathf.FloorToInt(Stable01(salt) * (max - min));
+    }
+
+    private float Stable01(int salt)
+    {
+        unchecked
+        {
+            uint x = (uint)((fly?.Personality?.VisualSeed ?? 0) * 1103515245 + salt * 12345);
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return (x & 0x00FFFFFFu) / 16777216f;
+        }
+    }
+
+    private void TraceSignalReceive(DB_SignalPacket packet, float response)
+    {
+        if (fly?.abstractCreature == null ||
+            !DryCycle.Debugging.AI.AIDebugTrace.IsWatched(fly.abstractCreature))
+            return;
+        DryCycle.Debugging.AI.AIDebugTrace.Record(
+            fly.abstractCreature,
+            DryCycle.Debugging.AI.AIDebugEventCategory.Social,
+            "SignalPerceived",
+            $"{packet.Kind} gen={packet.Generation} hop={packet.Hop} via={lastSignalModality} confidence={response:0.00}",
+            lastSignalDecision);
+    }
 }
