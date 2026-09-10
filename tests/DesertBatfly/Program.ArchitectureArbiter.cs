@@ -25,7 +25,8 @@ internal static partial class Program
         Type runtime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_Runtime", true);
         Type combatRuntime = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CombatRuntime", true);
         Type injuryRecovery = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_InjuryRecovery", true);
-        Type perception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
+        Type perception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionRuntime", true);
+        Type perceptionSnapshot = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionSnapshot", true);
         Type restraintPolicy = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RestraintPolicy", true);
         Type swarmLifecycle = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SwarmLifecycleRuntime", true);
         Type swarmRoom = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_SwarmRoom", true);
@@ -36,7 +37,7 @@ internal static partial class Program
                      "Conscious", "Dead", "Restrained", "InShortcut", "InHive",
                      "NativeMovementMode", "NativeBehavior", "Personality", "PhysicalCapability",
                      "SevereInjury", "InjuryRecovering", "InjuryRecoveryTarget", "PostStunShock",
-                     "Thirst", "Trauma", "Grief", "BondStrength", "IncomingProjectile",
+                     "Thirst", "Trauma", "Grief", "BondStrength", "Perception", "IncomingProjectile",
                      "VisibilityFactor", "Travel", "SignalInfluence", "EnvironmentInfluence",
                      "Threat", "Social", "Roost", "VengeanceActive", "ImmediateDanger",
                      "HardSurvival", "CombatAllowed", "SocialAllowed", "CrossRoomOwned",
@@ -44,6 +45,8 @@ internal static partial class Program
                  })
             Check(frame.GetField(name, Flags) != null,
                 "Architecture arbitration FrameContext contains approved current-frame fact " + name);
+        Check(frame.GetField("Perception", Flags)?.FieldType == perceptionSnapshot,
+            "Architecture arbitration FrameContext carries one immutable Perception R2 snapshot");
         foreach (string retired in new[]
                  { "VisiblePlayerCount", "NearestVisiblePlayer", "PredatorCandidateCount", "NearestPredator" })
             Check(frame.GetField(retired, Flags) == null,
@@ -196,9 +199,10 @@ internal static partial class Program
               restraintPolicy.GetMethod("IsRestrainedByNonFly", Flags) != null,
             "Architecture arbitration restraint classification has one canonical policy surface");
         Check(perception.GetProperty("PursuitTicks", Flags) != null &&
+              perception.GetProperty("Snapshot", Flags)?.PropertyType == perceptionSnapshot &&
               desertAI.GetProperty("RetreatTicks", Flags) != null &&
               desertAI.GetProperty("EscapeFrom", Flags) != null,
-            "Architecture arbitration debug facts are exposed by their current owners without private reflection");
+            "Architecture arbitration debug/current perception facts are exposed by Perception R2 without private reflection");
 
         Type hooks = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_RainWorldHooks", true);
         MethodInfo hooksEnable = hooks.GetMethod("Enable", Flags);
@@ -260,10 +264,11 @@ internal static partial class Program
 
         Check(frame.Name.StartsWith("DB_", StringComparison.Ordinal) &&
               proposal.Name.StartsWith("DB_", StringComparison.Ordinal) &&
-              arbiter.Name.StartsWith("DB_", StringComparison.Ordinal),
+              arbiter.Name.StartsWith("DB_", StringComparison.Ordinal) &&
+              perception.Name.StartsWith("DB_", StringComparison.Ordinal),
             "Architecture arbitration architecture uses DB_ domain naming and does not create TaskXX production types");
 
         Console.WriteLine(
-            "Architecture arbitration: formal Social and NeutralEcology are distinct owners; current domain owners, thin native hooks, direct Observatory queries, lean FrameContext, Feeding priority, special physics and rejected-proposal presentation are guarded; Rain World live validation remains.");
+            "Architecture arbitration: formal Social and NeutralEcology are distinct owners; Perception R2 snapshots feed FrameContext; current domain owners, thin native hooks, direct Observatory queries, Feeding priority, special physics and rejected-proposal presentation are guarded; Rain World live validation remains.");
     }
 }
