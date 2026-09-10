@@ -34,12 +34,18 @@ internal static partial class Program
             Check(MantleCrabPincerAnatomy.PalmWidths[i] >
                   MantleCrabPincerAnatomy.SegmentWidth(i, 3) * 1.7f,
                 "Pincer " + i + " palm must flare visibly beyond the wrist shaft");
-            Check(MantleCrabPincerAnatomy.FingerLengths[i] < 30f,
-                "Pincer " + i + " fingers regressed into long needle-like extensions");
+            Check(MantleCrabPincerAnatomy.FingerLengths[i] < MantleCrabPincerAnatomy.PalmLengths[i],
+                "Pincer " + i + " digit must remain shorter than the manus instead of becoming a terminal needle");
+            Check(MantleCrabPincerAnatomy.FingerLengths[i] < 22f,
+                "Pincer " + i + " fingers regressed beyond the V3 compact-chela envelope");
+            Check(Math.Abs(MantleCrabPincerAnatomy.PalmRestAngleDegrees[i]) >= 4f,
+                "Pincer " + i + " lost the carpal angle separating palm from terminal shaft");
         }
 
         Check(!SimpleMirror(MantleCrabPincerAnatomy.Chains[0], MantleCrabPincerAnatomy.Chains[1]),
             "Dedicated pincer rest poses must preserve left/right asymmetry");
+        Check(MantleCrabPincerAnatomy.PalmWidths[1] > MantleCrabPincerAnatomy.PalmWidths[0],
+            "Right chela must retain the stronger heterochelous palm");
 
         MantleCrab crab = Empty<MantleCrab>();
         crab.ShellScale = 1f;
@@ -78,6 +84,10 @@ internal static partial class Program
                 previous = rig.Pos[segment];
             }
 
+            Vector2 shaftAxis = (rig.Pos[3] - rig.Pos[2]).normalized;
+            Vector2 palmAxis = rig.PalmAxis(1f);
+            Check(Math.Abs(shaftAxis.x * palmAxis.y - shaftAxis.y * palmAxis.x) > .05f,
+                "Pincer carpal joint collapsed back into a straight continuation of the arm");
             Check(rig.Open > MantleCrabPincerAnatomy.IdleOpen[index] + .4f,
                 "Pincer open channel failed to follow its animation target");
         }
