@@ -113,5 +113,5 @@ grep -q 'room.MiddleOfTile(floorTile) + Vector2.down \* 10f' "$ROOST"
 ! grep -q 'room.MiddleOfTile(floorTile) + Vector2.up \* 10f' "$ROOST"
 
 python3 "$TESTS/check_social_diversity.py"
-
-echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus social-diversity prediction protected.'
+python3 "$TESTS/check_perception_r2.py"
+echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus social-diversity and Perception R2 prediction audits protected.'
