@@ -585,7 +585,7 @@ internal static class WalkableDynamicSurfaceRuntime
     {
         if (player?.room == null || Feet(player) == null || player.dead || !player.Consious ||
             player.inShortcut || player.enteringShortCut.HasValue || player.grabbedBy.Count > 0 ||
-            player.submersion > 0.55f)
+            player.Submersion > 0.55f)
             return false;
 
         return IsGroundCompatibleBodyMode(player.bodyMode);
