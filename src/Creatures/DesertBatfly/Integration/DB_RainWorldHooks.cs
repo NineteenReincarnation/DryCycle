@@ -152,13 +152,13 @@ internal static class DB_RainWorldHooks
             return;
         }
 
-        // R3 order is deliberate: refresh state/facts first, resolve one owner, then execute.
-        // Vanilla FlyAI.Update is no longer allowed to write an ordinary goal before Arbiter.
+        // Refresh all mutable domain state exactly once before the read-only proposal pass.
         DB_EnvironmentRuntime.RefreshInfluence(desert);
         desert.DesertAI.RefreshDecisionState();
         DB_ThreatRuntime.RefreshState(desert);
         DB_SocialRuntime.RefreshState(desert);
         desert.Feeding.RefreshState();
+        DB_NeutralBehaviorRuntime.RefreshState(desert);
 
         DB_BehaviorResolution ownership = DB_BehaviorArbiter.ResolveFrame(desert);
 
@@ -172,6 +172,7 @@ internal static class DB_RainWorldHooks
             DB_BehaviorOwner.Restraint or DB_BehaviorOwner.Shortcut or DB_BehaviorOwner.Emergence)
         {
             DB_SocialRuntime.CancelForPriority(desert, PrimaryOwnerBlockReason(ownership.PrimaryOwner));
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
             CompleteR3Frame(desert, ownership);
             return;
         }
@@ -212,6 +213,7 @@ internal static class DB_RainWorldHooks
             if (DB_TravelRuntime.TryDriveRealized(desert))
             {
                 DB_SocialRuntime.CancelForPriority(desert, "travel priority");
+                DB_NeutralBehaviorRuntime.CancelForPriority(desert);
                 desert.DesertAI.CancelAttack();
                 CompleteR3Frame(desert, ownership);
                 return;
@@ -329,6 +331,19 @@ internal static class DB_RainWorldHooks
                 "Social executor yielded after reservation/state recheck");
         }
 
+        if (ownership.PrimaryOwner == DB_BehaviorOwner.NeutralEcology)
+        {
+            if (DB_BehaviorExecution.TryNeutralEcology(desert, ownership))
+            {
+                CompleteR3Frame(desert, ownership);
+                return;
+            }
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
+            ownership = DB_BehaviorArbiter.ResolveFrame(
+                desert, DB_BehaviorOwner.NeutralEcology,
+                "NeutralEcology executor yielded after local-goal recheck");
+        }
+
         if (ExecuteNativeOwned(orig, self, desert, ownership))
         {
             CompleteR3Frame(desert, ownership);
@@ -368,11 +383,11 @@ internal static class DB_RainWorldHooks
             return false;
         if (!DB_BehaviorArbiter.IsPrimaryOwner(desert, owner)) return false;
 
-        // NativeSpecial already declares its social suppression in the winning proposal.
-        // Keep that semantic at the accepted top-level owner instead of re-hooking nested
-        // FleeFromRainUpdate solely to cancel Social a second time.
         if (ownership.WinningProposal.SuppressSocial)
+        {
             DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=" + owner);
+            DB_NeutralBehaviorRuntime.CancelForPriority(desert);
+        }
 
         orig(self);
         return true;
