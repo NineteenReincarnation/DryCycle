@@ -102,9 +102,9 @@ internal static class WalkableDynamicSurfaceRuntime
         if (states.TryGetValue(self, out RiderState state) && state.Surface != null)
         {
             // Jump() is the authoritative vanilla ground-jump event, including buffered jumps.
-            // Leave the injected ContactPoint intact for the remainder of this MovementUpdate just
-            // like a normal tile jump, but exit the moving velocity frame before vanilla applies
-            // its jump impulse.
+            // Detach before vanilla applies its impulse, but the cooldown below is directional:
+            // it prevents immediate sticky re-acquisition while rising and never suppresses a
+            // legitimate downward crossing back onto the surface.
             Detach(self, state, default, JumpDetachCooldown, inheritSurfaceVelocity: true);
         }
 
@@ -131,7 +131,10 @@ internal static class WalkableDynamicSurfaceRuntime
     {
         if (state.Surface == null)
         {
-            if (state.DetachCooldown == 0 && CanRide(player))
+            // A cooldown is not a collision blackout. TryAcquireSurface applies the stricter
+            // crossing-only rule while the cooldown is active, allowing a short jump arc to land
+            // back on the shell without making the player stick to it while still rising.
+            if (CanRide(player))
             {
                 BodyChunk acquisitionFeet = Feet(player);
                 if (acquisitionFeet != null && TryAcquireSurface(player, acquisitionFeet, state))
@@ -240,8 +243,7 @@ internal static class WalkableDynamicSurfaceRuntime
             return;
         }
 
-        if (state.DetachCooldown == 0)
-            TryAcquireSurface(player, feet, state);
+        TryAcquireSurface(player, feet, state);
     }
 
     private static bool TryAcquireSurface(Player player, BodyChunk feet, RiderState state)
@@ -262,9 +264,17 @@ internal static class WalkableDynamicSurfaceRuntime
                 continue;
 
             float distance = SignedFootDistance(feet, sample);
-            float previousDistance = PreviousSignedFootDistance(feet, sample);
+            float previousDistance = PreviousSignedFootDistance(feet, surface, sample);
             float relativeNormalVelocity = RelativeNormalVelocity(feet, sample);
             if (!ShouldAcquireContact(previousDistance, distance, relativeNormalVelocity))
+                continue;
+
+            // Detach cooldown is only an anti-stick/debounce window. During it we still permit a
+            // genuine outside -> inside crossing while moving toward the surface. This is the case
+            // produced by short jump arcs over a curved shell. Resting proximity and upward motion
+            // remain suppressed, so Jump() cannot immediately reattach on the same frame.
+            if (state.DetachCooldown > 0 &&
+                !ShouldAcquireDuringCooldown(previousDistance, distance, relativeNormalVelocity))
                 continue;
 
             float score = Mathf.Abs(distance) + Mathf.Max(0f, relativeNormalVelocity) * 0.5f;
@@ -293,6 +303,7 @@ internal static class WalkableDynamicSurfaceRuntime
         state.LastSurfacePoint = resolvedSample.Point;
         state.LastSurfaceVelocity = EffectiveSurfaceVelocity(resolvedSample.Velocity);
         state.DistanceBeforeMovement = SignedFootDistance(feet, resolvedSample);
+        state.DetachCooldown = 0;
         ApplyVanillaSurfaceState(player, bestSurface, resolvedSample);
         TrackRider(player);
         return true;
@@ -605,8 +616,20 @@ internal static class WalkableDynamicSurfaceRuntime
     private static float SignedFootDistance(BodyChunk feet, WalkableSurfaceSample sample) =>
         Vector2.Dot(feet.pos - sample.Point, sample.Normal) - feet.rad;
 
-    private static float PreviousSignedFootDistance(BodyChunk feet, WalkableSurfaceSample sample) =>
-        Vector2.Dot(feet.lastPos - sample.PreviousPoint, sample.Normal) - feet.rad;
+    private static float PreviousSignedFootDistance(
+        BodyChunk feet,
+        IWalkableDynamicSurface surface,
+        WalkableSurfaceSample currentSample)
+    {
+        // On a curved shell a jumping player may travel far enough sideways that the nearest
+        // segment changes between frames. Sampling lastPos independently prevents the current
+        // segment coordinate from being incorrectly reused for the previous-frame side test.
+        if (surface != null && surface.TrySample(feet.lastPos, out WalkableSurfaceSample previousSample) &&
+            IsSurfaceContactNormal(previousSample.Normal))
+            return Vector2.Dot(feet.lastPos - previousSample.PreviousPoint, previousSample.Normal) - feet.rad;
+
+        return Vector2.Dot(feet.lastPos - currentSample.PreviousPoint, currentSample.Normal) - feet.rad;
+    }
 
     private static float RelativeNormalVelocity(BodyChunk feet, WalkableSurfaceSample sample) =>
         Vector2.Dot(feet.vel - sample.Velocity, sample.Normal);
@@ -671,6 +694,15 @@ internal static class WalkableDynamicSurfaceRuntime
         bool restingNearSurface = currentDistance >= -1.5f && currentDistance <= AcquireAboveTolerance;
         return sweptDownThroughSurface || restingNearSurface;
     }
+
+    internal static bool ShouldAcquireDuringCooldown(
+        float previousDistance,
+        float currentDistance,
+        float relativeNormalVelocity) =>
+        relativeNormalVelocity < -0.05f &&
+        previousDistance > TargetFootGap &&
+        currentDistance <= TargetFootGap &&
+        currentDistance >= -AcquireBelowLimit;
 
     internal static bool ShouldDetachAfterMovement(
         float previousDistance,
