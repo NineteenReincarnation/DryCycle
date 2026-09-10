@@ -24,6 +24,7 @@ internal static partial class Program
             Directory.CreateDirectory(output);
             GenomeTests();
             RigTests();
+            PincerTests();
             TerrainTests();
             PlatformSurfaceTests();
             PlatformRuntimeTests();
