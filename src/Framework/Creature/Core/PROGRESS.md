@@ -18,9 +18,9 @@
 - 完成了别名只读保护。外部代码拿到 `Aliases` 后不能直接修改 Descriptor 内部保存的别名集合。
 - 完成了 `CreatureTemplate` 创建方式登记。`TemplateFactory` 是 Descriptor 唯一强制要求的工厂；没有模板创建方式的 Descriptor 不能正式注册。
 - 完成了 `CreatureState` 创建方式登记。开发者可以通过 `SetStateFactory` 或 `State` 提供自定义 State；没有填写时由 Registry 保留 Rain World 原本创建的 State。
-- 完成了实际 `Creature` 创建方式登记。开发者可以通过 `SetCreatureFactory` 或 `Realized` 提供房间内实际生物的创建方式；没有填写时由 Registry继续走 Rain World 原本的 Realize 流程。
+- 完成了实际 `Creature` 创建方式登记。开发者可以通过 `SetCreatureFactory` 或 `Realized` 提供房间内实际生物的创建方式；没有填写时由 Registry 继续走 Rain World 原本的 Realize 流程。
 - 完成了 `AbstractCreatureAI` 创建方式登记。开发者可以通过 `SetAbstractAIFactory` 或 `AbstractAI` 提供自定义抽象 AI；没有填写时保留 Rain World 原本的 AbstractAI。
-- 完成了实际 `ArtificialIntelligence` 创建方式登记。开发者可以通过 `SetRealizedAIFactory` 或 `AI` 提供实际 AI；没有填写时由 Registry继续走 Rain World 原本的 AI 创建流程。
+- 完成了实际 `ArtificialIntelligence` 创建方式登记。开发者可以通过 `SetRealizedAIFactory` 或 `AI` 提供实际 AI；没有填写时由 Registry 继续走 Rain World 原本的 AI 创建流程。
 - 完成了四个可选工厂的清除接口。State、实际 Creature、AbstractAI、实际 AI 都可以在注册前撤销自定义工厂并恢复“交给原版处理”的配置状态。
 - 完成了注册前验证。生物 Type 必须已经拥有有效 ExtEnum Index，Descriptor 必须已经填写 TemplateFactory。
 - 完成了注册后冻结。Descriptor 被 Registry 成功接收后，显示名称、别名和所有工厂都不能继续修改，避免 Registry 已建立索引后注册信息再次变化。
@@ -40,7 +40,10 @@
 - 完成了 Type Index 冲突检查。两个不同 Descriptor 占用同一个 ExtEnum Index 时直接报错。
 - 完成了标准名称与 Alias 冲突检查。一个生物的 Type 名称或 Alias 如果已经被另一个 Descriptor 占用，注册直接失败。
 - 完成了冲突报错信息。错误中会写出冲突值、已经占用该值的 OwnerId 和 Creature Type、新提交 Descriptor 的 OwnerId 和 Creature Type。
-- 完成了注册事务式检查。所有 Type、Index、名称、Alias 冲突检查全部通过后，Registry 才会把 Descriptor 写入各个索引并冻结；校验失败不会留下半份注册记录。
+- 完成了注册名称统一预处理。一次注册实际要写入的标准 Type 名称和 Alias 会先整理成同一份名称列表，冲突检查和正式写入使用完全相同的数据，不再各自重新计算一遍。
+- 完成了完整注册事务。Type、Index、名称、Alias 全部预检成功后才开始写 Registry；任何列表或索引写入失败时，本次已经写入的内容都会撤回。
+- 完成了冻结失败回滚。Descriptor 的 `Freeze()` 被放在本次 Registry 写入的最后一步；如果最终冻结失败，本次写入的 Descriptor 列表、Descriptor 集合、Type 名称索引、Type Index 索引和名称索引都会撤回。
+- 完成了失败注册的 Descriptor 状态保护。注册提交失败时不会留下“Descriptor 已经被冻结，但 Registry 只登记了一部分”的半完成状态。
 - 完成了注册时机保护。`StaticWorld.InitCustomTemplates` 开始后关闭新增生物注册；开发者如果再提交新的 Descriptor，会收到明确的“注册太晚”错误。
 - 完成了 Registry Hook 的幂等启用。`Enable` 重复调用不会重复挂 Hook。
 - 完成了 Registry Hook 的卸载。`Disable` 会移除本 Registry 安装的五个 Core Hook，但保留已经登记的 Descriptor，也不会重新开放已经关闭的注册阶段。
@@ -55,10 +58,13 @@
 - 完成了 `On.AbstractCreature.ctor` 接入。Rain World 原版构造先执行；只有 Descriptor 明确填写 StateFactory 或 AbstractAIFactory 时，Registry 才替换对应对象。
 - 完成了 State 原版回退。Descriptor 没有 StateFactory 时，Registry 不覆盖 `AbstractCreature.state`。
 - 完成了自定义 State 创建失败包装。StateFactory 抛出的异常会被包装成包含 Creature Type、OwnerId 和 factory 阶段的信息；返回 `null` 会直接报错。
+- 完成了 State 归属检查。StateFactory 返回的 `CreatureState.creature` 必须就是当前正在构造的 `AbstractCreature`；返回绑定到其他生物的 State 会在写入 `self.state` 之前直接报错。
 - 完成了 AbstractAI 原版回退。Descriptor 没有 AbstractAIFactory 时，Registry 不覆盖原版 `AbstractCreature.abstractAI`。
+- 完成了 AbstractAI 归属检查。AbstractAIFactory 返回对象的 `parent` 必须就是当前 `AbstractCreature`，`world` 必须就是当前生物所在的 `World`；任意一项错误都会在替换原版 AbstractAI 之前报错。
 - 完成了 AbstractAI 的 Den 信息保留。Rain World 原版构造阶段如果已经给默认 AbstractAI 写入 `privDenPos`，替换成自定义 AbstractAI 时会把这个巢穴位置迁过去。
 - 完成了 `On.AbstractCreature.Realize` 接入。Descriptor 没有实际 Creature 工厂时完整调用原版 Realize；有实际 Creature 工厂时由 Registry 创建并赋给 `realizedObject`。
 - 完成了实际 Creature 工厂空值和异常检查。返回 `null` 或抛异常时会明确指出 Creature Type、OwnerId 和 realized creature factory 阶段。
+- 完成了实际 Creature 归属检查。CreatureFactory 返回对象的 `Creature.abstractCreature` 必须就是当前正在 Realize 的 `AbstractCreature`；如果工厂误用了另一只生物，Registry 会在写入 `realizedObject` 之前报错。
 - 完成了自定义 Realize 后的原版流程保留。Registry 会继续执行原版针对已经存在 realized object 的检查，并保留 MSC 自定义 Realize 产生的挑战模式标记处理。
 - 完成了自定义 Realize 后的 AI 初始化。生物模板启用 AI 且存在 AbstractAI 时，Registry 会调用 `InitiateAI`。
 - 完成了自定义 Realize 后的 stuck object 实体化。与该 AbstractCreature 连接的 stuck object 两端如果尚未实体化，Registry 会继续调用它们的 `Realize`，保留 Rain World 原本的连接对象行为。
@@ -66,9 +72,11 @@
 - 完成了实际 AI 重复创建保护。`abstractAI.RealAI` 已经存在时不会再次调用 RealizedAIFactory。
 - 完成了实际 AI 前置条件检查。声明实际 AI 工厂但当前 `AbstractCreature` 没有 AbstractAI 时直接报错。
 - 完成了实际 AI 工厂空值和异常检查。返回 `null` 或抛异常时会明确指出 Creature Type、OwnerId 和 realized AI factory 阶段。
-- 完成了 `On.WorldLoader.CreatureTypeFromString` 接入。Registry 先调用 Rain World 原本的名称解析；原版已经识别成功时直接尊重原版结果，不让自定义 Alias 抢走原版名称。
-- 完成了自定义名称解析回退。只有原版名称解析没有得到结果时，Registry 才按已建立的标准名称和 Alias 索引查找自定义生物。
-- 完成了中英文双语 XML 注释。公开 Registry API 采用中文说明在上、英文说明在下的格式。
+- 完成了实际 AI 归属检查。RealizedAIFactory 返回对象的 `ArtificialIntelligence.creature` 必须就是当前正在初始化 AI 的 `AbstractCreature`；绑定到其他生物的 AI 不会被写入 `abstractAI.RealAI`。
+- 完成了 Factory 错误对象提前拦截。State、AbstractAI、实际 Creature、实际 AI 的归属错误都会在对象真正写回 Rain World 状态之前被拒绝，避免错误对象进入后续游戏更新流程后才暴露问题。
+- 完成了 `On.WorldLoader.CreatureTypeFromString` 接入。当前实现会先查询 Registry 的标准名称和 Alias；如果 Registry 没有匹配项，再调用 Rain World 原本的名称解析。
+- 完成了自定义名称解析。标准 Type 名称和 Alias 都通过已经建立的名称索引查找，不需要逐个扫描 Descriptor。
+- 完成了中英文双语 XML 注释。公开 Registry API 和本次新增的内部事务、Factory 归属说明采用中文说明在上、英文说明在下的格式。
 - Registry 当前只处理 CreatureDescriptor 登记、模板创建、State 创建、实际 Creature 创建、AbstractAI 创建、实际 AI 创建和 world 文件名称解析。它没有接管 Creature relationship、资源加载、Sandbox、DevTools、图标、Expedition 和生物行为逻辑。
 
 ## `src/Creatures/MantleCrab/MantleCrabDefinition.cs`
