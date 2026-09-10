@@ -42,6 +42,7 @@ internal static class DB_RainWorldHooks
         On.Fly.Burrowed += Burrow;
         On.FlyAI.Update += UpdateAI;
         On.FlyAI.UpdateThreats += Threats;
+        On.FlyAI.ConsiderOtherFly += ConsiderOtherFly;
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.SwarmUpdate += Swarm;
         On.FlyAI.UpdateFollowDijsktra += Follow;
@@ -59,6 +60,7 @@ internal static class DB_RainWorldHooks
         On.Fly.Burrowed -= Burrow;
         On.FlyAI.Update -= UpdateAI;
         On.FlyAI.UpdateThreats -= Threats;
+        On.FlyAI.ConsiderOtherFly -= ConsiderOtherFly;
         On.FlyAI.IdleUpdate -= Idle;
         On.FlyAI.SwarmUpdate -= Swarm;
         On.FlyAI.UpdateFollowDijsktra -= Follow;
@@ -417,6 +419,23 @@ internal static class DB_RainWorldHooks
     private static void Threats(On.FlyAI.orig_UpdateThreats orig, FlyAI self)
     {
         if (self.fly is not DB_Creature) orig(self);
+    }
+
+    private static void ConsiderOtherFly(On.FlyAI.orig_ConsiderOtherFly orig, FlyAI self)
+    {
+        if (self.fly is DB_Creature)
+        {
+            // Desert Batflies are intentionally absent from Room.fliesRoomAi. Allowing the
+            // vanilla neighbor pass to sample an ordinary Fly would nevertheless import that
+            // Fly's Dijkstra map, FlockBehavior, localGoal and chain attraction into DB idle
+            // flight. DB Threat/Signal/Social/NeutralEcology already own those semantics, so
+            // clear the transient vanilla neighbor instead of letting a mixed-species room
+            // recreate the old fixed-point flocking leak.
+            self.otherFly = null;
+            return;
+        }
+
+        orig(self);
     }
 
     private static void Idle(On.FlyAI.orig_IdleUpdate orig, FlyAI self)
