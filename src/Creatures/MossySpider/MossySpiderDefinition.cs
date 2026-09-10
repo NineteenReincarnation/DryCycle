@@ -1,21 +1,37 @@
-using System.Collections.Generic;
-using DryCycle.Registration;
+using DryCycle.Framework.Creature.Core;
 using UnityEngine;
+using CreatureTemplateBuilder = DryCycle.Registration.CreatureTemplateBuilder;
 
 namespace DryCycle.Creatures.MossySpider;
 
-internal sealed class MossySpiderDefinition : CreatureDefinition
+internal static class MossySpiderDefinition
 {
     private static readonly Color MossColor = new(0.48f, 0.52f, 0.22f);
 
-    internal MossySpiderDefinition() : base(MossySpiderEnums.Type)
+    /// <summary>
+    /// 把 MossySpider 的模板、实体、抽象 AI、实际 AI 和 world.txt 别名登记到新的 CreatureRegistry。
+    ///
+    /// Registers MossySpider's template, realized creature, abstract AI, realized AI, and world.txt alias through the new CreatureRegistry.
+    /// </summary>
+    internal static CreatureDescriptor Register()
     {
+        CreatureDescriptor descriptor = new CreatureDescriptor(
+                MossySpiderEnums.Type,
+                DryCycle.Plugin.ModId)
+            .Name("Mossy Spider")
+            .Alias("mossy spider")
+            .Template(CreateTemplate)
+            .Realized(CreateRealizedCreature)
+            .AbstractAI(CreateAbstractAI)
+            .AI(CreateRealizedAI);
+
+        return CreatureRegistry.Register(descriptor);
     }
 
-    internal override CreatureTemplate CreateTemplate()
+    private static CreatureTemplate CreateTemplate()
     {
         CreatureTemplateBuilder builder = new(
-            Type,
+            MossySpiderEnums.Type,
             "Mossy Spider")
         {
             // MossySpider owns its AI behavior while reusing Deer's existing pre-baked
@@ -104,25 +120,18 @@ internal sealed class MossySpiderDefinition : CreatureDefinition
         return 0;
     }
 
-    internal override Creature CreateRealizedCreature(AbstractCreature abstractCreature)
+    private static Creature CreateRealizedCreature(AbstractCreature abstractCreature)
     {
         return new MossySpider(abstractCreature, abstractCreature.world);
     }
 
-    internal override AbstractCreatureAI CreateAbstractAI(AbstractCreature abstractCreature)
+    private static AbstractCreatureAI CreateAbstractAI(AbstractCreature abstractCreature)
     {
         return new MossySpiderAbstractAI(abstractCreature.world, abstractCreature);
     }
 
-    internal override ArtificialIntelligence CreateRealizedAI(AbstractCreature abstractCreature)
+    private static ArtificialIntelligence CreateRealizedAI(AbstractCreature abstractCreature)
     {
         return new MossySpiderAI(abstractCreature, abstractCreature.world);
-    }
-
-    internal override IEnumerable<string> WorldFileAliases()
-    {
-        yield return "MossySpider";
-        yield return "mossyspider";
-        yield return "mossy spider";
     }
 }
