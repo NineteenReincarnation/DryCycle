@@ -5,9 +5,9 @@ using UnityEngine;
 namespace DryCycle.Creatures.DesertBatfly;
 
 /// <summary>
-/// Signal emitter/transport facade. Receiver belief, confidence, generation de-duplication and
+/// Signal emitter/transport runtime. Receiver belief, confidence, generation de-duplication and
 /// interpretation belong to DB_PerceptionRuntime. This type owns packet creation, emitter
-/// cadence, display state and compatibility reads only; it never creates behavior state.
+/// cadence and display state only; it never creates receiver or behavior state.
 /// </summary>
 internal static class DB_SignalRuntime
 {
@@ -164,51 +164,6 @@ internal static class DB_SignalRuntime
         return packet;
     }
 
-    /// <summary>
-    /// Compatibility forwarding surface for callers not yet migrated to Perception R2. No
-    /// receiver state or response semantics live here.
-    /// </summary>
-    internal static bool ReceivePacket(
-        DB_Creature receiver,
-        DB_SignalPacket packet,
-        out bool relayAlarm)
-    {
-        relayAlarm = false;
-        DB_PerceptionRuntime perception = receiver?.DesertAI?.Perception;
-        return perception != null && perception.ReceiveSignal(packet, out relayAlarm);
-    }
-
-    /// <summary>
-    /// Transitional compatibility view. Consumers can migrate independently without keeping a
-    /// second signal-receiver state. The returned values are copied from Perception R2.
-    /// </summary>
-    internal static bool TryGetInfluence(DB_Creature bat, out DB_SignalInfluence influence)
-    {
-        influence = default;
-        DB_PerceptionRuntime perception = bat?.DesertAI?.Perception;
-        if (perception == null ||
-            !perception.TryGetSignalContext(out DB_PerceptionSignalContext signal))
-            return false;
-
-        influence = new DB_SignalInfluence(
-            signal.AlarmPressure,
-            signal.AlarmOrigin,
-            signal.AlarmThreat,
-            signal.DistressInterest,
-            signal.DistressSource,
-            signal.RallyInterest,
-            signal.RallySource,
-            signal.RallyTarget,
-            signal.RoostInterest,
-            signal.RoostSource,
-            signal.HarassInterest,
-            signal.HarassSource,
-            signal.HarassTarget,
-            signal.SafeConfidence,
-            signal.LastReason);
-        return true;
-    }
-
     internal static bool TryGetDisplay(DB_Creature bat, out DB_SignalDisplayState display)
     {
         display = default;
@@ -220,46 +175,6 @@ internal static class DB_SignalRuntime
             state.Display.Intensity,
             state.DisplayUntil - clock,
             state.Display.Direction);
-        return true;
-    }
-
-    internal static bool TryGetDebugState(DB_Creature bat, out DB_SignalDebugState debug)
-    {
-        debug = default;
-        DB_PerceptionRuntime perception = bat?.DesertAI?.Perception;
-        if (perception == null) return false;
-
-        DB_PerceptionSignalContext signal = perception.Snapshot.Signals;
-        DB_SignalInfluence influence = new(
-            signal.AlarmPressure,
-            signal.AlarmOrigin,
-            signal.AlarmThreat,
-            signal.DistressInterest,
-            signal.DistressSource,
-            signal.RallyInterest,
-            signal.RallySource,
-            signal.RallyTarget,
-            signal.RoostInterest,
-            signal.RoostSource,
-            signal.HarassInterest,
-            signal.HarassSource,
-            signal.HarassTarget,
-            signal.SafeConfidence,
-            signal.LastReason);
-        DB_SignalPerception legacyPerception = perception.LastSignalModality switch
-        {
-            DB_PerceptionModality.Visual => DB_SignalPerception.Visual,
-            DB_PerceptionModality.Acoustic => DB_SignalPerception.CloseAcoustic,
-            _ => DB_SignalPerception.None
-        };
-        debug = new DB_SignalDebugState(
-            influence,
-            perception.LastSignalGeneration,
-            perception.LastSignalKind,
-            legacyPerception,
-            perception.LastSignalHop,
-            perception.LastSignalDecision,
-            DB_SignalRoomRuntime.For(bat.room)?.Count ?? 0);
         return true;
     }
 
