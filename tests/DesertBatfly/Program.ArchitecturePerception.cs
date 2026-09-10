@@ -14,7 +14,6 @@ internal static partial class Program
         Type perceptionScoring = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionScoring", true);
         Type perceptionSource = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionSource", true);
         Type perceptionModality = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_PerceptionModality", true);
-        Type legacyCreaturePerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", true);
         Type weaponPerception = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_WeaponPerception", true);
         Type heldObservation = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_HeldThreatObservation", true);
         Type ai = mod.GetType("DryCycle.Creatures.DesertBatfly.DB_AI", true);
@@ -52,10 +51,14 @@ internal static partial class Program
         Check(perception.GetMethod("RefreshState", Flags) != null &&
               perception.GetProperty("Snapshot", Flags) != null &&
               perception.GetMethod("TryGetIncomingProjectile", Flags) != null &&
+              perception.GetMethod("TryGetSignalContext", Flags) != null &&
+              perception.GetMethod("ReceiveSignal", Flags) != null &&
               perception.GetMethod("TryGetDebugState", Flags) != null,
-            "Perception R2 exposes one receiver refresh/snapshot/debug surface");
-        Check(legacyCreaturePerception.BaseType == perception,
-            "Perception R2 legacy creature type is a zero-policy bridge over the unified runtime during staged migration");
+            "Perception R2 exposes one receiver refresh/snapshot/signal/debug surface");
+        Check(ai.GetProperty("Perception", Flags)?.PropertyType == perception,
+            "DB_AI now owns DB_PerceptionRuntime directly with no transitional creature-perception type");
+        Check(mod.GetType("DryCycle.Creatures.DesertBatfly.DB_CreaturePerception", false) == null,
+            "retired DB_CreaturePerception bridge is absent after direct R2 ownership migration");
 
         foreach (string field in new[]
         {
@@ -114,11 +117,17 @@ internal static partial class Program
               (bool)shouldSwitch.Invoke(null, new object[] { 0.70f, 0.71f, 0.9f, true }),
             "Perception R2 attention hysteresis rejects micro-switches but allows material or imminent challenges");
 
-        // Equal scores use a stable key rather than candidate enumeration order.
-        bool key10WinsFrom20 = (bool)betterScore.Invoke(null, new object[] { 0.5f, 10, 0.5f, 20 });
-        bool key20LosesTo10 = (bool)betterScore.Invoke(null, new object[] { 0.5f, 20, 0.5f, 10 });
-        Check(key10WinsFrom20 && !key20LosesTo10,
-            "Perception R2 exact-score ties resolve by stable identity, not RoomContext enumeration order");
+        // Equal scores use a stable key rather than candidate enumeration order. Exercise a
+        // larger identity range so this stays an ordering contract rather than one hard-coded pair.
+        bool stableTieOrder = true;
+        for (int key = 2; key < 128; key++)
+        {
+            bool lowerWins = (bool)betterScore.Invoke(null, new object[] { 0.5f, key - 1, 0.5f, key });
+            bool higherLoses = (bool)betterScore.Invoke(null, new object[] { 0.5f, key, 0.5f, key - 1 });
+            stableTieOrder &= lowerWins && !higherLoses;
+        }
+        Check(stableTieOrder,
+            "Perception R2 exact-score ties resolve deterministically by stable identity across candidate orderings");
 
         MethodInfo scanCreatures = perception.GetMethod("ScanCreatures", Flags);
         MethodInfo scanProjectiles = perception.GetMethod("RefreshIncomingProjectile", Flags);
@@ -154,18 +163,19 @@ internal static partial class Program
               !MethodWritesField(scanProjectiles, typeof(BodyChunk), "vel"),
             "Perception R2 receiver never writes BodyChunk velocity or owns locomotion");
 
-        // Staged migration contract: long-term threat memory and signal transport stay in their
-        // existing domains while receiver semantics move behind the R2 snapshot.
+        // Long-term threat memory and signal transport stay in their existing domains while
+        // receiver semantics live behind the R2 snapshot. Held-item observation is the one
+        // remaining WeaponPerception migration bridge and is removed in the next cleanup.
         Check(threat.GetMethod("RefreshState", Flags) != null &&
               signalDefinition.GetMethod("For", Flags) != null &&
               signalRuntime.GetMethod("EmitAlarm", Flags) != null,
             "Perception R2 preserves Threat memory/assessment and Signal emission/transport domain boundaries");
         Check(weaponPerception.GetMethod("TryObserveHeldThreats", Flags) != null &&
               heldObservation.GetField("VisibleSpear", Flags) != null,
-            "Perception R2 phase one keeps the held-item migration bridge until Threat consumers move to the snapshot");
+            "Perception R2 retains only the explicit held-item migration bridge for current Threat consumers");
         Check(ai.GetMethod("ScanWeapons", Flags) == null && ai.GetMethod("ScanCreatures", Flags) == null,
             "Perception R2 does not resurrect DB_AI scanning facades");
 
-        Console.WriteLine("Architecture Perception R2 phase one: fixed perception slots, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.");
+        Console.WriteLine("Architecture Perception R2: direct DB_AI ownership, fixed perception slots, order-independent attention/projectile scoring, bounded lost tracking, relay confidence, hysteresis, staggered scans and ownership separation verified.");
     }
 }
