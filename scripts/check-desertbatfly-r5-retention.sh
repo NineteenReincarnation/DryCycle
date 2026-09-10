@@ -42,9 +42,17 @@ grep -q 'DB_EnvironmentalPolicy.AcceptSandstormEmergencyRefuge' src/Creatures/De
 ! grep -RIn --include='*.cs' 'LeaveRoom(' src/Creatures/DesertBatfly/World/Environment
 ! grep -RIn --include='*.cs' 'new DB_TravelIntent\|RequestPermanentMigration\|ConvertToReturnHome' src/Creatures/DesertBatfly/World/Environment
 
-grep -q 'AnonymousAlarmEscapeThreshold = 0.34f' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
-grep -q 'ThreatAlarmEscapeThreshold = 0.30f' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
-grep -q 'DB_ThreatMemoryStore.For(receiver.DesertState, slot)' src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
+# R2 moved receiver interpretation out of SignalRuntime. Preserve the old alarm thresholds and
+# receiver-local threat-memory modulation at their new Perception owner, while keeping Signals
+# free of receiver behavior and persistent-memory writes.
+PERCEPTION='src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs'
+SIGNAL='src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs'
+grep -q 'ReportedAnonymousHazardThreshold = 0.34f' "$PERCEPTION"
+grep -q 'ReportedThreatDangerThreshold = 0.30f' "$PERCEPTION"
+grep -q 'DB_ThreatMemoryStore.For(fly.DesertState, slot)' "$PERCEPTION"
+grep -q 'internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)' "$PERCEPTION"
+! grep -q 'ThreatenedAt' "$SIGNAL"
+! grep -q 'DB_SocialRuntime.CancelForPriority' "$SIGNAL"
 test "$(grep -c 'DB_SignalRuntime.EmitAcuteAlarm' src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatRuntime.cs)" -ge 3
 grep -q 'DB_SignalRuntime.EmitDistress' src/Creatures/DesertBatfly/Core/Runtime/DB_EventConsumers.cs
 # Rally is a Vengeance-domain action: it must remain on the arming path after the Fear/Vengeance split.
@@ -59,4 +67,4 @@ printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly
 printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs'
 printf '%s\n' "${runtime_patch_users[@]}" | grep -qx 'src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs'
 
-echo 'R5 retention audit passed: no internal Bridge/RuntimeDetour debt; reflection is limited to Sandbox/Warp integration.'
+echo 'R5 retention audit passed: no internal Bridge/RuntimeDetour debt; reflection is limited to Sandbox/Warp integration; Signal receiver semantics are retained by Perception R2.'
