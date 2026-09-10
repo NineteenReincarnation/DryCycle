@@ -79,12 +79,14 @@ internal static class DB_SocialBond
             ? source.DesertState.GriefStrength * source.DesertState.GriefAnger * 0.15f : 0f;
 
         float signal = 0f;
-        if (DB_SignalRuntime.TryGetInfluence(source, out DB_SignalInfluence influence))
+        DB_PerceptionRuntime perception = source.DesertAI?.Perception;
+        if (perception != null &&
+            perception.TryGetSignalContext(out DB_PerceptionSignalContext signalContext))
         {
-            if (victim != null && influence.DistressSource == victim)
-                signal += influence.DistressInterest * 0.20f;
-            if (threat != null && influence.RallyTarget == threat)
-                signal += influence.RallyInterest * 0.16f;
+            if (victim != null && signalContext.DistressSource == victim)
+                signal += signalContext.DistressInterest * 0.20f;
+            if (threat != null && signalContext.RallyTarget == threat)
+                signal += signalContext.RallyInterest * 0.16f;
         }
 
         return GetBondStrength(source, victim) * 0.18f + grief + signal;
