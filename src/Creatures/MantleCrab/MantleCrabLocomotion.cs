@@ -18,15 +18,18 @@ internal sealed class MantleCrabLocomotion
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
+    private readonly MantleCrabTraversalPlanner traversal;
     private int lastStepIndex = -1;
     private int startCooldown;
 
     internal float MoveIntent { get; private set; }
     internal float TurnIntent { get; private set; }
+    internal MantleCrabTraversalPlanner Traversal => traversal;
 
     internal MantleCrabLocomotion(MantleCrab crab)
     {
         this.crab = crab;
+        traversal = new MantleCrabTraversalPlanner(crab);
     }
 
     internal void Reset()
@@ -35,6 +38,7 @@ internal sealed class MantleCrabLocomotion
         TurnIntent = 0f;
         lastStepIndex = -1;
         startCooldown = 0;
+        traversal.Reset();
         for (int i = 0; i < stepCooldown.Length; i++)
             stepCooldown[i] = 0;
     }
@@ -45,8 +49,12 @@ internal sealed class MantleCrabLocomotion
         TurnIntent = Mathf.Clamp(turn, -1f, 1f);
     }
 
+    internal float DesiredStandHeight(MantleCrabLimb leg) => traversal.DesiredStandHeight(leg);
+
     internal void UpdateStepPlanning()
     {
+        traversal.Update(MoveIntent);
+
         for (int i = 0; i < stepCooldown.Length; i++)
             if (stepCooldown[i] > 0) stepCooldown[i]--;
 
@@ -68,9 +76,8 @@ internal sealed class MantleCrabLocomotion
         if (swinging >= 2 || startCooldown > 0)
             return;
 
+        // 第一只脚已经接近落地时才允许第二只脚开始摆动。
         // A second leg may only leave the ground while the first is already settling.
-        // The support-interval test below still has final authority, so this overlap cannot
-        // remove both supports from the same side of the shell.
         if (swinging == 1 && furthestSwingProgress < SecondStepProgress)
             return;
 
@@ -85,6 +92,9 @@ internal sealed class MantleCrabLocomotion
             if (!leg.Planted || leg.Swinging)
                 continue;
 
+            if (!traversal.AllowLift(leg))
+                continue;
+
             Vector2 anchor = crab.Anchor(leg);
             float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
             bool emergency = stretch > .955f;
@@ -97,6 +107,7 @@ internal sealed class MantleCrabLocomotion
             float alongError = Mathf.Abs(Vector2.Dot(desired - leg.Contact, axis));
             float urgency = alongError / Mathf.Max(18f, 30f * crab.ShellScale);
             urgency += Mathf.InverseLerp(.78f, .96f, stretch) * 1.35f;
+            urgency *= traversal.UrgencyMultiplier(leg);
 
             if (lastStepIndex >= 0)
             {
@@ -124,7 +135,7 @@ internal sealed class MantleCrabLocomotion
             return;
 
         lastStepIndex = candidate;
-        stepCooldown[candidate] = 22;
+        stepCooldown[candidate] = traversal.StepCooldown(steppingLeg);
         startCooldown = 3;
     }
 
@@ -138,8 +149,12 @@ internal sealed class MantleCrabLocomotion
         Vector2 velocity = BodyVelocity();
         float speed = Vector2.Dot(velocity, axis);
         float supportFactor = Mathf.InverseLerp(1f, 4f, crab.SupportingFeet);
+        float effectiveMove = traversal.EffectiveMoveIntent(MoveIntent);
 
-        float targetSpeed = MoveIntent * MaxGroundSpeed * Mathf.Lerp(.72f, 1f, supportFactor);
+        // 粗糙地形先保证支撑，再追求速度；推进仍由已着地的腿施加到各自锚点。
+        // Rough terrain prioritizes support over speed. Propulsion still enters the rigid shell
+        // through the anchors of planted legs rather than by translating the shell directly.
+        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.72f, 1f, supportFactor);
         float acceleration = Mathf.Clamp((targetSpeed - speed) * .11f, -MaxGroundAcceleration, MaxGroundAcceleration);
         int planted = 0;
         for (int i = 0; i < crab.Legs.Length; i++)
@@ -170,7 +185,7 @@ internal sealed class MantleCrabLocomotion
         }
 
         float angularVelocity = angularMomentum / Mathf.Max(1f, inertia);
-        float targetAngularVelocity = TurnIntent * MaxTurnSpeed * Mathf.Lerp(1f, .55f, Mathf.Abs(MoveIntent));
+        float targetAngularVelocity = TurnIntent * MaxTurnSpeed * Mathf.Lerp(1f, .55f, Mathf.Abs(effectiveMove));
         float angularAcceleration = Mathf.Clamp(
             targetAngularVelocity - angularVelocity,
             -MaxTurnAcceleration,
@@ -179,8 +194,8 @@ internal sealed class MantleCrabLocomotion
         if (Mathf.Abs(angularAcceleration) < .000001f)
             return;
 
-        // Pure rotational impulse: every shell chunk receives the velocity change appropriate
-        // for its radius. The rigid-shell projection that follows preserves this angular momentum.
+        // 只施加转动冲量；后面的刚体投影负责保留这部分角动量。
+        // Apply a pure rotational impulse. The rigid-shell projection that follows preserves it.
         for (int i = 0; i < crab.bodyChunks.Length; i++)
         {
             BodyChunk chunk = crab.bodyChunks[i];
@@ -194,7 +209,8 @@ internal sealed class MantleCrabLocomotion
         Vector2 rest = TransformLocal(leg.RestTipOffset);
         float inputLead = MoveIntent * Mathf.Lerp(25f, 48f, Mathf.Abs(MoveIntent)) * crab.ShellScale;
         float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 6f, -24f, 24f) * crab.ShellScale;
-        return anchor + rest + axis * (inputLead + velocityLead);
+        Vector2 nominal = anchor + rest + axis * (inputLead + velocityLead);
+        return traversal.AdjustLanding(leg, nominal, axis);
     }
 
     private bool CanLift(int candidate)
