@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 AI='src/Creatures/DesertBatfly/Behavior/DB_AI.cs'
-PERCEPTION='src/Creatures/DesertBatfly/Behavior/Perception/DB_CreaturePerception.cs'
+PERCEPTION='src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs'
 INJURY='src/Creatures/DesertBatfly/Behavior/Injury/DB_InjuryRecovery.cs'
 EXECUTION='src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorExecution.cs'
 SWARM='src/Creatures/DesertBatfly/Behavior/DB_SwarmLifecycleRuntime.cs'
@@ -28,7 +28,7 @@ grep -q 'ai.RetreatTicks' "$OBS"
 grep -q 'ai.Perception.PursuitTicks' "$OBS"
 grep -q 'ai.EscapeFrom' "$OBS"
 grep -q 'DB_RestraintPolicy.IsRestrainedByNonFly(bat)' "$OBS"
-grep -q 'internal int PursuitTicks => pursuit;' "$PERCEPTION"
+grep -q 'internal int PursuitTicks' "$PERCEPTION"
 grep -q 'internal int RetreatTicks => retreat;' "$AI"
 grep -q 'internal Vector2 EscapeFrom => escapeFrom;' "$AI"
 
