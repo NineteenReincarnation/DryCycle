@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Deterministic behavioral invariants for DesertBatfly Perception R2.
 
-This is not a Unity simulation. It mirrors the pure scoring contracts in
-DB_PerceptionScoring and stress-tests ordering, monotonicity and boundedness.
+This is not a Unity simulation. It mirrors the pure scoring/selection contracts in
+DB_PerceptionScoring and DB_PerceptionRuntime and stress-tests ordering, monotonicity
+and boundedness.
 """
 from __future__ import annotations
 
-import itertools
 import math
 import random
 
@@ -132,6 +132,28 @@ def choose_projectile(items):
     return best
 
 
+def choose_observed_player(candidates, preferred_slot, max_distance):
+    """Mirror the fixed four-slot Perception cache and preferred/nearest read policy."""
+    by_slot = {}
+    for slot, distance in candidates:
+        if slot < 0 or slot >= 4 or distance < 0.0:
+            continue
+        previous = by_slot.get(slot)
+        if previous is None or distance <= previous:
+            by_slot[slot] = distance
+
+    if preferred_slot is not None and preferred_slot in by_slot:
+        if by_slot[preferred_slot] <= max_distance:
+            return preferred_slot
+
+    ranked = [
+        (distance, slot)
+        for slot, distance in by_slot.items()
+        if distance <= max_distance
+    ]
+    return min(ranked)[1] if ranked else None
+
+
 def main() -> None:
     rng = random.Random(0xD35E47)
 
@@ -170,7 +192,28 @@ def main() -> None:
     imminent_spear = projectile_risk(0.30, 3.0, 38.0, 15.0, 1.0, 0.92, 0.0)
     assert imminent_spear > grazing_rock
 
-    # 3. Relay reports may never become more certain as hop count increases.
+    # 3. Current observed-player selection is stable: a valid preferred target wins,
+    # otherwise nearest visible slot wins and exact distance ties use the lower slot.
+    fixture = [(0, 180.0), (1, 95.0), (2, 95.0), (3, 260.0)]
+    assert choose_observed_player(fixture, 0, 200.0) == 0
+    assert choose_observed_player(fixture, 3, 200.0) == 1
+    assert choose_observed_player(fixture, None, 200.0) == 1
+    assert choose_observed_player(fixture, None, 80.0) is None
+
+    for _ in range(5000):
+        candidates = [
+            (rng.randrange(0, 4), rng.uniform(10.0, 450.0))
+            for _ in range(rng.randint(1, 10))
+        ]
+        preferred = rng.randrange(0, 4) if rng.random() < 0.7 else None
+        max_distance = rng.uniform(40.0, 430.0)
+        expected = choose_observed_player(candidates, preferred, max_distance)
+        for _ in range(5):
+            shuffled = list(candidates)
+            rng.shuffle(shuffled)
+            assert choose_observed_player(shuffled, preferred, max_distance) == expected
+
+    # 4. Relay reports may never become more certain as hop count increases.
     for _ in range(10000):
         args = (rng.random(), rng.random(), rng.random(), rng.random())
         root = signal_confidence(args[0], args[1], 0, args[2], args[3], False)
@@ -180,30 +223,34 @@ def main() -> None:
         acoustic = signal_confidence(args[0], args[1], 0, args[2], args[3], True)
         assert acoustic <= root + 1e-9
 
-    # 4. Lost target belief is bounded and strictly non-increasing.
+    # 5. Lost target belief is bounded and strictly non-increasing.
     for initial in (0.15, 0.35, 0.7, 1.0):
         values = [lost_confidence(initial, age) for age in range(LOST_TRACK_MAX_TICKS + 1)]
         assert all(a + 1e-9 >= b for a, b in zip(values, values[1:]))
         assert values[-1] == 0.0
 
-    # 5. Attention hysteresis must suppress micro-churn while still allowing material danger.
+    # 6. Attention hysteresis must suppress micro-churn while still allowing material danger.
     assert not should_switch(0.70, 0.72, 0.90, False)
     assert should_switch(0.70, 0.90, 0.90, False)
     assert should_switch(0.70, 0.71, 0.90, True)
 
-    # 6. Fog lowers direct confidence; it cannot increase direct certainty.
+    # 7. Fog lowers direct confidence; it cannot increase direct certainty.
     for _ in range(10000):
         distance = rng.uniform(0.0, 430.0)
         clear = direct_confidence(430.0, distance, 1.0)
         fog = direct_confidence(430.0, distance, rng.uniform(0.1, 0.6))
         assert fog <= clear + 1e-9
 
-    # 7. Nerve changes ambiguity sensitivity but cannot create a threat from zero evidence.
+    # 8. Nerve changes ambiguity sensitivity but cannot create a threat from zero evidence.
     for nerve in (0.0, 0.5, 1.0):
         assert threat_score(0.0, 50.0, 180.0, 8.0, 1.0, 1.0, 1.0, nerve) == 0.0
         assert threat_score(0.8, 50.0, 180.0, 8.0, 1.0, 0.0, 1.0, nerve) == 0.0
 
-    print("Perception R2 prediction audit passed: 5k threat permutations, 5k projectile permutations, 10k relay/fog cases, lost-track monotonicity and hysteresis invariants verified.")
+    print(
+        "Perception R2 prediction audit passed: 5k threat permutations, 5k projectile "
+        "permutations, 5k observed-player permutations, 10k relay/fog cases, lost-track "
+        "monotonicity and hysteresis invariants verified."
+    )
 
 
 if __name__ == "__main__":
