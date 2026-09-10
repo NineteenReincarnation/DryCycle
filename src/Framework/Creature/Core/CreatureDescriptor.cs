@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace DryCycle.Framework.Creature.Core;
 
@@ -12,7 +13,9 @@ namespace DryCycle.Framework.Creature.Core;
 /// </summary>
 public sealed class CreatureDescriptor
 {
-    private readonly HashSet<string> _aliases = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _aliases = new();
+    private readonly HashSet<string> _aliasSet = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ReadOnlyCollection<string> _readOnlyAliases;
     private bool _isFrozen;
 
     public CreatureDescriptor(CreatureTemplate.Type type, string ownerId)
@@ -31,6 +34,7 @@ public sealed class CreatureDescriptor
 
         OwnerId = ownerId.Trim();
         DisplayName = type.value;
+        _readOnlyAliases = _aliases.AsReadOnly();
     }
 
     /// <summary>
@@ -45,16 +49,16 @@ public sealed class CreatureDescriptor
     public string OwnerId { get; }
 
     /// <summary>
-    /// Human-readable creature name. Defaults to <see cref="CreatureTemplate.Type.value"/>.
+    /// Human-readable creature name. Defaults to the creature type value.
     /// </summary>
     public string DisplayName { get; private set; }
 
     /// <summary>
-    /// Additional case-insensitive names accepted for this creature.
-    /// The canonical <see cref="CreatureTemplate.Type.value"/> is not required here;
-    /// the registry always indexes it separately.
+    /// Additional case-insensitive names accepted for this creature, in declaration order.
+    /// The canonical creature type value is not required here; the registry indexes it
+    /// separately. The returned collection cannot mutate the descriptor.
     /// </summary>
-    public IReadOnlyCollection<string> Aliases => _aliases;
+    public IReadOnlyList<string> Aliases => _readOnlyAliases;
 
     /// <summary>
     /// Creates the creature template inserted into StaticWorld.
@@ -110,7 +114,11 @@ public sealed class CreatureDescriptor
         ThrowIfFrozen();
 
         string normalized = NormalizeAlias(alias);
-        _aliases.Add(normalized);
+        if (_aliasSet.Add(normalized))
+        {
+            _aliases.Add(normalized);
+        }
+
         return this;
     }
 
@@ -140,13 +148,29 @@ public sealed class CreatureDescriptor
             return false;
         }
 
-        return _aliases.Remove(alias.Trim());
+        string normalized = alias.Trim();
+        if (!_aliasSet.Remove(normalized))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < _aliases.Count; i++)
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(_aliases[i], normalized))
+            {
+                _aliases.RemoveAt(i);
+                break;
+            }
+        }
+
+        return true;
     }
 
     public CreatureDescriptor ClearAliases()
     {
         ThrowIfFrozen();
         _aliases.Clear();
+        _aliasSet.Clear();
         return this;
     }
 
