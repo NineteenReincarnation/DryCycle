@@ -28,6 +28,7 @@ internal static partial class Program
             TerrainTests();
             PlatformSurfaceTests();
             PlatformRuntimeTests();
+            MaterialTests();
             GeometryTests();
 
             Console.WriteLine(
