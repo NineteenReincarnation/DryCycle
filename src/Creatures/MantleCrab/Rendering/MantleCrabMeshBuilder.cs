@@ -7,6 +7,7 @@ internal enum MantleCrabMaterial { Shell, Leg, Joint, Foot, Pincer, Eye, Fringe 
 internal static class MantleCrabMeshBuilder
 {
     internal const int TileSize = 128, MaterialCount = 7;
+    internal const float FootRootFraction = .61f;
 
     internal static TriangleMesh Grid(string atlas, int columns, int rows, MantleCrabMaterial material)
     {
@@ -34,6 +35,15 @@ internal static class MantleCrabMeshBuilder
         ((int)material * TileSize + .5f + uv.x * (TileSize - 1)) / (TileSize * MaterialCount),
         (.5f + uv.y * (TileSize - 1)) / (TileSize * 2));
 
+    internal static Vector2 FootRoot(Vector2 ankle, Vector2 tip) =>
+        Vector2.Lerp(ankle, tip, FootRootFraction);
+
+    internal static float WalkingJointTrim(float halfWidth) =>
+        Mathf.Clamp(halfWidth * .88f, 2.25f, 5.4f);
+
+    internal static float PincerJointTrim(float halfWidth) =>
+        Mathf.Clamp(halfWidth * .62f, 1.55f, 3.5f);
+
     internal static void Segment(
         TriangleMesh mesh,
         int columns,
@@ -49,29 +59,9 @@ internal static class MantleCrabMeshBuilder
         Vector2 axis = direction.normalized;
         Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
 
-        // Walking-leg joint sprites arrive here as very short, relatively wide segments. Treat
-        // those as actual exoskeletal hinge capsules rather than miniature tapered rods. Eye
-        // stalks remain in the ordinary thin-segment branch below.
-        bool hinge = width >= 1.25f && taper >= .45f;
-        if (hinge)
-        {
-            Vector2 center = (start + end) * .5f;
-            float halfLength = Mathf.Max(direction.magnitude * .5f, width * 1.08f);
-            for (int y = 0; y <= rows; y++)
-            for (int x = 0; x <= columns; x++)
-            {
-                float u = x / (float)columns * 2f - 1f;
-                float v = y / (float)rows * 2f - 1f;
-                float cap = Mathf.Sqrt(Mathf.Max(0f, 1f - u * u));
-                float waist = .78f + cap * .30f;
-                float bevel = 1f - .08f * Mathf.Abs(v);
-                mesh.MoveVertice(
-                    y * (columns + 1) + x,
-                    center + axis * (u * halfLength) + cross * (v * width * waist * bevel) - camera);
-            }
-            return;
-        }
-
+        // Legacy short segments are retained for eye stalks and compatibility callers. Dedicated
+        // appendage joints use JointCapsule below so a tiny connector can no longer accidentally
+        // inherit a limb-shaft silhouette.
         for (int y = 0; y <= rows; y++)
         for (int x = 0; x <= columns; x++)
         {
@@ -106,9 +96,6 @@ internal static class MantleCrabMeshBuilder
             Vector2 p;
             if (block)
             {
-                // Pincer-arm joints use a faceted hinge plate with a slight central waist. It is
-                // deliberately asymmetric in the longitudinal direction so it reads as two shell
-                // pieces overlapping around an articulation rather than a generic oval bead.
                 float cap = Mathf.Sqrt(Mathf.Max(0f, 1f - u * u));
                 float longitudinal = u * (.88f + .08f * (1f - Mathf.Abs(v)));
                 float lateral = v * (.78f + cap * .28f) * (1f - .07f * Mathf.Abs(u));
@@ -123,6 +110,52 @@ internal static class MantleCrabMeshBuilder
             mesh.MoveVertice(
                 y * (columns + 1) + x,
                 center + axis * (p.x * width) + cross * (p.y * height) - camera);
+        }
+    }
+
+    /// <summary>
+    /// A fitted exoskeletal articulation. Shafts are trimmed before entering this mesh, so the
+    /// capsule is actual anatomy rather than an oval painted over two intersecting rods. The UV
+    /// centre maps to the material's cavity mask and therefore reads as a recessed membrane.
+    /// </summary>
+    internal static void JointCapsule(
+        TriangleMesh mesh,
+        int columns,
+        int rows,
+        Vector2 center,
+        Vector2 incoming,
+        Vector2 outgoing,
+        float halfWidth,
+        bool slender,
+        Vector2 camera)
+    {
+        if (incoming.sqrMagnitude < .0001f) incoming = Vector2.down;
+        if (outgoing.sqrMagnitude < .0001f) outgoing = incoming;
+        incoming.Normalize();
+        outgoing.Normalize();
+
+        Vector2 axis = incoming + outgoing;
+        if (axis.sqrMagnitude < .0001f) axis = outgoing;
+        axis.Normalize();
+        Vector2 cross = MantleCrabRenderingMath.Perpendicular(axis);
+
+        float bend = Mathf.Clamp01((1f - Vector2.Dot(incoming, outgoing)) * .5f);
+        float halfLength = halfWidth * (slender ? Mathf.Lerp(.60f, .74f, bend) : Mathf.Lerp(.74f, .94f, bend));
+        float lateral = halfWidth * (slender ? 1.00f : 1.13f);
+
+        for (int y = 0; y <= rows; y++)
+        for (int x = 0; x <= columns; x++)
+        {
+            float u = x / (float)columns * 2f - 1f;
+            float v = y / (float)rows * 2f - 1f;
+            float cap = Mathf.Sqrt(Mathf.Max(0f, 1f - u * u));
+            float rim = .78f + cap * .25f;
+            float bevel = 1f - .08f * Mathf.Abs(v);
+            float centreCompression = 1f - .08f * (1f - Mathf.Abs(u)) * bend;
+            Vector2 point = center +
+                            axis * (u * halfLength * centreCompression) +
+                            cross * (v * lateral * rim * bevel);
+            mesh.MoveVertice(y * (columns + 1) + x, point - camera);
         }
     }
 
@@ -147,8 +180,7 @@ internal static class MantleCrabMeshBuilder
             float v = y / (float)rows * 2f - 1f;
 
             // V3 exoskeletal profile: collar -> load-bearing belly -> narrowed shaft -> terminal
-            // collar. The difference is intentionally visible at normal Rain World zoom, so the
-            // long legs read as plates joined by hinges instead of four straight pipes.
+            // collar. The authored skeleton provides the bend; this profile provides shell mass.
             float profile;
             if (u < .14f)
                 profile = Mathf.Lerp(.72f, 1.04f, Mathf.SmoothStep(0f, 1f, u / .14f));
@@ -168,9 +200,8 @@ internal static class MantleCrabMeshBuilder
     }
 
     /// <summary>
-    /// Capture-arm shaft profile. Compared with a walking leg, the pincer arm has a stronger
-    /// joint collar, a leaner middle shaft and a visible terminal collar so its four rigid links
-    /// remain readable instead of merging into one red wire.
+    /// Capture-arm shaft profile. It is leaner than a walking leg and has smaller collars so the
+    /// red appendage remains elegant while still reading as four rigid exoskeletal links.
     /// </summary>
     internal static void PincerShaft(
         TriangleMesh mesh,
@@ -208,7 +239,7 @@ internal static class MantleCrabMeshBuilder
     }
 
     /// <summary>
-    /// The fixed-finger mesh also carries the manus. The manus now occupies most of the mesh and
+    /// The fixed-finger mesh also carries the manus. The manus occupies most of the mesh and
     /// expands abruptly after the carpal joint; only the distal portion becomes the short fixed
     /// digit. This is intentionally a chela, not a terminal fork.
     /// </summary>
@@ -341,9 +372,7 @@ internal static class MantleCrabMeshBuilder
         Vector2 shankCross = MantleCrabRenderingMath.Perpendicular(shankDirection);
         if (Vector2.Dot(shankCross, tangent) < 0f) shankCross = -shankCross;
 
-        // The old renderer painted Foot material across the entire fourth leg link. Keep the IK
-        // endpoint unchanged, but visually reserve only the terminal 39% for the actual foot.
-        Vector2 footRoot = Vector2.Lerp(ankle, tip, .61f);
+        Vector2 footRoot = FootRoot(ankle, tip);
 
         for (int x = 0; x <= columns; x++)
         for (int y = 0; y <= rows; y++)
@@ -368,12 +397,11 @@ internal static class MantleCrabMeshBuilder
             if (localCross.sqrMagnitude < .0001f) localCross = tangent;
             else localCross.Normalize();
 
-            // A slight outer-side expansion gives each foot a planted, non-mirrored silhouette.
+            // Outer-side expansion creates a planted, slightly asymmetric load-bearing foot.
             float lateralBias = Mathf.Lerp(1f, v > 0f ? 1.08f : .94f, plant);
             Vector2 point = center + localCross * (v * width * bulk * lateralBias);
 
-            // Only the final edge collapses onto the terrain plane, producing a broad sole while
-            // preserving visible volume through the heel/body instead of flattening half the mesh.
+            // Only the terminal edge collapses onto the terrain plane. The heel/body remains thick.
             float sole = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.86f, 1f, u));
             point -= normal * Vector2.Dot(point - tip, normal) * sole;
             mesh.MoveVertice(y * (columns + 1) + x, point - camera);
