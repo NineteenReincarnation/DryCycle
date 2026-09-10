@@ -110,9 +110,6 @@ internal readonly struct DB_FrameContext
     internal readonly float VisibilityFactor;
 
     internal readonly DB_TravelFrameSummary Travel;
-    // Transitional compatibility view for consumers not yet moved to Perception.Signals.
-    internal readonly bool HasSignalInfluence;
-    internal readonly DB_SignalInfluence SignalInfluence;
     internal readonly bool HasEnvironmentInfluence;
     internal readonly DB_EnvironmentInfluence EnvironmentInfluence;
     internal readonly DB_ThreatFrameSummary Threat;
@@ -160,8 +157,6 @@ internal readonly struct DB_FrameContext
         in DB_WeaponObservation incomingProjectileObservation,
         float visibilityFactor,
         in DB_TravelFrameSummary travel,
-        bool hasSignalInfluence,
-        in DB_SignalInfluence signalInfluence,
         bool hasEnvironmentInfluence,
         in DB_EnvironmentInfluence environmentInfluence,
         in DB_ThreatFrameSummary threat,
@@ -207,8 +202,6 @@ internal readonly struct DB_FrameContext
         IncomingProjectileObservation = incomingProjectileObservation;
         VisibilityFactor = Mathf.Clamp01(visibilityFactor);
         Travel = travel;
-        HasSignalInfluence = hasSignalInfluence;
-        SignalInfluence = signalInfluence;
         HasEnvironmentInfluence = hasEnvironmentInfluence;
         EnvironmentInfluence = environmentInfluence;
         Threat = threat;
@@ -276,23 +269,6 @@ internal static class DB_FrameContextRuntime
         if (!hasEnvironment) environment = DB_EnvironmentInfluence.Neutral;
 
         DB_PerceptionSignalContext signalPerception = perception.Signals;
-        bool hasSignal = ai?.Perception?.TryGetSignalContext(out signalPerception) == true;
-        DB_SignalInfluence signal = new(
-            signalPerception.AlarmPressure,
-            signalPerception.AlarmOrigin,
-            signalPerception.AlarmThreat,
-            signalPerception.DistressInterest,
-            signalPerception.DistressSource,
-            signalPerception.RallyInterest,
-            signalPerception.RallySource,
-            signalPerception.RallyTarget,
-            signalPerception.RoostInterest,
-            signalPerception.RoostSource,
-            signalPerception.HarassInterest,
-            signalPerception.HarassSource,
-            signalPerception.HarassTarget,
-            signalPerception.SafeConfidence,
-            signalPerception.LastReason);
 
         bool hasThreat = DB_ThreatRuntime.TryGetDebugState(
             bat, out DB_ThreatDebugState threatDebug);
@@ -383,8 +359,6 @@ internal static class DB_FrameContextRuntime
             projectile,
             hasEnvironment ? environment.VisibilityConfidence : 1f,
             travel,
-            hasSignal,
-            signal,
             hasEnvironment,
             environment,
             threat,
