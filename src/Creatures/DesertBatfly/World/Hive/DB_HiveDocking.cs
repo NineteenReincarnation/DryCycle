@@ -41,6 +41,24 @@ internal static class DB_HiveDocking
             "environmental Home docking on BatHive tile");
     }
 
+    /// <summary>
+    /// Travel keeps ownership through ReturnHome ingress and while an EmergencyRefuge is being
+    /// held. Check the intent before touching a hive tile so an unrelated colony-migration route
+    /// that merely crosses a hive cannot accidentally burrow.
+    /// </summary>
+    internal static bool TryHandleTravelOwned(DB_Creature bat)
+    {
+        if (bat?.abstractCreature == null ||
+            !DB_TravelRuntime.TryGetDebugState(bat.abstractCreature, out DB_TravelDebugState travel))
+            return false;
+
+        if (travel.Purpose == DB_TravelPurpose.ReturnHome)
+            return TryHandleTravelReturnHome(bat);
+        if (travel.Purpose == DB_TravelPurpose.EmergencyRefuge && travel.WaitingAtRefuge)
+            return TryHandleTravelRefuge(bat);
+        return false;
+    }
+
     internal static bool TryHandleTravelReturnHome(DB_Creature bat)
     {
         return TryHandleDocking(
