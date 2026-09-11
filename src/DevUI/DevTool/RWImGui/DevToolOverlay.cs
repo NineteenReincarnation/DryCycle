@@ -9,9 +9,6 @@ internal static class DevToolOverlay
 {
     private static string objectSearch = string.Empty;
     private static bool sceneTab;
-    private static int editedObjectIndex = -1;
-    private static float editX;
-    private static float editY;
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
@@ -23,7 +20,7 @@ internal static class DevToolOverlay
         DrawTopBar(snapshot, display);
         if (snapshot.FocusMode) return;
 
-        DrawActivityBar(snapshot, display);
+        DrawActivityBar(snapshot);
         if (snapshot.BrowserOpen) DrawBrowser(snapshot, display);
         if (snapshot.InspectorOpen) DrawInspector(snapshot, display);
         DrawStatusBar(snapshot, display);
@@ -49,8 +46,7 @@ internal static class DevToolOverlay
         ImGui.Text(snapshot.ToolMode.ToString());
 
         ImGui.SameLine(0f, 20f);
-        if (ImGui.Button("Save  Ctrl+S"))
-            Send(EditorUiCommandKind.Save);
+        if (ImGui.Button("Save  Ctrl+S")) Send(EditorUiCommandKind.Save);
 
         ImGui.SameLine();
         bool undoDisabled = !snapshot.CanUndo;
@@ -68,11 +64,10 @@ internal static class DevToolOverlay
 
         ImGui.SameLine();
         if (ImGui.Button("Focus  Tab")) Send(EditorUiCommandKind.ToggleFocus);
-
         ImGui.End();
     }
 
-    private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    private static void DrawActivityBar(EditorPresentationSnapshot snapshot)
     {
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 56f), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Num.Vector2(44f, 250f), ImGuiCond.Always);
@@ -99,7 +94,6 @@ internal static class DevToolOverlay
         if (ImGui.Button(snapshot.InspectorOpen ? "I" : "i", new Num.Vector2(28f, 0f)))
             Send(EditorUiCommandKind.ToggleInspector);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Toggle inspector · Ctrl+I");
-
         ImGui.End();
     }
 
@@ -129,7 +123,7 @@ internal static class DevToolOverlay
         {
             ImGui.Text(snapshot.ToolMode + " tools");
             ImGui.Separator();
-            ImGui.TextDisabled("This workspace will reuse the same overlay shell.");
+            ImGui.TextDisabled("This workspace reuses the same overlay shell.");
             ImGui.TextDisabled("Objects is the first functional migration target.");
             ImGui.End();
             return;
@@ -142,7 +136,6 @@ internal static class DevToolOverlay
 
         if (sceneTab) DrawSceneObjectList(snapshot);
         else DrawObjectLibrary(snapshot);
-
         ImGui.End();
     }
 
@@ -172,17 +165,13 @@ internal static class DevToolOverlay
             string label = item.DisplayName + "##AddObject" + item.Type;
             if (ImGui.Selectable(label, false))
             {
-                // First implementation places new objects at the conventional room-camera
-                // center. Scene click-placement will replace this once the scene gizmo layer
-                // owns a stable camera/screen transform.
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.CreateObject,
                     text: item.Type,
                     x: snapshot.Inspector.HasSelection ? snapshot.Inspector.X : 683f,
                     y: snapshot.Inspector.HasSelection ? snapshot.Inspector.Y : 384f));
             }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(item.Source + " · " + item.Type);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(item.Source + " · " + item.Type);
         }
 
         if (matches == 0) ImGui.TextDisabled("No matching objects.");
@@ -205,7 +194,7 @@ internal static class DevToolOverlay
 
     private static void DrawInspector(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float width = Math.Min(330f, Math.Max(280f, display.X * 0.24f));
+        float width = Math.Min(360f, Math.Max(300f, display.X * 0.26f));
         float height = Math.Max(260f, display.Y - 94f);
         ImGui.SetNextWindowPos(new Num.Vector2(display.X - width - 8f, 56f), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Always);
@@ -217,59 +206,7 @@ internal static class DevToolOverlay
             return;
         }
 
-        EditorInspectorSnapshot inspector = snapshot.Inspector ?? new EditorInspectorSnapshot();
-        if (!inspector.HasSelection)
-        {
-            editedObjectIndex = -1;
-            ImGui.TextDisabled("Nothing selected.");
-            ImGui.End();
-            return;
-        }
-
-        ImGui.Text(inspector.Type);
-        ImGui.TextDisabled(inspector.DataType);
-        ImGui.Separator();
-
-        if (editedObjectIndex != inspector.ObjectIndex)
-        {
-            editedObjectIndex = inspector.ObjectIndex;
-            editX = inspector.X;
-            editY = inspector.Y;
-        }
-
-        ImGui.TextDisabled("Transform");
-        ImGui.SetNextItemWidth(-1f);
-        bool xChanged = ImGui.InputFloat("X##DevToolPosX", ref editX, 1f, 20f, "%.1f");
-        ImGui.SetNextItemWidth(-1f);
-        bool yChanged = ImGui.InputFloat("Y##DevToolPosY", ref editY, 1f, 20f, "%.1f");
-        if ((xChanged || yChanged) && ImGui.IsItemDeactivatedAfterEdit())
-        {
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                EditorUiCommandKind.SetObjectPosition,
-                inspector.ObjectIndex,
-                x: editX,
-                y: editY));
-        }
-        if (ImGui.Button("Apply Position"))
-        {
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                EditorUiCommandKind.SetObjectPosition,
-                inspector.ObjectIndex,
-                x: editX,
-                y: editY));
-        }
-
-        ImGui.Separator();
-        ImGui.TextDisabled("Data");
-        if (string.IsNullOrEmpty(inspector.SerializedData))
-            ImGui.TextDisabled("No serialized data.");
-        else
-            ImGui.TextWrapped(inspector.SerializedData);
-
-        ImGui.Separator();
-        if (ImGui.Button("Delete Object"))
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
-
+        ObjectInspectorView.Draw(snapshot.Inspector);
         ImGui.End();
     }
 
