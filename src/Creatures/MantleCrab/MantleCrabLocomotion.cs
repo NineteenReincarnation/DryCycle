@@ -32,6 +32,7 @@ internal sealed class MantleCrabLocomotion
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly float[] legLoad = new float[4];
+    private readonly float[] legStress = new float[4];
     private readonly MantleCrabTraversalPlanner traversal;
     private readonly MantleCrabPostureController posture;
     private int lastStepIndex = -1;
@@ -84,6 +85,7 @@ internal sealed class MantleCrabLocomotion
         {
             stepCooldown[i] = 0;
             legLoad[i] = 1f;
+            legStress[i] = 0f;
         }
     }
 
@@ -106,6 +108,18 @@ internal sealed class MantleCrabLocomotion
         if (leg == null || leg.IsPincer || leg.Index < 0 || leg.Index >= legLoad.Length)
             return 0f;
         return Mathf.Clamp01(legLoad[leg.Index]);
+    }
+
+    /// <summary>
+    /// 返回当前这条腿“有多想换步”。它不是动画节拍，而是工作区、拖后、关节姿态和接触质量的综合压力。
+    ///
+    /// Returns the current discomfort/stress score used to decide which support should be released next.
+    /// </summary>
+    internal float StepStress(MantleCrabLimb leg)
+    {
+        if (leg == null || leg.IsPincer || leg.Index < 0 || leg.Index >= legStress.Length)
+            return 0f;
+        return Mathf.Clamp01(legStress[leg.Index]);
     }
 
     /// <summary>
@@ -154,6 +168,7 @@ internal sealed class MantleCrabLocomotion
         if (startCooldown > 0)
             startCooldown--;
 
+        UpdateLegStress(bodyVelocity);
         UpdateLegLoads();
 
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
@@ -199,10 +214,11 @@ internal sealed class MantleCrabLocomotion
 
             Vector2 anchor = crab.Anchor(leg);
             float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
+            float stress = legStress[i];
 
-            // stance 脚不允许滑，所以更早安排换步，不能等到接近极限长度才处理。
-            // Locked stance contacts require earlier step scheduling instead of late contact sliding.
-            bool emergency = stretch > .85f;
+            // 高压力代表这条腿已经不适合继续承担当前 stance，允许绕过正常 cooldown。
+            // High stress means the limb is mechanically uncomfortable enough to bypass normal cooldown.
+            bool emergency = stress > .90f || stretch > .86f;
             if (stepCooldown[i] > 0 && !emergency)
                 continue;
             if (!CanLift(i))
@@ -210,24 +226,26 @@ internal sealed class MantleCrabLocomotion
 
             Vector2 desired = DesiredLanding(leg, anchor, axis, bodyVelocity);
             float alongError = Mathf.Abs(Vector2.Dot(desired - leg.Contact, axis));
-            float urgency = alongError / Mathf.Max(18f, 30f * crab.ShellScale);
-            urgency += Mathf.InverseLerp(.70f, .86f, stretch) * 1.45f;
-            urgency += (1f - leg.SupportQuality(crab)) * .30f;
+
+            // 主要依据腿本身的机械压力选腿；预测落点误差只作为次要提前量。
+            // Mechanical discomfort is now the primary release score. Prediction error is only a secondary lead cue.
+            float urgency = stress * 1.35f;
+            urgency += alongError / Mathf.Max(20f, 34f * crab.ShellScale) * .32f;
             urgency *= traversal.UrgencyMultiplier(leg);
 
             // 对角腿只保留很弱的相位偏好。慢速大型生物允许地形和承重需要轻易打破节拍。
             // Diagonal timing is only a weak bias. Terrain and load requirements may freely break the rhythm.
             float phaseOffset = i == 0 || i == 3 ? 0f : Mathf.PI;
             float rhythm = .5f + .5f * Mathf.Cos(stridePhase - phaseOffset);
-            urgency += (rhythm - .5f) * .10f * motionAmount;
+            urgency += (rhythm - .5f) * .08f * motionAmount;
 
             if (lastStepIndex >= 0)
             {
                 int diagonal = 3 - lastStepIndex;
                 if (i == diagonal)
-                    urgency += .08f;
+                    urgency += .06f;
                 else if (leg.Side == crab.Legs[lastStepIndex].Side)
-                    urgency -= .06f;
+                    urgency -= .05f;
             }
 
             if (urgency > bestUrgency)
@@ -301,6 +319,106 @@ internal sealed class MantleCrabLocomotion
         }
     }
 
+    /// <summary>
+    /// 计算每条承重腿当前的机械压力。评分不决定动画，只回答“继续把这只脚留在这里有多不舒服”。
+    ///
+    /// Computes a mechanical discomfort score for every planted leg.
+    /// </summary>
+    private void UpdateLegStress(Vector2 bodyVelocity)
+    {
+        Vector2 axis = WalkAxis;
+        if (axis.sqrMagnitude <= .0001f)
+            axis = Vector2.right;
+        else
+            axis.Normalize();
+
+        float alongVelocity = Vector2.Dot(bodyVelocity, axis);
+        float travelSign = 0f;
+        if (Mathf.Abs(smoothedMoveIntent) > .08f)
+            travelSign = Mathf.Sign(smoothedMoveIntent);
+        else if (Mathf.Abs(alongVelocity) > .18f)
+            travelSign = Mathf.Sign(alongVelocity);
+
+        float scale = Mathf.Max(.35f, crab.ShellScale);
+
+        for (int i = 0; i < crab.Legs.Length && i < legStress.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Planted || leg.Swinging || posture.Recovering)
+            {
+                legStress[i] = 0f;
+                continue;
+            }
+
+            Vector2 anchor = crab.Anchor(leg);
+            float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
+
+            // 工作区压力同时关注过伸和过度压缩。过度压缩权重较低，因为大型长腿本来就应允许明显折叠。
+            // Workspace stress watches both extension and compression; compression is deliberately softer.
+            float extensionStress = Mathf.InverseLerp(.62f, .86f, stretch);
+            float compressionStress = 1f - Mathf.InverseLerp(.34f, .50f, stretch);
+            float workspaceStress = Mathf.Max(extensionStress, compressionStress * .52f);
+
+            // 拖后压力：比较当前脚相对髋部的位置和这条腿自己的自然落点。
+            // A stance foot that has been carried behind its own neutral point becomes progressively eager to step.
+            float trailingStress = 0f;
+            if (travelSign != 0f)
+            {
+                float currentAlong = Vector2.Dot(leg.Contact - anchor, axis);
+                float restAlong = Vector2.Dot(TransformWalkingLocal(leg.RestTipOffset), axis);
+                float trailingDistance = (restAlong - currentAlong) * travelSign;
+                trailingStress = Mathf.InverseLerp(6f * scale, 42f * scale, trailingDistance);
+            }
+
+            // 关节姿态只占较小权重。它用于识别“长度还够，但整条腿已经拧得很别扭”的情况。
+            // Joint-pose stress is intentionally secondary: it catches awkward geometry without fighting terrain adaptation.
+            float poseStress = JointPoseStress(leg);
+
+            // 接触开始恶化时提前准备换步，但不会因为坡面本身就立刻抬腿。
+            // Poor support quality adds a small release bias without treating every slope as a failure.
+            float contactStress = 1f - leg.SupportQuality(crab);
+
+            float stress = workspaceStress * .46f +
+                           trailingStress * .30f +
+                           poseStress * .14f +
+                           contactStress * .10f;
+
+            // 真正接近过伸极限时，必须覆盖其它平滑项，避免锁足以后被身体硬拉。
+            // Near extension limits, force the score high enough to escape before the stance becomes a taut strut.
+            stress = Mathf.Max(stress, extensionStress * .92f);
+            legStress[i] = Mathf.Clamp01(stress);
+        }
+    }
+
+    private float JointPoseStress(MantleCrabLimb leg)
+    {
+        Vector2 previous = crab.Anchor(leg);
+        float stress = 0f;
+        float weight = 0f;
+
+        // 最末端足节需要服从 GroundNormal，所以这里只评估前三段承重骨节。
+        // The distal foot segment follows terrain normal, so only the three load-bearing proximal segments are scored.
+        for (int i = 0; i < 3; i++)
+        {
+            Vector2 current = leg.Pos[i] - previous;
+            Vector2 rest = TransformWalkingLocal(leg.Rest[i + 1] - leg.Rest[i]);
+            previous = leg.Pos[i];
+
+            if (current.sqrMagnitude <= .0001f || rest.sqrMagnitude <= .0001f)
+                continue;
+
+            current.Normalize();
+            rest.Normalize();
+            float alignment = Mathf.Clamp(Vector2.Dot(current, rest), -1f, 1f);
+            float segmentStress = 1f - Mathf.InverseLerp(.40f, .94f, alignment);
+            float segmentWeight = i == 0 ? 1f : .82f;
+            stress += segmentStress * segmentWeight;
+            weight += segmentWeight;
+        }
+
+        return weight > .001f ? Mathf.Clamp01(stress / weight) : 0f;
+    }
+
     private void UpdateLegLoads()
     {
         for (int i = 0; i < crab.Legs.Length && i < legLoad.Length; i++)
@@ -317,9 +435,7 @@ internal sealed class MantleCrabLocomotion
             else if (i == pendingStepIndex)
             {
                 target = 0f;
-                Vector2 anchor = crab.Anchor(leg);
-                float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
-                rate = stretch > .84f ? EmergencyUnloadRate : NormalUnloadRate;
+                rate = legStress[i] > .82f ? EmergencyUnloadRate : NormalUnloadRate;
             }
             else
             {
