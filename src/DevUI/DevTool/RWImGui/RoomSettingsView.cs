@@ -43,8 +43,9 @@ internal static class RoomSettingsView
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.TextDisabled(DevToolUiSettings.T("添加效果", "ADD EFFECT"));
+        ImGui.TextDisabled(DevToolUiSettings.T("搜索", "SEARCH"));
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##RoomEffectSearch", "Search##RoomEffectSearch"), ref effectSearch, 128);
+        ImGui.InputText("##RoomEffectSearch", ref effectSearch, 128);
 
         string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
         string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
