@@ -72,7 +72,6 @@ internal sealed class Plugin : BaseUnityPlugin
 
         CreatureCoreRegistry.Enable();
         DryCycleContent.Enable();
-        MossySpiderBackPlatform.Enable();
         DB_Relationships.Enable();
         DB_RainWorldHooks.Enable();
         SpinebackLizardHooks.Enable();
@@ -91,7 +90,6 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         DB_Relationships.Disable();
         DB_RainWorldHooks.Disable();
-        MossySpiderBackPlatform.Disable();
         CreatureCoreRegistry.Disable();
         DryCycleContent.Disable();
         CreatureDevConsoleSupport.ResetRegistration();

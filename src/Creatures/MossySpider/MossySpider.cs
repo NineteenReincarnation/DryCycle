@@ -1,14 +1,16 @@
+using DryCycle.Creatures.Platforming;
 using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Creatures.MossySpider;
 
-public sealed class MossySpider : Creature
+public sealed class MossySpider : Creature, IWalkableDynamicSurface, IDynamicWalkableCurveGeometry
 {
     internal const int SegmentCount = 4;
     internal const float SegmentSpacing = 78f;
     internal const int LegCount = 10;
 
+    private const int WalkableCurvePointCount = 2;
     private const float UnsupportedGravity = 0.90f;
     private const float SupportedGravity = 0.040f;
     private const int MinimumStableFeet = 5;
@@ -67,6 +69,29 @@ public sealed class MossySpider : Creature
             return center / bodyChunks.Length;
         }
     }
+
+    Room IWalkableDynamicSurface.SurfaceRoom => room;
+
+    bool IWalkableDynamicSurface.SurfaceEnabled =>
+        room != null && !slatedForDeletetion;
+
+    bool IWalkableDynamicSurface.TrySample(
+        Vector2 worldPosition,
+        out WalkableSurfaceSample sample) =>
+        DynamicWalkableCurveSampler.TrySample(this, this, worldPosition, out sample);
+
+    bool IWalkableDynamicSurface.TrySample(
+        float coordinate,
+        out WalkableSurfaceSample sample) =>
+        DynamicWalkableCurveSampler.TrySample(this, this, coordinate, out sample);
+
+    int IDynamicWalkableCurveGeometry.CurvePointCount => WalkableCurvePointCount;
+
+    bool IDynamicWalkableCurveGeometry.TryGetCurvePoint(
+        int index,
+        bool previous,
+        out Vector2 point) =>
+        MossySpiderDorsalPlane.TryGetWalkableCurvePoint(this, index, previous, out point);
 
     public MossySpider(AbstractCreature abstractCreature, World world) : base(abstractCreature, world)
     {
