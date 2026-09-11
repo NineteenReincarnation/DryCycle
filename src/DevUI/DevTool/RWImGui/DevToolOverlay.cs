@@ -1,6 +1,7 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Room;
+using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -137,6 +138,13 @@ internal static class DevToolOverlay
             return;
         }
 
+        if (snapshot.ToolMode == EditorToolMode.Sound)
+        {
+            SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
+            ImGui.End();
+            return;
+        }
+
         if (snapshot.ToolMode != EditorToolMode.Objects)
         {
             ImGui.Text(snapshot.ToolMode + " tools");
@@ -257,22 +265,31 @@ internal static class DevToolOverlay
         if (snapshot.ToolMode == EditorToolMode.Room)
         {
             RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
-            ImGui.Separator();
-            bool legacyVisible = snapshot.Inspector?.LegacyUiVisible == true;
-            if (ImGui.Button(legacyVisible ? "Hide Original DevUI" : "Show Original DevUI"))
-                Send(EditorUiCommandKind.ToggleLegacyUi);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
+            DrawLegacyFallback(snapshot, "Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
         }
         else if (snapshot.ToolMode == EditorToolMode.Objects)
         {
             ObjectInspectorView.Draw(snapshot.Inspector);
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Sound)
+        {
+            SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
         }
         else
         {
             ImGui.TextDisabled(snapshot.ToolMode + " inspector is not migrated yet.");
         }
         ImGui.End();
+    }
+
+    private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
+    {
+        ImGui.Separator();
+        bool legacyVisible = snapshot.Inspector?.LegacyUiVisible == true;
+        if (ImGui.Button(legacyVisible ? "Hide Original DevUI" : "Show Original DevUI"))
+            Send(EditorUiCommandKind.ToggleLegacyUi);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
     }
 
     private static void DrawStatusBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -291,6 +308,11 @@ internal static class DevToolOverlay
                 string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
                 ImGui.TextDisabled("Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
                                    "   ·   " + snapshot.Document + placement);
+            }
+            else if (snapshot.ToolMode == EditorToolMode.Sound)
+            {
+                EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
+                ImGui.TextDisabled("Sounds " + (sound.Sounds?.Length ?? 0) + "   ·   " + snapshot.Document);
             }
             else
             {
