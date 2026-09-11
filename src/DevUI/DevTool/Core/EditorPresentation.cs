@@ -34,6 +34,8 @@ public sealed class EditorInspectorSnapshot
     public float X { get; init; }
     public float Y { get; init; }
     public string DataType { get; init; } = string.Empty;
+    public bool LegacyUiAvailable { get; init; }
+    public bool LegacyUiVisible { get; init; }
     public EditorPropertySnapshot[] Properties { get; init; } = Array.Empty<EditorPropertySnapshot>();
     public LegacyControlSnapshot[] LegacyControls { get; init; } = Array.Empty<LegacyControlSnapshot>();
 }
@@ -108,6 +110,8 @@ public static class EditorPresentationHub
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
             DataType = selected?.data?.GetType().FullName ?? string.Empty,
+            LegacyUiAvailable = session.ToolMode == EditorToolMode.Objects,
+            LegacyUiVisible = session.LegacyUiVisible,
             Properties = ObjectInspectorRegistry.Capture(selected),
             LegacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected)
         };
@@ -177,6 +181,7 @@ public enum EditorUiCommandKind
     ToggleFocus,
     ToggleBrowser,
     ToggleInspector,
+    ToggleLegacyUi,
     SetToolMode,
     SelectObject,
     ToggleObjectSelection,
@@ -263,6 +268,9 @@ public static class EditorUiCommandQueue
                 break;
             case EditorUiCommandKind.ToggleInspector:
                 session.ToggleInspector();
+                break;
+            case EditorUiCommandKind.ToggleLegacyUi:
+                session.ToggleLegacyUi();
                 break;
             case EditorUiCommandKind.SetToolMode:
                 session.SetToolMode(command.Mode);
