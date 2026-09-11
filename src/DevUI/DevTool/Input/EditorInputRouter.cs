@@ -47,6 +47,7 @@ public static class EditorInputRouter
         On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
         On.RainWorldGame.Update += RainWorldGame_Update;
         On.DevInterface.Handle.Update += Handle_Update;
+        On.DevInterface.MapPage.Update += MapPage_Update;
         enabled = true;
     }
 
@@ -57,6 +58,7 @@ public static class EditorInputRouter
         On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate;
         On.RainWorldGame.Update -= RainWorldGame_Update;
         On.DevInterface.Handle.Update -= Handle_Update;
+        On.DevInterface.MapPage.Update -= MapPage_Update;
         SetFrontendAttached(false);
         capturedGame = null;
         capturedUnityFrame = -1;
@@ -212,6 +214,49 @@ public static class EditorInputRouter
         {
             self.owner.mouseClick = mouseClick;
         }
+    }
+
+    /// <summary>
+    /// The rebuilt Map workspace must keep the vanilla MapPage alive because its world data,
+    /// save path and mod hooks remain authoritative. However, its hidden controls must not
+    /// react behind the ImGui canvas. Suppress only the DevUI mouse state for the duration of
+    /// the vanilla MapPage update; no RoomPanel position or map data is modified.
+    /// </summary>
+    private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, DevInterface.MapPage self)
+    {
+        if (!ShouldBlockLegacyMapMouse(self))
+        {
+            orig(self);
+            return;
+        }
+
+        DevInterface.DevUI owner = self.owner;
+        bool mouseClick = owner.mouseClick;
+        bool mouseDown = owner.mouseDown;
+        owner.mouseClick = false;
+        owner.mouseDown = false;
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            owner.mouseClick = mouseClick;
+            owner.mouseDown = mouseDown;
+        }
+    }
+
+    private static bool ShouldBlockLegacyMapMouse(DevInterface.MapPage page)
+    {
+        if (!frontendAttached || EditorUiModeState.UseVanilla || page?.owner == null)
+            return false;
+
+        EditorSession session = DevToolSessionHub.Current;
+        return session != null &&
+               session.ToolMode == EditorToolMode.Map &&
+               !session.LegacyUiVisible &&
+               ReferenceEquals(session.Owner, page.owner) &&
+               page.owner.game?.devToolsActive == true;
     }
 
     private static void Player_checkInput(On.Player.orig_checkInput orig, Player self)
