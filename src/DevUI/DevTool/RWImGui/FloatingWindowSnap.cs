@@ -89,7 +89,7 @@ internal static class FloatingWindowSnap
             Num.Vector2 snapped = FindBestPosition(id, position, size);
             if (DistanceSquared(snapped, position) > 0.01f)
             {
-                ImGui.SetWindowPos(snapped, ImGuiCond.Always);
+                ImGui.SetWindowPos(snapped);
                 position = snapped;
             }
 
