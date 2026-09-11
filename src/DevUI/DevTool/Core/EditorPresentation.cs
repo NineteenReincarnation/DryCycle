@@ -38,6 +38,7 @@ public sealed class EditorInspectorSnapshot
     public bool LegacyUiAvailable { get; init; }
     public bool LegacyUiVisible { get; init; }
     public EditorPropertySnapshot[] Properties { get; init; } = Array.Empty<EditorPropertySnapshot>();
+    public string[] MixedPropertyKeys { get; init; } = Array.Empty<string>();
     public LegacyControlSnapshot[] LegacyControls { get; init; } = Array.Empty<LegacyControlSnapshot>();
 }
 
@@ -100,19 +101,34 @@ public static class EditorPresentationHub
 
         PlacedObject selected = session.Selection.PrimaryPlacedObject;
         int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
+        int selectionCount = session.Selection.Count;
+
+        EditorPropertySnapshot[] properties;
+        string[] mixedPropertyKeys;
+        if (selectionCount > 1)
+            properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
+        else
+        {
+            properties = ObjectInspectorRegistry.Capture(selected);
+            mixedPropertyKeys = Array.Empty<string>();
+        }
+
         EditorInspectorSnapshot inspector = new()
         {
             HasSelection = selected != null && selectedIndex >= 0,
             ObjectIndex = selectedIndex,
-            SelectionCount = session.Selection.Count,
-            Type = selected?.type?.value ?? string.Empty,
+            SelectionCount = selectionCount,
+            Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
-            DataType = selected?.data?.GetType().FullName ?? string.Empty,
-            LegacyUiAvailable = session.ToolMode == EditorToolMode.Objects,
+            DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
+            LegacyUiAvailable = selectionCount == 1 && session.ToolMode == EditorToolMode.Objects,
             LegacyUiVisible = session.LegacyUiVisible,
-            Properties = ObjectInspectorRegistry.Capture(selected),
-            LegacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected)
+            Properties = properties,
+            MixedPropertyKeys = mixedPropertyKeys,
+            LegacyControls = selectionCount == 1
+                ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
+                : Array.Empty<LegacyControlSnapshot>()
         };
 
         int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
@@ -193,7 +209,9 @@ public enum EditorUiCommandKind
     PlaceObjectAtCursor,
     CancelPlacement,
     SetObjectPosition,
+    SetSelectionPosition,
     SetObjectProperty,
+    SetSelectionProperty,
     InvokeLegacyButton,
     SetLegacySlider,
     ResetLegacySlider
@@ -320,8 +338,14 @@ public static class EditorUiCommandQueue
             case EditorUiCommandKind.SetObjectPosition:
                 EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
                 break;
+            case EditorUiCommandKind.SetSelectionPosition:
+                EditorActions.SetSelectionPrimaryPosition(session, new Vector2(command.X, command.Y));
+                break;
             case EditorUiCommandKind.SetObjectProperty:
                 EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
+                break;
+            case EditorUiCommandKind.SetSelectionProperty:
+                EditorActions.SetSelectionProperty(session, command.Text, command.PropertyValue);
                 break;
             case EditorUiCommandKind.InvokeLegacyButton:
                 EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index), command.Text);
