@@ -65,6 +65,15 @@ internal sealed class MantleCrabTestMovementAI : ArtificialIntelligence
 
         Vector2 center = crab.bodyChunks[2].pos;
 
+        // 身体正在回正时只等待姿态控制器完成恢复，不把“主动停止推进”误判成卡住后反复换向。
+        // During righting recovery, wait for posture control instead of misclassifying intentional zero travel as a stuck event.
+        if (crab.Locomotion.Posture.Recovering)
+        {
+            crab.SetLocomotionIntent(0f, 0f);
+            ResetProgress();
+            return;
+        }
+
         if (pauseFrames > 0)
         {
             pauseFrames--;
