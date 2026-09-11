@@ -30,7 +30,8 @@ namespace DryCycle.Editor
             "Assets/DryCycle/Compute/DryCycleFogNoise.compute",
             "Assets/DryCycle/Shaders/DryCycleHeatWaveAtmosphere.shader",
             "Assets/DryCycle/Shaders/DryCycleIntenseHeatAtmosphere.shader",
-            "Assets/DryCycle/Shaders/DryCycleDehydrationComposite.shader"
+            "Assets/DryCycle/Shaders/DryCycleDehydrationComposite.shader",
+            "Assets/DryCycle/Shaders/DryCycleMenuTextFlow.shader"
         };
 
         private static readonly string[] CreatureAssets =
@@ -186,6 +187,11 @@ namespace DryCycle.Editor
             if (dehydrationComposite == null)
                 throw new InvalidOperationException(
                     "DryCycle dehydration composite shader could not be imported: " + WeatherAssets[5]);
+
+            Shader menuTextFlow = AssetDatabase.LoadAssetAtPath<Shader>(WeatherAssets[6]);
+            if (menuTextFlow == null || ShaderUtil.ShaderHasError(menuTextFlow))
+                throw new InvalidOperationException(
+                    "DryCycle menu text flow shader failed to import/compile: " + WeatherAssets[6]);
 
             Debug.Log(
                 "DryCycle weather source assets imported successfully. " +
