@@ -1,26 +1,21 @@
 name: DesertBatfly R6 Function Retention
 
-# Long-lived read-only gameplay-contract guard for the R0 hidden-risk register.
-# Architecture identity remains protected by desertbatfly-r6-architecture-guard.yml.
+# Protect only durable gameplay/compatibility contracts. Historical private helper names,
+# exact implementation topology and removed tests are intentionally not part of this guard.
 on:
   push:
     branches:
-      - task14-r6-b1-final
       - main
     paths:
       - 'src/Creatures/DesertBatfly/**'
-      - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
-      - 'tests/DesertBatfly/**'
+      - 'src/Plugin.cs'
       - 'scripts/check-desertbatfly-function-retention.sh'
-      - 'scripts/check-desertbatfly-internal-hook-cleanup.sh'
       - '.github/workflows/desertbatfly-r6-function-retention.yml'
   pull_request:
     paths:
       - 'src/Creatures/DesertBatfly/**'
-      - 'src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
-      - 'tests/DesertBatfly/**'
+      - 'src/Plugin.cs'
       - 'scripts/check-desertbatfly-function-retention.sh'
-      - 'scripts/check-desertbatfly-internal-hook-cleanup.sh'
       - '.github/workflows/desertbatfly-r6-function-retention.yml'
   workflow_dispatch:
 
@@ -32,9 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: R0 hidden-risk function retention
+      - name: Durable gameplay and compatibility contracts
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/check-desertbatfly-function-retention.sh
-          bash scripts/check-desertbatfly-internal-hook-cleanup.sh

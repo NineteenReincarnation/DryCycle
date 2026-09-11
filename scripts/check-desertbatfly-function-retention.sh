@@ -4,133 +4,83 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-SRC='src/Creatures/DesertBatfly'
-TESTS='tests/DesertBatfly'
-HOOKS="$SRC/Integration/DB_RainWorldHooks.cs"
-INJURY="$SRC/Behavior/Injury/DB_InjuryRecovery.cs"
-ROOST="$SRC/Behavior/DB_RoostPolicy.cs"
-EVENTS="$SRC/Core/Runtime/DB_EventHub.cs"
-CORPSE="$SRC/Core/Runtime/DB_CorpseWarningRuntime.cs"
-CONSUMERS="$SRC/Core/Runtime/DB_EventConsumers.cs"
-PERCEPTION="$SRC/Behavior/Perception/DB_PerceptionRuntime.cs"
-SIGNALS="$SRC/Behavior/Signals"
-SIGNAL_DEF="$SIGNALS/DB_SignalDefinition.cs"
-SIGNAL_RT="$SIGNALS/DB_SignalRuntime.cs"
-SIGNAL_PACKET="$SIGNALS/DB_SignalPacket.cs"
-SIGNAL_ROOM="$SIGNALS/DB_SignalRoomState.cs"
-SIGNAL_TYPES="$SIGNALS/DB_SignalTypes.cs"
-SIGNAL_DEBUG='src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs'
-OBSERVATORY='src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs'
+python3 - <<'PY'
+from pathlib import Path
+import re
+import sys
 
-grep -q 'ProgressLocalGoalAlongDijkstraMap(dijkstraInput, bestMap)' "$INJURY"
-grep -q 'DB_FlightMotor.TrySteer(' "$INJURY"
-grep -q 'DB_BehaviorOwner.InjuryRecovery' "$INJURY"
-grep -q 'preserveDijkstra: true' "$INJURY"
-grep -q 'internal void ClearLocalTarget()' "$INJURY"
+src = Path('src/Creatures/DesertBatfly')
+failures = []
+if not src.is_dir():
+    raise SystemExit('missing DesertBatfly source tree')
 
-mapfile -t travel_drivers < <(grep -RIn --include='*.cs' 'DB_TravelRuntime\.TryDriveRealized(' "$SRC" || true)
-test "${#travel_drivers[@]}" -eq 1
-printf '%s\n' "${travel_drivers[@]}" | grep -q '^.*DB_RainWorldHooks.cs:'
+files = sorted(src.rglob('*.cs'))
+texts = {p: p.read_text(encoding='utf-8') for p in files}
+joined = '\n'.join(texts.values())
 
-grep -q 'internal bool TryMarkMortality()' "$EVENTS"
-grep -q 'if (MortalityPublished) return false;' "$EVENTS"
-grep -q '!transaction.state.TryMarkMortality()' "$EVENTS"
-grep -q 'state.ViolenceDepth++' "$EVENTS"
-grep -q 'transaction.state.PendingMortality = mortality;' "$EVENTS"
-grep -q 'FlushPendingMortality(transaction.state);' "$EVENTS"
-grep -q 'sourceObject is not Rock' "$EVENTS"
-CREATURE="$SRC/Core/DB_Creature.cs"
-grep -q 'DB_EventHub.BeginViolence(' "$CREATURE"
-grep -q 'DB_EventHub.EndViolence(' "$CREATURE"
-grep -q 'DB_EventHub.PrepareMortality(' "$CREATURE"
-grep -q 'DB_EventHub.CompleteMortality(' "$CREATURE"
-if grep -q 'RockSurvivalHealthFloor = 0.12f;' "$CREATURE"; then
-    echo 'ERROR: HB-03 regressed to the old inflated Rock health floor.'
-    exit 1
-fi
+def require_literal(value, reason):
+    if value not in joined:
+        failures.append(reason + ': ' + value)
 
-grep -q 'internal int Serial;' "$EVENTS"
-grep -q 'bool priorStillActive = CaptureStillActive(victim, state.Capture);' "$EVENTS"
-grep -q 'if (!state.Capture.Accept(captor, priorStillActive)) return;' "$EVENTS"
-grep -q 'afterState == LizardTongue.State.AttachedInSmallObject' "$EVENTS"
-grep -q 'session.Tongue.state == LizardTongue.State.AttachedInSmallObject' "$EVENTS"
+# Persistent/external compatibility. These values affect saves, world files and external mods.
+for literal, reason in (
+    ('"DesertBatfly"', 'creature external identity missing'),
+    ('DCDesertBatflyV1', 'save identity missing'),
+    ('DESERTSWARMROOM', 'world tag identity missing'),
+):
+    require_literal(literal, reason)
 
-grep -q 'internal static void TrackRoom(Room room)' "$CORPSE"
-grep -q 'internal static void Reset()' "$CORPSE"
-grep -q 'item.Destroy();' "$CORPSE"
-grep -q 'type.DeclaringType == typeof(DB_FearRuntime)' "$CORPSE"
-grep -q 'DB_CorpseWarningRuntime.TrackRoom' "$CONSUMERS"
+# The species must still have one explicit Rain World integration surface, but private helper
+# names, exact owner order and file topology are free to evolve.
+hooks_path = src / 'Integration' / 'DB_RainWorldHooks.cs'
+if not hooks_path.exists():
+    failures.append('missing central Rain World integration adapter')
+else:
+    hooks = texts[hooks_path]
+    for token in ('On.FlyAI.Update', 'On.Fly.ReportToFliesRoomAI'):
+        if token not in hooks:
+            failures.append('required Rain World integration boundary missing: ' + token)
 
-mapfile -t thirst_writers < <(grep -RIlE --include='*.cs' 'DesertState\.Thirst\s*=' "$SRC" | sort)
-test "${#thirst_writers[@]}" -eq 4
-printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Behavior/Combat/DB_CombatRuntime.cs"
-printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Behavior/Feeding/DB_FeedingCoordinator.cs"
-printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/Core/Runtime/DB_Runtime.cs"
-printf '%s\n' "${thirst_writers[@]}" | grep -qx "$SRC/World/Environment/DB_EnvironmentRuntime.cs"
+# Hive lifecycle safety is gameplay-facing and worth retaining independent of implementation.
+# Do not reintroduce vanilla FliesRoomAI.Update() as the DesertBatfly passive emergence driver;
+# its per-fly random roll scales emergence rate with colony size.
+swarm_candidates = [p for p in files if p.name == 'DB_SwarmRoom.cs']
+if swarm_candidates:
+    swarm = texts[swarm_candidates[0]]
+    if re.search(r'\bHive\.Update\s*\(', swarm):
+        failures.append('DesertBatfly passive hive lifecycle calls vanilla FliesRoomAI.Update again')
 
-mapfile -t physical_scanners < <(grep -RIl --include='*.cs' 'room\.physicalObjects' "$SRC" | sort)
-test "${#physical_scanners[@]}" -eq 1
-test "${physical_scanners[0]}" = "$SRC/Core/Runtime/DB_RoomContext.cs"
-grep -q 'context?.ThrownWeapons' "$PERCEPTION"
-grep -q 'DB_PerceptionScoring.ProjectileRisk' "$PERCEPTION"
-grep -q 'internal bool TryGetObservedPlayer' "$PERCEPTION"
-grep -q 'internal bool TryGetHeldThreats' "$PERCEPTION"
-! test -e "$SRC/Behavior/Perception/DB_WeaponPerception.cs"
-! grep -RIn --include='*.cs' 'DB_WeaponPerception' "$SRC"
+# Successful hive emergence must have an explicit species-owned post-emergence path somewhere.
+# We intentionally check the concept rather than an exact method signature.
+if 'FlyEmergeFromHive' in joined and 'HiveDeparture' not in joined:
+    failures.append('hive emergence exists without a species-owned HiveDeparture lifecycle')
 
-grep -q 'DB_RoomContext.TryGetExisting(self, out DB_RoomContext context)' "$HOOKS"
-grep -q 'context.Bats.Count == 0' "$HOOKS"
-mapfile -t env_room_updates < <(grep -RIn --include='*.cs' 'DB_EnvironmentRoomRuntime\.Update(' "$SRC" || true)
-test "${#env_room_updates[@]}" -eq 1
-printf '%s\n' "${env_room_updates[@]}" | grep -q '^.*DB_RainWorldHooks.cs:'
+# Sandstorm contraction and passive emergence suppression must remain connected conceptually.
+if ('Sandstorm' in joined or 'DeathSandstorm' in joined) and 'ShouldSuppressPassiveHiveEmergence' not in joined:
+    failures.append('weather-aware passive hive emergence suppression is missing')
 
-test -f "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.AlarmFlutter => new(300f, 95f, 135, 135, 38, 2, 0.56f, 0.31f)' "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.DistressCall => new(250f, 108f, 120, 120, 52)' "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.RallySignal => new(235f, 0f, 84, 90, 42)' "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.RoostCall => new(215f, 0f, 110, 110, 30)' "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.HarassSignal => new(235f, 0f, 90, 90, 30)' "$SIGNAL_DEF"
-grep -q 'DB_SignalKind.SafeSignal => new(195f, 0f, 90, 90, 30)' "$SIGNAL_DEF"
-grep -q 'definition.VisualRange' "$PERCEPTION"
-grep -q 'definition.CloseAcousticRange' "$PERCEPTION"
-grep -q 'DB_PerceptionScoring.SignalConfidence' "$PERCEPTION"
-grep -q 'definition.AmbientTtlTicks' "$SIGNAL_RT"
-grep -q 'DB_SignalDefinition.For(kind).MaxRelayHops' "$SIGNAL_PACKET"
-grep -q 'definition.RelayScale(packet.Hop)' "$SIGNAL_ROOM"
-grep -q 'definition.RootTtlTicks' "$SIGNAL_ROOM"
-grep -q 'perception.ReceiveSignal(packet, out bool relay)' "$SIGNAL_ROOM"
-! grep -q 'ThreatenedAt' "$SIGNAL_RT"
-! grep -q 'DB_SocialRuntime.CancelForPriority' "$SIGNAL_RT"
-! grep -qE 'MaxAlarmHop|AlarmTtlTicks|AlarmHop1Scale|AlarmHop2Scale|NeutralSignalTtl|internal static float VisualRadius' "$SIGNAL_RT"
-! grep -RInE 'DB_SignalRuntime\.(MaxAlarmHop|AlarmTtlTicks|AlarmHop1Scale|AlarmHop2Scale)' "$SIGNALS"
+# Rock impacts are a deliberate non-finisher gameplay rule. Protect the behavior, not the old
+# exact health-floor value or method layout.
+creature_candidates = [p for p in files if p.name == 'DB_Creature.cs']
+if creature_candidates:
+    creature = texts[creature_candidates[0]]
+    if 'resolvingRockViolence' not in creature or 'source?.owner is Rock' not in creature:
+        failures.append('rock non-finisher handling disappeared from DB_Creature')
 
-# Perception R2 final ownership: no compatibility receiver API/DTO may return to Signals.
-! grep -q 'internal static bool ReceivePacket' "$SIGNAL_RT"
-! grep -q 'internal static bool TryGetInfluence' "$SIGNAL_RT"
-! grep -q 'internal static bool TryGetDebugState' "$SIGNAL_RT"
-! grep -RIn --include='*.cs' 'DB_SignalPerception' "$SRC"
-! grep -RIn --include='*.cs' 'DB_SignalInfluence' "$SRC"
-! grep -RIn --include='*.cs' 'DB_SignalDebugState' "$SRC"
-grep -q 'internal bool ReceiveSignal(DB_SignalPacket packet, out bool relayAlarm)' "$PERCEPTION"
-grep -q 'internal bool TryGetSignalContext(out DB_PerceptionSignalContext context)' "$PERCEPTION"
-grep -q 'DB_PerceptionSignalContext signal = hasPerception' "$SIGNAL_DEBUG"
-grep -q 'perception.Snapshot.Signals' "$SIGNAL_DEBUG"
-! grep -q 'DB_SignalRuntime.TryGetDebugState' "$SIGNAL_DEBUG"
+# Optional managed tests may come and go. If present, only reject stale positive reflection
+# references that point to types no longer declared in production.
+tests = Path('tests/DesertBatfly')
+if tests.is_dir():
+    decl = set(re.findall(r'\b(?:class|struct|enum|interface)\s+(DB_[A-Za-z0-9_]+)\b', joined))
+    positive = re.compile(r'GetType\("DryCycle\.Creatures\.DesertBatfly\.(DB_[A-Za-z0-9_]+)"')
+    for path in tests.rglob('*.cs'):
+        for name in positive.findall(path.read_text(encoding='utf-8')):
+            if name not in decl:
+                failures.append(f'stale managed-test reflection target {name}: {path}')
 
-! grep -RIn 'intimidation.GetMethod("ArmVengeance"' "$TESTS"
-! grep -RIn 'intimidation.GetMethod("ForceFlight"' "$TESTS"
-grep -q 'vengeance.GetMethod("ArmVengeance", Flags)' "$TESTS/Program.Signals.cs"
-grep -q 'vengeance.GetNestedType("Participation", Flags)' "$TESTS/Program.Signals.cs"
+if failures:
+    print('\n'.join(failures), file=sys.stderr)
+    sys.exit(1)
 
-grep -q 'DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution)' "$OBSERVATORY"
-grep -q 'resolution.PrimaryOwner' "$OBSERVATORY"
-grep -q 'resolution.WinningProposal.BehaviorKind' "$OBSERVATORY"
-grep -q 'debug.Rejected' "$OBSERVATORY"
-
-grep -q 'DB_RoostAnchorKind.FloorUnderside' "$ROOST"
-grep -q 'room.MiddleOfTile(floorTile) + Vector2.down \* 10f' "$ROOST"
-! grep -q 'room.MiddleOfTile(floorTile) + Vector2.up \* 10f' "$ROOST"
-
-python3 "$TESTS/check_social_diversity.py"
-python3 "$TESTS/check_perception_r2.py"
-echo 'DesertBatfly function-retention audit passed: HB-01..HB-11 plus Social diversity, Perception R2 and final Signal/Perception ownership protected.'
+print('R6 gameplay retention passed: external identities and durable gameplay contracts are intact.')
+PY

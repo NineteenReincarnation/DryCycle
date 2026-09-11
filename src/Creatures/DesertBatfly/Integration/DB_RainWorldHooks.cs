@@ -119,6 +119,9 @@ internal static class DB_RainWorldHooks
     {
         if (self is DB_Creature desert)
         {
+            // Hold the ingress slot until Burrowed is actually reached, then free it for the next
+            // queued bat before vanilla removes this creature from the realized room.
+            DB_HiveTraffic.Forget(desert);
             desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
             DB_NeutralBehaviorRuntime.Forget(desert);
@@ -136,14 +139,29 @@ internal static class DB_RainWorldHooks
             return;
         }
 
+        bool wasInHive = self.inHive.Contains(fly);
+        DB_HiveTraffic.Forget(desert);
         desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
         DB_NeutralBehaviorRuntime.Forget(desert);
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
-        try { orig(self, fly); }
-        finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
+        try
+        {
+            orig(self, fly);
+        }
+        finally
+        {
+            bool stillInHive = self.inHive.Contains(fly);
+            desert.DesertState.InHive = stillInHive;
+
+            // Every successful BatHive exit, including an explicit Travel departure, receives the
+            // same exclusive clearance corridor. The old room queue was the only caller and left
+            // travel-triggered exits without emergence lifecycle ownership.
+            if (wasInHive && !stillInHive && !desert.dead && desert.room == self.room)
+                desert.Emergence.BeginHiveDeparture();
+        }
     }
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
@@ -392,6 +410,13 @@ internal static class DB_RainWorldHooks
             DB_SocialRuntime.CancelForPriority(desert, "R3 PrimaryOwner=" + owner);
             DB_NeutralBehaviorRuntime.CancelForPriority(desert);
         }
+
+        // Native rain remains an enclosing NativeSpecial owner, but DesertBatfly's local-hive
+        // branch is executed by the Hive domain so it cannot bypass the shared ingress queue.
+        // If there is no usable local hive, return to vanilla for its ordinary cross-room escape.
+        if (owner == DB_BehaviorOwner.NativeSpecial && self.fleeFromRain &&
+            DB_SwarmRoom.TryExecuteNativeRain(self, desert))
+            return true;
 
         orig(self);
         return true;

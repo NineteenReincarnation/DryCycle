@@ -62,7 +62,18 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
     public override void PlaceInRoom(Room placeRoom)
     {
         base.PlaceInRoom(placeRoom);
-        if (!DesertState.InHive || dead || placeRoom.hives.Length == 0) return;
+        if (!DesertState.InHive || dead) return;
+
+        // InHive is save-backed. A moved/migrated creature can therefore realize in a room whose
+        // authored geometry has no BatHive even though the previous abstract state said it was
+        // resting in one. Repair that stale flag instead of leaving a realized active bat marked
+        // permanently invisible to flock/hive lifecycle code.
+        if (placeRoom?.hives == null || placeRoom.hives.Length == 0)
+        {
+            DesertState.InHive = false;
+            return;
+        }
+
         var hive = DB_SwarmRoom.For(placeRoom).Hive;
         if (!hive.inHive.Contains(this)) hive.MoveFlyToHive(this);
     }
@@ -174,6 +185,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
 
         DesertAI.CancelAttack();
         Emergence.Cancel();
+        DB_HiveTraffic.Forget(this);
         DB_SocialRuntime.CancelForPriority(this, "grabbed / restraint");
 
         // Report before vanilla installs this grasp into grabbedBy. The EventHub uses that
@@ -228,6 +240,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         Restraint.ClearTransient();
         DesertAI?.CancelAttack();
         Emergence?.Cancel();
+        DB_HiveTraffic.Forget(this);
 
         // Capture chain witnesses and killer attribution at the exact point where the former
         // On.Creature.Die hook observed this lifecycle: immediately before base.Die.
@@ -247,6 +260,7 @@ internal sealed class DB_Creature : Fly, IPlayerEdible
         Rescue.ClearTransient();
         Restraint.ClearTransient();
         DesertAI?.CancelAttack();
+        DB_HiveTraffic.Forget(this);
         DB_FearRuntime.Forget(this);
         base.Destroy();
     }

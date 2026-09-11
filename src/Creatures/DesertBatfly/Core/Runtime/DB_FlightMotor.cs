@@ -47,6 +47,7 @@ internal static class DB_FlightMotor
     {
         states = new ConditionalWeakTable<DB_Creature, State>();
         DB_FogGoalModifier.Reset();
+        DB_HiveTraffic.Reset();
     }
 
     internal static void Forget(DB_Creature bat)
@@ -54,6 +55,7 @@ internal static class DB_FlightMotor
         if (bat == null) return;
         states.Remove(bat);
         DB_FogGoalModifier.Forget(bat);
+        DB_HiveTraffic.Forget(bat);
     }
 
     internal static bool TrySteer(
@@ -75,6 +77,9 @@ internal static class DB_FlightMotor
 
         nominalSpeed = Mathf.Max(0.1f, nominalSpeed);
         response = Mathf.Clamp01(response);
+        DB_HiveTraffic.FilterGoal(
+            bat, owner, goal, preserveDijkstra,
+            out goal, out preserveDijkstra);
         goal = DB_FogGoalModifier.ModifyGoal(bat, owner, goal);
 
         bat.LoseAllGrasps();
@@ -133,6 +138,13 @@ internal static class DB_FlightMotor
             resolution.SpecialPhysicsOwner != DB_SpecialPhysicsOwner.None)
             return false;
 
+        bool keepDijkstra = bat.AI.followingDijkstraMap >= 0;
+        bool admitted = DB_HiveTraffic.FilterGoal(
+            bat, owner, goal, keepDijkstra,
+            out goal, out keepDijkstra);
+        if (!admitted && !keepDijkstra)
+            bat.AI.followingDijkstraMap = -1;
+
         goal = DB_FogGoalModifier.ModifyGoal(bat, owner, goal);
         bat.AI.localGoal = goal;
 
@@ -163,6 +175,13 @@ internal static class DB_FlightMotor
         if (DB_BehaviorArbiter.TryGetResolution(bat, out DB_BehaviorResolution resolution) &&
             resolution.SpecialPhysicsOwner != DB_SpecialPhysicsOwner.None)
             return false;
+
+        bool keepDijkstra = bat.AI.followingDijkstraMap >= 0;
+        bool admitted = DB_HiveTraffic.FilterGoal(
+            bat, owner, goal, keepDijkstra,
+            out goal, out keepDijkstra);
+        if (!admitted && !keepDijkstra)
+            bat.AI.followingDijkstraMap = -1;
 
         goal = DB_FogGoalModifier.ModifyGoal(bat, owner, goal);
         bat.AI.localGoal = goal;

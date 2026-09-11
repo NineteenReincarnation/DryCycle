@@ -90,7 +90,12 @@ internal sealed class DB_InjuryRecovery
         if (TryDriveRecoveryHive(out Vector2 hiveTarget))
         {
             brain.SetMode(DB_AI.Activity.InjuryRecovery);
-            injury.SetRecovery(DB_InjuryRecoveryState.Hive, hiveTarget, "severe injury; native hive dijkstra recovery route");
+            injury.SetRecovery(
+                DB_InjuryRecoveryState.Hive,
+                hiveTarget,
+                DB_HiveTraffic.IsAdmitted(fly)
+                    ? "severe injury; native hive dijkstra recovery route"
+                    : "severe injury; waiting at distributed BatHive ingress hold");
             return true;
         }
 
@@ -111,6 +116,7 @@ internal sealed class DB_InjuryRecovery
         if (fly?.AI != null && fly.Injury.RecoveryState == DB_InjuryRecoveryState.Hive &&
             !fly.AI.fleeFromRain && fly.AI.behavior != FlyAI.Behavior.Burrow)
             fly.AI.followingDijkstraMap = -1;
+        DB_HiveTraffic.Forget(fly);
     }
 
     private bool RecoveryRoostTargetValid(DB_RoostAnchor anchor)
@@ -182,12 +188,8 @@ internal sealed class DB_InjuryRecovery
 
         if (fly.room.GetTile(fly.mainBodyChunk.pos).hive)
         {
-            fly.AI.ChangeBehavior(FlyAI.Behavior.Burrow);
-            fly.burrowOrHangSpot = fly.mainBodyChunk.pos;
-            fly.movMode = Fly.MovementMode.Burrow;
-            fly.AI.afraid = Mathf.Max(fly.AI.afraid, 0.8f);
             brain.ClearRoostClaim();
-            return true;
+            return DB_HiveDocking.TryHandleInjuryRecovery(fly);
         }
 
         fly.LoseAllGrasps();
@@ -203,13 +205,16 @@ internal sealed class DB_InjuryRecovery
         if (dijkstraInput == Vector2.zero || fly.room.GetTile(dijkstraInput).Solid)
             dijkstraInput = fly.mainBodyChunk.pos;
         Vector2 next = fly.AI.ProgressLocalGoalAlongDijkstraMap(dijkstraInput, bestMap);
-        return DB_FlightMotor.TrySteer(
+        bool guided = DB_FlightMotor.TrySteer(
             fly,
             DB_BehaviorOwner.InjuryRecovery,
             next,
             4.2f,
             preserveDijkstra: true,
             response: 0.20f);
+        if (guided && !DB_HiveTraffic.IsAdmitted(fly))
+            target = fly.AI.localGoal;
+        return guided;
     }
 
     private Vector2 ClosestHivePoint(int hiveIndex)
@@ -232,6 +237,7 @@ internal sealed class DB_InjuryRecovery
     {
         if (!DB_BehaviorArbiter.IsPrimaryOwner(fly, DB_BehaviorOwner.InjuryRecovery)) return;
         recoveryRoostTarget = anchor;
+        DB_HiveTraffic.Forget(fly);
         brain.SetRoostClaim(anchor);
         fly.AI.followingDijkstraMap = -1;
         fly.AI.ChangeBehavior(FlyAI.Behavior.Chain);
