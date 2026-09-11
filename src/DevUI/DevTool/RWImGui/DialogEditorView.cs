@@ -35,7 +35,7 @@ internal static class DialogEditorView
             if (ImGui.Selectable(file + "##DialogFile" + i, selected))
                 DialogEditorCommandQueue.Enqueue(new DialogEditorCommand(DialogEditorCommandKind.SelectDialog, path));
             if (selected) ImGui.SetItemDefaultFocus();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(path);
+            if (ImGui.IsItemHovered()) DevToolTooltip.Show(path);
         }
 
         if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的对话文件。", "No matching dialog files."));
@@ -58,6 +58,8 @@ internal static class DialogEditorView
             ImGui.End();
             return;
         }
+
+        FloatingWindowSnap.TrackCurrentWindow("DialogPreview");
 
         if (string.IsNullOrEmpty(snapshot.SelectedPath))
         {
