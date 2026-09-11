@@ -71,7 +71,16 @@ public static class MapEditorPresentationHub
         MapEditorState state = MapEditorStateHub.Get(session);
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
-        HashSet<string> disabled = new(page.world.DisabledMapRooms ?? Array.Empty<string>(), StringComparer.Ordinal);
+        HashSet<string> disabled = new(StringComparer.Ordinal);
+        if (page.world.DisabledMapRooms != null)
+        {
+            for (int i = 0; i < page.world.DisabledMapRooms.Count; i++)
+            {
+                string name = page.world.DisabledMapRooms[i];
+                if (!string.IsNullOrEmpty(name)) disabled.Add(name);
+            }
+        }
+
         int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
 
         for (int i = 0; i < page.subNodes.Count; i++)
