@@ -13,39 +13,37 @@ internal enum MantleCrabRecoveryPhase
 }
 
 /// <summary>
-/// MantleCrab 的地面姿态与承重控制。
+/// MantleCrab 的地面站立与翻身控制。
 ///
-/// V3 的核心原则来自 Rain World 原版 Deer / MirosBird：步足决定“身体现在有多少可靠支撑”，
-/// 但维持体重的基础支撑作用在整个身体上，而不是分别从左右腿根向几个 BodyChunk 注入力。
-/// 这样正常站立不会因为左右脚质量的一点差异就自己制造旋转；甲壳角度只由单独、很弱的姿态控制处理。
+/// 普通站立刻意采用 Rain World 原版大型生物的宽容思路：
+/// 脚已经踩住地面，就把它当成有效支点；身体整体负责抵消重力和维持站高。
+/// 不再因为某条腿伸展比例、IK 小误差或接触质量的轻微波动而减少基础承重。
 ///
-/// Ground posture and support controller. Following the vanilla large-creature pattern, limbs determine
-/// support authority while gravity compensation is applied to the whole body. Standing support therefore
-/// does not create torque by itself; shell orientation is handled separately by a deliberately soft controller.
+/// Ground stance and self-righting controller. Normal stance deliberately follows the forgiving
+/// vanilla large-creature pattern: grounded feet establish support, while the whole body receives
+/// gravity compensation. Minor IK or pose errors are handled by stepping, not by collapsing the body.
 /// </summary>
 internal sealed class MantleCrabPostureController
 {
-    private const float MaximumTerrainFollowDegrees = 9f;
+    private const float MaximumTerrainFollowDegrees = 8f;
     private const float MaximumManualLeanDegrees = 4f;
     private const float MovementStopDegrees = 34f;
     private const float RecoveryEnterDegrees = 60f;
     private const float RecoveryExitDegrees = 12f;
     private const float RecoveryDeployDegrees = 46f;
 
-    // 站立支撑故意比较“软”。生成时已经处在接近正确高度，所以这里主要负责抵消重力、
-    // 吸收小误差，而不是像千斤顶一样把身体迅速顶到目标高度。
-    // Standing suspension is intentionally soft: it mostly cancels gravity and removes small height error.
-    private const float SupportHeightGain = .0034f;
-    private const float SupportVelocityDamping = .20f;
-    private const float FullSupportQuality = 1.55f;
-    private const float OneSidedSupportAuthority = .44f;
-    private const float MaximumSupportFactor = 1.10f;
+    // 站高只做小修正。基础承重首先完整抵消 Rain World 已经施加的重力。
+    // Height control is a small correction on top of full gravity compensation.
+    private const float SupportHeightGain = .0022f;
+    private const float SupportVelocityDamping = .11f;
+    private const float MaximumSupportFactor = 1.14f;
+    private const float SingleFootSupportFactor = .62f;
 
-    // 甲壳姿态控制只修正缓慢漂移，不承担“站立”本身。
-    // Shell attitude correction is separate from support and intentionally low-authority.
-    private const float PostureGain = .00082f;
-    private const float PostureDamping = .15f;
-    private const float MaximumAngularAcceleration = .00072f;
+    // 普通姿态回正必须很弱；它只防止甲壳慢慢漂歪，不负责“托住身体”。
+    // Ordinary attitude correction is deliberately weak and separate from standing support.
+    private const float PostureGain = .00072f;
+    private const float PostureDamping = .14f;
+    private const float MaximumAngularAcceleration = .00062f;
 
     private const float RecoveryAngularAcceleration = .00055f;
     private const float RecoveryMaximumAngularSpeed = .0145f;
@@ -57,7 +55,6 @@ internal sealed class MantleCrabPostureController
     private const float RecoveryPushCycleFrames = 52f;
 
     private readonly MantleCrab crab;
-    private readonly float[] supportQuality = new float[4];
     private Vector2 supportNormal = Vector2.up;
     private Vector2 walkAxis = Vector2.right;
     private bool recovering;
@@ -121,9 +118,6 @@ internal sealed class MantleCrabPostureController
         recoveryDirection = 1f;
         recoveryPhase = MantleCrabRecoveryPhase.None;
         recoveryPhaseFrame = 0;
-
-        for (int i = 0; i < supportQuality.Length; i++)
-            supportQuality[i] = 0f;
     }
 
     internal void UpdateFrame()
@@ -134,16 +128,12 @@ internal sealed class MantleCrabPostureController
             BeginRecovery(shellAngle);
 
         Vector2 summedNormal = Vector2.zero;
-        float summedQuality = 0f;
+        int groundedFeet = 0;
 
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.GroundNormal.y <= .15f)
-                continue;
-
-            float quality = crab.Locomotion.EffectiveSupportQuality(leg);
-            if (quality <= .001f)
+            if (!leg.Planted || leg.Swinging || leg.GroundNormal.y <= .15f)
                 continue;
 
             Vector2 normal = leg.GroundNormal;
@@ -154,18 +144,16 @@ internal sealed class MantleCrabPostureController
             if (normal.y < 0f)
                 normal = -normal;
 
-            summedNormal += normal * quality;
-            summedQuality += quality;
+            summedNormal += normal;
+            groundedFeet++;
         }
 
-        Vector2 targetNormal = summedQuality > .001f ? summedNormal / summedQuality : Vector2.up;
+        Vector2 targetNormal = groundedFeet > 0 ? summedNormal / groundedFeet : Vector2.up;
         if (targetNormal.sqrMagnitude <= .0001f)
             targetNormal = Vector2.up;
         else
             targetNormal.Normalize();
 
-        // 长腿吸收大部分碎石和小坡度，甲壳只缓慢跟随一小部分地形角度。
-        // Long legs absorb local terrain; the shell follows only a limited averaged slope.
         float terrainAngle = Mathf.Clamp(
             Mathf.Atan2(-targetNormal.x, targetNormal.y),
             -MaximumTerrainFollowDegrees * Mathf.Deg2Rad,
@@ -187,9 +175,7 @@ internal sealed class MantleCrabPostureController
         if (walkAxis.x < 0f)
             walkAxis = -walkAxis;
 
-        // 翻身阶段只有真实接触地形时才允许壳体产生恢复力矩。
-        // Recovery torque exists only against real terrain contact.
-        if (recovering && summedQuality < .08f)
+        if (recovering && groundedFeet == 0)
             ApplyShellContactRecovery(shellAngle);
     }
 
@@ -212,8 +198,6 @@ internal sealed class MantleCrabPostureController
                 break;
 
             case MantleCrabRecoveryPhase.Brace:
-                // 空中保持收腿。只有壳体落地以后才伸撑腿找真实支点。
-                // Stay tucked in the air; bracing starts only after shell-terrain contact.
                 if (!shellContact)
                     return;
 
@@ -267,13 +251,10 @@ internal sealed class MantleCrabPostureController
     }
 
     /// <summary>
-    /// 站立 V3：步足只决定支撑权限，维持体重的加速度统一施加到整个甲壳。
-    /// 这是本轮最关键的改动——正常站立本身不再产生任何人为角动量。
-    ///
-    /// Standing V3: feet determine support authority, while gravity compensation acts on the whole shell.
-    /// Basic standing therefore injects no artificial angular momentum.
+    /// 普通站立只看“脚有没有真正踩住”。两条及以上脚着地时，完整抵消身体重力；
+    /// 腿姿势不舒服由换步逻辑处理，不能通过减少重力补偿把整只生物搞塌。
     /// </summary>
-    internal void ApplySupportAndPosture(float effectiveGravity, float turnIntent)
+    internal void ApplySupportAndPosture(float ignoredGravity, float turnIntent)
     {
         UpdateFrame();
         BodyState(
@@ -283,68 +264,52 @@ internal sealed class MantleCrabPostureController
             out float inertia,
             out float angularVelocity);
 
-        float qualitySum = 0f;
-        float weightedHeightError = 0f;
-        float leftQuality = 0f;
-        float rightQuality = 0f;
-        int validSupports = 0;
+        int groundedFeet = 0;
+        float heightErrorSum = 0f;
+        bool leftSupport = false;
+        bool rightSupport = false;
 
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            float quality = crab.Locomotion.EffectiveSupportQuality(leg);
-            supportQuality[i] = quality;
-            if (quality <= .001f)
+            if (!leg.Planted || leg.Swinging)
                 continue;
 
-            validSupports++;
-            qualitySum += quality;
-
-            // 用真实脚点而不是腿根判断支撑位于重心哪一侧。
-            // Support side is defined by the real foot contact, not the shell anchor.
-            float offset = Vector2.Dot(leg.Contact - center, walkAxis);
-            if (offset < -2f)
-                leftQuality += quality;
-            else if (offset > 2f)
-                rightQuality += quality;
-
-            // 站高误差沿世界竖直计算，与 Rain World 原版重力补偿保持一致。
-            // Height correction is world-vertical, matching vanilla gravity compensation.
+            groundedFeet++;
             float actualHeight = crab.Anchor(leg).y - leg.Contact.y;
-            float heightError = leg.StandHeight - actualHeight;
-            weightedHeightError += heightError * quality;
+            heightErrorSum += leg.StandHeight - actualHeight;
+
+            float offset = Vector2.Dot(leg.Contact - center, walkAxis);
+            if (offset < -2f) leftSupport = true;
+            if (offset > 2f) rightSupport = true;
         }
 
-        bool straddlesCenter = leftQuality > .08f && rightQuality > .08f;
-        float supportCoverage = Mathf.Clamp01(qualitySum / FullSupportQuality);
-        float sideAuthority = straddlesCenter
-            ? 1f
-            : validSupports >= 2 ? OneSidedSupportAuthority : OneSidedSupportAuthority * .65f;
-        float supportAuthority = supportCoverage * sideAuthority;
+        // PhysicalObject.gravity 已经包含 room.gravity。不要再乘第二次房间重力。
+        // PhysicalObject.gravity already includes room.gravity; use it directly just like vanilla creatures do.
+        float effectiveGravity = Mathf.Max(0f, crab.gravity);
 
-        if (qualitySum > .001f && supportAuthority > .001f)
+        if (groundedFeet > 0 && effectiveGravity > 0f)
         {
-            float meanHeightError = weightedHeightError / qualitySum;
-            float heightCorrection = meanHeightError * SupportHeightGain -
-                                     velocity.y * SupportVelocityDamping;
+            float meanHeightError = heightErrorSum / groundedFeet;
+            float supportFactor = groundedFeet >= 2 ? 1f : SingleFootSupportFactor;
 
-            // 支撑首先抵消重力，站高误差只做小修正。最大权限略高于 1g，足够慢慢站回正确高度，
-            // 但不会再出现把整个大型甲壳弹飞的千斤顶效果。
-            // Support first cancels gravity; height error adds only a small correction.
-            float supportAcceleration = effectiveGravity * supportAuthority + heightCorrection * supportAuthority;
-            float maximumSupport = Mathf.Max(0f, effectiveGravity) * MaximumSupportFactor;
-            supportAcceleration = Mathf.Clamp(supportAcceleration, 0f, maximumSupport);
+            float supportAcceleration = effectiveGravity * supportFactor;
+            supportAcceleration += meanHeightError * SupportHeightGain;
+            supportAcceleration -= velocity.y * SupportVelocityDamping;
 
-            // 原版 Deer / MirosBird 的关键思路：身体级支撑。
-            // 每个 BodyChunk 得到同样的竖直加速度，因此这里不会制造旋转。
-            // Vanilla-style body-level support: equal acceleration on all shell chunks, hence no support torque.
+            float maxSupport = effectiveGravity * (groundedFeet >= 2
+                ? MaximumSupportFactor
+                : SingleFootSupportFactor * 1.05f);
+            supportAcceleration = Mathf.Clamp(supportAcceleration, 0f, maxSupport);
+
+            // 和 MirosBird 一样：支撑作用到整个身体，而不是某一条腿根。
+            // Equal acceleration on every shell chunk cannot create artificial standing torque.
             for (int i = 0; i < crab.bodyChunks.Length; i++)
                 crab.bodyChunks[i].vel.y += supportAcceleration;
         }
 
-        // 翻身由专门的恢复流程负责；普通站姿只做很弱的角度阻尼。
-        // Recovery owns large rotations. Ordinary stance only damps small shell-angle drift.
-        float terrainLean = Mathf.Atan2(walkAxis.y, walkAxis.x) * .25f;
+        // 普通站姿只做很弱的回正。只要有两条脚着地，就不要因为脚点细微差异自己摔倒。
+        float terrainLean = Mathf.Atan2(walkAxis.y, walkAxis.x) * .22f;
         float manualLean = recovering
             ? 0f
             : Mathf.Clamp(turnIntent, -1f, 1f) * MaximumManualLeanDegrees * Mathf.Deg2Rad;
@@ -356,13 +321,9 @@ internal sealed class MantleCrabPostureController
                 MaximumTerrainFollowDegrees * Mathf.Deg2Rad);
 
         float angleError = DeltaRadians(desiredAngle, ShellAngleRadians());
-        float postureAuthority;
-        if (recovering)
-            postureAuthority = .55f;
-        else if (straddlesCenter)
-            postureAuthority = Mathf.Clamp01(qualitySum / 1.35f);
-        else
-            postureAuthority = .12f * supportCoverage;
+        float postureAuthority = recovering
+            ? .55f
+            : groundedFeet >= 2 ? 1f : groundedFeet == 1 ? .28f : 0f;
 
         float maxAngularAcceleration = recovering ? RecoveryAngularAcceleration : MaximumAngularAcceleration;
         float damping = recovering ? RecoveryAngularDamping : PostureDamping;
