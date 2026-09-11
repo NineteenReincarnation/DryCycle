@@ -16,6 +16,7 @@ internal static class DevToolOverlay
     private static string objectSearch = string.Empty;
     private static bool sceneTab;
     private static int sceneSelectionAnchor = -1;
+    private static float browserInspectorSplit = 0.40f;
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
@@ -35,8 +36,8 @@ internal static class DevToolOverlay
         if (!snapshot.FocusMode)
         {
             DrawActivityBar(snapshot, display);
-            if (snapshot.BrowserOpen) DrawBrowser(snapshot, display);
-            if (snapshot.InspectorOpen) DrawInspector(snapshot, display);
+            if (snapshot.BrowserOpen || snapshot.InspectorOpen)
+                DrawBrowserInspectorPanel(snapshot, display);
             DrawStatusBar(snapshot, display);
         }
 
@@ -161,11 +162,11 @@ internal static class DevToolOverlay
         ImGui.Separator();
         if (ImGui.Button(snapshot.BrowserOpen ? "<" : ">", new Num.Vector2(28f, 0f)))
             Send(EditorUiCommandKind.ToggleBrowser);
-        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏浏览器 · Ctrl+B", "Toggle browser · Ctrl+B"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏左栏浏览器 · Ctrl+B", "Toggle left Browser pane · Ctrl+B"));
 
         if (ImGui.Button(snapshot.InspectorOpen ? "I" : "i", new Num.Vector2(28f, 0f)))
             Send(EditorUiCommandKind.ToggleInspector);
-        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏检查器 · Ctrl+I", "Toggle inspector · Ctrl+I"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器 · Ctrl+I", "Toggle right Inspector pane · Ctrl+I"));
         ImGui.End();
     }
 
@@ -178,24 +179,100 @@ internal static class DevToolOverlay
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
-    private static void DrawBrowser(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    private static void DrawBrowserInspectorPanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float maxHeight = Math.Max(260f, display.Y - 32f);
-        ImGui.SetNextWindowPos(new Num.Vector2(78f, 120f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(320f, Math.Min(460f, maxHeight)), ImGuiCond.FirstUseEver);
+        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        float defaultWidth = Math.Min(Math.Max(760f * Math.Min(1.4f, scale), display.X * 0.58f), Math.Max(520f, display.X - 80f));
+        float defaultHeight = Math.Min(Math.Max(440f * Math.Min(1.25f, scale), display.Y * 0.52f), Math.Max(320f, display.Y - 120f));
+        Num.Vector2 defaultPos = new(
+            Math.Max(80f, (display.X - defaultWidth) * 0.58f),
+            Math.Max(92f, (display.Y - defaultHeight) * 0.50f));
+
+        ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(240f, 190f),
-            new Num.Vector2(Math.Max(240f, display.X - 16f), maxHeight));
+            new Num.Vector2(520f, 300f),
+            new Num.Vector2(Math.Max(520f, display.X - 16f), Math.Max(300f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
-        if (!ImGui.Begin(DevToolUiSettings.T("浏览器###DevToolBrowser", "Browser###DevToolBrowser"), flags))
+
+        if (!ImGui.Begin(DevToolUiSettings.T("编辑面板###DevToolBrowserInspector", "Editor Panel###DevToolBrowserInspector"), ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
             return;
         }
 
-        FloatingWindowSnap.TrackCurrentWindow("Browser");
+        FloatingWindowSnap.TrackCurrentWindow("BrowserInspector");
 
+        bool browser = snapshot.BrowserOpen;
+        bool inspector = snapshot.InspectorOpen;
+        Num.Vector2 available = ImGui.GetContentRegionAvail();
+        if (available.X < 1f || available.Y < 1f)
+        {
+            ImGui.End();
+            return;
+        }
+
+        if (browser && inspector)
+        {
+            float splitterWidth = Math.Max(8f, 6f * scale);
+            float minLeft = Math.Min(available.X * 0.45f, Math.Max(180f, 220f * Math.Min(1.4f, scale)));
+            float minRight = Math.Min(available.X * 0.45f, Math.Max(220f, 260f * Math.Min(1.4f, scale)));
+            float usable = Math.Max(1f, available.X - splitterWidth);
+            float leftWidth = usable * browserInspectorSplit;
+            leftWidth = Math.Max(minLeft, Math.Min(leftWidth, Math.Max(minLeft, usable - minRight)));
+            browserInspectorSplit = Math.Max(0.18f, Math.Min(0.82f, leftWidth / usable));
+
+            if (ImGui.BeginChild("##DevToolBrowserPane", new Num.Vector2(leftWidth, available.Y), true))
+            {
+                ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
+                ImGui.Separator();
+                DrawBrowserContents(snapshot);
+            }
+            ImGui.EndChild();
+
+            ImGui.SameLine(0f, 0f);
+            ImGui.InvisibleButton("##DevToolBrowserInspectorSplitter", new Num.Vector2(splitterWidth, available.Y));
+            Num.Vector2 splitMin = ImGui.GetItemRectMin();
+            Num.Vector2 splitMax = ImGui.GetItemRectMax();
+            ImDrawListPtr draw = ImGui.GetWindowDrawList();
+            float lineX = (splitMin.X + splitMax.X) * 0.5f;
+            uint lineColor = ImGui.GetColorU32(ImGui.IsItemHovered() || ImGui.IsItemActive()
+                ? ImGuiCol.HeaderActive
+                : ImGuiCol.Separator);
+            draw.AddLine(new Num.Vector2(lineX, splitMin.Y), new Num.Vector2(lineX, splitMax.Y), lineColor, ImGui.IsItemActive() ? 3f : 1.5f);
+            if (ImGui.IsItemActive() && usable > 1f)
+            {
+                browserInspectorSplit += ImGui.GetIO().MouseDelta.X / usable;
+                browserInspectorSplit = Math.Max(0.18f, Math.Min(0.82f, browserInspectorSplit));
+            }
+
+            ImGui.SameLine(0f, 0f);
+            if (ImGui.BeginChild("##DevToolInspectorPane", new Num.Vector2(0f, available.Y), true))
+            {
+                ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
+                ImGui.Separator();
+                DrawInspectorContents(snapshot);
+            }
+            ImGui.EndChild();
+        }
+        else if (browser)
+        {
+            ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
+            ImGui.Separator();
+            DrawBrowserContents(snapshot);
+        }
+        else if (inspector)
+        {
+            ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
+            ImGui.Separator();
+            DrawInspectorContents(snapshot);
+        }
+
+        ImGui.End();
+    }
+
+    private static void DrawBrowserContents(EditorPresentationSnapshot snapshot)
+    {
         if (snapshot.ToolMode == EditorToolMode.Room)
             RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
         else if (snapshot.ToolMode == EditorToolMode.Sound)
@@ -219,8 +296,41 @@ internal static class DevToolOverlay
         }
         else
             ImGui.TextDisabled(DevToolUiSettings.T("当前工具不可用。", "Tools unavailable."));
+    }
 
-        ImGui.End();
+    private static void DrawInspectorContents(EditorPresentationSnapshot snapshot)
+    {
+        if (snapshot.ToolMode == EditorToolMode.Room)
+        {
+            RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于尚未迁移的模板、地形或自定义房间设置控件。", "Fallback for template, terrain or custom RoomSettings controls not migrated yet."));
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Objects)
+            ObjectInspectorView.Draw(snapshot.Inspector);
+        else if (snapshot.ToolMode == EditorToolMode.Sound)
+        {
+            SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于未迁移的自定义声音页面控件。", "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet."));
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Triggers)
+        {
+            TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于新检查器无法表达的自定义触发器/事件控件。", "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector."));
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Map)
+        {
+            MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于图编辑器尚未表达的原版或 Mod 地图控件。", "Fallback for vanilla or mod-added MapPage controls not represented by the graph editor."));
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Dialog)
+            DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
+        else if (snapshot.ToolMode == EditorToolMode.Relationships)
+        {
+            RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于矩阵编辑器尚未表达的关系页面扩展。", "Fallback for custom RelationshipPage extensions not represented by the matrix editor."));
+        }
+        else
+            ImGui.TextDisabled(DevToolUiSettings.T("当前检查器不可用。", "Inspector unavailable."));
     }
 
     private static void DrawObjectLibrary(EditorPresentationSnapshot snapshot)
@@ -302,60 +412,6 @@ internal static class DevToolOverlay
                 sceneSelectionAnchor = item.Index;
             }
         }
-    }
-
-    private static void DrawInspector(EditorPresentationSnapshot snapshot, Num.Vector2 display)
-    {
-        float defaultWidth = InspectorWidth(display);
-        float maxHeight = Math.Max(260f, display.Y - 32f);
-        ImGui.SetNextWindowPos(new Num.Vector2(Math.Max(8f, display.X - defaultWidth - 8f), 120f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, Math.Min(460f, maxHeight)), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(280f, 190f),
-            new Num.Vector2(Math.Max(280f, display.X - 16f), maxHeight));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
-        if (!ImGui.Begin(DevToolUiSettings.T("检查器###DevToolInspector", "Inspector###DevToolInspector"), flags))
-        {
-            ImGui.End();
-            return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow("Inspector");
-
-        if (snapshot.ToolMode == EditorToolMode.Room)
-        {
-            RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于尚未迁移的模板、地形或自定义房间设置控件。", "Fallback for template, terrain or custom RoomSettings controls not migrated yet."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Objects)
-            ObjectInspectorView.Draw(snapshot.Inspector);
-        else if (snapshot.ToolMode == EditorToolMode.Sound)
-        {
-            SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于未迁移的自定义声音页面控件。", "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Triggers)
-        {
-            TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于新检查器无法表达的自定义触发器/事件控件。", "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Map)
-        {
-            MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于图编辑器尚未表达的原版或 Mod 地图控件。", "Fallback for vanilla or mod-added MapPage controls not represented by the graph editor."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Dialog)
-            DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Relationships)
-        {
-            RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于矩阵编辑器尚未表达的关系页面扩展。", "Fallback for custom RelationshipPage extensions not represented by the matrix editor."));
-        }
-        else
-            ImGui.TextDisabled(DevToolUiSettings.T("当前检查器不可用。", "Inspector unavailable."));
-
-        ImGui.End();
     }
 
     private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
@@ -472,9 +528,6 @@ internal static class DevToolOverlay
         }
         ImGui.End();
     }
-
-    private static float InspectorWidth(Num.Vector2 display) =>
-        Math.Min(380f, Math.Max(320f, display.X * 0.27f));
 
     private static bool Matches(EditorObjectTypeSnapshot item, string query)
     {
