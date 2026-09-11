@@ -20,13 +20,13 @@ internal static class TriggerEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled("Trigger editor unavailable.");
+            ImGui.TextDisabled(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."));
             return;
         }
 
-        if (ImGui.Button(sceneTab ? "Library" : "Library*")) sceneTab = false;
+        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*"))) sceneTab = false;
         ImGui.SameLine();
-        if (ImGui.Button(sceneTab ? "Scene*" : "Scene")) sceneTab = true;
+        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene"))) sceneTab = true;
         ImGui.Separator();
 
         if (sceneTab) DrawScene(snapshot);
@@ -37,29 +37,31 @@ internal static class TriggerEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled("Trigger editor unavailable.");
+            ImGui.TextDisabled(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."));
             return;
         }
 
         EditorTriggerSnapshot selected = FindSelected(snapshot);
         if (selected == null)
         {
-            ImGui.TextDisabled("Select a trigger from Scene or its world gizmo.");
+            ImGui.TextDisabled(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个触发器。", "Select a trigger from Scene or its world gizmo."));
             return;
         }
 
         ImGui.Text(selected.Type);
-        ImGui.TextDisabled(selected.Event?.HasEvent == true ? "Event · " + selected.Event.Type : "No event assigned");
+        ImGui.TextDisabled(selected.Event?.HasEvent == true
+            ? DevToolUiSettings.T("事件 · ", "Event · ") + selected.Event.Type
+            : DevToolUiSettings.T("未分配事件", "No event assigned"));
         ImGui.Separator();
 
-        ImGui.TextDisabled("ACTIVATION");
-        DrawInt(selected, TriggerEditorKeys.ActiveFromCycle, "From cycle", selected.ActiveFromCycle, 0, 80);
+        ImGui.TextDisabled(DevToolUiSettings.T("触发条件", "ACTIVATION"));
+        DrawInt(selected, TriggerEditorKeys.ActiveFromCycle, DevToolUiSettings.T("起始周期", "From cycle"), selected.ActiveFromCycle, 0, 80);
         DrawUpperCycle(selected);
-        DrawFloat(selected, TriggerEditorKeys.DelaySeconds, "Delay (seconds)", selected.DelaySeconds, 0f, 120f);
-        DrawFloat(selected, TriggerEditorKeys.FireChance, "Fire chance", selected.FireChance, 0f, 1f);
+        DrawFloat(selected, TriggerEditorKeys.DelaySeconds, DevToolUiSettings.T("延迟（秒）", "Delay (seconds)"), selected.DelaySeconds, 0f, 120f);
+        DrawFloat(selected, TriggerEditorKeys.FireChance, DevToolUiSettings.T("触发概率", "Fire chance"), selected.FireChance, 0f, 1f);
 
         bool multiUse = selected.MultiUse;
-        if (ImGui.Checkbox("Can fire multiple times##TriggerMultiUse", ref multiUse))
+        if (ImGui.Checkbox(DevToolUiSettings.T("允许多次触发##TriggerMultiUse", "Can fire multiple times##TriggerMultiUse"), ref multiUse))
             SendValue(selected.Index, TriggerEditorKeys.MultiUse,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: multiUse));
 
@@ -69,16 +71,16 @@ internal static class TriggerEditorView
         if (selected.IsSpot)
         {
             ImGui.Separator();
-            ImGui.TextDisabled("SPOT AREA");
-            DrawVector(selected, TriggerEditorKeys.Position, "Position", selected.X, selected.Y);
-            DrawFloat(selected, TriggerEditorKeys.Radius, "Radius", selected.Radius, 0f, 4000f);
+            ImGui.TextDisabled(DevToolUiSettings.T("区域", "SPOT AREA"));
+            DrawVector(selected, TriggerEditorKeys.Position, DevToolUiSettings.T("位置", "Position"), selected.X, selected.Y);
+            DrawFloat(selected, TriggerEditorKeys.Radius, DevToolUiSettings.T("半径", "Radius"), selected.Radius, 0f, 4000f);
         }
 
         if (!string.IsNullOrEmpty(selected.CreatureType))
         {
             ImGui.Separator();
-            ImGui.TextDisabled("CREATURE");
-            DrawString(selected, TriggerEditorKeys.CreatureType, "Creature type", selected.CreatureType);
+            ImGui.TextDisabled(DevToolUiSettings.T("生物", "CREATURE"));
+            DrawString(selected, TriggerEditorKeys.CreatureType, DevToolUiSettings.T("生物类型", "Creature type"), selected.CreatureType);
         }
 
         ImGui.Separator();
@@ -88,14 +90,14 @@ internal static class TriggerEditorView
         DrawEventEditor(snapshot, selected);
 
         ImGui.Separator();
-        if (ImGui.Button("Delete Trigger"))
+        if (ImGui.Button(DevToolUiSettings.T("删除触发器", "Delete Trigger")))
             TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Delete, selected.Index));
     }
 
     private static void DrawLibrary(EditorTriggerPresentationSnapshot snapshot)
     {
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText("Search##TriggerLibrarySearch", ref search, 128);
+        ImGui.InputText(DevToolUiSettings.T("搜索##TriggerLibrarySearch", "Search##TriggerLibrarySearch"), ref search, 128);
         ImGui.Separator();
 
         string[] types = snapshot.TriggerTypes ?? Array.Empty<string>();
@@ -111,13 +113,13 @@ internal static class TriggerEditorView
                     text: type));
         }
 
-        if (matches == 0) ImGui.TextDisabled("No matching trigger types.");
+        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."));
     }
 
     private static void DrawScene(EditorTriggerPresentationSnapshot snapshot)
     {
         EditorTriggerSnapshot[] triggers = snapshot.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
-        ImGui.TextDisabled(triggers.Length + " triggers");
+        ImGui.TextDisabled(DevToolUiSettings.T($"{triggers.Length} 个触发器", $"{triggers.Length} triggers"));
         ImGui.Separator();
 
         for (int i = 0; i < triggers.Length; i++)
@@ -132,14 +134,14 @@ internal static class TriggerEditorView
 
     private static void DrawEventEditor(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
     {
-        ImGui.TextDisabled("EVENT");
+        ImGui.TextDisabled(DevToolUiSettings.T("事件", "EVENT"));
         EditorTriggeredEventSnapshot value = trigger.Event ?? new EditorTriggeredEventSnapshot();
 
-        string preview = value.HasEvent ? value.Type : "None";
-        if (ImGui.BeginCombo("Type##TriggerEventType", preview))
+        string preview = value.HasEvent ? value.Type : DevToolUiSettings.T("无", "None");
+        if (ImGui.BeginCombo(DevToolUiSettings.T("类型##TriggerEventType", "Type##TriggerEventType"), preview))
         {
             bool noneSelected = !value.HasEvent;
-            if (ImGui.Selectable("None##TriggerEventNone", noneSelected))
+            if (ImGui.Selectable(DevToolUiSettings.T("无##TriggerEventNone", "None##TriggerEventNone"), noneSelected))
                 TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.ClearEvent, trigger.Index));
             if (noneSelected) ImGui.SetItemDefaultFocus();
 
@@ -160,7 +162,7 @@ internal static class TriggerEditorView
 
         if (!value.HasEvent)
         {
-            ImGui.TextDisabled("Choose an event type to configure this trigger.");
+            ImGui.TextDisabled(DevToolUiSettings.T("选择一种事件类型后再配置此触发器。", "Choose an event type to configure this trigger."));
             return;
         }
 
@@ -183,8 +185,12 @@ internal static class TriggerEditorView
         }
 
         ImGui.TextWrapped(value.Type);
-        ImGui.TextDisabled("This event has no built-in Rain World parameters exposed here.");
-        ImGui.TextDisabled("If a mod adds custom DevInterface controls, switch to Vanilla UI to edit them.");
+        ImGui.TextDisabled(DevToolUiSettings.T(
+            "该事件没有在这里暴露原版 Rain World 参数。",
+            "This event has no built-in Rain World parameters exposed here."));
+        ImGui.TextDisabled(DevToolUiSettings.T(
+            "如果 Mod 添加了自定义 DevInterface 控件，请切换到原版 UI 编辑。",
+            "If a mod adds custom DevInterface controls, switch to Vanilla UI to edit them."));
     }
 
     private static void DrawMusicEvent(
@@ -192,33 +198,33 @@ internal static class TriggerEditorView
         EditorTriggerSnapshot trigger,
         EditorTriggeredEventSnapshot value)
     {
-        ImGui.TextDisabled("MUSIC");
-        DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, "Song", value.SongName);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Volume, "Volume", value.Volume, 0f, 1f);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeInSeconds, "Fade in (seconds)", value.FadeInSeconds, 0f, 15f);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, "Priority", value.Priority, 0f, 1f);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.DroneTolerance, "Drone tolerance", value.DroneTolerance, 0f, 1f);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.MaxThreatLevel, "Fade out at threat", value.MaxThreatLevel, 0f, 1f);
-        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.RoomsRange, "Room transitions", value.RoomsRange, 0, 39, "Unlimited");
-        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.CyclesRest, "Rest cycles", value.CyclesRest, 0, 79, "One time");
+        ImGui.TextDisabled(DevToolUiSettings.T("音乐", "MUSIC"));
+        DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, DevToolUiSettings.T("歌曲", "Song"), value.SongName);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Volume, DevToolUiSettings.T("音量", "Volume"), value.Volume, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeInSeconds, DevToolUiSettings.T("淡入（秒）", "Fade in (seconds)"), value.FadeInSeconds, 0f, 15f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, DevToolUiSettings.T("优先级", "Priority"), value.Priority, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.DroneTolerance, DevToolUiSettings.T("Drone 容忍度", "Drone tolerance"), value.DroneTolerance, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.MaxThreatLevel, DevToolUiSettings.T("威胁达到此值时淡出", "Fade out at threat"), value.MaxThreatLevel, 0f, 1f);
+        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.RoomsRange, DevToolUiSettings.T("房间切换数", "Room transitions"), value.RoomsRange, 0, 39, DevToolUiSettings.T("无限制", "Unlimited"));
+        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.CyclesRest, DevToolUiSettings.T("休息周期", "Rest cycles"), value.CyclesRest, 0, 79, DevToolUiSettings.T("仅一次", "One time"));
 
         bool loop = value.Loop;
-        if (ImGui.Checkbox("Loop##TriggerEventLoop", ref loop))
+        if (ImGui.Checkbox(DevToolUiSettings.T("循环##TriggerEventLoop", "Loop##TriggerEventLoop"), ref loop))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.Loop,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: loop));
 
         bool onePerCycle = value.OneSongPerCycle;
-        if (ImGui.Checkbox("One song per cycle##TriggerEventOnePerCycle", ref onePerCycle))
+        if (ImGui.Checkbox(DevToolUiSettings.T("每周期仅一首歌##TriggerEventOnePerCycle", "One song per cycle##TriggerEventOnePerCycle"), ref onePerCycle))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.OneSongPerCycle,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: onePerCycle));
 
         bool stopAtDeath = value.StopAtDeath;
-        if (ImGui.Checkbox("Stop at death##TriggerEventStopDeath", ref stopAtDeath))
+        if (ImGui.Checkbox(DevToolUiSettings.T("死亡时停止##TriggerEventStopDeath", "Stop at death##TriggerEventStopDeath"), ref stopAtDeath))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.StopAtDeath,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: stopAtDeath));
 
         bool stopAtGate = value.StopAtGate;
-        if (ImGui.Checkbox("Stop at gate##TriggerEventStopGate", ref stopAtGate))
+        if (ImGui.Checkbox(DevToolUiSettings.T("进入业力门时停止##TriggerEventStopGate", "Stop at gate##TriggerEventStopGate"), ref stopAtGate))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.StopAtGate,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: stopAtGate));
     }
@@ -228,43 +234,41 @@ internal static class TriggerEditorView
         EditorTriggerSnapshot trigger,
         EditorTriggeredEventSnapshot value)
     {
-        ImGui.TextDisabled("STOP MUSIC");
+        ImGui.TextDisabled(DevToolUiSettings.T("停止音乐", "STOP MUSIC"));
 
         string mode = value.StopMode ?? string.Empty;
-        if (ImGui.BeginCombo("Stop mode##TriggerStopMode", FriendlyStopMode(mode)))
+        if (ImGui.BeginCombo(DevToolUiSettings.T("停止模式##TriggerStopMode", "Stop mode##TriggerStopMode"), FriendlyStopMode(mode)))
         {
-            DrawStopModeOption(trigger.Index, mode, "AllSongs", "Stop all songs");
-            DrawStopModeOption(trigger.Index, mode, "SpecificSong", "Stop specific song");
-            DrawStopModeOption(trigger.Index, mode, "AllButSpecific", "Stop all but specific song");
+            DrawStopModeOption(trigger.Index, mode, "AllSongs", DevToolUiSettings.T("停止所有歌曲", "Stop all songs"));
+            DrawStopModeOption(trigger.Index, mode, "SpecificSong", DevToolUiSettings.T("停止指定歌曲", "Stop specific song"));
+            DrawStopModeOption(trigger.Index, mode, "AllButSpecific", DevToolUiSettings.T("停止除指定歌曲外的所有歌曲", "Stop all but specific song"));
             ImGui.EndCombo();
         }
 
-        // Preserve custom ExtEnum values from other mods instead of coercing them into one
-        // of the three vanilla modes. A custom value can still be edited as text.
-        DrawEventString(trigger.Index, TriggerEventEditorKeys.StopMode, "Custom mode", mode);
+        DrawEventString(trigger.Index, TriggerEventEditorKeys.StopMode, DevToolUiSettings.T("自定义模式", "Custom mode"), mode);
 
         if (!string.Equals(mode, "AllSongs", StringComparison.Ordinal))
-            DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, "Song", value.SongName);
+            DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, DevToolUiSettings.T("歌曲", "Song"), value.SongName);
 
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, "Priority", value.Priority, 0f, 1f);
-        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeOutSeconds, "Fade out (seconds)", value.FadeOutSeconds, 0f, 30f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, DevToolUiSettings.T("优先级", "Priority"), value.Priority, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeOutSeconds, DevToolUiSettings.T("淡出（秒）", "Fade out (seconds)"), value.FadeOutSeconds, 0f, 30f);
     }
 
     private static void DrawProjectedImageEvent(EditorTriggerSnapshot trigger, EditorTriggeredEventSnapshot value)
     {
-        ImGui.TextDisabled("PROJECTED IMAGE");
+        ImGui.TextDisabled(DevToolUiSettings.T("投影图像", "PROJECTED IMAGE"));
 
         bool afterEncounter = value.AfterEncounter;
-        if (ImGui.Checkbox("After encounter##TriggerProjectedAfter", ref afterEncounter))
+        if (ImGui.Checkbox(DevToolUiSettings.T("遭遇后##TriggerProjectedAfter", "After encounter##TriggerProjectedAfter"), ref afterEncounter))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.AfterEncounter,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: afterEncounter));
 
         bool directionOnly = value.OnlyWhenShowingDirection;
-        if (ImGui.Checkbox("Only when showing direction##TriggerProjectedDirection", ref directionOnly))
+        if (ImGui.Checkbox(DevToolUiSettings.T("仅显示方向时##TriggerProjectedDirection", "Only when showing direction##TriggerProjectedDirection"), ref directionOnly))
             SendEventValue(trigger.Index, TriggerEventEditorKeys.OnlyWhenShowingDirection,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: directionOnly));
 
-        DrawEventInt(trigger.Index, TriggerEventEditorKeys.FromCycle, "From cycle", value.FromCycle, 0, 9999);
+        DrawEventInt(trigger.Index, TriggerEventEditorKeys.FromCycle, DevToolUiSettings.T("起始周期", "From cycle"), value.FromCycle, 0, 9999);
     }
 
     private static void DrawSongCombo(
@@ -275,7 +279,8 @@ internal static class TriggerEditorView
         string current)
     {
         current ??= string.Empty;
-        if (ImGui.BeginCombo(label + "##TriggerEventSong" + key, string.IsNullOrEmpty(current) ? "NO SONG" : current))
+        if (ImGui.BeginCombo(label + "##TriggerEventSong" + key,
+                string.IsNullOrEmpty(current) ? DevToolUiSettings.T("无歌曲", "NO SONG") : current))
         {
             string[] songs = snapshot.SongNames ?? Array.Empty<string>();
             for (int i = 0; i < songs.Length; i++)
@@ -290,9 +295,7 @@ internal static class TriggerEditorView
             ImGui.EndCombo();
         }
 
-        // The current song may come from a mod and therefore not exist in vanilla's discovered
-        // list. Keep a text path so such values remain editable rather than being discarded.
-        DrawEventString(triggerIndex, key, "Song ID", current);
+        DrawEventString(triggerIndex, key, DevToolUiSettings.T("歌曲 ID", "Song ID"), current);
     }
 
     private static void DrawStopModeOption(int triggerIndex, string current, string value, string label)
@@ -306,17 +309,17 @@ internal static class TriggerEditorView
 
     private static string FriendlyStopMode(string mode) => mode switch
     {
-        "AllSongs" => "Stop all songs",
-        "SpecificSong" => "Stop specific song",
-        "AllButSpecific" => "Stop all but specific song",
-        _ => string.IsNullOrEmpty(mode) ? "Unknown" : mode
+        "AllSongs" => DevToolUiSettings.T("停止所有歌曲", "Stop all songs"),
+        "SpecificSong" => DevToolUiSettings.T("停止指定歌曲", "Stop specific song"),
+        "AllButSpecific" => DevToolUiSettings.T("停止除指定歌曲外的所有歌曲", "Stop all but specific song"),
+        _ => string.IsNullOrEmpty(mode) ? DevToolUiSettings.T("未知", "Unknown") : mode
     };
 
     private static void DrawUpperCycle(EditorTriggerSnapshot trigger)
     {
         bool noUpper = trigger.ActiveToCycle < 0;
         bool editedNoUpper = noUpper;
-        if (ImGui.Checkbox("No upper cycle##TriggerNoUpper", ref editedNoUpper))
+        if (ImGui.Checkbox(DevToolUiSettings.T("无结束周期##TriggerNoUpper", "No upper cycle##TriggerNoUpper"), ref editedNoUpper))
         {
             int next = editedNoUpper ? -1 : trigger.ActiveFromCycle;
             SendValue(trigger.Index, TriggerEditorKeys.ActiveToCycle,
@@ -324,15 +327,15 @@ internal static class TriggerEditorView
         }
 
         if (noUpper) return;
-        DrawInt(trigger, TriggerEditorKeys.ActiveToCycle, "Up to cycle", trigger.ActiveToCycle,
+        DrawInt(trigger, TriggerEditorKeys.ActiveToCycle, DevToolUiSettings.T("截止周期", "Up to cycle"), trigger.ActiveToCycle,
             trigger.ActiveFromCycle, 79);
     }
 
     private static void DrawKarma(EditorTriggerSnapshot trigger)
     {
-        string[] labels = { "None", "2", "3", "4", "5" };
+        string[] labels = { DevToolUiSettings.T("无", "None"), "2", "3", "4", "5" };
         int value = Math.Max(0, Math.Min(trigger.Karma, labels.Length - 1));
-        if (!ImGui.BeginCombo("Karma requirement##TriggerKarma", labels[value])) return;
+        if (!ImGui.BeginCombo(DevToolUiSettings.T("业力要求##TriggerKarma", "Karma requirement##TriggerKarma"), labels[value])) return;
         for (int i = 0; i < labels.Length; i++)
         {
             bool selected = i == value;
@@ -346,17 +349,19 @@ internal static class TriggerEditorView
 
     private static void DrawEntrance(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
     {
-        string preview = trigger.Entrance < 0 ? "Any entrance" : "Entrance " + trigger.Entrance;
-        if (!ImGui.BeginCombo("Entrance requirement##TriggerEntrance", preview)) return;
+        string preview = trigger.Entrance < 0
+            ? DevToolUiSettings.T("任意入口", "Any entrance")
+            : DevToolUiSettings.T("入口 ", "Entrance ") + trigger.Entrance;
+        if (!ImGui.BeginCombo(DevToolUiSettings.T("入口要求##TriggerEntrance", "Entrance requirement##TriggerEntrance"), preview)) return;
 
-        if (ImGui.Selectable("Any entrance##TriggerEntranceAny", trigger.Entrance < 0))
+        if (ImGui.Selectable(DevToolUiSettings.T("任意入口##TriggerEntranceAny", "Any entrance##TriggerEntranceAny"), trigger.Entrance < 0))
             SendValue(trigger.Index, TriggerEditorKeys.Entrance,
                 new EditorPropertyValue(EditorPropertyKind.Integer, integer: -1));
 
         for (int i = 0; i < snapshot.EntranceCount; i++)
         {
             bool selected = trigger.Entrance == i;
-            if (ImGui.Selectable("Entrance " + i + "##TriggerEntrance" + i, selected))
+            if (ImGui.Selectable(DevToolUiSettings.T("入口 ", "Entrance ") + i + "##TriggerEntrance" + i, selected))
                 SendValue(trigger.Index, TriggerEditorKeys.Entrance,
                     new EditorPropertyValue(EditorPropertyKind.Integer, integer: i));
             if (selected) ImGui.SetItemDefaultFocus();
@@ -366,7 +371,7 @@ internal static class TriggerEditorView
 
     private static void DrawSlugcats(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
     {
-        if (!ImGui.CollapsingHeader("Slugcats##TriggerSlugcats", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        if (!ImGui.CollapsingHeader(DevToolUiSettings.T("蛞蝓猫##TriggerSlugcats", "Slugcats##TriggerSlugcats"), ImGuiTreeNodeFlags.DefaultOpen)) return;
         string[] all = snapshot.SlugcatNames ?? Array.Empty<string>();
         string[] allowed = trigger.AllowedSlugcats ?? Array.Empty<string>();
 
