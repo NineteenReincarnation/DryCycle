@@ -32,15 +32,11 @@ internal sealed class MantleCrabPostureController
     private const float RecoveryExitDegrees = 12f;
     private const float RecoveryDeployDegrees = 46f;
 
-    // 站高只做小修正。基础承重首先完整抵消 Rain World 已经施加的重力。
-    // Height control is a small correction on top of full gravity compensation.
     private const float SupportHeightGain = .0022f;
     private const float SupportVelocityDamping = .11f;
     private const float MaximumSupportFactor = 1.14f;
     private const float SingleFootSupportFactor = .62f;
 
-    // 普通姿态回正必须很弱；它只防止甲壳慢慢漂歪，不负责“托住身体”。
-    // Ordinary attitude correction is deliberately weak and separate from standing support.
     private const float PostureGain = .00072f;
     private const float PostureDamping = .14f;
     private const float MaximumAngularAcceleration = .00062f;
@@ -133,10 +129,10 @@ internal sealed class MantleCrabPostureController
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.Swinging || leg.GroundNormal.y <= .15f)
+            if (crab.Locomotion.EffectiveSupportQuality(leg) <= 0f)
                 continue;
 
-            Vector2 normal = leg.GroundNormal;
+            Vector2 normal = leg.Planted ? leg.GroundNormal : Vector2.up;
             if (normal.sqrMagnitude <= .0001f)
                 normal = Vector2.up;
             else
@@ -251,7 +247,7 @@ internal sealed class MantleCrabPostureController
     }
 
     /// <summary>
-    /// 普通站立只看“脚有没有真正踩住”。两条及以上脚着地时，完整抵消身体重力；
+    /// 普通站立只看“脚有没有真正碰到地面”。两条及以上脚有地面接触时，完整抵消身体重力；
     /// 腿姿势不舒服由换步逻辑处理，不能通过减少重力补偿把整只生物搞塌。
     /// </summary>
     internal void ApplySupportAndPosture(float ignoredGravity, float turnIntent)
@@ -266,26 +262,20 @@ internal sealed class MantleCrabPostureController
 
         int groundedFeet = 0;
         float heightErrorSum = 0f;
-        bool leftSupport = false;
-        bool rightSupport = false;
 
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.Swinging)
+            if (crab.Locomotion.EffectiveSupportQuality(leg) <= 0f)
                 continue;
 
             groundedFeet++;
-            float actualHeight = crab.Anchor(leg).y - leg.Contact.y;
+            Vector2 supportPoint = leg.Planted ? leg.Contact : leg.Tip;
+            float actualHeight = crab.Anchor(leg).y - supportPoint.y;
             heightErrorSum += leg.StandHeight - actualHeight;
-
-            float offset = Vector2.Dot(leg.Contact - center, walkAxis);
-            if (offset < -2f) leftSupport = true;
-            if (offset > 2f) rightSupport = true;
         }
 
-        // PhysicalObject.gravity 已经包含 room.gravity。不要再乘第二次房间重力。
-        // PhysicalObject.gravity already includes room.gravity; use it directly just like vanilla creatures do.
+        // PhysicalObject.gravity 已经包含 room.gravity。这里直接用，不再重复乘房间重力。
         float effectiveGravity = Mathf.Max(0f, crab.gravity);
 
         if (groundedFeet > 0 && effectiveGravity > 0f)
@@ -302,13 +292,10 @@ internal sealed class MantleCrabPostureController
                 : SingleFootSupportFactor * 1.05f);
             supportAcceleration = Mathf.Clamp(supportAcceleration, 0f, maxSupport);
 
-            // 和 MirosBird 一样：支撑作用到整个身体，而不是某一条腿根。
-            // Equal acceleration on every shell chunk cannot create artificial standing torque.
             for (int i = 0; i < crab.bodyChunks.Length; i++)
                 crab.bodyChunks[i].vel.y += supportAcceleration;
         }
 
-        // 普通站姿只做很弱的回正。只要有两条脚着地，就不要因为脚点细微差异自己摔倒。
         float terrainLean = Mathf.Atan2(walkAxis.y, walkAxis.x) * .22f;
         float manualLean = recovering
             ? 0f
