@@ -8,34 +8,42 @@ internal static class UiModeSwitch
 {
     internal static void Draw()
     {
-        // Use a first-use default only. From then on ImGui owns the window position/size so
-        // developers can move and resize it like the rest of the rebuilt editor.
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(148f, 58f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(126f, 52f), new Num.Vector2(300f, 160f));
-        ImGui.SetNextWindowBgAlpha(0.92f);
+        ImGui.SetNextWindowSize(new Num.Vector2(250f, 104f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(210f, 96f), new Num.Vector2(420f, 220f));
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
 
-        if (!ImGui.Begin("UI###DevToolUiModeSwitch", flags))
+        if (!ImGui.Begin(DevToolUiSettings.T("界面###DevToolUiModeSwitch", "UI###DevToolUiModeSwitch"), flags))
         {
             ImGui.End();
             return;
         }
 
-        bool vanilla = EditorUiModeState.UseVanilla;
-
-        if (!vanilla) ImGui.BeginDisabled();
-        if (ImGui.SmallButton("New UI##DevToolUseNewUi"))
-            EditorUiModeState.SetVanilla(false);
-        if (!vanilla) ImGui.EndDisabled();
+        ImGui.TextDisabled(DevToolUiSettings.T("语言", "Language"));
+        bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
+        if (chinese) ImGui.BeginDisabled();
+        if (ImGui.SmallButton("中文##DevToolChinese"))
+            DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
+        if (chinese) ImGui.EndDisabled();
 
         ImGui.SameLine();
+        bool english = DevToolUiSettings.Language == DevToolUiLanguage.English;
+        if (english) ImGui.BeginDisabled();
+        if (ImGui.SmallButton("English##DevToolEnglish"))
+            DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
+        if (english) ImGui.EndDisabled();
 
-        if (vanilla) ImGui.BeginDisabled();
-        if (ImGui.SmallButton("Vanilla##DevToolUseVanillaUi"))
+        ImGui.Separator();
+        if (ImGui.Button(DevToolUiSettings.T("切换到原版", "Use Vanilla")))
             EditorUiModeState.SetVanilla(true);
-        if (vanilla) ImGui.EndDisabled();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(DevToolUiSettings.T(
+                "切换后完全隐藏新 UI。Ctrl+Shift+U 可切回。",
+                "Hides the rebuilt UI completely. Ctrl+Shift+U returns to it."));
 
+        ImGui.SameLine();
+        ImGui.TextDisabled(DevToolUiSettings.T("Esc 隐藏/恢复面板", "Esc hides/restores panels"));
         ImGui.End();
     }
 }
