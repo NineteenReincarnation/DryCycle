@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
@@ -12,6 +13,8 @@ internal sealed class DB_SwarmRoom
     private int ecologySampleTimer;
     private int flockRefresh;
     private int neutralRouteSerial;
+    private int nextHiveReleaseClock = -1;
+    private int hiveReleaseSerial;
     internal DB_FlockSnapshot Flock { get; private set; }
     internal int SnapshotAge => 30 - flockRefresh;
 
@@ -36,9 +39,7 @@ internal sealed class DB_SwarmRoom
     /// DESERTSWARMROOM is not a vanilla swarmRoom, so FlyAI.InActiveSwarmRoom cannot choose
     /// the intended node set by itself. Explicit leave-room routing is preserved, but ordinary
     /// Idle navigation is restricted to exit/den maps. BatHive maps belong to explicit
-    /// ReturnHome/environment docking intent and must not become neutral roaming destinations:
-    /// otherwise vanilla IdleUpdate sees CurrentFollowDijkstraIsToHive and repeatedly tries to
-    /// enter native Swarm near the hive entrance.
+    /// ReturnHome/environment docking intent and must not become neutral roaming destinations.
     /// </summary>
     internal static bool TryHandleNativeFollowDijkstra(FlyAI ai, DB_Creature bat)
     {
@@ -62,10 +63,6 @@ internal sealed class DB_SwarmRoom
         int current = ai.followingDijkstraMap;
         if (current >= 0 && current < relevant)
         {
-            // Non-idle/native-special behavior may already own a deliberate route. Neutral Idle
-            // is different: retain only ordinary exit/den maps. If an old/current map points at
-            // a BatHive, replace it in this same GenericFlightUpdate before vanilla IdleUpdate
-            // can interpret it as a reason to enter Swarm.
             if (ai.behavior != FlyAI.Behavior.Idle)
                 return true;
 
@@ -90,9 +87,6 @@ internal sealed class DB_SwarmRoom
                 ordinaryCount++;
         }
 
-        // Neutral flight never invents a reason to approach a BatHive. Rooms with no ordinary
-        // exit/den map simply fall back to free native Idle flight until a real higher-level
-        // owner (Travel/Environment/etc.) supplies an explicit route.
         if (ordinaryCount <= 0)
             return -1;
 
@@ -149,18 +143,12 @@ internal sealed class DB_SwarmRoom
         bool authoredColony = IsDB_SwarmRoom(room.abstractRoom);
         if (authoredColony)
         {
-            // Colony/Travel own population bootstrap, recovery and migration. Realizing a room
-            // must never recreate the old HivePopulation + CurvePopulation refill because
-            // that would erase cross-cycle mortality and migration history.
             if (!ecologyInitialized)
             {
                 ecologyInitialized = true;
                 DB_ColonyRuntime.EnsureWorld(room.world);
             }
 
-            // Long-term pressure uses one low-frequency room sample per simulated second.
-            // No region-wide scan is performed here; the save-backed runtime folds these
-            // bounded accumulators at cycle settlement.
             if (--ecologySampleTimer <= 0)
             {
                 ecologySampleTimer = 40;
@@ -168,26 +156,87 @@ internal sealed class DB_SwarmRoom
             }
         }
 
-        // Native hive emergence respects rain, grass nodes, predators and sounds.
-        // Clean up consumed/dead entries rather than resurrecting them on exit.
-        Hive.inHive.RemoveAll(fly => fly.slatedForDeletetion || fly.dead);
+        Hive.inHive.RemoveAll(fly => fly == null || fly.slatedForDeletetion || fly.dead);
 
-        // Hive occupants are removed from Room.Update by vanilla: recover them here once,
-        // only while still inHive; entering a hive never grants an instant heal.
         foreach (Fly member in Hive.inHive)
             if (member is DB_Creature resting && !resting.dead)
                 resting.Injury.Recover(0.0032f / 40f);
 
-        if (SuppressThermalHiveEmergence())
-            UpdateHiveWithoutEmergence();
-        else
-            Hive.Update(eu);
+        // Never call FliesRoomAI.Update for Desert Batfly colonies. Vanilla gives every single
+        // hive occupant an independent 2.5% emergence roll every frame; with a persistent colony
+        // this releases most of the population in seconds and creates a permanent cloud directly
+        // above the same BatHive tiles. We keep the bookkeeping part of that update here and own
+        // emergence throughput explicitly below.
+        UpdateHiveWithoutEmergence();
+
+        if (!SuppressThermalHiveEmergence())
+            TryReleaseQueuedHiveMember();
 
         if (--flockRefresh <= 0)
         {
             Flock = DB_FlockSnapshot.Capture(room, Hive.flies, Flock.PanicRatio);
             flockRefresh = 30;
         }
+    }
+
+    private void TryReleaseQueuedHiveMember()
+    {
+        if (Hive.inHive.Count == 0 || room.hives == null || room.hives.Length == 0)
+            return;
+
+        // Preserve vanilla hard hazard gates before attempting FlyEmergeFromHive. The method
+        // checks them again, but doing it here prevents repeatedly consuming the room queue while
+        // emergence is impossible.
+        if ((!FlyAI.RoomNotACycleHazard(room) &&
+             ((ModManager.MSC && room.world.rainCycle.preTimer > 0) ||
+              room.world.rainCycle.RainApproaching < 0.3f ||
+              room.world.rainCycle.RainGameOver)) || room.VoidWeaverActive)
+            return;
+
+        int clock = Math.Max(0, room.game?.clock ?? 0);
+        if (nextHiveReleaseClock < 0)
+            nextHiveReleaseClock = clock + 20;
+        if (clock < nextHiveReleaseClock)
+            return;
+
+        DB_Creature candidate = SelectReleaseCandidate();
+        // One shared room timer: release at most one bat roughly every 0.9-1.7 seconds at 40 Hz.
+        // This remains independent of colony population, so a larger colony no longer becomes an
+        // exponentially stronger emitter at its entrance.
+        nextHiveReleaseClock = clock + StableReleaseInterval(++hiveReleaseSerial);
+        if (candidate == null)
+            return;
+
+        int before = Hive.inHive.Count;
+        Hive.FlyEmergeFromHive(candidate);
+        if (Hive.inHive.Count < before && candidate.room == room)
+            candidate.Emergence.BeginHiveDeparture();
+    }
+
+    private DB_Creature SelectReleaseCandidate()
+    {
+        int count = Hive.inHive.Count;
+        if (count == 0) return null;
+        int start = count == 1
+            ? 0
+            : (int)(((uint)(hiveReleaseSerial * 1103515245 + 12345)) % (uint)count);
+        for (int i = 0; i < count; i++)
+        {
+            Fly member = Hive.inHive[(start + i) % count];
+            if (member is DB_Creature bat && !bat.dead && !bat.slatedForDeletetion)
+                return bat;
+        }
+        return null;
+    }
+
+    private int StableReleaseInterval(int serial)
+    {
+        int seed = room.abstractRoom?.index ?? 0;
+        uint value = (uint)(seed * 73856093) ^ (uint)(serial * 19349663) ^ 0x9E3779B9u;
+        value ^= value >> 16;
+        value *= 0x7feb352du;
+        value ^= value >> 15;
+        return 36 + (int)(value % 33u); // 36..68 ticks
     }
 
     private bool SuppressThermalHiveEmergence()
@@ -200,10 +249,6 @@ internal sealed class DB_SwarmRoom
                 DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat))
             return false;
 
-        // Early Advisory heat remains ecologically active. Once the room reaches actual
-        // preparation/shelter pressure, a bat that committed to the hive must be allowed to
-        // stay there instead of FliesRoomAI's vanilla 2.5%-per-frame random emergence undoing
-        // the environmental decision immediately.
         return context.Phase is DB_EnvironmentPhase.Preparation or
                DB_EnvironmentPhase.Sheltering or
                DB_EnvironmentPhase.Acute;
@@ -211,9 +256,6 @@ internal sealed class DB_SwarmRoom
 
     private void UpdateHiveWithoutEmergence()
     {
-        // This mirrors the non-emergence maintenance portion of FliesRoomAI.Update. Burrowed
-        // occupants are kept unrealized in the room while active-list bookkeeping remains
-        // clean. Normal Hive.Update resumes as soon as thermal shelter pressure ends.
         for (int i = Hive.inHive.Count - 1; i >= 0; i--)
         {
             Fly member = Hive.inHive[i];
