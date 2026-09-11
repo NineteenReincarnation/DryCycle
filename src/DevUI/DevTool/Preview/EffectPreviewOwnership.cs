@@ -189,6 +189,35 @@ internal sealed class EffectPreviewOwnershipTransaction
     {
         if (room == null) return;
 
+        // Keep room manager/back-reference fields intact while owned objects tear themselves down.
+        // Some load-time scene objects use those fields from Destroy(), so restoring first can make
+        // their own cleanup path observe an impossible half-rolled-back room.
+        CleanCameraLeasers();
+
+        for (int i = ownedObjects.Count - 1; i >= 0; i--)
+        {
+            UpdatableAndDeletable obj = ownedObjects[i];
+            if (obj == null) continue;
+            try
+            {
+                obj.Destroy();
+                if (ContainsReference(room.updateList, obj) || ReferenceEquals(obj.room, room))
+                    room.CleanOutObjectNotInThisRoom(obj);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool effect preview object rollback failed for '" + obj.GetType().FullName +
+                    "' (" + reason + "): " + error.Message);
+                try
+                {
+                    if (ReferenceEquals(obj.room, room)) obj.RemoveFromRoom();
+                }
+                catch { }
+            }
+        }
+        ownedObjects.Clear();
+
         for (int i = fieldMutations.Count - 1; i >= 0; i--)
         {
             FieldMutation mutation = fieldMutations[i];
@@ -211,34 +240,6 @@ internal sealed class EffectPreviewOwnershipTransaction
             }
         }
         fieldMutations.Clear();
-
-        CleanCameraLeasers();
-
-        for (int i = ownedObjects.Count - 1; i >= 0; i--)
-        {
-            UpdatableAndDeletable obj = ownedObjects[i];
-            if (obj == null) continue;
-            try
-            {
-                obj.Destroy();
-                if (ContainsReference(room.updateList, obj) || ReferenceEquals(obj.room, room))
-                    room.CleanOutObjectNotInThisRoom(obj);
-                else if (ReferenceEquals(obj.room, room))
-                    obj.RemoveFromRoom();
-            }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning(
-                    "DevTool effect preview object rollback failed for '" + obj.GetType().FullName +
-                    "' (" + reason + "): " + error.Message);
-                try
-                {
-                    if (ReferenceEquals(obj.room, room)) obj.RemoveFromRoom();
-                }
-                catch { }
-            }
-        }
-        ownedObjects.Clear();
 
         // Clean once more after Room.CleanOutObjectNotInThisRoom in case a drawable was detached
         // from room.drawableObjects only during object removal.
