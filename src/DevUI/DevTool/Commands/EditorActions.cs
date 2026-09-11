@@ -75,6 +75,41 @@ public static class EditorActions
         return true;
     }
 
+    public static bool SetSelectionPrimaryPosition(EditorSession session, Vector2 newPrimaryPosition)
+    {
+        if (session?.RoomSettings?.placedObjects == null || session.Selection.Count == 0) return false;
+
+        PlacedObject primary = session.Selection.PrimaryPlacedObject;
+        if (primary == null) return false;
+
+        Vector2 delta = newPrimaryPosition - primary.pos;
+        if (delta.sqrMagnitude <= 0.000001f) return false;
+
+        PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        List<PlacedObject> targets = new(session.Selection.PlacedObjects);
+        int moved = 0;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            PlacedObject target = targets[i];
+            if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
+            target.pos += delta;
+            TryRefresh(target);
+            moved++;
+        }
+
+        if (moved == 0) return false;
+        session.Owner.activePage?.Refresh();
+
+        PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (SnapshotHistoryEntry.TryCreate(
+                moved == 1 ? "Move object" : "Move " + moved + " objects",
+                before,
+                after,
+                out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
+    }
+
     public static bool SetObjectProperty(
         EditorSession session,
         PlacedObject target,
@@ -90,6 +125,36 @@ public static class EditorActions
             "Change " + key,
             () => accepted = ObjectInspectorRegistry.TrySetValue(target, key, value));
         return accepted;
+    }
+
+    public static bool SetSelectionProperty(EditorSession session, string key, EditorPropertyValue value)
+    {
+        if (session?.RoomSettings?.placedObjects == null || session.Selection.Count == 0 || string.IsNullOrEmpty(key))
+            return false;
+
+        PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        List<PlacedObject> targets = new(session.Selection.PlacedObjects);
+        int changed = 0;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            PlacedObject target = targets[i];
+            if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
+            if (!ObjectInspectorRegistry.TrySetValue(target, key, value)) continue;
+            TryRefresh(target);
+            changed++;
+        }
+
+        if (changed == 0) return false;
+        session.Owner.activePage?.Refresh();
+
+        PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (SnapshotHistoryEntry.TryCreate(
+                changed == 1 ? "Change " + key : "Change " + key + " on " + changed + " objects",
+                before,
+                after,
+                out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
     }
 
     public static bool InvokeLegacyButton(EditorSession session, PlacedObject target, string path)
