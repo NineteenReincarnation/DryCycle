@@ -7,6 +7,7 @@ using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
@@ -42,14 +43,17 @@ internal static class DevToolRuntime
         SoundEditorCommandQueue.Clear();
         TriggerEditorCommandQueue.Clear();
         MapEditorCommandQueue.Clear();
+        RelationshipEditorCommandQueue.Clear();
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
         SoundEditorPresentationHub.Clear();
         TriggerEditorPresentationHub.Clear();
         MapEditorPresentationHub.Clear();
+        RelationshipEditorPresentationHub.Clear();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
         MapEditorStateHub.Reset();
+        RelationshipEditorStateHub.Reset();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -78,6 +82,7 @@ internal static class DevToolRuntime
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
+        RelationshipEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
@@ -91,7 +96,8 @@ internal static class DevToolRuntime
              (session.ToolMode == EditorToolMode.Room && self.activePage is RoomSettingsPage) ||
              (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage) ||
              (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage) ||
-             (session.ToolMode == EditorToolMode.Map && self.activePage is MapPage));
+             (session.ToolMode == EditorToolMode.Map && self.activePage is MapPage) ||
+             (session.ToolMode == EditorToolMode.Relationships && self.activePage is RelationshipPage));
         LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
         EditorPresentationHub.Publish(session);
@@ -99,6 +105,7 @@ internal static class DevToolRuntime
         SoundEditorPresentationHub.Publish(session);
         TriggerEditorPresentationHub.Publish(session);
         MapEditorPresentationHub.Publish(session);
+        RelationshipEditorPresentationHub.Publish(session);
     }
 }
 
@@ -264,7 +271,7 @@ public sealed class EditorSession
     {
         if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room &&
             ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers &&
-            ToolMode != EditorToolMode.Map) return;
+            ToolMode != EditorToolMode.Map && ToolMode != EditorToolMode.Relationships) return;
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
