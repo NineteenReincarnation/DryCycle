@@ -24,12 +24,10 @@ internal static class RoomSettingsView
     private static Section section = Section.Environment;
     private static string effectSearch = string.Empty;
     private const float BrowserBodyFontScale = 1.22f;
-    private const float EffectSourceHeaderFontScale = 1.52f;
 
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled(DevToolUiSettings.T("房间设置", "ROOM SETTINGS"));
-        ImGui.Separator();
+        DevToolWidgets.PaneTitle(DevToolUiSettings.T("房间设置", "ROOM SETTINGS"), BrowserBodyFontScale);
 
         DrawSectionButton(Section.Environment, DevToolUiSettings.T("环境", "Environment"));
         DrawSectionButton(Section.Visual, DevToolUiSettings.T("视觉 / 色板", "Visual / Palette"));
@@ -40,12 +38,11 @@ internal static class RoomSettingsView
 
         if (section != Section.Effects || !snapshot.Available) return;
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("添加效果", "ADD EFFECT"));
-        ImGui.TextDisabled(DevToolUiSettings.T("搜索", "SEARCH"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("添加效果", "ADD EFFECT"), BrowserBodyFontScale);
+        DevToolWidgets.MutedText(DevToolUiSettings.T("搜索", "SEARCH"));
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText("##RoomEffectSearch", ref effectSearch, 128);
+        ImGui.Spacing();
 
         string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
         string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
@@ -62,7 +59,7 @@ internal static class RoomSettingsView
             {
                 lastCategory = category;
                 if (!string.IsNullOrEmpty(category))
-                    DrawEffectSourceHeader(category);
+                    DevToolWidgets.SourceHeader(category, EffectSourceColor(category), 1.52f, BrowserBodyFontScale);
             }
 
             if (ImGui.Selectable(type + "##RoomAddEffect" + type, false))
@@ -73,19 +70,19 @@ internal static class RoomSettingsView
             }
         }
 
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的效果。", "No matching effects."));
+        if (matches == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的效果。", "No matching effects."));
     }
 
     internal static void DrawInspector(EditorRoomSettingsSnapshot snapshot)
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("房间设置不可用。", "Room settings unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("房间设置不可用。", "Room settings unavailable."), true);
             return;
         }
 
-        ImGui.Text(SectionName(section));
-        ImGui.Separator();
+        DevToolWidgets.PaneTitle(SectionName(section));
 
         switch (section)
         {
@@ -112,13 +109,12 @@ internal static class RoomSettingsView
 
     private static void DrawEnvironment(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled(DevToolUiSettings.T("雨", "RAIN"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("雨", "RAIN"));
         DrawFloatInherited(snapshot, RoomSettingKeys.RainIntensity, DevToolUiSettings.T("降雨强度", "Rain Intensity"), snapshot.RainIntensity, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.RumbleIntensity, DevToolUiSettings.T("震动强度", "Rumble Intensity"), snapshot.RumbleIntensity, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.CeilingDrips, DevToolUiSettings.T("天花板滴水", "Ceiling Drips"), snapshot.CeilingDrips, 0f, 1f);
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("水面波浪", "WATER WAVES"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("水面波浪", "WATER WAVES"));
         DrawFloatInherited(snapshot, RoomSettingKeys.WaveSpeed, DevToolUiSettings.T("波速", "Wave Speed"), snapshot.WaveSpeed, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.WaveLength, DevToolUiSettings.T("波长", "Wave Length"), snapshot.WaveLength, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.WaveAmplitude, DevToolUiSettings.T("波幅", "Wave Amplitude"), snapshot.WaveAmplitude, 0f, 1f);
@@ -129,18 +125,16 @@ internal static class RoomSettingsView
 
     private static void DrawVisual(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled(DevToolUiSettings.T("氛围", "ATMOSPHERE"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("氛围", "ATMOSPHERE"));
         DrawFloatInherited(snapshot, RoomSettingKeys.Clouds, DevToolUiSettings.T("云层", "Clouds"), snapshot.Clouds, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.Grime, DevToolUiSettings.T("污垢", "Grime"), snapshot.Grime, 0f, 1f);
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("主色板", "PALETTE"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("主色板", "PALETTE"));
         DrawIntInherited(snapshot, RoomSettingKeys.Palette, DevToolUiSettings.T("色板", "Palette"), snapshot.Palette);
         DrawIntInherited(snapshot, RoomSettingKeys.EffectColorA, DevToolUiSettings.T("效果颜色 A", "Effect Color A"), snapshot.EffectColorA);
         DrawIntInherited(snapshot, RoomSettingKeys.EffectColorB, DevToolUiSettings.T("效果颜色 B", "Effect Color B"), snapshot.EffectColorB);
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("渐变色板", "FADE PALETTE"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("渐变色板", "FADE PALETTE"));
         int fadePalette = Get(IntEdits, RoomSettingKeys.FadePalette, snapshot.HasFadePalette ? snapshot.FadePalette : -1);
         bool fadeChanged = ImGui.InputInt(DevToolUiSettings.T("渐变色板编号##RoomFadePalette", "Fade Palette##RoomFadePalette"), ref fadePalette, 1, 10);
         IntEdits[RoomSettingKeys.FadePalette] = fadePalette;
@@ -152,12 +146,12 @@ internal static class RoomSettingsView
         if (snapshot.HasFadePalette)
             DrawScreenFades(snapshot.FadePaletteFades, false);
         else
-            ImGui.TextDisabled(DevToolUiSettings.T("-1 / 负数表示不使用渐变色板。", "-1 / negative disables the fade palette."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("-1 / 负数表示不使用渐变色板。", "-1 / negative disables the fade palette."), true);
     }
 
     private static void DrawGameplay(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled(DevToolUiSettings.T("危险", "DANGER"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("危险", "DANGER"));
         if (ImGui.BeginCombo(DevToolUiSettings.T("危险类型##RoomDangerType", "Danger Type##RoomDangerType"), snapshot.DangerType))
         {
             string[] options = snapshot.DangerTypes ?? Array.Empty<string>();
@@ -186,8 +180,7 @@ internal static class RoomSettingsView
             SendSetting(RoomSettingKeys.WetTerrain,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: wetTerrain));
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("随机物品", "RANDOM ITEMS"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("随机物品", "RANDOM ITEMS"));
         DrawFloatInherited(snapshot, RoomSettingKeys.RandomItemDensity, DevToolUiSettings.T("物品密度", "Item Density"), snapshot.RandomItemDensity, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.RandomItemSpearChance, DevToolUiSettings.T("长矛概率", "Spear Chance"), snapshot.RandomItemSpearChance, 0f, 1f);
     }
@@ -196,21 +189,19 @@ internal static class RoomSettingsView
     {
         if (!snapshot.TerrainAvailable)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T(
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
                 "当前房间没有 TerrainCurve；原版 Terrain 面板默认折叠，但参数仍可写入 RoomSettings。",
-                "This room has no TerrainCurve; vanilla collapses the Terrain panel, but the RoomSettings values remain editable."));
-            ImGui.Separator();
+                "This room has no TerrainCurve; vanilla collapses the Terrain panel, but the RoomSettings values remain editable."), true);
         }
 
-        ImGui.TextDisabled(DevToolUiSettings.T("地形色板", "TERRAIN PALETTE"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("地形色板", "TERRAIN PALETTE"));
         DrawTerrainPalette(snapshot, false);
         DrawTerrainPalette(snapshot, true);
 
         if (snapshot.HasTerrainFadePalette)
             DrawScreenFades(snapshot.TerrainFadePaletteFades, true);
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("地形参数", "TERRAIN PARAMETERS"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("地形参数", "TERRAIN PARAMETERS"));
         DrawFloatInherited(snapshot, RoomSettingKeys.TerrainLight, DevToolUiSettings.T("光照", "Light"), snapshot.TerrainLight, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.TerrainStainAmount, DevToolUiSettings.T("污渍量", "Stain Amount"), snapshot.TerrainStainAmount, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.TerrainStainBrightness, DevToolUiSettings.T("污渍亮度", "Stain Brightness"), snapshot.TerrainStainBrightness, 0f, 1f);
@@ -260,11 +251,11 @@ internal static class RoomSettingsView
     {
         if (!snapshot.TemplateControlsAvailable)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("当前房间没有区域模板可用。", "No region templates are available for this room."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("当前房间没有区域模板可用。", "No region templates are available for this room."), true);
             return;
         }
 
-        ImGui.TextDisabled(DevToolUiSettings.T("继承自模板", "INHERIT FROM TEMPLATE"));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("继承自模板", "INHERIT FROM TEMPLATE"));
         string preview = string.Equals(snapshot.CurrentTemplate, "NONE", StringComparison.OrdinalIgnoreCase)
             ? "NONE"
             : snapshot.RegionName + " - " + snapshot.CurrentTemplate;
@@ -288,18 +279,23 @@ internal static class RoomSettingsView
             ImGui.EndCombo();
         }
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("保存为模板", "SAVE AS TEMPLATE"));
-        ImGui.TextWrapped(DevToolUiSettings.T(
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("保存为模板", "SAVE AS TEMPLATE"));
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
             "与原版一致：点击后会立即覆盖对应区域模板文件，并重置当前房间的本地 RoomSettings。",
-            "Vanilla behavior: clicking immediately overwrites the selected region template file and resets the room's local RoomSettings."));
+            "Vanilla behavior: clicking immediately overwrites the selected region template file and resets the room's local RoomSettings."), true);
 
         string[] templates = snapshot.TemplateNames ?? Array.Empty<string>();
         for (int i = 0; i < templates.Length; i++)
         {
             string name = templates[i];
-            if (ImGui.Button(DevToolUiSettings.T("写入 ", "Save to ") + snapshot.RegionName + " - " + name + "##SaveRoomTemplate" + i))
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("写入 ", "Save to ") + snapshot.RegionName + " - " + name,
+                    "SaveRoomTemplate" + i,
+                    DevToolButtonTone.Primary,
+                    true))
+            {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SaveAsTemplate, key: name));
+            }
         }
     }
 
@@ -308,7 +304,7 @@ internal static class RoomSettingsView
         EditorRoomEffectSnapshot[] effects = snapshot.Effects ?? Array.Empty<EditorRoomEffectSnapshot>();
         if (effects.Length == 0)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("当前没有房间效果，可从浏览器添加。", "No room effects. Add one from the Browser."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("当前没有房间效果，可从左侧浏览器添加。", "No room effects. Add one from the Browser."), true);
             return;
         }
 
@@ -320,8 +316,12 @@ internal static class RoomSettingsView
             if (effect.Inherited) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
             else if (effect.OverWrite) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
 
-            if (!ImGui.CollapsingHeader(header + "##RoomEffect" + effect.Index, ImGuiTreeNodeFlags.DefaultOpen))
-                continue;
+            ImGui.PushStyleColor(ImGuiCol.Header, new Num.Vector4(0.18f, 0.34f, 0.54f, 0.72f));
+            ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Num.Vector4(0.24f, 0.45f, 0.72f, 0.88f));
+            ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Num.Vector4(0.30f, 0.56f, 0.90f, 0.95f));
+            bool open = ImGui.CollapsingHeader(header + "##RoomEffect" + effect.Index, ImGuiTreeNodeFlags.DefaultOpen);
+            ImGui.PopStyleColor(3);
+            if (!open) continue;
 
             string[] names = effect.SliderNames ?? Array.Empty<string>();
             float[] values = effect.Values ?? Array.Empty<float>();
@@ -352,14 +352,19 @@ internal static class RoomSettingsView
 
             if (effect.Inherited)
             {
-                ImGui.TextDisabled(DevToolUiSettings.T("继承效果 · 请修改来源模板。", "Inherited effect · edit the source template to change it."));
+                DevToolWidgets.MutedText(DevToolUiSettings.T("继承效果 · 请修改来源模板。", "Inherited effect · edit the source template to change it."), true);
             }
-            else if (ImGui.SmallButton(DevToolUiSettings.T("移除##RoomEffectRemove", "Remove##RoomEffectRemove") + effect.Index))
+            else if (DevToolWidgets.ActionButton(
+                         DevToolUiSettings.T("移除", "Remove"),
+                         "RoomEffectRemove" + effect.Index,
+                         DevToolButtonTone.Danger))
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                     RoomEditorCommandKind.DeleteEffect,
                     index: effect.Index));
             }
+
+            ImGui.Spacing();
         }
     }
 
@@ -389,30 +394,6 @@ internal static class RoomSettingsView
                 FloatEdits[stateKey] = fades[i];
             }
         }
-    }
-
-    private static void DrawEffectSourceHeader(string category)
-    {
-        ImGui.Spacing();
-        ImGui.SetWindowFontScale(EffectSourceHeaderFontScale);
-
-        Num.Vector2 pos = ImGui.GetCursorScreenPos();
-        ImDrawListPtr draw = ImGui.GetWindowDrawList();
-        const uint outline = 0xFF000000u;
-        const float stroke = 2f;
-
-        draw.AddText(pos + new Num.Vector2(-stroke, 0f), outline, category);
-        draw.AddText(pos + new Num.Vector2(stroke, 0f), outline, category);
-        draw.AddText(pos + new Num.Vector2(0f, -stroke), outline, category);
-        draw.AddText(pos + new Num.Vector2(0f, stroke), outline, category);
-        draw.AddText(pos + new Num.Vector2(-stroke, -stroke), outline, category);
-        draw.AddText(pos + new Num.Vector2(stroke, -stroke), outline, category);
-        draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, category);
-        draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, category);
-
-        ImGui.TextColored(EffectSourceColor(category), category);
-        ImGui.SetWindowFontScale(BrowserBodyFontScale);
-        ImGui.Separator();
     }
 
     private static Num.Vector4 EffectSourceColor(string category)
@@ -447,7 +428,7 @@ internal static class RoomSettingsView
     private static void DrawSectionButton(Section value, string label)
     {
         bool active = section == value;
-        if (ImGui.Selectable(label + "##RoomSection" + value, active))
+        if (DevToolWidgets.NavItem(label, "RoomSection" + value, active))
             section = value;
     }
 
@@ -478,12 +459,17 @@ internal static class RoomSettingsView
         ImGui.SameLine();
         if (snapshot.IsLocal(key))
         {
-            if (ImGui.SmallButton(DevToolUiSettings.T("继承##", "Inherit##") + key))
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("继承", "Inherit"),
+                    "RoomInherit" + key,
+                    DevToolButtonTone.Subtle))
+            {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.ResetSetting, key: key));
+            }
         }
         else
         {
-            ImGui.TextDisabled(snapshot.InheritedFromTemplate(key) ? "<T>" : "<A>");
+            DevToolWidgets.MutedText(snapshot.InheritedFromTemplate(key) ? "<T>" : "<A>");
         }
     }
 
