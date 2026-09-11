@@ -13,7 +13,6 @@ using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Items.RopeSpear;
 using DryCycle.Misc;
-using DryCycle.OptimizedVanilla;
 using DryCycle.PlayerAbility.SlugCatKarmicArmor;
 using DryCycle.Registration;
 using DryCycle.Rendering;
@@ -66,9 +65,8 @@ internal sealed class Plugin : BaseUnityPlugin
         // Direct-number editing is a DevTools input facility, not a gameplay system.
         // Install it as soon as the plugin is enabled so palette/day-night numeric fields
         // are available even if a later OnModsInit subsystem fails before MiscRuntime.
-        // MiscRuntime.Enable keeps the same idempotent calls for normal initialization.
+        // MiscRuntime.Enable keeps the same idempotent call for normal initialization.
         PaletteDirectInputRuntime.Enable();
-        DevUIShortcutInputGuard.Enable();
 
         CreatureCoreRegistry.Enable();
         DryCycleContent.Enable();
@@ -97,9 +95,8 @@ internal sealed class Plugin : BaseUnityPlugin
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
 
-        // These two hooks are installed from OnEnable, so always remove them even when
+        // PaletteDirectInputRuntime is installed from OnEnable, so always remove it even when
         // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
-        DevUIShortcutInputGuard.Disable();
         PaletteDirectInputRuntime.Disable();
 
         if (_initialized)
