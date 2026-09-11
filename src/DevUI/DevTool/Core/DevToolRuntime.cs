@@ -47,33 +47,20 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Synchronize before vanilla DevInterface controls mutate backing state so the
-        // compatibility recorder can capture a true transaction start.
         DevToolSessionHub.Synchronize(self);
         EditorSession session = DevToolSessionHub.Current;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
-        // Editor shortcuts are handled before vanilla DevUI consumes the same raw keys.
         EditorInputRouter.UpdateShortcuts(session);
         orig(self);
 
-        // A click/drag on any retained world-space Handle should select the owning object in
-        // the modern editor. This reuses Rain World's own representation hit testing.
         session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
-
-        // Legacy DevInterface controls have now completed this frame's mutation. Close any
-        // pointer/text transaction that ended during orig.Update and push it into history.
         session?.Synchronize(self);
         session?.LegacyTransactions.AfterLegacyUpdate(session);
 
-        // RWImGui never mutates game state from Present. Execute its queued actions here.
-        // A SetToolMode command may switch the vanilla backend page, so synchronize again.
         EditorUiCommandQueue.Process(session);
         session?.Synchronize(self);
 
-        // Objects is the first fully migrated workspace. When the optional frontend is
-        // actually attached, keep the ObjectsPage alive for representations/hooks but move
-        // its old screen-space controls out of the way. World-space handles remain visible.
         bool suppressLegacyObjectsUi =
             EditorInputRouter.FrontendAttached &&
             session?.ToolMode == EditorToolMode.Objects &&
@@ -103,10 +90,6 @@ public enum EditorDocumentKind
     Relationships
 }
 
-/// <summary>
-/// Stable history boundary. Tool-mode changes do not create a new document unless the
-/// target tool edits a genuinely different document such as the region map.
-/// </summary>
 public readonly struct EditorDocumentKey : IEquatable<EditorDocumentKey>
 {
     public EditorDocumentKey(EditorDocumentKind kind, string identity)
@@ -152,6 +135,8 @@ public sealed class EditorSession
     public bool BrowserOpen { get; private set; } = true;
     public bool InspectorOpen { get; private set; } = true;
     public bool LegacyUiVisible { get; private set; }
+    public bool PlacementActive => !string.IsNullOrEmpty(PlacementType);
+    public string PlacementType { get; private set; } = string.Empty;
     public string ObjectSearch { get; set; } = string.Empty;
 
     public Room Room => Owner?.room;
@@ -169,28 +154,25 @@ public sealed class EditorSession
             History.ActivateDocument(next);
             LegacyTransactions.Reset();
             LegacyUiVisible = false;
+            CancelPlacement();
         }
 
-        // Real backend page switches are mirrored into the tool mode. The history boundary
-        // is still the document, not the page, so Room/Objects/Sound/Triggers share history.
         if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
         {
             observedLegacyPage = owner?.activePage;
             ToolMode = ResolveToolMode(observedLegacyPage);
             LegacyTransactions.Reset();
             LegacyUiVisible = false;
+            if (ToolMode != EditorToolMode.Objects) CancelPlacement();
         }
 
         Selection.RemoveMissing(RoomSettings?.placedObjects);
     }
 
-    /// <summary>
-    /// Changes the modern tool mode and silently switches the matching vanilla page behind
-    /// it. Keeping that page alive preserves normal DevInterface construction and hook paths
-    /// for objects supplied by any mod, while the modern UI remains the visible surface.
-    /// </summary>
     public void SetToolMode(EditorToolMode mode)
     {
+        if (mode != EditorToolMode.Objects) CancelPlacement();
+
         if (Owner == null)
         {
             ToolMode = mode;
@@ -210,8 +192,6 @@ public sealed class EditorSession
             return;
         }
 
-        // Restore any temporarily hidden controls before the old page destroys its Futile
-        // nodes. The newly-created page will be suppressed again after its first update.
         LegacyUiPresentationController.Restore(Owner.activePage);
         LegacyTransactions.Reset();
         LegacyUiVisible = false;
@@ -219,6 +199,15 @@ public sealed class EditorSession
         observedLegacyPage = Owner.activePage;
         ToolMode = ResolveToolMode(observedLegacyPage);
     }
+
+    public void BeginPlacement(string type)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return;
+        if (ToolMode != EditorToolMode.Objects) SetToolMode(EditorToolMode.Objects);
+        PlacementType = type;
+    }
+
+    public void CancelPlacement() => PlacementType = string.Empty;
 
     internal void SynchronizeSelectionFromLegacyNode(DevUINode node)
     {
@@ -306,6 +295,22 @@ public sealed class EditorSelection
     {
         if (value == null) return;
         if (!placedObjects.Remove(value)) placedObjects.Add(value);
+    }
+
+    public void SelectRange(IList<PlacedObject> live, int anchor, int target, bool additive)
+    {
+        if (live == null || live.Count == 0) return;
+        anchor = Math.Max(0, Math.Min(anchor, live.Count - 1));
+        target = Math.Max(0, Math.Min(target, live.Count - 1));
+        if (!additive) placedObjects.Clear();
+
+        int min = Math.Min(anchor, target);
+        int max = Math.Max(anchor, target);
+        for (int i = min; i <= max; i++)
+        {
+            PlacedObject item = live[i];
+            if (item != null && !placedObjects.Contains(item)) placedObjects.Add(item);
+        }
     }
 
     public void Clear() => placedObjects.Clear();
