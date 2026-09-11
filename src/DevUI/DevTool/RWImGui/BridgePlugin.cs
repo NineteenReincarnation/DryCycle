@@ -33,21 +33,26 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
-        // The presentation snapshot is intentionally not authoritative for lifetime: once H
-        // destroys vanilla DevUI, DevUI.Update stops and the last snapshot remains cached.
-        // Poll the live RainWorldGame/DevUI relationship from the main thread instead so H,
-        // O and process transitions all hide and release the frontend immediately.
-        EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
-        bool visible = snapshot.Available && DevToolSessionHub.IsCurrentSessionLive;
-        DevToolFrontend.SetVisibleFromMainThread(visible);
-        DevToolFrontend.SetCursorModeFromMainThread(visible, EditorUiModeState.UseVanilla);
+        // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
+        // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
+        bool sessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+        bool rebuiltVisible = sessionVisible &&
+                              !EditorUiModeState.UseVanilla &&
+                              !EditorUiModeState.OverlayHidden;
+
+        // Vanilla mode and Escape-hidden mode release the RWImGUI context completely. This is
+        // important for Warp Menu and other RWImGUI consumers: an invisible DryCycle editor
+        // must not keep ownership of their mouse/keyboard input context.
+        DevToolFrontend.SetVisibleFromMainThread(rebuiltVisible);
+        DevToolFrontend.SetCursorModeFromMainThread(
+            sessionVisible,
+            useSystemCursor: EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden);
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        if (DevToolSessionHub.IsCurrentSessionLive)
-            Cursor.visible = true;
+        Cursor.visible = true;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
@@ -97,6 +102,10 @@ internal static class DevToolFrontend
     private static volatile bool visible;
     private static int contextBusyLogged;
     private static int drawFailureLogged;
+    private static int cjkFontLogged;
+    private static int cjkFontMissingLogged;
+    private static bool cjkFontResolved;
+    private static ImFontPtr cjkFont;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
@@ -113,20 +122,20 @@ internal static class DevToolFrontend
         EnsureContext();
     }
 
-    internal static void SetCursorModeFromMainThread(bool sessionVisible, bool vanillaMode)
+    internal static void SetCursorModeFromMainThread(bool sessionVisible, bool useSystemCursor)
     {
         if (!sessionVisible) return;
 
-        // Rain World forces the operating-system cursor visible when H opens DevUI. New UI
-        // uses ImGui's software cursor instead, so keeping the OS cursor would produce two
-        // pointers and cover hover labels. Vanilla mode restores Rain World's cursor.
-        Cursor.visible = vanillaMode;
+        // Rain World forces the operating-system cursor visible when H opens DevUI. The rebuilt
+        // UI uses ImGui's software cursor, while Vanilla/Warp mode must hand the system cursor
+        // back to Rain World.
+        Cursor.visible = useSystemCursor;
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         // Keep the Always callback intentionally empty. Interactive drawing belongs to the
-        // RWImGui context Render lifecycle, matching the stable AI Observatory integration.
+        // RWImGui context Render lifecycle.
     }
 
     private static void EnsureContext()
@@ -168,7 +177,7 @@ internal static class DevToolFrontend
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
-        if (!visible || !snapshot.Available)
+        if (!visible || !snapshot.Available || EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -177,15 +186,18 @@ internal static class DevToolFrontend
         try
         {
             ImGuiIOPtr io = ImGui.GetIO();
-            bool vanilla = EditorUiModeState.UseVanilla;
-            io.MouseDrawCursor = !vanilla;
+            io.MouseDrawCursor = true;
 
-            // The switch is intentionally always available while DevTools are open. In
-            // Vanilla mode it is the only RWImGui window left on screen, so returning to
-            // the rebuilt editor never depends on an original DevInterface control.
-            UiModeSwitch.Draw();
-            if (!vanilla)
+            bool pushedChineseFont = TryPushChineseFont();
+            try
+            {
+                UiModeSwitch.Draw();
                 DevToolOverlay.Draw(snapshot);
+            }
+            finally
+            {
+                if (pushedChineseFont) ImGui.PopFont();
+            }
 
             EditorInputRouter.SetFrontendCapture(io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput);
         }
@@ -195,6 +207,66 @@ internal static class DevToolFrontend
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
                 log?.LogError("DevTool RWImGui draw failed: " + error);
         }
+    }
+
+    private static unsafe bool TryPushChineseFont()
+    {
+        if (!DevToolUiSettings.IsChinese) return false;
+
+        ResolveCjkFont();
+        if (cjkFont.NativePtr == null)
+        {
+            // Do not leave the editor full of missing-glyph boxes. English remains available as
+            // a deterministic fallback on old RWImGUI installations without a CJK atlas font.
+            DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
+            return false;
+        }
+
+        ImGui.PushFont(cjkFont);
+        return true;
+    }
+
+    private static unsafe void ResolveCjkFont()
+    {
+        if (cjkFontResolved) return;
+        cjkFontResolved = true;
+
+        float targetSize = DevToolUiSettings.PreferredChineseFontSize;
+        float bestDistance = float.MaxValue;
+        int bestIndex = -1;
+
+        ImVector<ImFontPtr> fonts = ImGui.GetIO().Fonts.Fonts;
+        for (int i = 0; i < fonts.Size; i++)
+        {
+            ImFontPtr candidate = fonts[i];
+            if (candidate.NativePtr == null) continue;
+
+            if (candidate.FindGlyphNoFallback((ushort)'中').NativePtr == null ||
+                candidate.FindGlyphNoFallback((ushort)'文').NativePtr == null ||
+                candidate.FindGlyphNoFallback((ushort)'房').NativePtr == null ||
+                candidate.FindGlyphNoFallback((ushort)'间').NativePtr == null)
+                continue;
+
+            float distance = Math.Abs(candidate.FontSize - targetSize);
+            if (distance >= bestDistance) continue;
+            bestDistance = distance;
+            bestIndex = i;
+            cjkFont = candidate;
+        }
+
+        if (cjkFont.NativePtr != null)
+        {
+            if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
+                log?.LogInfo(
+                    $"DryCycle DevTool selected CJK atlas font index={bestIndex}, size={cjkFont.FontSize:0.##}. " +
+                    "Noto Sans SC / compatible Simplified Chinese atlas glyphs will be used.");
+            return;
+        }
+
+        if (Interlocked.Exchange(ref cjkFontMissingLogged, 1) == 0)
+            log?.LogWarning(
+                "DryCycle DevTool could not find Simplified Chinese glyphs in RWImGUI's font atlas. " +
+                "RWImGUI 1.12 normally includes NotoSansSC-Regular.ttf; falling back to English UI.");
     }
 }
 
