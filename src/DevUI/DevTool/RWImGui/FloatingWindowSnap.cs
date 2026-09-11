@@ -6,8 +6,8 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Floating-window layout service. It owns magnetic alignment, live alignment guides and the
-/// presentation-only multi-selection used to reorganize several editor panels at once.
+/// Floating-window layout service. It owns magnetic alignment, live alignment guides,
+/// marquee selection and persistent presentation-only window groups.
 /// </summary>
 internal static class FloatingWindowSnap
 {
@@ -24,6 +24,18 @@ internal static class FloatingWindowSnap
         Horizontal
     }
 
+    internal readonly struct WindowGroupSnapshot
+    {
+        internal WindowGroupSnapshot(int id, string[] members)
+        {
+            Id = id;
+            Members = members ?? Array.Empty<string>();
+        }
+
+        internal int Id { get; }
+        internal string[] Members { get; }
+    }
+
     private readonly struct GuideLine
     {
         internal GuideLine(GuideAxis axis, float coordinate)
@@ -34,6 +46,12 @@ internal static class FloatingWindowSnap
 
         internal GuideAxis Axis { get; }
         internal float Coordinate { get; }
+    }
+
+    private sealed class WindowGroup
+    {
+        internal int Id;
+        internal readonly HashSet<string> Members = new(StringComparer.Ordinal);
     }
 
     private sealed class WindowState
@@ -58,9 +76,11 @@ internal static class FloatingWindowSnap
     private static readonly List<string> StaleKeys = new();
     private static readonly Dictionary<string, Num.Vector2> GroupDragOrigins = new(StringComparer.Ordinal);
     private static readonly List<GuideLine> Guides = new();
+    private static readonly List<WindowGroup> Groups = new();
 
     private static Num.Vector2 displaySize;
     private static int frame;
+    private static int nextGroupId = 1;
 
     private static bool marqueeActive;
     private static bool marqueeReleasePending;
@@ -73,6 +93,49 @@ internal static class FloatingWindowSnap
     private static Num.Vector2 groupDragDelta;
 
     internal static bool OwnsMouse => marqueeActive || marqueeReleasePending || groupDragging;
+    internal static int SelectedWindowCount => Selected.Count;
+
+    internal static WindowGroupSnapshot[] GetGroupSnapshots()
+    {
+        if (Groups.Count == 0) return Array.Empty<WindowGroupSnapshot>();
+
+        WindowGroupSnapshot[] result = new WindowGroupSnapshot[Groups.Count];
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            WindowGroup group = Groups[i];
+            string[] members = new string[group.Members.Count];
+            group.Members.CopyTo(members);
+            Array.Sort(members, StringComparer.OrdinalIgnoreCase);
+            result[i] = new WindowGroupSnapshot(group.Id, members);
+        }
+
+        Array.Sort(result, (a, b) => a.Id.CompareTo(b.Id));
+        return result;
+    }
+
+    internal static bool SelectGroup(int groupId)
+    {
+        WindowGroup group = FindGroup(groupId);
+        if (group == null) return false;
+
+        Selected.Clear();
+        foreach (string member in group.Members)
+        {
+            if (IsWindowLive(member)) Selected.Add(member);
+        }
+        return Selected.Count > 0;
+    }
+
+    internal static bool DissolveGroup(int groupId)
+    {
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            if (Groups[i].Id != groupId) continue;
+            Groups.RemoveAt(i);
+            return true;
+        }
+        return false;
+    }
 
     internal static void BeginFrame(Num.Vector2 currentDisplaySize)
     {
@@ -86,6 +149,11 @@ internal static class FloatingWindowSnap
 
         ImGuiIOPtr io = ImGui.GetIO();
         bool leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+
+        // Ctrl+G turns the current marquee selection into a persistent layout group.
+        // Text input owns Ctrl+G while an ImGui text field is active.
+        if (!io.WantTextInput && io.KeyCtrl && !io.KeyShift && ImGui.IsKeyPressed(ImGuiKey.G))
+            CreateGroupFromSelection();
 
         // Shift + left click/drag is reserved for panel selection. Starting on empty space creates
         // a marquee; starting on a panel toggles that panel in the current selection.
@@ -119,8 +187,20 @@ internal static class FloatingWindowSnap
             }
         }
 
-        // Once a marquee has selected two or more windows, a normal left drag on the title bar of
-        // any selected window moves the entire group. Individual ImGui controls remain untouched.
+        // Clicking the title bar of a persistent group member restores the whole group selection.
+        // This makes a group behave as one layout unit without changing any editor document data.
+        if (!io.KeyShift && !groupDragging && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
+            TryFindWindowAtPoint(io.MousePos, selectedOnly: false, titleOnly: true, out string groupHit) &&
+            TryFindGroupByMember(groupHit, out WindowGroup clickedGroup))
+        {
+            Selected.Clear();
+            foreach (string member in clickedGroup.Members)
+            {
+                if (IsWindowLive(member)) Selected.Add(member);
+            }
+        }
+
+        // A normal left drag on the title bar of any selected window moves the entire selection.
         if (!io.KeyShift && !groupDragging && Selected.Count > 1 &&
             ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
             TryFindWindowAtPoint(io.MousePos, selectedOnly: true, titleOnly: true, out _))
@@ -181,8 +261,6 @@ internal static class FloatingWindowSnap
             return;
         }
 
-        // Group movement overrides ImGui's normal per-window drag for the selected set. This is
-        // deliberately presentation-only and never touches editor document/history state.
         if (groupDragging && Selected.Contains(id) && GroupDragOrigins.TryGetValue(id, out Num.Vector2 origin))
         {
             Num.Vector2 target = ClampVisible(origin + groupDragDelta, size);
@@ -215,8 +293,6 @@ internal static class FloatingWindowSnap
                 }
             }
 
-            // Final correction on release guarantees exact integer/floating-point equality even
-            // if ImGui's own resize code moved the edge again after the previous live snap.
             if (!mouseDown && state.MouseWasDown && state.ManipulatedDuringDrag)
             {
                 if (state.WasResizing)
@@ -271,6 +347,72 @@ internal static class FloatingWindowSnap
         draw.AddRect(min, max, border, 0f, ImDrawFlags.None, 2f);
     }
 
+    private static bool CreateGroupFromSelection()
+    {
+        HashSet<string> members = new(StringComparer.Ordinal);
+        foreach (string id in Selected)
+        {
+            // The group inspector stays independent so it can always be used to recover a group.
+            if (string.Equals(id, "Groups", StringComparison.Ordinal)) continue;
+            if (IsWindowLive(id)) members.Add(id);
+        }
+
+        if (members.Count < 2) return false;
+
+        // Repeating Ctrl+G on exactly the same group is intentionally idempotent.
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            if (Groups[i].Members.SetEquals(members)) return true;
+        }
+
+        // One window belongs to at most one persistent group. Pull selected members out of older
+        // groups first; groups left with fewer than two members stop being meaningful and vanish.
+        for (int i = Groups.Count - 1; i >= 0; i--)
+        {
+            WindowGroup existing = Groups[i];
+            existing.Members.ExceptWith(members);
+            if (existing.Members.Count < 2) Groups.RemoveAt(i);
+        }
+
+        WindowGroup group = new() { Id = nextGroupId++ };
+        group.Members.UnionWith(members);
+        Groups.Add(group);
+
+        Selected.Clear();
+        Selected.UnionWith(members);
+        return true;
+    }
+
+    private static WindowGroup FindGroup(int groupId)
+    {
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            if (Groups[i].Id == groupId) return Groups[i];
+        }
+        return null;
+    }
+
+    private static bool TryFindGroupByMember(string id, out WindowGroup group)
+    {
+        group = null;
+        if (string.IsNullOrEmpty(id)) return false;
+
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            if (!Groups[i].Members.Contains(id)) continue;
+            group = Groups[i];
+            return true;
+        }
+        return false;
+    }
+
+    private static bool IsWindowLive(string id)
+    {
+        return !string.IsNullOrEmpty(id) &&
+               Windows.TryGetValue(id, out WindowState state) &&
+               state.Initialized && state.LastSeenFrame >= frame - 1;
+    }
+
     private static void DetectResizeEdges(WindowState state, Num.Vector2 position, Num.Vector2 size)
     {
         float oldLeft = state.Position.X;
@@ -288,8 +430,6 @@ internal static class FloatingWindowSnap
         bool top = topDelta > GeometryEpsilon;
         bool bottom = bottomDelta > GeometryEpsilon;
 
-        // Standard ImGui resizing changes one horizontal and/or one vertical edge. If layout
-        // effects make both edges appear to move, keep the edge with the larger user delta.
         if (left && right)
         {
             left = leftDelta >= rightDelta;
@@ -327,43 +467,27 @@ internal static class FloatingWindowSnap
         if (state.ResizeLeft)
         {
             float target = FindBestEdgeTarget(
-                id, verticalAxis: true, currentEdge: left,
-                perpendicularMin: top, perpendicularMax: bottom,
-                fixedOppositeEdge: right, matchingSizeFromLeftOrTop: true,
-                addGuides: true);
-            if (!float.IsNaN(target) && right - target >= 40f)
-                left = target;
+                id, true, left, top, bottom, right, true, true);
+            if (!float.IsNaN(target) && right - target >= 40f) left = target;
         }
         else if (state.ResizeRight)
         {
             float target = FindBestEdgeTarget(
-                id, verticalAxis: true, currentEdge: right,
-                perpendicularMin: top, perpendicularMax: bottom,
-                fixedOppositeEdge: left, matchingSizeFromLeftOrTop: false,
-                addGuides: true);
-            if (!float.IsNaN(target) && target - left >= 40f)
-                right = target;
+                id, true, right, top, bottom, left, false, true);
+            if (!float.IsNaN(target) && target - left >= 40f) right = target;
         }
 
         if (state.ResizeTop)
         {
             float target = FindBestEdgeTarget(
-                id, verticalAxis: false, currentEdge: top,
-                perpendicularMin: left, perpendicularMax: right,
-                fixedOppositeEdge: bottom, matchingSizeFromLeftOrTop: true,
-                addGuides: true);
-            if (!float.IsNaN(target) && bottom - target >= 28f)
-                top = target;
+                id, false, top, left, right, bottom, true, true);
+            if (!float.IsNaN(target) && bottom - target >= 28f) top = target;
         }
         else if (state.ResizeBottom)
         {
             float target = FindBestEdgeTarget(
-                id, verticalAxis: false, currentEdge: bottom,
-                perpendicularMin: left, perpendicularMax: right,
-                fixedOppositeEdge: top, matchingSizeFromLeftOrTop: false,
-                addGuides: true);
-            if (!float.IsNaN(target) && target - top >= 28f)
-                bottom = target;
+                id, false, bottom, left, right, top, false, true);
+            if (!float.IsNaN(target) && target - top >= 28f) bottom = target;
         }
 
         Num.Vector2 snappedPosition = new(left, top);
@@ -378,10 +502,6 @@ internal static class FloatingWindowSnap
         size = snappedSize;
     }
 
-    /// <summary>
-    /// Finds the closest coordinate for one actively-resized edge. Targets include screen edges,
-    /// screen centre, every neighbouring window edge/centre, adjacent edges and equal dimensions.
-    /// </summary>
     private static float FindBestEdgeTarget(
         string id,
         bool verticalAxis,
@@ -423,13 +543,10 @@ internal static class FloatingWindowSnap
             float otherEnd = otherStart + otherSize;
             float otherCenter = (otherStart + otherEnd) * 0.5f;
 
-            // Edge-to-edge, edge-to-opposite-edge and edge-to-centre alignment.
             ConsiderEdge(ref bestTarget, ref bestDistance, currentEdge, otherStart);
             ConsiderEdge(ref bestTarget, ref bestDistance, currentEdge, otherCenter);
             ConsiderEdge(ref bestTarget, ref bestDistance, currentEdge, otherEnd);
 
-            // Equal width/height while resizing. The actively dragged edge moves while the
-            // opposite edge remains fixed.
             float equalSizeTarget = matchingSizeFromLeftOrTop
                 ? fixedOppositeEdge - otherSize
                 : fixedOppositeEdge + otherSize;
@@ -457,7 +574,7 @@ internal static class FloatingWindowSnap
 
         if (min.X == float.MaxValue) return rawDelta;
         Num.Vector2 size = max - min;
-        Num.Vector2 snapped = FindBestPosition(null, min, size, Selected, addGuides: true);
+        Num.Vector2 snapped = FindBestPosition(null, min, size, Selected, true);
         return rawDelta + (snapped - min);
     }
 
@@ -578,10 +695,6 @@ internal static class FloatingWindowSnap
         }
     }
 
-    /// <summary>
-    /// Aligns a moving rectangle. It supports screen edges/centre and every standard relation
-    /// between window left/centre/right and top/centre/bottom, including adjacent-edge docking.
-    /// </summary>
     private static Num.Vector2 FindBestPosition(
         string id,
         Num.Vector2 position,
@@ -628,7 +741,6 @@ internal static class FloatingWindowSnap
 
             if (RangesNear(top, bottom, otherTop, otherBottom, AlignmentReach))
             {
-                // Left / centre / right can align to any left / centre / right guide.
                 ConsiderMoveX(ref bestX, ref bestXDistance, ref bestXGuide, left, otherLeft, 0f);
                 ConsiderMoveX(ref bestX, ref bestXDistance, ref bestXGuide, left, otherCenterX, 0f);
                 ConsiderMoveX(ref bestX, ref bestXDistance, ref bestXGuide, left, otherRight, 0f);
@@ -644,7 +756,6 @@ internal static class FloatingWindowSnap
 
             if (RangesNear(left, right, otherLeft, otherRight, AlignmentReach))
             {
-                // Top / centre / bottom can align to any top / centre / bottom guide.
                 ConsiderMoveY(ref bestY, ref bestYDistance, ref bestYGuide, top, otherTop, 0f);
                 ConsiderMoveY(ref bestY, ref bestYDistance, ref bestYGuide, top, otherCenterY, 0f);
                 ConsiderMoveY(ref bestY, ref bestYDistance, ref bestYGuide, top, otherBottom, 0f);
