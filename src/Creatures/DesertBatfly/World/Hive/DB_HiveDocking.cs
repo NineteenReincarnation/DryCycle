@@ -6,6 +6,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Single realized authority for the final BatHive tile -> Burrow transition.
 /// Higher-level domains decide why a Desert Batfly is returning and which hive map to follow;
 /// this class alone owns the last physical docking step once the bat reaches a hive tile.
+/// DB_HiveTraffic separately serializes the approach corridor and keeps its claim until the
+/// Burrowed hook confirms that vanilla actually moved the bat into the hive list.
 /// </summary>
 internal static class DB_HiveDocking
 {
@@ -39,6 +41,24 @@ internal static class DB_HiveDocking
             "environmental Home docking on BatHive tile");
     }
 
+    /// <summary>
+    /// Travel keeps ownership through ReturnHome ingress and while an EmergencyRefuge is being
+    /// held. Check the intent before touching a hive tile so an unrelated colony-migration route
+    /// that merely crosses a hive cannot accidentally burrow.
+    /// </summary>
+    internal static bool TryHandleTravelOwned(DB_Creature bat)
+    {
+        if (bat?.abstractCreature == null ||
+            !DB_TravelRuntime.TryGetDebugState(bat.abstractCreature, out DB_TravelDebugState travel))
+            return false;
+
+        if (travel.Purpose == DB_TravelPurpose.ReturnHome)
+            return TryHandleTravelReturnHome(bat);
+        if (travel.Purpose == DB_TravelPurpose.EmergencyRefuge && travel.WaitingAtRefuge)
+            return TryHandleTravelRefuge(bat);
+        return false;
+    }
+
     internal static bool TryHandleTravelReturnHome(DB_Creature bat)
     {
         return TryHandleDocking(
@@ -47,6 +67,42 @@ internal static class DB_HiveDocking
             1.05f,
             true,
             "ReturnHome final BatHive ingress");
+    }
+
+    /// <summary>
+    /// Travel-owned refuge holding may deliberately choose a BatHive node. Unlike ReturnHome it
+    /// keeps its EmergencyRefuge intent after docking, but physically it uses the same native
+    /// BatHive ingress transition. The Travel runtime already suppresses emergence while waiting
+    /// at a refuge, and the room passive-release queue also excludes bats with a Travel intent.
+    /// </summary>
+    internal static bool TryHandleTravelRefuge(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.Travel,
+            1.25f,
+            true,
+            "EmergencyRefuge final BatHive ingress");
+    }
+
+    internal static bool TryHandleInjuryRecovery(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.InjuryRecovery,
+            0.80f,
+            true,
+            "injury recovery final BatHive ingress");
+    }
+
+    internal static bool TryHandleNativeRain(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.NativeSpecial,
+            2f,
+            true,
+            "native rain final BatHive ingress");
     }
 
     /// <summary>
@@ -80,7 +136,8 @@ internal static class DB_HiveDocking
         bat.AI.afraid = Mathf.Max(bat.AI.afraid, afraidFloor);
 
         // Match vanilla FlyAI docking: merely entering a hive tile is not enough. Keep a
-        // small downward bias until the body actually touches the lower entrance surface.
+        // small downward bias until the body touches the lower entrance surface; ContactPoint
+        // y == -1 is the same condition vanilla uses before switching to Burrow.
         bat.mainBodyChunk.vel.y -= 1f;
         if (bat.mainBodyChunk.ContactPoint.y != -1)
             return true;
