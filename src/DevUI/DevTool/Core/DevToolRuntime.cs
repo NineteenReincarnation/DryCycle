@@ -67,12 +67,13 @@ internal static class DevToolRuntime
         RoomEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
-        bool suppressLegacyObjectsUi =
+        bool suppressMigratedLegacyUi =
             EditorInputRouter.FrontendAttached &&
-            session?.ToolMode == EditorToolMode.Objects &&
+            session != null &&
             session.LegacyUiVisible == false &&
-            self.activePage is ObjectsPage;
-        LegacyUiPresentationController.Apply(self.activePage, suppressLegacyObjectsUi);
+            ((session.ToolMode == EditorToolMode.Objects && self.activePage is ObjectsPage) ||
+             (session.ToolMode == EditorToolMode.Room && self.activePage is RoomSettingsPage));
+        LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
         EditorPresentationHub.Publish(session);
         RoomEditorPresentationHub.Publish(session);
@@ -276,7 +277,7 @@ public sealed class EditorSession
 
     public void ToggleLegacyUi()
     {
-        if (ToolMode != EditorToolMode.Objects) return;
+        if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room) return;
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
