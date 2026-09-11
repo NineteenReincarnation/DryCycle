@@ -26,7 +26,6 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 NeutralHover = new(0.24f, 0.27f, 0.32f, 0.92f);
     private static readonly Num.Vector4 Danger = new(0.57f, 0.20f, 0.22f, 0.88f);
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
-    private static readonly Num.Vector4 Outline = new(0f, 0f, 0f, 1f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
     internal static void PaneTitle(string text, float restoreScale = 1f)
@@ -132,7 +131,7 @@ internal static class DevToolWidgets
         ImGui.SetWindowFontScale(fontScale);
         Num.Vector2 pos = ImGui.GetCursorScreenPos();
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
-        uint outline = ImGui.GetColorU32(Outline);
+        const uint outline = 0xFF000000u;
 
         draw.AddText(pos + new Num.Vector2(-stroke, 0f), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, 0f), outline, text);
