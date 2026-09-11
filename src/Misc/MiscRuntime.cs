@@ -13,15 +13,14 @@ internal static class MiscRuntime
 
         DryCycleOptions.Register();
 
-        // Core DryCycle DevUI features stay enabled regardless of RegionKit.
+        // Core DryCycle DevUI features stay enabled regardless of optional editor frontends.
         DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable();
         PaletteDirectInputRuntime.Enable();
-        DevUIShortcutInputGuard.Enable();
         DryCycle.WorldLink.WorldLinkRuntime.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
-        // These two utilities only exist as temporary RegionKit fallbacks. They are
-        // disabled by default to avoid duplicate hooks/UI once RegionKit is working.
+        // These two utilities only exist as temporary compatibility fallbacks. They are
+        // disabled by default to avoid duplicate hooks/UI once their replacement is active.
         if (DryCycle.DayNight.RegionDayNightOptions.EnableLegacyIndividualPlacedObjectViewer)
         {
             IndividualPlacedObjectViewer.Enable();
@@ -43,7 +42,6 @@ internal static class MiscRuntime
         {
             // WorldLink Enable is transactional, but keep this defensive cleanup so a
             // partially initialized MiscRuntime never leaves room/map hooks behind.
-            DevUIShortcutInputGuard.Disable();
             DryCycle.WorldLink.WorldLinkRuntime.Disable();
             return;
         }
@@ -51,7 +49,6 @@ internal static class MiscRuntime
         FadePaletteCombiner.Disable();
         IndividualPlacedObjectViewer.Disable();
         DryCycle.WorldLink.WorldLinkRuntime.Disable();
-        DevUIShortcutInputGuard.Disable();
         PaletteDirectInputRuntime.Disable();
         DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Disable();
         _enabled = false;
