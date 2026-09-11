@@ -456,7 +456,7 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
     {
         private readonly Func<TData, TEnum> getter;
         private readonly Action<TData, TEnum> setter;
-        private readonly string[] names = Enum.GetNames(typeof(TEnum));
+        private readonly string[] names = global::System.Enum.GetNames(typeof(TEnum));
 
         internal EnumBinding(string key, string displayName, string group, string source,
             Func<TData, TEnum> getter, Action<TData, TEnum> setter)
@@ -487,7 +487,7 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
         {
             if (setter == null || value.Kind != EditorPropertyKind.Enum) return false;
             if (value.Integer < 0 || value.Integer >= names.Length) return false;
-            if (!Enum.TryParse(names[value.Integer], out TEnum parsed)) return false;
+            if (!global::System.Enum.TryParse(names[value.Integer], out TEnum parsed)) return false;
             setter(data, parsed);
             return true;
         }
