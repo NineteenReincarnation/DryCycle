@@ -15,6 +15,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static class DevToolOverlay
 {
     private static string objectSearch = string.Empty;
+    private static string sceneSearch = string.Empty;
     private static bool sceneTab;
     private static int sceneSelectionAnchor = -1;
     private static float browserInspectorSplit = 0.40f;
@@ -235,9 +236,6 @@ internal static class DevToolOverlay
         bool browser = snapshot.BrowserOpen;
         bool inspector = snapshot.InspectorOpen && !objectNoSelection;
 
-        // In Objects mode an empty Inspector is wasted room. If the developer left Inspector on
-        // while Browser is hidden, temporarily give the whole panel to Library/Scene until a
-        // selection exists; the stored Browser/Inspector preferences themselves are unchanged.
         if (objectNoSelection && !browser && snapshot.InspectorOpen)
             browser = true;
 
@@ -498,8 +496,12 @@ internal static class DevToolOverlay
     private static void DrawSceneObjectList(EditorPresentationSnapshot snapshot)
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
-        DevToolWidgets.MutedText(DevToolUiSettings.T($"已放置 {objects.Length} 个物件", $"{objects.Length} placed objects"));
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            $"已放置 {objects.Length} 个物件 · 已选 {selectedCount}",
+            $"{objects.Length} placed · {selectedCount} selected"));
+
         if (selectedCount > 0)
         {
             ImGui.SameLine();
@@ -517,33 +519,109 @@ internal static class DevToolOverlay
         }
 
         ImGui.Spacing();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("搜索场景物件", "Search scene objects"));
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputText("##DevToolSceneSearch", ref sceneSearch, 128);
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGuiIOPtr io = ImGui.GetIO();
+
+        List<string> sources = new();
+        int matches = 0;
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            string label = item.Type + "  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##SceneObject" + item.Index;
-            if (!ImGui.Selectable(label, item.Selected)) continue;
-            if (io.KeyShift && sceneSelectionAnchor >= 0)
+            EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
+            if (!MatchesSceneObject(item, metadata, sceneSearch)) continue;
+            matches++;
+            string source = string.IsNullOrWhiteSpace(metadata?.Source)
+                ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                : metadata.Source;
+            if (!ContainsExact(sources, source)) sources.Add(source);
+        }
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+        {
+            string source = sources[sourceIndex];
+            DevToolWidgets.SourceHeader(source, ObjectSourceColor(source), 1.34f * BrowserPaneFontScale, BrowserPaneFontScale);
+
+            string lastCategory = null;
+            for (int i = 0; i < objects.Length; i++)
             {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                    EditorUiCommandKind.SelectObjectRange,
-                    index: item.Index,
-                    secondaryIndex: sceneSelectionAnchor,
-                    flag: io.KeyCtrl));
-            }
-            else if (io.KeyCtrl)
-            {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
-                sceneSelectionAnchor = item.Index;
-            }
-            else
-            {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
-                sceneSelectionAnchor = item.Index;
+                EditorObjectSnapshot item = objects[i];
+                EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
+                if (!MatchesSceneObject(item, metadata, sceneSearch)) continue;
+
+                string itemSource = string.IsNullOrWhiteSpace(metadata?.Source)
+                    ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                    : metadata.Source;
+                if (!string.Equals(itemSource, source, StringComparison.OrdinalIgnoreCase)) continue;
+
+                string category = string.IsNullOrWhiteSpace(metadata?.Category)
+                    ? DevToolUiSettings.T("未分类", "Unsorted")
+                    : metadata.Category;
+                if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+                {
+                    lastCategory = category;
+                    DevToolWidgets.MutedText(category);
+                }
+
+                string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
+                    ? item.Type
+                    : metadata.DisplayName;
+                string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##SceneObject" + item.Index;
+                if (!ImGui.Selectable(label, item.Selected))
+                {
+                    if (ImGui.IsItemHovered())
+                        DevToolTooltip.Show(source + " · " + item.Type + " · " + category);
+                    continue;
+                }
+
+                if (io.KeyShift && sceneSelectionAnchor >= 0)
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.SelectObjectRange,
+                        index: item.Index,
+                        secondaryIndex: sceneSelectionAnchor,
+                        flag: io.KeyCtrl));
+                }
+                else if (io.KeyCtrl)
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
+                    sceneSelectionAnchor = item.Index;
+                }
+                else
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
+                    sceneSelectionAnchor = item.Index;
+                }
             }
         }
+
+        if (matches == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
+    }
+
+    private static EditorObjectTypeSnapshot FindObjectMetadata(EditorPresentationSnapshot snapshot, string type)
+    {
+        EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
+        for (int i = 0; i < library.Length; i++)
+            if (string.Equals(library[i].Type, type, StringComparison.Ordinal)) return library[i];
+        return null;
+    }
+
+    private static bool MatchesSceneObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return true;
+        query = query.Trim();
+        return Contains(item.Type, query) ||
+               Contains(metadata?.DisplayName, query) ||
+               Contains(metadata?.Source, query) ||
+               Contains(metadata?.Category, query) ||
+               Fuzzy(item.Type, query) ||
+               Fuzzy(metadata?.DisplayName, query);
     }
 
     private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
