@@ -51,6 +51,22 @@ internal static class DB_HiveDocking
             "ReturnHome final BatHive ingress");
     }
 
+    /// <summary>
+    /// Travel-owned refuge holding may deliberately choose a BatHive node. Unlike ReturnHome it
+    /// keeps its EmergencyRefuge intent after docking, but physically it uses the same native
+    /// BatHive ingress transition. The Travel runtime already suppresses emergence while waiting
+    /// at a refuge, and the room passive-release queue also excludes bats with a Travel intent.
+    /// </summary>
+    internal static bool TryHandleTravelRefuge(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.Travel,
+            1.25f,
+            true,
+            "EmergencyRefuge final BatHive ingress");
+    }
+
     internal static bool TryHandleInjuryRecovery(DB_Creature bat)
     {
         return TryHandleDocking(
@@ -59,6 +75,16 @@ internal static class DB_HiveDocking
             0.80f,
             true,
             "injury recovery final BatHive ingress");
+    }
+
+    internal static bool TryHandleNativeRain(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.NativeSpecial,
+            2f,
+            true,
+            "native rain final BatHive ingress");
     }
 
     /// <summary>
