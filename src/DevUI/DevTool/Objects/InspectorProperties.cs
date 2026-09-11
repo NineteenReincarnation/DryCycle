@@ -452,7 +452,7 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
         }
     }
 
-    private sealed class EnumBinding<TEnum> : Binding where TEnum : struct, Enum
+    private sealed class EnumBinding<TEnum> : Binding where TEnum : struct, global::System.Enum
     {
         private readonly Func<TData, TEnum> getter;
         private readonly Action<TData, TEnum> setter;
@@ -532,7 +532,7 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
         => Add(new ColorBinding(key, displayName, group, source, getter ?? throw new ArgumentNullException(nameof(getter)), setter));
 
     public ObjectInspectorDefinition<TData> Enum<TEnum>(string key, string displayName, Func<TData, TEnum> getter,
-        Action<TData, TEnum> setter, string group = "Properties") where TEnum : struct, Enum
+        Action<TData, TEnum> setter, string group = "Properties") where TEnum : struct, global::System.Enum
         => Add(new EnumBinding<TEnum>(key, displayName, group, source, getter ?? throw new ArgumentNullException(nameof(getter)), setter));
 
     public bool CanInspect(PlacedObject target) => target?.data is TData;
