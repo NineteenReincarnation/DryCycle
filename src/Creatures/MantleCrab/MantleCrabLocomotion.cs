@@ -21,6 +21,14 @@ internal sealed class MantleCrabLocomotion
     private const float IntentResponse = .020f;
     private const float DriveJerk = .0032f;
 
+    // Rain World 的 BodyChunk 在 Creature.Update 最前面就会先扣重力、再移动位置。
+    // 因此站立帧结束时必须保留一份“下一帧会被重力吃掉”的向上速度。
+    // 旧版把这个速度硬压到 0.28，导致每个下一帧都以约 -0.62 的速度下沉。
+    private const float StandingHeightGain = .026f;
+    private const float StandingMaximumHeightCorrection = .30f;
+    private const float StepUpMaximumHeightCorrection = .46f;
+    private const float SingleFootCarryFactor = .58f;
+
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly MantleCrabTraversalPlanner traversal;
@@ -116,8 +124,6 @@ internal sealed class MantleCrabLocomotion
         if (startCooldown > 0)
             startCooldown--;
 
-        // 每一帧都先留下一个 PLAN。后面如果同一 frame 没有 GROUND，说明 MantleCrab.Update
-        // 在真正调用站立支撑之前就 return 了，这正是本轮要排查的情况之一。
         MantleCrabStandDebug.RecordPlanning(crab, this);
 
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
@@ -200,17 +206,18 @@ internal sealed class MantleCrabLocomotion
         Vector2 beforeSupport = BodyVelocity();
         posture.ApplySupportAndPosture(crab.gravity, TurnIntent);
         Vector2 afterSupport = BodyVelocity();
-        StabilizeVerticalMotion();
-        Vector2 afterVerticalStabilizer = BodyVelocity();
 
-        // 这里记录的是实际速度变化，不是重新计算一个“理论支撑值”。
-        // supportDeltaY 可以直接告诉我们这一帧站立代码到底有没有真的把身体往上托。
+        // 不再把向上速度压成 0.28。Rain World 下一帧会先减 gravity 再移动，
+        // 所以这里准备好下一帧真正需要的竖直速度。
+        PrepareStandingForNextFrame();
+        Vector2 afterStandingCorrection = BodyVelocity();
+
         MantleCrabStandDebug.RecordGroundForces(
             crab,
             this,
             beforeSupport,
             afterSupport,
-            afterVerticalStabilizer);
+            afterStandingCorrection);
 
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
         {
@@ -251,8 +258,6 @@ internal sealed class MantleCrabLocomotion
         if (leg.Planted)
             return true;
 
-        // 原版 MirosBird 的 groundContact 也是“已经碰到地面”就成立，
-        // 不要求脚的内部状态先达到一个几乎零误差的锁点。
         return MantleCrabTerrainProbe.StillSupported(crab.room, leg.Tip);
     }
 
@@ -264,23 +269,52 @@ internal sealed class MantleCrabLocomotion
         return count;
     }
 
-    private void StabilizeVerticalMotion()
+    /// <summary>
+    /// Rain World 的 BodyChunk.Update 顺序是：先 vel.y -= gravity，再 pos += vel。
+    /// 因此这里的目标不是把帧尾竖直速度压到 0，而是让帧尾保留 gravity 左右的速度：
+    /// 下一帧重力扣掉以后才真正得到接近 0 的位移速度。
+    /// 如果身体低于腿的正常站高，则在 gravity 基础上再加少量恢复速度。
+    /// </summary>
+    private void PrepareStandingForNextFrame()
     {
-        if (crab.bodyChunks == null || CountGroundedFeet() < 2 || posture.SeverelyUnstable)
+        if (crab.bodyChunks == null || crab.room == null || posture.SeverelyUnstable)
             return;
 
-        Vector2 velocity = BodyVelocity();
-        if (velocity.y <= 0f)
+        int groundedFeet = CountGroundedFeet();
+        if (groundedFeet <= 0)
             return;
 
-        float maximumUpwardSpeed = traversal.Mode == MantleCrabTraversalMode.StepUp ? .62f : .28f;
-        float targetUpwardSpeed = Mathf.Min(velocity.y * .78f, maximumUpwardSpeed);
-        float remove = velocity.y - targetUpwardSpeed;
-        if (remove <= .001f)
-            return;
+        float heightErrorSum = 0f;
+        int heightSamples = 0;
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!IsFootGrounded(leg))
+                continue;
+
+            Vector2 supportPoint = leg.Planted ? leg.Contact : leg.Tip;
+            float actualHeight = crab.Anchor(leg).y - supportPoint.y;
+            heightErrorSum += leg.StandHeight - actualHeight;
+            heightSamples++;
+        }
+
+        float meanHeightError = heightSamples > 0 ? heightErrorSum / heightSamples : 0f;
+        float maxCorrection = traversal.Mode == MantleCrabTraversalMode.StepUp
+            ? StepUpMaximumHeightCorrection
+            : StandingMaximumHeightCorrection;
+        float heightCorrection = Mathf.Clamp(
+            meanHeightError * StandingHeightGain,
+            -StandingMaximumHeightCorrection,
+            maxCorrection);
+
+        float gravityCarry = Mathf.Max(0f, crab.gravity) *
+                             (groundedFeet >= 2 ? 1f : SingleFootCarryFactor);
+        float targetVerticalVelocity = Mathf.Max(0f, gravityCarry + heightCorrection);
+        float currentVerticalVelocity = BodyVelocity().y;
+        float delta = targetVerticalVelocity - currentVerticalVelocity;
 
         for (int i = 0; i < crab.bodyChunks.Length; i++)
-            crab.bodyChunks[i].vel.y -= remove;
+            crab.bodyChunks[i].vel.y += delta;
     }
 
     private Vector2 DesiredLanding(
