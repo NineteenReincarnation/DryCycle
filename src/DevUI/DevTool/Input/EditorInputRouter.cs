@@ -7,20 +7,30 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Input;
 
 /// <summary>
-/// Shared ownership state between the RWImGui frontend and Rain World. Presentation sets
-/// ImGui capture intent; the game-side runtime owns shortcut dispatch and gameplay input
-/// suppression. This keeps ImGui calls out of DryCycle.dll.
+/// Shared ownership state between the optional RWImGui frontend and Rain World. The
+/// frontend reports both attachment and per-frame capture intent; the game-side runtime
+/// owns shortcut dispatch and gameplay-input suppression. This keeps ImGui calls out of
+/// DryCycle.dll and lets vanilla DevInterface remain usable when the frontend is absent.
 /// </summary>
 public static class EditorInputRouter
 {
+    private static volatile bool frontendAttached;
     private static volatile bool wantsMouse;
     private static volatile bool wantsKeyboard;
     private static volatile bool wantsTextInput;
     private static bool enabled;
 
+    public static bool FrontendAttached => frontendAttached;
     public static bool WantsMouse => wantsMouse;
     public static bool WantsKeyboard => wantsKeyboard;
     public static bool WantsTextInput => wantsTextInput;
+
+    public static void SetFrontendAttached(bool attached)
+    {
+        frontendAttached = attached;
+        if (!attached)
+            SetFrontendCapture(false, false, false);
+    }
 
     public static void SetFrontendCapture(bool mouse, bool keyboard, bool textInput)
     {
@@ -40,7 +50,7 @@ public static class EditorInputRouter
     {
         if (!enabled) return;
         On.Player.checkInput -= Player_checkInput;
-        SetFrontendCapture(false, false, false);
+        SetFrontendAttached(false);
         enabled = false;
     }
 
