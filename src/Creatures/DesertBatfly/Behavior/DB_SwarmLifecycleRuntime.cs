@@ -6,13 +6,9 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Thin adapter for Rain World's nonvirtual FlyAI Idle/Swarm callbacks.
 ///
 /// Desert Batfly does not use native FlyAI.Swarm/SwarmFlight as a gameplay state. Vanilla
-/// IdleUpdate may still attempt Idle -> Swarm, so the transition is folded back to Idle before
-/// a later frame can execute SwarmUpdate. Native self-roost remains available only when the
-/// shared Desert Batfly roost occupancy policy accepts the selected patch.
-///
-/// Important: DB_RainWorldHooks never executes vanilla SwarmUpdate for Desert Batflies. This
-/// class therefore performs state cleanup only; no native swarm steering is allowed to leak for
-/// one frame before being cancelled.
+/// IdleUpdate may still attempt Idle -> Swarm, so the transition is folded back to Idle and a
+/// long no-swarm guard is installed. Native self-roost remains available only when the shared
+/// Desert Batfly roost occupancy policy accepts the selected patch.
 /// </summary>
 internal static class DB_SwarmLifecycleRuntime
 {
@@ -20,6 +16,14 @@ internal static class DB_SwarmLifecycleRuntime
     {
         SuppressNativeSwarm(ai, bat);
         SuppressCrowdedNativeSelfRoost(ai, bat);
+    }
+
+    // Kept as the hook boundary for compatibility with DB_RainWorldHooks. The state is always
+    // folded back to Idle and SwarmFlight is cleared, so a native swarm cannot persist across
+    // frames even if vanilla entered Swarm inside the callback.
+    internal static void AfterNativeSwarmUpdate(FlyAI ai, DB_Creature bat)
+    {
+        SuppressNativeSwarm(ai, bat);
     }
 
     internal static void SuppressNativeSwarmEntry(FlyAI ai, DB_Creature bat)
