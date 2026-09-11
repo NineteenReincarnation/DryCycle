@@ -29,26 +29,26 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Outline = new(0f, 0f, 0f, 1f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
-    internal static void PaneTitle(string text)
+    internal static void PaneTitle(string text, float restoreScale = 1f)
     {
         ImGui.Spacing();
-        DrawOutlinedText(text, Accent, 1.16f, 1.5f);
+        DrawOutlinedText(text, Accent, 1.16f * restoreScale, 1.5f, restoreScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
 
-    internal static void SectionHeader(string text)
+    internal static void SectionHeader(string text, float restoreScale = 1f)
     {
         ImGui.Spacing();
-        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.10f, 1.25f);
+        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.10f * restoreScale, 1.25f, restoreScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
 
-    internal static void SourceHeader(string text, Num.Vector4 color, float fontScale = 1.38f)
+    internal static void SourceHeader(string text, Num.Vector4 color, float fontScale = 1.38f, float restoreScale = 1f)
     {
         ImGui.Spacing();
-        DrawOutlinedText(text, color, fontScale, 2f);
+        DrawOutlinedText(text, color, fontScale, 2f, restoreScale);
         ImGui.Separator();
     }
 
@@ -127,7 +127,7 @@ internal static class DevToolWidgets
         ImGui.PopStyleColor();
     }
 
-    private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke)
+    private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke, float restoreScale)
     {
         ImGui.SetWindowFontScale(fontScale);
         Num.Vector2 pos = ImGui.GetCursorScreenPos();
@@ -144,6 +144,6 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
         ImGui.TextColored(color, text);
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(restoreScale);
     }
 }
