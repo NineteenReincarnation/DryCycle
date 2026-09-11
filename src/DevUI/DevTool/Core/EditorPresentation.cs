@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Commands;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
@@ -33,7 +34,8 @@ public sealed class EditorInspectorSnapshot
     public float X { get; init; }
     public float Y { get; init; }
     public string DataType { get; init; } = string.Empty;
-    public string SerializedData { get; init; } = string.Empty;
+    public EditorPropertySnapshot[] Properties { get; init; } = Array.Empty<EditorPropertySnapshot>();
+    public LegacyControlSnapshot[] LegacyControls { get; init; } = Array.Empty<LegacyControlSnapshot>();
 }
 
 /// <summary>
@@ -106,30 +108,14 @@ public static class EditorPresentationHub
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
             DataType = selected?.data?.GetType().FullName ?? string.Empty,
-            SerializedData = SafeDataString(selected)
+            Properties = ObjectInspectorRegistry.Capture(selected),
+            LegacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected)
         };
 
         int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
         if (libraryTypeCount != typeCount || libraryCache.Length == 0)
         {
-            IReadOnlyList<ObjectDescriptor> descriptors = ObjectCatalog.GetAll();
-            EditorObjectTypeSnapshot[] next = new EditorObjectTypeSnapshot[descriptors.Count];
-            for (int i = 0; i < descriptors.Count; i++)
-            {
-                ObjectDescriptor descriptor = descriptors[i];
-                string[] tags = new string[descriptor.Tags.Count];
-                for (int t = 0; t < tags.Length; t++) tags[t] = descriptor.Tags[t];
-                next[i] = new EditorObjectTypeSnapshot
-                {
-                    Type = descriptor.Type?.value ?? string.Empty,
-                    DisplayName = descriptor.DisplayName,
-                    Category = descriptor.Category,
-                    Source = descriptor.Source,
-                    Tags = tags
-                };
-            }
-            libraryCache = next;
-            libraryTypeCount = typeCount;
+            RebuildLibraryCache(typeCount);
         }
 
         current = new EditorPresentationSnapshot
@@ -154,10 +140,32 @@ public static class EditorPresentationHub
 
     internal static void Clear() => current = EditorPresentationSnapshot.Empty;
 
-    private static string SafeDataString(PlacedObject item)
+    internal static void InvalidateObjectLibrary()
     {
-        try { return item?.data?.ToString() ?? string.Empty; }
-        catch { return "<serialization failed>"; }
+        libraryTypeCount = -1;
+        libraryCache = Array.Empty<EditorObjectTypeSnapshot>();
+    }
+
+    private static void RebuildLibraryCache(int typeCount)
+    {
+        IReadOnlyList<ObjectDescriptor> descriptors = ObjectCatalog.GetAll();
+        EditorObjectTypeSnapshot[] next = new EditorObjectTypeSnapshot[descriptors.Count];
+        for (int i = 0; i < descriptors.Count; i++)
+        {
+            ObjectDescriptor descriptor = descriptors[i];
+            string[] tags = new string[descriptor.Tags.Count];
+            for (int t = 0; t < tags.Length; t++) tags[t] = descriptor.Tags[t];
+            next[i] = new EditorObjectTypeSnapshot
+            {
+                Type = descriptor.Type?.value ?? string.Empty,
+                DisplayName = descriptor.DisplayName,
+                Category = descriptor.Category,
+                Source = descriptor.Source,
+                Tags = tags
+            };
+        }
+        libraryCache = next;
+        libraryTypeCount = typeCount;
     }
 }
 
@@ -174,12 +182,23 @@ public enum EditorUiCommandKind
     ToggleObjectSelection,
     DeleteObject,
     CreateObject,
-    SetObjectPosition
+    SetObjectPosition,
+    SetObjectProperty,
+    InvokeLegacyButton,
+    SetLegacySlider,
+    ResetLegacySlider
 }
 
 public readonly struct EditorUiCommand
 {
-    public EditorUiCommand(EditorUiCommandKind kind, int index = -1, string text = null, float x = 0f, float y = 0f, EditorToolMode mode = EditorToolMode.Room)
+    public EditorUiCommand(
+        EditorUiCommandKind kind,
+        int index = -1,
+        string text = null,
+        float x = 0f,
+        float y = 0f,
+        EditorToolMode mode = EditorToolMode.Room,
+        EditorPropertyValue propertyValue = default)
     {
         Kind = kind;
         Index = index;
@@ -187,6 +206,7 @@ public readonly struct EditorUiCommand
         X = x;
         Y = y;
         Mode = mode;
+        PropertyValue = propertyValue;
     }
 
     public EditorUiCommandKind Kind { get; }
@@ -195,6 +215,7 @@ public readonly struct EditorUiCommand
     public float X { get; }
     public float Y { get; }
     public EditorToolMode Mode { get; }
+    public EditorPropertyValue PropertyValue { get; }
 }
 
 public static class EditorUiCommandQueue
@@ -261,6 +282,18 @@ public static class EditorUiCommandQueue
                 break;
             case EditorUiCommandKind.SetObjectPosition:
                 EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
+                break;
+            case EditorUiCommandKind.SetObjectProperty:
+                EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
+                break;
+            case EditorUiCommandKind.InvokeLegacyButton:
+                EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index), command.Text);
+                break;
+            case EditorUiCommandKind.SetLegacySlider:
+                EditorActions.SetLegacySlider(session, ResolveObject(session, command.Index), command.Text, command.X);
+                break;
+            case EditorUiCommandKind.ResetLegacySlider:
+                EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index), command.Text);
                 break;
         }
     }
