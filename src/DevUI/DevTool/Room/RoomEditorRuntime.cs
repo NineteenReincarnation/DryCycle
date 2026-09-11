@@ -24,6 +24,11 @@ public static class RoomEditorPresentationHub
 public enum RoomEditorCommandKind
 {
     SetSetting,
+    ResetSetting,
+    SetPaletteFade,
+    SetTerrainPaletteFade,
+    SetTemplate,
+    SaveAsTemplate,
     AddEffect,
     DeleteEffect,
     SetEffectAmount
@@ -69,6 +74,21 @@ public static class RoomEditorCommandQueue
                 {
                     case RoomEditorCommandKind.SetSetting:
                         RoomEditorActions.SetRoomSetting(session, command.Key, command.Value);
+                        break;
+                    case RoomEditorCommandKind.ResetSetting:
+                        RoomEditorActions.ResetRoomSetting(session, command.Key);
+                        break;
+                    case RoomEditorCommandKind.SetPaletteFade:
+                        RoomEditorActions.SetPaletteFade(session, command.Index, command.Value.X);
+                        break;
+                    case RoomEditorCommandKind.SetTerrainPaletteFade:
+                        RoomEditorActions.SetTerrainPaletteFade(session, command.Index, command.Value.X);
+                        break;
+                    case RoomEditorCommandKind.SetTemplate:
+                        RoomEditorActions.SetRoomTemplate(session, command.Key);
+                        break;
+                    case RoomEditorCommandKind.SaveAsTemplate:
+                        RoomEditorActions.SaveRoomAsTemplate(session, command.Key);
                         break;
                     case RoomEditorCommandKind.AddEffect:
                         RoomEditorActions.AddRoomEffect(session, command.Key);
