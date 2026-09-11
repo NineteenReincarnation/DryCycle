@@ -129,15 +129,38 @@ internal static class LegacyUiPresentationController
             DevUINode child = panel.subNodes[i];
             if (child == null) continue;
 
-            if (child is Handle)
+            if (child is Handle handle)
             {
                 // Spot/Directional sound handles, Spot trigger handles and nested radius
-                // handles remain scene gizmos.
+                // handles remain scene gizmos. Their original visual line back to the legacy
+                // panel must be hidden, otherwise moving the panel off-screen creates a huge
+                // diagonal line across the room.
+                SuppressPanelConnector(handle);
                 continue;
             }
 
             SuppressSubtree(child);
         }
+    }
+
+    private static void SuppressPanelConnector(Handle handle)
+    {
+        if (handle == null) return;
+
+        int connectorIndex = handle switch
+        {
+            SpotSoundHandle => 4,
+            DirectionalSoundHandle => 2,
+            SpotTriggerHandle => 3,
+            _ => -1
+        };
+
+        if (connectorIndex < 0 || handle.fSprites == null || connectorIndex >= handle.fSprites.Count)
+            return;
+
+        Remember(handle);
+        if (handle.fSprites[connectorIndex] != null)
+            handle.fSprites[connectorIndex].isVisible = false;
     }
 
     private static void SuppressSubtree(DevUINode node)
