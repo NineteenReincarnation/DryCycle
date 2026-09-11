@@ -8,7 +8,7 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.History;
 
 /// <summary>
-/// Identity-preserving snapshot migrated from the existing DevUI Ctrl+Z runtime. The same
+/// Identity-preserving snapshot migrated from the former DevUI shortcut runtime. The same
 /// PlacedObject and Data instances are restored so POM/RegionKit objects that retain object
 /// references do not break across Undo/Redo.
 /// </summary>
@@ -45,6 +45,7 @@ public sealed class PlacedObjectState
 
     public PlacedObject Target => target;
     public int Index => index;
+    internal string Fingerprint => fingerprint;
 
     public static PlacedObjectState Capture(RoomSettings settings, PlacedObject target)
     {
@@ -72,25 +73,7 @@ public sealed class PlacedObjectState
 
             if (index >= 0)
             {
-                target.type = type;
-                target.pos = pos;
-                target.active = active;
-                target.deactivatedByWarpFilter = deactivatedByWarpFilter;
-                target.save = save;
-                target.unrecognizedAttributes = Clone(unrecognizedAttributes);
-                target.data = dataReference;
-
-                if (dataReference != null)
-                {
-                    dataReference.owner = target;
-                    dataReference.FromString(dataSerialized);
-                    try { dataReference.RefreshLiveVisuals(); }
-                    catch (Exception error)
-                    {
-                        Plugin.Logger?.LogWarning("DevTool placed-object live refresh failed: " + error.Message);
-                    }
-                }
-
+                if (!RestoreDetachedFields(current)) return false;
                 current.placedObjects.Insert(Mathf.Clamp(index, 0, current.placedObjects.Count), target);
             }
 
@@ -102,6 +85,31 @@ public sealed class PlacedObjectState
             Plugin.Logger?.LogWarning("DevTool placed-object restore failed: " + error.Message);
             return false;
         }
+    }
+
+    internal bool RestoreDetachedFields(RoomSettings current)
+    {
+        if (!ReferenceEquals(settings, current) || target == null) return false;
+
+        target.type = type;
+        target.pos = pos;
+        target.active = active;
+        target.deactivatedByWarpFilter = deactivatedByWarpFilter;
+        target.save = save;
+        target.unrecognizedAttributes = Clone(unrecognizedAttributes);
+        target.data = dataReference;
+
+        if (dataReference != null)
+        {
+            dataReference.owner = target;
+            dataReference.FromString(dataSerialized);
+            try { dataReference.RefreshLiveVisuals(); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool placed-object live refresh failed: " + error.Message);
+            }
+        }
+        return true;
     }
 
     private string BuildFingerprint()
