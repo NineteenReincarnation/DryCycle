@@ -26,7 +26,10 @@ internal static class DevToolUiSettings
     internal const float WindowOutlineWidth = 2f;
 
     private static readonly Num.Vector4 DefaultTextColor = new(0.94f, 0.94f, 0.94f, 1f);
-    private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.62f, 0.64f, 0.68f, 1f);
+    // Secondary labels are deliberately brighter than stock ImGui disabled text. In the DevTool
+    // these labels are structural headings, not disabled controls, and must remain readable over
+    // the semi-transparent room view.
+    private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.76f, 0.80f, 0.86f, 1f);
 
     // Chinese is intentionally the default for DryCycle's development workflow.
     internal static DevToolUiLanguage Language { get; private set; } = DevToolUiLanguage.Chinese;
