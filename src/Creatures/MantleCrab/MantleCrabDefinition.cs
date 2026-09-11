@@ -7,10 +7,10 @@ namespace DryCycle.Creatures.MantleCrab;
 internal static class MantleCrabDefinition
 {
     /// <summary>
-    /// 把 MantleCrab 的模板、状态和实际生物创建方式登记到新的 CreatureRegistry。
+    /// 把 MantleCrab 的模板、状态、实体和临时移动测试 AI 登记到 CreatureRegistry。
     /// 资源加载仍然留在 MantleCrab 自己的代码里，不塞进 Core Registry。
     ///
-    /// Registers MantleCrab's template, state, and realized-creature factories through the new CreatureRegistry.
+    /// Registers MantleCrab's template, state, realized creature, and temporary movement-test AI through CreatureRegistry.
     /// Resource loading stays owned by MantleCrab instead of the core registry.
     /// </summary>
     internal static CreatureDescriptor Register()
@@ -21,7 +21,8 @@ internal static class MantleCrabDefinition
             .Name("Mantle Crab")
             .Template(CreateTemplate)
             .State(CreateState)
-            .Realized(CreateRealizedCreature);
+            .Realized(CreateRealizedCreature)
+            .AI(CreateRealizedAI);
 
         return CreatureRegistry.Register(descriptor);
     }
@@ -30,7 +31,9 @@ internal static class MantleCrabDefinition
     {
         CreatureTemplate template = new CreatureTemplateBuilder(MantleCrabEnums.Type, "Mantle Crab")
         {
-            HasAI = false,
+            // 这里只开启 AI 生命周期，让临时测试脑能够驱动现有 Locomotion；不启用 AIMap 或正式寻路。
+            // Only enable the AI lifecycle so the temporary test brain can drive Locomotion; no AIMap or production pathing is enabled.
+            HasAI = true,
             RequireAIMap = false,
             DoPreBakedPathing = false
         }.Build();
@@ -43,8 +46,8 @@ internal static class MantleCrabDefinition
         template.forbidStandardShortcutEntry = true;
         template.doesNotUseDens = true;
 
-        // 当前 MantleCrab 仍然只是外观与物理原型，不在这里加入生态、Sandbox、AI 或战斗策略。
-        // MantleCrab is still an appearance/physics prototype; ecology, sandbox, AI, and combat policy stay out of this definition.
+        // 当前仍然不是正式 AI：这里只有用于验证步态和复杂地形通过的自动巡逻。
+        // This is still not production AI; the only automated behavior is a patrol used to validate gait and terrain traversal.
         return template;
     }
 
@@ -63,6 +66,11 @@ internal static class MantleCrabDefinition
         // finalizer so the generic platform runtime can restore the rigid shell before reconciling riders.
         WalkableDynamicSurfaceRuntime.RegisterPostPhysicsFinalizer(crab, crab.MaintainRigidShell);
         return crab;
+    }
+
+    private static ArtificialIntelligence CreateRealizedAI(AbstractCreature creature)
+    {
+        return new MantleCrabTestMovementAI(creature, creature.world);
     }
 
     internal static void LoadResources(RainWorld rainWorld)
