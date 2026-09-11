@@ -139,11 +139,11 @@ internal static class MapEditorView
     {
         if (!snapshot.Available || size.X < 120f || size.Y < 120f) return;
 
-        ImGui.SetNextWindowPos(position, ImGuiCond.Always);
-        ImGui.SetNextWindowSize(size, ImGuiCond.Always);
+        ImGui.SetNextWindowPos(position, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(size, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(420f, 300f), new Num.Vector2(4000f, 4000f));
         ImGui.SetNextWindowBgAlpha(0.98f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar |
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
                                  ImGuiWindowFlags.NoScrollWithMouse;
         if (!ImGui.Begin("Region Map###DevToolMapCanvas", flags))
         {
