@@ -231,7 +231,13 @@ internal static class DevToolFrontend
                 if (pushedChineseFont) ImGui.PopFont();
             }
 
-            EditorInputRouter.SetFrontendCapture(io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput);
+            // A marquee can begin over empty room pixels, where ImGui itself would normally report
+            // WantCaptureMouse=false. Reserve the mouse explicitly so selection never clicks or
+            // drags a vanilla world-space DevInterface handle underneath the layout gesture.
+            EditorInputRouter.SetFrontendCapture(
+                io.WantCaptureMouse || FloatingWindowSnap.OwnsMouse,
+                io.WantCaptureKeyboard,
+                io.WantTextInput);
         }
         catch (Exception error)
         {
