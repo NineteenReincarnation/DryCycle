@@ -23,10 +23,15 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
+    private bool sessionWasVisible;
+    private bool sessionWasPaused;
 
     private void OnEnable()
     {
         log = Logger;
+        sessionWasVisible = false;
+        sessionWasPaused = false;
+        EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
@@ -36,7 +41,27 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
+        EditorSession session = DevToolSessionHub.Current;
+        RainWorldGame game = session?.Owner?.game;
         bool sessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+        bool sessionPaused = sessionVisible && game?.GamePaused == true;
+
+        // Escape only hides the rebuilt UI long enough to hand ownership to Warp Menu or another
+        // RWImGui consumer. It must never become a persistent global state. Recover when DevTools
+        // comes back through H/O, when a pause/menu closes, or when an external RWImGui context has
+        // finished and released ownership after Escape.
+        if (EditorUiModeState.OverlayHidden && sessionVisible)
+        {
+            bool sessionReturned = !sessionWasVisible;
+            bool resumedFromPause = sessionWasPaused && !sessionPaused;
+            bool escapeReleased = !global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.Escape);
+            bool externalContextReleased = escapeReleased && !ImGUIAPI.HasContext;
+            if (sessionReturned || resumedFromPause || externalContextReleased)
+                EditorUiModeState.SetOverlayHidden(false);
+        }
+
+        sessionWasVisible = sessionVisible;
+        sessionWasPaused = sessionPaused;
 
         // Keep the RWImGui frontend alive in Vanilla presentation mode so the tiny New UI /
         // Vanilla switch remains reachable. Escape-hidden mode still releases the context so
@@ -49,6 +74,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DevToolFrontend.SetVisibleFromMainThread(false);
+        EditorUiModeState.SetOverlayHidden(false);
+        sessionWasVisible = false;
+        sessionWasPaused = false;
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
     }
