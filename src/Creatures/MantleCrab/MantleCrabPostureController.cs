@@ -127,7 +127,9 @@ internal sealed class MantleCrabPostureController
             if (!leg.Planted || leg.GroundNormal.y <= .15f)
                 continue;
 
-            float quality = leg.SupportQuality(crab);
+            // 地面参考系也只应该相信真正正在承重的脚。正在卸载的腿不应继续拉动平均地面法线。
+            // The terrain frame trusts actual load-bearing feet, not a planted limb that is already unloading.
+            float quality = crab.Locomotion.EffectiveSupportQuality(leg);
             if (quality <= .001f)
                 continue;
 
@@ -269,7 +271,10 @@ internal sealed class MantleCrabPostureController
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            float quality = leg.Planted ? leg.SupportQuality(crab) : 0f;
+
+            // 这里使用“接触质量 × 承重权重”，让卸载和重新吃重真正改变甲壳受力。
+            // Use contact quality times load authority so unloading/reloading is physical rather than cosmetic.
+            float quality = crab.Locomotion.EffectiveSupportQuality(leg);
             supportQuality[i] = quality;
             if (quality <= .001f)
                 continue;
