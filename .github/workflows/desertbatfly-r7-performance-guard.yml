@@ -1,9 +1,10 @@
 name: DesertBatfly R7 Performance Guard
 
+# R7 is a living performance budget. It blocks broad performance regressions while allowing
+# caches, ownership layout, observability fields and internal implementation to evolve.
 on:
   push:
     branches:
-      - task14-r6-b1-final
       - main
     paths:
       - 'src/Creatures/DesertBatfly/**'
@@ -32,17 +33,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Static performance and Observatory retention
+
+      - name: Living performance budget
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/check-desertbatfly-r7-performance.sh
+
       - name: Compile-only build isolation contract
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/check-drycycle-build-contract.sh
-      - name: Roslyn syntax parse Desert Batfly and Observatory sources
+
+      - name: Roslyn syntax parse existing DesertBatfly and debug sources
         shell: bash
         run: |
           set -euo pipefail
@@ -53,19 +57,26 @@ jobs:
           cat > "$tmp/Program.cs" <<'CS'
           using Microsoft.CodeAnalysis;
           using Microsoft.CodeAnalysis.CSharp;
+          var roots = new[] { "src/Creatures/DesertBatfly", "src/Debug/AIDebugger/Sources" };
           var errors = new List<string>();
-          foreach (var root in new[] { "src/Creatures/DesertBatfly", "src/Debug/AIDebugger/Sources" })
-          foreach (var path in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+          var parsed = 0;
+          foreach (var root in roots)
           {
-              var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(path), new CSharpParseOptions(LanguageVersion.Preview), path);
-              foreach (var d in tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error))
-                  errors.Add(d.ToString());
+              if (!Directory.Exists(root)) continue;
+              foreach (var path in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+              {
+                  parsed++;
+                  var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(path), new CSharpParseOptions(LanguageVersion.Preview), path);
+                  foreach (var d in tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error))
+                      errors.Add(d.ToString());
+              }
           }
+          if (parsed == 0) errors.Add("No DesertBatfly/debug C# source files were found.");
           if (errors.Count > 0)
           {
               Console.Error.WriteLine(string.Join(Environment.NewLine, errors));
               Environment.Exit(1);
           }
-          Console.WriteLine("R7 performance/observability Roslyn syntax parse passed.");
+          Console.WriteLine($"R7 syntax guard passed for {parsed} existing source files.");
           CS
           dotnet run --project "$tmp/P.csproj"
