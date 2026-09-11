@@ -67,13 +67,40 @@ public static class EditorInputRouter
 
     internal static void UpdateShortcuts(EditorSession session)
     {
-        if (session == null || HasLocalTextFocus(session.Owner?.game) || wantsTextInput ||
-            session.LegacyTransactions.HasPendingTransaction)
-            return;
+        if (session == null) return;
 
         bool ctrl = global::UnityEngine.Input.GetKey(KeyCode.LeftControl) || global::UnityEngine.Input.GetKey(KeyCode.RightControl) ||
                     global::UnityEngine.Input.GetKey(KeyCode.LeftCommand) || global::UnityEngine.Input.GetKey(KeyCode.RightCommand);
         bool shift = global::UnityEngine.Input.GetKey(KeyCode.LeftShift) || global::UnityEngine.Input.GetKey(KeyCode.RightShift);
+
+        // Vanilla presentation hides every rebuilt window, so a keyboard path is required to
+        // return without leaving DevTools. This shortcut deliberately works in either mode.
+        if (ctrl && shift && global::UnityEngine.Input.GetKeyDown(KeyCode.U))
+        {
+            EditorUiModeState.SetVanilla(!EditorUiModeState.UseVanilla);
+            EditorUiModeState.SetOverlayHidden(false);
+            SetFrontendCapture(false, false, false);
+            return;
+        }
+
+        // Escape belongs to the game/Warp Menu. The editor only changes its own visibility and
+        // immediately drops capture; it never consumes or synthesizes the Escape key itself.
+        if (!EditorUiModeState.UseVanilla && global::UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (session.PlacementActive)
+                session.CancelPlacement();
+            else
+                EditorUiModeState.ToggleOverlayHidden();
+
+            SetFrontendCapture(false, false, false);
+            capturedGame = null;
+            capturedUnityFrame = -1;
+            return;
+        }
+
+        if (HasLocalTextFocus(session.Owner?.game) || wantsTextInput ||
+            session.LegacyTransactions.HasPendingTransaction)
+            return;
 
         // Save/Undo/Redo belong to the rebuilt core, not to one visual frontend. They remain
         // available in Vanilla presentation mode because the old shortcut runtime was removed.
@@ -96,14 +123,8 @@ public static class EditorInputRouter
 
         // Vanilla mode restores the original editor interaction model. Do not let hidden
         // New-UI commands such as duplicate/delete/focus/browser shortcuts fire behind it.
-        if (EditorUiModeState.UseVanilla)
+        if (EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
             return;
-
-        if (session.PlacementActive && global::UnityEngine.Input.GetKeyDown(KeyCode.Escape))
-        {
-            session.CancelPlacement();
-            return;
-        }
 
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
             EditorActions.DuplicateSelection(session);
@@ -194,8 +215,9 @@ public static class EditorInputRouter
 
         EditorSession session = DevToolSessionHub.Current;
         bool ownsThisUi = session != null && ReferenceEquals(session.Owner, self.owner);
-        bool newUiPlacementOwnsMouse = !EditorUiModeState.UseVanilla && session?.PlacementActive == true;
-        bool frontendOwnsMouse = frontendAttached && wantsMouse;
+        bool newUiVisible = !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
+        bool newUiPlacementOwnsMouse = newUiVisible && session?.PlacementActive == true;
+        bool frontendOwnsMouse = newUiVisible && frontendAttached && wantsMouse;
         bool blockNewDrag = ownsThisUi && self.owner.game?.devToolsActive == true &&
                             (newUiPlacementOwnsMouse || frontendOwnsMouse);
         if (!blockNewDrag)
@@ -328,13 +350,15 @@ public static class EditorInputRouter
     private static bool HasTextKeyboardOwner(RainWorldGame game)
     {
         if (game == null || game.devUI == null || !game.devToolsActive) return false;
-        return HasLocalTextFocus(game) || (frontendAttached && wantsTextInput);
+        bool frontendVisible = frontendAttached && !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
+        return HasLocalTextFocus(game) || (frontendVisible && wantsTextInput);
     }
 
     private static bool HasKeyboardOwner(RainWorldGame game)
     {
         if (game == null || game.devUI == null || !game.devToolsActive) return false;
-        return HasLocalTextFocus(game) || (frontendAttached && (wantsKeyboard || wantsTextInput));
+        bool frontendVisible = frontendAttached && !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
+        return HasLocalTextFocus(game) || (frontendVisible && (wantsKeyboard || wantsTextInput));
     }
 
     private static bool HasLocalTextFocus(RainWorldGame game)
