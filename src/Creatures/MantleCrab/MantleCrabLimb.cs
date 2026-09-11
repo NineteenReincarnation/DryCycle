@@ -2,6 +2,15 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.MantleCrab;
 
+internal enum MantleCrabSwingPhase
+{
+    None,
+    Lift,
+    Transfer,
+    Lower,
+    Settle
+}
+
 internal sealed class MantleCrabLimb
 {
     private const float PassiveAcquireReach = .90f;
@@ -28,6 +37,8 @@ internal sealed class MantleCrabLimb
     internal bool Planted { get; private set; }
     internal bool Swinging { get; private set; }
     internal float SwingProgress { get; private set; }
+    internal MantleCrabSwingPhase SwingPhase { get; private set; }
+    internal float SwingPhaseProgress { get; private set; }
     internal bool RecoveryBraced { get; private set; }
     internal Vector2 Contact => contact;
     internal MantleCrabPincerRig PincerRig => pincerRig;
@@ -38,9 +49,12 @@ internal sealed class MantleCrabLimb
     private readonly float nominalStandHeight;
     private Vector2 contact;
     private Vector2 swingStart;
+    private Vector2 swingLiftNormal = Vector2.up;
     private bool hasTarget;
     private int searchTick;
-    private float swingDuration;
+    private float swingDistance01;
+    private float swingLiftHeight;
+    private float swingPhaseDuration;
     private float stanceHeightScale = 1f;
 
     internal MantleCrabLimb(int index, bool pincer)
@@ -84,6 +98,8 @@ internal sealed class MantleCrabLimb
     {
         stanceHeightScale = 1f;
         RecoveryBraced = false;
+        SwingPhase = MantleCrabSwingPhase.None;
+        SwingPhaseProgress = 0f;
         if (IsPincer)
         {
             pincerRig.Reset(null, anchor);
@@ -140,6 +156,8 @@ internal sealed class MantleCrabLimb
             hasTarget = false;
         Swinging = false;
         SwingProgress = 0f;
+        SwingPhase = MantleCrabSwingPhase.None;
+        SwingPhaseProgress = 0f;
         searchTick = 8 + Index;
         return Planted;
     }
@@ -168,10 +186,22 @@ internal sealed class MantleCrabLimb
         Planted = false;
         Swinging = true;
         SwingProgress = 0f;
-        swingDuration = Mathf.Lerp(
-            12f,
-            20f,
-            Mathf.InverseLerp(18f, 100f, Vector2.Distance(swingStart, contact)));
+
+        float distance = Vector2.Distance(swingStart, contact);
+        swingDistance01 = Mathf.InverseLerp(18f, 100f, distance);
+        swingLiftHeight = Mathf.Lerp(18f, 34f, swingDistance01);
+
+        Vector2 bodyUp = crab.Locomotion.SupportNormal;
+        if (bodyUp.sqrMagnitude <= .0001f)
+            bodyUp = Vector2.up;
+        else
+            bodyUp.Normalize();
+        Vector2 landingUp = landingNormal.sqrMagnitude > .0001f ? landingNormal.normalized : Vector2.up;
+        if (landingUp.y < 0f)
+            landingUp = -landingUp;
+        swingLiftNormal = Vector2.Lerp(bodyUp, landingUp, .24f).normalized;
+
+        EnterSwingPhase(MantleCrabSwingPhase.Lift);
         return true;
     }
 
@@ -184,6 +214,8 @@ internal sealed class MantleCrabLimb
             Anchor = pincerRig.Anchor;
             Planted = Swinging = false;
             SwingProgress = 0f;
+            SwingPhase = MantleCrabSwingPhase.None;
+            SwingPhaseProgress = 0f;
             return;
         }
 
@@ -299,6 +331,8 @@ internal sealed class MantleCrabLimb
         Planted = false;
         Swinging = false;
         SwingProgress = 0f;
+        SwingPhase = MantleCrabSwingPhase.None;
+        SwingPhaseProgress = 0f;
         RecoveryBraced = false;
 
         if (phase == MantleCrabRecoveryPhase.Retract)
@@ -510,22 +544,128 @@ internal sealed class MantleCrabLimb
         return value * value * (3f - 2f * value);
     }
 
+    private void EnterSwingPhase(MantleCrabSwingPhase phase)
+    {
+        SwingPhase = phase;
+        SwingPhaseProgress = 0f;
+        swingPhaseDuration = phase switch
+        {
+            MantleCrabSwingPhase.Lift => Mathf.Lerp(9f, 13f, swingDistance01),
+            MantleCrabSwingPhase.Transfer => Mathf.Lerp(13f, 20f, swingDistance01),
+            MantleCrabSwingPhase.Lower => Mathf.Lerp(9f, 14f, swingDistance01),
+            MantleCrabSwingPhase.Settle => Mathf.Lerp(8f, 12f, swingDistance01),
+            _ => 1f
+        };
+    }
+
     private void UpdateSwing(MantleCrab crab, Vector2 anchor)
     {
-        SwingProgress = Mathf.Clamp01(SwingProgress + 1f / Mathf.Max(1f, swingDuration));
-        float t = SwingProgress * SwingProgress * (3f - 2f * SwingProgress);
-        Vector2 liftNormal = Vector2.Lerp(Vector2.up, GroundNormal, .30f).normalized;
-        float lift = Mathf.Sin(Mathf.PI * t) *
-            Mathf.Lerp(16f, 30f, Mathf.InverseLerp(20f, 100f, Vector2.Distance(swingStart, contact)));
-        Vector2 target = Vector2.Lerp(swingStart, contact, t) + liftNormal * lift;
+        if (SwingPhase == MantleCrabSwingPhase.None)
+            EnterSwingPhase(MantleCrabSwingPhase.Lift);
 
-        SolveWalkingPose(crab, anchor, target, false);
+        // 真正进入落脚阶段以后，目标地面必须仍然存在。前半程允许脚在空中完成抬起和转移，
+        // Lower / Settle 则要求落点仍是有效支撑面，否则这一步直接失败并重新找地。
+        // Once lowering begins the landing terrain must still exist. Earlier phases may complete in the air,
+        // while Lower / Settle abort if the planned support disappeared.
+        if ((SwingPhase == MantleCrabSwingPhase.Lower || SwingPhase == MantleCrabSwingPhase.Settle) &&
+            !MantleCrabTerrainProbe.StillSupported(crab.room, contact))
+        {
+            AbortSwing();
+            searchTick = 0;
+            return;
+        }
 
-        if (SwingProgress < 1f)
+        SwingPhaseProgress = Mathf.Clamp01(
+            SwingPhaseProgress + 1f / Mathf.Max(1f, swingPhaseDuration));
+        float t = Smooth01(SwingPhaseProgress);
+        SwingProgress = GlobalSwingProgress(SwingPhase, t);
+
+        Vector2 displacement = contact - swingStart;
+        Vector2 liftPoint = swingStart + displacement * .12f + swingLiftNormal * swingLiftHeight;
+        Vector2 transferPoint = contact + swingLiftNormal * Mathf.Max(8f, swingLiftHeight * .48f);
+        Vector2 target;
+        bool groundedPose = false;
+
+        switch (SwingPhase)
+        {
+            case MantleCrabSwingPhase.Lift:
+                // 先离地再向前：脚尖的大部分运动都沿支撑法线抬起，只带少量前移，
+                // 防止大型步足刚解除承重就贴着地面横扫。
+                // Clear the terrain before travelling forward; only a small horizontal component is allowed here.
+                target = Vector2.Lerp(swingStart, liftPoint, t);
+                break;
+
+            case MantleCrabSwingPhase.Transfer:
+                // 中段保持明显离地高度完成主要前移。额外的小弧顶避免两段插值看起来像折线。
+                // Carry most of the forward travel while elevated, with a shallow arc to avoid a piecewise-linear look.
+                target = Vector2.Lerp(liftPoint, transferPoint, t) +
+                         swingLiftNormal * (Mathf.Sin(t * Mathf.PI) * swingLiftHeight * .10f);
+                break;
+
+            case MantleCrabSwingPhase.Lower:
+                // 到达落点上方以后再主动下探，并在这一段开始把末端足朝地面法线对齐。
+                // Descend only after reaching the landing neighbourhood, and begin aligning the distal foot to terrain.
+                target = Vector2.Lerp(
+                    transferPoint,
+                    contact + GroundNormal.normalized * 2.8f,
+                    t);
+                groundedPose = true;
+                break;
+
+            case MantleCrabSwingPhase.Settle:
+                // 脚已经视觉接地，但仍保持 Swinging=true，因此它暂时不参与承重或下一次换步。
+                // 最后几帧只完成约 2.8px 的压实，再把控制权交给承重恢复。
+                // The foot is visually touching down but remains a swing limb until this short compression finishes.
+                target = contact + GroundNormal.normalized * Mathf.Lerp(2.8f, 0f, t);
+                groundedPose = true;
+                break;
+
+            default:
+                target = contact;
+                break;
+        }
+
+        SolveWalkingPose(crab, anchor, target, groundedPose);
+
+        if (SwingPhaseProgress < 1f)
             return;
 
+        switch (SwingPhase)
+        {
+            case MantleCrabSwingPhase.Lift:
+                EnterSwingPhase(MantleCrabSwingPhase.Transfer);
+                return;
+            case MantleCrabSwingPhase.Transfer:
+                EnterSwingPhase(MantleCrabSwingPhase.Lower);
+                return;
+            case MantleCrabSwingPhase.Lower:
+                EnterSwingPhase(MantleCrabSwingPhase.Settle);
+                return;
+            case MantleCrabSwingPhase.Settle:
+                FinishSwing(crab, anchor);
+                return;
+        }
+    }
+
+    private float GlobalSwingProgress(MantleCrabSwingPhase phase, float phaseProgress)
+    {
+        phaseProgress = Mathf.Clamp01(phaseProgress);
+        return phase switch
+        {
+            MantleCrabSwingPhase.Lift => Mathf.Lerp(0f, .24f, phaseProgress),
+            MantleCrabSwingPhase.Transfer => Mathf.Lerp(.24f, .62f, phaseProgress),
+            MantleCrabSwingPhase.Lower => Mathf.Lerp(.62f, .86f, phaseProgress),
+            MantleCrabSwingPhase.Settle => Mathf.Lerp(.86f, 1f, phaseProgress),
+            _ => 0f
+        };
+    }
+
+    private void FinishSwing(MantleCrab crab, Vector2 anchor)
+    {
         Swinging = false;
         SwingProgress = 1f;
+        SwingPhase = MantleCrabSwingPhase.None;
+        SwingPhaseProgress = 0f;
 
         if (Vector2.Distance(anchor, contact) <= Reach * ReleaseReach &&
             MantleCrabTerrainProbe.StillSupported(crab.room, contact))
@@ -533,12 +673,24 @@ internal sealed class MantleCrabLimb
             SolveWalkingPose(crab, anchor, contact, true);
             Planted = Vector2.Distance(Tip, contact) < PlantTolerance;
             hasTarget = Planted;
+            if (Planted)
+            {
+                searchTick = 8 + Index;
+                return;
+            }
         }
-        else
-        {
-            ReleaseContact();
-            searchTick = 0;
-        }
+
+        ReleaseContact();
+        searchTick = 0;
+    }
+
+    private void AbortSwing()
+    {
+        Swinging = false;
+        SwingProgress = 0f;
+        SwingPhase = MantleCrabSwingPhase.None;
+        SwingPhaseProgress = 0f;
+        ReleaseContact();
     }
 
     private void ReleaseContact()
