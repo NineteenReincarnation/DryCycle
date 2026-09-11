@@ -48,13 +48,18 @@ internal static class SoundEditorView
         if (selected == null)
         {
             ImGui.Separator();
-            ImGui.TextDisabled("Select a sound from Scene to edit it.");
+            ImGui.TextDisabled("Select a sound from Scene or its world gizmo to edit it.");
             return;
         }
 
         ImGui.Separator();
         ImGui.Text(selected.Sample);
-        ImGui.TextDisabled(selected.Type + (selected.Inherited ? " · Inherited" : string.Empty));
+        string state = selected.Type;
+        if (selected.Inherited) state += " · Inherited";
+        else if (selected.OverWrite) state += " · Overrides template";
+        ImGui.TextDisabled(state);
+
+        if (selected.Inherited) ImGui.BeginDisabled();
 
         DrawSoundFloat(selected, SoundEditorKeys.Volume, "Volume", selected.Volume, 0f, 1f);
         DrawSoundFloat(selected, SoundEditorKeys.Pitch, "Pitch", selected.Pitch, 0.1f, 1.9f);
@@ -78,9 +83,11 @@ internal static class SoundEditorView
             DrawSoundVector(selected, SoundEditorKeys.Direction, "Direction", selected.DirectionX, selected.DirectionY);
         }
 
+        if (selected.Inherited) ImGui.EndDisabled();
+
         if (selected.Inherited)
         {
-            ImGui.TextDisabled("Inherited sound · edit the source template to change it.");
+            ImGui.TextDisabled("Inherited sound · edit its source template or add a local override.");
         }
         else
         {
@@ -141,6 +148,7 @@ internal static class SoundEditorView
             };
             string label = "[" + prefix + "] " + sound.Sample;
             if (sound.Inherited) label += "  [Inherited]";
+            else if (sound.OverWrite) label += "  [Override]";
             if (ImGui.Selectable(label + "##SoundScene" + sound.Index, sound.Selected))
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
         }
