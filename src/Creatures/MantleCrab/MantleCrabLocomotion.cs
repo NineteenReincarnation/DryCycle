@@ -32,6 +32,13 @@ internal sealed class MantleCrabLocomotion
     private const float TouchdownReloadFloor = .42f;
     private const float MaximumTouchdownVelocityRemoval = .18f;
 
+    // 大型甲壳不应该永远自己拖着腿前进。推进权限取决于移动方向前方是否已经建立真实支撑。
+    // Keep a low fallback so steps and terrain traversal cannot deadlock while a leading limb is still searching.
+    private const float ForwardSupportMinimumAuthority = .24f;
+    private const float ForwardSupportFullQuality = 1.35f;
+    private const float ForwardSupportNearDistance = 6f;
+    private const float ForwardSupportFullDistance = 46f;
+
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly float[] legLoad = new float[4];
@@ -324,14 +331,19 @@ internal sealed class MantleCrabLocomotion
         }
 
         float supportFactor = Mathf.Clamp01(qualitySum / 3.2f);
+        float forwardAuthority = ForwardSupportAuthority(effectiveMove, axis);
 
-        // 正在卸载/重新吃重时，可用推进能力也会自然降低。
-        // Propulsion authority falls naturally while supports are unloading or settling after touchdown.
-        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.38f, .90f, supportFactor);
+        // 总支撑决定“现在能不能推”，前方支撑决定“能把多大的甲壳真正跟过去”。
+        // If leading feet have not established a loaded foothold yet, the body may creep but not tow the legs at full speed.
+        float targetSpeed = effectiveMove *
+                            MaxGroundSpeed *
+                            Mathf.Lerp(.38f, .90f, supportFactor) *
+                            forwardAuthority;
+        float accelerationLimit = MaxGroundAcceleration * Mathf.Lerp(.55f, 1f, forwardAuthority);
         float requestedAcceleration = Mathf.Clamp(
             (targetSpeed - speed) * .060f,
-            -MaxGroundAcceleration,
-            MaxGroundAcceleration);
+            -accelerationLimit,
+            accelerationLimit);
 
         driveAcceleration = Mathf.MoveTowards(driveAcceleration, requestedAcceleration, DriveJerk);
 
@@ -347,6 +359,67 @@ internal sealed class MantleCrabLocomotion
             float share = quality / qualitySum;
             anchor.vel += axis * (driveAcceleration * totalMass * share / Mathf.Max(.01f, anchor.mass));
         }
+    }
+
+    /// <summary>
+    /// 根据移动方向前方真实承重脚计算身体推进权限。
+    /// 前导脚越靠前、接触越可靠、吃重越完整，权限越高；没有前导支撑时仍保留少量爬行能力，避免地形死锁。
+    ///
+    /// Computes body-drive authority from real loaded footholds ahead of the COM in the requested travel direction.
+    /// </summary>
+    private float ForwardSupportAuthority(float effectiveMove, Vector2 axis)
+    {
+        if (Mathf.Abs(effectiveMove) < .05f || crab.bodyChunks == null || crab.bodyChunks.Length == 0)
+            return 1f;
+
+        if (axis.sqrMagnitude <= .0001f)
+            axis = Vector2.right;
+        else
+            axis.Normalize();
+
+        float direction = Mathf.Sign(effectiveMove);
+        Vector2 center = BodyCenter(out _);
+        float scale = Mathf.Max(.65f, crab.ShellScale);
+        float nearDistance = ForwardSupportNearDistance * scale;
+        float fullDistance = ForwardSupportFullDistance * scale;
+        float forwardQuality = 0f;
+        int reliableForwardSupports = 0;
+
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Planted || leg.Swinging)
+                continue;
+
+            float quality = EffectiveSupportQuality(leg);
+            if (quality <= .02f)
+                continue;
+
+            float ahead = Vector2.Dot(leg.Contact - center, axis) * direction;
+            float position = Mathf.InverseLerp(-nearDistance, fullDistance, ahead);
+            position = position * position * (3f - 2f * position);
+            forwardQuality += quality * position;
+
+            if (ahead > nearDistance * .65f && quality >= .34f)
+                reliableForwardSupports++;
+        }
+
+        float qualityAuthority = Mathf.Clamp01(forwardQuality / ForwardSupportFullQuality);
+        float countAuthority = reliableForwardSupports switch
+        {
+            >= 2 => 1f,
+            1 => .72f,
+            _ => .28f
+        };
+        float established = Mathf.Clamp01(qualityAuthority * .74f + countAuthority * .26f);
+        established = established * established * (3f - 2f * established);
+
+        // 上台阶时需要保留稍高的最低权限，才能把重心缓慢送向已经找到的高处支点。
+        // Step-up traversal keeps a slightly higher floor so support gating cannot prevent the actual climb.
+        float minimumAuthority = traversal.Mode == MantleCrabTraversalMode.StepUp
+            ? Mathf.Max(ForwardSupportMinimumAuthority, .34f)
+            : ForwardSupportMinimumAuthority;
+        return Mathf.Lerp(minimumAuthority, 1f, established);
     }
 
     /// <summary>
