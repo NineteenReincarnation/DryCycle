@@ -211,13 +211,13 @@ public sealed class CreatureDescriptor
     }
 
     /// <summary>
-    /// 批量添加别名的简写语法糖，可直接写 <c>.Aliases("name1", "name2")</c>。
+    /// 批量添加别名的简写语法糖，可直接写 <c>.WithAliases("name1", "name2")</c>。
     /// 保持与 <see cref="AddAliases"/> 相同的去重、顺序与冻结规则。
     ///
-    /// Fluent shorthand for adding multiple aliases, allowing calls such as <c>.Aliases("name1", "name2")</c>.
+    /// Fluent shorthand for adding multiple aliases, allowing calls such as <c>.WithAliases("name1", "name2")</c>.
     /// It preserves the same deduplication, ordering, and freeze rules as <see cref="AddAliases"/>.
     /// </summary>
-    public CreatureDescriptor Aliases(params string[] aliases) => AddAliases(aliases);
+    public CreatureDescriptor WithAliases(params string[] aliases) => AddAliases(aliases);
 
     /// <summary>
     /// 删除一个已声明的生物别名；比较时忽略大小写。

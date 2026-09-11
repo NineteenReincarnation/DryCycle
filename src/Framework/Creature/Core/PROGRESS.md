@@ -10,7 +10,7 @@
 - 完成了所属 Mod 登记。Descriptor 保存 `OwnerId`，注册冲突和工厂报错时可以明确指出是哪一个 Mod 提交的生物。
 - 完成了显示名称登记。默认显示名称使用 `CreatureTemplate.Type.value`，开发者可以通过 `SetDisplayName` 或短写法 `Name` 主动修改。
 - 完成了单个别名登记。开发者可以通过 `AddAlias` 或短写法 `Alias` 添加一个别名。
-- 完成了批量别名登记。开发者可以通过 `AddAliases(IEnumerable<string>)` 或短写法 `Aliases(params string[])` 一次添加多个别名。
+- 完成了批量别名登记。开发者可以通过 `AddAliases(IEnumerable<string>)` 或短写法 `WithAliases(params string[])` 一次添加多个别名，避免与只读属性 `Aliases` 重名。
 - 完成了别名清理。开发者可以在注册前删除一个别名，也可以清空全部别名。
 - 完成了别名规范化。别名会去掉首尾空白；空字符串和纯空白字符串会被拒绝。
 - 完成了别名忽略大小写去重。`MossySpider`、`mossyspider` 如果作为别名重复加入，只保留第一次成功加入的文本。
