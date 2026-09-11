@@ -212,7 +212,7 @@ internal static class DevToolFrontend
         }
     }
 
-    private static float ResolveUiFontScale(bool chineseFontActive)
+    private static unsafe float ResolveUiFontScale(bool chineseFontActive)
     {
         if (!DevToolUiSettings.IsChinese || !chineseFontActive || cjkFont.NativePtr == null || cjkFont.FontSize <= 0.01f)
             return 1f;
