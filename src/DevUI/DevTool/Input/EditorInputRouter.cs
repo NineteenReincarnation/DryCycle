@@ -1,5 +1,7 @@
+using DryCycle.DevUI.Controls;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.Misc;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Input;
@@ -44,7 +46,9 @@ public static class EditorInputRouter
 
     internal static void UpdateShortcuts(EditorSession session)
     {
-        if (session == null || wantsTextInput) return;
+        if (session == null || wantsTextInput || DryCycleInputFocus.Focused != null ||
+            PaletteDirectInputRuntime.HasActiveInput || session.LegacyTransactions.HasPendingTransaction)
+            return;
 
         bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
                     Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
