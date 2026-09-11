@@ -44,6 +44,8 @@ internal static class FloatingWindowSnap
     private static Num.Vector2 groupDragStartMouse;
     private static Num.Vector2 groupDragDelta;
 
+    internal static bool OwnsMouse => marqueeActive || marqueeReleasePending || groupDragging;
+
     internal static void BeginFrame(Num.Vector2 currentDisplaySize)
     {
         frame++;
