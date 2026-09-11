@@ -125,7 +125,7 @@ internal static class SoundEditorView
                     secondaryIndex: createType));
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(DevToolUiSettings.T("添加为 ", "Add as ") + TypeName(createType));
+                DevToolTooltip.Show(DevToolUiSettings.T("添加为 ", "Add as ") + TypeName(createType));
         }
         if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的环境音频。", "No matching ambient samples."));
     }
