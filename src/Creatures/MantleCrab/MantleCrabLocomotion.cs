@@ -3,32 +3,38 @@ using UnityEngine;
 namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>
-/// Low-level MantleCrab walking motor. AI and player-control layers only provide move/turn intent;
-/// this class owns footstep selection, landing prediction and grounded shell propulsion.
+/// MantleCrab 的低层步行驱动。高层只提供 move/turn 意图；这里负责换步、落脚预测和地面推进。
+/// 行走框架由 PostureController 根据世界重力和地面支撑建立，绝不再使用甲壳当前旋转角当作移动方向。
+///
+/// Low-level walking motor. Higher layers only provide move/turn intent. The grounded frame is owned
+/// by PostureController and is never derived from the shell's current physical rotation.
 /// </summary>
 internal sealed class MantleCrabLocomotion
 {
-    private const float StepUrgencyThreshold = 1f;
+    private const float StepUrgencyThreshold = .92f;
     private const float MinimumSupportMargin = 12f;
-    private const float SecondStepProgress = .72f;
-    private const float MaxGroundSpeed = 2.8f;
-    private const float MaxGroundAcceleration = .18f;
-    private const float MaxTurnSpeed = .006f;
-    private const float MaxTurnAcceleration = .00045f;
+    private const float SecondStepProgress = .78f;
+    private const float MaxGroundSpeed = 2.2f;
+    private const float MaxGroundAcceleration = .10f;
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly MantleCrabTraversalPlanner traversal;
+    private readonly MantleCrabPostureController posture;
     private int lastStepIndex = -1;
     private int startCooldown;
 
     internal float MoveIntent { get; private set; }
     internal float TurnIntent { get; private set; }
     internal MantleCrabTraversalPlanner Traversal => traversal;
+    internal MantleCrabPostureController Posture => posture;
+    internal Vector2 WalkAxis => posture.WalkAxis;
+    internal Vector2 SupportNormal => posture.SupportNormal;
 
     internal MantleCrabLocomotion(MantleCrab crab)
     {
         this.crab = crab;
+        posture = new MantleCrabPostureController(crab);
         traversal = new MantleCrabTraversalPlanner(crab);
     }
 
@@ -38,6 +44,7 @@ internal sealed class MantleCrabLocomotion
         TurnIntent = 0f;
         lastStepIndex = -1;
         startCooldown = 0;
+        posture.Reset();
         traversal.Reset();
         for (int i = 0; i < stepCooldown.Length; i++)
             stepCooldown[i] = 0;
@@ -53,15 +60,17 @@ internal sealed class MantleCrabLocomotion
 
     internal void UpdateStepPlanning()
     {
+        // 先建立独立于甲壳旋转的地面坐标系，再让 Traversal 和步态使用同一套方向。
+        // Build the gravity/terrain frame first so traversal and gait consume one stable direction basis.
+        posture.UpdateFrame();
         traversal.Update(MoveIntent);
 
         for (int i = 0; i < stepCooldown.Length; i++)
             if (stepCooldown[i] > 0) stepCooldown[i]--;
-
         if (startCooldown > 0)
             startCooldown--;
 
-        if (!crab.Consious || crab.room == null)
+        if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
             return;
 
         int swinging = 0;
@@ -76,12 +85,10 @@ internal sealed class MantleCrabLocomotion
         if (swinging >= 2 || startCooldown > 0)
             return;
 
-        // 第一只脚已经接近落地时才允许第二只脚开始摆动。
-        // A second leg may only leave the ground while the first is already settling.
         if (swinging == 1 && furthestSwingProgress < SecondStepProgress)
             return;
 
-        Vector2 axis = NormalizedAxis();
+        Vector2 axis = WalkAxis;
         Vector2 bodyVelocity = BodyVelocity();
         int candidate = -1;
         float bestUrgency = StepUrgencyThreshold;
@@ -91,13 +98,12 @@ internal sealed class MantleCrabLocomotion
             MantleCrabLimb leg = crab.Legs[i];
             if (!leg.Planted || leg.Swinging)
                 continue;
-
             if (!traversal.AllowLift(leg))
                 continue;
 
             Vector2 anchor = crab.Anchor(leg);
             float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
-            bool emergency = stretch > .955f;
+            bool emergency = stretch > .89f;
             if (stepCooldown[i] > 0 && !emergency)
                 continue;
             if (!CanLift(i))
@@ -105,15 +111,16 @@ internal sealed class MantleCrabLocomotion
 
             Vector2 desired = DesiredLanding(leg, anchor, axis, bodyVelocity);
             float alongError = Mathf.Abs(Vector2.Dot(desired - leg.Contact, axis));
-            float urgency = alongError / Mathf.Max(18f, 30f * crab.ShellScale);
-            urgency += Mathf.InverseLerp(.78f, .96f, stretch) * 1.35f;
+            float urgency = alongError / Mathf.Max(18f, 28f * crab.ShellScale);
+            urgency += Mathf.InverseLerp(.78f, .90f, stretch) * 1.25f;
+            urgency += (1f - leg.SupportQuality(crab)) * .35f;
             urgency *= traversal.UrgencyMultiplier(leg);
 
             if (lastStepIndex >= 0)
             {
                 int diagonal = 3 - lastStepIndex;
                 if (i == diagonal)
-                    urgency += .14f;
+                    urgency += .12f;
                 else if (leg.Side == crab.Legs[lastStepIndex].Side)
                     urgency -= .08f;
             }
@@ -136,86 +143,66 @@ internal sealed class MantleCrabLocomotion
 
         lastStepIndex = candidate;
         stepCooldown[candidate] = traversal.StepCooldown(steppingLeg);
-        startCooldown = 3;
+        startCooldown = 4;
     }
 
-    internal void ApplyGroundForces()
+    internal void ApplyGroundForces(float effectiveGravity)
     {
+        // 姿态控制先负责“站稳”和“回正”，推进只负责沿地面切线产生速度。
+        // Posture owns standing and righting. Propulsion only owns velocity along the grounded tangent.
+        posture.ApplySupportAndPosture(effectiveGravity, TurnIntent);
+
         if (!crab.Consious || crab.room == null || crab.SupportingFeet < 2)
             return;
 
-        Vector2 axis = NormalizedAxis();
-        Vector2 center = BodyCenter(out float totalMass);
+        Vector2 axis = WalkAxis;
         Vector2 velocity = BodyVelocity();
         float speed = Vector2.Dot(velocity, axis);
-        float supportFactor = Mathf.InverseLerp(1f, 4f, crab.SupportingFeet);
-        float effectiveMove = traversal.EffectiveMoveIntent(MoveIntent);
+        float effectiveMove = posture.SeverelyUnstable ? 0f : traversal.EffectiveMoveIntent(MoveIntent);
 
-        // 粗糙地形先保证支撑，再追求速度；推进仍由已着地的腿施加到各自锚点。
-        // Rough terrain prioritizes support over speed. Propulsion still enters the rigid shell
-        // through the anchors of planted legs rather than by translating the shell directly.
-        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.72f, 1f, supportFactor);
-        float acceleration = Mathf.Clamp((targetSpeed - speed) * .11f, -MaxGroundAcceleration, MaxGroundAcceleration);
-        int planted = 0;
+        float qualitySum = 0f;
         for (int i = 0; i < crab.Legs.Length; i++)
-            if (crab.Legs[i].Planted) planted++;
-
-        if (planted > 0)
-        {
-            for (int i = 0; i < crab.Legs.Length; i++)
-            {
-                MantleCrabLimb leg = crab.Legs[i];
-                if (!leg.Planted) continue;
-                BodyChunk anchor = crab.bodyChunks[leg.AnchorChunk];
-                anchor.vel += axis * (acceleration * totalMass / (planted * anchor.mass));
-            }
-        }
-
-        if (crab.SupportingFeet < 3)
+            qualitySum += crab.Legs[i].SupportQuality(crab);
+        if (qualitySum <= .05f)
             return;
 
-        float inertia = 0f;
-        float angularMomentum = 0f;
-        for (int i = 0; i < crab.bodyChunks.Length; i++)
+        float supportFactor = Mathf.Clamp01(qualitySum / 3.2f);
+        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.62f, 1f, supportFactor);
+        float acceleration = Mathf.Clamp(
+            (targetSpeed - speed) * .095f,
+            -MaxGroundAcceleration,
+            MaxGroundAcceleration);
+
+        float totalMass = crab.TotalMass;
+        for (int i = 0; i < crab.Legs.Length; i++)
         {
-            BodyChunk chunk = crab.bodyChunks[i];
-            Vector2 offset = chunk.pos - center;
-            inertia += chunk.mass * offset.sqrMagnitude;
-            angularMomentum += chunk.mass * Cross(offset, chunk.vel - velocity);
-        }
+            MantleCrabLimb leg = crab.Legs[i];
+            float quality = leg.SupportQuality(crab);
+            if (quality <= .001f)
+                continue;
 
-        float angularVelocity = angularMomentum / Mathf.Max(1f, inertia);
-        float targetAngularVelocity = TurnIntent * MaxTurnSpeed * Mathf.Lerp(1f, .55f, Mathf.Abs(effectiveMove));
-        float angularAcceleration = Mathf.Clamp(
-            targetAngularVelocity - angularVelocity,
-            -MaxTurnAcceleration,
-            MaxTurnAcceleration);
-
-        if (Mathf.Abs(angularAcceleration) < .000001f)
-            return;
-
-        // 只施加转动冲量；后面的刚体投影负责保留这部分角动量。
-        // Apply a pure rotational impulse. The rigid-shell projection that follows preserves it.
-        for (int i = 0; i < crab.bodyChunks.Length; i++)
-        {
-            BodyChunk chunk = crab.bodyChunks[i];
-            Vector2 offset = chunk.pos - center;
-            chunk.vel += new Vector2(-offset.y, offset.x) * angularAcceleration;
+            BodyChunk anchor = crab.bodyChunks[leg.AnchorChunk];
+            float share = quality / qualitySum;
+            anchor.vel += axis * (acceleration * totalMass * share / Mathf.Max(.01f, anchor.mass));
         }
     }
 
-    private Vector2 DesiredLanding(MantleCrabLimb leg, Vector2 anchor, Vector2 axis, Vector2 bodyVelocity)
+    private Vector2 DesiredLanding(
+        MantleCrabLimb leg,
+        Vector2 anchor,
+        Vector2 axis,
+        Vector2 bodyVelocity)
     {
-        Vector2 rest = TransformLocal(leg.RestTipOffset);
-        float inputLead = MoveIntent * Mathf.Lerp(25f, 48f, Mathf.Abs(MoveIntent)) * crab.ShellScale;
-        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 6f, -24f, 24f) * crab.ShellScale;
+        Vector2 rest = TransformWalkingLocal(leg.RestTipOffset);
+        float inputLead = MoveIntent * Mathf.Lerp(20f, 38f, Mathf.Abs(MoveIntent)) * crab.ShellScale;
+        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 5f, -16f, 16f) * crab.ShellScale;
         Vector2 nominal = anchor + rest + axis * (inputLead + velocityLead);
         return traversal.AdjustLanding(leg, nominal, axis);
     }
 
     private bool CanLift(int candidate)
     {
-        Vector2 axis = NormalizedAxis();
+        Vector2 axis = WalkAxis;
         Vector2 center = BodyCenter(out _);
         float min = float.MaxValue;
         float max = float.MinValue;
@@ -225,7 +212,8 @@ internal sealed class MantleCrabLocomotion
         {
             if (i == candidate) continue;
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.Swinging) continue;
+            if (!leg.Planted || leg.Swinging || leg.SupportQuality(crab) < .18f)
+                continue;
 
             float coordinate = Vector2.Dot(leg.Contact - center, axis);
             min = Mathf.Min(min, coordinate);
@@ -266,18 +254,14 @@ internal sealed class MantleCrabLocomotion
         return totalMass > .0001f ? center / totalMass : crab.bodyChunks[2].pos;
     }
 
-    private Vector2 TransformLocal(Vector2 local)
+    private Vector2 TransformWalkingLocal(Vector2 local)
     {
-        Vector2 axis = NormalizedAxis();
-        Vector2 up = new(-axis.y, axis.x);
-        return axis * local.x + up * local.y;
+        Vector2 right = WalkAxis;
+        Vector2 up = SupportNormal;
+        if (right.sqrMagnitude <= .0001f) right = Vector2.right;
+        else right.Normalize();
+        if (up.sqrMagnitude <= .0001f) up = Vector2.up;
+        else up.Normalize();
+        return right * local.x + up * local.y;
     }
-
-    private Vector2 NormalizedAxis()
-    {
-        Vector2 axis = crab.Axis;
-        return axis.sqrMagnitude > .0001f ? axis.normalized : Vector2.right;
-    }
-
-    private static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
 }

@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Creatures.MantleCrab;
 
-/// <summary>Rigid shell, articulated limbs and low-level walking motor for MantleCrab.</summary>
+/// <summary>Rigid shell, articulated limbs and grounded locomotion for MantleCrab.</summary>
 public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalkableCurveGeometry
 {
     internal static readonly Vector2[] ShellRest =
@@ -14,10 +14,11 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
     private const float VisualBodyStart = 17f;
     private const float VisualBodyEnd = 185f;
     private const float VisualBodyWidth = VisualBodyEnd - VisualBodyStart;
+    private const float SpawnGroundScan = 125f;
+
     internal readonly MantleCrabLimb[] Legs = new MantleCrabLimb[4];
     internal readonly MantleCrabLimb[] Pincers = new MantleCrabLimb[2];
     internal readonly MantleCrabLocomotion Locomotion;
-    private readonly float[] supportAccelerations = new float[4];
 
     private Vector2 shellRestCenter;
     private float shellRestInertia;
@@ -59,7 +60,12 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         ShellScale = Phenotype.ShellWidth;
         bodyChunks = new BodyChunk[5];
         for (int i = 0; i < 5; i++)
-            bodyChunks[i] = new BodyChunk(this, i, ShellRest[i] * ShellScale, Radii[i] * ShellScale, i == 2 ? 3f : 1.8f);
+            bodyChunks[i] = new BodyChunk(
+                this,
+                i,
+                ShellRest[i] * ShellScale,
+                Radii[i] * ShellScale,
+                i == 2 ? 3f : 1.8f);
 
         // The complete distance graph remains as collision-time bracing, but it is no longer
         // responsible for visible shell stiffness. MaintainRigidShell removes all internal
@@ -68,12 +74,18 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         int connection = 0;
         for (int i = 0; i < 5; i++)
         for (int j = i + 1; j < 5; j++)
-            bodyChunkConnections[connection++] = new BodyChunkConnection(bodyChunks[i], bodyChunks[j],
-                Vector2.Distance(ShellRest[i], ShellRest[j]) * ShellScale, BodyChunkConnection.Type.Normal, .85f, -1f);
+            bodyChunkConnections[connection++] = new BodyChunkConnection(
+                bodyChunks[i],
+                bodyChunks[j],
+                Vector2.Distance(ShellRest[i], ShellRest[j]) * ShellScale,
+                BodyChunkConnection.Type.Normal,
+                .85f,
+                -1f);
 
         for (int i = 0; i < 4; i++) Legs[i] = new MantleCrabLimb(i, false);
         for (int i = 0; i < 2; i++) Pincers[i] = new MantleCrabLimb(i, true);
         Locomotion = new MantleCrabLocomotion(this);
+
         airFriction = .995f;
         gravity = .9f;
         bounce = .05f;
@@ -87,7 +99,31 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
     public override void PlaceInRoom(Room placeRoom)
     {
         base.PlaceInRoom(placeRoom);
-        Vector2 center = placeRoom.MiddleOfTile(abstractCreature.pos.Tile);
+
+        Vector2 spawn = placeRoom.MiddleOfTile(abstractCreature.pos.Tile);
+        Vector2 center = spawn;
+
+        // 生成点靠近地面时，先把甲壳放到真实站高，再让脚寻找支撑。
+        // 旧实现把甲壳直接塞在生成 Tile 中心，随后用接近 300 px 的腿瞬间把身体弹起。
+        // If the spawn point is close to terrain, place the shell at standing height before feet acquire support.
+        // The old path spawned the shell near the floor and let ~300 px legs explosively correct the error.
+        if (MantleCrabTerrainProbe.TrySurfaceBelow(
+                placeRoom,
+                spawn.x,
+                spawn.y + 35f,
+                SpawnGroundScan,
+                out Vector2 spawnSurface,
+                out _) &&
+            spawnSurface.y <= spawn.y + 38f &&
+            spawnSurface.y >= spawn.y - SpawnGroundScan + 20f)
+        {
+            float bodyClearance = 0f;
+            for (int i = 0; i < Legs.Length; i++)
+                bodyClearance += Legs[i].NominalBodyClearance;
+            bodyClearance /= Mathf.Max(1, Legs.Length);
+            center.y = spawnSurface.y + bodyClearance;
+        }
+
         for (int i = 0; i < 5; i++)
         {
             bodyChunks[i].HardSetPosition(center + ShellRest[i] * ShellScale);
@@ -95,11 +131,6 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         }
 
         ResetRigidShellFrame();
-
-        // DevConsole and ordinary realization both enter through PlaceInRoom. If a normal
-        // standing surface is already reachable, plant the visual legs immediately so the
-        // first gravity frames do not make the tall passive prototype crumple before support
-        // engages. A genuinely airborne spawn still falls normally.
         ResetLimbs(snapWalkingToSupport: true);
     }
 
@@ -112,7 +143,11 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
 
     private void ResetLimbs(bool snapWalkingToSupport)
     {
+        // 先清空地面框架，避免新房间的腿沿用上一个房间的坡面法线。
+        // Reset the grounded frame before any leg asks it for a walking-space transform.
+        Locomotion.Reset();
         SupportingFeet = 0;
+
         foreach (MantleCrabLimb leg in Legs)
         {
             Vector2 anchor = Anchor(leg);
@@ -124,12 +159,13 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         foreach (MantleCrabLimb pincer in Pincers)
             pincer.Reset(Anchor(pincer));
 
-        Locomotion.Reset();
         graphicsModule?.Reset();
     }
 
     internal Vector2 Anchor(MantleCrabLimb limb)
     {
+        // 腿根属于甲壳，所以根节点必须跟随真实甲壳姿态；只有“腿往哪里垂、身体往哪里走”与甲壳旋转解耦。
+        // Limb roots are physically attached to the shell. Only hanging/stepping/travel directions are decoupled from shell rotation.
         Vector2 axis = Axis;
         Vector2 up = new(-axis.y, axis.x);
         return bodyChunks[2].pos + axis * limb.Rest[0].x + up * limb.Rest[0].y;
@@ -152,9 +188,8 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         if (abstractCreature?.abstractAI?.RealAI is MantleCrabTestMovementAI testAI)
             testAI.Update();
 
-        // Safari is currently the direct test surface for the low-level motor. Horizontal input
-        // walks along the shell axis; vertical input applies the deliberately slow reorientation
-        // requested by the C locomotion model. A future AI can call SetLocomotionIntent directly.
+        // Safari：左右是地面移动，上下只提供很小的身体倾斜意图，不再把甲壳旋转成新的推进方向。
+        // Safari: horizontal drives grounded travel; vertical only requests a small body lean.
         if (safariControlled && inputWithDiagonals.HasValue)
             SetLocomotionIntent(inputWithDiagonals.Value.x, inputWithDiagonals.Value.y);
 
@@ -166,60 +201,17 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
             leg.Update(this, Anchor(leg));
             if (leg.Planted) SupportingFeet++;
         }
-        foreach (MantleCrabLimb pincer in Pincers) pincer.Update(this, Anchor(pincer));
+        foreach (MantleCrabLimb pincer in Pincers)
+            pincer.Update(this, Anchor(pincer));
 
-        if (!Consious || SupportingFeet == 0) return;
-        ApplySupport(gravity * room.gravity);
-        Locomotion.ApplyGroundForces();
+        if (!Consious || SupportingFeet == 0)
+            return;
 
-        // Support and locomotion are applied at individual shell stations so they can create
-        // legitimate translation and torque. Project those impulses back to rigid-body velocities
-        // immediately so they cannot seed a new internal vibration for the next frame.
+        Locomotion.ApplyGroundForces(gravity * room.gravity);
+
+        // Support, posture and propulsion enter through shell stations. Re-project their result
+        // into rigid-body velocity so those forces cannot create an internal vibration mode.
         RigidifyShellVelocities();
-    }
-
-    internal void ApplySupport(float effectiveGravity)
-    {
-        float totalMass = TotalMass;
-        Vector2 center = Vector2.zero, velocity = Vector2.zero;
-        foreach (BodyChunk chunk in bodyChunks)
-        {
-            center += chunk.pos * chunk.mass;
-            velocity += chunk.vel * chunk.mass;
-        }
-        center /= totalMass;
-        velocity /= totalMass;
-
-        float angularMomentum = 0f, inertia = 0f;
-        foreach (BodyChunk chunk in bodyChunks)
-        {
-            Vector2 offset = chunk.pos - center, relativeVelocity = chunk.vel - velocity;
-            angularMomentum += chunk.mass * Cross(offset, relativeVelocity);
-            inertia += chunk.mass * offset.sqrMagnitude;
-        }
-        float angularVelocity = angularMomentum / Mathf.Max(1f, inertia);
-
-        for (int i = 0; i < Legs.Length; i++)
-        {
-            MantleCrabLimb leg = Legs[i];
-            supportAccelerations[i] = 0f;
-            if (!leg.Planted) continue;
-            BodyChunk anchor = bodyChunks[leg.AnchorChunk];
-            float extensionError = leg.StandHeight - (Anchor(leg).y - leg.Tip.y);
-            float stationVelocity = velocity.y + angularVelocity * (anchor.pos.x - center.x);
-            supportAccelerations[i] = MantleCrabRigMath.SupportAcceleration(extensionError,
-                stationVelocity, effectiveGravity, SupportingFeet);
-        }
-
-        // Evaluate every leg against the same velocity snapshot. Paired legs share a chunk;
-        // applying the first force before evaluating the second would make support order-dependent.
-        for (int i = 0; i < Legs.Length; i++)
-        {
-            MantleCrabLimb leg = Legs[i];
-            if (!leg.Planted) continue;
-            BodyChunk anchor = bodyChunks[leg.AnchorChunk];
-            anchor.vel.y += supportAccelerations[i] * totalMass / anchor.mass;
-        }
     }
 
     /// <summary>

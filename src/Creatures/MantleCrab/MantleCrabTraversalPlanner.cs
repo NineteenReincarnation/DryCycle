@@ -90,6 +90,8 @@ internal sealed class MantleCrabTraversalPlanner
             return;
         }
 
+        // 这里的 Axis 是地面行走切线，不再是甲壳当前朝向。
+        // Axis is the grounded travel tangent, never the shell's current physical orientation.
         Vector2 axis = Axis();
         Vector2 center = BodyCenter();
         float scanTop = center.y + 10f * crab.ShellScale;
@@ -130,7 +132,8 @@ internal sealed class MantleCrabTraversalPlanner
         float missingPenalty = (ProbeCount - hits) / (float)ProbeCount;
         float normalPenalty = 0f;
         for (int i = 0; i < ProbeCount; i++)
-            if (probeHit[i]) normalPenalty = Mathf.Max(normalPenalty, 1f - Mathf.Clamp01(probeNormal[i].y));
+            if (probeHit[i])
+                normalPenalty = Mathf.Max(normalPenalty, 1f - Mathf.Clamp01(probeNormal[i].y));
         Roughness = Mathf.Clamp01(
             heightSpread / (48f * crab.ShellScale) + missingPenalty * .7f + normalPenalty * .45f);
 
@@ -148,7 +151,8 @@ internal sealed class MantleCrabTraversalPlanner
         {
             float delta = probePoint[significantIndex].y - baselineHeight;
             float maxRise = minimumReach * .35f;
-            if (!ReachableByLeadingLeg(probePoint[significantIndex], delta < 0f ? .74f : .90f) || delta > maxRise)
+            if (!ReachableByLeadingLeg(probePoint[significantIndex], delta < 0f ? .74f : .90f) ||
+                delta > maxRise)
             {
                 Mode = MantleCrabTraversalMode.Blocked;
             }
@@ -169,9 +173,6 @@ internal sealed class MantleCrabTraversalPlanner
         }
         else if (firstMissing >= 0 && firstHitAfterMissing < 0 && firstMissing <= 3)
         {
-            // 前方支撑消失且在可探测距离内没有重新出现：把它当作悬崖/过宽沟，而不是继续冲。
-            // If support disappears and does not reappear inside the probing workspace, treat it
-            // as a cliff or over-wide gap instead of walking forward on optimism.
             Mode = MantleCrabTraversalMode.Blocked;
         }
         else if (hits == 0 || (!shellClear && maxHeight <= baselineHeight + 20f * crab.ShellScale))
@@ -231,8 +232,6 @@ internal sealed class MantleCrabTraversalPlanner
             case MantleCrabTraversalMode.StepUp:
             case MantleCrabTraversalMode.StepDown:
             case MantleCrabTraversalMode.BridgeGap:
-                // The forward feet probe first. Rear supports remain loaded until at least one
-                // forward foot has proved that the new surface can carry the body.
                 return leading || LeadingSupportEstablished;
             case MantleCrabTraversalMode.Blocked:
                 return false;
@@ -256,8 +255,6 @@ internal sealed class MantleCrabTraversalPlanner
                     return leading ? 1.55f : .35f;
                 return leading ? .82f : 1.18f;
             case MantleCrabTraversalMode.Rough:
-                // Real crabs increase leading-leg duty factor on difficult terrain. Once a
-                // leading foot is down we therefore make it a little less eager to lift again.
                 return leading ? .84f : 1.08f;
             default:
                 return 1f;
@@ -283,8 +280,6 @@ internal sealed class MantleCrabTraversalPlanner
             Mode != MantleCrabTraversalMode.BridgeGap)
             return nominal;
 
-        // The two coplanar walking legs on one side should not collapse onto the same foothold.
-        // The visually outer pair reaches slightly farther while the inner pair stays slightly back.
         float pairOffset = (leg.Index < 2 ? 10f : -10f) * moveSign * crab.ShellScale;
         return transitionSupport + axis * pairOffset;
     }
@@ -338,12 +333,9 @@ internal sealed class MantleCrabTraversalPlanner
             MantleCrabLimb leg = crab.Legs[i];
             if (!IsLeading(leg)) continue;
 
-            // 规划时允许身体先下蹲，再判断下一块地是否在真实关节工作空间内。
-            // Planning may account for a crouch before deciding whether the next foothold is
-            // inside the real articulated workspace; the actual body still has to crouch before
-            // TryBeginStep can reach it.
-            Vector2 anchor = crab.Anchor(leg) + Vector2.down * (leg.NominalStandHeight * (1f - stanceScale));
-            if (Vector2.Distance(anchor, point) <= leg.Reach * .92f)
+            Vector2 anchor = crab.Anchor(leg) +
+                             Vector2.down * (leg.NominalStandHeight * (1f - stanceScale));
+            if (Vector2.Distance(anchor, point) <= leg.Reach * .90f)
                 return true;
         }
         return false;
@@ -412,7 +404,7 @@ internal sealed class MantleCrabTraversalPlanner
 
     private Vector2 Axis()
     {
-        Vector2 axis = crab.Axis;
+        Vector2 axis = crab.Locomotion.WalkAxis;
         return axis.sqrMagnitude > .0001f ? axis.normalized : Vector2.right;
     }
 }

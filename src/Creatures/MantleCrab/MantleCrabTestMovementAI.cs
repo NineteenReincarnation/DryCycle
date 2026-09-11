@@ -101,8 +101,6 @@ internal sealed class MantleCrabTestMovementAI : ArtificialIntelligence
         cruiseFramesRemaining--;
         if (cruiseFramesRemaining <= 0)
         {
-            // 即使一路畅通也定期换向，专门覆盖左右步态和换向恢复。
-            // Periodically reverse even on clear ground so both gait directions are exercised automatically.
             ReverseDirection();
             crab.SetLocomotionIntent(0f, 0f);
             RememberProgressOrigin(center);
@@ -124,7 +122,9 @@ internal sealed class MantleCrabTestMovementAI : ArtificialIntelligence
         if (progressFrames < ProgressWindowFrames)
             return false;
 
-        Vector2 axis = crab.Axis;
+        // 卡住判定必须沿地面行走轴计算，不能沿已经可能被撞歪的甲壳 Axis。
+        // Stuck progress is measured on the grounded travel axis, never the potentially tilted shell axis.
+        Vector2 axis = crab.Locomotion.WalkAxis;
         if (axis.sqrMagnitude <= .0001f)
             axis = Vector2.right;
         else
