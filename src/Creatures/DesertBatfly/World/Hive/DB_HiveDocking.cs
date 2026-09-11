@@ -6,6 +6,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// Single realized authority for the final BatHive tile -> Burrow transition.
 /// Higher-level domains decide why a Desert Batfly is returning and which hive map to follow;
 /// this class alone owns the last physical docking step once the bat reaches a hive tile.
+/// DB_HiveTraffic separately serializes the approach corridor and keeps its claim until the
+/// Burrowed hook confirms that vanilla actually moved the bat into the hive list.
 /// </summary>
 internal static class DB_HiveDocking
 {
@@ -49,6 +51,16 @@ internal static class DB_HiveDocking
             "ReturnHome final BatHive ingress");
     }
 
+    internal static bool TryHandleInjuryRecovery(DB_Creature bat)
+    {
+        return TryHandleDocking(
+            bat,
+            DB_BehaviorOwner.InjuryRecovery,
+            0.80f,
+            true,
+            "injury recovery final BatHive ingress");
+    }
+
     /// <summary>
     /// Returns true whenever this frame is physically inside an eligible hive tile and the
     /// accepted owner should keep control of docking. A true result therefore means either
@@ -80,7 +92,8 @@ internal static class DB_HiveDocking
         bat.AI.afraid = Mathf.Max(bat.AI.afraid, afraidFloor);
 
         // Match vanilla FlyAI docking: merely entering a hive tile is not enough. Keep a
-        // small downward bias until the body actually touches the lower entrance surface.
+        // small downward bias until the body touches the lower entrance surface; ContactPoint
+        // y == -1 is the same condition vanilla uses before switching to Burrow.
         bat.mainBodyChunk.vel.y -= 1f;
         if (bat.mainBodyChunk.ContactPoint.y != -1)
             return true;
