@@ -44,9 +44,20 @@ internal static class SoundEditorView
             return;
         }
 
-        ImGui.TextDisabled(DevToolUiSettings.T("房间音频", "ROOM AUDIO"));
-        DrawRoomFloat(SoundEditorKeys.BackgroundDroneVolume, DevToolUiSettings.T("背景低鸣", "Bkg Drone"), snapshot.BackgroundDroneVolume, 0f, 1f);
-        DrawRoomFloat(SoundEditorKeys.NoThreatDroneVolume, DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"), snapshot.NoThreatDroneVolume, 0f, 1f);
+        bool collapseAll = DevToolWidgets.PaneTitleWithAction(
+            DevToolUiSettings.T("声音", "Sound"),
+            DevToolUiSettings.T("折叠所有", "Collapse All"),
+            "SoundInspectorCollapseAll");
+
+        if (collapseAll)
+            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (ImGui.CollapsingHeader(
+                DevToolUiSettings.T("房间音频##SoundRoomAudio", "Room Audio##SoundRoomAudio"),
+                ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawRoomFloat(SoundEditorKeys.BackgroundDroneVolume, DevToolUiSettings.T("背景低鸣", "Bkg Drone"), snapshot.BackgroundDroneVolume, 0f, 1f);
+            DrawRoomFloat(SoundEditorKeys.NoThreatDroneVolume, DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"), snapshot.NoThreatDroneVolume, 0f, 1f);
+        }
 
         EditorSoundSnapshot selected = FindSelected(snapshot);
         if (selected == null)
@@ -62,6 +73,13 @@ internal static class SoundEditorView
         if (selected.Inherited) state += DevToolUiSettings.T(" · 继承", " · Inherited");
         else if (selected.OverWrite) state += DevToolUiSettings.T(" · 覆盖模板", " · Overrides template");
         ImGui.TextDisabled(state);
+
+        if (collapseAll)
+            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("声音内容##SoundSelectedDetails", "Sound Details##SoundSelectedDetails"),
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return;
 
         if (selected.Inherited) ImGui.BeginDisabled();
 
