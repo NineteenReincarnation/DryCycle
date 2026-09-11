@@ -23,21 +23,21 @@ internal static class RoomSettingsView
 
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled("ROOM SETTINGS");
+        ImGui.TextDisabled(DevToolUiSettings.T("房间设置", "ROOM SETTINGS"));
         ImGui.Separator();
 
-        DrawSectionButton(Section.Environment, "Environment");
-        DrawSectionButton(Section.Visual, "Visual");
-        DrawSectionButton(Section.Gameplay, "Gameplay");
-        DrawSectionButton(Section.Effects, "Effects");
+        DrawSectionButton(Section.Environment, DevToolUiSettings.T("环境", "Environment"));
+        DrawSectionButton(Section.Visual, DevToolUiSettings.T("视觉", "Visual"));
+        DrawSectionButton(Section.Gameplay, DevToolUiSettings.T("玩法", "Gameplay"));
+        DrawSectionButton(Section.Effects, DevToolUiSettings.T("效果", "Effects"));
 
         if (section != Section.Effects || !snapshot.Available) return;
 
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.TextDisabled("ADD EFFECT");
+        ImGui.TextDisabled(DevToolUiSettings.T("添加效果", "ADD EFFECT"));
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText("Search##RoomEffectSearch", ref effectSearch, 128);
+        ImGui.InputText(DevToolUiSettings.T("搜索##RoomEffectSearch", "Search##RoomEffectSearch"), ref effectSearch, 128);
 
         string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
         int matches = 0;
@@ -54,18 +54,18 @@ internal static class RoomSettingsView
             }
         }
 
-        if (matches == 0) ImGui.TextDisabled("No matching effects.");
+        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的效果。", "No matching effects."));
     }
 
     internal static void DrawInspector(EditorRoomSettingsSnapshot snapshot)
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled("Room settings unavailable.");
+            ImGui.TextDisabled(DevToolUiSettings.T("房间设置不可用。", "Room settings unavailable."));
             return;
         }
 
-        ImGui.Text(section.ToString());
+        ImGui.Text(SectionName(section));
         ImGui.Separator();
 
         switch (section)
@@ -87,38 +87,38 @@ internal static class RoomSettingsView
 
     private static void DrawEnvironment(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled("Rain");
-        DrawFloat(RoomSettingKeys.RainIntensity, "Rain Intensity", snapshot.RainIntensity, 0f, 1f);
-        DrawFloat(RoomSettingKeys.RumbleIntensity, "Rumble Intensity", snapshot.RumbleIntensity, 0f, 1f);
-        DrawFloat(RoomSettingKeys.CeilingDrips, "Ceiling Drips", snapshot.CeilingDrips, 0f, 1f);
+        ImGui.TextDisabled(DevToolUiSettings.T("雨", "Rain"));
+        DrawFloat(RoomSettingKeys.RainIntensity, DevToolUiSettings.T("降雨强度", "Rain Intensity"), snapshot.RainIntensity, 0f, 1f);
+        DrawFloat(RoomSettingKeys.RumbleIntensity, DevToolUiSettings.T("震动强度", "Rumble Intensity"), snapshot.RumbleIntensity, 0f, 1f);
+        DrawFloat(RoomSettingKeys.CeilingDrips, DevToolUiSettings.T("天花板滴水", "Ceiling Drips"), snapshot.CeilingDrips, 0f, 1f);
 
         ImGui.Separator();
-        ImGui.TextDisabled("Water Waves");
-        DrawFloat(RoomSettingKeys.WaveSpeed, "Wave Speed", snapshot.WaveSpeed, 0f, 1f);
-        DrawFloat(RoomSettingKeys.WaveLength, "Wave Length", snapshot.WaveLength, 0f, 1f);
-        DrawFloat(RoomSettingKeys.WaveAmplitude, "Wave Amplitude", snapshot.WaveAmplitude, 0f, 1f);
-        DrawFloat(RoomSettingKeys.SecondWaveLength, "Rollback Length", snapshot.SecondWaveLength, 0f, 1f);
-        DrawFloat(RoomSettingKeys.SecondWaveAmplitude, "Rollback Amplitude", snapshot.SecondWaveAmplitude, 0f, 1f);
-        DrawFloat(RoomSettingKeys.WaterReflectionAlpha, "Water Light", snapshot.WaterReflectionAlpha, 0f, 1f);
+        ImGui.TextDisabled(DevToolUiSettings.T("水面波浪", "Water Waves"));
+        DrawFloat(RoomSettingKeys.WaveSpeed, DevToolUiSettings.T("波速", "Wave Speed"), snapshot.WaveSpeed, 0f, 1f);
+        DrawFloat(RoomSettingKeys.WaveLength, DevToolUiSettings.T("波长", "Wave Length"), snapshot.WaveLength, 0f, 1f);
+        DrawFloat(RoomSettingKeys.WaveAmplitude, DevToolUiSettings.T("波幅", "Wave Amplitude"), snapshot.WaveAmplitude, 0f, 1f);
+        DrawFloat(RoomSettingKeys.SecondWaveLength, DevToolUiSettings.T("回卷长度", "Rollback Length"), snapshot.SecondWaveLength, 0f, 1f);
+        DrawFloat(RoomSettingKeys.SecondWaveAmplitude, DevToolUiSettings.T("回卷幅度", "Rollback Amplitude"), snapshot.SecondWaveAmplitude, 0f, 1f);
+        DrawFloat(RoomSettingKeys.WaterReflectionAlpha, DevToolUiSettings.T("水面亮度", "Water Light"), snapshot.WaterReflectionAlpha, 0f, 1f);
     }
 
     private static void DrawVisual(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled("Atmosphere");
-        DrawFloat(RoomSettingKeys.Clouds, "Clouds", snapshot.Clouds, 0f, 1f);
-        DrawFloat(RoomSettingKeys.Grime, "Grime", snapshot.Grime, 0f, 1f);
+        ImGui.TextDisabled(DevToolUiSettings.T("氛围", "Atmosphere"));
+        DrawFloat(RoomSettingKeys.Clouds, DevToolUiSettings.T("云层", "Clouds"), snapshot.Clouds, 0f, 1f);
+        DrawFloat(RoomSettingKeys.Grime, DevToolUiSettings.T("污垢", "Grime"), snapshot.Grime, 0f, 1f);
 
         ImGui.Separator();
-        ImGui.TextDisabled("Palette");
-        DrawInt(RoomSettingKeys.Palette, "Palette", snapshot.Palette);
-        DrawInt(RoomSettingKeys.EffectColorA, "Effect Color A", snapshot.EffectColorA);
-        DrawInt(RoomSettingKeys.EffectColorB, "Effect Color B", snapshot.EffectColorB);
+        ImGui.TextDisabled(DevToolUiSettings.T("色板", "Palette"));
+        DrawInt(RoomSettingKeys.Palette, DevToolUiSettings.T("色板", "Palette"), snapshot.Palette);
+        DrawInt(RoomSettingKeys.EffectColorA, DevToolUiSettings.T("效果颜色 A", "Effect Color A"), snapshot.EffectColorA);
+        DrawInt(RoomSettingKeys.EffectColorB, DevToolUiSettings.T("效果颜色 B", "Effect Color B"), snapshot.EffectColorB);
     }
 
     private static void DrawGameplay(EditorRoomSettingsSnapshot snapshot)
     {
-        ImGui.TextDisabled("Danger");
-        if (ImGui.BeginCombo("Danger Type##RoomDangerType", snapshot.DangerType))
+        ImGui.TextDisabled(DevToolUiSettings.T("危险", "Danger"));
+        if (ImGui.BeginCombo(DevToolUiSettings.T("危险类型##RoomDangerType", "Danger Type##RoomDangerType"), snapshot.DangerType))
         {
             string[] options = snapshot.DangerTypes ?? Array.Empty<string>();
             for (int i = 0; i < options.Length; i++)
@@ -136,19 +136,19 @@ internal static class RoomSettingsView
         }
 
         bool script = snapshot.RoomSpecificScript;
-        if (ImGui.Checkbox("Room Specific Script", ref script))
+        if (ImGui.Checkbox(DevToolUiSettings.T("房间专属脚本", "Room Specific Script"), ref script))
             SendSetting(RoomSettingKeys.RoomSpecificScript,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: script));
 
         bool wetTerrain = snapshot.WetTerrain;
-        if (ImGui.Checkbox("Wet Terrain", ref wetTerrain))
+        if (ImGui.Checkbox(DevToolUiSettings.T("湿润地形", "Wet Terrain"), ref wetTerrain))
             SendSetting(RoomSettingKeys.WetTerrain,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: wetTerrain));
 
         ImGui.Separator();
-        ImGui.TextDisabled("Random Items");
-        DrawFloat(RoomSettingKeys.RandomItemDensity, "Item Density", snapshot.RandomItemDensity, 0f, 1f);
-        DrawFloat(RoomSettingKeys.RandomItemSpearChance, "Spear Chance", snapshot.RandomItemSpearChance, 0f, 1f);
+        ImGui.TextDisabled(DevToolUiSettings.T("随机物品", "Random Items"));
+        DrawFloat(RoomSettingKeys.RandomItemDensity, DevToolUiSettings.T("物品密度", "Item Density"), snapshot.RandomItemDensity, 0f, 1f);
+        DrawFloat(RoomSettingKeys.RandomItemSpearChance, DevToolUiSettings.T("长矛概率", "Spear Chance"), snapshot.RandomItemSpearChance, 0f, 1f);
     }
 
     private static void DrawEffects(EditorRoomSettingsSnapshot snapshot)
@@ -156,7 +156,7 @@ internal static class RoomSettingsView
         EditorRoomEffectSnapshot[] effects = snapshot.Effects ?? Array.Empty<EditorRoomEffectSnapshot>();
         if (effects.Length == 0)
         {
-            ImGui.TextDisabled("No room effects. Add one from the Browser.");
+            ImGui.TextDisabled(DevToolUiSettings.T("当前没有房间效果，可从浏览器添加。", "No room effects. Add one from the Browser."));
             return;
         }
 
@@ -165,7 +165,7 @@ internal static class RoomSettingsView
             EditorRoomEffectSnapshot effect = effects[i];
             string header = effect.Type;
             if (!string.IsNullOrEmpty(effect.Category)) header += "  ·  " + effect.Category;
-            if (effect.Inherited) header += "  [Inherited]";
+            if (effect.Inherited) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
 
             if (!ImGui.CollapsingHeader(header + "##RoomEffect" + effect.Index, ImGuiTreeNodeFlags.DefaultOpen))
                 continue;
@@ -177,12 +177,10 @@ internal static class RoomSettingsView
             {
                 string key = "effect:" + effect.Index + ":" + slider;
                 float value = Get(FloatEdits, key, values[slider]);
-                bool changed = ImGui.SliderFloat(
-                    (string.IsNullOrEmpty(names[slider]) ? "Value " + (slider + 1) : names[slider]) + "##" + key,
-                    ref value,
-                    0f,
-                    1f,
-                    "%.3f");
+                string sliderLabel = string.IsNullOrEmpty(names[slider])
+                    ? DevToolUiSettings.T("数值 ", "Value ") + (slider + 1)
+                    : names[slider];
+                bool changed = ImGui.SliderFloat(sliderLabel + "##" + key, ref value, 0f, 1f, "%.3f");
                 FloatEdits[key] = value;
 
                 if (!effect.Inherited && ImGui.IsItemDeactivatedAfterEdit())
@@ -201,15 +199,27 @@ internal static class RoomSettingsView
 
             if (effect.Inherited)
             {
-                ImGui.TextDisabled("Inherited effect · edit the source template to change it.");
+                ImGui.TextDisabled(DevToolUiSettings.T("继承效果 · 请修改来源模板。", "Inherited effect · edit the source template to change it."));
             }
-            else if (ImGui.SmallButton("Remove##RoomEffectRemove" + effect.Index))
+            else if (ImGui.SmallButton(DevToolUiSettings.T("移除##RoomEffectRemove", "Remove##RoomEffectRemove") + effect.Index))
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                     RoomEditorCommandKind.DeleteEffect,
                     index: effect.Index));
             }
         }
+    }
+
+    private static string SectionName(Section value)
+    {
+        return value switch
+        {
+            Section.Environment => DevToolUiSettings.T("环境", "Environment"),
+            Section.Visual => DevToolUiSettings.T("视觉", "Visual"),
+            Section.Gameplay => DevToolUiSettings.T("玩法", "Gameplay"),
+            Section.Effects => DevToolUiSettings.T("效果", "Effects"),
+            _ => value.ToString()
+        };
     }
 
     private static void DrawSectionButton(Section value, string label)
