@@ -17,13 +17,12 @@ internal static class RelationshipEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("关系编辑器不可用。", "Relationship editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("关系编辑器不可用。", "Relationship editor unavailable."), true);
             return;
         }
 
         ImGui.TextDisabled(DevToolUiSettings.T("主生物", "PRIMARY CREATURE"));
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##RelationshipPrimarySearch", "Search##RelationshipPrimarySearch"), ref primarySearch, 128);
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "RelationshipPrimarySearch", ref primarySearch, 128);
         ImGui.Separator();
 
         string[] creatures = snapshot.CreatureTypes ?? Array.Empty<string>();
@@ -43,12 +42,11 @@ internal static class RelationshipEditorView
             }
             if (selected) ImGui.SetItemDefaultFocus();
         }
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."));
+        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."), true);
 
         ImGui.Separator();
         ImGui.TextDisabled(DevToolUiSettings.T("矩阵过滤", "MATRIX FILTER"));
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索行##RelationshipMatrixSearch", "Search rows##RelationshipMatrixSearch"), ref matrixSearch, 128);
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索行", "Search rows"), "RelationshipMatrixSearch", ref matrixSearch, 128);
         ImGui.Checkbox(DevToolUiSettings.T("仅显示已修改##RelationshipChangedOnly", "Changed only##RelationshipChangedOnly"), ref changedOnly);
         ImGui.TextDisabled(DevToolUiSettings.T("* = 直接覆盖", "* = direct override"));
     }
@@ -73,9 +71,13 @@ internal static class RelationshipEditorView
 
         FloatingWindowSnap.TrackCurrentWindow("Relationships");
 
-        ImGui.Text(DevToolUiSettings.T("主体：", "Primary: ") + (string.IsNullOrEmpty(snapshot.PrimaryCreature) ? DevToolUiSettings.T("<无>", "<none>") : snapshot.PrimaryCreature));
-        ImGui.SameLine();
-        ImGui.TextDisabled(DevToolUiSettings.T("点击任意方向进行检查/编辑", "click either direction to inspect/edit"));
+        string primaryText = DevToolUiSettings.T("主体：", "Primary: ") + (string.IsNullOrEmpty(snapshot.PrimaryCreature) ? DevToolUiSettings.T("<无>", "<none>") : snapshot.PrimaryCreature);
+        ImGui.Text(primaryText);
+        string hint = DevToolUiSettings.T("点击任意方向进行检查/编辑", "click either direction to inspect/edit");
+        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(hint).X))
+            ImGui.TextDisabled(hint);
+        else
+            ImGui.TextDisabled(hint);
         ImGui.Separator();
 
         float available = ImGui.GetContentRegionAvail().X;
@@ -121,14 +123,14 @@ internal static class RelationshipEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("关系编辑器不可用。", "Relationship editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("关系编辑器不可用。", "Relationship editor unavailable."), true);
             return;
         }
 
         EditorRelationshipRowSnapshot row = FindRow(snapshot, snapshot.SelectedOtherCreature);
         if (row == null)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("请从关系矩阵中选择一个方向。", "Select one direction from the relationship matrix."));
+            ImGui.TextWrapped(DevToolUiSettings.T("请从关系矩阵中选择一个方向。", "Select one direction from the relationship matrix."));
             return;
         }
 
@@ -183,7 +185,7 @@ internal static class RelationshipEditorView
         ImGui.Separator();
         bool canReset = relationship.DirectOverride;
         if (!canReset) ImGui.BeginDisabled();
-        if (ImGui.Button(DevToolUiSettings.T("重置覆盖", "Reset Override")))
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("重置覆盖", "Reset Override"), "ResetRelationshipOverride", DevToolButtonTone.Subtle))
         {
             RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                 RelationshipEditorCommandKind.ResetRelationship,
@@ -194,7 +196,7 @@ internal static class RelationshipEditorView
         }
         if (!canReset) ImGui.EndDisabled();
 
-        ImGui.TextDisabled(DevToolUiSettings.T(
+        ImGui.TextWrapped(DevToolUiSettings.T(
             "重置只会恢复原版/继承关系，不会写入一个替代值。",
             "Reset reveals the original/inherited Rain World relationship; it does not write a replacement value."));
     }
