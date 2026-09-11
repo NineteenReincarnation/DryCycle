@@ -36,7 +36,7 @@ internal static class DevToolWidgets
 
         if (primary)
         {
-            DrawOutlinedText(text, Accent, 1.28f * restoreScale, 1.75f, restoreScale);
+            DrawOutlinedText(text, Accent, 1.42f * restoreScale, 1.75f, restoreScale);
             ImGui.Spacing();
             return;
         }
