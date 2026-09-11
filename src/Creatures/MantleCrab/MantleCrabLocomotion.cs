@@ -47,6 +47,14 @@ internal sealed class MantleCrabLocomotion
     private const float PreloadMaximumAcceleration = .020f;
     private const float PreloadMinimumSupportQuality = .48f;
 
+    // 正常推进时，不再把所有承重腿当成完全相同的发动机。
+    // 脚还在身体前方时以接重为主；身体越过脚点、腿进入后蹬区以后，才逐渐承担主要推进。
+    // During positive drive, stance geometry decides how much each loaded leg contributes to propulsion.
+    private const float StanceDriveMinimumWeight = .24f;
+    private const float StanceDriveLeadTolerance = 10f;
+    private const float StanceDriveFullTrail = 34f;
+    private const float StanceDriveStressFloor = .58f;
+
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly float[] legLoad = new float[4];
@@ -360,6 +368,27 @@ internal sealed class MantleCrabLocomotion
 
         driveAcceleration = Mathf.MoveTowards(driveAcceleration, requestedAcceleration, DriveJerk);
 
+        // 加速时让真正处于后蹬区的承重腿承担更多推进；刹车时则让所有可靠支撑共同参与。
+        // This keeps the body from feeling like one hidden motor while preserving stable braking authority.
+        bool propelling = Mathf.Abs(effectiveMove) > .05f &&
+                          Mathf.Abs(driveAcceleration) > .0001f &&
+                          Mathf.Sign(driveAcceleration) == Mathf.Sign(effectiveMove);
+        float driveDirection = propelling ? Mathf.Sign(effectiveMove) : 0f;
+        float driveWeightSum = 0f;
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            float quality = EffectiveSupportQuality(leg);
+            if (quality <= .001f)
+                continue;
+
+            float stanceWeight = propelling ? StanceDriveWeight(leg, axis, driveDirection) : 1f;
+            driveWeightSum += quality * stanceWeight;
+        }
+
+        if (driveWeightSum <= .001f)
+            driveWeightSum = qualitySum;
+
         float totalMass = crab.TotalMass;
         for (int i = 0; i < crab.Legs.Length; i++)
         {
@@ -368,10 +397,44 @@ internal sealed class MantleCrabLocomotion
             if (quality <= .001f)
                 continue;
 
+            float stanceWeight = propelling ? StanceDriveWeight(leg, axis, driveDirection) : 1f;
+            float share = quality * stanceWeight / driveWeightSum;
             BodyChunk anchor = crab.bodyChunks[leg.AnchorChunk];
-            float share = quality / qualitySum;
             anchor.vel += axis * (driveAcceleration * totalMass * share / Mathf.Max(.01f, anchor.mass));
         }
+    }
+
+    /// <summary>
+    /// 正常向前加速时，脚点越落后于这条腿自己的自然落点，越说明它处于后蹬阶段。
+    /// 新落地、仍在身体前方的腿保留少量推进权，但主要职责是接重；接近机械极限的腿也会主动降低推进份额。
+    ///
+    /// Returns the stance-phase propulsion weight for one loaded foot.
+    /// </summary>
+    private float StanceDriveWeight(MantleCrabLimb leg, Vector2 axis, float driveDirection)
+    {
+        if (leg == null || driveDirection == 0f)
+            return 1f;
+
+        Vector2 anchor = crab.Anchor(leg);
+        float currentAlong = Vector2.Dot(leg.Contact - anchor, axis) * driveDirection;
+        float restAlong = Vector2.Dot(TransformWalkingLocal(leg.RestTipOffset), axis) * driveDirection;
+        float trailingDistance = restAlong - currentAlong;
+        float scale = Mathf.Max(.65f, crab.ShellScale);
+
+        float stance = Mathf.InverseLerp(
+            -StanceDriveLeadTolerance * scale,
+            StanceDriveFullTrail * scale,
+            trailingDistance);
+        stance = stance * stance * (3f - 2f * stance);
+
+        float weight = Mathf.Lerp(StanceDriveMinimumWeight, 1f, stance);
+        float stress = StepStress(leg);
+        weight *= Mathf.Lerp(1f, StanceDriveStressFloor, stress);
+
+        // 刚落地还在吸收冲击的腿不应该立刻变成主推进腿。
+        // A fresh compressed contact first accepts weight, then gradually joins propulsion.
+        weight *= Mathf.Lerp(1f, .68f, Mathf.Clamp01(leg.TouchdownAbsorption));
+        return Mathf.Max(.08f, weight);
     }
 
     /// <summary>
