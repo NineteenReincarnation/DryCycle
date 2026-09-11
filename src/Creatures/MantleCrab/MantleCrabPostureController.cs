@@ -23,9 +23,10 @@ internal sealed class MantleCrabPostureController
 {
     private const float MaximumTerrainFollowDegrees = 10f;
     private const float MaximumManualLeanDegrees = 6f;
-    private const float RecoveryEnterDegrees = 28f;
+    private const float MovementStopDegrees = 32f;
+    private const float RecoveryEnterDegrees = 58f;
     private const float RecoveryExitDegrees = 12f;
-    private const float RecoveryDeployDegrees = 58f;
+    private const float RecoveryDeployDegrees = 46f;
     private const float SupportHeightGain = .0065f;
     private const float SupportVelocityDamping = .34f;
     private const float MaximumSupportFactor = 1.18f;
@@ -59,7 +60,8 @@ internal sealed class MantleCrabPostureController
     internal Vector2 SupportNormal => supportNormal;
     internal Vector2 WalkAxis => walkAxis;
     internal bool Recovering => recovering;
-    internal bool SeverelyUnstable => recovering;
+    internal bool SeverelyUnstable => recovering ||
+                                      Mathf.Abs(ShellAngleRadians()) >= MovementStopDegrees * Mathf.Deg2Rad;
     internal MantleCrabRecoveryPhase RecoveryPhase => recoveryPhase;
     internal float RecoveryDirection => recoveryDirection;
 
