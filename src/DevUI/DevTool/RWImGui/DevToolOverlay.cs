@@ -2,6 +2,7 @@ using System;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
+using DryCycle.DevUI.DevTool.Triggers;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -145,6 +146,13 @@ internal static class DevToolOverlay
             return;
         }
 
+        if (snapshot.ToolMode == EditorToolMode.Triggers)
+        {
+            TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
+            ImGui.End();
+            return;
+        }
+
         if (snapshot.ToolMode != EditorToolMode.Objects)
         {
             ImGui.Text(snapshot.ToolMode + " tools");
@@ -276,6 +284,11 @@ internal static class DevToolOverlay
             SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
             DrawLegacyFallback(snapshot, "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
         }
+        else if (snapshot.ToolMode == EditorToolMode.Triggers)
+        {
+            TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, "Fallback for TriggeredEvent controls and custom TriggerPage extensions not migrated yet.");
+        }
         else
         {
             ImGui.TextDisabled(snapshot.ToolMode + " inspector is not migrated yet.");
@@ -313,6 +326,11 @@ internal static class DevToolOverlay
             {
                 EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
                 ImGui.TextDisabled("Sounds " + (sound.Sounds?.Length ?? 0) + "   ·   " + snapshot.Document);
+            }
+            else if (snapshot.ToolMode == EditorToolMode.Triggers)
+            {
+                EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
+                ImGui.TextDisabled("Triggers " + (trigger.Triggers?.Length ?? 0) + "   ·   " + snapshot.Document);
             }
             else
             {
