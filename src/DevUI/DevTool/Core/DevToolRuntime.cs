@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Core;
@@ -17,6 +18,7 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
+        CompatibilityBootstrap.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
@@ -27,6 +29,8 @@ internal static class DevToolRuntime
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
         EditorInputRouter.Disable();
+        EditorUiCommandQueue.Clear();
+        EditorPresentationHub.Clear();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -35,8 +39,18 @@ internal static class DevToolRuntime
     {
         orig(self);
         if (self == null) return;
+
         DevToolSessionHub.Synchronize(self);
-        EditorInputRouter.UpdateShortcuts(DevToolSessionHub.Current);
+        EditorSession session = DevToolSessionHub.Current;
+
+        // Keyboard shortcuts and all UI-originated mutations run on Unity's main thread.
+        EditorInputRouter.UpdateShortcuts(session);
+        EditorUiCommandQueue.Process(session);
+
+        // Commands can change selection, object collections or tool state. Synchronize once
+        // more before publishing the detached snapshot consumed by the Present callback.
+        session?.Synchronize(self);
+        EditorPresentationHub.Publish(session);
     }
 }
 
