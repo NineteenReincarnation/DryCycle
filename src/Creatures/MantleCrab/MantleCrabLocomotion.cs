@@ -19,9 +19,6 @@ internal sealed class MantleCrabLocomotion
     private const float IntentResponse = .025f;
     private const float DriveJerk = .0045f;
 
-    // 大型身体不能把一条腿从“满承重”一帧切成“完全离地”。
-    // 卸载慢于紧急脱载，重新吃重则更慢，让落脚以后有一个明确的 settle 阶段。
-    // A large body must not switch a limb from full load to airborne in one frame.
     private const float NormalUnloadRate = .050f;
     private const float EmergencyUnloadRate = .105f;
     private const float ReloadRate = .032f;
@@ -32,31 +29,32 @@ internal sealed class MantleCrabLocomotion
     private const float TouchdownReloadFloor = .42f;
     private const float MaximumTouchdownVelocityRemoval = .18f;
 
-    // 大型甲壳不应该永远自己拖着腿前进。推进权限取决于移动方向前方是否已经建立真实支撑。
-    // Keep a low fallback so steps and terrain traversal cannot deadlock while a leading limb is still searching.
     private const float ForwardSupportMinimumAuthority = .24f;
     private const float ForwardSupportFullQuality = 1.35f;
     private const float ForwardSupportNearDistance = 6f;
     private const float ForwardSupportFullDistance = 46f;
 
-    // 抬腿前先把重心轻微移向剩余支撑脚。这里只做几像素级真实平移，不播放额外身体摇摆动画。
-    // Before lift-off, shift the shell a few pixels toward the remaining support centroid using real velocity correction.
+    // 重心越靠近当前支撑区边缘，身体推进权限越低。大型身体必须等脚把支撑区重新扩开以后再跟进。
+    // Drive fades continuously near the support-span boundary instead of waiting for a binary CanLift failure.
+    private const float SupportMarginMinimumAuthority = .28f;
+    private const float SupportMarginFrontNear = 4f;
+    private const float SupportMarginFrontFull = 24f;
+    private const float SupportMarginRearNear = 3f;
+    private const float SupportMarginRearFull = 14f;
+
     private const float PreloadMaximumShift = 7f;
     private const float PreloadPositionGain = .0018f;
     private const float PreloadVelocityDamping = .022f;
     private const float PreloadMaximumAcceleration = .020f;
     private const float PreloadMinimumSupportQuality = .48f;
 
-    // 正常推进时，不再把所有承重腿当成完全相同的发动机。
-    // 脚还在身体前方时以接重为主；身体越过脚点、腿进入后蹬区以后，才逐渐承担主要推进。
-    // During positive drive, stance geometry decides how much each loaded leg contributes to propulsion.
     private const float StanceDriveMinimumWeight = .24f;
     private const float StanceDriveLeadTolerance = 10f;
     private const float StanceDriveFullTrail = 34f;
     private const float StanceDriveStressFloor = .58f;
 
-    // 正常 stance 仍然锁死 Contact；所谓抓地力只限制一条腿能传递多少水平推力。
-    // Exceeding traction therefore reduces force authority and raises release pressure instead of sliding the foot point.
+    // 正常 stance 仍然锁死 Contact；抓地不足只限制水平传力并提高换步压力，不允许脚点偷偷滑动。
+    // Traction failure limits horizontal force and raises release pressure without translating the locked foot contact.
     private const float TractionMinimumAuthority = .30f;
     private const float TractionFullQuality = 1.55f;
     private const float TractionStrainRise = .065f;
@@ -82,9 +80,6 @@ internal sealed class MantleCrabLocomotion
     internal float SmoothedMoveIntent => smoothedMoveIntent;
     internal float StridePhase => stridePhase;
     internal float MotionAmount => motionAmount;
-
-    // 暂时不使用正弦函数主动上下抬身体。甲壳的细微起伏现在应该来自真实承重转移。
-    // Do not force a sinusoidal body bob. Subtle shell motion should emerge from real load transfer.
     internal float BodyHeightRhythm => 0f;
 
     internal MantleCrabTraversalPlanner Traversal => traversal;
@@ -309,11 +304,14 @@ internal sealed class MantleCrabLocomotion
 
         float supportFactor = Mathf.Clamp01(qualitySum / 3.2f);
         float forwardAuthority = ForwardSupportAuthority(effectiveMove, axis);
+        float marginAuthority = SupportMarginAuthority(effectiveMove, axis);
+        float groundedAuthority = forwardAuthority * Mathf.Lerp(.70f, 1f, marginAuthority);
+
         float targetSpeed = effectiveMove *
                             MaxGroundSpeed *
                             Mathf.Lerp(.38f, .90f, supportFactor) *
-                            forwardAuthority;
-        float accelerationLimit = MaxGroundAcceleration * Mathf.Lerp(.55f, 1f, forwardAuthority);
+                            groundedAuthority;
+        float accelerationLimit = MaxGroundAcceleration * Mathf.Lerp(.50f, 1f, groundedAuthority);
         float requestedAcceleration = Mathf.Clamp(
             (targetSpeed - speed) * .060f,
             -accelerationLimit,
@@ -401,18 +399,11 @@ internal sealed class MantleCrabLocomotion
         stance = stance * stance * (3f - 2f * stance);
 
         float weight = Mathf.Lerp(StanceDriveMinimumWeight, 1f, stance);
-        float stress = StepStress(leg);
-        weight *= Mathf.Lerp(1f, StanceDriveStressFloor, stress);
+        weight *= Mathf.Lerp(1f, StanceDriveStressFloor, StepStress(leg));
         weight *= Mathf.Lerp(1f, .68f, Mathf.Clamp01(leg.TouchdownAbsorption));
         return Mathf.Max(.08f, weight);
     }
 
-    /// <summary>
-    /// 计算一条锁定脚当前能可靠传递多少水平推力。这里只返回力权限，不修改 Contact。
-    /// 地面法线越可信、腿越处于中间工作区、腿的水平杠杆越合理，抓地越完整。
-    ///
-    /// Computes traction authority for a locked stance foot without ever translating its contact point.
-    /// </summary>
     private float TractionMultiplier(MantleCrabLimb leg, Vector2 axis)
     {
         if (leg == null || !leg.Planted)
@@ -513,6 +504,68 @@ internal sealed class MantleCrabLocomotion
             ? Mathf.Max(ForwardSupportMinimumAuthority, .34f)
             : ForwardSupportMinimumAuthority;
         return Mathf.Lerp(minimumAuthority, 1f, established);
+    }
+
+    /// <summary>
+    /// 根据当前可靠脚点在 WalkAxis 上包住重心的余量，连续限制身体推进。
+    /// 这不是新的步态节拍，只是防止甲壳在下一只脚落稳之前把重心推到支撑区边缘之外。
+    /// </summary>
+    private float SupportMarginAuthority(float effectiveMove, Vector2 axis)
+    {
+        if (Mathf.Abs(effectiveMove) < .05f)
+            return 1f;
+
+        if (axis.sqrMagnitude <= .0001f)
+            axis = Vector2.right;
+        else
+            axis.Normalize();
+
+        Vector2 center = BodyCenter(out _);
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        float supportQuality = 0f;
+        int supports = 0;
+
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Planted || leg.Swinging)
+                continue;
+
+            float quality = EffectiveSupportQuality(leg);
+            if (quality < ReliableLoadThreshold)
+                continue;
+
+            float coordinate = Vector2.Dot(leg.Contact - center, axis);
+            min = Mathf.Min(min, coordinate);
+            max = Mathf.Max(max, coordinate);
+            supportQuality += quality;
+            supports++;
+        }
+
+        if (supports < 2 || supportQuality < .48f || min >= 0f || max <= 0f)
+            return SupportMarginMinimumAuthority;
+
+        float direction = Mathf.Sign(effectiveMove);
+        float frontMargin = direction > 0f ? max : -min;
+        float rearMargin = direction > 0f ? -min : max;
+        float scale = Mathf.Max(.65f, crab.ShellScale);
+
+        float front = Mathf.InverseLerp(
+            SupportMarginFrontNear * scale,
+            SupportMarginFrontFull * scale,
+            frontMargin);
+        float rear = Mathf.InverseLerp(
+            SupportMarginRearNear * scale,
+            SupportMarginRearFull * scale,
+            rearMargin);
+        float stable = Mathf.Clamp01(Mathf.Min(front, rear));
+        stable = stable * stable * (3f - 2f * stable);
+
+        float floor = traversal.Mode == MantleCrabTraversalMode.StepUp
+            ? Mathf.Max(SupportMarginMinimumAuthority, .44f)
+            : SupportMarginMinimumAuthority;
+        return Mathf.Lerp(floor, 1f, stable);
     }
 
     private void UpdateLegStress(Vector2 bodyVelocity)
