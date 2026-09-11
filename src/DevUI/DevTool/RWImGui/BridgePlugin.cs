@@ -200,14 +200,15 @@ internal static class DevToolFrontend
             float fontScale = ResolveUiFontScale(baseFontSize);
             float layoutScale = ResolveLayoutScale();
 
-            // Use one absolute visual font scale for the whole rebuilt UI. Do not feed the
-            // previous FontGlobalScale back into the next calculation; doing so makes repeated
-            // size changes drift or jump when a different atlas font is selected.
+            // Font size and widget geometry are driven from the same absolute presentation scale.
+            // This prevents large text from being laid out against stale small paddings/scrollbars.
             io.FontGlobalScale = fontScale;
 
             int pushedLayoutVars = PushScaledLayout(layoutScale);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, DevToolUiSettings.WindowOutlineWidth);
             ImGui.PushStyleColor(ImGuiCol.Text, DevToolUiSettings.TextColor);
             ImGui.PushStyleColor(ImGuiCol.TextDisabled, DevToolUiSettings.DisabledTextColor);
+            ImGui.PushStyleColor(ImGuiCol.Border, new System.Numerics.Vector4(0f, 0f, 0f, 1f));
             try
             {
                 // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
@@ -219,11 +220,13 @@ internal static class DevToolFrontend
                     FontSettingsWindow.Draw(io.DisplaySize);
                     DevToolOverlay.Draw(snapshot);
                 }
+
+                FloatingWindowSnap.EndFrame();
             }
             finally
             {
-                ImGui.PopStyleColor(2);
-                if (pushedLayoutVars > 0) ImGui.PopStyleVar(pushedLayoutVars);
+                ImGui.PopStyleColor(3);
+                ImGui.PopStyleVar(pushedLayoutVars + 1);
                 io.FontGlobalScale = oldGlobalScale;
                 if (pushedChineseFont) ImGui.PopFont();
             }
@@ -251,27 +254,26 @@ internal static class DevToolFrontend
     {
         if (baseFontSize <= 0.01f) return 1f;
         float scale = DevToolUiSettings.FontSize / baseFontSize;
-        return Math.Max(0.65f, Math.Min(2.5f, scale));
+        return Math.Max(0.65f, Math.Min(4.0f, scale));
     }
 
     private static float ResolveLayoutScale()
     {
-        float scale = DevToolUiSettings.FontSize / DevToolUiSettings.DefaultFontSize;
-        return Math.Max(0.70f, Math.Min(1.80f, scale));
+        float scale = DevToolUiSettings.FontSize / DevToolUiSettings.ReferenceFontSize;
+        return Math.Max(0.70f, Math.Min(3.50f, scale));
     }
 
     private static int PushScaledLayout(float scale)
     {
-        if (Math.Abs(scale - 1f) < 0.001f) return 0;
-
         ImGuiStylePtr style = ImGui.GetStyle();
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, style.WindowPadding * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, style.FramePadding * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, style.ItemSpacing * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, style.ItemInnerSpacing * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.IndentSpacing, style.IndentSpacing * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize, style.ScrollbarSize * scale);
         ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, style.GrabMinSize * scale);
-        return 6;
+        return 7;
     }
 
     private static unsafe bool TryPushChineseFont()
@@ -320,9 +322,9 @@ internal static class DevToolFrontend
 
             // Font size must never choose a different atlas font while the developer drags the
             // size slider. Weight chooses the family variant; baked size only breaks equal-weight
-            // ties against the stable default size. Visual size is handled exclusively by scale.
+            // ties against the stable reference size. Visual size is handled exclusively by scale.
             int weightDistance = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight);
-            float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.DefaultFontSize);
+            float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.ReferenceFontSize);
             if (weightDistance > bestWeightDistance ||
                 (weightDistance == bestWeightDistance && sizeDistance >= bestSizeDistance))
                 continue;
