@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
+using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -19,6 +20,7 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
+        BuiltinInspectorAdapters.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
