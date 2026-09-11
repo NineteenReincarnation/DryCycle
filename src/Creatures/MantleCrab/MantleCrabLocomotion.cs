@@ -3,29 +3,23 @@ using UnityEngine;
 namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>
-/// MantleCrab 的低层地面移动。
+/// MantleCrab 的基础地面移动。
 ///
-/// 这一版主动做减法：参考 Rain World 原版 Deer / MirosBird，步足负责提供“是否可靠支撑”的信息，
-/// 身体的基础承重和地面推进都尽量作用在整个甲壳上，而不是从单个腿根向 BodyChunk 注入不对称力矩。
-/// 正常步态暂时只允许一条腿处于 Swing，先保证站立和三足支撑稳定，再逐步恢复更复杂节律。
+/// 当前版本故意保持简单：脚负责固定落点和迈步，身体负责站稳和缓慢移动。
+/// 不再让腿部“质量分数”决定身体会不会塌，也不再把水平推进分配到不同腿根制造额外旋转。
 ///
-/// Simplified grounded locomotion. Feet describe support state; body-level support and propulsion move the shell
-/// without injecting artificial torque through individual leg anchors. Only one walking leg may swing at a time.
+/// Basic grounded locomotion. Feet own footholds and stepping; the shell owns stable standing and slow travel.
+/// Minor limb pose errors never reduce gravity support, and ordinary drive is applied to the whole shell.
 /// </summary>
 internal sealed class MantleCrabLocomotion
 {
     private const float StepUrgencyThreshold = .78f;
-    private const float MinimumSupportMargin = 12f;
+    private const float MinimumSupportMargin = 10f;
 
-    // 大型生物先慢下来。先把站立、落脚、三足支撑做稳定，再谈更快的节律。
-    // Keep cruise deliberately slow until standing and three-leg support are proven stable in game.
-    private const float MaxGroundSpeed = 1.10f;
-    private const float MaxGroundAcceleration = .035f;
-    private const float IntentResponse = .022f;
-    private const float DriveJerk = .0035f;
-
-    private const float ReliableSupportQuality = .18f;
-    private const int MinimumReliableSupportsForDrive = 3;
+    private const float MaxGroundSpeed = 1.05f;
+    private const float MaxGroundAcceleration = .032f;
+    private const float IntentResponse = .020f;
+    private const float DriveJerk = .0032f;
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
@@ -50,9 +44,6 @@ internal sealed class MantleCrabLocomotion
     internal MantleCrabPostureController Posture => posture;
     internal Vector2 WalkAxis => posture.WalkAxis;
     internal Vector2 SupportNormal => posture.SupportNormal;
-
-    // 保留给现有代码/调试接口。V3 暂时取消预卸载状态机。
-    // Compatibility surface: V3 intentionally has no pending unload state.
     internal int PendingStepIndex => -1;
 
     internal MantleCrabLocomotion(MantleCrab crab)
@@ -89,8 +80,8 @@ internal sealed class MantleCrabLocomotion
     internal float DesiredStandHeight(MantleCrabLimb leg) => traversal.DesiredStandHeight(leg);
 
     /// <summary>
-    /// V3 暂时取消预卸载/重新吃重控制器。Plant 的正常步足就是完整支撑，Swing 或失去接触就是 0。
-    /// 后续只有在基础移动重新通过实机测试后，才考虑把渐进承重以更简单的方式加回来。
+    /// 当前没有“部分承重”。脚踩住就是 1，抬起或失去接触就是 0。
+    /// 这是刻意模仿原版大型生物的宽容状态，而不是做连续力学评分。
     /// </summary>
     internal float SupportLoad(MantleCrabLimb leg)
     {
@@ -99,16 +90,13 @@ internal sealed class MantleCrabLocomotion
         return 1f;
     }
 
-    // 保留接口；复杂 Stress Manager 已从当前稳定性基线中移除。
-    // Compatibility method; the layered stress manager is deliberately absent from this baseline.
     internal float StepStress(MantleCrabLimb leg) => 0f;
 
-    internal float EffectiveSupportQuality(MantleCrabLimb leg)
-    {
-        if (leg == null || !leg.Planted || leg.Swinging)
-            return 0f;
-        return leg.SupportQuality(crab) * SupportLoad(leg);
-    }
+    /// <summary>
+    /// 保留这个接口给现有代码使用，但当前它只是“是否真的踩住”的二值结果。
+    /// 腿姿势是否难受只影响换步，不再影响身体基本站立。
+    /// </summary>
+    internal float EffectiveSupportQuality(MantleCrabLimb leg) => SupportLoad(leg);
 
     internal void UpdateStepPlanning()
     {
@@ -140,65 +128,57 @@ internal sealed class MantleCrabLocomotion
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
             return;
 
-        // 先回到最保守、最容易验证的大型四足基线：任何时刻最多只有一条腿离地。
-        // Return to the conservative vanilla-like baseline: at most one walking leg may be airborne.
+        // 不走的时候别为了“调整姿势”自己乱迈腿。
+        if (Mathf.Abs(smoothedMoveIntent) < .045f)
+            return;
+
+        // 一次只迈一条腿。
         for (int i = 0; i < crab.Legs.Length; i++)
-        {
             if (crab.Legs[i].Swinging)
                 return;
-        }
 
         if (startCooldown > 0)
             return;
 
-        // 四脚没有全部重新建立可靠接触时，不主动发起下一步。
-        // Do not start another step until all four feet have recovered a reliable planted contact.
-        int reliableSupports = CountReliableSupports();
-        if (reliableSupports < crab.Legs.Length)
+        // 四脚重新站稳以后才开始下一步。
+        if (CountGroundedFeet() < crab.Legs.Length)
             return;
 
         Vector2 axis = WalkAxis;
+        float travelSign = Mathf.Sign(smoothedMoveIntent);
         int candidate = -1;
         float bestUrgency = StepUrgencyThreshold;
 
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.Swinging)
-                continue;
-            if (!traversal.AllowLift(leg))
-                continue;
-
-            Vector2 anchor = crab.Anchor(leg);
-            float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
-            bool emergency = stretch > .85f;
-
-            if (stepCooldown[i] > 0 && !emergency)
+            if (!leg.Planted || leg.Swinging || !traversal.AllowLift(leg))
                 continue;
             if (!CanLift(i))
                 continue;
 
-            Vector2 desired = DesiredLanding(leg, anchor, axis, bodyVelocity);
-            float alongError = Mathf.Abs(Vector2.Dot(desired - leg.Contact, axis));
+            Vector2 anchor = crab.Anchor(leg);
+            float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
 
-            float urgency = alongError / Mathf.Max(18f, 30f * crab.ShellScale);
-            urgency += Mathf.InverseLerp(.70f, .86f, stretch) * 1.45f;
-            urgency += (1f - leg.SupportQuality(crab)) * .25f;
+            bool emergency = stretch > .875f;
+            if (stepCooldown[i] > 0 && !emergency)
+                continue;
+
+            // 只看两个主要原因：腿被拖到身体后面，以及腿快伸直。
+            Vector2 restOffset = TransformWalkingLocal(leg.RestTipOffset);
+            float currentAlong = Vector2.Dot(leg.Contact - anchor, axis) * travelSign;
+            float restAlong = Vector2.Dot(restOffset, axis) * travelSign;
+            float trailing = restAlong - currentAlong;
+
+            float urgency = Mathf.InverseLerp(4f * crab.ShellScale, 34f * crab.ShellScale, trailing) * 1.05f;
+            urgency += Mathf.InverseLerp(.72f, .89f, stretch) * 1.30f;
             urgency *= traversal.UrgencyMultiplier(leg);
 
-            // 只保留极弱节律偏好；稳定性和实际脚位拥有绝对优先级。
-            // Rhythm is only a tiny tie-breaker. Stability and real foot geometry own the step decision.
-            float phaseOffset = i == 0 || i == 3 ? 0f : Mathf.PI;
-            float rhythm = .5f + .5f * Mathf.Cos(stridePhase - phaseOffset);
-            urgency += (rhythm - .5f) * .05f * motionAmount;
-
+            // 只用很小的对角偏好打破平手，不让它变成固定节拍。
             if (lastStepIndex >= 0)
             {
                 int diagonal = 3 - lastStepIndex;
-                if (i == diagonal)
-                    urgency += .035f;
-                else if (leg.Side == crab.Legs[lastStepIndex].Side)
-                    urgency -= .025f;
+                if (i == diagonal) urgency += .04f;
             }
 
             if (urgency > bestUrgency)
@@ -222,11 +202,10 @@ internal sealed class MantleCrabLocomotion
         startCooldown = 10;
     }
 
-    internal void ApplyGroundForces(float effectiveGravity)
+    internal void ApplyGroundForces(float ignoredGravity)
     {
-        // 先由 V3 PostureController 做身体级重力补偿和弱姿态阻尼。
-        // V3 posture applies body-level gravity support and low-authority angle damping first.
-        posture.ApplySupportAndPosture(effectiveGravity, TurnIntent);
+        // PostureController 直接使用 crab.gravity；PhysicalObject.gravity 已经包含房间重力。
+        posture.ApplySupportAndPosture(crab.gravity, TurnIntent);
         StabilizeVerticalMotion();
 
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
@@ -235,8 +214,8 @@ internal sealed class MantleCrabLocomotion
             return;
         }
 
-        int reliableSupports = CountReliableSupports();
-        if (reliableSupports < 2)
+        int groundedFeet = CountGroundedFeet();
+        if (groundedFeet < 3)
         {
             driveAcceleration = Mathf.MoveTowards(driveAcceleration, 0f, DriveJerk * 1.5f);
             return;
@@ -247,47 +226,28 @@ internal sealed class MantleCrabLocomotion
         float speed = Vector2.Dot(velocity, axis);
         float effectiveMove = traversal.EffectiveMoveIntent(smoothedMoveIntent);
 
-        float qualitySum = 0f;
-        for (int i = 0; i < crab.Legs.Length; i++)
-            qualitySum += EffectiveSupportQuality(crab.Legs[i]);
-
-        if (qualitySum <= .05f)
-        {
-            driveAcceleration = Mathf.MoveTowards(driveAcceleration, 0f, DriveJerk * 1.5f);
-            return;
-        }
-
-        float supportFactor = Mathf.Clamp01(qualitySum / 3.2f);
-
-        // 三条可靠支撑是正常移动最低条件。只剩两脚时不继续拖着壳走，只允许速度自然衰减。
-        // Three reliable stance feet are the normal drive baseline; with only two, stop driving and settle.
-        float driveAuthority = reliableSupports >= MinimumReliableSupportsForDrive ? 1f : 0f;
-        float targetSpeed = effectiveMove *
-                            MaxGroundSpeed *
-                            Mathf.Lerp(.36f, .86f, supportFactor) *
-                            driveAuthority;
-
+        // 三脚时自动慢一点，四脚时才允许完整巡航。
+        float footingScale = groundedFeet >= 4 ? 1f : .48f;
+        float targetSpeed = effectiveMove * MaxGroundSpeed * footingScale;
         float requestedAcceleration = Mathf.Clamp(
             (targetSpeed - speed) * .055f,
             -MaxGroundAcceleration,
             MaxGroundAcceleration);
         driveAcceleration = Mathf.MoveTowards(driveAcceleration, requestedAcceleration, DriveJerk);
 
-        // 关键：推进作为整个刚性甲壳的 COM 加速度施加到全部 BodyChunk。
-        // 不再根据哪条腿承重把水平冲量打进某个腿根，因此普通行走推进本身不会制造旋转。
-        // Critical change: propulsion is a whole-shell COM acceleration, so walking drive itself injects no torque.
+        // 整个甲壳一起前进，不从某一条腿根单独推身体。
         Vector2 correction = axis * driveAcceleration;
         for (int i = 0; i < crab.bodyChunks.Length; i++)
             crab.bodyChunks[i].vel += correction;
     }
 
-    private int CountReliableSupports()
+    private int CountGroundedFeet()
     {
         int count = 0;
         for (int i = 0; i < crab.Legs.Length; i++)
         {
             MantleCrabLimb leg = crab.Legs[i];
-            if (leg.Planted && !leg.Swinging && EffectiveSupportQuality(leg) >= ReliableSupportQuality)
+            if (leg.Planted && !leg.Swinging)
                 count++;
         }
         return count;
@@ -295,14 +255,15 @@ internal sealed class MantleCrabLocomotion
 
     private void StabilizeVerticalMotion()
     {
-        if (crab.bodyChunks == null || CountReliableSupports() < 2 || posture.SeverelyUnstable)
+        if (crab.bodyChunks == null || CountGroundedFeet() < 2 || posture.SeverelyUnstable)
             return;
 
         Vector2 velocity = BodyVelocity();
         if (velocity.y <= 0f)
             return;
 
-        float maximumUpwardSpeed = traversal.Mode == MantleCrabTraversalMode.StepUp ? .66f : .30f;
+        // 只阻止再次被腿弹飞；正常下落完全不干涉。
+        float maximumUpwardSpeed = traversal.Mode == MantleCrabTraversalMode.StepUp ? .62f : .28f;
         float targetUpwardSpeed = Mathf.Min(velocity.y * .78f, maximumUpwardSpeed);
         float remove = velocity.y - targetUpwardSpeed;
         if (remove <= .001f)
@@ -319,11 +280,10 @@ internal sealed class MantleCrabLocomotion
         Vector2 bodyVelocity)
     {
         Vector2 rest = TransformWalkingLocal(leg.RestTipOffset);
-
         float inputLead = smoothedMoveIntent *
                           Mathf.Lerp(10f, 22f, Mathf.Abs(smoothedMoveIntent)) *
                           crab.ShellScale;
-        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 3.0f, -8f, 8f) * crab.ShellScale;
+        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 3f, -8f, 8f) * crab.ShellScale;
         Vector2 nominal = anchor + rest + axis * (inputLead + velocityLead);
         return traversal.AdjustLanding(leg, nominal, axis);
     }
@@ -342,7 +302,7 @@ internal sealed class MantleCrabLocomotion
                 continue;
 
             MantleCrabLimb leg = crab.Legs[i];
-            if (!leg.Planted || leg.Swinging || EffectiveSupportQuality(leg) < ReliableSupportQuality)
+            if (!leg.Planted || leg.Swinging)
                 continue;
 
             float coordinate = Vector2.Dot(leg.Contact - center, axis);
@@ -351,8 +311,6 @@ internal sealed class MantleCrabLocomotion
             supports++;
         }
 
-        // 四足生物抬一条腿以后必须确实剩下三条可靠支撑。
-        // A four-legged body may lift only when all three remaining contacts are reliable.
         if (supports < 3)
             return false;
 
