@@ -9,6 +9,7 @@ internal static class DevToolOverlay
 {
     private static string objectSearch = string.Empty;
     private static bool sceneTab;
+    private static int sceneSelectionAnchor = -1;
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
@@ -18,12 +19,15 @@ internal static class DevToolOverlay
         if (display.Y < 1f) display.Y = 768f;
 
         DrawTopBar(snapshot, display);
-        if (snapshot.FocusMode) return;
+        if (!snapshot.FocusMode)
+        {
+            DrawActivityBar(snapshot);
+            if (snapshot.BrowserOpen) DrawBrowser(snapshot, display);
+            if (snapshot.InspectorOpen) DrawInspector(snapshot, display);
+            DrawStatusBar(snapshot, display);
+        }
 
-        DrawActivityBar(snapshot);
-        if (snapshot.BrowserOpen) DrawBrowser(snapshot, display);
-        if (snapshot.InspectorOpen) DrawInspector(snapshot, display);
-        DrawStatusBar(snapshot, display);
+        HandlePlacement(snapshot, display, io);
     }
 
     private static void DrawTopBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -44,6 +48,12 @@ internal static class DevToolOverlay
         ImGui.TextDisabled("·");
         ImGui.SameLine();
         ImGui.Text(snapshot.ToolMode.ToString());
+
+        if (snapshot.PlacementActive)
+        {
+            ImGui.SameLine(0f, 16f);
+            ImGui.Text("Place: " + snapshot.PlacementType);
+        }
 
         ImGui.SameLine(0f, 20f);
         if (ImGui.Button("Save  Ctrl+S")) Send(EditorUiCommandKind.Save);
@@ -144,8 +154,16 @@ internal static class DevToolOverlay
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText("Search##DevToolObjectSearch", ref objectSearch, 128);
         ImGui.TextDisabled("@source   #tag   :category");
-        ImGui.Separator();
 
+        if (snapshot.PlacementActive)
+        {
+            ImGui.Separator();
+            ImGui.Text("Placing " + snapshot.PlacementType);
+            ImGui.TextDisabled("Left click room · Shift = repeat · Esc/right click = cancel");
+            if (ImGui.Button("Cancel placement")) Send(EditorUiCommandKind.CancelPlacement);
+        }
+
+        ImGui.Separator();
         string lastCategory = null;
         int matches = 0;
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
@@ -162,15 +180,10 @@ internal static class DevToolOverlay
                 ImGui.TextDisabled(lastCategory);
             }
 
-            string label = item.DisplayName + "##AddObject" + item.Type;
-            if (ImGui.Selectable(label, false))
-            {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                    EditorUiCommandKind.CreateObject,
-                    text: item.Type,
-                    x: snapshot.Inspector.HasSelection ? snapshot.Inspector.X : 683f,
-                    y: snapshot.Inspector.HasSelection ? snapshot.Inspector.Y : 384f));
-            }
+            bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
+            string label = item.DisplayName + "##PlaceObject" + item.Type;
+            if (ImGui.Selectable(label, selected))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(item.Source + " · " + item.Type);
         }
 
@@ -181,14 +194,42 @@ internal static class DevToolOverlay
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         ImGui.TextDisabled(objects.Length + " placed objects");
-        ImGui.Separator();
 
+        int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
+        if (selectedCount > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Duplicate##SceneSelection")) Send(EditorUiCommandKind.DuplicateSelection);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Delete##SceneSelection")) Send(EditorUiCommandKind.DeleteSelection);
+        }
+
+        ImGui.Separator();
+        ImGuiIOPtr io = ImGui.GetIO();
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
             string label = item.Type + "  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##SceneObject" + item.Index;
-            if (ImGui.Selectable(label, item.Selected))
+            if (!ImGui.Selectable(label, item.Selected)) continue;
+
+            if (io.KeyShift && sceneSelectionAnchor >= 0)
+            {
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                    EditorUiCommandKind.SelectObjectRange,
+                    index: item.Index,
+                    secondaryIndex: sceneSelectionAnchor,
+                    flag: io.KeyCtrl));
+            }
+            else if (io.KeyCtrl)
+            {
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
+                sceneSelectionAnchor = item.Index;
+            }
+            else
+            {
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
+                sceneSelectionAnchor = item.Index;
+            }
         }
     }
 
@@ -220,10 +261,46 @@ internal static class DevToolOverlay
                                  ImGuiWindowFlags.NoInputs;
         if (ImGui.Begin("##DevToolStatus", flags))
         {
-            int selected = 0;
-            EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
-            for (int i = 0; i < objects.Length; i++) if (objects[i].Selected) selected++;
-            ImGui.TextDisabled("Objects " + objects.Length + "   ·   Selected " + selected + "   ·   " + snapshot.Document);
+            int selected = snapshot.Inspector?.SelectionCount ?? 0;
+            string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
+            ImGui.TextDisabled("Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
+                               "   ·   " + snapshot.Document + placement);
+        }
+        ImGui.End();
+    }
+
+    private static void HandlePlacement(EditorPresentationSnapshot snapshot, Num.Vector2 display, ImGuiIOPtr io)
+    {
+        if (!snapshot.PlacementActive || snapshot.ToolMode != EditorToolMode.Objects) return;
+
+        bool overWindow = ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
+        if (!overWindow && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            Send(EditorUiCommandKind.CancelPlacement);
+            return;
+        }
+
+        if (!overWindow && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.PlaceObjectAtCursor,
+                flag: io.KeyShift));
+        }
+
+        Num.Vector2 mouse = io.MousePos;
+        Num.Vector2 size = new(230f, 44f);
+        Num.Vector2 pos = new(
+            Math.Min(Math.Max(8f, mouse.X + 18f), Math.Max(8f, display.X - size.X - 8f)),
+            Math.Min(Math.Max(8f, mouse.Y + 18f), Math.Max(8f, display.Y - size.Y - 8f)));
+        ImGui.SetNextWindowPos(pos, ImGuiCond.Always);
+        ImGui.SetNextWindowSize(size, ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0.88f);
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
+                                 ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoInputs;
+        if (ImGui.Begin("##DevToolPlacementHint", flags))
+        {
+            ImGui.Text("Place " + snapshot.PlacementType);
+            ImGui.TextDisabled(io.KeyShift ? "Click · continuous" : "Click · once   Shift · continuous");
         }
         ImGui.End();
     }
