@@ -151,6 +151,8 @@ internal static class MapEditorView
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("MapCanvas");
+
         Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
         if (canvasSize.X < 50f || canvasSize.Y < 50f)
