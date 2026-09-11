@@ -7,6 +7,7 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using ImGuiNET;
 using RWIMGUI.API;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -39,11 +40,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
         bool visible = snapshot.Available && DevToolSessionHub.IsCurrentSessionLive;
         DevToolFrontend.SetVisibleFromMainThread(visible);
+        DevToolFrontend.SetCursorModeFromMainThread(visible, EditorUiModeState.UseVanilla);
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        if (DevToolSessionHub.IsCurrentSessionLive)
+            Cursor.visible = true;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
@@ -107,6 +111,17 @@ internal static class DevToolFrontend
         }
 
         EnsureContext();
+    }
+
+    internal static void SetCursorModeFromMainThread(bool sessionVisible, bool vanillaMode)
+    {
+        if (!sessionVisible) return;
+
+        // Rain World forces the operating-system cursor visible when H opens DevUI. RWImGui
+        // already owns the editor pointer/hover presentation, so keeping both produces the
+        // doubled cursor and obscures tooltips. Only hide the OS cursor while New UI is the
+        // active presentation; Vanilla mode keeps Rain World's original behavior intact.
+        Cursor.visible = vanillaMode;
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
