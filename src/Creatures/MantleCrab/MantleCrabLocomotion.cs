@@ -11,13 +11,13 @@ namespace DryCycle.Creatures.MantleCrab;
 /// </summary>
 internal sealed class MantleCrabLocomotion
 {
-    private const float StepUrgencyThreshold = .92f;
+    private const float StepUrgencyThreshold = .78f;
     private const float MinimumSupportMargin = 12f;
-    private const float SecondStepProgress = .78f;
-    private const float MaxGroundSpeed = 2.2f;
-    private const float MaxGroundAcceleration = .10f;
-    private const float IntentResponse = .045f;
-    private const float DriveJerk = .0105f;
+    private const float SecondStepProgress = .86f;
+    private const float MaxGroundSpeed = 1.25f;
+    private const float MaxGroundAcceleration = .045f;
+    private const float IntentResponse = .025f;
+    private const float DriveJerk = .0045f;
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
@@ -35,7 +35,13 @@ internal sealed class MantleCrabLocomotion
     internal float SmoothedMoveIntent => smoothedMoveIntent;
     internal float StridePhase => stridePhase;
     internal float MotionAmount => motionAmount;
-    internal float BodyHeightRhythm => Mathf.Sin(stridePhase * 2f) * 1.15f * motionAmount * crab.ShellScale;
+
+    // 这一轮先取消明显的正弦上下弹跳。大型身体的起伏应主要来自真实负载转移，
+    // 后续再把“压腿/卸载”做成支撑驱动的细微动画，而不是用周期函数主动抬身体。
+    // Remove the obvious sinusoidal bob for now. A large body should derive vertical motion from
+    // real load transfer; later polish can reintroduce subtle compression from support state instead of a forced sine wave.
+    internal float BodyHeightRhythm => 0f;
+
     internal MantleCrabTraversalPlanner Traversal => traversal;
     internal MantleCrabPostureController Posture => posture;
     internal Vector2 WalkAxis => posture.WalkAxis;
@@ -79,22 +85,22 @@ internal sealed class MantleCrabLocomotion
         posture.UpdateFrame();
         posture.AdvanceRecoveryAnimation();
 
-        // 高层输入不直接变成腿的瞬时动作。大型身体需要先建立/卸掉推进负载。
-        // High-level intent is filtered before it reaches gait planning so a large body never snaps between full directions.
+        // 大型生物的运动指令要有明显建立负载的过程，不能一帧进入完整巡航。
+        // A large creature needs time to build and unload drive force instead of snapping into full travel.
         float targetMove = posture.SeverelyUnstable ? 0f : MoveIntent;
         smoothedMoveIntent = Mathf.MoveTowards(smoothedMoveIntent, targetMove, IntentResponse);
         motionAmount = Mathf.MoveTowards(
             motionAmount,
             Mathf.Abs(smoothedMoveIntent),
-            posture.SeverelyUnstable ? .10f : .032f);
+            posture.SeverelyUnstable ? .08f : .018f);
 
         Vector2 bodyVelocity = BodyVelocity();
         float groundSpeed = Mathf.Abs(Vector2.Dot(bodyVelocity, WalkAxis));
         if (motionAmount > .001f)
         {
-            // 节律只做很弱的换步偏好，稳定性判断永远拥有更高优先级。
-            // Rhythm provides only a weak preferred timing window; stability always has authority to override it.
-            float phaseRate = (.034f + Mathf.Clamp(groundSpeed, 0f, MaxGroundSpeed) * .018f) * motionAmount;
+            // 节律现在只是一条很慢的“机会窗口”，不应该把四足变成固定拍子。
+            // Rhythm is deliberately slow and remains only an opportunity window; stability still owns the actual step choice.
+            float phaseRate = (.018f + Mathf.Clamp(groundSpeed, 0f, MaxGroundSpeed) * .010f) * motionAmount;
             stridePhase = Mathf.Repeat(stridePhase + phaseRate, Mathf.PI * 2f);
         }
 
@@ -137,7 +143,10 @@ internal sealed class MantleCrabLocomotion
 
             Vector2 anchor = crab.Anchor(leg);
             float stretch = Vector2.Distance(anchor, leg.Contact) / Mathf.Max(1f, leg.Reach);
-            bool emergency = stretch > .89f;
+
+            // stance 脚现在不允许滑，所以必须更早安排换步，不能等到接近极限长度才处理。
+            // Stance contacts are now locked, so schedule the next step earlier instead of relying on late contact sliding.
+            bool emergency = stretch > .85f;
             if (stepCooldown[i] > 0 && !emergency)
                 continue;
             if (!CanLift(i))
@@ -145,24 +154,24 @@ internal sealed class MantleCrabLocomotion
 
             Vector2 desired = DesiredLanding(leg, anchor, axis, bodyVelocity);
             float alongError = Mathf.Abs(Vector2.Dot(desired - leg.Contact, axis));
-            float urgency = alongError / Mathf.Max(18f, 28f * crab.ShellScale);
-            urgency += Mathf.InverseLerp(.78f, .90f, stretch) * 1.25f;
-            urgency += (1f - leg.SupportQuality(crab)) * .35f;
+            float urgency = alongError / Mathf.Max(18f, 30f * crab.ShellScale);
+            urgency += Mathf.InverseLerp(.70f, .86f, stretch) * 1.45f;
+            urgency += (1f - leg.SupportQuality(crab)) * .30f;
             urgency *= traversal.UrgencyMultiplier(leg);
 
-            // 对角腿有相反的自然节律窗口，但只给很小的权重；粗糙地形仍可打破这个节奏。
-            // Diagonal pairs have opposite preferred windows, but the bias is intentionally small and terrain may break it.
+            // 对角腿只保留很弱的相位偏好。慢速大型生物允许地形和承重需要轻易打破节拍。
+            // Diagonal timing is only a weak bias. Terrain and load requirements may freely break the rhythm.
             float phaseOffset = i == 0 || i == 3 ? 0f : Mathf.PI;
             float rhythm = .5f + .5f * Mathf.Cos(stridePhase - phaseOffset);
-            urgency += (rhythm - .5f) * .16f * motionAmount;
+            urgency += (rhythm - .5f) * .10f * motionAmount;
 
             if (lastStepIndex >= 0)
             {
                 int diagonal = 3 - lastStepIndex;
                 if (i == diagonal)
-                    urgency += .12f;
+                    urgency += .08f;
                 else if (leg.Side == crab.Legs[lastStepIndex].Side)
-                    urgency -= .08f;
+                    urgency -= .06f;
             }
 
             if (urgency > bestUrgency)
@@ -183,14 +192,20 @@ internal sealed class MantleCrabLocomotion
 
         lastStepIndex = candidate;
         stepCooldown[candidate] = traversal.StepCooldown(steppingLeg);
-        startCooldown = 4;
+        startCooldown = 7;
     }
 
     internal void ApplyGroundForces(float effectiveGravity)
     {
-        // 姿态控制先负责站稳、负载转移和翻倒恢复；推进只负责沿地面切线产生速度。
-        // Posture owns support, load transfer and self-righting. Propulsion only owns grounded tangent speed.
+        // 姿态控制先负责站稳和负载转移；推进只负责沿地面切线产生速度。
+        // Posture owns support and load transfer. Propulsion only owns grounded tangent speed.
         posture.ApplySupportAndPosture(effectiveGravity, TurnIntent);
+
+        // 本轮先加一层保守的“大体型垂直稳定器”，专门压掉录像里的 pogo 起跳。
+        // 它不负责把身体抬到目标高度，只限制已经由支撑系统产生的过大向上 COM 速度。
+        // This conservative large-body vertical stabilizer suppresses the pogo launches seen in the recording.
+        // It never lifts the shell by itself; it only limits excessive upward COM velocity already produced by support.
+        StabilizeVerticalMotion();
 
         if (!crab.Consious || crab.room == null || crab.SupportingFeet < 2 || posture.SeverelyUnstable)
         {
@@ -213,14 +228,15 @@ internal sealed class MantleCrabLocomotion
         }
 
         float supportFactor = Mathf.Clamp01(qualitySum / 3.2f);
-        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.62f, 1f, supportFactor);
+
+        // 支撑越差越应该慢，而不是让剩下的两条腿拖着整个甲壳维持巡航速度。
+        // Weak support reduces speed instead of asking the remaining legs to drag the shell at full cruise.
+        float targetSpeed = effectiveMove * MaxGroundSpeed * Mathf.Lerp(.42f, .92f, supportFactor);
         float requestedAcceleration = Mathf.Clamp(
-            (targetSpeed - speed) * .095f,
+            (targetSpeed - speed) * .060f,
             -MaxGroundAcceleration,
             MaxGroundAcceleration);
 
-        // 推进力增加加加速度限制，换向时不会一帧从满制动跳到满加速。
-        // Propulsion is jerk-limited so reversals cannot jump from full braking to full drive in one frame.
         driveAcceleration = Mathf.MoveTowards(driveAcceleration, requestedAcceleration, DriveJerk);
 
         float totalMass = crab.TotalMass;
@@ -237,6 +253,27 @@ internal sealed class MantleCrabLocomotion
         }
     }
 
+    private void StabilizeVerticalMotion()
+    {
+        if (crab.bodyChunks == null || crab.SupportingFeet < 2 || posture.SeverelyUnstable)
+            return;
+
+        Vector2 velocity = BodyVelocity();
+        if (velocity.y <= 0f)
+            return;
+
+        // 上台阶允许略多一点垂直速度，其余情况下大型甲壳不应该被腿连续弹离地面。
+        // Step-up traversal gets a little more vertical freedom; otherwise the shell should not be launched by support legs.
+        float maximumUpwardSpeed = traversal.Mode == MantleCrabTraversalMode.StepUp ? .78f : .42f;
+        float targetUpwardSpeed = Mathf.Min(velocity.y * .82f, maximumUpwardSpeed);
+        float remove = velocity.y - targetUpwardSpeed;
+        if (remove <= .001f)
+            return;
+
+        for (int i = 0; i < crab.bodyChunks.Length; i++)
+            crab.bodyChunks[i].vel.y -= remove;
+    }
+
     private Vector2 DesiredLanding(
         MantleCrabLimb leg,
         Vector2 anchor,
@@ -244,10 +281,13 @@ internal sealed class MantleCrabLocomotion
         Vector2 bodyVelocity)
     {
         Vector2 rest = TransformWalkingLocal(leg.RestTipOffset);
+
+        // 步幅跟随新的慢速巡航一起缩小。更短的步长能让脚有时间完成抬起和落地，而不是大跨度追赶身体。
+        // Shorter stride projection matches the slower cruise and gives the limb time to visibly lift and settle.
         float inputLead = smoothedMoveIntent *
-                          Mathf.Lerp(18f, 36f, Mathf.Abs(smoothedMoveIntent)) *
+                          Mathf.Lerp(12f, 26f, Mathf.Abs(smoothedMoveIntent)) *
                           crab.ShellScale;
-        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 4.6f, -15f, 15f) * crab.ShellScale;
+        float velocityLead = Mathf.Clamp(Vector2.Dot(bodyVelocity, axis) * 3.4f, -10f, 10f) * crab.ShellScale;
         Vector2 nominal = anchor + rest + axis * (inputLead + velocityLead);
         return traversal.AdjustLanding(leg, nominal, axis);
     }
