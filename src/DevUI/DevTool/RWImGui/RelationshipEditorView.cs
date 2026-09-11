@@ -71,6 +71,8 @@ internal static class RelationshipEditorView
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("Relationships");
+
         ImGui.Text(DevToolUiSettings.T("主体：", "Primary: ") + (string.IsNullOrEmpty(snapshot.PrimaryCreature) ? DevToolUiSettings.T("<无>", "<none>") : snapshot.PrimaryCreature));
         ImGui.SameLine();
         ImGui.TextDisabled(DevToolUiSettings.T("点击任意方向进行检查/编辑", "click either direction to inspect/edit"));
@@ -101,7 +103,7 @@ internal static class RelationshipEditorView
             string name = string.IsNullOrEmpty(row.DisplayName) ? row.CreatureType : row.DisplayName;
             ImGui.TextUnformatted(name);
             if (ImGui.IsItemHovered() && !string.Equals(name, row.CreatureType, StringComparison.Ordinal))
-                ImGui.SetTooltip(row.CreatureType);
+                DevToolTooltip.Show(row.CreatureType);
 
             ImGui.SameLine(startX + nameWidth);
             DrawRelationButton(snapshot, row, EditorRelationshipDirection.PrimaryToOther, relationWidth);
