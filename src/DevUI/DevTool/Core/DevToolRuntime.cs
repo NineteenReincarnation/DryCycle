@@ -8,6 +8,7 @@ using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
+using DryCycle.DevUI.DevTool.Triggers;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -38,10 +39,13 @@ internal static class DevToolRuntime
         EditorUiCommandQueue.Clear();
         RoomEditorCommandQueue.Clear();
         SoundEditorCommandQueue.Clear();
+        TriggerEditorCommandQueue.Clear();
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
         SoundEditorPresentationHub.Clear();
+        TriggerEditorPresentationHub.Clear();
         SoundEditorStateHub.Reset();
+        TriggerEditorStateHub.Reset();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -68,6 +72,7 @@ internal static class DevToolRuntime
         EditorUiCommandQueue.Process(session);
         RoomEditorCommandQueue.Process(session);
         SoundEditorCommandQueue.Process(session);
+        TriggerEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
@@ -79,12 +84,14 @@ internal static class DevToolRuntime
             session.LegacyUiVisible == false &&
             ((session.ToolMode == EditorToolMode.Objects && self.activePage is ObjectsPage) ||
              (session.ToolMode == EditorToolMode.Room && self.activePage is RoomSettingsPage) ||
-             (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage));
+             (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage) ||
+             (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage));
         LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
         EditorPresentationHub.Publish(session);
         RoomEditorPresentationHub.Publish(session);
         SoundEditorPresentationHub.Publish(session);
+        TriggerEditorPresentationHub.Publish(session);
     }
 }
 
@@ -248,7 +255,8 @@ public sealed class EditorSession
 
     public void ToggleLegacyUi()
     {
-        if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room && ToolMode != EditorToolMode.Sound) return;
+        if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room &&
+            ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers) return;
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
