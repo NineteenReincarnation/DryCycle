@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -126,6 +127,24 @@ public static class MapEditorPresentationHub
                     FromRoomIndex = a,
                     ToRoomIndex = b
                 });
+            }
+        }
+
+        // CreatureVis owns Futile nodes directly rather than normal DevUINodes, so the
+        // generic legacy-control hider cannot reach them. Hide only while the rebuilt map
+        // workspace is active. Vanilla CreatureVis.Update restores its own visibility on the
+        // next frame after switching back to Vanilla UI.
+        if (EditorInputRouter.FrontendAttached && !EditorUiModeState.UseVanilla &&
+            page.creatureVisualizations != null)
+        {
+            for (int i = 0; i < page.creatureVisualizations.Count; i++)
+            {
+                MapPage.CreatureVis vis = page.creatureVisualizations[i];
+                if (vis == null) continue;
+                if (vis.label != null) vis.label.isVisible = false;
+                if (vis.label2 != null) vis.label2.isVisible = false;
+                if (vis.sprite != null) vis.sprite.isVisible = false;
+                if (vis.sprite2 != null) vis.sprite2.isVisible = false;
             }
         }
 
