@@ -41,6 +41,7 @@ internal static class DB_RainWorldHooks
         On.FliesRoomAI.FlyEmergeFromHive += Emerge;
         On.Fly.Burrowed += Burrow;
         On.FlyAI.Update += UpdateAI;
+        On.FlyAI.FleeFromRainUpdate += FleeFromRain;
         On.FlyAI.UpdateThreats += Threats;
         On.FlyAI.ConsiderOtherFly += ConsiderOtherFly;
         On.FlyAI.IdleUpdate += Idle;
@@ -59,6 +60,7 @@ internal static class DB_RainWorldHooks
         On.FliesRoomAI.FlyEmergeFromHive -= Emerge;
         On.Fly.Burrowed -= Burrow;
         On.FlyAI.Update -= UpdateAI;
+        On.FlyAI.FleeFromRainUpdate -= FleeFromRain;
         On.FlyAI.UpdateThreats -= Threats;
         On.FlyAI.ConsiderOtherFly -= ConsiderOtherFly;
         On.FlyAI.IdleUpdate -= Idle;
@@ -119,6 +121,9 @@ internal static class DB_RainWorldHooks
     {
         if (self is DB_Creature desert)
         {
+            // Hold the ingress slot until Burrowed is actually reached, then free it for the next
+            // queued bat before vanilla removes this creature from the realized room.
+            DB_HiveTraffic.Forget(desert);
             desert.Feeding.ClearTransient();
             DB_SocialRuntime.CancelForPriority(desert, "burrow priority");
             DB_NeutralBehaviorRuntime.Forget(desert);
@@ -136,14 +141,29 @@ internal static class DB_RainWorldHooks
             return;
         }
 
+        bool wasInHive = self.inHive.Contains(fly);
+        DB_HiveTraffic.Forget(desert);
         desert.Feeding.ClearTransient();
         DB_SocialRuntime.CancelForPriority(desert, "emergence priority");
         DB_NeutralBehaviorRuntime.Forget(desert);
         DB_SignalRuntime.Forget(desert);
         DB_EnvironmentRuntime.Forget(desert);
         desert.DesertState.InHive = false;
-        try { orig(self, fly); }
-        finally { desert.DesertState.InHive = self.inHive.Contains(fly); }
+        try
+        {
+            orig(self, fly);
+        }
+        finally
+        {
+            bool stillInHive = self.inHive.Contains(fly);
+            desert.DesertState.InHive = stillInHive;
+
+            // Every successful BatHive exit, including an explicit Travel departure, receives the
+            // same exclusive clearance corridor. The old room queue was the only caller and left
+            // travel-triggered exits without emergence lifecycle ownership.
+            if (wasInHive && !stillInHive && !desert.dead && desert.room == self.room)
+                desert.Emergence.BeginHiveDeparture();
+        }
     }
 
     private static void UpdateAI(On.FlyAI.orig_Update orig, FlyAI self)
@@ -395,6 +415,61 @@ internal static class DB_RainWorldHooks
 
         orig(self);
         return true;
+    }
+
+    /// <summary>
+    /// Vanilla FleeFromRainUpdate sends every fly in the room toward its nearest BatHive at once.
+    /// Desert Batflies preserve the same native Dijkstra choice, but submit the final local goal
+    /// through DB_FlightMotor so DB_HiveTraffic can serialize the physical ingress corridor.
+    /// </summary>
+    private static void FleeFromRain(On.FlyAI.orig_FleeFromRainUpdate orig, FlyAI self)
+    {
+        if (self.fly is not DB_Creature desert || self.room == null)
+        {
+            orig(self);
+            return;
+        }
+
+        self.afraid = 2f;
+        if (self.room.hives == null || self.room.hives.Length == 0)
+        {
+            // No local BatHive exists, so preserve vanilla migration-direction escape exactly.
+            orig(self);
+            return;
+        }
+
+        if (self.followingDijkstraMap < self.room.abstractRoom.nodes.Length)
+        {
+            int bestMap = -1;
+            int bestDistance = int.MaxValue;
+            for (int i = 0; i < self.room.hives.Length; i++)
+            {
+                if (self.room.hives[i] == null || self.room.hives[i].Length == 0) continue;
+                int map = self.room.exitAndDenIndex.Length + i;
+                int distance = self.room.aimap.ExitDistanceForCreature(
+                    self.fly.abstractCreature.pos.Tile,
+                    map,
+                    self.Template);
+                if (distance < 0 || distance >= bestDistance) continue;
+                bestDistance = distance;
+                bestMap = map;
+            }
+
+            if (bestMap >= 0)
+            {
+                self.leaveRoomDijkstra = -1;
+                self.followingDijkstraMap = bestMap;
+            }
+        }
+
+        if (self.followingDijkstraMap < 0) return;
+        var nextGoal = self.ProgressLocalGoalAlongDijkstraMap(
+            self.localGoal,
+            self.followingDijkstraMap);
+        DB_FlightMotor.TryGuideNative(
+            desert,
+            DB_BehaviorOwner.NativeSpecial,
+            nextGoal);
     }
 
     private static void CompleteR3Frame(
