@@ -1,6 +1,5 @@
 using DryCycle.Creatures.Platforming;
 using DryCycle.Framework.Creature.Core;
-using CreatureTemplateBuilder = DryCycle.Registration.CreatureTemplateBuilder;
 
 namespace DryCycle.Creatures.MantleCrab;
 
@@ -29,14 +28,13 @@ internal static class MantleCrabDefinition
 
     private static CreatureTemplate CreateTemplate()
     {
-        CreatureTemplate template = new CreatureTemplateBuilder(MantleCrabEnums.Type, "Mantle Crab")
-        {
-            // 这里只开启 AI 生命周期，让临时测试脑能够驱动现有 Locomotion；不启用 AIMap 或正式寻路。
-            // Only enable the AI lifecycle so the temporary test brain can drive Locomotion; no AIMap or production pathing is enabled.
-            HasAI = true,
-            RequireAIMap = false,
-            DoPreBakedPathing = false
-        }.Build();
+        // 这里只开启 AI 生命周期，让临时测试脑能够驱动现有 Locomotion；不启用 AIMap 或正式寻路。
+        // Only enable the AI lifecycle so the temporary test brain can drive Locomotion; no AIMap or production pathing is enabled.
+        CreatureTemplate template = new CreatureTemplateBuilder(MantleCrabEnums.Type)
+            .Name("Mantle Crab")
+            .AI()
+            .RequireAIMap(false)
+            .Build();
 
         template.grasps = 0;
         template.bodySize = 6f;
