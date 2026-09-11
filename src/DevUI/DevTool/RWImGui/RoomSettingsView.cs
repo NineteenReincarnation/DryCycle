@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Preview;
 using DryCycle.DevUI.DevTool.Room;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -36,7 +37,11 @@ internal static class RoomSettingsView
         DrawSectionButton(Section.Templates, DevToolUiSettings.T("模板", "Templates"));
         DrawSectionButton(Section.Effects, DevToolUiSettings.T("效果", "Effects"));
 
-        if (section != Section.Effects || !snapshot.Available) return;
+        if (section != Section.Effects || !snapshot.Available)
+        {
+            EffectPreviewIntentHub.ClearHover();
+            return;
+        }
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("添加效果", "ADD EFFECT"), BrowserBodyFontScale);
         DevToolWidgets.MutedText(DevToolUiSettings.T("搜索", "SEARCH"));
@@ -48,6 +53,7 @@ internal static class RoomSettingsView
         string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
         string lastCategory = null;
         int matches = 0;
+        bool effectHovered = false;
         for (int i = 0; i < available.Length; i++)
         {
             string type = available[i];
@@ -62,13 +68,25 @@ internal static class RoomSettingsView
                     DevToolWidgets.SourceHeader(category, EffectSourceColor(category), 1.52f, BrowserBodyFontScale);
             }
 
-            if (ImGui.Selectable(type + "##RoomAddEffect" + type, false))
+            bool clicked = ImGui.Selectable(type + "##RoomAddEffect" + type, false);
+            bool hovered = ImGui.IsItemHovered();
+            if (clicked)
             {
+                effectHovered = true;
+                EffectPreviewIntentHub.SuppressForCommit(type);
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                     RoomEditorCommandKind.AddEffect,
                     key: type));
             }
+            else if (hovered)
+            {
+                effectHovered = true;
+                EffectPreviewIntentHub.Hover(type);
+            }
         }
+
+        if (!effectHovered)
+            EffectPreviewIntentHub.ClearHover();
 
         if (matches == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的效果。", "No matching effects."));
