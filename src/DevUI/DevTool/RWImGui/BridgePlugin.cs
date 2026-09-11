@@ -37,14 +37,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
         bool sessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
-        bool rebuiltVisible = sessionVisible &&
-                              !EditorUiModeState.UseVanilla &&
-                              !EditorUiModeState.OverlayHidden;
 
-        // Vanilla mode and Escape-hidden mode release the RWImGUI context completely. This is
-        // important for Warp Menu and other RWImGUI consumers: an invisible DryCycle editor
-        // must not keep ownership of their mouse/keyboard input context.
-        DevToolFrontend.SetVisibleFromMainThread(rebuiltVisible);
+        // Keep the RWImGui frontend alive in Vanilla presentation mode so the tiny New UI /
+        // Vanilla switch remains reachable. Escape-hidden mode still releases the context so
+        // Warp Menu and other RWImGui consumers can own input without interference.
+        bool frontendVisible = sessionVisible && !EditorUiModeState.OverlayHidden;
+        DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
     }
 
     private void OnDisable()
@@ -179,7 +177,7 @@ internal static class DevToolFrontend
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
-        if (!visible || !snapshot.Available || EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
+        if (!visible || !snapshot.Available || EditorUiModeState.OverlayHidden)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -198,20 +196,34 @@ internal static class DevToolFrontend
 
             bool pushedChineseFont = TryPushChineseFont();
             float oldGlobalScale = io.FontGlobalScale;
-            float baseFontSize = ResolveActiveBaseFontSize(oldGlobalScale);
-            io.FontGlobalScale = oldGlobalScale * ResolveUiFontScale(baseFontSize);
+            float baseFontSize = ResolveActiveBaseFontSize(pushedChineseFont);
+            float fontScale = ResolveUiFontScale(baseFontSize);
+            float layoutScale = ResolveLayoutScale();
 
+            // Use one absolute visual font scale for the whole rebuilt UI. Do not feed the
+            // previous FontGlobalScale back into the next calculation; doing so makes repeated
+            // size changes drift or jump when a different atlas font is selected.
+            io.FontGlobalScale = fontScale;
+
+            int pushedLayoutVars = PushScaledLayout(layoutScale);
             ImGui.PushStyleColor(ImGuiCol.Text, DevToolUiSettings.TextColor);
             ImGui.PushStyleColor(ImGuiCol.TextDisabled, DevToolUiSettings.DisabledTextColor);
             try
             {
+                // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
+                // presentation hides rebuilt editor panels, not the control used to return.
                 UiModeSwitch.Draw();
-                FontSettingsWindow.Draw(io.DisplaySize);
-                DevToolOverlay.Draw(snapshot);
+
+                if (!EditorUiModeState.UseVanilla)
+                {
+                    FontSettingsWindow.Draw(io.DisplaySize);
+                    DevToolOverlay.Draw(snapshot);
+                }
             }
             finally
             {
                 ImGui.PopStyleColor(2);
+                if (pushedLayoutVars > 0) ImGui.PopStyleVar(pushedLayoutVars);
                 io.FontGlobalScale = oldGlobalScale;
                 if (pushedChineseFont) ImGui.PopFont();
             }
@@ -226,12 +238,13 @@ internal static class DevToolFrontend
         }
     }
 
-    private static float ResolveActiveBaseFontSize(float oldGlobalScale)
+    private static unsafe float ResolveActiveBaseFontSize(bool pushedChineseFont)
     {
-        float rendered = ImGui.GetFontSize();
-        if (oldGlobalScale > 0.01f)
-            rendered /= oldGlobalScale;
-        return rendered > 0.01f ? rendered : 13f;
+        if (pushedChineseFont && cjkFont.NativePtr != null && cjkFont.FontSize > 0.01f)
+            return cjkFont.FontSize;
+
+        ImFontPtr active = ImGui.GetFont();
+        return active.NativePtr != null && active.FontSize > 0.01f ? active.FontSize : 13f;
     }
 
     private static float ResolveUiFontScale(float baseFontSize)
@@ -239,6 +252,26 @@ internal static class DevToolFrontend
         if (baseFontSize <= 0.01f) return 1f;
         float scale = DevToolUiSettings.FontSize / baseFontSize;
         return Math.Max(0.65f, Math.Min(2.5f, scale));
+    }
+
+    private static float ResolveLayoutScale()
+    {
+        float scale = DevToolUiSettings.FontSize / DevToolUiSettings.DefaultFontSize;
+        return Math.Max(0.70f, Math.Min(1.80f, scale));
+    }
+
+    private static int PushScaledLayout(float scale)
+    {
+        if (Math.Abs(scale - 1f) < 0.001f) return 0;
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, style.FramePadding * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, style.ItemSpacing * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, style.ItemInnerSpacing * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.IndentSpacing, style.IndentSpacing * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize, style.ScrollbarSize * scale);
+        ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, style.GrabMinSize * scale);
+        return 6;
     }
 
     private static unsafe bool TryPushChineseFont()
@@ -277,19 +310,25 @@ internal static class DevToolFrontend
         }
 
         FontCandidate best = null;
-        float bestScore = float.MaxValue;
+        int bestWeightDistance = int.MaxValue;
+        float bestSizeDistance = float.MaxValue;
         HashSet<int> weights = new();
         for (int i = 0; i < CjkFonts.Count; i++)
         {
             FontCandidate candidate = CjkFonts[i];
             weights.Add(candidate.Weight);
 
-            // Weight is the primary choice. Font size only breaks ties because final visual size
-            // is controlled independently through FontGlobalScale.
-            float score = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight) * 0.1f +
-                          Math.Abs(candidate.Font.FontSize - DevToolUiSettings.FontSize);
-            if (score >= bestScore) continue;
-            bestScore = score;
+            // Font size must never choose a different atlas font while the developer drags the
+            // size slider. Weight chooses the family variant; baked size only breaks equal-weight
+            // ties against the stable default size. Visual size is handled exclusively by scale.
+            int weightDistance = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight);
+            float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.DefaultFontSize);
+            if (weightDistance > bestWeightDistance ||
+                (weightDistance == bestWeightDistance && sizeDistance >= bestSizeDistance))
+                continue;
+
+            bestWeightDistance = weightDistance;
+            bestSizeDistance = sizeDistance;
             best = candidate;
         }
 
