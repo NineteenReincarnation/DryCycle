@@ -49,7 +49,7 @@ internal static class TriggerEditorView
         }
 
         ImGui.Text(selected.Type);
-        ImGui.TextDisabled(selected.EventType.Length == 0 ? "No event assigned" : "Event · " + selected.EventType);
+        ImGui.TextDisabled(selected.Event?.HasEvent == true ? "Event · " + selected.Event.Type : "No event assigned");
         ImGui.Separator();
 
         ImGui.TextDisabled("ACTIVATION");
@@ -85,11 +85,7 @@ internal static class TriggerEditorView
         DrawSlugcats(snapshot, selected);
 
         ImGui.Separator();
-        ImGui.TextDisabled("EVENT");
-        if (string.IsNullOrEmpty(selected.EventType))
-            ImGui.TextDisabled("No event. Event sub-editor is the next migration layer.");
-        else
-            ImGui.TextWrapped(selected.EventType);
+        DrawEventEditor(snapshot, selected);
 
         ImGui.Separator();
         if (ImGui.Button("Delete Trigger"))
@@ -128,11 +124,193 @@ internal static class TriggerEditorView
         {
             EditorTriggerSnapshot trigger = triggers[i];
             string label = trigger.Type;
-            if (!string.IsNullOrEmpty(trigger.EventType)) label += "  →  " + trigger.EventType;
+            if (trigger.Event?.HasEvent == true) label += "  →  " + trigger.Event.Type;
             if (ImGui.Selectable(label + "##TriggerScene" + trigger.Index, trigger.Selected))
                 TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Select, trigger.Index));
         }
     }
+
+    private static void DrawEventEditor(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
+    {
+        ImGui.TextDisabled("EVENT");
+        EditorTriggeredEventSnapshot value = trigger.Event ?? new EditorTriggeredEventSnapshot();
+
+        string preview = value.HasEvent ? value.Type : "None";
+        if (ImGui.BeginCombo("Type##TriggerEventType", preview))
+        {
+            bool noneSelected = !value.HasEvent;
+            if (ImGui.Selectable("None##TriggerEventNone", noneSelected))
+                TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.ClearEvent, trigger.Index));
+            if (noneSelected) ImGui.SetItemDefaultFocus();
+
+            string[] eventTypes = snapshot.EventTypes ?? Array.Empty<string>();
+            for (int i = 0; i < eventTypes.Length; i++)
+            {
+                string type = eventTypes[i];
+                bool selected = value.HasEvent && string.Equals(value.Type, type, StringComparison.Ordinal);
+                if (ImGui.Selectable(type + "##TriggerEventType" + i, selected))
+                    TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
+                        TriggerEditorCommandKind.SetEventType,
+                        index: trigger.Index,
+                        text: type));
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        if (!value.HasEvent)
+        {
+            ImGui.TextDisabled("Choose an event type to configure this trigger.");
+            return;
+        }
+
+        if (string.Equals(value.Type, "MusicEvent", StringComparison.Ordinal))
+        {
+            DrawMusicEvent(snapshot, trigger, value);
+            return;
+        }
+
+        if (string.Equals(value.Type, "StopMusicEvent", StringComparison.Ordinal))
+        {
+            DrawStopMusicEvent(snapshot, trigger, value);
+            return;
+        }
+
+        if (string.Equals(value.Type, "ShowProjectedImageEvent", StringComparison.Ordinal))
+        {
+            DrawProjectedImageEvent(trigger, value);
+            return;
+        }
+
+        ImGui.TextWrapped(value.Type);
+        ImGui.TextDisabled("This event has no built-in Rain World parameters exposed here.");
+        ImGui.TextDisabled("If a mod adds custom DevInterface controls, switch to Vanilla UI to edit them.");
+    }
+
+    private static void DrawMusicEvent(
+        EditorTriggerPresentationSnapshot snapshot,
+        EditorTriggerSnapshot trigger,
+        EditorTriggeredEventSnapshot value)
+    {
+        ImGui.TextDisabled("MUSIC");
+        DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, "Song", value.SongName);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Volume, "Volume", value.Volume, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeInSeconds, "Fade in (seconds)", value.FadeInSeconds, 0f, 15f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, "Priority", value.Priority, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.DroneTolerance, "Drone tolerance", value.DroneTolerance, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.MaxThreatLevel, "Fade out at threat", value.MaxThreatLevel, 0f, 1f);
+        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.RoomsRange, "Room transitions", value.RoomsRange, 0, 39, "Unlimited");
+        DrawOptionalEventInt(trigger.Index, TriggerEventEditorKeys.CyclesRest, "Rest cycles", value.CyclesRest, 0, 79, "One time");
+
+        bool loop = value.Loop;
+        if (ImGui.Checkbox("Loop##TriggerEventLoop", ref loop))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.Loop,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: loop));
+
+        bool onePerCycle = value.OneSongPerCycle;
+        if (ImGui.Checkbox("One song per cycle##TriggerEventOnePerCycle", ref onePerCycle))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.OneSongPerCycle,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: onePerCycle));
+
+        bool stopAtDeath = value.StopAtDeath;
+        if (ImGui.Checkbox("Stop at death##TriggerEventStopDeath", ref stopAtDeath))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.StopAtDeath,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: stopAtDeath));
+
+        bool stopAtGate = value.StopAtGate;
+        if (ImGui.Checkbox("Stop at gate##TriggerEventStopGate", ref stopAtGate))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.StopAtGate,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: stopAtGate));
+    }
+
+    private static void DrawStopMusicEvent(
+        EditorTriggerPresentationSnapshot snapshot,
+        EditorTriggerSnapshot trigger,
+        EditorTriggeredEventSnapshot value)
+    {
+        ImGui.TextDisabled("STOP MUSIC");
+
+        string mode = value.StopMode ?? string.Empty;
+        if (ImGui.BeginCombo("Stop mode##TriggerStopMode", FriendlyStopMode(mode)))
+        {
+            DrawStopModeOption(trigger.Index, mode, "AllSongs", "Stop all songs");
+            DrawStopModeOption(trigger.Index, mode, "SpecificSong", "Stop specific song");
+            DrawStopModeOption(trigger.Index, mode, "AllButSpecific", "Stop all but specific song");
+            ImGui.EndCombo();
+        }
+
+        // Preserve custom ExtEnum values from other mods instead of coercing them into one
+        // of the three vanilla modes. A custom value can still be edited as text.
+        DrawEventString(trigger.Index, TriggerEventEditorKeys.StopMode, "Custom mode", mode);
+
+        if (!string.Equals(mode, "AllSongs", StringComparison.Ordinal))
+            DrawSongCombo(snapshot, trigger.Index, TriggerEventEditorKeys.SongName, "Song", value.SongName);
+
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.Priority, "Priority", value.Priority, 0f, 1f);
+        DrawEventFloat(trigger.Index, TriggerEventEditorKeys.FadeOutSeconds, "Fade out (seconds)", value.FadeOutSeconds, 0f, 30f);
+    }
+
+    private static void DrawProjectedImageEvent(EditorTriggerSnapshot trigger, EditorTriggeredEventSnapshot value)
+    {
+        ImGui.TextDisabled("PROJECTED IMAGE");
+
+        bool afterEncounter = value.AfterEncounter;
+        if (ImGui.Checkbox("After encounter##TriggerProjectedAfter", ref afterEncounter))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.AfterEncounter,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: afterEncounter));
+
+        bool directionOnly = value.OnlyWhenShowingDirection;
+        if (ImGui.Checkbox("Only when showing direction##TriggerProjectedDirection", ref directionOnly))
+            SendEventValue(trigger.Index, TriggerEventEditorKeys.OnlyWhenShowingDirection,
+                new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: directionOnly));
+
+        DrawEventInt(trigger.Index, TriggerEventEditorKeys.FromCycle, "From cycle", value.FromCycle, 0, 9999);
+    }
+
+    private static void DrawSongCombo(
+        EditorTriggerPresentationSnapshot snapshot,
+        int triggerIndex,
+        string key,
+        string label,
+        string current)
+    {
+        current ??= string.Empty;
+        if (ImGui.BeginCombo(label + "##TriggerEventSong" + key, string.IsNullOrEmpty(current) ? "NO SONG" : current))
+        {
+            string[] songs = snapshot.SongNames ?? Array.Empty<string>();
+            for (int i = 0; i < songs.Length; i++)
+            {
+                string song = songs[i];
+                bool selected = string.Equals(song, current, StringComparison.Ordinal);
+                if (ImGui.Selectable(song + "##TriggerSong" + key + i, selected))
+                    SendEventValue(triggerIndex, key,
+                        new EditorPropertyValue(EditorPropertyKind.String, text: song));
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        // The current song may come from a mod and therefore not exist in vanilla's discovered
+        // list. Keep a text path so such values remain editable rather than being discarded.
+        DrawEventString(triggerIndex, key, "Song ID", current);
+    }
+
+    private static void DrawStopModeOption(int triggerIndex, string current, string value, string label)
+    {
+        bool selected = string.Equals(current, value, StringComparison.Ordinal);
+        if (ImGui.Selectable(label + "##TriggerStopMode" + value, selected))
+            SendEventValue(triggerIndex, TriggerEventEditorKeys.StopMode,
+                new EditorPropertyValue(EditorPropertyKind.String, text: value));
+        if (selected) ImGui.SetItemDefaultFocus();
+    }
+
+    private static string FriendlyStopMode(string mode) => mode switch
+    {
+        "AllSongs" => "Stop all songs",
+        "SpecificSong" => "Stop specific song",
+        "AllButSpecific" => "Stop all but specific song",
+        _ => string.IsNullOrEmpty(mode) ? "Unknown" : mode
+    };
 
     private static void DrawUpperCycle(EditorTriggerSnapshot trigger)
     {
@@ -140,7 +318,7 @@ internal static class TriggerEditorView
         bool editedNoUpper = noUpper;
         if (ImGui.Checkbox("No upper cycle##TriggerNoUpper", ref editedNoUpper))
         {
-            int next = editedNoUpper ? -1 : Math.Max(trigger.ActiveFromCycle, trigger.ActiveFromCycle);
+            int next = editedNoUpper ? -1 : trigger.ActiveFromCycle;
             SendValue(trigger.Index, TriggerEditorKeys.ActiveToCycle,
                 new EditorPropertyValue(EditorPropertyKind.Integer, integer: next));
         }
@@ -254,6 +432,65 @@ internal static class TriggerEditorView
             StringEdits[stateKey] = current ?? string.Empty;
     }
 
+    private static void DrawEventFloat(int triggerIndex, string key, string label, float current, float min, float max)
+    {
+        string stateKey = "event:" + triggerIndex + ":" + key;
+        float value = Get(FloatEdits, stateKey, current);
+        bool changed = ImGui.SliderFloat(label + "##Trigger" + stateKey, ref value, min, max, "%.3f");
+        FloatEdits[stateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+        else if (!changed && !ImGui.IsItemActive())
+            FloatEdits[stateKey] = current;
+    }
+
+    private static void DrawEventInt(int triggerIndex, string key, string label, int current, int min, int max)
+    {
+        string stateKey = "event:" + triggerIndex + ":" + key;
+        int value = Get(IntEdits, stateKey, current);
+        bool changed = ImGui.InputInt(label + "##Trigger" + stateKey, ref value);
+        value = Math.Max(min, Math.Min(max, value));
+        IntEdits[stateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+        else if (!changed && !ImGui.IsItemActive())
+            IntEdits[stateKey] = current;
+    }
+
+    private static void DrawOptionalEventInt(
+        int triggerIndex,
+        string key,
+        string label,
+        int current,
+        int min,
+        int max,
+        string negativeLabel)
+    {
+        bool negative = current < 0;
+        bool editedNegative = negative;
+        if (ImGui.Checkbox(negativeLabel + "##TriggerOptional" + triggerIndex + key, ref editedNegative))
+        {
+            int next = editedNegative ? -1 : min;
+            SendEventValue(triggerIndex, key,
+                new EditorPropertyValue(EditorPropertyKind.Integer, integer: next));
+        }
+
+        if (!negative)
+            DrawEventInt(triggerIndex, key, label, current, min, max);
+    }
+
+    private static void DrawEventString(int triggerIndex, string key, string label, string current)
+    {
+        string stateKey = "event:" + triggerIndex + ":" + key;
+        string value = Get(StringEdits, stateKey, current ?? string.Empty);
+        bool changed = ImGui.InputText(label + "##Trigger" + stateKey, ref value, 256);
+        StringEdits[stateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.String, text: value));
+        else if (!changed && !ImGui.IsItemActive())
+            StringEdits[stateKey] = current ?? string.Empty;
+    }
+
     private static EditorTriggerSnapshot FindSelected(EditorTriggerPresentationSnapshot snapshot)
     {
         EditorTriggerSnapshot[] triggers = snapshot.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
@@ -264,6 +501,13 @@ internal static class TriggerEditorView
     private static void SendValue(int index, string key, EditorPropertyValue value) =>
         TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
             TriggerEditorCommandKind.SetValue,
+            index: index,
+            key: key,
+            value: value));
+
+    private static void SendEventValue(int index, string key, EditorPropertyValue value) =>
+        TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
+            TriggerEditorCommandKind.SetEventValue,
             index: index,
             key: key,
             value: value));
