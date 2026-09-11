@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 
@@ -69,16 +68,16 @@ public static class RoomEditorCommandQueue
                 switch (command.Kind)
                 {
                     case RoomEditorCommandKind.SetSetting:
-                        EditorActions.SetRoomSetting(session, command.Key, command.Value);
+                        RoomEditorActions.SetRoomSetting(session, command.Key, command.Value);
                         break;
                     case RoomEditorCommandKind.AddEffect:
-                        EditorActions.AddRoomEffect(session, command.Key);
+                        RoomEditorActions.AddRoomEffect(session, command.Key);
                         break;
                     case RoomEditorCommandKind.DeleteEffect:
-                        EditorActions.DeleteRoomEffect(session, command.Index);
+                        RoomEditorActions.DeleteRoomEffect(session, command.Index);
                         break;
                     case RoomEditorCommandKind.SetEffectAmount:
-                        EditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X);
+                        RoomEditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X);
                         break;
                 }
             }
