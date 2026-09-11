@@ -7,7 +7,6 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using ImGuiNET;
 using RWIMGUI.API;
-using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -44,15 +43,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // important for Warp Menu and other RWImGUI consumers: an invisible DryCycle editor
         // must not keep ownership of their mouse/keyboard input context.
         DevToolFrontend.SetVisibleFromMainThread(rebuiltVisible);
-        DevToolFrontend.SetCursorModeFromMainThread(
-            sessionVisible,
-            useSystemCursor: EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden);
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        Cursor.visible = true;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
@@ -122,16 +117,6 @@ internal static class DevToolFrontend
         EnsureContext();
     }
 
-    internal static void SetCursorModeFromMainThread(bool sessionVisible, bool useSystemCursor)
-    {
-        if (!sessionVisible) return;
-
-        // Rain World forces the operating-system cursor visible when H opens DevUI. The rebuilt
-        // UI uses ImGui's software cursor, while Vanilla/Warp mode must hand the system cursor
-        // back to Rain World.
-        Cursor.visible = useSystemCursor;
-    }
-
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         // Keep the Always callback intentionally empty. Interactive drawing belongs to the
@@ -186,7 +171,13 @@ internal static class DevToolFrontend
         try
         {
             ImGuiIOPtr io = ImGui.GetIO();
-            io.MouseDrawCursor = true;
+
+            // Rain World's developer cursor remains authoritative. Do not toggle Unity's cursor
+            // visibility and do not draw a second ImGui software cursor; both approaches fight
+            // the vanilla DevUI and cause visible flicker. Tooltip placement is handled separately.
+            io.MouseDrawCursor = false;
+
+            FloatingWindowSnap.BeginFrame(io.DisplaySize);
 
             bool pushedChineseFont = TryPushChineseFont();
             float oldGlobalScale = io.FontGlobalScale;
