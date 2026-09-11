@@ -183,7 +183,7 @@ public sealed class EditorSession
     public string PlacementType { get; private set; } = string.Empty;
     public string ObjectSearch { get; set; } = string.Empty;
 
-    public Room Room => Owner?.room;
+    public global::Room Room => Owner?.room;
     public RoomSettings RoomSettings => Room?.roomSettings;
     public World World => Owner?.game?.world;
 
@@ -306,7 +306,7 @@ public sealed class EditorSession
         if (ui?.activePage is RelationshipPage)
             return new EditorDocumentKey(EditorDocumentKind.Relationships, "global");
 
-        Room room = ui?.room;
+        global::Room room = ui?.room;
         string roomName = room?.abstractRoom?.name ?? room?.roomSettings?.name ?? "<room>";
         return new EditorDocumentKey(EditorDocumentKind.Room, roomName);
     }
