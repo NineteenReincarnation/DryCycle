@@ -18,6 +18,8 @@ internal static class DevToolUiTheme
     private static readonly Num.Vector4 Child = new(0.025f, 0.035f, 0.050f, 0.36f);
     private static readonly Num.Vector4 Border = new(0.05f, 0.06f, 0.08f, 0.96f);
     private static readonly Num.Vector4 Separator = new(0.34f, 0.43f, 0.55f, 0.56f);
+    private static readonly Num.Vector4 Text = new(0.95f, 0.97f, 1.00f, 1f);
+    private static readonly Num.Vector4 TextDisabled = new(0.74f, 0.79f, 0.86f, 1f);
 
     /// <summary>
     /// Apply the standard style to the current RWImGui context. Safe to call every frame.
@@ -36,6 +38,8 @@ internal static class DevToolUiTheme
         style.FrameBorderSize = 1f;
         style.ChildBorderSize = 1f;
 
+        style.Colors[(int)ImGuiCol.Text] = Text;
+        style.Colors[(int)ImGuiCol.TextDisabled] = TextDisabled;
         style.Colors[(int)ImGuiCol.ChildBg] = Child;
         style.Colors[(int)ImGuiCol.Border] = Border;
         style.Colors[(int)ImGuiCol.Separator] = Separator;
