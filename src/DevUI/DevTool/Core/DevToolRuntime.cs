@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Objects;
@@ -9,8 +10,8 @@ using DryCycle.DevUI.DevTool.Objects;
 namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
-/// Owns the lifetime of the new editor model. The vanilla DevInterface remains alive as a
-/// generic compatibility backend; presentation is supplied by the optional RWImGui frontend.
+/// Owns the lifetime of the new editor model. Vanilla DevInterface remains alive as a
+/// compatibility backend; presentation is supplied by the optional RWImGui frontend.
 /// DevTool does not discover, reference or call third-party mod APIs.
 /// </summary>
 internal static class DevToolRuntime
@@ -30,6 +31,7 @@ internal static class DevToolRuntime
     {
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
+        LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
         EditorUiCommandQueue.Clear();
         EditorPresentationHub.Clear();
@@ -45,8 +47,8 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Synchronize before vanilla DevInterface controls mutate their backing state so
-        // the generic compatibility recorder can capture the true transaction start.
+        // Synchronize before vanilla DevInterface controls mutate backing state so the
+        // compatibility recorder can capture a true transaction start.
         DevToolSessionHub.Synchronize(self);
         EditorSession session = DevToolSessionHub.Current;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
@@ -56,13 +58,24 @@ internal static class DevToolRuntime
         orig(self);
 
         // Legacy DevInterface controls have now completed this frame's mutation. Close any
-        // mouse/text transaction that ended during orig.Update and push it into history.
+        // pointer/text transaction that ended during orig.Update and push it into history.
         session?.Synchronize(self);
         session?.LegacyTransactions.AfterLegacyUpdate(session);
 
         // RWImGui never mutates game state from Present. Execute its queued actions here.
+        // A SetToolMode command may switch the vanilla backend page, so synchronize again.
         EditorUiCommandQueue.Process(session);
         session?.Synchronize(self);
+
+        // Objects is the first fully migrated workspace. When the optional frontend is
+        // actually attached, keep the ObjectsPage alive for representations/hooks but move
+        // its old screen-space controls out of the way. World-space handles remain visible.
+        bool suppressLegacyObjectsUi =
+            EditorInputRouter.FrontendAttached &&
+            session?.ToolMode == EditorToolMode.Objects &&
+            self.activePage is ObjectsPage;
+        LegacyUiPresentationController.Apply(self.activePage, suppressLegacyObjectsUi);
+
         EditorPresentationHub.Publish(session);
     }
 }
@@ -86,7 +99,8 @@ public enum EditorDocumentKind
 }
 
 /// <summary>
-/// Stable history boundary. Tool-mode changes do not create a new document.
+/// Stable history boundary. Tool-mode changes do not create a new document unless the
+/// target tool edits a genuinely different document such as the region map.
 /// </summary>
 public readonly struct EditorDocumentKey : IEquatable<EditorDocumentKey>
 {
@@ -150,8 +164,8 @@ public sealed class EditorSession
             LegacyTransactions.Reset();
         }
 
-        // A real vanilla page switch is mirrored once. ImGui tool changes remain independent
-        // afterwards, so Objects/Sound/Room can share one Scene document and history stack.
+        // Real backend page switches are mirrored into the tool mode. The history boundary
+        // is still the document, not the page, so Room/Objects/Sound/Triggers share history.
         if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
         {
             observedLegacyPage = owner?.activePage;
@@ -162,11 +176,60 @@ public sealed class EditorSession
         Selection.RemoveMissing(RoomSettings?.placedObjects);
     }
 
-    public void SetToolMode(EditorToolMode mode) => ToolMode = mode;
+    /// <summary>
+    /// Changes the modern tool mode and silently switches the matching vanilla page behind
+    /// it. Keeping that page alive preserves normal DevInterface construction and hook paths
+    /// for objects supplied by any mod, while the modern UI remains the visible surface.
+    /// </summary>
+    public void SetToolMode(EditorToolMode mode)
+    {
+        if (Owner == null)
+        {
+            ToolMode = mode;
+            return;
+        }
+
+        int pageIndex = PageIndex(mode);
+        if (pageIndex < 0)
+        {
+            ToolMode = mode;
+            return;
+        }
+
+        if (ResolveToolMode(Owner.activePage) == mode)
+        {
+            ToolMode = mode;
+            return;
+        }
+
+        // Restore any temporarily hidden controls before the old page destroys its Futile
+        // nodes. The newly-created page will be suppressed again after its first update.
+        LegacyUiPresentationController.Restore(Owner.activePage);
+        LegacyTransactions.Reset();
+        Owner.SwitchPage(pageIndex);
+        observedLegacyPage = Owner.activePage;
+        ToolMode = ResolveToolMode(observedLegacyPage);
+    }
+
     public void ToggleFocusMode() => FocusMode = !FocusMode;
     public void SetFocusMode(bool value) => FocusMode = value;
     public void ToggleBrowser() => BrowserOpen = !BrowserOpen;
     public void ToggleInspector() => InspectorOpen = !InspectorOpen;
+
+    private static int PageIndex(EditorToolMode mode)
+    {
+        return mode switch
+        {
+            EditorToolMode.Room => 0,
+            EditorToolMode.Objects => 1,
+            EditorToolMode.Sound => 2,
+            EditorToolMode.Map => 3,
+            EditorToolMode.Triggers => 4,
+            EditorToolMode.Dialog => 5,
+            EditorToolMode.Relationships => 6,
+            _ => -1
+        };
+    }
 
     private static EditorDocumentKey ResolveDocument(global::DevInterface.DevUI ui)
     {
