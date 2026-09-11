@@ -82,7 +82,18 @@ internal static class RoomSettingsView
             return;
         }
 
-        DevToolWidgets.PaneTitle(SectionName(section));
+        bool collapseAllEffects = false;
+        if (section == Section.Effects)
+        {
+            collapseAllEffects = DevToolWidgets.PaneTitleWithAction(
+                SectionName(section),
+                DevToolUiSettings.T("折叠所有", "Collapse All"),
+                "RoomEffectsCollapseAll");
+        }
+        else
+        {
+            DevToolWidgets.PaneTitle(SectionName(section));
+        }
 
         switch (section)
         {
@@ -102,7 +113,7 @@ internal static class RoomSettingsView
                 DrawTemplates(snapshot);
                 break;
             case Section.Effects:
-                DrawEffects(snapshot);
+                DrawEffects(snapshot, collapseAllEffects);
                 break;
         }
     }
@@ -308,7 +319,7 @@ internal static class RoomSettingsView
         }
     }
 
-    private static void DrawEffects(EditorRoomSettingsSnapshot snapshot)
+    private static void DrawEffects(EditorRoomSettingsSnapshot snapshot, bool collapseAll)
     {
         EditorRoomEffectSnapshot[] effects = snapshot.Effects ?? Array.Empty<EditorRoomEffectSnapshot>();
         if (effects.Length == 0)
@@ -325,6 +336,8 @@ internal static class RoomSettingsView
             if (effect.Inherited) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
             else if (effect.OverWrite) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
 
+            if (collapseAll)
+                ImGui.SetNextItemOpen(false, ImGuiCond.Always);
             ImGui.PushStyleColor(ImGuiCol.Header, new Num.Vector4(0.18f, 0.34f, 0.54f, 0.72f));
             ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Num.Vector4(0.24f, 0.45f, 0.72f, 0.88f));
             ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Num.Vector4(0.30f, 0.56f, 0.90f, 0.95f));
