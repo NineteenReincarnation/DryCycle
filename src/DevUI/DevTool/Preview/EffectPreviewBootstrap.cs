@@ -644,7 +644,7 @@ internal sealed class RoomProbeState
     private readonly RoomSettings.RoomEffect[] effects;
     private readonly PlacedObject[] placedObjects;
     private readonly AmbientSound[] ambientSounds;
-    private readonly Trigger[] triggers;
+    private readonly EventTrigger[] triggers;
     private readonly bool firstTimeRealized;
     private readonly UnityEngine.Random.State randomState;
 
@@ -653,7 +653,7 @@ internal sealed class RoomProbeState
         RoomSettings.RoomEffect[] effects,
         PlacedObject[] placedObjects,
         AmbientSound[] ambientSounds,
-        Trigger[] triggers,
+        EventTrigger[] triggers,
         bool firstTimeRealized,
         UnityEngine.Random.State randomState)
     {
@@ -675,7 +675,7 @@ internal sealed class RoomProbeState
             settings?.effects?.ToArray() ?? Array.Empty<RoomSettings.RoomEffect>(),
             settings?.placedObjects?.ToArray() ?? Array.Empty<PlacedObject>(),
             settings?.ambientSounds?.ToArray() ?? Array.Empty<AmbientSound>(),
-            settings?.triggers?.ToArray() ?? Array.Empty<Trigger>(),
+            settings?.triggers?.ToArray() ?? Array.Empty<EventTrigger>(),
             room?.abstractRoom?.firstTimeRealized ?? false,
             UnityEngine.Random.state);
     }
@@ -819,7 +819,12 @@ internal static class ConstructorConventionBootstrap
         }
 
         Type[] array = result.ToArray();
-        lock (TypeCache) TypeCache[simpleName] = array;
+        // Do not permanently cache a miss: a content mod can still load an assembly after the
+        // DevTool runtime was initialized and the next hover should be allowed to discover it.
+        if (array.Length > 0)
+        {
+            lock (TypeCache) TypeCache[simpleName] = array;
+        }
         return array;
     }
 
