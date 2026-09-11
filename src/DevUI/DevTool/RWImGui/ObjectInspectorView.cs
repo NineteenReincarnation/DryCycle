@@ -219,11 +219,11 @@ internal static class ObjectInspectorView
         if (ImGui.IsItemHovered())
         {
             if (mixed && !string.IsNullOrEmpty(property.Source))
-                ImGui.SetTooltip(DevToolUiSettings.T("所选物件的值不同。\n", "Selected objects contain different values.\n") + property.Source);
+                DevToolTooltip.Show(DevToolUiSettings.T("所选物件的值不同。\n", "Selected objects contain different values.\n") + property.Source);
             else if (mixed)
-                ImGui.SetTooltip(DevToolUiSettings.T("所选物件的值不同。", "Selected objects contain different values."));
+                DevToolTooltip.Show(DevToolUiSettings.T("所选物件的值不同。", "Selected objects contain different values."));
             else if (!string.IsNullOrEmpty(property.Source))
-                ImGui.SetTooltip(property.Source);
+                DevToolTooltip.Show(property.Source);
         }
     }
 
@@ -325,7 +325,7 @@ internal static class ObjectInspectorView
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(DevToolUiSettings.T(
+            DevToolTooltip.Show(DevToolUiSettings.T(
                 "用于无法转换到新检查器的自定义 DevInterface 控件。",
                 "Fallback for custom DevInterface controls that cannot be translated into the Inspector."));
     }
