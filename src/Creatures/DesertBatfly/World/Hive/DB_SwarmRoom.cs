@@ -78,6 +78,64 @@ internal sealed class DB_SwarmRoom
         return true;
     }
 
+    /// <summary>
+    /// Executes the local-hive branch of vanilla FleeFromRain under the already accepted
+    /// NativeSpecial owner. Keeping this at the enclosing FlyAI.Update ownership boundary avoids
+    /// a nested FleeFromRain hook while still routing the physical BatHive approach through the
+    /// same traffic gate used by Environment, Travel and InjuryRecovery. Returns false when no
+    /// usable local hive exists so vanilla can retain its cross-room rain fallback.
+    /// </summary>
+    internal static bool TryExecuteNativeRain(FlyAI ai, DB_Creature bat)
+    {
+        if (ai?.room?.aimap == null || bat == null || !ReferenceEquals(ai.fly, bat) ||
+            !ai.fleeFromRain || ai.room.hives == null || ai.room.hives.Length == 0 ||
+            !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.NativeSpecial))
+            return false;
+
+        int bestMap = -1;
+        int bestDistance = int.MaxValue;
+        int currentHive = ai.followingDijkstraMap - ai.room.exitAndDenIndex.Length;
+        if (currentHive >= 0 && currentHive < ai.room.hives.Length &&
+            ai.room.hives[currentHive] != null && ai.room.hives[currentHive].Length > 0)
+        {
+            int currentDistance = ai.room.aimap.ExitDistanceForCreature(
+                bat.abstractCreature.pos.Tile,
+                ai.followingDijkstraMap,
+                bat.Template);
+            if (currentDistance >= 0)
+            {
+                bestMap = ai.followingDijkstraMap;
+                bestDistance = currentDistance;
+            }
+        }
+
+        if (bestMap < 0)
+        {
+            for (int i = 0; i < ai.room.hives.Length; i++)
+            {
+                if (ai.room.hives[i] == null || ai.room.hives[i].Length == 0) continue;
+                int map = ai.room.exitAndDenIndex.Length + i;
+                int distance = ai.room.aimap.ExitDistanceForCreature(
+                    bat.abstractCreature.pos.Tile,
+                    map,
+                    bat.Template);
+                if (distance < 0 || distance >= bestDistance) continue;
+                bestDistance = distance;
+                bestMap = map;
+            }
+        }
+
+        if (bestMap < 0) return false;
+        ai.afraid = 2f;
+        ai.leaveRoomDijkstra = -1;
+        ai.followingDijkstraMap = bestMap;
+        Vector2 nextGoal = ai.ProgressLocalGoalAlongDijkstraMap(ai.localGoal, bestMap);
+        return DB_FlightMotor.TryGuideNative(
+            bat,
+            DB_BehaviorOwner.NativeSpecial,
+            nextGoal);
+    }
+
     private int NextNeutralFollowMap(FlyAI ai, DB_Creature bat, int relevant, int current)
     {
         int ordinaryCount = 0;
