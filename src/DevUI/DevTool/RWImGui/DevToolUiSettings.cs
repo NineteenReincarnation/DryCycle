@@ -17,8 +17,13 @@ internal static class DevToolUiSettings
 {
     internal const float WindowAlpha = 0.52f;
     internal const float PopupAlpha = 0.68f;
-    internal const float DefaultFontSize = 18f;
+
+    // 18 px is the original rebuilt-editor design scale. The default typography is intentionally
+    // doubled to 36 px, while layout spacing follows the same 2x scale.
+    internal const float ReferenceFontSize = 18f;
+    internal const float DefaultFontSize = 36f;
     internal const int DefaultFontWeight = 400;
+    internal const float WindowOutlineWidth = 2f;
 
     private static readonly Num.Vector4 DefaultTextColor = new(0.94f, 0.94f, 0.94f, 1f);
     private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.62f, 0.64f, 0.68f, 1f);
@@ -32,6 +37,7 @@ internal static class DevToolUiSettings
     internal static Num.Vector4 DisabledTextColor { get; set; } = DefaultDisabledTextColor;
 
     internal static bool IsChinese => Language == DevToolUiLanguage.Chinese;
+    internal static float UiScale => FontSize / ReferenceFontSize;
 
     internal static void SetLanguage(DevToolUiLanguage language)
     {
