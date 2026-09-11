@@ -8,6 +8,7 @@ using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Preview;
 using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
@@ -31,6 +32,7 @@ internal static class DevToolRuntime
         ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
+        On.RainWorldGame.Update += RainWorldGame_Update;
         enabled = true;
     }
 
@@ -38,6 +40,8 @@ internal static class DevToolRuntime
     {
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
+        On.RainWorldGame.Update -= RainWorldGame_Update;
+        EffectPreviewRuntime.Reset();
         ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
@@ -68,11 +72,13 @@ internal static class DevToolRuntime
     {
         if (self == null)
         {
+            EffectPreviewRuntime.Reset();
             orig(self);
             return;
         }
 
         DevToolSessionHub.Synchronize(self);
+        EffectPreviewRuntime.BeforeDevUiUpdate(self);
         EditorSession session = DevToolSessionHub.Current;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
@@ -91,6 +97,7 @@ internal static class DevToolRuntime
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
         session?.Synchronize(self);
+        EffectPreviewRuntime.AfterDevUiUpdate(self);
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
         // complete original page while keeping the tiny frontend mode switch available.
@@ -123,6 +130,12 @@ internal static class DevToolRuntime
         MapEditorPresentationHub.Publish(session);
         DialogEditorPresentationHub.Publish(session);
         RelationshipEditorPresentationHub.Publish(session);
+    }
+
+    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
+    {
+        orig(self);
+        EffectPreviewRuntime.OnGameUpdate(self);
     }
 }
 
