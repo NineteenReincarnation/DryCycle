@@ -18,7 +18,7 @@ internal enum DevToolButtonTone
 /// </summary>
 internal static class DevToolWidgets
 {
-    private enum GildedTitleLevel
+    private enum FlowTitleLevel
     {
         Primary,
         Secondary,
@@ -26,6 +26,8 @@ internal static class DevToolWidgets
     }
 
     private static readonly Num.Vector4 Accent = new(0.30f, 0.58f, 0.92f, 1f);
+    private static readonly Num.Vector4 SecondaryAccent = new(0.68f, 0.80f, 0.90f, 1f);
+    private static readonly Num.Vector4 TertiaryAccent = new(0.78f, 0.86f, 1.00f, 1f);
     private static readonly Num.Vector4 AccentSoft = new(0.19f, 0.38f, 0.62f, 0.78f);
     private static readonly Num.Vector4 AccentHover = new(0.27f, 0.50f, 0.80f, 0.92f);
     private static readonly Num.Vector4 AccentActive = new(0.34f, 0.63f, 0.98f, 1f);
@@ -34,15 +36,6 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Danger = new(0.57f, 0.20f, 0.22f, 0.88f);
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
-
-    // Keep the current hierarchy colours. "Gilded" now means the Rain World-style moving
-    // surface highlight, not replacing these base colours with a different palette.
-    private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
-    private static readonly Num.Vector4 PrimaryShadow = new(0.35f, 0.22f, 0.08f, 1f);
-    private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
-    private static readonly Num.Vector4 SecondaryShadow = new(0.30f, 0.19f, 0.07f, 1f);
-    private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
-    private static readonly Num.Vector4 TertiaryShadow = new(0.25f, 0.16f, 0.06f, 1f);
 
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
@@ -55,13 +48,13 @@ internal static class DevToolWidgets
         if (primary)
         {
             paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
-            DrawGildedTitle(text, GildedTitleLevel.Primary, 1.55f * restoreScale, 2.0f, paneBodyScale);
+            DrawFlowingTitle(text, FlowTitleLevel.Primary, 1.55f * restoreScale, 2.0f, paneBodyScale);
             ImGui.Spacing();
             return;
         }
 
         float bodyScale = ResolvePaneBodyScale(restoreScale);
-        DrawGildedTitle(text, GildedTitleLevel.Secondary, 1.28f * bodyScale, 1.6f, bodyScale);
+        DrawFlowingTitle(text, FlowTitleLevel.Secondary, 1.28f * bodyScale, 1.6f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -70,7 +63,7 @@ internal static class DevToolWidgets
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawGildedTitle(text, GildedTitleLevel.Tertiary, 1.18f * bodyScale, 1.4f, bodyScale);
+        DrawFlowingTitle(text, FlowTitleLevel.Tertiary, 1.18f * bodyScale, 1.4f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -205,32 +198,28 @@ internal static class DevToolWidgets
         return text == "INSPECTOR" || text == "检查器";
     }
 
-    private static void DrawGildedTitle(
+    private static void DrawFlowingTitle(
         string text,
-        GildedTitleLevel level,
+        FlowTitleLevel level,
         float fontScale,
         float stroke,
         float restoreScale)
     {
         Num.Vector4 body;
-        Num.Vector4 shadow;
         float flowStrength;
 
         switch (level)
         {
-            case GildedTitleLevel.Primary:
-                body = PrimaryGold;
-                shadow = PrimaryShadow;
+            case FlowTitleLevel.Primary:
+                body = Accent;
                 flowStrength = 0.72f;
                 break;
-            case GildedTitleLevel.Secondary:
-                body = SecondaryGold;
-                shadow = SecondaryShadow;
+            case FlowTitleLevel.Secondary:
+                body = SecondaryAccent;
                 flowStrength = 0.58f;
                 break;
             default:
-                body = TertiaryGold;
-                shadow = TertiaryShadow;
+                body = TertiaryAccent;
                 flowStrength = 0.46f;
                 break;
         }
@@ -250,12 +239,9 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
-        // Keep a restrained lower-right relief so the text remains readable on bright room art.
-        draw.AddText(pos + new Num.Vector2(0.8f, 1.0f), ImGui.GetColorU32(shadow), text);
+        // The body keeps the editor's established blue hierarchy. The Rain World-style material
+        // impression comes only from the moving neutral highlight layered over it.
         ImGui.TextColored(body, text);
-
-        // The moving layer is screen-space and shared by every heading, matching the original
-        // Rain World menu-title behavior instead of restarting a local shimmer per string.
         DevToolTitleFlow.Draw(draw, pos, textSize, text, body, flowStrength);
         ImGui.SetWindowFontScale(restoreScale);
     }
