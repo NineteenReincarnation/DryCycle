@@ -67,6 +67,68 @@ internal static class DevToolWidgets
         ImGui.Spacing();
     }
 
+    /// <summary>
+    /// Draws the normal secondary pane title with one compact action pinned to the right edge.
+    /// This is used for commands such as Collapse All so the action does not consume another
+    /// vertical row in the inspector or obscure more of the room than necessary.
+    /// </summary>
+    internal static bool PaneTitleWithAction(
+        string text,
+        string actionLabel,
+        string actionId,
+        float restoreScale = 1f,
+        DevToolButtonTone tone = DevToolButtonTone.Subtle)
+    {
+        bool primary = IsPrimaryPaneTitle(text);
+        ImGui.Spacing();
+
+        float titleRestoreScale;
+        FlowTitleLevel level;
+        float fontScale;
+        float stroke;
+
+        if (primary)
+        {
+            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
+            titleRestoreScale = paneBodyScale;
+            level = FlowTitleLevel.Primary;
+            fontScale = 1.55f * restoreScale;
+            stroke = 2.0f;
+        }
+        else
+        {
+            float bodyScale = ResolvePaneBodyScale(restoreScale);
+            titleRestoreScale = bodyScale;
+            level = FlowTitleLevel.Secondary;
+            fontScale = 1.28f * bodyScale;
+            stroke = 1.6f;
+        }
+
+        float rowStartX = ImGui.GetCursorPosX();
+        float rowRightX = rowStartX + ImGui.GetContentRegionAvail().X;
+        float buttonWidth = ButtonWidth(actionLabel);
+
+        DrawFlowingTitle(text, level, fontScale, stroke, titleRestoreScale);
+
+        ImGui.SameLine();
+        float actionX = rowRightX - buttonWidth;
+        if (actionX > rowStartX)
+            ImGui.SetCursorPosX(actionX);
+        bool pressed = ActionButton(actionLabel, actionId, tone);
+
+        if (primary)
+        {
+            ImGui.Spacing();
+        }
+        else
+        {
+            ImGui.Separator();
+            ImGui.Spacing();
+        }
+
+        return pressed;
+    }
+
     internal static void SectionHeader(string text, float restoreScale = 1f)
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
