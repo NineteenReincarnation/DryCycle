@@ -72,7 +72,13 @@ internal static class LegacyUiPresentationController
 
             if (node is AmbientSoundPanel soundPanel)
             {
-                SuppressAmbientSoundPanel(soundPanel);
+                SuppressDraggablePanelKeepingHandles(soundPanel);
+                continue;
+            }
+
+            if (node is TriggerPanel triggerPanel)
+            {
+                SuppressDraggablePanelKeepingHandles(triggerPanel);
                 continue;
             }
 
@@ -106,13 +112,13 @@ internal static class LegacyUiPresentationController
         }
     }
 
-    private static void SuppressAmbientSoundPanel(AmbientSoundPanel panel)
+    private static void SuppressDraggablePanelKeepingHandles(Panel panel)
     {
         if (panel == null) return;
 
-        // AmbientSoundPanel itself is draggable, so merely hiding sprites would leave an
-        // invisible click target over the room. Move the panel off-screen, while its Spot /
-        // Directional handles continue to maintain their own absolute scene positions.
+        // These legacy panels are draggable. Hiding only their sprites would leave an
+        // invisible click target over the room, so move the panel itself off-screen. Their
+        // world-space Handle children maintain their own absolute positions during Update.
         Remember(panel);
         panel.pos = Offscreen;
         HideVisuals(panel);
@@ -125,8 +131,8 @@ internal static class LegacyUiPresentationController
 
             if (child is Handle)
             {
-                // SpotSoundHandle, DirectionalSoundHandle and the Spot radius handle form
-                // the world-space sound gizmo and must stay alive.
+                // Spot/Directional sound handles, Spot trigger handles and nested radius
+                // handles remain scene gizmos.
                 continue;
             }
 
