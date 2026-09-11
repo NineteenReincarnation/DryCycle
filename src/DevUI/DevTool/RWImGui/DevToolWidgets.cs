@@ -36,10 +36,14 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
     // Gold hierarchy is intentional. The moving neutral-white flow is layered on top so the
-    // material reads as polished metal instead of a flat yellow label.
+    // material reads as polished metal instead of a flat yellow label. The warm lower-right relief
+    // gives the body depth without turning the whole heading into a glow.
     private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
+    private static readonly Num.Vector4 PrimaryGoldRelief = new(0.35f, 0.22f, 0.08f, 0.82f);
     private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
+    private static readonly Num.Vector4 SecondaryGoldRelief = new(0.30f, 0.19f, 0.07f, 0.74f);
     private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
+    private static readonly Num.Vector4 TertiaryGoldRelief = new(0.25f, 0.16f, 0.06f, 0.64f);
 
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
@@ -210,20 +214,24 @@ internal static class DevToolWidgets
         float restoreScale)
     {
         Num.Vector4 body;
+        Num.Vector4 relief;
         float flowStrength;
 
         switch (level)
         {
             case FlowTitleLevel.Primary:
                 body = PrimaryGold;
+                relief = PrimaryGoldRelief;
                 flowStrength = 0.72f;
                 break;
             case FlowTitleLevel.Secondary:
                 body = SecondaryGold;
+                relief = SecondaryGoldRelief;
                 flowStrength = 0.58f;
                 break;
             default:
                 body = TertiaryGold;
+                relief = TertiaryGoldRelief;
                 flowStrength = 0.46f;
                 break;
         }
@@ -243,6 +251,10 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
+        // Keep this inside the black outline and below the body. It reads as a warm metal relief,
+        // not as a second shadow or bloom, and restores depth that was lost during the temporary
+        // blue-palette experiment.
+        draw.AddText(pos + new Num.Vector2(0.8f, 1.0f), ImGui.GetColorU32(relief), text);
         ImGui.TextColored(body, text);
         DevToolTitleFlow.Draw(draw, pos, textSize, text, body, flowStrength);
         ImGui.SetWindowFontScale(restoreScale);
