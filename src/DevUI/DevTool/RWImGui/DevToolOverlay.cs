@@ -1,6 +1,7 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
+using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
@@ -22,10 +23,12 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
-        // Map is a true editor workspace, so its canvas owns the central area. Draw it first
-        // so the top bar and side panels remain above it in ImGui z-order.
+        // Map and Relationships are true editor workspaces, so their own canvas/matrix owns
+        // the central area. Other modes leave the complete Rain World room visible underneath.
         if (snapshot.ToolMode == EditorToolMode.Map)
             DrawMapCanvas(snapshot, display);
+        else if (snapshot.ToolMode == EditorToolMode.Relationships)
+            DrawRelationshipMatrix(snapshot, display);
 
         DrawTopBar(snapshot, display);
         if (!snapshot.FocusMode)
@@ -41,6 +44,22 @@ internal static class DevToolOverlay
 
     private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
+    }
+
+    private static void DrawRelationshipMatrix(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        RelationshipEditorView.DrawMatrix(RelationshipEditorPresentationHub.Current, pos, size);
+    }
+
+    private static void GetCentralWorkspaceRect(
+        EditorPresentationSnapshot snapshot,
+        Num.Vector2 display,
+        out Num.Vector2 pos,
+        out Num.Vector2 size)
+    {
         float inspectorWidth = InspectorWidth(display);
         float left = snapshot.FocusMode ? 8f : snapshot.BrowserOpen ? 366f : 58f;
         float right = snapshot.FocusMode
@@ -49,9 +68,8 @@ internal static class DevToolOverlay
                 ? display.X - inspectorWidth - 16f
                 : display.X - 8f;
         float bottom = snapshot.FocusMode ? display.Y - 8f : display.Y - 38f;
-        Num.Vector2 pos = new(left, 56f);
-        Num.Vector2 size = new(Math.Max(120f, right - left), Math.Max(120f, bottom - 56f));
-        MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
+        pos = new Num.Vector2(left, 56f);
+        size = new Num.Vector2(Math.Max(120f, right - left), Math.Max(120f, bottom - 56f));
     }
 
     private static void DrawTopBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -104,7 +122,7 @@ internal static class DevToolOverlay
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot)
     {
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 56f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(44f, 250f), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Num.Vector2(44f, 316f), ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(0.94f);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
                                  ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar;
@@ -119,6 +137,8 @@ internal static class DevToolOverlay
         DrawModeButton("S", "Sound", EditorToolMode.Sound, snapshot.ToolMode);
         DrawModeButton("T", "Triggers", EditorToolMode.Triggers, snapshot.ToolMode);
         DrawModeButton("M", "Map", EditorToolMode.Map, snapshot.ToolMode);
+        DrawModeButton("D", "Dialog", EditorToolMode.Dialog, snapshot.ToolMode);
+        DrawModeButton("L", "Relationships", EditorToolMode.Relationships, snapshot.ToolMode);
 
         ImGui.Separator();
         if (ImGui.Button(snapshot.BrowserOpen ? "<" : ">", new Num.Vector2(28f, 0f)))
@@ -181,11 +201,24 @@ internal static class DevToolOverlay
             return;
         }
 
+        if (snapshot.ToolMode == EditorToolMode.Relationships)
+        {
+            RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
+            ImGui.End();
+            return;
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Dialog)
+        {
+            ImGui.TextDisabled("Dialog migration is not implemented yet.");
+            ImGui.TextWrapped("Use Vanilla mode for dialog editing until the conversation tree/editor is migrated.");
+            ImGui.End();
+            return;
+        }
+
         if (snapshot.ToolMode != EditorToolMode.Objects)
         {
             ImGui.Text(snapshot.ToolMode + " tools");
-            ImGui.Separator();
-            ImGui.TextDisabled("This workspace reuses the same overlay shell.");
             ImGui.End();
             return;
         }
@@ -320,6 +353,17 @@ internal static class DevToolOverlay
         else if (snapshot.ToolMode == EditorToolMode.Map)
         {
             MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, "Fallback for vanilla or mod-added MapPage controls not represented by the graph editor.");
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Relationships)
+        {
+            RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
+            DrawLegacyFallback(snapshot, "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Dialog)
+        {
+            ImGui.TextDisabled("Dialog inspector is not migrated yet.");
+            ImGui.TextWrapped("Switch to Vanilla UI to edit dialogs for now.");
         }
         else
         {
@@ -369,6 +413,11 @@ internal static class DevToolOverlay
                 EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
                 ImGui.TextDisabled("Map " + (map.Rooms?.Length ?? 0) + " rooms   ·   " + map.RegionName);
             }
+            else if (snapshot.ToolMode == EditorToolMode.Relationships)
+            {
+                EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
+                ImGui.TextDisabled("Relationships   ·   Primary " + rel.PrimaryCreature + "   ·   " + snapshot.Document);
+            }
             else
             {
                 ImGui.TextDisabled(snapshot.Document + "   ·   " + snapshot.ToolMode);
@@ -396,12 +445,12 @@ internal static class DevToolOverlay
         }
 
         Num.Vector2 mouse = io.MousePos;
-        Num.Vector2 size = new(230f, 44f);
+        Num.Vector2 hintSize = new(230f, 44f);
         Num.Vector2 pos = new(
-            Math.Min(Math.Max(8f, mouse.X + 18f), Math.Max(8f, display.X - size.X - 8f)),
-            Math.Min(Math.Max(8f, mouse.Y + 18f), Math.Max(8f, display.Y - size.Y - 8f)));
+            Math.Min(Math.Max(8f, mouse.X + 18f), Math.Max(8f, display.X - hintSize.X - 8f)),
+            Math.Min(Math.Max(8f, mouse.Y + 18f), Math.Max(8f, display.Y - hintSize.Y - 8f)));
         ImGui.SetNextWindowPos(pos, ImGuiCond.Always);
-        ImGui.SetNextWindowSize(size, ImGuiCond.Always);
+        ImGui.SetNextWindowSize(hintSize, ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(0.88f);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
                                  ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoInputs;
