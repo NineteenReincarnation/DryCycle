@@ -29,7 +29,7 @@ public sealed class LegacyControlSnapshot
 
 internal static class LegacyDevInterfaceBridge
 {
-    internal static LegacyControlSnapshot[] Capture(DevUI owner, PlacedObject target)
+    internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
     {
         if (owner?.activePage is not ObjectsPage page || target == null)
             return Array.Empty<LegacyControlSnapshot>();
@@ -42,7 +42,7 @@ internal static class LegacyDevInterfaceBridge
         return result.ToArray();
     }
 
-    internal static bool ClickButton(DevUI owner, PlacedObject target, string path)
+    internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
@@ -61,7 +61,7 @@ internal static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetSlider(DevUI owner, PlacedObject target, string path, float factor)
+    internal static bool SetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path, float factor)
     {
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
@@ -82,7 +82,7 @@ internal static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool ResetSlider(DevUI owner, PlacedObject target, string path)
+    internal static bool ResetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
