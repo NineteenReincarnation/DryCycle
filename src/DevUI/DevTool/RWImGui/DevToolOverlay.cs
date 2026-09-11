@@ -222,7 +222,7 @@ internal static class DevToolOverlay
             leftWidth = Math.Max(minLeft, Math.Min(leftWidth, Math.Max(minLeft, usable - minRight)));
             browserInspectorSplit = Math.Max(0.18f, Math.Min(0.82f, leftWidth / usable));
 
-            if (ImGui.BeginChild("##DevToolBrowserPane", new Num.Vector2(leftWidth, available.Y), true))
+            if (ImGui.BeginChild("##DevToolBrowserPane", new Num.Vector2(leftWidth, available.Y), ImGuiChildFlags.Borders))
             {
                 ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
                 ImGui.Separator();
@@ -247,7 +247,7 @@ internal static class DevToolOverlay
             }
 
             ImGui.SameLine(0f, 0f);
-            if (ImGui.BeginChild("##DevToolInspectorPane", new Num.Vector2(0f, available.Y), true))
+            if (ImGui.BeginChild("##DevToolInspectorPane", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
             {
                 ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
                 ImGui.Separator();
