@@ -149,8 +149,8 @@ public sealed class LegacyTransactionRecorder
     private static int CurrentPointerMask()
     {
         int result = 0;
-        if (Input.GetMouseButton(0)) result |= 1;
-        if (Input.GetMouseButton(1)) result |= 2;
+        if (global::UnityEngine.Input.GetMouseButton(0)) result |= 1;
+        if (global::UnityEngine.Input.GetMouseButton(1)) result |= 2;
         return result;
     }
 
