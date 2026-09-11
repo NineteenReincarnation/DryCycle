@@ -117,10 +117,9 @@ internal static class DevToolFrontend
     {
         if (!sessionVisible) return;
 
-        // Rain World forces the operating-system cursor visible when H opens DevUI. RWImGui
-        // already owns the editor pointer/hover presentation, so keeping both produces the
-        // doubled cursor and obscures tooltips. Only hide the OS cursor while New UI is the
-        // active presentation; Vanilla mode keeps Rain World's original behavior intact.
+        // Rain World forces the operating-system cursor visible when H opens DevUI. New UI
+        // uses ImGui's software cursor instead, so keeping the OS cursor would produce two
+        // pointers and cover hover labels. Vanilla mode restores Rain World's cursor.
         Cursor.visible = vanillaMode;
     }
 
@@ -177,14 +176,17 @@ internal static class DevToolFrontend
 
         try
         {
+            ImGuiIOPtr io = ImGui.GetIO();
+            bool vanilla = EditorUiModeState.UseVanilla;
+            io.MouseDrawCursor = !vanilla;
+
             // The switch is intentionally always available while DevTools are open. In
             // Vanilla mode it is the only RWImGui window left on screen, so returning to
             // the rebuilt editor never depends on an original DevInterface control.
             UiModeSwitch.Draw();
-            if (!EditorUiModeState.UseVanilla)
+            if (!vanilla)
                 DevToolOverlay.Draw(snapshot);
 
-            ImGuiIOPtr io = ImGui.GetIO();
             EditorInputRouter.SetFrontendCapture(io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput);
         }
         catch (Exception error)
