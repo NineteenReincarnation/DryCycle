@@ -28,47 +28,62 @@ internal static class ObjectInspectorView
         if (!inspector.HasSelection)
         {
             Reset(-1);
-            ImGui.TextDisabled(DevToolUiSettings.T("未选择物件。", "Nothing selected."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("未选择物件。", "Nothing selected."));
             return;
         }
 
         if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
             Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
 
-        ImGui.Text(inspector.Type);
-        ImGui.TextDisabled(inspector.DataType);
-        if (inspector.SelectionCount > 1)
-            ImGui.TextDisabled(DevToolUiSettings.T("正在编辑当前多选物件共有的属性。", "Editing shared properties for the current selection."));
-        ImGui.Separator();
-
+        DrawIdentity(inspector);
         DrawTransform(inspector);
         DrawProperties(inspector);
-        DrawLegacyControls(inspector);
-        DrawLegacyFallback(inspector);
+        DrawCompatibility(inspector);
+        DrawActions(inspector);
+    }
 
-        ImGui.Separator();
-        if (inspector.SelectionCount > 1)
+    private static void DrawIdentity(EditorInspectorSnapshot inspector)
+    {
+        EditorObjectTypeSnapshot metadata = inspector.SelectionCount == 1
+            ? FindMetadata(inspector.Type)
+            : null;
+
+        DevToolWidgets.SourceHeader(
+            inspector.Type,
+            ObjectSourceColor(metadata?.Source),
+            1.28f,
+            1f);
+
+        if (metadata != null)
         {
-            if (ImGui.Button(DevToolUiSettings.T("复制所选  Ctrl+D", "Duplicate Selection  Ctrl+D")))
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DuplicateSelection));
-            ImGui.SameLine();
-            if (ImGui.Button(DevToolUiSettings.T("删除所选", "Delete Selection")))
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteSelection));
+            string source = string.IsNullOrWhiteSpace(metadata.Source)
+                ? DevToolUiSettings.T("未知来源", "Unknown source")
+                : metadata.Source;
+            string category = string.IsNullOrWhiteSpace(metadata.Category)
+                ? DevToolUiSettings.T("未分类", "Unsorted")
+                : metadata.Category;
+            DevToolWidgets.MutedText(source + "  ·  " + category);
         }
-        else if (ImGui.Button(DevToolUiSettings.T("删除物件", "Delete Object")))
+        else if (inspector.SelectionCount > 1)
         {
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
+                "正在编辑当前多选物件共有的属性。",
+                "Editing properties shared by the current selection."), true);
+        }
+
+        if (inspector.SelectionCount == 1 && !string.IsNullOrWhiteSpace(inspector.DataType))
+        {
+            if (ImGui.IsItemHovered())
+                DevToolTooltip.Show(inspector.DataType);
         }
     }
 
     private static void DrawTransform(EditorInspectorSnapshot inspector)
     {
-        ImGui.TextDisabled(inspector.SelectionCount > 1
-            ? DevToolUiSettings.T("变换 · 组锚点", "Transform · group anchor")
-            : DevToolUiSettings.T("变换", "Transform"));
+        DevToolWidgets.SectionHeader(inspector.SelectionCount > 1
+            ? DevToolUiSettings.T("变换 · 组锚点", "TRANSFORM · GROUP ANCHOR")
+            : DevToolUiSettings.T("变换", "TRANSFORM"));
 
-        // The primary object is the anchor for a multi-selection. Moving it from the
-        // Inspector applies the same delta to every selected object on the Unity thread.
         if (!ImGui.IsAnyItemActive())
             SynchronizePosition(inspector);
 
@@ -91,15 +106,15 @@ internal static class ObjectInspectorView
         {
             if (inspector.SelectionCount > 1)
             {
-                ImGui.Separator();
-                ImGui.TextDisabled(DevToolUiSettings.T(
+                DevToolWidgets.SectionHeader(DevToolUiSettings.T("属性", "PROPERTIES"));
+                DevToolWidgets.MutedText(DevToolUiSettings.T(
                     "所选物件之间没有共同的可编辑属性。",
-                    "No editable properties are shared by every selected object."));
+                    "No editable properties are shared by every selected object."), true);
             }
             return;
         }
 
-        ImGui.Separator();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("属性", "PROPERTIES"));
         string group = null;
         for (int i = 0; i < properties.Length; i++)
         {
@@ -107,9 +122,11 @@ internal static class ObjectInspectorView
             if (!string.Equals(group, property.Group, StringComparison.Ordinal))
             {
                 group = property.Group;
-                ImGui.TextDisabled(string.IsNullOrEmpty(group)
-                    ? DevToolUiSettings.T("属性", "Properties")
-                    : group);
+                if (!string.IsNullOrWhiteSpace(group))
+                {
+                    ImGui.Spacing();
+                    DevToolWidgets.MutedText(group);
+                }
             }
             DrawProperty(inspector, property);
         }
@@ -127,18 +144,16 @@ internal static class ObjectInspectorView
         switch (property.Kind)
         {
             case EditorPropertyKind.ReadOnly:
-                ImGui.TextDisabled(property.DisplayName);
+                DevToolWidgets.MutedText(property.DisplayName);
                 ImGui.TextWrapped(property.StringValue ?? string.Empty);
                 break;
 
             case EditorPropertyKind.Float:
             {
                 float value = Get(FloatEdits, stateKey, property.X);
-                bool changed;
-                if (property.HasRange)
-                    changed = ImGui.SliderFloat(label, ref value, property.Min, property.Max, "%.3f");
-                else
-                    changed = ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
+                bool changed = property.HasRange
+                    ? ImGui.SliderFloat(label, ref value, property.Min, property.Max, "%.3f")
+                    : ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
                 FloatEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
                     SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
@@ -150,11 +165,9 @@ internal static class ObjectInspectorView
             case EditorPropertyKind.Integer:
             {
                 int value = Get(IntEdits, stateKey, property.IntegerValue);
-                bool changed;
-                if (property.HasRange)
-                    changed = ImGui.SliderInt(label, ref value, (int)property.Min, (int)property.Max);
-                else
-                    changed = ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
+                bool changed = property.HasRange
+                    ? ImGui.SliderInt(label, ref value, (int)property.Min, (int)property.Max)
+                    : ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
                 IntEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
                     SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
@@ -248,29 +261,34 @@ internal static class ObjectInspectorView
         ImGui.EndCombo();
     }
 
-    private static void DrawLegacyControls(EditorInspectorSnapshot inspector)
+    private static void DrawCompatibility(EditorInspectorSnapshot inspector)
     {
-        // Legacy controls intentionally remain single-selection only. Presentation strips
-        // them from multi-selection because their semantics are not safely composable.
         LegacyControlSnapshot[] controls = inspector.LegacyControls ?? Array.Empty<LegacyControlSnapshot>();
-        if (controls.Length == 0) return;
+        if (controls.Length == 0 && !inspector.LegacyUiAvailable) return;
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("原版 DevInterface", "Legacy DevInterface"));
-        ImGui.TextWrapped(DevToolUiSettings.T(
-            "这里显示物件原始 Representation 暴露的标准 Rain World 控件。",
-            "Standard Rain World controls exposed by the object's original representation."));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("高级 / 兼容", "ADVANCED / COMPATIBILITY"));
+        if (!ImGui.CollapsingHeader(DevToolUiSettings.T(
+                "原版 DevInterface 控件##ObjectLegacyControls",
+                "Legacy DevInterface Controls##ObjectLegacyControls")))
+        {
+            DrawLegacyFallbackButton(inspector);
+            return;
+        }
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "标准 Rain World Representation 暴露的兼容控件。未知 Mod 控件不会被猜测或重写。",
+            "Compatibility controls exposed by the original Rain World representation. Unknown mod controls are not guessed or rewritten."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
             LegacyControlSnapshot control = controls[i];
             string stateKey = inspector.ObjectIndex + ":legacy:" + control.Path;
-            string label = (string.IsNullOrEmpty(control.Label) ? control.Id : control.Label) +
-                           "##DevToolLegacy_" + stateKey;
+            string visibleLabel = string.IsNullOrEmpty(control.Label) ? control.Id : control.Label;
+            string label = visibleLabel + "##DevToolLegacy_" + stateKey;
 
             if (control.Kind == LegacyControlKind.Button)
             {
-                if (ImGui.Button(label))
+                if (DevToolWidgets.ActionButton(visibleLabel, "LegacyButton_" + stateKey, DevToolButtonTone.Normal))
                     EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                         EditorUiCommandKind.InvokeLegacyButton,
                         inspector.ObjectIndex,
@@ -297,37 +315,92 @@ internal static class ObjectInspectorView
             if (!string.IsNullOrWhiteSpace(control.ValueText))
             {
                 ImGui.SameLine();
-                ImGui.TextDisabled(control.ValueText);
+                DevToolWidgets.MutedText(control.ValueText);
             }
 
             if (control.CanReset)
             {
                 ImGui.SameLine();
-                if (ImGui.SmallButton(DevToolUiSettings.T("重置##", "Reset##") + stateKey))
+                if (DevToolWidgets.ActionButton(
+                        DevToolUiSettings.T("重置", "Reset"),
+                        "LegacyReset_" + stateKey,
+                        DevToolButtonTone.Subtle))
                     EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                         EditorUiCommandKind.ResetLegacySlider,
                         inspector.ObjectIndex,
                         text: control.Path));
             }
         }
+
+        DrawLegacyFallbackButton(inspector);
     }
 
-    private static void DrawLegacyFallback(EditorInspectorSnapshot inspector)
+    private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
     {
         if (!inspector.LegacyUiAvailable) return;
 
-        ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("兼容", "Compatibility"));
+        ImGui.Spacing();
         string label = inspector.LegacyUiVisible
-            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
-            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
-        if (ImGui.Button(label + "##DevToolLegacyFallback"))
+            ? DevToolUiSettings.T("隐藏完整原版 DevUI", "Hide Full Original DevUI")
+            : DevToolUiSettings.T("显示完整原版 DevUI", "Show Full Original DevUI");
+        if (DevToolWidgets.ActionButton(label, "DevToolLegacyFallback", DevToolButtonTone.Primary, true))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
 
         if (ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T(
-                "用于无法转换到新检查器的自定义 DevInterface 控件。",
-                "Fallback for custom DevInterface controls that cannot be translated into the Inspector."));
+                "用于无法完整迁移到新检查器的自定义 DevInterface。切回完整原版 UI 时会恢复原始 Gizmo 和面板。",
+                "Fallback for custom DevInterface controls that cannot be fully represented here. The full original UI restores its original gizmos and panels."));
+    }
+
+    private static void DrawActions(EditorInspectorSnapshot inspector)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("操作", "ACTIONS"));
+        if (inspector.SelectionCount > 1)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("复制所选  Ctrl+D", "Duplicate Selection  Ctrl+D"),
+                    "DuplicateObjectSelection",
+                    DevToolButtonTone.Normal))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DuplicateSelection));
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("删除所选", "Delete Selection"),
+                    "DeleteObjectSelection",
+                    DevToolButtonTone.Danger))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteSelection));
+            return;
+        }
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("删除物件", "Delete Object"),
+                "DeleteObject",
+                DevToolButtonTone.Danger,
+                true))
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
+    }
+
+    private static EditorObjectTypeSnapshot FindMetadata(string type)
+    {
+        EditorObjectTypeSnapshot[] library = EditorPresentationHub.Current.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
+        for (int i = 0; i < library.Length; i++)
+            if (string.Equals(library[i].Type, type, StringComparison.Ordinal)) return library[i];
+        return null;
+    }
+
+    private static Num.Vector4 ObjectSourceColor(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+            return new Num.Vector4(0.78f, 0.82f, 0.90f, 1f);
+        if (source.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.36f, 0.72f, 1f, 1f);
+        if (source.IndexOf("RegionKit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.StartsWith("RK", StringComparison.OrdinalIgnoreCase))
+            return new Num.Vector4(1f, 0.70f, 0.34f, 1f);
+        if (source.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.IndexOf("Rain World", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.88f, 0.88f, 0.88f, 1f);
+        return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
     }
 
     private static void SendPosition(EditorInspectorSnapshot inspector)
