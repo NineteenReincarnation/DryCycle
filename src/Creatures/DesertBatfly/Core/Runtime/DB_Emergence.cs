@@ -56,6 +56,8 @@ internal sealed class DB_Emergence
     {
         if (fly?.room == null || fly.mainBodyChunk == null) return;
 
+        // A creature cannot own an ingress reservation and an egress corridor at the same time.
+        DB_HiveTraffic.Forget(fly);
         surface = fly.mainBodyChunk.pos;
         normal = ChooseHiveOutward(fly.room, surface);
         hiveDepartureGoal = ChooseHiveDepartureGoal(fly.room, surface, normal);
@@ -115,6 +117,24 @@ internal sealed class DB_Emergence
     private void UpdateHiveDeparture()
     {
         age++;
+
+        // Passive emergence that happened immediately before a shelter weather transition must
+        // not retain the high-priority egress owner for another 150 ticks while Environment is
+        // already asking the same bat to return. Explicit Travel has its own committed reason to
+        // leave and therefore keeps the corridor until normal clearance.
+        if (!DB_TravelRuntime.HasIntent(fly.abstractCreature) &&
+            DB_SwarmRoom.ShouldSuppressPassiveHiveEmergence(fly.room))
+        {
+            Cancel();
+            fly.AI.ChangeBehavior(FlyAI.Behavior.Idle);
+            fly.AI.leaveRoomDijkstra = -1;
+            fly.AI.followingDijkstraMap = -1;
+            fly.AI.noSwarmCounter = Mathf.Max(fly.AI.noSwarmCounter, 90);
+            fly.burrowOrHangSpot = null;
+            fly.movMode = Fly.MovementMode.BatFlight;
+            fly.AI.localGoal = fly.mainBodyChunk.pos;
+            return;
+        }
 
         Vector2 away = fly.mainBodyChunk.pos - surface;
         float distance = away.magnitude;
