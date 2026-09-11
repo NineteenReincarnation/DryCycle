@@ -8,8 +8,8 @@ namespace DryCycle.DevUI.DevTool.Input;
 
 /// <summary>
 /// Single input-arbitration point for the rebuilt DevTool. It coordinates optional ImGui
-/// capture, DryCycle's legacy text fields, editor shortcuts, vanilla DevTool hotkeys and
-/// gameplay input. ImGui itself is never referenced from DryCycle.dll.
+/// capture, DryCycle's legacy text fields, editor shortcuts, vanilla DevTool hotkeys,
+/// world-space handles and gameplay input. ImGui itself is never referenced from DryCycle.dll.
 /// </summary>
 public static class EditorInputRouter
 {
@@ -46,6 +46,7 @@ public static class EditorInputRouter
         On.Player.checkInput += Player_checkInput;
         On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
         On.RainWorldGame.Update += RainWorldGame_Update;
+        On.DevInterface.Handle.Update += Handle_Update;
         enabled = true;
     }
 
@@ -55,6 +56,7 @@ public static class EditorInputRouter
         On.Player.checkInput -= Player_checkInput;
         On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate;
         On.RainWorldGame.Update -= RainWorldGame_Update;
+        On.DevInterface.Handle.Update -= Handle_Update;
         SetFrontendAttached(false);
         capturedGame = null;
         capturedUnityFrame = -1;
@@ -156,6 +158,42 @@ public static class EditorInputRouter
                 capturedGame = null;
                 capturedUnityFrame = -1;
             }
+        }
+    }
+
+    /// <summary>
+    /// Prevents a click consumed by the overlay from also beginning a drag on a world-space
+    /// DevInterface handle underneath it. Existing handle drags are allowed to finish so a
+    /// drag does not get stuck merely because the cursor crosses an Inspector/Browser panel.
+    /// Placement mode also reserves fresh clicks for object placement.
+    /// </summary>
+    private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, DevInterface.Handle self)
+    {
+        if (self?.owner == null || self.dragged)
+        {
+            orig(self);
+            return;
+        }
+
+        EditorSession session = DevToolSessionHub.Current;
+        bool ownsThisUi = session != null && ReferenceEquals(session.Owner, self.owner);
+        bool blockNewDrag = ownsThisUi && self.owner.game?.devToolsActive == true &&
+                            (session.PlacementActive || (frontendAttached && wantsMouse));
+        if (!blockNewDrag)
+        {
+            orig(self);
+            return;
+        }
+
+        bool mouseClick = self.owner.mouseClick;
+        self.owner.mouseClick = false;
+        try
+        {
+            orig(self);
+        }
+        finally
+        {
+            self.owner.mouseClick = mouseClick;
         }
     }
 
