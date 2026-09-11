@@ -18,6 +18,7 @@ internal static class ObjectInspectorView
     private static readonly Dictionary<string, float> LegacySliderEdits = new(StringComparer.Ordinal);
 
     private static int objectIndex = -1;
+    private static int selectionCount;
     private static float positionX;
     private static float positionY;
 
@@ -31,11 +32,13 @@ internal static class ObjectInspectorView
             return;
         }
 
-        if (objectIndex != inspector.ObjectIndex)
-            Reset(inspector.ObjectIndex, inspector.X, inspector.Y);
+        if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
+            Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
 
         ImGui.Text(inspector.Type);
         ImGui.TextDisabled(inspector.DataType);
+        if (inspector.SelectionCount > 1)
+            ImGui.TextDisabled("Editing shared properties for the current selection.");
         ImGui.Separator();
 
         DrawTransform(inspector);
@@ -44,16 +47,26 @@ internal static class ObjectInspectorView
         DrawLegacyFallback(inspector);
 
         ImGui.Separator();
-        if (ImGui.Button("Delete Object"))
+        if (inspector.SelectionCount > 1)
+        {
+            if (ImGui.Button("Duplicate Selection  Ctrl+D"))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DuplicateSelection));
+            ImGui.SameLine();
+            if (ImGui.Button("Delete Selection"))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteSelection));
+        }
+        else if (ImGui.Button("Delete Object"))
+        {
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
+        }
     }
 
     private static void DrawTransform(EditorInspectorSnapshot inspector)
     {
-        ImGui.TextDisabled("Transform");
+        ImGui.TextDisabled(inspector.SelectionCount > 1 ? "Transform · group anchor" : "Transform");
 
-        // Keep external/gizmo movement visible, but never overwrite an edit buffer while
-        // an ImGui item is active. This is what lets typed values survive across frames.
+        // The primary object is the anchor for a multi-selection. Moving it from the
+        // Inspector applies the same delta to every selected object on the Unity thread.
         if (!ImGui.IsAnyItemActive())
             SynchronizePosition(inspector);
 
@@ -72,7 +85,15 @@ internal static class ObjectInspectorView
     private static void DrawProperties(EditorInspectorSnapshot inspector)
     {
         EditorPropertySnapshot[] properties = inspector.Properties ?? Array.Empty<EditorPropertySnapshot>();
-        if (properties.Length == 0) return;
+        if (properties.Length == 0)
+        {
+            if (inspector.SelectionCount > 1)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("No editable properties are shared by every selected object.");
+            }
+            return;
+        }
 
         ImGui.Separator();
         string group = null;
@@ -84,15 +105,18 @@ internal static class ObjectInspectorView
                 group = property.Group;
                 ImGui.TextDisabled(string.IsNullOrEmpty(group) ? "Properties" : group);
             }
-            DrawProperty(inspector.ObjectIndex, property);
+            DrawProperty(inspector, property);
         }
     }
 
-    private static void DrawProperty(int targetIndex, EditorPropertySnapshot property)
+    private static void DrawProperty(EditorInspectorSnapshot inspector, EditorPropertySnapshot property)
     {
         if (property == null || string.IsNullOrEmpty(property.Key)) return;
-        string stateKey = targetIndex + ":" + property.Key;
-        string label = property.DisplayName + "##DevToolProperty_" + stateKey;
+
+        bool mixed = IsMixed(inspector, property.Key);
+        string stateKey = inspector.ObjectIndex + ":" + inspector.SelectionCount + ":" + property.Key;
+        string displayName = property.DisplayName + (mixed ? "  [Mixed]" : string.Empty);
+        string label = displayName + "##DevToolProperty_" + stateKey;
 
         switch (property.Kind)
         {
@@ -111,7 +135,7 @@ internal static class ObjectInspectorView
                     changed = ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
                 FloatEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(targetIndex, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
                 else if (!changed && !ImGui.IsItemActive())
                     FloatEdits[stateKey] = property.X;
                 break;
@@ -127,7 +151,7 @@ internal static class ObjectInspectorView
                     changed = ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
                 IntEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(targetIndex, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
                 else if (!changed && !ImGui.IsItemActive())
                     IntEdits[stateKey] = property.IntegerValue;
                 break;
@@ -137,7 +161,7 @@ internal static class ObjectInspectorView
             {
                 bool value = property.BooleanValue;
                 if (ImGui.Checkbox(label, ref value))
-                    SendProperty(targetIndex, property.Key, new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: value));
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: value));
                 break;
             }
 
@@ -147,7 +171,7 @@ internal static class ObjectInspectorView
                 bool changed = ImGui.InputText(label, ref value, 1024);
                 StringEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(targetIndex, property.Key, new EditorPropertyValue(EditorPropertyKind.String, text: value));
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.String, text: value));
                 else if (!changed && !ImGui.IsItemActive())
                     StringEdits[stateKey] = property.StringValue ?? string.Empty;
                 break;
@@ -159,7 +183,7 @@ internal static class ObjectInspectorView
                 bool changed = ImGui.InputFloat2(label, ref value, "%.2f");
                 Vector2Edits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(targetIndex, property.Key,
+                    SendProperty(inspector, property.Key,
                         new EditorPropertyValue(EditorPropertyKind.Vector2, x: value.X, y: value.Y));
                 else if (!changed && !ImGui.IsItemActive())
                     Vector2Edits[stateKey] = new Num.Vector2(property.X, property.Y);
@@ -173,7 +197,7 @@ internal static class ObjectInspectorView
                 bool changed = ImGui.ColorEdit4(label, ref value);
                 ColorEdits[stateKey] = value;
                 if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(targetIndex, property.Key,
+                    SendProperty(inspector, property.Key,
                         new EditorPropertyValue(EditorPropertyKind.Color,
                             x: value.X, y: value.Y, z: value.Z, w: value.W));
                 else if (!changed && !ImGui.IsItemActive())
@@ -182,27 +206,36 @@ internal static class ObjectInspectorView
             }
 
             case EditorPropertyKind.Enum:
-                DrawEnum(targetIndex, property, label);
+                DrawEnum(inspector, property, label, mixed);
                 break;
         }
 
-        if (ImGui.IsItemHovered() && !string.IsNullOrEmpty(property.Source))
-            ImGui.SetTooltip(property.Source);
+        if (ImGui.IsItemHovered())
+        {
+            if (mixed && !string.IsNullOrEmpty(property.Source))
+                ImGui.SetTooltip("Selected objects contain different values.\n" + property.Source);
+            else if (mixed)
+                ImGui.SetTooltip("Selected objects contain different values.");
+            else if (!string.IsNullOrEmpty(property.Source))
+                ImGui.SetTooltip(property.Source);
+        }
     }
 
-    private static void DrawEnum(int targetIndex, EditorPropertySnapshot property, string label)
+    private static void DrawEnum(EditorInspectorSnapshot inspector, EditorPropertySnapshot property, string label, bool mixed)
     {
         string[] options = property.Options ?? Array.Empty<string>();
-        string preview = property.IntegerValue >= 0 && property.IntegerValue < options.Length
-            ? options[property.IntegerValue]
-            : property.StringValue ?? string.Empty;
+        string preview = mixed
+            ? "<Mixed>"
+            : property.IntegerValue >= 0 && property.IntegerValue < options.Length
+                ? options[property.IntegerValue]
+                : property.StringValue ?? string.Empty;
 
         if (!ImGui.BeginCombo(label, preview)) return;
         for (int i = 0; i < options.Length; i++)
         {
-            bool selected = i == property.IntegerValue;
+            bool selected = !mixed && i == property.IntegerValue;
             if (ImGui.Selectable(options[i] + "##" + label + i, selected))
-                SendProperty(targetIndex, property.Key,
+                SendProperty(inspector, property.Key,
                     new EditorPropertyValue(EditorPropertyKind.Enum, integer: i));
             if (selected) ImGui.SetItemDefaultFocus();
         }
@@ -211,6 +244,8 @@ internal static class ObjectInspectorView
 
     private static void DrawLegacyControls(EditorInspectorSnapshot inspector)
     {
+        // Legacy controls intentionally remain single-selection only. Presentation strips
+        // them from multi-selection because their semantics are not safely composable.
         LegacyControlSnapshot[] controls = inspector.LegacyControls ?? Array.Empty<LegacyControlSnapshot>();
         if (controls.Length == 0) return;
 
@@ -285,20 +320,36 @@ internal static class ObjectInspectorView
 
     private static void SendPosition(EditorInspectorSnapshot inspector)
     {
+        EditorUiCommandKind kind = inspector.SelectionCount > 1
+            ? EditorUiCommandKind.SetSelectionPosition
+            : EditorUiCommandKind.SetObjectPosition;
+
         EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-            EditorUiCommandKind.SetObjectPosition,
+            kind,
             inspector.ObjectIndex,
             x: positionX,
             y: positionY));
     }
 
-    private static void SendProperty(int targetIndex, string key, EditorPropertyValue value)
+    private static void SendProperty(EditorInspectorSnapshot inspector, string key, EditorPropertyValue value)
     {
+        EditorUiCommandKind kind = inspector.SelectionCount > 1
+            ? EditorUiCommandKind.SetSelectionProperty
+            : EditorUiCommandKind.SetObjectProperty;
+
         EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-            EditorUiCommandKind.SetObjectProperty,
-            targetIndex,
+            kind,
+            inspector.ObjectIndex,
             text: key,
             propertyValue: value));
+    }
+
+    private static bool IsMixed(EditorInspectorSnapshot inspector, string key)
+    {
+        string[] mixed = inspector?.MixedPropertyKeys ?? Array.Empty<string>();
+        for (int i = 0; i < mixed.Length; i++)
+            if (string.Equals(mixed[i], key, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private static void SynchronizePosition(EditorInspectorSnapshot inspector)
@@ -307,9 +358,10 @@ internal static class ObjectInspectorView
         if (Math.Abs(positionY - inspector.Y) > 0.0001f) positionY = inspector.Y;
     }
 
-    private static void Reset(int nextObjectIndex, float x = 0f, float y = 0f)
+    private static void Reset(int nextObjectIndex, float x = 0f, float y = 0f, int nextSelectionCount = 0)
     {
         objectIndex = nextObjectIndex;
+        selectionCount = nextSelectionCount;
         positionX = x;
         positionY = y;
         FloatEdits.Clear();
