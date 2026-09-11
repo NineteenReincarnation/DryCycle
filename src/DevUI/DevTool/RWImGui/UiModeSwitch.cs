@@ -20,6 +20,8 @@ internal static class UiModeSwitch
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("UI");
+
         ImGui.TextDisabled(DevToolUiSettings.T("语言", "Language"));
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
         if (chinese) ImGui.BeginDisabled();
@@ -38,7 +40,7 @@ internal static class UiModeSwitch
         if (ImGui.Button(DevToolUiSettings.T("切换到原版", "Use Vanilla")))
             EditorUiModeState.SetVanilla(true);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(DevToolUiSettings.T(
+            DevToolTooltip.Show(DevToolUiSettings.T(
                 "切换后完全隐藏新 UI。Ctrl+Shift+U 可切回。",
                 "Hides the rebuilt UI completely. Ctrl+Shift+U returns to it."));
 
