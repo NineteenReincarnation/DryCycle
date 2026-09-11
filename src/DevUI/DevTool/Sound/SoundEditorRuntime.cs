@@ -86,6 +86,7 @@ public static class SoundEditorPresentationHub
             return;
         }
 
+        SoundEditorStateHub.SynchronizeFromLegacyNode(session, session.Owner.draggedNode ?? page.draggedObject);
         SoundEditorState state = SoundEditorStateHub.Get(session);
         int count = session.RoomSettings.ambientSounds.Count;
         if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
