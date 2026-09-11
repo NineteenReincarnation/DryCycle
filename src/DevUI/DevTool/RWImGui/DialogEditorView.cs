@@ -14,13 +14,12 @@ internal static class DialogEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("对话浏览器不可用。", "Dialog browser unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("对话浏览器不可用。", "Dialog browser unavailable."), true);
             return;
         }
 
         ImGui.TextDisabled(DevToolUiSettings.T("语言 · ", "LANGUAGE · ") + snapshot.Language);
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索对话##DialogSearch", "Search dialogs##DialogSearch"), ref search, 128);
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索对话", "Search dialogs"), "DialogSearch", ref search, 128);
         ImGui.Separator();
 
         string[] paths = snapshot.DialogPaths ?? Array.Empty<string>();
@@ -38,7 +37,7 @@ internal static class DialogEditorView
             if (ImGui.IsItemHovered()) DevToolTooltip.Show(path);
         }
 
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的对话文件。", "No matching dialog files."));
+        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的对话文件。", "No matching dialog files."), true);
     }
 
     internal static void DrawPreview(
@@ -69,8 +68,11 @@ internal static class DialogEditorView
         }
 
         ImGui.Text(snapshot.SelectedFileName);
-        ImGui.SameLine();
-        ImGui.TextDisabled((snapshot.Events?.Length ?? 0) + DevToolUiSettings.T(" 个事件", " events"));
+        string eventCount = (snapshot.Events?.Length ?? 0) + DevToolUiSettings.T(" 个事件", " events");
+        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(eventCount).X))
+            ImGui.TextDisabled(eventCount);
+        else
+            ImGui.TextDisabled(eventCount);
         ImGui.Separator();
 
         EditorDialogEventSnapshot[] events = snapshot.Events ?? Array.Empty<EditorDialogEventSnapshot>();
@@ -119,7 +121,7 @@ internal static class DialogEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("对话浏览器不可用。", "Dialog browser unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("对话浏览器不可用。", "Dialog browser unavailable."), true);
             return;
         }
 
