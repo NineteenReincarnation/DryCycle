@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Map;
@@ -43,16 +44,19 @@ internal static class DevToolRuntime
         SoundEditorCommandQueue.Clear();
         TriggerEditorCommandQueue.Clear();
         MapEditorCommandQueue.Clear();
+        DialogEditorCommandQueue.Clear();
         RelationshipEditorCommandQueue.Clear();
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
         SoundEditorPresentationHub.Clear();
         TriggerEditorPresentationHub.Clear();
         MapEditorPresentationHub.Clear();
+        DialogEditorPresentationHub.Clear();
         RelationshipEditorPresentationHub.Clear();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
         MapEditorStateHub.Reset();
+        DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
         DevToolSessionHub.Reset();
         enabled = false;
@@ -82,6 +86,7 @@ internal static class DevToolRuntime
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
+        DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
@@ -97,6 +102,7 @@ internal static class DevToolRuntime
              (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage) ||
              (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage) ||
              (session.ToolMode == EditorToolMode.Map && self.activePage is MapPage) ||
+             (session.ToolMode == EditorToolMode.Dialog && self.activePage is DialogPage) ||
              (session.ToolMode == EditorToolMode.Relationships && self.activePage is RelationshipPage));
         LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
@@ -105,6 +111,7 @@ internal static class DevToolRuntime
         SoundEditorPresentationHub.Publish(session);
         TriggerEditorPresentationHub.Publish(session);
         MapEditorPresentationHub.Publish(session);
+        DialogEditorPresentationHub.Publish(session);
         RelationshipEditorPresentationHub.Publish(session);
     }
 }
