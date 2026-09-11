@@ -45,6 +45,11 @@ internal static class TriggerEditorView
             return;
         }
 
+        bool collapseAll = DevToolWidgets.PaneTitleWithAction(
+            DevToolUiSettings.T("触发器", "Trigger"),
+            DevToolUiSettings.T("折叠所有", "Collapse All"),
+            "TriggerInspectorCollapseAll");
+
         EditorTriggerSnapshot selected = FindSelected(snapshot);
         if (selected == null)
         {
@@ -57,6 +62,13 @@ internal static class TriggerEditorView
             ? DevToolUiSettings.T("事件 · ", "Event · ") + selected.Event.Type
             : DevToolUiSettings.T("未分配事件", "No event assigned"));
         ImGui.Separator();
+
+        if (collapseAll)
+            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("触发器内容##TriggerInspectorDetails", "Trigger Details##TriggerInspectorDetails"),
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return;
 
         ImGui.TextDisabled(DevToolUiSettings.T("触发条件", "ACTIVATION"));
         DrawInt(selected, TriggerEditorKeys.ActiveFromCycle, DevToolUiSettings.T("起始周期", "From cycle"), selected.ActiveFromCycle, 0, 80);
