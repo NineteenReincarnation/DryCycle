@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Room;
 using ImGuiNET;
+using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -22,6 +23,8 @@ internal static class RoomSettingsView
     private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
     private static Section section = Section.Environment;
     private static string effectSearch = string.Empty;
+    private const float BrowserBodyFontScale = 1.22f;
+    private const float EffectSourceHeaderFontScale = 1.52f;
 
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
     {
@@ -58,10 +61,7 @@ internal static class RoomSettingsView
             {
                 lastCategory = category;
                 if (!string.IsNullOrEmpty(category))
-                {
-                    ImGui.Spacing();
-                    ImGui.TextDisabled(category);
-                }
+                    DrawEffectSourceHeader(category);
             }
 
             if (ImGui.Selectable(type + "##RoomAddEffect" + type, false))
@@ -388,6 +388,45 @@ internal static class RoomSettingsView
                 FloatEdits[stateKey] = fades[i];
             }
         }
+    }
+
+    private static void DrawEffectSourceHeader(string category)
+    {
+        ImGui.Spacing();
+        ImGui.SetWindowFontScale(EffectSourceHeaderFontScale);
+
+        Num.Vector2 pos = ImGui.GetCursorScreenPos();
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        const uint outline = 0xFF000000u;
+        const float stroke = 2f;
+
+        draw.AddText(pos + new Num.Vector2(-stroke, 0f), outline, category);
+        draw.AddText(pos + new Num.Vector2(stroke, 0f), outline, category);
+        draw.AddText(pos + new Num.Vector2(0f, -stroke), outline, category);
+        draw.AddText(pos + new Num.Vector2(0f, stroke), outline, category);
+        draw.AddText(pos + new Num.Vector2(-stroke, -stroke), outline, category);
+        draw.AddText(pos + new Num.Vector2(stroke, -stroke), outline, category);
+        draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, category);
+        draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, category);
+
+        ImGui.TextColored(EffectSourceColor(category), category);
+        ImGui.SetWindowFontScale(BrowserBodyFontScale);
+        ImGui.Separator();
+    }
+
+    private static Num.Vector4 EffectSourceColor(string category)
+    {
+        if (category.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.36f, 0.72f, 1f, 1f);
+
+        if (category.IndexOf("RegionKit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            category.StartsWith("RK", StringComparison.OrdinalIgnoreCase))
+            return new Num.Vector4(1f, 0.70f, 0.34f, 1f);
+
+        if (category.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.88f, 0.88f, 0.88f, 1f);
+
+        return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
     }
 
     private static string SectionName(Section value)
