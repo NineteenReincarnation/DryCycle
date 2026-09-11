@@ -69,26 +69,41 @@ public static class EditorInputRouter
             session.LegacyTransactions.HasPendingTransaction)
             return;
 
+        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
+                    Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        // Save/Undo/Redo belong to the rebuilt core, not to one visual frontend. They remain
+        // available in Vanilla presentation mode because the old shortcut runtime was removed.
+        if (ctrl && Input.GetKeyDown(KeyCode.S))
+        {
+            EditorActions.Save(session);
+            return;
+        }
+        if (ctrl && Input.GetKeyDown(KeyCode.Z))
+        {
+            if (shift) EditorActions.Redo(session);
+            else EditorActions.Undo(session);
+            return;
+        }
+        if (ctrl && Input.GetKeyDown(KeyCode.Y))
+        {
+            EditorActions.Redo(session);
+            return;
+        }
+
+        // Vanilla mode restores the original editor interaction model. Do not let hidden
+        // New-UI commands such as duplicate/delete/focus/browser shortcuts fire behind it.
+        if (EditorUiModeState.UseVanilla)
+            return;
+
         if (session.PlacementActive && Input.GetKeyDown(KeyCode.Escape))
         {
             session.CancelPlacement();
             return;
         }
 
-        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
-                    Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
-        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-
-        if (ctrl && Input.GetKeyDown(KeyCode.S))
-            EditorActions.Save(session);
-        else if (ctrl && Input.GetKeyDown(KeyCode.Z))
-        {
-            if (shift) EditorActions.Redo(session);
-            else EditorActions.Undo(session);
-        }
-        else if (ctrl && Input.GetKeyDown(KeyCode.Y))
-            EditorActions.Redo(session);
-        else if (ctrl && Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
+        if (ctrl && Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
             EditorActions.DuplicateSelection(session);
         else if (Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
             EditorActions.DeleteSelection(session);
@@ -165,7 +180,7 @@ public static class EditorInputRouter
     /// Prevents a click consumed by the overlay from also beginning a drag on a world-space
     /// DevInterface handle underneath it. Existing handle drags are allowed to finish so a
     /// drag does not get stuck merely because the cursor crosses an Inspector/Browser panel.
-    /// Placement mode also reserves fresh clicks for object placement.
+    /// Placement mode reserves fresh clicks only while the rebuilt UI is active.
     /// </summary>
     private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, DevInterface.Handle self)
     {
@@ -177,8 +192,10 @@ public static class EditorInputRouter
 
         EditorSession session = DevToolSessionHub.Current;
         bool ownsThisUi = session != null && ReferenceEquals(session.Owner, self.owner);
+        bool newUiPlacementOwnsMouse = !EditorUiModeState.UseVanilla && session?.PlacementActive == true;
+        bool frontendOwnsMouse = frontendAttached && wantsMouse;
         bool blockNewDrag = ownsThisUi && self.owner.game?.devToolsActive == true &&
-                            (session.PlacementActive || (frontendAttached && wantsMouse));
+                            (newUiPlacementOwnsMouse || frontendOwnsMouse);
         if (!blockNewDrag)
         {
             orig(self);
