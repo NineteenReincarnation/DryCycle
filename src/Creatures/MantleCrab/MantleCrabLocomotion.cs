@@ -116,6 +116,10 @@ internal sealed class MantleCrabLocomotion
         if (startCooldown > 0)
             startCooldown--;
 
+        // 每一帧都先留下一个 PLAN。后面如果同一 frame 没有 GROUND，说明 MantleCrab.Update
+        // 在真正调用站立支撑之前就 return 了，这正是本轮要排查的情况之一。
+        MantleCrabStandDebug.RecordPlanning(crab, this);
+
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
             return;
 
@@ -193,8 +197,20 @@ internal sealed class MantleCrabLocomotion
 
     internal void ApplyGroundForces(float ignoredGravity)
     {
+        Vector2 beforeSupport = BodyVelocity();
         posture.ApplySupportAndPosture(crab.gravity, TurnIntent);
+        Vector2 afterSupport = BodyVelocity();
         StabilizeVerticalMotion();
+        Vector2 afterVerticalStabilizer = BodyVelocity();
+
+        // 这里记录的是实际速度变化，不是重新计算一个“理论支撑值”。
+        // supportDeltaY 可以直接告诉我们这一帧站立代码到底有没有真的把身体往上托。
+        MantleCrabStandDebug.RecordGroundForces(
+            crab,
+            this,
+            beforeSupport,
+            afterSupport,
+            afterVerticalStabilizer);
 
         if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
         {
