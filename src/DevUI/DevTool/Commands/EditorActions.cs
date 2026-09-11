@@ -5,6 +5,7 @@ using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Preview;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Commands;
@@ -13,6 +14,7 @@ public static class EditorActions
 {
     public static bool Save(EditorSession session)
     {
+        EffectPreviewRuntime.EndForPersistentOperation("save");
         if (session?.Owner == null) return false;
         try
         {
@@ -40,8 +42,17 @@ public static class EditorActions
         }
     }
 
-    public static bool Undo(EditorSession session) => session?.History.Undo(session) ?? false;
-    public static bool Redo(EditorSession session) => session?.History.Redo(session) ?? false;
+    public static bool Undo(EditorSession session)
+    {
+        EffectPreviewRuntime.EndForPersistentOperation("undo");
+        return session?.History.Undo(session) ?? false;
+    }
+
+    public static bool Redo(EditorSession session)
+    {
+        EffectPreviewRuntime.EndForPersistentOperation("redo");
+        return session?.History.Redo(session) ?? false;
+    }
 
     public static bool PlaceObjectAtCursor(EditorSession session, bool keepPlacementMode)
     {
