@@ -26,17 +26,17 @@ internal static class MapEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled("Map editor unavailable.");
+            ImGui.TextDisabled(DevToolUiSettings.T("地图编辑器不可用。", "Map editor unavailable."));
             return;
         }
 
-        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + " rooms");
-        if (ImGui.Button("Fit Map")) fitRequested = true;
+        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
+        if (ImGui.Button(DevToolUiSettings.T("适配地图", "Fit Map"))) fitRequested = true;
         ImGui.SameLine();
         if (ImGui.SmallButton("100%")) zoom = 1f;
 
         ImGui.Separator();
-        ImGui.TextDisabled("LAYERS");
+        ImGui.TextDisabled(DevToolUiSettings.T("图层", "LAYERS"));
         for (int i = 0; i < LayerVisible.Length; i++)
         {
             bool visible = LayerVisible[i];
@@ -46,7 +46,7 @@ internal static class MapEditorView
         }
 
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText("Search rooms##MapRoomSearch", ref search, 128);
+        ImGui.InputText(DevToolUiSettings.T("搜索房间##MapRoomSearch", "Search rooms##MapRoomSearch"), ref search, 128);
         ImGui.Separator();
 
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
@@ -59,11 +59,11 @@ internal static class MapEditorView
 
             string label = room.Name + "  [L" + room.Layer + "]";
             if (!string.IsNullOrEmpty(room.Subregion)) label += "  " + room.Subregion;
-            if (room.Disabled) label += "  [Hidden]";
+            if (room.Disabled) label += DevToolUiSettings.T("  [隐藏]", "  [Hidden]");
             if (ImGui.Selectable(label + "##MapBrowserRoom" + room.RoomIndex, room.Selected))
                 Select(room.RoomIndex);
         }
-        if (matches == 0) ImGui.TextDisabled("No matching rooms.");
+        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."));
     }
 
     internal static void DrawInspector(EditorMapPresentationSnapshot snapshot)
@@ -72,7 +72,7 @@ internal static class MapEditorView
         if (room == null)
         {
             inspectorRoom = -1;
-            ImGui.TextDisabled("Select a room from the graph or room list.");
+            ImGui.TextDisabled(DevToolUiSettings.T("从图中或房间列表选择一个房间。", "Select a room from the graph or room list."));
             return;
         }
 
@@ -89,14 +89,14 @@ internal static class MapEditorView
         }
 
         ImGui.Text(room.Name);
-        ImGui.TextDisabled("Room index " + room.RoomIndex);
-        if (room.CurrentRoom) ImGui.TextDisabled("Current camera room");
-        if (room.OffScreenDen) ImGui.TextDisabled("Off-screen den");
-        if (room.Disabled) ImGui.TextDisabled("Hidden from map output");
+        ImGui.TextDisabled(DevToolUiSettings.T("房间索引 ", "Room index ") + room.RoomIndex);
+        if (room.CurrentRoom) ImGui.TextDisabled(DevToolUiSettings.T("当前镜头房间", "Current camera room"));
+        if (room.OffScreenDen) ImGui.TextDisabled(DevToolUiSettings.T("屏幕外巢穴", "Off-screen den"));
+        if (room.Disabled) ImGui.TextDisabled(DevToolUiSettings.T("从地图输出中隐藏", "Hidden from map output"));
         ImGui.Separator();
 
         Num.Vector2 position = inspectorPosition;
-        bool positionChanged = ImGui.InputFloat2("Dev position##MapInspectorPosition", ref position, "%.1f");
+        bool positionChanged = ImGui.InputFloat2(DevToolUiSettings.T("开发位置##MapInspectorPosition", "Dev position##MapInspectorPosition"), ref position, "%.1f");
         inspectorPosition = position;
         if (ImGui.IsItemDeactivatedAfterEdit())
             SetPosition(room.RoomIndex, position);
@@ -104,12 +104,12 @@ internal static class MapEditorView
             inspectorPosition = new Num.Vector2(room.X, room.Y);
 
         int layer = room.Layer;
-        if (ImGui.BeginCombo("Layer##MapInspectorLayer", "Layer " + layer))
+        if (ImGui.BeginCombo(DevToolUiSettings.T("图层##MapInspectorLayer", "Layer##MapInspectorLayer"), DevToolUiSettings.T("图层 ", "Layer ") + layer))
         {
             for (int i = 0; i < 3; i++)
             {
                 bool selected = layer == i;
-                if (ImGui.Selectable("Layer " + i + "##MapLayer" + i, selected))
+                if (ImGui.Selectable(DevToolUiSettings.T("图层 ", "Layer ") + i + "##MapLayer" + i, selected))
                     MapEditorCommandQueue.Enqueue(new MapEditorCommand(
                         MapEditorCommandKind.SetRoomLayer,
                         roomIndex: room.RoomIndex,
@@ -120,7 +120,7 @@ internal static class MapEditorView
         }
 
         string subregion = inspectorSubregion;
-        bool subregionChanged = ImGui.InputText("Subregion##MapInspectorSubregion", ref subregion, 128);
+        bool subregionChanged = ImGui.InputText(DevToolUiSettings.T("子区域##MapInspectorSubregion", "Subregion##MapInspectorSubregion"), ref subregion, 128);
         inspectorSubregion = subregion;
         if (ImGui.IsItemDeactivatedAfterEdit())
             MapEditorCommandQueue.Enqueue(new MapEditorCommand(
@@ -131,8 +131,8 @@ internal static class MapEditorView
             inspectorSubregion = room.Subregion ?? string.Empty;
 
         ImGui.Separator();
-        ImGui.TextDisabled("Connections are taken directly from World/AbstractRoom.");
-        ImGui.TextDisabled("Map position edits are saved by Ctrl+S with MapPage.SaveMapConfig().");
+        ImGui.TextDisabled(DevToolUiSettings.T("连接关系直接读取 World/AbstractRoom。", "Connections are taken directly from World/AbstractRoom."));
+        ImGui.TextDisabled(DevToolUiSettings.T("Ctrl+S 会通过 MapPage.SaveMapConfig() 保存地图位置。", "Map position edits are saved by Ctrl+S with MapPage.SaveMapConfig()."));
     }
 
     internal static void DrawCanvas(EditorMapPresentationSnapshot snapshot, Num.Vector2 position, Num.Vector2 size)
@@ -142,10 +142,10 @@ internal static class MapEditorView
         ImGui.SetNextWindowPos(position, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(size, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new Num.Vector2(420f, 300f), new Num.Vector2(4000f, 4000f));
-        ImGui.SetNextWindowBgAlpha(0.98f);
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
                                  ImGuiWindowFlags.NoScrollWithMouse;
-        if (!ImGui.Begin("Region Map###DevToolMapCanvas", flags))
+        if (!ImGui.Begin(DevToolUiSettings.T("区域地图###DevToolMapCanvas", "Region Map###DevToolMapCanvas"), flags))
         {
             ImGui.End();
             return;
