@@ -6,6 +6,7 @@ using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Room;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -36,7 +37,9 @@ internal static class DevToolRuntime
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
         EditorUiCommandQueue.Clear();
+        RoomEditorCommandQueue.Clear();
         EditorPresentationHub.Clear();
+        RoomEditorPresentationHub.Clear();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -61,6 +64,7 @@ internal static class DevToolRuntime
         session?.LegacyTransactions.AfterLegacyUpdate(session);
 
         EditorUiCommandQueue.Process(session);
+        RoomEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
         bool suppressLegacyObjectsUi =
@@ -71,6 +75,7 @@ internal static class DevToolRuntime
         LegacyUiPresentationController.Apply(self.activePage, suppressLegacyObjectsUi);
 
         EditorPresentationHub.Publish(session);
+        RoomEditorPresentationHub.Publish(session);
     }
 
     private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, Handle self)
