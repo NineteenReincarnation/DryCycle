@@ -39,13 +39,13 @@ internal static class DevToolWidgets
         if (primary)
         {
             paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
-            DrawOutlinedText(text, Accent, 1.42f * restoreScale, 1.75f, paneBodyScale);
+            DrawOutlinedText(text, Accent, 1.55f * restoreScale, 1.9f, paneBodyScale);
             ImGui.Spacing();
             return;
         }
 
         float bodyScale = ResolvePaneBodyScale(restoreScale);
-        DrawOutlinedText(text, SecondaryAccent, 1.15f * bodyScale, 1.35f, bodyScale);
+        DrawOutlinedText(text, SecondaryAccent, 1.28f * bodyScale, 1.5f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -54,7 +54,7 @@ internal static class DevToolWidgets
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.10f * bodyScale, 1.25f, bodyScale);
+        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.18f * bodyScale, 1.35f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
