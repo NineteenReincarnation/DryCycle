@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Preview;
 
 namespace DryCycle.DevUI.DevTool.Room;
 
@@ -169,13 +170,19 @@ internal static class RoomSettingsPresentation
             return Array.Empty<EditorRoomEffectSnapshot>();
 
         RoomSettingsPage page = session?.Owner?.activePage as RoomSettingsPage;
-        EditorRoomEffectSnapshot[] result = new EditorRoomEffectSnapshot[settings.effects.Count];
+        List<EditorRoomEffectSnapshot> result = new(settings.effects.Count);
         for (int i = 0; i < settings.effects.Count; i++)
         {
             RoomSettings.RoomEffect effect = settings.effects[i];
+
+            // Preview effects are real runtime list entries on purpose so unknown mods can see
+            // them through standard Rain World APIs. They must never become editor document rows.
+            if (EffectPreviewRuntime.IsPreviewEffect(effect))
+                continue;
+
             if (effect == null)
             {
-                result[i] = new EditorRoomEffectSnapshot { Index = i, Type = "<null>" };
+                result.Add(new EditorRoomEffectSnapshot { Index = i, Type = "<null>" });
                 continue;
             }
 
@@ -188,7 +195,7 @@ internal static class RoomSettingsPresentation
                 values[slider] = effect.GetAmount(slider);
             }
 
-            result[i] = new EditorRoomEffectSnapshot
+            result.Add(new EditorRoomEffectSnapshot
             {
                 Index = i,
                 Type = effect.type?.value ?? string.Empty,
@@ -198,9 +205,9 @@ internal static class RoomSettingsPresentation
                 Save = effect.save,
                 SliderNames = names,
                 Values = values
-            };
+            });
         }
-        return result;
+        return result.ToArray();
     }
 
     private static void CaptureAvailableEffects(
