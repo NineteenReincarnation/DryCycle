@@ -6,7 +6,6 @@ internal sealed class MantleCrabLimb
 {
     private const float PassiveAcquireReach = .90f;
     private const float StepAcquireReach = .92f;
-    private const float SlipStartReach = .84f;
     private const float ReleaseReach = .92f;
     private const float PlantTolerance = 1.5f;
 
@@ -231,11 +230,11 @@ internal sealed class MantleCrabLimb
             }
             else
             {
+                // 承重脚在一个 stance 周期内必须固定在真实世界接触点上。
+                // 身体从脚点上方经过；接近关节极限时由步态系统抬脚换步，而不是沿地面拖着 Contact 滑。
+                // A stance foot remains locked to its world-space terrain contact. The body moves over it;
+                // nearing the workspace limit must trigger a new step rather than translating the contact across the floor.
                 float stretch = Vector2.Distance(anchor, contact) / Mathf.Max(1f, Reach);
-                if (Planted && stretch > SlipStartReach)
-                    RelieveContactStrain(crab, anchor, stretch);
-
-                stretch = Vector2.Distance(anchor, contact) / Mathf.Max(1f, Reach);
                 if (stretch > ReleaseReach)
                     ReleaseContact();
             }
@@ -256,7 +255,7 @@ internal sealed class MantleCrabLimb
 
         bool wasPlanted = Planted;
         Vector2 target = hasTarget
-            ? Vector2.MoveTowards(LastPos[3], contact, 11f)
+            ? (Planted ? contact : Vector2.MoveTowards(LastPos[3], contact, 11f))
             : Vector2.Lerp(LastPos[3], anchor + TransformWalkingLocal(crab, RestTipOffset), .08f);
 
         SolveWalkingPose(crab, anchor, target, hasTarget);
@@ -540,40 +539,6 @@ internal sealed class MantleCrabLimb
             ReleaseContact();
             searchTick = 0;
         }
-    }
-
-    private void RelieveContactStrain(MantleCrab crab, Vector2 anchor, float stretch)
-    {
-        Vector2 normal = GroundNormal.sqrMagnitude > .0001f ? GroundNormal.normalized : Vector2.up;
-        if (normal.y < 0f)
-            normal = -normal;
-        Vector2 tangent = new(normal.y, -normal.x);
-        if (tangent.x < 0f)
-            tangent = -tangent;
-
-        float tangentialStrain = Vector2.Dot(anchor - contact, tangent);
-        float slipScale = Mathf.InverseLerp(SlipStartReach, ReleaseReach, stretch);
-        float slip = Mathf.Clamp(tangentialStrain, -1.6f, 1.6f) * slipScale;
-        if (Mathf.Abs(slip) < .05f)
-            return;
-
-        Vector2 desired = contact + tangent * slip;
-        if (!MantleCrabTerrainProbe.Find(
-                crab.room,
-                anchor,
-                desired,
-                Reach * ReleaseReach,
-                out Vector2 relieved,
-                out Vector2 relievedNormal))
-            return;
-
-        // 这是接触面的微小滑移，不是重新落脚；禁止一次滑到另一块远处地形。
-        // This is local surface slip, not a new step. Never snap the foot to a distant surface.
-        if (Vector2.Distance(relieved, contact) > 6f)
-            return;
-
-        contact = relieved;
-        GroundNormal = relievedNormal;
     }
 
     private void ReleaseContact()
