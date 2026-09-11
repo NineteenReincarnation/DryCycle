@@ -189,6 +189,8 @@ internal static class DevToolFrontend
             io.MouseDrawCursor = true;
 
             bool pushedChineseFont = TryPushChineseFont();
+            float oldGlobalScale = io.FontGlobalScale;
+            io.FontGlobalScale = ResolveUiFontScale(pushedChineseFont);
             try
             {
                 UiModeSwitch.Draw();
@@ -196,6 +198,7 @@ internal static class DevToolFrontend
             }
             finally
             {
+                io.FontGlobalScale = oldGlobalScale;
                 if (pushedChineseFont) ImGui.PopFont();
             }
 
@@ -207,6 +210,17 @@ internal static class DevToolFrontend
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
                 log?.LogError("DevTool RWImGui draw failed: " + error);
         }
+    }
+
+    private static float ResolveUiFontScale(bool chineseFontActive)
+    {
+        if (!DevToolUiSettings.IsChinese || !chineseFontActive || cjkFont.NativePtr == null || cjkFont.FontSize <= 0.01f)
+            return 1f;
+
+        // Chinese glyphs become noticeably harder to read at the small sizes commonly used by
+        // developer overlays. Keep the visual size around 18 px while preserving the atlas font.
+        float scale = DevToolUiSettings.PreferredChineseFontSize / cjkFont.FontSize;
+        return Math.Max(1f, Math.Min(1.35f, scale));
     }
 
     private static unsafe bool TryPushChineseFont()
