@@ -67,6 +67,12 @@ public static class EditorInputRouter
             session.LegacyTransactions.HasPendingTransaction)
             return;
 
+        if (session.PlacementActive && Input.GetKeyDown(KeyCode.Escape))
+        {
+            session.CancelPlacement();
+            return;
+        }
+
         bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
                     Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
@@ -80,6 +86,10 @@ public static class EditorInputRouter
         }
         else if (ctrl && Input.GetKeyDown(KeyCode.Y))
             EditorActions.Redo(session);
+        else if (ctrl && Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
+            EditorActions.DuplicateSelection(session);
+        else if (Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
+            EditorActions.DeleteSelection(session);
         else if (ctrl && Input.GetKeyDown(KeyCode.B))
             session.ToggleBrowser();
         else if (ctrl && Input.GetKeyDown(KeyCode.I))
@@ -93,7 +103,9 @@ public static class EditorInputRouter
         RainWorldGame self,
         float dt)
     {
-        if (!HasKeyboardOwner(self))
+        // Only text ownership needs the expensive vanilla-shortcut bypass/manual DevUI update.
+        // A normal ImGui button/slider may want keyboard focus without consuming raw A/S/Q/etc.
+        if (!HasTextKeyboardOwner(self))
         {
             orig(self, dt);
             return;
@@ -104,9 +116,6 @@ public static class EditorInputRouter
         bool devToolsWasActive = self.devToolsActive;
         DevInterface.DevUI focusedDevUi = self.devUI;
 
-        // RainWorldGame.RawUpdate owns vanilla single-letter DevTools shortcuts. Hide the
-        // DevTools flag only for that raw update while an editor text/control owns keyboard
-        // input, then manually update the already-open DevUI once so its backend stays live.
         self.mDown = Input.GetKey(KeyCode.M);
         self.hDown = Input.GetKey(KeyCode.H);
         self.pDown = Input.GetKey(KeyCode.P);
@@ -132,8 +141,6 @@ public static class EditorInputRouter
         bool captured = IsKeyboardCapturedThisFrame(self) || HasKeyboardOwner(self);
         if (captured)
         {
-            // RainWorldGame.Update owns restart and pause edges. A text field may release
-            // focus during RawUpdate, so the raw-frame marker survives through this call.
             self.lastRestartButton = Input.GetKey(KeyCode.R);
             self.lastPauseButton = true;
         }
@@ -216,6 +223,12 @@ public static class EditorInputRouter
         RecalculateDownDiagonal(ref input);
         self.input[0] = input;
         self.mapInput = input;
+    }
+
+    private static bool HasTextKeyboardOwner(RainWorldGame game)
+    {
+        if (game == null || game.devUI == null || !game.devToolsActive) return false;
+        return HasLocalTextFocus(game) || (frontendAttached && wantsTextInput);
     }
 
     private static bool HasKeyboardOwner(RainWorldGame game)
