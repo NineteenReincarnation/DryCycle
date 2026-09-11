@@ -8,14 +8,15 @@ internal static class UiModeSwitch
 {
     internal static void Draw()
     {
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.Always);
+        // Use a first-use default only. From then on ImGui owns the window position/size so
+        // developers can move and resize it like the rest of the rebuilt editor.
+        ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(148f, 58f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(126f, 52f), new Num.Vector2(300f, 160f));
         ImGui.SetNextWindowBgAlpha(0.92f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration |
-                                 ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings |
-                                 ImGuiWindowFlags.AlwaysAutoResize;
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
 
-        if (!ImGui.Begin("##DevToolUiModeSwitch", flags))
+        if (!ImGui.Begin("UI###DevToolUiModeSwitch", flags))
         {
             ImGui.End();
             return;

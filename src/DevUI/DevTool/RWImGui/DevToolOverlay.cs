@@ -24,8 +24,8 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
-        // Map, Dialog and Relationships are true editor workspaces, so their own central
-        // content replaces the room view. Scene-oriented modes keep the full room visible.
+        // Map, Dialog and Relationships are true editor workspaces. Their windows now use
+        // first-use defaults only; developers can move/resize them independently afterwards.
         if (snapshot.ToolMode == EditorToolMode.Map)
             DrawMapCanvas(snapshot, display);
         else if (snapshot.ToolMode == EditorToolMode.Dialog)
@@ -36,7 +36,7 @@ internal static class DevToolOverlay
         DrawTopBar(snapshot, display);
         if (!snapshot.FocusMode)
         {
-            DrawActivityBar(snapshot);
+            DrawActivityBar(snapshot, display);
             if (snapshot.BrowserOpen) DrawBrowser(snapshot, display);
             if (snapshot.InspectorOpen) DrawInspector(snapshot, display);
             DrawStatusBar(snapshot, display);
@@ -47,54 +47,59 @@ internal static class DevToolOverlay
 
     private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
     }
 
     private static void DrawDialogPreview(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         DialogEditorView.DrawPreview(DialogEditorPresentationHub.Current, pos, size);
     }
 
     private static void DrawRelationshipMatrix(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         RelationshipEditorView.DrawMatrix(RelationshipEditorPresentationHub.Current, pos, size);
     }
 
-    private static void GetCentralWorkspaceRect(
-        EditorPresentationSnapshot snapshot,
-        Num.Vector2 display,
-        out Num.Vector2 pos,
-        out Num.Vector2 size)
+    private static void GetCentralWorkspaceRect(Num.Vector2 display, out Num.Vector2 pos, out Num.Vector2 size)
     {
-        float inspectorWidth = InspectorWidth(display);
-        float left = snapshot.FocusMode ? 8f : snapshot.BrowserOpen ? 366f : 58f;
-        float right = snapshot.FocusMode
-            ? display.X - 8f
-            : snapshot.InspectorOpen
-                ? display.X - inspectorWidth - 16f
-                : display.X - 8f;
-        float bottom = snapshot.FocusMode ? display.Y - 8f : display.Y - 38f;
-        pos = new Num.Vector2(left, 56f);
-        size = new Num.Vector2(Math.Max(120f, right - left), Math.Max(120f, bottom - 56f));
+        float width = Math.Min(900f, Math.Max(520f, display.X * 0.58f));
+        float height = Math.Min(620f, Math.Max(360f, display.Y * 0.64f));
+        pos = new Num.Vector2(
+            Math.Max(180f, (display.X - width) * 0.5f),
+            Math.Max(88f, (display.Y - height) * 0.5f));
+        size = new Num.Vector2(width, height);
     }
 
     private static void DrawTopBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        ImGui.SetNextWindowPos(new Num.Vector2(58f, 8f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(Math.Max(420f, display.X - 116f), 40f), ImGuiCond.Always);
+        string room = string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
+        string undo = string.IsNullOrEmpty(snapshot.UndoLabel) ? "Undo" : "Undo " + snapshot.UndoLabel;
+        string redo = string.IsNullOrEmpty(snapshot.RedoLabel) ? "Redo" : "Redo " + snapshot.RedoLabel;
+        float textWidth = ImGui.CalcTextSize(room + " · " + snapshot.ToolMode).X;
+        float preferredWidth = Math.Min(
+            Math.Max(420f, display.X - 16f),
+            Math.Max(500f, textWidth + ImGui.CalcTextSize(undo + redo).X + 300f));
+
+        // The UI switch occupies the top-left by default. This command window starts to its
+        // right, but only on first use; its saved/user placement is never overwritten later.
+        ImGui.SetNextWindowPos(new Num.Vector2(168f, 8f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 62f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(360f, 54f),
+            new Num.Vector2(Math.Max(360f, display.X - 16f), 220f));
         ImGui.SetNextWindowBgAlpha(0.95f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar;
-        if (!ImGui.Begin("##DevToolTopBar", flags))
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+                                 ImGuiWindowFlags.NoScrollWithMouse;
+        if (!ImGui.Begin("Commands###DevToolTopBar", flags))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextDisabled(string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName);
+        ImGui.TextDisabled(room);
         ImGui.SameLine();
         ImGui.TextDisabled("·");
         ImGui.SameLine();
@@ -112,14 +117,12 @@ internal static class DevToolOverlay
         ImGui.SameLine();
         bool undoDisabled = !snapshot.CanUndo;
         if (undoDisabled) ImGui.BeginDisabled();
-        string undo = string.IsNullOrEmpty(snapshot.UndoLabel) ? "Undo" : "Undo " + snapshot.UndoLabel;
         if (ImGui.Button(undo + "##DevToolUndo")) Send(EditorUiCommandKind.Undo);
         if (undoDisabled) ImGui.EndDisabled();
 
         ImGui.SameLine();
         bool redoDisabled = !snapshot.CanRedo;
         if (redoDisabled) ImGui.BeginDisabled();
-        string redo = string.IsNullOrEmpty(snapshot.RedoLabel) ? "Redo" : "Redo " + snapshot.RedoLabel;
         if (ImGui.Button(redo + "##DevToolRedo")) Send(EditorUiCommandKind.Redo);
         if (redoDisabled) ImGui.EndDisabled();
 
@@ -128,14 +131,16 @@ internal static class DevToolOverlay
         ImGui.End();
     }
 
-    private static void DrawActivityBar(EditorPresentationSnapshot snapshot)
+    private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 56f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(44f, 316f), ImGuiCond.Always);
+        ImGui.SetNextWindowPos(new Num.Vector2(8f, 76f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(54f, 350f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(52f, 220f),
+            new Num.Vector2(180f, Math.Max(220f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(0.94f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar;
-        if (!ImGui.Begin("##DevToolActivity", flags))
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar;
+        if (!ImGui.Begin("Tools###DevToolActivity", flags))
         {
             ImGui.End();
             return;
@@ -171,11 +176,14 @@ internal static class DevToolOverlay
 
     private static void DrawBrowser(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float height = Math.Max(260f, display.Y - 94f);
-        ImGui.SetNextWindowPos(new Num.Vector2(58f, 56f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(300f, height), ImGuiCond.Always);
+        float maxHeight = Math.Max(260f, display.Y - 32f);
+        ImGui.SetNextWindowPos(new Num.Vector2(70f, 76f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(300f, Math.Min(440f, maxHeight)), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(220f, 180f),
+            new Num.Vector2(Math.Max(220f, display.X - 16f), maxHeight));
         ImGui.SetNextWindowBgAlpha(0.96f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoSavedSettings;
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
         if (!ImGui.Begin("Browser###DevToolBrowser", flags))
         {
             ImGui.End();
@@ -290,12 +298,15 @@ internal static class DevToolOverlay
 
     private static void DrawInspector(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float width = InspectorWidth(display);
-        float height = Math.Max(260f, display.Y - 94f);
-        ImGui.SetNextWindowPos(new Num.Vector2(display.X - width - 8f, 56f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Always);
+        float defaultWidth = InspectorWidth(display);
+        float maxHeight = Math.Max(260f, display.Y - 32f);
+        ImGui.SetNextWindowPos(new Num.Vector2(Math.Max(8f, display.X - defaultWidth - 8f), 76f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, Math.Min(440f, maxHeight)), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(260f, 180f),
+            new Num.Vector2(Math.Max(260f, display.X - 16f), maxHeight));
         ImGui.SetNextWindowBgAlpha(0.96f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoSavedSettings;
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
         if (!ImGui.Begin("Inspector###DevToolInspector", flags))
         {
             ImGui.End();
@@ -348,50 +359,65 @@ internal static class DevToolOverlay
 
     private static void DrawStatusBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        ImGui.SetNextWindowPos(new Num.Vector2(58f, display.Y - 30f), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(Math.Max(420f, display.X - 116f), 22f), ImGuiCond.Always);
+        string text = BuildStatusText(snapshot);
+        float preferredWidth = Math.Min(
+            Math.Max(220f, display.X - 16f),
+            Math.Max(220f, ImGui.CalcTextSize(text).X + 28f));
+
+        ImGui.SetNextWindowPos(new Num.Vector2(168f, Math.Max(8f, display.Y - 74f)), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 58f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(180f, 52f),
+            new Num.Vector2(Math.Max(180f, display.X - 16f), 180f));
         ImGui.SetNextWindowBgAlpha(0.90f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoScrollbar |
-                                 ImGuiWindowFlags.NoInputs;
-        if (ImGui.Begin("##DevToolStatus", flags))
-        {
-            if (snapshot.ToolMode == EditorToolMode.Objects)
-            {
-                int selected = snapshot.Inspector?.SelectionCount ?? 0;
-                string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
-                ImGui.TextDisabled("Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
-                                   "   ·   " + snapshot.Document + placement);
-            }
-            else if (snapshot.ToolMode == EditorToolMode.Sound)
-            {
-                EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
-                ImGui.TextDisabled("Sounds " + (sound.Sounds?.Length ?? 0) + "   ·   " + snapshot.Document);
-            }
-            else if (snapshot.ToolMode == EditorToolMode.Triggers)
-            {
-                EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
-                ImGui.TextDisabled("Triggers " + (trigger.Triggers?.Length ?? 0) + "   ·   " + snapshot.Document);
-            }
-            else if (snapshot.ToolMode == EditorToolMode.Map)
-            {
-                EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
-                ImGui.TextDisabled("Map " + (map.Rooms?.Length ?? 0) + " rooms   ·   " + map.RegionName);
-            }
-            else if (snapshot.ToolMode == EditorToolMode.Dialog)
-            {
-                EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
-                ImGui.TextDisabled("Dialog " + dialog.SelectedFileName + "   ·   " + (dialog.Events?.Length ?? 0) + " events");
-            }
-            else if (snapshot.ToolMode == EditorToolMode.Relationships)
-            {
-                EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
-                ImGui.TextDisabled("Relationships   ·   Primary " + rel.PrimaryCreature + "   ·   " + snapshot.Document);
-            }
-            else
-                ImGui.TextDisabled(snapshot.Document + "   ·   " + snapshot.ToolMode);
-        }
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+                                 ImGuiWindowFlags.NoScrollWithMouse;
+        if (ImGui.Begin("Status###DevToolStatus", flags))
+            ImGui.TextDisabled(text);
         ImGui.End();
+    }
+
+    private static string BuildStatusText(EditorPresentationSnapshot snapshot)
+    {
+        if (snapshot.ToolMode == EditorToolMode.Objects)
+        {
+            int selected = snapshot.Inspector?.SelectionCount ?? 0;
+            string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
+            return "Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
+                   "   ·   " + snapshot.Document + placement;
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Sound)
+        {
+            EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
+            return "Sounds " + (sound.Sounds?.Length ?? 0) + "   ·   " + snapshot.Document;
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Triggers)
+        {
+            EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
+            return "Triggers " + (trigger.Triggers?.Length ?? 0) + "   ·   " + snapshot.Document;
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Map)
+        {
+            EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
+            return "Map " + (map.Rooms?.Length ?? 0) + " rooms   ·   " + map.RegionName;
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Dialog)
+        {
+            EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
+            return "Dialog " + dialog.SelectedFileName + "   ·   " + (dialog.Events?.Length ?? 0) + " events";
+        }
+
+        if (snapshot.ToolMode == EditorToolMode.Relationships)
+        {
+            EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
+            return "Relationships   ·   Primary " + rel.PrimaryCreature + "   ·   " + snapshot.Document;
+        }
+
+        return snapshot.Document + "   ·   " + snapshot.ToolMode;
     }
 
     private static void HandlePlacement(EditorPresentationSnapshot snapshot, Num.Vector2 display, ImGuiIOPtr io)

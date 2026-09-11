@@ -48,11 +48,11 @@ internal static class DialogEditorView
     {
         if (!snapshot.Available || size.X < 180f || size.Y < 120f) return;
 
-        ImGui.SetNextWindowPos(position, ImGuiCond.Always);
-        ImGui.SetNextWindowSize(size, ImGuiCond.Always);
+        ImGui.SetNextWindowPos(position, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(size, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(320f, 220f), new Num.Vector2(4000f, 4000f));
         ImGui.SetNextWindowBgAlpha(0.98f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove |
-                                 ImGuiWindowFlags.NoSavedSettings;
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
         if (!ImGui.Begin("Dialog Preview###DevToolDialogPreview", flags))
         {
             ImGui.End();

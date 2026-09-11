@@ -7,6 +7,7 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using ImGuiNET;
 using RWIMGUI.API;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -39,11 +40,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
         bool visible = snapshot.Available && DevToolSessionHub.IsCurrentSessionLive;
         DevToolFrontend.SetVisibleFromMainThread(visible);
+        DevToolFrontend.SetCursorModeFromMainThread(visible, EditorUiModeState.UseVanilla);
     }
 
     private void OnDisable()
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        if (DevToolSessionHub.IsCurrentSessionLive)
+            Cursor.visible = true;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
@@ -109,6 +113,16 @@ internal static class DevToolFrontend
         EnsureContext();
     }
 
+    internal static void SetCursorModeFromMainThread(bool sessionVisible, bool vanillaMode)
+    {
+        if (!sessionVisible) return;
+
+        // Rain World forces the operating-system cursor visible when H opens DevUI. New UI
+        // uses ImGui's software cursor instead, so keeping the OS cursor would produce two
+        // pointers and cover hover labels. Vanilla mode restores Rain World's cursor.
+        Cursor.visible = vanillaMode;
+    }
+
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         // Keep the Always callback intentionally empty. Interactive drawing belongs to the
@@ -162,14 +176,17 @@ internal static class DevToolFrontend
 
         try
         {
+            ImGuiIOPtr io = ImGui.GetIO();
+            bool vanilla = EditorUiModeState.UseVanilla;
+            io.MouseDrawCursor = !vanilla;
+
             // The switch is intentionally always available while DevTools are open. In
             // Vanilla mode it is the only RWImGui window left on screen, so returning to
             // the rebuilt editor never depends on an original DevInterface control.
             UiModeSwitch.Draw();
-            if (!EditorUiModeState.UseVanilla)
+            if (!vanilla)
                 DevToolOverlay.Draw(snapshot);
 
-            ImGuiIOPtr io = ImGui.GetIO();
             EditorInputRouter.SetFrontendCapture(io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput);
         }
         catch (Exception error)
