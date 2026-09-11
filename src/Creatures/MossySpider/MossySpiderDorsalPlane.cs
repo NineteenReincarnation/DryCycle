@@ -3,7 +3,7 @@ using UnityEngine;
 namespace DryCycle.Creatures.MossySpider;
 
 /// <summary>
-/// One rigid dorsal plane shared by rendering and player collision.
+/// One rigid dorsal plane shared by rendering and the shared dynamic-walkable-surface runtime.
 ///
 /// The torso BodyChunks remain flexible, but the moss-covered top is deliberately not a
 /// spline. Its walkable section is one straight segment built from the front and rear
@@ -86,54 +86,41 @@ internal static class MossySpiderDorsalPlane
         return true;
     }
 
-    internal static bool TrySurfaceAtWorldX(
+    /// <summary>
+    /// 为共享动态地形采样器提供背部直线的两个端点。
+    /// 点序会保证当前帧曲线的左侧法线指向 MossySpider 背部外侧；前后各保留原来的 8 px 碰撞延伸。
+    ///
+    /// Supplies the two endpoints of the dorsal line to the shared dynamic-surface sampler.
+    /// Point order guarantees that the curve's left-hand normal faces the dorsal outside, while preserving the existing 8 px collision overhang at both ends.
+    /// </summary>
+    internal static bool TryGetWalkableCurvePoint(
         MossySpider spider,
-        float worldX,
-        out float u,
-        out Vector2 currentPoint,
-        out Vector2 previousPoint,
-        out Vector2 normal)
+        int index,
+        bool previous,
+        out Vector2 point)
     {
-        u = 0f;
-        currentPoint = Vector2.zero;
-        previousPoint = Vector2.zero;
-        normal = Vector2.up;
-
-        if (!TryGetFrame(spider, 1f, out Frame current) ||
-            !TryGetFrame(spider, 0f, out Frame previous))
+        point = default;
+        if (index < 0 || index > 1 ||
+            !TryGetFrame(spider, previous ? 0f : 1f, out Frame frame))
         {
             return false;
         }
 
-        Vector2 currentA = current.Start - current.Tangent * CollisionOverhang;
-        Vector2 currentB = current.End + current.Tangent * CollisionOverhang;
-        float dx = currentB.x - currentA.x;
-        if (Mathf.Abs(dx) < 0.001f)
+        Vector2 start = frame.Start - frame.Tangent * CollisionOverhang;
+        Vector2 end = frame.End + frame.Tangent * CollisionOverhang;
+
+        // DynamicWalkableCurveSampler derives its contact normal from point order.
+        // MossySpiderDorsalPlane deliberately keeps the visual dorsal normal world-up,
+        // so reverse the geometry only when needed to make the sampler derive that same side.
+        Vector2 leftNormal = new(-frame.Tangent.y, frame.Tangent.x);
+        if (Vector2.Dot(leftNormal, frame.Normal) < 0f)
         {
-            return false;
+            Vector2 swap = start;
+            start = end;
+            end = swap;
         }
 
-        float t = (worldX - currentA.x) / dx;
-        if (t < 0f || t > 1f)
-        {
-            return false;
-        }
-
-        Vector2 previousA = previous.Start - previous.Tangent * CollisionOverhang;
-        Vector2 previousB = previous.End + previous.Tangent * CollisionOverhang;
-        currentPoint = Vector2.Lerp(currentA, currentB, t);
-        previousPoint = Vector2.Lerp(previousA, previousB, t);
-        normal = current.Normal;
-
-        float coreLength = Vector2.Distance(current.Start, current.End);
-        float extendedLength = coreLength + CollisionOverhang * 2f;
-        float coreT = coreLength > 0.001f
-            ? (t * extendedLength - CollisionOverhang) / coreLength
-            : 0.5f;
-        u = Mathf.Lerp(
-            MossySpiderSilhouette.WalkableStartU,
-            MossySpiderSilhouette.WalkableEndU,
-            Mathf.Clamp01(coreT));
+        point = index == 0 ? start : end;
         return true;
     }
 
