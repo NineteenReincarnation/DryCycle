@@ -147,6 +147,11 @@ public sealed class MantleCrab : Creature, IWalkableDynamicSurface, IDynamicWalk
         // keeps the collision's linear and angular response, never its bend/compression modes.
         MaintainRigidShell();
 
+        // 临时测试 AI 只产生 Move/Turn 意图；真正的步态和地形反射仍由 Locomotion 负责。
+        // The temporary test AI only produces Move/Turn intent; gait and terrain reflexes remain owned by Locomotion.
+        if (abstractCreature?.abstractAI?.RealAI is MantleCrabTestMovementAI testAI)
+            testAI.Update();
+
         // Safari is currently the direct test surface for the low-level motor. Horizontal input
         // walks along the shell axis; vertical input applies the deliberately slow reorientation
         // requested by the C locomotion model. A future AI can call SetLocomotionIntent directly.
