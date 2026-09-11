@@ -1,7 +1,7 @@
 namespace DryCycle.Creatures.MossySpider;
 
 /// <summary>
-/// Shared rectangular side-profile used by MossySpiderGraphics and the dorsal platform.
+/// Shared rectangular side-profile used by MossySpiderGraphics and the dorsal walkable surface.
 /// The torso BodyChunks may still flex underneath, but the painted body no longer tapers
 /// into hanging front/rear points. This restores the broad rectangular silhouette.
 /// </summary>
