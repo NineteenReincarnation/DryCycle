@@ -138,6 +138,39 @@ internal sealed class DB_SwarmRoom
         else if (rooms.TryGetValue(room, out var colony)) colony.Update(eu);
     }
 
+    /// <summary>
+    /// Passive colony emergence is closed whenever the current weather ecology is asking bats to
+    /// contract into shelter. Sandstorms close from Advisory onward because their species profile
+    /// already starts Home/Burrow preparation there; emitting new bats during that phase creates
+    /// an immediate leave-hive/return-hive loop. Other severe weather closes from Preparation.
+    /// Explicit Travel departures are not routed through this passive queue.
+    /// </summary>
+    internal static bool ShouldSuppressPassiveHiveEmergence(Room room)
+    {
+        if (room == null ||
+            !DB_EnvironmentRoomRuntime.TryGetContext(room, out DB_EnvironmentContext context) ||
+            context.Phase is DB_EnvironmentPhase.Calm or DB_EnvironmentPhase.Recovery)
+            return false;
+
+        return context.Weather switch
+        {
+            DB_EnvironmentWeather.Sandstorm or DB_EnvironmentWeather.DeathSandstorm =>
+                context.Phase is DB_EnvironmentPhase.Advisory or
+                    DB_EnvironmentPhase.Preparation or
+                    DB_EnvironmentPhase.Sheltering or
+                    DB_EnvironmentPhase.Acute,
+            DB_EnvironmentWeather.DenseFog or
+            DB_EnvironmentWeather.HeavyRain or
+            DB_EnvironmentWeather.HeatWave or
+            DB_EnvironmentWeather.IntenseHeat or
+            DB_EnvironmentWeather.DeathRain =>
+                context.Phase is DB_EnvironmentPhase.Preparation or
+                    DB_EnvironmentPhase.Sheltering or
+                    DB_EnvironmentPhase.Acute,
+            _ => false
+        };
+    }
+
     private void Update(bool eu)
     {
         bool authoredColony = IsDB_SwarmRoom(room.abstractRoom);
@@ -169,8 +202,16 @@ internal sealed class DB_SwarmRoom
         // emergence throughput explicitly below.
         UpdateHiveWithoutEmergence();
 
-        if (!SuppressThermalHiveEmergence())
+        if (ShouldSuppressPassiveHiveEmergence(room))
+        {
+            // Re-open with a fresh delay instead of dumping a queued release immediately when the
+            // weather clears.
+            nextHiveReleaseClock = -1;
+        }
+        else
+        {
             TryReleaseQueuedHiveMember();
+        }
 
         if (--flockRefresh <= 0)
         {
@@ -207,10 +248,9 @@ internal sealed class DB_SwarmRoom
         if (candidate == null)
             return;
 
-        int before = Hive.inHive.Count;
+        // DB_RainWorldHooks.Emerge owns all post-hive departure initialization. Keeping that
+        // lifecycle at the actual FlyEmergeFromHive boundary also covers explicit Travel exits.
         Hive.FlyEmergeFromHive(candidate);
-        if (Hive.inHive.Count < before && candidate.room == room)
-            candidate.Emergence.BeginHiveDeparture();
     }
 
     private DB_Creature SelectReleaseCandidate()
@@ -223,8 +263,15 @@ internal sealed class DB_SwarmRoom
         for (int i = 0; i < count; i++)
         {
             Fly member = Hive.inHive[(start + i) % count];
-            if (member is DB_Creature bat && !bat.dead && !bat.slatedForDeletetion)
-                return bat;
+            if (member is not DB_Creature bat || bat.dead || bat.slatedForDeletetion)
+                continue;
+
+            // Passive ecology must never steal a bat from a committed cross-room trip or force a
+            // severely injured individual out of the recovery space it deliberately entered.
+            if (bat.Injury.IsSeverelyInjured || bat.Injury.IsRecovering ||
+                DB_TravelRuntime.HasIntent(bat.abstractCreature))
+                continue;
+            return bat;
         }
         return null;
     }
@@ -239,21 +286,6 @@ internal sealed class DB_SwarmRoom
         return 36 + (int)(value % 33u); // 36..68 ticks
     }
 
-    private bool SuppressThermalHiveEmergence()
-    {
-        if (!DB_EnvironmentRoomRuntime.TryGetContext(
-                room, out DB_EnvironmentContext context))
-            return false;
-
-        if (context.Weather is not (
-                DB_EnvironmentWeather.HeatWave or DB_EnvironmentWeather.IntenseHeat))
-            return false;
-
-        return context.Phase is DB_EnvironmentPhase.Preparation or
-               DB_EnvironmentPhase.Sheltering or
-               DB_EnvironmentPhase.Acute;
-    }
-
     private void UpdateHiveWithoutEmergence()
     {
         for (int i = Hive.inHive.Count - 1; i >= 0; i--)
@@ -264,6 +296,8 @@ internal sealed class DB_SwarmRoom
                 Hive.inHive.RemoveAt(i);
                 continue;
             }
+            if (member is DB_Creature resting)
+                resting.DesertState.InHive = true;
             if (member.room == room)
                 member.RemoveFromRoom();
         }
@@ -272,7 +306,12 @@ internal sealed class DB_SwarmRoom
         {
             Fly member = Hive.flies[i];
             if (member == null || member.room != room)
+            {
                 Hive.flies.RemoveAt(i);
+                continue;
+            }
+            if (member is DB_Creature active)
+                active.DesertState.InHive = false;
         }
     }
 }
