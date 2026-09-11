@@ -6,9 +6,9 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Keeps vanilla DevInterface alive as a compatibility backend while preventing its old
-/// screen-space controls from visually/physically overlapping the ImGui Objects workspace.
-/// World-space handles remain active. No third-party type or API is inspected here.
+/// Keeps vanilla DevInterface alive as a compatibility backend while preventing migrated
+/// screen-space controls from visually/physically overlapping the rebuilt ImGui editor.
+/// Useful world-space handles remain active. No third-party type or API is inspected here.
 /// </summary>
 internal static class LegacyUiPresentationController
 {
@@ -65,17 +65,20 @@ internal static class LegacyUiPresentationController
 
             if (node is PlacedObjectRepresentation representation)
             {
-                // Keep the representation and its world-space handle active, but remove the
-                // large legacy object-name label. Child Handles remain scene gizmos; panels
-                // and rectangular controls beneath the representation are suppressed below.
                 RememberAndHideLabels(representation);
                 SuppressRepresentationChildren(representation);
                 continue;
             }
 
+            if (node is AmbientSoundPanel soundPanel)
+            {
+                SuppressAmbientSoundPanel(soundPanel);
+                continue;
+            }
+
             if (node is Handle)
             {
-                // Standalone handles are world-space controls and must remain usable.
+                // Standalone handles are scene-space controls and remain usable.
                 continue;
             }
 
@@ -94,8 +97,36 @@ internal static class LegacyUiPresentationController
 
             if (child is Handle)
             {
-                // Radius/vector/line handles are the useful scene gizmos we intentionally
-                // keep from the original representation.
+                // Radius/vector/line handles are the useful scene gizmos retained from the
+                // original representation.
+                continue;
+            }
+
+            SuppressSubtree(child);
+        }
+    }
+
+    private static void SuppressAmbientSoundPanel(AmbientSoundPanel panel)
+    {
+        if (panel == null) return;
+
+        // AmbientSoundPanel itself is draggable, so merely hiding sprites would leave an
+        // invisible click target over the room. Move the panel off-screen, while its Spot /
+        // Directional handles continue to maintain their own absolute scene positions.
+        Remember(panel);
+        panel.pos = Offscreen;
+        HideVisuals(panel);
+
+        if (panel.subNodes == null) return;
+        for (int i = 0; i < panel.subNodes.Count; i++)
+        {
+            DevUINode child = panel.subNodes[i];
+            if (child == null) continue;
+
+            if (child is Handle)
+            {
+                // SpotSoundHandle, DirectionalSoundHandle and the Spot radius handle form
+                // the world-space sound gizmo and must stay alive.
                 continue;
             }
 
@@ -194,9 +225,6 @@ internal static class LegacyUiPresentationController
             RestoreVisibility(node.fLabels, state.LabelVisibility);
         }
 
-        // Rebuild screen positions after restoring logical coordinates. Do not call
-        // Page.Refresh(): some pages rebuild temporary nodes there. Refresh only the nodes
-        // whose coordinates were actually displaced.
         foreach (KeyValuePair<DevUINode, NodeState> pair in hidden)
         {
             if (!pair.Value.HasPosition || pair.Key is not PositionedDevUINode positioned) continue;
