@@ -25,6 +25,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void OnEnable()
     {
         log = Logger;
+        EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
@@ -39,6 +40,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DevToolFrontend.SetVisibleFromMainThread(false);
+        EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
     }
 
