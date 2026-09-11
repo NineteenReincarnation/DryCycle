@@ -22,6 +22,21 @@ internal static class UiModeSwitch
 
         FloatingWindowSnap.TrackCurrentWindow("UI");
 
+        // Keep the original two-way mode switch visible in both modes. Vanilla hides the rebuilt
+        // editor panels, but never hides the control that lets the developer return to New UI.
+        bool vanilla = EditorUiModeState.UseVanilla;
+        if (!vanilla) ImGui.BeginDisabled();
+        if (ImGui.SmallButton("New UI##DevToolUseNewUi"))
+            EditorUiModeState.SetVanilla(false);
+        if (!vanilla) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (vanilla) ImGui.BeginDisabled();
+        if (ImGui.SmallButton("Vanilla##DevToolUseVanillaUi"))
+            EditorUiModeState.SetVanilla(true);
+        if (vanilla) ImGui.EndDisabled();
+
+        ImGui.Separator();
         ImGui.TextDisabled(DevToolUiSettings.T("语言", "Language"));
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
         if (chinese) ImGui.BeginDisabled();
@@ -37,14 +52,6 @@ internal static class UiModeSwitch
         if (english) ImGui.EndDisabled();
 
         ImGui.Separator();
-        if (ImGui.Button(DevToolUiSettings.T("切换到原版", "Use Vanilla")))
-            EditorUiModeState.SetVanilla(true);
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T(
-                "切换后完全隐藏新 UI。Ctrl+Shift+U 可切回。",
-                "Hides the rebuilt UI completely. Ctrl+Shift+U returns to it."));
-
-        ImGui.SameLine();
         ImGui.TextDisabled(DevToolUiSettings.T("Esc 隐藏/恢复面板", "Esc hides/restores panels"));
         ImGui.End();
     }
