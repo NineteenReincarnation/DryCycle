@@ -28,6 +28,8 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Danger = new(0.57f, 0.20f, 0.22f, 0.88f);
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
+    private const float InspectorPaneBodyScale = 1.15f;
+    private static float paneBodyScale = 1f;
 
     internal static void PaneTitle(string text, float restoreScale = 1f)
     {
@@ -36,28 +38,32 @@ internal static class DevToolWidgets
 
         if (primary)
         {
-            DrawOutlinedText(text, Accent, 1.42f * restoreScale, 1.75f, restoreScale);
+            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
+            DrawOutlinedText(text, Accent, 1.42f * restoreScale, 1.75f, paneBodyScale);
             ImGui.Spacing();
             return;
         }
 
-        DrawOutlinedText(text, SecondaryAccent, 1.15f * restoreScale, 1.35f, restoreScale);
+        float bodyScale = ResolvePaneBodyScale(restoreScale);
+        DrawOutlinedText(text, SecondaryAccent, 1.15f * bodyScale, 1.35f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
 
     internal static void SectionHeader(string text, float restoreScale = 1f)
     {
+        float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.10f * restoreScale, 1.25f, restoreScale);
+        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.10f * bodyScale, 1.25f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
 
     internal static void SourceHeader(string text, Num.Vector4 color, float fontScale = 1.38f, float restoreScale = 1f)
     {
+        float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawOutlinedText(text, color, fontScale, 2f, restoreScale);
+        DrawOutlinedText(text, color, fontScale, 2f, bodyScale);
         ImGui.Separator();
     }
 
@@ -165,12 +171,22 @@ internal static class DevToolWidgets
         return true;
     }
 
+    private static float ResolvePaneBodyScale(float requestedRestoreScale)
+    {
+        return requestedRestoreScale == 1f ? paneBodyScale : requestedRestoreScale;
+    }
+
     private static bool IsPrimaryPaneTitle(string text)
     {
         return text == "BROWSER" ||
                text == "INSPECTOR" ||
                text == "浏览器" ||
                text == "检查器";
+    }
+
+    private static bool IsInspectorPaneTitle(string text)
+    {
+        return text == "INSPECTOR" || text == "检查器";
     }
 
     private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke, float restoreScale)
