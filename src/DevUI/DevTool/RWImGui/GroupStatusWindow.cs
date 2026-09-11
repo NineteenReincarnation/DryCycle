@@ -93,6 +93,7 @@ internal static class GroupStatusWindow
             "Tools" => DevToolUiSettings.T("工具", "Tools"),
             "Browser" => DevToolUiSettings.T("浏览器", "Browser"),
             "Inspector" => DevToolUiSettings.T("检查器", "Inspector"),
+            "BrowserInspector" => DevToolUiSettings.T("编辑面板", "Editor panel"),
             "Status" => DevToolUiSettings.T("状态", "Status"),
             "Font" => DevToolUiSettings.T("字体", "Font"),
             "Map" => DevToolUiSettings.T("地图工作区", "Map workspace"),
