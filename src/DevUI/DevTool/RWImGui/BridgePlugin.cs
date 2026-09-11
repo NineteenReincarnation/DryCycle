@@ -32,8 +32,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
+        // The presentation snapshot is intentionally not authoritative for lifetime: once H
+        // destroys vanilla DevUI, DevUI.Update stops and the last snapshot remains cached.
+        // Poll the live RainWorldGame/DevUI relationship from the main thread instead so H,
+        // O and process transitions all hide and release the frontend immediately.
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
-        DevToolFrontend.SetVisibleFromMainThread(snapshot.Available && snapshot.DevToolsActive);
+        bool visible = snapshot.Available && DevToolSessionHub.IsCurrentSessionLive;
+        DevToolFrontend.SetVisibleFromMainThread(visible);
     }
 
     private void OnDisable()
@@ -149,7 +154,7 @@ internal static class DevToolFrontend
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
-        if (!visible || !snapshot.Available || !snapshot.DevToolsActive)
+        if (!visible || !snapshot.Available)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
