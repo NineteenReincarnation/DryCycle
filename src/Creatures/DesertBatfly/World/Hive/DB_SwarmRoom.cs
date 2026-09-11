@@ -92,6 +92,14 @@ internal sealed class DB_SwarmRoom
             !DB_BehaviorArbiter.IsPrimaryOwner(bat, DB_BehaviorOwner.NativeSpecial))
             return false;
 
+        ai.afraid = 2f;
+        bat.DesertAI.CancelAttack();
+
+        // Since this method consumes the accepted NativeSpecial frame instead of calling the
+        // whole vanilla FlyAI.Update, it must also preserve vanilla's final hive-tile transition.
+        if (ai.room.GetTile(bat.mainBodyChunk.pos).hive)
+            return DB_HiveDocking.TryHandleNativeRain(bat);
+
         int bestMap = -1;
         int bestDistance = int.MaxValue;
         int currentHive = ai.followingDijkstraMap - ai.room.exitAndDenIndex.Length;
@@ -126,7 +134,18 @@ internal sealed class DB_SwarmRoom
         }
 
         if (bestMap < 0) return false;
-        ai.afraid = 2f;
+
+        // Native rain can pre-empt a normal Chain/Hang state. Do the same minimal state cleanup
+        // as other owned flight routes so a stale roost movement mode cannot fight the Dijkstra
+        // goal while the bat is trying to reach the hive.
+        bat.LoseAllGrasps();
+        bat.burrowOrHangSpot = null;
+        if (ai.behavior == FlyAI.Behavior.Chain)
+            ai.ChangeBehavior(FlyAI.Behavior.Idle);
+        else if (ai.behavior != FlyAI.Behavior.Burrow)
+            ai.behavior = FlyAI.Behavior.Idle;
+        bat.movMode = Fly.MovementMode.BatFlight;
+        ai.noSwarmCounter = Mathf.Max(ai.noSwarmCounter, 90);
         ai.leaveRoomDijkstra = -1;
         ai.followingDijkstraMap = bestMap;
         Vector2 nextGoal = ai.ProgressLocalGoalAlongDijkstraMap(ai.localGoal, bestMap);
