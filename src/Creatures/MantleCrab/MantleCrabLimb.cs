@@ -17,6 +17,8 @@ internal sealed class MantleCrabLimb
     private readonly float[] upperLengths;
     private readonly Vector2[] preferredDirections = new Vector2[4];
     private readonly Vector2[] upperPreferredDirections = new Vector2[3];
+    private readonly Vector2[] recoveryPreferredDirections = new Vector2[4];
+    private readonly Vector2[] recoverySolved = new Vector2[4];
     private readonly MantleCrabPincerRig pincerRig;
     internal readonly Vector2[] Rest;
     internal Vector2 RestTipOffset => Rest[4] - Rest[0];
@@ -27,6 +29,7 @@ internal sealed class MantleCrabLimb
     internal bool Planted { get; private set; }
     internal bool Swinging { get; private set; }
     internal float SwingProgress { get; private set; }
+    internal bool RecoveryBraced { get; private set; }
     internal Vector2 Contact => contact;
     internal MantleCrabPincerRig PincerRig => pincerRig;
     internal float NominalStandHeight => nominalStandHeight;
@@ -81,6 +84,7 @@ internal sealed class MantleCrabLimb
     internal void Reset(Vector2 anchor)
     {
         stanceHeightScale = 1f;
+        RecoveryBraced = false;
         if (IsPincer)
         {
             pincerRig.Reset(null, anchor);
@@ -199,6 +203,19 @@ internal sealed class MantleCrabLimb
             Pos[i] += Velocity[i] * .055f;
         }
 
+        // 翻倒恢复拥有自己的肢体状态机。先收腿保护关节，再用翻身侧的腿找地撑住，
+        // 甲壳回到安全角度以后才逐步重新伸腿。恢复期间不允许普通落脚逻辑和它抢控制权。
+        // Self-righting owns the walking legs while active: tuck first, brace on one side,
+        // then redeploy only after the shell returns to a safe angle.
+        if (crab.Locomotion.Posture.Recovering)
+        {
+            UpdateRecoveryPose(crab, anchor);
+            UpdateVelocities();
+            return;
+        }
+
+        RecoveryBraced = false;
+
         if (Swinging)
         {
             UpdateSwing(crab, anchor);
@@ -269,6 +286,223 @@ internal sealed class MantleCrabLimb
         float contactQuality = 1f - Mathf.InverseLerp(1.5f, 4f, Vector2.Distance(Tip, contact));
         float normalQuality = Mathf.Clamp01(.45f + Mathf.Max(0f, GroundNormal.y) * .55f);
         return Mathf.Clamp01(Mathf.Min(extensionQuality, compressionQuality) * contactQuality * normalQuality);
+    }
+
+    private void UpdateRecoveryPose(MantleCrab crab, Vector2 anchor)
+    {
+        MantleCrabPostureController posture = crab.Locomotion.Posture;
+        MantleCrabRecoveryPhase phase = posture.RecoveryPhase;
+        float progress = posture.RecoveryPhaseProgress;
+
+        // 进入恢复时立即卸掉普通落脚点。这样被压在身体另一侧的脚不会继续把旧 Contact 当成焊点。
+        // Ordinary planted contacts are released as soon as recovery owns the limb.
+        hasTarget = false;
+        Planted = false;
+        Swinging = false;
+        SwingProgress = 0f;
+        RecoveryBraced = false;
+
+        if (phase == MantleCrabRecoveryPhase.Retract)
+        {
+            SolveRecoveryTuck(crab, anchor, Mathf.Lerp(.055f, .13f, Smooth01(progress)));
+            return;
+        }
+
+        if ((phase == MantleCrabRecoveryPhase.Brace || phase == MantleCrabRecoveryPhase.Roll) &&
+            posture.ShouldBraceLeg(this) &&
+            TryRecoveryBraceTarget(crab, anchor, posture, out Vector2 braceTarget, out Vector2 braceNormal))
+        {
+            GroundNormal = braceNormal;
+            float response = phase == MantleCrabRecoveryPhase.Brace
+                ? Mathf.Lerp(.055f, .11f, Smooth01(progress))
+                : Mathf.Lerp(.10f, .16f, posture.RecoveryPushAmount);
+            SolveRecoveryBrace(crab, anchor, braceTarget, posture.RecoveryDirection, response);
+            RecoveryBraced = Vector2.Distance(Tip, braceTarget) < 5f &&
+                             MantleCrabTerrainProbe.StillSupported(crab.room, braceTarget);
+            return;
+        }
+
+        if (phase == MantleCrabRecoveryPhase.Deploy)
+        {
+            UpdateRecoveryDeploy(crab, anchor, progress);
+            return;
+        }
+
+        // 非撑地侧的腿在 Brace/Roll 阶段始终保持蜷缩，避免四条长腿一起扫过屏幕。
+        // Non-bracing legs remain tucked throughout brace/roll instead of flailing around the shell.
+        SolveRecoveryTuck(crab, anchor, .11f);
+    }
+
+    private void SolveRecoveryTuck(MantleCrab crab, Vector2 anchor, float response)
+    {
+        Vector2 shellAxis = crab.Axis;
+        if (shellAxis.sqrMagnitude <= .0001f) shellAxis = Vector2.right;
+        else shellAxis.Normalize();
+        Vector2 shellUp = new(-shellAxis.y, shellAxis.x);
+        float inward = -Side;
+
+        // 收腿是沿甲壳局部坐标折叠，不是把整条腿缩短。四段真实长度始终保持不变，
+        // 只是用交错的关节角把长腿收拢到甲壳附近。
+        // Tucking folds the fixed-length chain in shell space; no segment is scaled or shortened.
+        Vector2[] localDirections =
+        [
+            new(inward * .97f, -.24f),
+            new(-inward * .96f, -.28f),
+            new(inward * .95f, -.31f),
+            new(-inward * .91f, -.41f)
+        ];
+
+        Vector2 previous = anchor;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 desiredDirection = shellAxis * localDirections[i].x + shellUp * localDirections[i].y;
+            desiredDirection.Normalize();
+            recoverySolved[i] = previous + desiredDirection * Lengths[i];
+            previous = recoverySolved[i];
+        }
+
+        BlendChainToward(anchor, recoverySolved, response);
+    }
+
+    private bool TryRecoveryBraceTarget(
+        MantleCrab crab,
+        Vector2 anchor,
+        MantleCrabPostureController posture,
+        out Vector2 target,
+        out Vector2 normal)
+    {
+        target = default;
+        normal = Vector2.up;
+        if (crab.room == null)
+            return false;
+
+        float direction = posture.RecoveryDirection;
+        float push = posture.RecoveryPushAmount;
+        float lateral = Mathf.Lerp(42f, 78f, push) * crab.ShellScale;
+        float down = Mathf.Lerp(46f, 82f, push) * crab.ShellScale;
+
+        // 两条同侧腿使用略有差别的探点，避免完全重叠成一根视觉支柱。
+        // Same-side brace legs use slightly separated probes so they do not visually collapse into one strut.
+        float separation = (Index < 2 ? 10f : -8f) * crab.ShellScale;
+        Vector2 desired = anchor + Vector2.right * (direction * lateral + separation) + Vector2.down * down;
+
+        return MantleCrabTerrainProbe.Find(
+            crab.room,
+            anchor,
+            desired,
+            Reach * .78f,
+            out target,
+            out normal);
+    }
+
+    private void SolveRecoveryBrace(
+        MantleCrab crab,
+        Vector2 anchor,
+        Vector2 target,
+        float direction,
+        float response)
+    {
+        Vector2[] authored =
+        [
+            new(direction * .74f, -.67f),
+            new(direction * .52f, -.85f),
+            new(-direction * .18f, -.98f),
+            new(-direction * .36f, -.93f)
+        ];
+
+        for (int i = 0; i < 4; i++)
+            recoveryPreferredDirections[i] = authored[i].normalized;
+        for (int i = 0; i < 4; i++)
+            recoverySolved[i] = Pos[i];
+
+        // 翻身撑腿允许比正常行走更大的关节活动角，但仍然是受限 IK，不允许膝盖翻面。
+        // Recovery bracing has a wider anatomical workspace than walking, while remaining constrained against joint inversion.
+        MantleCrabRigMath.SolveConstrained(
+            anchor,
+            target,
+            Lengths,
+            recoverySolved,
+            recoveryPreferredDirections,
+            72f,
+            68f);
+
+        BlendChainToward(anchor, recoverySolved, response);
+    }
+
+    private void UpdateRecoveryDeploy(MantleCrab crab, Vector2 anchor, float progress)
+    {
+        float t = Smooth01(progress);
+        Vector2 desired = anchor + TransformWalkingLocal(crab, RestTipOffset);
+
+        if (t < .28f)
+        {
+            SolveRecoveryTuck(crab, anchor, Mathf.Lerp(.08f, .05f, t / .28f));
+            return;
+        }
+
+        if (crab.room != null && MantleCrabTerrainProbe.Find(
+                crab.room,
+                anchor,
+                desired,
+                Reach * PassiveAcquireReach,
+                out Vector2 landing,
+                out Vector2 landingNormal))
+        {
+            GroundNormal = landingNormal;
+            float reachT = Smooth01(Mathf.InverseLerp(.28f, 1f, t));
+            Vector2 target = Vector2.Lerp(Tip, landing, Mathf.Lerp(.08f, .24f, reachT));
+            SolveWalkingPose(crab, anchor, target, reachT > .78f);
+
+            if (reachT > .82f && Vector2.Distance(Tip, landing) < PlantTolerance + .8f)
+            {
+                contact = landing;
+                hasTarget = true;
+                Planted = true;
+                searchTick = 8 + Index;
+            }
+            return;
+        }
+
+        // 暂时找不到地面时只恢复自然悬垂，不伪造一个落脚点。
+        // If no terrain is reachable, unfold toward the natural hanging pose without inventing contact.
+        Vector2 freeTarget = Vector2.Lerp(Tip, desired, Mathf.Lerp(.06f, .15f, t));
+        SolveWalkingPose(crab, anchor, freeTarget, false);
+    }
+
+    private void BlendChainToward(Vector2 anchor, Vector2[] targetPoints, float response)
+    {
+        Vector2 previous = anchor;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2 currentDirection = Pos[i] - previous;
+            if (currentDirection.sqrMagnitude <= .0001f)
+                currentDirection = targetPoints[i] - previous;
+            if (currentDirection.sqrMagnitude <= .0001f)
+                currentDirection = Vector2.down;
+            else
+                currentDirection.Normalize();
+
+            Vector2 desiredDirection = targetPoints[i] - previous;
+            if (desiredDirection.sqrMagnitude <= .0001f)
+                desiredDirection = currentDirection;
+            else
+                desiredDirection.Normalize();
+
+            Vector2 direction = Vector2.Lerp(currentDirection, desiredDirection, Mathf.Clamp01(response));
+            if (direction.sqrMagnitude <= .0001f)
+                direction = desiredDirection;
+            else
+                direction.Normalize();
+
+            Pos[i] = previous + direction * Lengths[i];
+            previous = Pos[i];
+        }
+    }
+
+    private static float Smooth01(float value)
+    {
+        value = Mathf.Clamp01(value);
+        return value * value * (3f - 2f * value);
     }
 
     private void UpdateSwing(MantleCrab crab, Vector2 anchor)
