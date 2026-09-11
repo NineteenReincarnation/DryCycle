@@ -8,15 +8,34 @@ namespace DryCycle.DevUI.DevTool.Core;
 public static class EditorUiModeState
 {
     private static volatile bool useVanilla;
+    private static volatile bool overlayHidden;
 
     /// <summary>
-    /// True when the original Rain World DevInterface should be shown as the primary UI.
-    /// The RWImGui frontend keeps only the tiny mode switch visible in this state.
+    /// True when the original Rain World DevInterface is the primary UI.
+    /// The rebuilt RWImGui frontend draws no windows in this mode.
     /// </summary>
     public static bool UseVanilla => useVanilla;
+
+    /// <summary>
+    /// Temporary visibility gate used by Escape. This is presentation-only state so opening
+    /// Warp Menu does not alter the active editor document, selection or history.
+    /// </summary>
+    public static bool OverlayHidden => overlayHidden;
 
     public static void SetVanilla(bool value)
     {
         useVanilla = value;
+        if (!value)
+            overlayHidden = false;
+    }
+
+    public static void SetOverlayHidden(bool value)
+    {
+        overlayHidden = value;
+    }
+
+    public static void ToggleOverlayHidden()
+    {
+        overlayHidden = !overlayHidden;
     }
 }
