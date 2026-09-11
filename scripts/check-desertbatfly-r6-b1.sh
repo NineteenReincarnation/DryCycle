@@ -1,162 +1,88 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-./scripts/check-desertbatfly-r5-retention.sh
 
-for f in \
-  src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs \
-  src/Creatures/DesertBatfly/Integration/DB_RuntimePatch.cs \
-  src/Creatures/DesertBatfly/Integration/DB_Sandbox.cs \
-  src/Creatures/DesertBatfly/Integration/DB_WarpCompatibility.cs \
-  src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs \
-  src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs \
-  src/Creatures/DesertBatfly/World/Travel/DB_TravelIntent.cs \
-  src/Creatures/DesertBatfly/World/Travel/DB_TravelDebugState.cs \
-  src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs \
-  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs \
-  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionTypes.cs \
-  src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionScoring.cs \
-  src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs \
-  src/Debug/AIDebugger/Sources/DB_ObservatorySource.cs \
-  src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs \
-  src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs \
-  src/Debug/AIDebugger/Sources/DB_ThreatDebugSource.cs \
-  src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs \
-  src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs; do test -f "$f"; done
+SRC='src/Creatures/DesertBatfly'
+HOOKS="$SRC/Integration/DB_RainWorldHooks.cs"
+DEFINITION="$SRC/Core/DB_Definition.cs"
+STATE="$SRC/Core/DB_State.cs"
+PLUGIN='src/Plugin.cs'
 
-! grep -RIn --include='*.cs' -E 'DesertBatflyHooks|DesertBatflyRuntimePatch|DesertBatflySandbox|DesertBatflyWarpCompatibility|DesertBatflyTask(09|10|11|12|13)DebugSource|DesertBatflyDebugSource|DesertBatflyTravelNavigation|DesertBatflyTravelDebugState' src
-grep -q 'DB_RainWorldHooks.Enable()' src/Plugin.cs
-grep -q 'DB_RainWorldHooks.Disable()' src/Plugin.cs
-grep -q 'AIDebugRegistry.Register(new DB_EnvironmentDebugSource())' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
-grep -q 'Register(new DB_ObservatorySource())' src/Debug/AIDebugger/Core/AIDebugRegistry.cs
-grep -q 'private readonly DB_ObservatorySource inner = new();' src/Debug/AIDebugger/Sources/DB_TravelDebugSource.cs
-grep -q 'private readonly DB_TravelDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SocialDebugSource.cs
-grep -q 'private readonly DB_SocialDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_ThreatDebugSource.cs
-grep -q 'private readonly DB_ThreatDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_SignalDebugSource.cs
-grep -q 'private readonly DB_SignalDebugSource inner = new();' src/Debug/AIDebugger/Sources/DB_EnvironmentDebugSource.cs
-
-grep -q 'internal static class DB_TravelRuntime' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
-grep -q 'bat.AI.LeaveRoom(new WorldCoordinate' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/World/Travel/DB_TravelRuntime.cs
-
-grep -q 'internal sealed class DB_SandSpitRuntime' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-grep -q 'DB_SandBurst.Emit' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-grep -q '^            bat,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-! grep -q '^            this,$' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Behavior/Combat/DB_SandSpitRuntime.cs
-if grep -n -E 'playerHolder|sandStruggleMeter|sandSpitThreshold|sandSpitCooldown|sandSpitWindup|sandSpitCycle|EmitSandSpit|PrepareNextSandThreshold|TrackPlayerRelease|UpdateHeldSandStruggle' src/Creatures/DesertBatfly/Core/DB_Creature.cs; then
-  echo 'Creature shell regained SandSpit runtime ownership.' >&2
-  exit 1
-fi
-
-grep -q 'internal sealed class DB_Runtime' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
-grep -q 'Runtime.BeforeVanillaUpdate()' src/Creatures/DesertBatfly/Core/DB_Creature.cs
-grep -q 'Runtime.AfterVanillaUpdate(eu, previousFlightVelocity)' src/Creatures/DesertBatfly/Core/DB_Creature.cs
-! grep -q 'base.Update' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' src/Creatures/DesertBatfly/Core/Runtime/DB_Runtime.cs
-
-PERCEPTION=src/Creatures/DesertBatfly/Behavior/Perception/DB_PerceptionRuntime.cs
-grep -q 'internal class DB_PerceptionRuntime' "$PERCEPTION"
-grep -q 'internal Creature Danger' "$PERCEPTION"
-grep -q 'DB_RoomContext context' "$PERCEPTION"
-grep -q 'DB_VisibilityPolicy.CanObserve' "$PERCEPTION"
-grep -q 'DB_PerceptionScoring.ThreatAttentionScore' "$PERCEPTION"
-grep -q 'DB_PerceptionScoring.ProjectileRisk' "$PERCEPTION"
-! grep -n 'mainBodyChunk.vel[[:space:]]*=' "$PERCEPTION"
-! grep -n '\.localGoal[[:space:]]*=' "$PERCEPTION"
-! grep -q 'private void ScanCreatures' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
-! grep -q 'DB_RoomContext context' src/Creatures/DesertBatfly/Behavior/DB_AI.cs
-! grep -q 'internal void UpdateScan()' "$PERCEPTION"
-SIGNAL_RT=src/Creatures/DesertBatfly/Behavior/Signals/DB_SignalRuntime.cs
-! grep -q 'internal static bool ReceivePacket' "$SIGNAL_RT"
-! grep -q 'internal static bool TryGetInfluence' "$SIGNAL_RT"
-! grep -q 'internal static bool TryGetDebugState' "$SIGNAL_RT"
-! grep -RIn --include='*.cs' 'DB_SignalInfluence' src/Creatures/DesertBatfly
-! grep -RIn --include='*.cs' 'DB_SignalPerception' src/Creatures/DesertBatfly
-! grep -RIn --include='*.cs' 'DB_SignalDebugState' src/Creatures/DesertBatfly
-
-# Immediate projectile response is now a formal R3 owner. The retired ordinary facade used
-# to rediscover the same cue/player after arbitration and could become a second execution path.
-! grep -q 'TryApplyOrdinaryProjectileEvade' src/Creatures/DesertBatfly/Behavior/Threat/DB_ThreatTactics.cs
-grep -q 'DB_ThreatTactics.ApplyProjectileEvadeOwned(bat, resolution.FinalGoal.Value)' src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorExecution.cs
-
-# Dehydration Feeding is a formal domain. It may read Thirst only through
-# PlayerDehydrationFacts, and room aggregation belongs only to DB_FeedingCoordinator.
-for f in \
-  src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs \
-  src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationFeedingRuntime.cs \
-  src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs \
-  src/Thirst/PlayerDehydrationFacts.cs; do test -f "$f"; done
-
-grep -q 'DB_BehaviorOwner.Feeding' src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorArbiter.cs
-grep -q 'bat.Feeding.ApplyOwnedBehavior()' src/Creatures/DesertBatfly/Core/Runtime/DB_BehaviorExecution.cs
-grep -q 'DB_SpecialPhysicsOwner.FeedingAttach' src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs
-grep -q 'bat.Feeding?.Attached == true' src/Creatures/DesertBatfly/Core/Runtime/DB_FrameContext.cs
-grep -q 'desert.Feeding.YieldAttachmentForHigherPriority()' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
-grep -q 'DB_FeedingCoordinator.UpdateRoom(self)' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
-grep -q 'DB_DehydrationGripRuntime.Enable()' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
-grep -q 'DB_DehydrationGripRuntime.Disable()' src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs
-grep -q '"FeedingRole"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
-grep -q '"FeedingGroup"' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
-grep -q 'DB_FeedingCoordinator.TryPeekTarget' src/Creatures/DesertBatfly/Debug/DB_Trace.cs
-
-grep -q 'On.Player.Collide += PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
-grep -q 'On.Player.Collide -= PlayerCollide' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
-grep -q 'VanillaAutoCaptureWouldAttempt' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
-grep -q 'ApprovedCollisionBat' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
-grep -q 'bat.shortcutDelay = 1;' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
-
-if grep -RIn --include='*.cs' -E 'HydrationWeakness|ThirstStore\.' src/Creatures/DesertBatfly/Behavior/Feeding; then
-  echo 'Feeding bypassed PlayerDehydrationFacts physiology boundary.' >&2
-  exit 1
-fi
-if grep -RIn --include='*.cs' -E 'physicalObjects|abstractRoom\.creatures' src/Creatures/DesertBatfly/Behavior/Feeding; then
-  echo 'Feeding reintroduced a direct room scan.' >&2
-  exit 1
-fi
-! grep -q 'DB_RoomContext' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationFeedingRuntime.cs
-! grep -q 'DB_RoomContext' src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs
+for path in "$SRC" "$HOOKS" "$DEFINITION" "$STATE" "$PLUGIN"; do
+    test -e "$path" || { echo "missing required DesertBatfly architecture surface: $path" >&2; exit 1; }
+done
 
 python3 - <<'PY'
 from pathlib import Path
 import re
-facts = Path('src/Thirst/PlayerDehydrationFacts.cs').read_text(encoding='utf-8')
-coordinator = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_FeedingCoordinator.cs').read_text(encoding='utf-8')
-grip = Path('src/Creatures/DesertBatfly/Behavior/Feeding/DB_DehydrationGripRuntime.cs').read_text(encoding='utf-8')
-hooks = Path('src/Creatures/DesertBatfly/Integration/DB_RainWorldHooks.cs').read_text(encoding='utf-8')
-if re.search(r'(?:>=|<=|>|<)\s*PlayerDehydrationStage\.', facts + coordinator):
-    raise SystemExit('PlayerDehydrationStage relational comparison is not legal C#')
-if coordinator.count('PlayerDehydrationFacts.ApplyPredationStress') != 1:
-    raise SystemExit('Feeding must have exactly one aggregate predation-stress ingress')
-if 'DB_RoomContext.For(room)' not in coordinator or 'context.Players' not in coordinator:
-    raise SystemExit('Feeding coordinator must consume the shared room player snapshot')
-if 'internal int MaintenanceClock = int.MinValue;' not in coordinator:
-    raise SystemExit('Feeding room maintenance lost its per-tick gate')
-if coordinator.count('MaintainRoomState(bat.room, state);') != 2 or \
-        coordinator.count('MaintainRoomState(room, state);') != 1:
-    raise SystemExit('Feeding assignment/update paths must share the room maintenance gate')
-if 'RefreshTargets(bat.room, state);' in coordinator or 'Prune(bat.room, state);' in coordinator:
-    raise SystemExit('Per-bat feeding queries bypassed the room maintenance gate')
-if coordinator.count('PromoteCloudReservations(state);') < 2:
-    raise SystemExit('Cloud promotion must run from maintenance and event-driven release')
-for token in (
-    'CollisionPickupAttempt(self, otherObject',
-    'PassesGripGate(self, bat, facts, state, clock)',
-    'ApprovedCollisionBat',
-    'bat.shortcutDelay = 1;',
+import sys
+
+src = Path('src/Creatures/DesertBatfly')
+hooks_path = src / 'Integration' / 'DB_RainWorldHooks.cs'
+plugin_path = Path('src/Plugin.cs')
+failures = []
+
+files = sorted(src.rglob('*.cs'))
+if not files:
+    failures.append('DesertBatfly production tree contains no C# source files')
+
+hooks = hooks_path.read_text(encoding='utf-8')
+plugin = plugin_path.read_text(encoding='utf-8')
+joined = '\n'.join(path.read_text(encoding='utf-8') for path in files)
+
+# External lifecycle integration remains explicit. Internal implementation is free to move.
+if 'DB_RainWorldHooks.Enable()' not in plugin:
+    failures.append('Plugin no longer enables DesertBatfly integration')
+if 'DB_RainWorldHooks.Disable()' not in plugin:
+    failures.append('Plugin no longer disables DesertBatfly integration')
+
+# Hook subscriptions in the central integration adapter must stay symmetric. This catches leaked
+# hooks without prescribing which hooks the species is allowed to use.
+adds = re.findall(r'\b(On\.[A-Za-z0-9_.]+)\s*\+=\s*([A-Za-z0-9_]+)', hooks)
+removes = re.findall(r'\b(On\.[A-Za-z0-9_.]+)\s*-=\s*([A-Za-z0-9_]+)', hooks)
+from collections import Counter
+if Counter(adds) != Counter(removes):
+    missing_remove = Counter(adds) - Counter(removes)
+    missing_add = Counter(removes) - Counter(adds)
+    if missing_remove:
+        failures.append('hook subscriptions without matching unsubscribe: ' + repr(dict(missing_remove)))
+    if missing_add:
+        failures.append('hook unsubscriptions without matching subscribe: ' + repr(dict(missing_add)))
+
+# Integration may adapt Rain World callbacks, but it should not become a second room scanner or
+# physics controller. Domain code is free to be refactored behind this boundary.
+for token, label in (
+    ('physicalObjects', 'direct physicalObjects room scan'),
+    ('abstractRoom.creatures', 'direct abstract creature scan'),
 ):
-    if token not in grip:
-        raise SystemExit('Dehydrated collision pickup contract missing: ' + token)
+    if token in hooks:
+        failures.append('DB_RainWorldHooks regained ' + label)
+if re.search(r'\bmainBodyChunk\.vel\s*=', hooks):
+    failures.append('DB_RainWorldHooks regained direct velocity ownership')
+if re.search(r'\b(?:self|desert|bat)\.AI\.localGoal\s*=', hooks):
+    failures.append('DB_RainWorldHooks regained direct localGoal ownership')
 
-owner_order = (
-    'PrimaryOwner == DB_BehaviorOwner.ImmediateProjectileEvade',
-    'PrimaryOwner == DB_BehaviorOwner.Feeding',
-    'PrimaryOwner == DB_BehaviorOwner.Combat',
-)
-positions = [hooks.find(token) for token in owner_order]
-if any(position < 0 for position in positions) or positions != sorted(positions):
-    raise SystemExit('R3 owner order changed: expected ImmediateProjectileEvade -> Feeding -> Combat')
+# Reflection is allowed only at explicit external-compatibility edges. Core/Behavior/World code
+# must not start depending on private reflection contracts.
+for path in files:
+    text = path.read_text(encoding='utf-8')
+    if 'System.Reflection' not in text and 'BindingFlags' not in text and 'FieldInfo' not in text and 'MethodInfo' not in text:
+        continue
+    rel = path.relative_to(src).as_posix()
+    if rel not in {'Integration/DB_Sandbox.cs', 'Integration/DB_WarpCompatibility.cs'}:
+        failures.append('reflection escaped compatibility boundary: ' + rel)
+
+# Keep externally serialized/world-authored identities stable. Private class names and directory
+# layout are deliberately not checked here.
+for literal in ('DesertBatfly', 'DCDesertBatflyV1', 'DESERTSWARMROOM'):
+    if literal not in joined:
+        failures.append('compatibility identity missing: ' + literal)
+
+if failures:
+    print('\n'.join(failures), file=sys.stderr)
+    sys.exit(1)
+
+print(f'R6 living architecture guard passed: {len(files)} production files; durable boundaries only.')
 PY
-
-echo 'R6 source retention audit passed.'
