@@ -4,7 +4,7 @@ Shader "DryCycle/MenuTextFlow"
     {
         _MainTex ("Text Alpha", 2D) = "white" {}
         _BaseColor ("Base Color", Color) = (1,1,1,1)
-        _FlowPhase ("Flow Phase", Float) = 0
+        _FlowPhase ("Flow Phase Offset", Float) = 0
         _FlowStrength ("Flow Strength", Range(0,1)) = 0.65
         _DarkStrength ("Dark Notch Strength", Range(0,0.4)) = 0.16
     }
@@ -89,10 +89,17 @@ Shader "DryCycle/MenuTextFlow"
             {
                 fixed4 glyph = tex2D(_MainTex, i.uv);
                 float2 screenUV = i.screenPos.xy / max(i.screenPos.w, 0.00001);
+                // The reference WPF shader uses top-left screen coordinates; normalize Unity's
+                // screen position to the same convention so CPU/RWImGui and Unity paths agree.
+                screenUV.y = 1.0 - screenUV.y;
 
-                // Same diagonal mapping recovered from the reference title effect. _FlowPhase is
-                // normally advanced at -0.125 units/second, so one complete profile takes ~8 s.
-                float coordinate = 0.70 * screenUV.x - 0.19 * screenUV.y + _FlowPhase;
+                // RainWorldRender drives the phase at roughly -0.125 units/second. _FlowPhase is
+                // an optional manual offset; normal users do not need to update it every frame.
+                float coordinate =
+                    0.70 * screenUV.x -
+                    0.19 * screenUV.y +
+                    _FlowPhase -
+                    _Time.y * 0.125;
                 float sampleValue = ReferenceGradient(coordinate) * 255.0;
                 float bright = saturate((sampleValue - 163.0) / (255.0 - 163.0));
                 float dark = saturate((163.0 - sampleValue) / (163.0 - 129.0));
