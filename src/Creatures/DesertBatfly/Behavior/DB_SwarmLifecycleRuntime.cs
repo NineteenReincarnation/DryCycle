@@ -5,14 +5,14 @@ namespace DryCycle.Creatures.DesertBatfly;
 /// <summary>
 /// Thin adapter for Rain World's nonvirtual FlyAI Idle/Swarm callbacks.
 ///
-/// Desert Batfly no longer uses native FlyAI.Swarm/SwarmFlight as a gameplay state. Vanilla
-/// may still attempt Idle -> Swarm inside FlyAI.Update, so these hook callbacks immediately
-/// fold that transition back to Idle. Native Idle may also start a self-roost directly on a
-/// ChainTile; that transition is retained only when the shared Desert Batfly roost occupancy
-/// policy says the local patch is not already crowded.
+/// Desert Batfly does not use native FlyAI.Swarm/SwarmFlight as a gameplay state. Vanilla
+/// IdleUpdate may still attempt Idle -> Swarm, so the transition is folded back to Idle before
+/// a later frame can execute SwarmUpdate. Native self-roost remains available only when the
+/// shared Desert Batfly roost occupancy policy accepts the selected patch.
 ///
-/// All species lifecycle/state belongs to DB_NeutralBehaviorRuntime or DB_RoostPolicy; this
-/// adapter owns no persistent state and exposes no forwarding facade.
+/// Important: DB_RainWorldHooks never executes vanilla SwarmUpdate for Desert Batflies. This
+/// class therefore performs state cleanup only; no native swarm steering is allowed to leak for
+/// one frame before being cancelled.
 /// </summary>
 internal static class DB_SwarmLifecycleRuntime
 {
@@ -22,7 +22,7 @@ internal static class DB_SwarmLifecycleRuntime
         SuppressCrowdedNativeSelfRoost(ai, bat);
     }
 
-    internal static void AfterNativeSwarmUpdate(FlyAI ai, DB_Creature bat)
+    internal static void SuppressNativeSwarmEntry(FlyAI ai, DB_Creature bat)
     {
         SuppressNativeSwarm(ai, bat);
     }
@@ -34,9 +34,8 @@ internal static class DB_SwarmLifecycleRuntime
         if (ai.behavior != FlyAI.Behavior.Swarm) return;
 
         ai.ChangeBehavior(FlyAI.Behavior.Idle);
-        // Prevent vanilla IdleUpdate from immediately re-entering Swarm on the next frame.
-        // Custom ShortSwarm is independent from this compatibility counter.
-        ai.noSwarmCounter = Mathf.Max(ai.noSwarmCounter, 80);
+        ai.noSwarmCounter = Mathf.Max(ai.noSwarmCounter, 120);
+        bat.movMode = Fly.MovementMode.BatFlight;
     }
 
     private static void SuppressCrowdedNativeSelfRoost(FlyAI ai, DB_Creature bat)
