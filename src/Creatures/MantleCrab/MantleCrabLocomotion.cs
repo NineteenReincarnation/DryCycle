@@ -81,12 +81,12 @@ internal sealed class MantleCrabLocomotion
 
         // 高层输入不直接变成腿的瞬时动作。大型身体需要先建立/卸掉推进负载。
         // High-level intent is filtered before it reaches gait planning so a large body never snaps between full directions.
-        float targetMove = posture.Recovering ? 0f : MoveIntent;
+        float targetMove = posture.SeverelyUnstable ? 0f : MoveIntent;
         smoothedMoveIntent = Mathf.MoveTowards(smoothedMoveIntent, targetMove, IntentResponse);
         motionAmount = Mathf.MoveTowards(
             motionAmount,
             Mathf.Abs(smoothedMoveIntent),
-            posture.Recovering ? .10f : .032f);
+            posture.SeverelyUnstable ? .10f : .032f);
 
         Vector2 bodyVelocity = BodyVelocity();
         float groundSpeed = Mathf.Abs(Vector2.Dot(bodyVelocity, WalkAxis));
@@ -105,7 +105,7 @@ internal sealed class MantleCrabLocomotion
         if (startCooldown > 0)
             startCooldown--;
 
-        if (!crab.Consious || crab.room == null || posture.Recovering)
+        if (!crab.Consious || crab.room == null || posture.SeverelyUnstable)
             return;
 
         int swinging = 0;
@@ -192,7 +192,7 @@ internal sealed class MantleCrabLocomotion
         // Posture owns support, load transfer and self-righting. Propulsion only owns grounded tangent speed.
         posture.ApplySupportAndPosture(effectiveGravity, TurnIntent);
 
-        if (!crab.Consious || crab.room == null || crab.SupportingFeet < 2 || posture.Recovering)
+        if (!crab.Consious || crab.room == null || crab.SupportingFeet < 2 || posture.SeverelyUnstable)
         {
             driveAcceleration = Mathf.MoveTowards(driveAcceleration, 0f, DriveJerk * 1.5f);
             return;
