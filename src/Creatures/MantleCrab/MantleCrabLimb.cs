@@ -44,7 +44,8 @@ internal sealed class MantleCrabLimb
     internal MantleCrabPincerRig PincerRig => pincerRig;
     internal float NominalStandHeight => nominalStandHeight;
     internal float NominalBodyClearance => -Rest[4].y;
-    internal float StandHeight => nominalStandHeight * stanceHeightScale;
+    internal float StandHeight => Mathf.Max(1f, nominalStandHeight * stanceHeightScale - touchdownCompression);
+    internal float TouchdownAbsorption => touchdownAbsorption;
 
     private readonly float nominalStandHeight;
     private Vector2 contact;
@@ -56,6 +57,9 @@ internal sealed class MantleCrabLimb
     private float swingLiftHeight;
     private float swingPhaseDuration;
     private float stanceHeightScale = 1f;
+    private float landingApproachSpeed;
+    private float touchdownCompression;
+    private float touchdownAbsorption;
 
     internal MantleCrabLimb(int index, bool pincer)
     {
@@ -97,6 +101,9 @@ internal sealed class MantleCrabLimb
     internal void Reset(Vector2 anchor)
     {
         stanceHeightScale = 1f;
+        landingApproachSpeed = 0f;
+        touchdownCompression = 0f;
+        touchdownAbsorption = 0f;
         RecoveryBraced = false;
         SwingPhase = MantleCrabSwingPhase.None;
         SwingPhaseProgress = 0f;
@@ -158,6 +165,9 @@ internal sealed class MantleCrabLimb
         SwingProgress = 0f;
         SwingPhase = MantleCrabSwingPhase.None;
         SwingPhaseProgress = 0f;
+        landingApproachSpeed = 0f;
+        touchdownCompression = 0f;
+        touchdownAbsorption = 0f;
         searchTick = 8 + Index;
         return Planted;
     }
@@ -186,6 +196,9 @@ internal sealed class MantleCrabLimb
         Planted = false;
         Swinging = true;
         SwingProgress = 0f;
+        landingApproachSpeed = 0f;
+        touchdownCompression = 0f;
+        touchdownAbsorption = 0f;
 
         float distance = Vector2.Distance(swingStart, contact);
         swingDistance01 = Mathf.InverseLerp(18f, 100f, distance);
@@ -240,6 +253,8 @@ internal sealed class MantleCrabLimb
         // then redeploy only after the shell returns to a safe angle.
         if (crab.Locomotion.Posture.Recovering)
         {
+            touchdownCompression = 0f;
+            touchdownAbsorption = 0f;
             UpdateRecoveryPose(crab, anchor);
             UpdateVelocities();
             return;
@@ -253,6 +268,20 @@ internal sealed class MantleCrabLimb
             UpdateVelocities();
             return;
         }
+
+        // 新落地的腿不是一根瞬间变硬的支柱。随着它重新吃重，关节压缩会逐步回弹到正常站高，
+        // 同时冲击吸收状态衰减。这样甲壳的细微压沉来自真实承重恢复，而不是额外播放上下动画。
+        // A newly planted leg is not an instantly rigid strut. Its temporary joint compression relaxes as load returns.
+        float load = crab.Locomotion.SupportLoad(this);
+        float scale = Mathf.Max(.65f, crab.ShellScale);
+        touchdownCompression = Mathf.MoveTowards(
+            touchdownCompression,
+            0f,
+            Mathf.Lerp(.075f, .18f, load) * scale);
+        touchdownAbsorption = Mathf.MoveTowards(
+            touchdownAbsorption,
+            0f,
+            Mathf.Lerp(.018f, .040f, load));
 
         if (hasTarget)
         {
@@ -627,6 +656,15 @@ internal sealed class MantleCrabLimb
 
         SolveWalkingPose(crab, anchor, target, groundedPose);
 
+        if (SwingPhase == MantleCrabSwingPhase.Lower || SwingPhase == MantleCrabSwingPhase.Settle)
+        {
+            Vector2 normal = GroundNormal.sqrMagnitude > .0001f ? GroundNormal.normalized : Vector2.up;
+            if (normal.y < 0f)
+                normal = -normal;
+            float approach = Mathf.Max(0f, -Vector2.Dot(Tip - LastPos[3], normal));
+            landingApproachSpeed = Mathf.Max(landingApproachSpeed, approach);
+        }
+
         if (SwingPhaseProgress < 1f)
             return;
 
@@ -675,11 +713,36 @@ internal sealed class MantleCrabLimb
             hasTarget = Planted;
             if (Planted)
             {
+                float bodyIntoGround = 0f;
+                Vector2 normal = GroundNormal.sqrMagnitude > .0001f ? GroundNormal.normalized : Vector2.up;
+                if (normal.y < 0f)
+                    normal = -normal;
+                if (crab.bodyChunks != null && crab.bodyChunks.Length > 0)
+                {
+                    float totalMass = 0f;
+                    Vector2 bodyVelocity = Vector2.zero;
+                    for (int i = 0; i < crab.bodyChunks.Length; i++)
+                    {
+                        BodyChunk chunk = crab.bodyChunks[i];
+                        totalMass += chunk.mass;
+                        bodyVelocity += chunk.vel * chunk.mass;
+                    }
+                    if (totalMass > .0001f)
+                        bodyIntoGround = Mathf.Max(0f, -Vector2.Dot(bodyVelocity / totalMass, normal));
+                }
+
+                float impactSpeed = Mathf.Max(landingApproachSpeed, bodyIntoGround);
+                float impact = Mathf.Clamp01(Mathf.InverseLerp(.08f, 1.10f, impactSpeed));
+                float scale = Mathf.Max(.65f, crab.ShellScale);
+                touchdownCompression = Mathf.Lerp(.9f, 4.4f, impact) * scale;
+                touchdownAbsorption = Mathf.Lerp(.20f, .76f, impact);
+                landingApproachSpeed = 0f;
                 searchTick = 8 + Index;
                 return;
             }
         }
 
+        landingApproachSpeed = 0f;
         ReleaseContact();
         searchTick = 0;
     }
@@ -690,6 +753,9 @@ internal sealed class MantleCrabLimb
         SwingProgress = 0f;
         SwingPhase = MantleCrabSwingPhase.None;
         SwingPhaseProgress = 0f;
+        landingApproachSpeed = 0f;
+        touchdownCompression = 0f;
+        touchdownAbsorption = 0f;
         ReleaseContact();
     }
 
