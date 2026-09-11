@@ -4,7 +4,7 @@ namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>
 /// MantleCrab 的低层步行驱动。高层只提供 move/turn 意图；这里负责换步、落脚预测和地面推进。
-/// 行走框架由 PostureController 根据世界重力和地面支撑建立，绝不再使用甲壳当前旋转角当作移动方向。
+/// 行走框架由 PostureController 根据世界重力和已接触地面的平均法线建立，绝不再使用甲壳当前旋转角当作移动方向。
 ///
 /// Low-level walking motor. Higher layers only provide move/turn intent. The grounded frame is owned
 /// by PostureController and is never derived from the shell's current physical rotation.
@@ -77,6 +77,7 @@ internal sealed class MantleCrabLocomotion
         // 先建立独立于甲壳旋转的地面坐标系，再让 Traversal 和步态使用同一套方向。
         // Build the gravity/terrain frame first so traversal and gait consume one stable direction basis.
         posture.UpdateFrame();
+        posture.AdvanceRecoveryAnimation();
 
         // 高层输入不直接变成腿的瞬时动作。大型身体需要先建立/卸掉推进负载。
         // High-level intent is filtered before it reaches gait planning so a large body never snaps between full directions.
