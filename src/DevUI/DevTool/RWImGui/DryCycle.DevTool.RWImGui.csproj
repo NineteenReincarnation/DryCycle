@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>DryCycle.DevTool.RWImGui</AssemblyName>
+    <RootNamespace>DryCycle.DevUI.DevTool.RWImGui</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <GameModOutputDir Condition="'$(GameModOutputDir)' == ''">D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <OutputPath>$(GameModOutputDir)</OutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+
+    <RWImGuiWorkshopRootPluginDir>$(RainWorldDir)/../../workshop/content/312520/3417372413/plugins</RWImGuiWorkshopRootPluginDir>
+    <RWImGuiWorkshopPackagePluginDir>$(RainWorldDir)/../../workshop/content/312520/3417372413/rwimgui/plugins</RWImGuiWorkshopPackagePluginDir>
+    <RWImGuiLocalPluginDir>$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/rwimgui/plugins</RWImGuiLocalPluginDir>
+
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopRootPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopRootPluginDir)</RWImGuiPluginDir>
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiWorkshopPackagePluginDir)/rain-world-imgui-api.dll')">$(RWImGuiWorkshopPackagePluginDir)</RWImGuiPluginDir>
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</RWImGuiPluginDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="DryCycle">
+      <HintPath>$(GameModOutputDir)/DryCycle.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PUBLIC-Assembly-CSharp">
+      <HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="rain-world-imgui-api">
+      <HintPath>$(RWImGuiPluginDir)/rain-world-imgui-api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ImGui.NET">
+      <HintPath>$(RWImGuiPluginDir)/ImGui.NET.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateDevToolRWImGuiReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set for DryCycle.DevTool.RWImGui." />
+    <Error Condition="!Exists('$(GameModOutputDir)/DryCycle.dll')" Text="DryCycle.dll must be built before the DevTool RWImGui frontend." />
+    <Error Condition="'$(RWImGuiPluginDir)' == ''" Text="RWImGUI was not found. Install Workshop item 3417372413 or pass RWImGuiPluginDir." />
+    <Error Condition="!Exists('$(RWImGuiPluginDir)/rain-world-imgui-api.dll')" Text="rain-world-imgui-api.dll not found under $(RWImGuiPluginDir)." />
+    <Error Condition="!Exists('$(RWImGuiPluginDir)/ImGui.NET.dll')" Text="RWImGUI modified ImGui.NET.dll not found under $(RWImGuiPluginDir)." />
+  </Target>
+</Project>

@@ -1,0 +1,241 @@
+using System;
+using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Sound;
+using ImGuiNET;
+using Num = System.Numerics;
+
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+internal static class SoundEditorView
+{
+    private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, Num.Vector2> VectorEdits = new(StringComparer.Ordinal);
+    private static bool sceneTab;
+    private static int createType;
+    private static string search = string.Empty;
+
+    internal static void DrawBrowser(EditorSoundPresentationSnapshot snapshot)
+    {
+        if (!snapshot.Available)
+        {
+            ImGui.TextDisabled("Sound editor unavailable.");
+            return;
+        }
+
+        if (ImGui.Button(sceneTab ? "Library" : "Library*")) sceneTab = false;
+        ImGui.SameLine();
+        if (ImGui.Button(sceneTab ? "Scene*" : "Scene")) sceneTab = true;
+        ImGui.Separator();
+
+        if (sceneTab) DrawScene(snapshot);
+        else DrawLibrary(snapshot);
+    }
+
+    internal static void DrawInspector(EditorSoundPresentationSnapshot snapshot)
+    {
+        if (!snapshot.Available)
+        {
+            ImGui.TextDisabled("Sound editor unavailable.");
+            return;
+        }
+
+        ImGui.TextDisabled("ROOM AUDIO");
+        DrawRoomFloat(SoundEditorKeys.BackgroundDroneVolume, "Bkg Drone", snapshot.BackgroundDroneVolume, 0f, 1f);
+        DrawRoomFloat(SoundEditorKeys.NoThreatDroneVolume, "No Threat Drone", snapshot.NoThreatDroneVolume, 0f, 1f);
+
+        EditorSoundSnapshot selected = FindSelected(snapshot);
+        if (selected == null)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Select a sound from Scene or its world gizmo to edit it.");
+            return;
+        }
+
+        ImGui.Separator();
+        ImGui.Text(selected.Sample);
+        string state = selected.Type;
+        if (selected.Inherited) state += " · Inherited";
+        else if (selected.OverWrite) state += " · Overrides template";
+        ImGui.TextDisabled(state);
+
+        if (selected.Inherited) ImGui.BeginDisabled();
+
+        DrawSoundFloat(selected, SoundEditorKeys.Volume, "Volume", selected.Volume, 0f, 1f);
+        DrawSoundFloat(selected, SoundEditorKeys.Pitch, "Pitch", selected.Pitch, 0.1f, 1.9f);
+
+        if (string.Equals(selected.Type, "Directional", StringComparison.Ordinal) ||
+            string.Equals(selected.Type, "Spot", StringComparison.Ordinal))
+            DrawSoundFloat(selected, SoundEditorKeys.Doppler, "Doppler", selected.Doppler, 0f, 1f);
+
+        if (string.Equals(selected.Type, "Spot", StringComparison.Ordinal))
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("SPATIAL");
+            DrawSoundVector(selected, SoundEditorKeys.Position, "Position", selected.X, selected.Y);
+            DrawSoundFloat(selected, SoundEditorKeys.Radius, "Radius", selected.Radius, 0f, 4000f);
+            DrawSoundFloat(selected, SoundEditorKeys.Taper, "Taper", selected.Taper, 0f, 1f);
+        }
+        else if (string.Equals(selected.Type, "Directional", StringComparison.Ordinal))
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("DIRECTION");
+            DrawSoundVector(selected, SoundEditorKeys.Direction, "Direction", selected.DirectionX, selected.DirectionY);
+        }
+
+        if (selected.Inherited) ImGui.EndDisabled();
+
+        if (selected.Inherited)
+        {
+            ImGui.TextDisabled("Inherited sound · edit its source template or add a local override.");
+        }
+        else
+        {
+            ImGui.Separator();
+            if (ImGui.Button("Delete Sound"))
+                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Delete, selected.Index));
+        }
+    }
+
+    private static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
+    {
+        ImGui.TextDisabled("CREATE SOUND");
+        if (ImGui.RadioButton("Omni", createType == 0)) createType = 0;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Directional", createType == 1)) createType = 1;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Spot", createType == 2)) createType = 2;
+
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputText("Search##SoundLibrarySearch", ref search, 128);
+        ImGui.Separator();
+
+        string[] samples = snapshot.Samples ?? Array.Empty<string>();
+        int matches = 0;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            string sample = samples[i];
+            if (!Matches(sample, search)) continue;
+            matches++;
+            if (ImGui.Selectable(sample + "##CreateSound" + i, false))
+            {
+                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                    SoundEditorCommandKind.Create,
+                    text: sample,
+                    secondaryIndex: createType));
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Add as " + TypeName(createType));
+        }
+        if (matches == 0) ImGui.TextDisabled("No matching ambient samples.");
+    }
+
+    private static void DrawScene(EditorSoundPresentationSnapshot snapshot)
+    {
+        EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
+        ImGui.TextDisabled(sounds.Length + " ambient sounds");
+        ImGui.Separator();
+
+        for (int i = 0; i < sounds.Length; i++)
+        {
+            EditorSoundSnapshot sound = sounds[i];
+            string prefix = sound.Type switch
+            {
+                "Omnidirectional" => "O",
+                "Directional" => "D",
+                "Spot" => "S",
+                _ => "?"
+            };
+            string label = "[" + prefix + "] " + sound.Sample;
+            if (sound.Inherited) label += "  [Inherited]";
+            else if (sound.OverWrite) label += "  [Override]";
+            if (ImGui.Selectable(label + "##SoundScene" + sound.Index, sound.Selected))
+                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
+        }
+    }
+
+    private static void DrawRoomFloat(string key, string label, float current, float min, float max)
+    {
+        string stateKey = "room:" + key;
+        float value = Get(FloatEdits, stateKey, current);
+        bool changed = ImGui.SliderFloat(label + "##SoundRoom" + key, ref value, min, max, "%.3f");
+        FloatEdits[stateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetRoomValue,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            FloatEdits[stateKey] = current;
+        }
+    }
+
+    private static void DrawSoundFloat(EditorSoundSnapshot sound, string key, string label, float current, float min, float max)
+    {
+        string stateKey = "sound:" + sound.Index + ":" + key;
+        float value = Get(FloatEdits, stateKey, current);
+        bool changed = ImGui.SliderFloat(label + "##" + stateKey, ref value, min, max, "%.3f");
+        FloatEdits[stateKey] = value;
+        if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetSoundValue,
+                index: sound.Index,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            FloatEdits[stateKey] = current;
+        }
+    }
+
+    private static void DrawSoundVector(EditorSoundSnapshot sound, string key, string label, float x, float y)
+    {
+        string stateKey = "sound:" + sound.Index + ":" + key;
+        Num.Vector2 value = Get(VectorEdits, stateKey, new Num.Vector2(x, y));
+        bool changed = ImGui.InputFloat2(label + "##" + stateKey, ref value, "%.2f");
+        VectorEdits[stateKey] = value;
+        if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetSoundValue,
+                index: sound.Index,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Vector2, x: value.X, y: value.Y)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            VectorEdits[stateKey] = new Num.Vector2(x, y);
+        }
+    }
+
+    private static EditorSoundSnapshot FindSelected(EditorSoundPresentationSnapshot snapshot)
+    {
+        EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
+        int index = snapshot.SelectedIndex;
+        return index >= 0 && index < sounds.Length ? sounds[index] : null;
+    }
+
+    private static string TypeName(int type) => type switch
+    {
+        0 => "Omnidirectional",
+        1 => "Directional",
+        2 => "Spot",
+        _ => "Sound"
+    };
+
+    private static bool Matches(string value, string query) =>
+        string.IsNullOrWhiteSpace(query) ||
+        (!string.IsNullOrEmpty(value) && value.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0);
+
+    private static TValue Get<TValue>(Dictionary<string, TValue> dictionary, string key, TValue fallback)
+    {
+        if (dictionary.TryGetValue(key, out TValue value)) return value;
+        dictionary[key] = fallback;
+        return fallback;
+    }
+}

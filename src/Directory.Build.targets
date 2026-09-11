@@ -1,11 +1,11 @@
 <Project>
-  <!-- The bridge project lives below src/, so the SDK-style DryCycle project would
-       otherwise glob BridgePlugin.cs into DryCycle.dll as well. The retired ImGui-facing
-       source files are also excluded from the core assembly now that AIDebuggerRuntime no
-       longer instantiates the custom renderer. Keeping the files in-repo preserves them as
-       migration reference without retaining an ImGui.NET assembly dependency in DryCycle. -->
+  <!-- Optional RWImGui frontend projects live below src/, so the SDK-style DryCycle
+       project would otherwise glob their source into DryCycle.dll. Keep ImGui-facing
+       code in optional assemblies so the gameplay/core DLL never acquires an ImGui.NET
+       dependency. -->
   <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle'">
     <Compile Remove="DryCycle.AIObservatory.RWImGui/**/*.cs" />
+    <Compile Remove="DevUI/DevTool/RWImGui/**/*.cs" />
     <Compile Remove="Debug/AIDebugger/Runtime/AIDebugDockingNative.cs" />
     <Compile Remove="Debug/AIDebugger/Runtime/AIDebugImGuiBackend.cs" />
     <Compile Remove="Debug/AIDebugger/Runtime/AIDebugImGuiIniIsolation.cs" />
@@ -43,41 +43,50 @@
              Text="DryCycle RWImGUI migration: removed stale local ImGui.NET/cimgui runtime copies from $(GameModOutputDir)." />
   </Target>
 
-  <!-- Build the optional frontend automatically when RWImGUI is installed. The bridge
-       references the DryCycle.dll that has just been produced, so there is no recursive
-       ProjectReference. Because the bridge is not a top-level solution project, Visual
-       Studio will not restore it automatically. Explicitly restore it before Build so the
-       SDK can generate obj/project.assets.json on a clean checkout.
-
-       Delete any old bridge output before compiling. If compilation fails, an obsolete
-       bridge DLL must never survive next to a newly-built DryCycle.dll and get loaded by
-       BepInEx on the following game launch. -->
+  <!-- Build optional frontends automatically when RWImGUI is installed. Each frontend
+       references the DryCycle.dll that has just been produced, avoiding recursive
+       ProjectReference graphs while keeping ImGui isolated from the main assembly. -->
   <Target Name="BuildOptionalRWImGuiBridge"
           AfterTargets="RemoveLegacyDryCycleImGuiRuntime"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
     <ItemGroup>
       <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
       <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.pdb" />
+      <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll" />
+      <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.DevTool.RWImGui.pdb" />
     </ItemGroup>
     <Delete Files="@(PreviousRWImGuiBridge)" />
     <Message Importance="high"
-             Text="DryCycle RWImGUI migration: cleared stale optional bridge outputs before rebuild." />
+             Text="DryCycle RWImGUI migration: cleared stale optional frontend outputs before rebuild." />
 
     <Message Importance="high"
-             Text="DryCycle RWImGUI migration: restoring optional bridge against $(ResolvedRWImGuiPluginDir)." />
+             Text="DryCycle RWImGUI migration: restoring AI Observatory frontend against $(ResolvedRWImGuiPluginDir)." />
     <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
              Targets="Restore"
              BuildInParallel="false"
              Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
-    <Message Importance="high"
-             Text="DryCycle RWImGUI migration: building optional bridge against $(ResolvedRWImGuiPluginDir)." />
     <MSBuild Projects="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
              Targets="Build"
              BuildInParallel="false"
              Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
+
+    <Message Importance="high"
+             Text="DryCycle RWImGUI migration: restoring DevTool frontend against $(ResolvedRWImGuiPluginDir)." />
+    <MSBuild Projects="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
+             Targets="Restore"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
+    <MSBuild Projects="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
+             Targets="Build"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RainWorldDir=$(RainWorldDir);GameModOutputDir=$(GameModOutputDir);RWImGuiPluginDir=$(ResolvedRWImGuiPluginDir)" />
+
     <Message Importance="high"
              Condition="Exists('$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll')"
-             Text="DryCycle RWImGUI migration: optional bridge built successfully." />
+             Text="DryCycle RWImGUI migration: AI Observatory frontend built successfully." />
+    <Message Importance="high"
+             Condition="Exists('$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll')"
+             Text="DryCycle RWImGUI migration: DevTool frontend built successfully." />
   </Target>
 
   <Target Name="ReportMissingOptionalRWImGuiBridge"
@@ -86,9 +95,11 @@
     <ItemGroup>
       <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
       <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.pdb" />
+      <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll" />
+      <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.DevTool.RWImGui.pdb" />
     </ItemGroup>
     <Delete Files="@(StaleRWImGuiBridge)" />
     <Message Importance="high"
-             Text="DryCycle RWImGUI migration: RWImGUI not found; optional Observatory bridge was skipped and stale bridge output was removed. Install Workshop 3417372413 or pass -p:RWImGuiPluginDir=... to build it." />
+             Text="DryCycle RWImGUI migration: RWImGUI not found; optional frontends were skipped and stale outputs removed. Install Workshop 3417372413 or pass -p:RWImGuiPluginDir=... to build them." />
   </Target>
 </Project>
