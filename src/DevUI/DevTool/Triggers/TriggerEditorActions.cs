@@ -21,6 +21,27 @@ public static class TriggerEditorKeys
     public const string CreatureType = "creatureType";
 }
 
+public static class TriggerEventEditorKeys
+{
+    public const string SongName = "songName";
+    public const string Priority = "priority";
+    public const string MaxThreatLevel = "maxThreatLevel";
+    public const string DroneTolerance = "droneTolerance";
+    public const string Volume = "volume";
+    public const string FadeInSeconds = "fadeInSeconds";
+    public const string Loop = "loop";
+    public const string OneSongPerCycle = "oneSongPerCycle";
+    public const string StopAtDeath = "stopAtDeath";
+    public const string StopAtGate = "stopAtGate";
+    public const string RoomsRange = "roomsRange";
+    public const string CyclesRest = "cyclesRest";
+    public const string StopMode = "stopMode";
+    public const string FadeOutSeconds = "fadeOutSeconds";
+    public const string AfterEncounter = "afterEncounter";
+    public const string OnlyWhenShowingDirection = "onlyWhenShowingDirection";
+    public const string FromCycle = "fromCycle";
+}
+
 internal static class TriggerEditorActions
 {
     internal static void Select(EditorSession session, int index)
@@ -195,12 +216,189 @@ internal static class TriggerEditorActions
         });
     }
 
-    private static bool Mutate(EditorSession session, string label, Func<bool> mutation)
+    internal static bool SetEventType(EditorSession session, int index, string eventTypeName)
+    {
+        if (!TryGet(session, index, out EventTrigger trigger) || string.IsNullOrEmpty(eventTypeName)) return false;
+        if (session.Owner?.activePage is not TriggersPage page) return false;
+
+        return Mutate(session, "Set trigger event " + eventTypeName, () =>
+        {
+            TriggerPanel panel = FindPanel(page, trigger);
+            TriggeredEvent.EventType eventType = new(eventTypeName, false);
+            if (panel != null)
+            {
+                // Reuse vanilla's event factory so built-in defaults (especially multiUse)
+                // and ordinary hooks on TriggerPanel.AddEvent remain intact.
+                panel.AddEvent(eventType);
+                return trigger.tEvent != null;
+            }
+
+            trigger.tEvent = CreateEventFallback(eventType);
+            ApplyDefaultMultiUse(trigger, eventType);
+            return trigger.tEvent != null;
+        }, refreshPage: false);
+    }
+
+    internal static bool ClearEvent(EditorSession session, int index)
+    {
+        if (!TryGet(session, index, out EventTrigger trigger) || trigger.tEvent == null) return false;
+        return Mutate(session, "Remove trigger event", () =>
+        {
+            trigger.tEvent = null;
+            return true;
+        });
+    }
+
+    internal static bool SetEventValue(EditorSession session, int index, string key, EditorPropertyValue value)
+    {
+        if (!TryGet(session, index, out EventTrigger trigger) || trigger.tEvent == null || string.IsNullOrEmpty(key))
+            return false;
+
+        return Mutate(session, "Change event " + key, () =>
+        {
+            if (trigger.tEvent is MusicEvent music)
+                return SetMusicEventValue(music, key, value);
+            if (trigger.tEvent is StopMusicEvent stop)
+                return SetStopMusicEventValue(stop, key, value);
+            if (trigger.tEvent is ShowProjectedImageEvent image)
+                return SetProjectedImageEventValue(image, key, value);
+            return false;
+        });
+    }
+
+    private static bool SetMusicEventValue(MusicEvent music, string key, EditorPropertyValue value)
+    {
+        switch (key)
+        {
+            case TriggerEventEditorKeys.SongName:
+                if (value.Kind != EditorPropertyKind.String || string.IsNullOrEmpty(value.Text)) return false;
+                music.songName = value.Text;
+                return true;
+            case TriggerEventEditorKeys.Priority:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                music.prio = Mathf.Clamp01(value.X);
+                return true;
+            case TriggerEventEditorKeys.MaxThreatLevel:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                music.maxThreatLevel = Mathf.Clamp01(value.X);
+                return true;
+            case TriggerEventEditorKeys.DroneTolerance:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                music.droneTolerance = Mathf.Clamp01(value.X);
+                return true;
+            case TriggerEventEditorKeys.Volume:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                music.volume = Mathf.Clamp01(value.X);
+                return true;
+            case TriggerEventEditorKeys.FadeInSeconds:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                music.fadeInTime = Mathf.Clamp(value.X, 0f, 15f) * 40f;
+                return true;
+            case TriggerEventEditorKeys.Loop:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                music.loop = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.OneSongPerCycle:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                music.oneSongPerCycle = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.StopAtDeath:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                music.stopAtDeath = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.StopAtGate:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                music.stopAtGate = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.RoomsRange:
+                if (value.Kind != EditorPropertyKind.Integer) return false;
+                music.roomsRange = value.Integer < 0 ? -1 : Mathf.Clamp(value.Integer, 0, 39);
+                return true;
+            case TriggerEventEditorKeys.CyclesRest:
+                if (value.Kind != EditorPropertyKind.Integer) return false;
+                music.cyclesRest = value.Integer < 0 ? -1 : Mathf.Clamp(value.Integer, 0, 79);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool SetStopMusicEventValue(StopMusicEvent stop, string key, EditorPropertyValue value)
+    {
+        switch (key)
+        {
+            case TriggerEventEditorKeys.SongName:
+                if (value.Kind != EditorPropertyKind.String || string.IsNullOrEmpty(value.Text)) return false;
+                stop.songName = value.Text;
+                return true;
+            case TriggerEventEditorKeys.Priority:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                stop.prio = Mathf.Clamp01(value.X);
+                return true;
+            case TriggerEventEditorKeys.FadeOutSeconds:
+                if (value.Kind != EditorPropertyKind.Float) return false;
+                stop.fadeOutTime = Mathf.Clamp(value.X, 0f, 30f) * 40f;
+                return true;
+            case TriggerEventEditorKeys.StopMode:
+                if (value.Kind != EditorPropertyKind.String || string.IsNullOrEmpty(value.Text)) return false;
+                stop.type = new StopMusicEvent.Type(value.Text, false);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool SetProjectedImageEventValue(ShowProjectedImageEvent image, string key, EditorPropertyValue value)
+    {
+        switch (key)
+        {
+            case TriggerEventEditorKeys.AfterEncounter:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                image.afterEncounter = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.OnlyWhenShowingDirection:
+                if (value.Kind != EditorPropertyKind.Boolean) return false;
+                image.onlyWhenShowingDirection = value.Boolean;
+                return true;
+            case TriggerEventEditorKeys.FromCycle:
+                if (value.Kind != EditorPropertyKind.Integer) return false;
+                image.fromCycle = Mathf.Max(0, value.Integer);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static TriggerPanel FindPanel(TriggersPage page, EventTrigger trigger)
+    {
+        if (page?.subNodes == null || trigger == null) return null;
+        for (int i = 0; i < page.subNodes.Count; i++)
+            if (page.subNodes[i] is TriggerPanel panel && ReferenceEquals(panel.trigger, trigger)) return panel;
+        return null;
+    }
+
+    private static TriggeredEvent CreateEventFallback(TriggeredEvent.EventType eventType)
+    {
+        if (eventType == TriggeredEvent.EventType.MusicEvent) return new MusicEvent();
+        if (eventType == TriggeredEvent.EventType.StopMusicEvent) return new StopMusicEvent();
+        if (eventType == TriggeredEvent.EventType.ShowProjectedImageEvent) return new ShowProjectedImageEvent();
+        return new TriggeredEvent(eventType);
+    }
+
+    private static void ApplyDefaultMultiUse(EventTrigger trigger, TriggeredEvent.EventType eventType)
+    {
+        if (trigger == null || eventType == null) return;
+        if (eventType == TriggeredEvent.EventType.MusicEvent) trigger.multiUse = false;
+        else if (eventType == TriggeredEvent.EventType.StopMusicEvent ||
+                 eventType == TriggeredEvent.EventType.ShowProjectedImageEvent) trigger.multiUse = true;
+    }
+
+    private static bool Mutate(EditorSession session, string label, Func<bool> mutation, bool refreshPage = true)
     {
         if (session?.RoomSettings == null || mutation == null) return false;
         RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
         if (before == null || !mutation()) return false;
-        RefreshPage(session);
+        if (refreshPage) RefreshPage(session);
         RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             session.History.Push(entry);
