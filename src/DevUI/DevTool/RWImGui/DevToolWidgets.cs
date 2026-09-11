@@ -18,8 +18,14 @@ internal enum DevToolButtonTone
 /// </summary>
 internal static class DevToolWidgets
 {
+    private enum GildedTitleLevel
+    {
+        Primary,
+        Secondary,
+        Tertiary
+    }
+
     private static readonly Num.Vector4 Accent = new(0.30f, 0.58f, 0.92f, 1f);
-    private static readonly Num.Vector4 SecondaryAccent = new(0.68f, 0.80f, 0.90f, 1f);
     private static readonly Num.Vector4 AccentSoft = new(0.19f, 0.38f, 0.62f, 0.78f);
     private static readonly Num.Vector4 AccentHover = new(0.27f, 0.50f, 0.80f, 0.92f);
     private static readonly Num.Vector4 AccentActive = new(0.34f, 0.63f, 0.98f, 1f);
@@ -28,6 +34,24 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Danger = new(0.57f, 0.20f, 0.22f, 0.88f);
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
+
+    // Rain World-inspired gilded hierarchy. The three levels intentionally share the same
+    // warm-gold family while reducing brightness and glow as the hierarchy becomes deeper.
+    private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
+    private static readonly Num.Vector4 PrimaryHighlight = new(1.00f, 0.94f, 0.69f, 1f);
+    private static readonly Num.Vector4 PrimaryShadow = new(0.35f, 0.22f, 0.08f, 1f);
+    private static readonly Num.Vector4 PrimaryGlow = new(0.93f, 0.66f, 0.22f, 0.20f);
+
+    private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
+    private static readonly Num.Vector4 SecondaryHighlight = new(0.97f, 0.84f, 0.56f, 1f);
+    private static readonly Num.Vector4 SecondaryShadow = new(0.30f, 0.19f, 0.07f, 1f);
+    private static readonly Num.Vector4 SecondaryGlow = new(0.86f, 0.58f, 0.18f, 0.13f);
+
+    private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
+    private static readonly Num.Vector4 TertiaryHighlight = new(0.88f, 0.73f, 0.47f, 1f);
+    private static readonly Num.Vector4 TertiaryShadow = new(0.25f, 0.16f, 0.06f, 1f);
+    private static readonly Num.Vector4 TertiaryGlow = new(0.76f, 0.49f, 0.14f, 0.08f);
+
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
 
@@ -39,13 +63,13 @@ internal static class DevToolWidgets
         if (primary)
         {
             paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
-            DrawOutlinedText(text, Accent, 1.55f * restoreScale, 1.9f, paneBodyScale);
+            DrawGildedTitle(text, GildedTitleLevel.Primary, 1.55f * restoreScale, 2.0f, paneBodyScale);
             ImGui.Spacing();
             return;
         }
 
         float bodyScale = ResolvePaneBodyScale(restoreScale);
-        DrawOutlinedText(text, SecondaryAccent, 1.28f * bodyScale, 1.5f, bodyScale);
+        DrawGildedTitle(text, GildedTitleLevel.Secondary, 1.28f * bodyScale, 1.6f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -54,7 +78,7 @@ internal static class DevToolWidgets
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawOutlinedText(text, new Num.Vector4(0.78f, 0.86f, 1f, 1f), 1.18f * bodyScale, 1.35f, bodyScale);
+        DrawGildedTitle(text, GildedTitleLevel.Tertiary, 1.18f * bodyScale, 1.4f, bodyScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -187,6 +211,72 @@ internal static class DevToolWidgets
     private static bool IsInspectorPaneTitle(string text)
     {
         return text == "INSPECTOR" || text == "检查器";
+    }
+
+    private static void DrawGildedTitle(
+        string text,
+        GildedTitleLevel level,
+        float fontScale,
+        float stroke,
+        float restoreScale)
+    {
+        Num.Vector4 body;
+        Num.Vector4 highlight;
+        Num.Vector4 shadow;
+        Num.Vector4 glow;
+
+        switch (level)
+        {
+            case GildedTitleLevel.Primary:
+                body = PrimaryGold;
+                highlight = PrimaryHighlight;
+                shadow = PrimaryShadow;
+                glow = PrimaryGlow;
+                break;
+            case GildedTitleLevel.Secondary:
+                body = SecondaryGold;
+                highlight = SecondaryHighlight;
+                shadow = SecondaryShadow;
+                glow = SecondaryGlow;
+                break;
+            default:
+                body = TertiaryGold;
+                highlight = TertiaryHighlight;
+                shadow = TertiaryShadow;
+                glow = TertiaryGlow;
+                break;
+        }
+
+        ImGui.SetWindowFontScale(fontScale);
+        Num.Vector2 pos = ImGui.GetCursorScreenPos();
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        const uint outline = 0xFF000000u;
+
+        uint glowColor = ImGui.GetColorU32(glow);
+        float glowOffset = stroke + (level == GildedTitleLevel.Primary ? 1.8f : 1.2f);
+        draw.AddText(pos + new Num.Vector2(-glowOffset, 0f), glowColor, text);
+        draw.AddText(pos + new Num.Vector2(glowOffset, 0f), glowColor, text);
+        draw.AddText(pos + new Num.Vector2(0f, -glowOffset), glowColor, text);
+        draw.AddText(pos + new Num.Vector2(0f, glowOffset), glowColor, text);
+
+        draw.AddText(pos + new Num.Vector2(-stroke, 0f), outline, text);
+        draw.AddText(pos + new Num.Vector2(stroke, 0f), outline, text);
+        draw.AddText(pos + new Num.Vector2(0f, -stroke), outline, text);
+        draw.AddText(pos + new Num.Vector2(0f, stroke), outline, text);
+        draw.AddText(pos + new Num.Vector2(-stroke, -stroke), outline, text);
+        draw.AddText(pos + new Num.Vector2(stroke, -stroke), outline, text);
+        draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
+        draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
+
+        // Warm lower-right relief makes the letters read as engraved metal instead of flat yellow text.
+        draw.AddText(pos + new Num.Vector2(1.15f, 1.35f), ImGui.GetColorU32(shadow), text);
+
+        ImGui.TextColored(body, text);
+
+        // A tiny upper-left duplicate acts as the polished metal edge. Keeping it under one pixel
+        // prevents the title from turning into a visibly doubled string at large UI scales.
+        draw.AddText(pos + new Num.Vector2(-0.65f, -0.75f), ImGui.GetColorU32(highlight), text);
+        ImGui.SetWindowFontScale(restoreScale);
     }
 
     private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke, float restoreScale)
