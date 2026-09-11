@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -50,6 +51,24 @@ internal static class SoundEditorStateHub
     internal static SoundEditorState Get(EditorSession session) =>
         session == null ? null : states.GetValue(session, _ => new SoundEditorState());
 
+    internal static void SynchronizeFromLegacyNode(EditorSession session, DevUINode node)
+    {
+        if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null || node == null)
+            return;
+
+        DevUINode current = node;
+        while (current != null)
+        {
+            if (current is AmbientSoundPanel panel && panel.sound != null)
+            {
+                int index = session.RoomSettings.ambientSounds.IndexOf(panel.sound);
+                if (index >= 0) Get(session).SelectedIndex = index;
+                return;
+            }
+            current = current.parentNode;
+        }
+    }
+
     internal static void Reset() => states = new ConditionalWeakTable<EditorSession, SoundEditorState>();
 }
 
@@ -61,7 +80,7 @@ public static class SoundEditorPresentationHub
     internal static void Publish(EditorSession session)
     {
         if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null ||
-            session.Owner?.activePage is not DevInterface.SoundPage page)
+            session.Owner?.activePage is not SoundPage page)
         {
             current = EditorSoundPresentationSnapshot.Empty;
             return;
