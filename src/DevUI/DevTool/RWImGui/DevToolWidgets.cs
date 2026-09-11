@@ -35,22 +35,14 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
-    // Rain World-inspired gilded hierarchy. The three levels intentionally share the same
-    // warm-gold family while reducing brightness and glow as the hierarchy becomes deeper.
+    // Keep the current hierarchy colours. "Gilded" now means the Rain World-style moving
+    // surface highlight, not replacing these base colours with a different palette.
     private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
-    private static readonly Num.Vector4 PrimaryHighlight = new(1.00f, 0.94f, 0.69f, 1f);
     private static readonly Num.Vector4 PrimaryShadow = new(0.35f, 0.22f, 0.08f, 1f);
-    private static readonly Num.Vector4 PrimaryGlow = new(0.93f, 0.66f, 0.22f, 0.20f);
-
     private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
-    private static readonly Num.Vector4 SecondaryHighlight = new(0.97f, 0.84f, 0.56f, 1f);
     private static readonly Num.Vector4 SecondaryShadow = new(0.30f, 0.19f, 0.07f, 1f);
-    private static readonly Num.Vector4 SecondaryGlow = new(0.86f, 0.58f, 0.18f, 0.13f);
-
     private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
-    private static readonly Num.Vector4 TertiaryHighlight = new(0.88f, 0.73f, 0.47f, 1f);
     private static readonly Num.Vector4 TertiaryShadow = new(0.25f, 0.16f, 0.06f, 1f);
-    private static readonly Num.Vector4 TertiaryGlow = new(0.76f, 0.49f, 0.14f, 0.08f);
 
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
@@ -221,43 +213,33 @@ internal static class DevToolWidgets
         float restoreScale)
     {
         Num.Vector4 body;
-        Num.Vector4 highlight;
         Num.Vector4 shadow;
-        Num.Vector4 glow;
+        float flowStrength;
 
         switch (level)
         {
             case GildedTitleLevel.Primary:
                 body = PrimaryGold;
-                highlight = PrimaryHighlight;
                 shadow = PrimaryShadow;
-                glow = PrimaryGlow;
+                flowStrength = 0.72f;
                 break;
             case GildedTitleLevel.Secondary:
                 body = SecondaryGold;
-                highlight = SecondaryHighlight;
                 shadow = SecondaryShadow;
-                glow = SecondaryGlow;
+                flowStrength = 0.58f;
                 break;
             default:
                 body = TertiaryGold;
-                highlight = TertiaryHighlight;
                 shadow = TertiaryShadow;
-                glow = TertiaryGlow;
+                flowStrength = 0.46f;
                 break;
         }
 
         ImGui.SetWindowFontScale(fontScale);
         Num.Vector2 pos = ImGui.GetCursorScreenPos();
+        Num.Vector2 textSize = ImGui.CalcTextSize(text);
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         const uint outline = 0xFF000000u;
-
-        uint glowColor = ImGui.GetColorU32(glow);
-        float glowOffset = stroke + (level == GildedTitleLevel.Primary ? 1.8f : 1.2f);
-        draw.AddText(pos + new Num.Vector2(-glowOffset, 0f), glowColor, text);
-        draw.AddText(pos + new Num.Vector2(glowOffset, 0f), glowColor, text);
-        draw.AddText(pos + new Num.Vector2(0f, -glowOffset), glowColor, text);
-        draw.AddText(pos + new Num.Vector2(0f, glowOffset), glowColor, text);
 
         draw.AddText(pos + new Num.Vector2(-stroke, 0f), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, 0f), outline, text);
@@ -268,14 +250,13 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
-        // Warm lower-right relief makes the letters read as engraved metal instead of flat yellow text.
-        draw.AddText(pos + new Num.Vector2(1.15f, 1.35f), ImGui.GetColorU32(shadow), text);
-
+        // Keep a restrained lower-right relief so the text remains readable on bright room art.
+        draw.AddText(pos + new Num.Vector2(0.8f, 1.0f), ImGui.GetColorU32(shadow), text);
         ImGui.TextColored(body, text);
 
-        // A tiny upper-left duplicate acts as the polished metal edge. Keeping it under one pixel
-        // prevents the title from turning into a visibly doubled string at large UI scales.
-        draw.AddText(pos + new Num.Vector2(-0.65f, -0.75f), ImGui.GetColorU32(highlight), text);
+        // The moving layer is screen-space and shared by every heading, matching the original
+        // Rain World menu-title behavior instead of restarting a local shimmer per string.
+        DevToolTitleFlow.Draw(draw, pos, textSize, text, body, flowStrength);
         ImGui.SetWindowFontScale(restoreScale);
     }
 
