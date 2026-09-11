@@ -25,14 +25,12 @@ internal static class DevToolRuntime
         BuiltinInspectorAdapters.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
-        On.DevInterface.Handle.Update += Handle_Update;
         enabled = true;
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
-        On.DevInterface.Handle.Update -= Handle_Update;
         On.DevInterface.DevUI.Update -= DevUI_Update;
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
@@ -67,7 +65,10 @@ internal static class DevToolRuntime
         RoomEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
+        // New UI hides only the already-migrated screen controls. Vanilla mode restores the
+        // complete original page while keeping the tiny frontend mode switch available.
         bool suppressMigratedLegacyUi =
+            !EditorUiModeState.UseVanilla &&
             EditorInputRouter.FrontendAttached &&
             session != null &&
             session.LegacyUiVisible == false &&
@@ -77,43 +78,6 @@ internal static class DevToolRuntime
 
         EditorPresentationHub.Publish(session);
         RoomEditorPresentationHub.Publish(session);
-    }
-
-    private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, Handle self)
-    {
-        global::DevInterface.DevUI owner = self?.owner;
-        EditorSession session = DevToolSessionHub.Current;
-        bool blockWorldMouse =
-            owner != null &&
-            session != null &&
-            ReferenceEquals(owner, session.Owner) &&
-            EditorInputRouter.FrontendAttached &&
-            (EditorInputRouter.WantsMouse || session.PlacementActive);
-
-        if (!blockWorldMouse)
-        {
-            orig(self);
-            return;
-        }
-
-        bool mouseClick = owner.mouseClick;
-        owner.mouseClick = false;
-        if (self.dragged)
-        {
-            self.dragged = false;
-            if (ReferenceEquals(owner.draggedNode, self)) owner.draggedNode = null;
-        }
-
-        try
-        {
-            // Keep normal Refresh/hover/color work alive, but prevent the retained vanilla
-            // gizmo from starting or continuing a drag underneath ImGui or placement mode.
-            orig(self);
-        }
-        finally
-        {
-            owner.mouseClick = mouseClick;
-        }
     }
 }
 
