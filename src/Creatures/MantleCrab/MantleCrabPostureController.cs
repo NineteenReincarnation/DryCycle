@@ -15,6 +15,7 @@ internal sealed class MantleCrabPostureController
     private const float MaximumManualLeanDegrees = 6f;
     private const float RecoveryEnterDegrees = 28f;
     private const float RecoveryExitDegrees = 12f;
+    private const float UnsupportedRecoveryAngle = 22f;
     private const float SupportHeightGain = .0065f;
     private const float SupportVelocityDamping = .34f;
     private const float MaximumSupportFactor = 1.18f;
@@ -22,12 +23,15 @@ internal sealed class MantleCrabPostureController
     private const float PostureGain = .00115f;
     private const float PostureDamping = .18f;
     private const float MaximumAngularAcceleration = .0012f;
+    private const float RecoveryAngularAcceleration = .0026f;
+    private const float RecoveryAngularDamping = .24f;
 
     private readonly MantleCrab crab;
     private readonly float[] supportQuality = new float[4];
     private Vector2 supportNormal = Vector2.up;
     private Vector2 walkAxis = Vector2.right;
     private bool recovering;
+    private float recoveryDirection = 1f;
 
     internal MantleCrabPostureController(MantleCrab crab)
     {
@@ -44,17 +48,24 @@ internal sealed class MantleCrabPostureController
         supportNormal = Vector2.up;
         walkAxis = Vector2.right;
         recovering = false;
+        recoveryDirection = 1f;
         for (int i = 0; i < supportQuality.Length; i++)
             supportQuality[i] = 0f;
     }
 
     internal void UpdateFrame()
     {
-        float absoluteShellAngle = Mathf.Abs(ShellAngleRadians()) * Mathf.Rad2Deg;
+        float shellAngle = ShellAngleRadians();
+        float absoluteShellAngle = Mathf.Abs(shellAngle) * Mathf.Rad2Deg;
         if (!recovering && absoluteShellAngle >= RecoveryEnterDegrees)
+        {
             recovering = true;
+            recoveryDirection = ChooseRecoveryDirection(shellAngle);
+        }
         else if (recovering && absoluteShellAngle <= RecoveryExitDegrees)
+        {
             recovering = false;
+        }
 
         Vector2 summed = Vector2.zero;
         float weight = 0f;
@@ -96,6 +107,13 @@ internal sealed class MantleCrabPostureController
         walkAxis = new Vector2(supportNormal.y, -supportNormal.x).normalized;
         if (walkAxis.x < 0f)
             walkAxis = -walkAxis;
+
+        // 原来的恢复只在脚已经 Plant 时才有力矩。视频里一旦翻到壳上，四脚全失去有效支撑，
+        // MantleCrab.Update 又会提前退出，于是恢复控制器永久失去执行机会。
+        // Recovery must therefore have a shell-contact path: while the shell itself is touching terrain,
+        // use that collision as the reaction point and rock the rigid body until a walking leg can reacquire ground.
+        if (recovering && weight < .08f)
+            ApplyShellContactRecovery(shellAngle);
     }
 
     internal void ApplySupportAndPosture(float effectiveGravity, float turnIntent)
@@ -153,8 +171,9 @@ internal sealed class MantleCrabPostureController
             rightX /= rightQuality;
 
         float meanHeightError = weightedHeightError / qualitySum;
+        float rhythm = recovering ? 0f : crab.Locomotion.BodyHeightRhythm;
         float supportAcceleration = effectiveGravity +
-                                    meanHeightError * SupportHeightGain -
+                                    (meanHeightError + rhythm) * SupportHeightGain -
                                     velocity.y * SupportVelocityDamping;
 
         // 两侧都有可靠支撑时才允许完整托住身体；只有单侧支撑时必须允许身体缓慢下沉/倾斜去寻找另一侧脚点。
@@ -210,15 +229,89 @@ internal sealed class MantleCrabPostureController
                 MaximumTerrainFollowDegrees * Mathf.Deg2Rad);
 
         float angleError = DeltaRadians(desiredAngle, ShellAngleRadians());
-        float torqueAuthority = straddlesCenter ? 1f : .52f;
+        float torqueAuthority = recovering ? 1.25f : straddlesCenter ? 1f : .52f;
+        float maxAngularAcceleration = recovering ? RecoveryAngularAcceleration : MaximumAngularAcceleration;
+        float damping = recovering ? RecoveryAngularDamping : PostureDamping;
         float angularAcceleration = Mathf.Clamp(
-            angleError * PostureGain - angularVelocity * PostureDamping,
-            -MaximumAngularAcceleration,
-            MaximumAngularAcceleration) * torqueAuthority;
+            angleError * PostureGain - angularVelocity * damping,
+            -maxAngularAcceleration,
+            maxAngularAcceleration) * torqueAuthority;
 
         if (Mathf.Abs(angularAcceleration) <= .000001f || inertia <= .001f)
             return;
 
+        ApplyPureAngularAcceleration(center, angularAcceleration);
+    }
+
+    private void ApplyShellContactRecovery(float shellAngle)
+    {
+        if (crab.bodyChunks == null || crab.bodyChunks.Length == 0)
+            return;
+
+        bool terrainContact = false;
+        for (int i = 0; i < crab.bodyChunks.Length; i++)
+        {
+            IntVector2 contact = crab.bodyChunks[i].ContactPoint;
+            if (contact.x != 0 || contact.y != 0)
+            {
+                terrainContact = true;
+                break;
+            }
+        }
+
+        // 空中不允许凭空自转。只有甲壳真正压在地形上时才使用壳-地接触提供反作用力。
+        // Never self-right in free fall. The emergency roll is only available while the shell contacts terrain.
+        if (!terrainContact)
+            return;
+
+        BodyState(
+            out Vector2 center,
+            out _,
+            out _,
+            out float inertia,
+            out float angularVelocity);
+        if (inertia <= .001f)
+            return;
+
+        float absoluteAngle = Mathf.Abs(shellAngle) * Mathf.Rad2Deg;
+        float direction;
+        if (absoluteAngle >= 150f)
+        {
+            // 接近完全倒扣时左右两条最短回正路径等价，锁定一个方向避免每帧在 ±PI 附近翻号。
+            // Near a perfect inversion both routes are equivalent; keep a latched side to avoid sign chatter at ±PI.
+            direction = recoveryDirection;
+        }
+        else
+        {
+            float error = DeltaRadians(0f, shellAngle);
+            direction = Mathf.Abs(error) > .0001f ? Mathf.Sign(error) : recoveryDirection;
+            recoveryDirection = direction;
+        }
+
+        float authority = Mathf.InverseLerp(UnsupportedRecoveryAngle, 90f, absoluteAngle);
+        authority = Mathf.Lerp(.45f, 1f, authority);
+        float angularAcceleration = direction * RecoveryAngularAcceleration * authority -
+                                    angularVelocity * RecoveryAngularDamping;
+        angularAcceleration = Mathf.Clamp(
+            angularAcceleration,
+            -RecoveryAngularAcceleration,
+            RecoveryAngularAcceleration);
+
+        ApplyPureAngularAcceleration(center, angularAcceleration);
+    }
+
+    private float ChooseRecoveryDirection(float shellAngle)
+    {
+        float error = DeltaRadians(0f, shellAngle);
+        if (Mathf.Abs(error) > 8f * Mathf.Deg2Rad && Mathf.Abs(Mathf.Abs(shellAngle) - Mathf.PI) > 10f * Mathf.Deg2Rad)
+            return Mathf.Sign(error);
+
+        int seed = crab.abstractCreature?.ID.RandomSeed ?? 0;
+        return (seed & 1) == 0 ? 1f : -1f;
+    }
+
+    private void ApplyPureAngularAcceleration(Vector2 center, float angularAcceleration)
+    {
         for (int i = 0; i < crab.bodyChunks.Length; i++)
         {
             BodyChunk chunk = crab.bodyChunks[i];
