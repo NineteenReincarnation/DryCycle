@@ -138,13 +138,27 @@ internal static class DevToolOverlay
 
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        string roomLabel = DevToolUiSettings.T("R  房间", "R  Room");
+        string objectsLabel = DevToolUiSettings.T("O  物件", "O  Objects");
+        string soundLabel = DevToolUiSettings.T("S  声音", "S  Sound");
+        string triggersLabel = DevToolUiSettings.T("T  触发器", "T  Triggers");
+        string mapLabel = DevToolUiSettings.T("M  地图", "M  Map");
+        string dialogLabel = DevToolUiSettings.T("D  对话", "D  Dialog");
+        string relationshipsLabel = DevToolUiSettings.T("L  关系", "L  Relationships");
+
+        float widest = ImGui.CalcTextSize(relationshipsLabel).X;
+        widest = Math.Max(widest, ImGui.CalcTextSize(triggersLabel).X);
+        widest = Math.Max(widest, ImGui.CalcTextSize(objectsLabel).X);
+        float defaultWidth = Math.Min(380f, Math.Max(190f, widest + 64f));
+        float defaultHeight = Math.Min(Math.Max(470f, 430f * Math.Max(1f, DevToolUiSettings.UiScale)), Math.Max(260f, display.Y - 32f));
+
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 120f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(62f, 350f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(60f, 220f),
-            new Num.Vector2(190f, Math.Max(220f, display.Y - 16f)));
+            new Num.Vector2(170f, 300f),
+            new Num.Vector2(Math.Min(520f, Math.Max(170f, display.X - 16f)), Math.Max(300f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar;
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
         if (!ImGui.Begin(DevToolUiSettings.T("工具###DevToolActivity", "Tools###DevToolActivity"), flags))
         {
             ImGui.End();
@@ -153,29 +167,35 @@ internal static class DevToolOverlay
 
         FloatingWindowSnap.TrackCurrentWindow("Tools");
 
-        DrawModeButton("R", DevToolUiSettings.T("房间", "Room"), EditorToolMode.Room, snapshot.ToolMode);
-        DrawModeButton("O", DevToolUiSettings.T("物件", "Objects"), EditorToolMode.Objects, snapshot.ToolMode);
-        DrawModeButton("S", DevToolUiSettings.T("声音", "Sound"), EditorToolMode.Sound, snapshot.ToolMode);
-        DrawModeButton("T", DevToolUiSettings.T("触发器", "Triggers"), EditorToolMode.Triggers, snapshot.ToolMode);
-        DrawModeButton("M", DevToolUiSettings.T("地图", "Map"), EditorToolMode.Map, snapshot.ToolMode);
-        DrawModeButton("D", DevToolUiSettings.T("对话", "Dialog"), EditorToolMode.Dialog, snapshot.ToolMode);
-        DrawModeButton("L", DevToolUiSettings.T("关系", "Relationships"), EditorToolMode.Relationships, snapshot.ToolMode);
+        DrawModeButton(roomLabel, DevToolUiSettings.T("房间设置", "Room settings"), EditorToolMode.Room, snapshot.ToolMode);
+        DrawModeButton(objectsLabel, DevToolUiSettings.T("物件", "Objects"), EditorToolMode.Objects, snapshot.ToolMode);
+        DrawModeButton(soundLabel, DevToolUiSettings.T("声音", "Sound"), EditorToolMode.Sound, snapshot.ToolMode);
+        DrawModeButton(triggersLabel, DevToolUiSettings.T("触发器", "Triggers"), EditorToolMode.Triggers, snapshot.ToolMode);
+        DrawModeButton(mapLabel, DevToolUiSettings.T("地图", "Map"), EditorToolMode.Map, snapshot.ToolMode);
+        DrawModeButton(dialogLabel, DevToolUiSettings.T("对话", "Dialog"), EditorToolMode.Dialog, snapshot.ToolMode);
+        DrawModeButton(relationshipsLabel, DevToolUiSettings.T("关系", "Relationships"), EditorToolMode.Relationships, snapshot.ToolMode);
 
         ImGui.Separator();
-        if (ImGui.Button(snapshot.BrowserOpen ? "<" : ">", new Num.Vector2(28f, 0f)))
+        string browserLabel = snapshot.BrowserOpen
+            ? DevToolUiSettings.T("隐藏浏览器  Ctrl+B", "Hide Browser  Ctrl+B")
+            : DevToolUiSettings.T("显示浏览器  Ctrl+B", "Show Browser  Ctrl+B");
+        if (ImGui.Button(browserLabel + "##DevToolToggleBrowser", new Num.Vector2(-1f, 0f)))
             Send(EditorUiCommandKind.ToggleBrowser);
-        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏左栏浏览器 · Ctrl+B", "Toggle left Browser pane · Ctrl+B"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏左栏浏览器", "Toggle left Browser pane"));
 
-        if (ImGui.Button(snapshot.InspectorOpen ? "I" : "i", new Num.Vector2(28f, 0f)))
+        string inspectorLabel = snapshot.InspectorOpen
+            ? DevToolUiSettings.T("隐藏检查器  Ctrl+I", "Hide Inspector  Ctrl+I")
+            : DevToolUiSettings.T("显示检查器  Ctrl+I", "Show Inspector  Ctrl+I");
+        if (ImGui.Button(inspectorLabel + "##DevToolToggleInspector", new Num.Vector2(-1f, 0f)))
             Send(EditorUiCommandKind.ToggleInspector);
-        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器 · Ctrl+I", "Toggle right Inspector pane · Ctrl+I"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器", "Toggle right Inspector pane"));
         ImGui.End();
     }
 
-    private static void DrawModeButton(string text, string tooltip, EditorToolMode mode, EditorToolMode current)
+    private static void DrawModeButton(string label, string tooltip, EditorToolMode mode, EditorToolMode current)
     {
-        if (current == mode) ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1f);
-        if (ImGui.Button(text + "##DevToolMode" + mode, new Num.Vector2(28f, 28f)))
+        if (current == mode) ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 2f);
+        if (ImGui.Button(label + "##DevToolMode" + mode, new Num.Vector2(-1f, 0f)))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: mode));
         if (current == mode) ImGui.PopStyleVar();
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
