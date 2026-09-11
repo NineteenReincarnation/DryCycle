@@ -35,7 +35,20 @@ internal static class ObjectInspectorView
         if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
             Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
 
+        bool collapseAll = DevToolWidgets.PaneTitleWithAction(
+            DevToolUiSettings.T("物件", "Object"),
+            DevToolUiSettings.T("折叠所有", "Collapse All"),
+            "ObjectInspectorCollapseAll");
+
         DrawIdentity(inspector);
+
+        if (collapseAll)
+            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("编辑内容##ObjectInspectorDetails", "Object Details##ObjectInspectorDetails"),
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
         DrawTransform(inspector);
         DrawProperties(inspector);
         DrawCompatibility(inspector);
