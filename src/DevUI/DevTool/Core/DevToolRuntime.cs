@@ -2,15 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
-using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
-/// Owns the lifetime of the new editor model. The legacy DevInterface remains alive as a
-/// compatibility backend; presentation is supplied by the optional RWImGui frontend.
+/// Owns the lifetime of the new editor model. The vanilla DevInterface remains alive as a
+/// generic compatibility backend; presentation is supplied by the optional RWImGui frontend.
+/// DevTool does not discover, reference or call third-party mod APIs.
 /// </summary>
 internal static class DevToolRuntime
 {
@@ -19,7 +19,6 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
-        CompatibilityBootstrap.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
@@ -44,8 +43,8 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Synchronize before vanilla/RegionKit controls mutate their backing state so the
-        // compatibility recorder can capture the true transaction start.
+        // Synchronize before vanilla DevInterface controls mutate their backing state so
+        // the generic compatibility recorder can capture the true transaction start.
         DevToolSessionHub.Synchronize(self);
         EditorSession session = DevToolSessionHub.Current;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
@@ -54,8 +53,8 @@ internal static class DevToolRuntime
         EditorInputRouter.UpdateShortcuts(session);
         orig(self);
 
-        // Legacy controls have now completed this frame's mutation. Close any mouse/text
-        // transaction that ended during orig.Update and push it into the unified history.
+        // Legacy DevInterface controls have now completed this frame's mutation. Close any
+        // mouse/text transaction that ended during orig.Update and push it into history.
         session?.Synchronize(self);
         session?.LegacyTransactions.AfterLegacyUpdate(session);
 
@@ -149,7 +148,7 @@ public sealed class EditorSession
             LegacyTransactions.Reset();
         }
 
-        // A real legacy page switch is mirrored once. ImGui tool changes remain independent
+        // A real vanilla page switch is mirrored once. ImGui tool changes remain independent
         // afterwards, so Objects/Sound/Room can share one Scene document and history stack.
         if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
         {
