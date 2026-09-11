@@ -388,6 +388,32 @@ public static class DevToolSessionHub
         }
     }
 
+    /// <summary>
+    /// True only while the currently published editor session still belongs to the live
+    /// RainWorldGame process and vanilla DevUI is actually open. This deliberately checks
+    /// the authoritative game state instead of the last presentation snapshot so H/O and
+    /// process transitions can hide the optional RWImGui frontend immediately even when
+    /// DevUI.Update is no longer running.
+    /// </summary>
+    public static bool IsCurrentSessionLive
+    {
+        get
+        {
+            current.TryGetTarget(out EditorSession session);
+            global::DevInterface.DevUI owner = session?.Owner;
+            RainWorldGame game = owner?.game;
+            if (game == null || !game.processActive || !game.devToolsActive)
+                return false;
+            if (game.devUI == null || !ReferenceEquals(game.devUI, owner))
+                return false;
+            if (game.manager == null || !ReferenceEquals(game.manager.currentMainLoop, game))
+                return false;
+            if (owner.room == null)
+                return false;
+            return true;
+        }
+    }
+
     internal static void Synchronize(global::DevInterface.DevUI ui)
     {
         EditorSession session = sessions.GetValue(ui, key => new EditorSession(key));
