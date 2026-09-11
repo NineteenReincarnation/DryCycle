@@ -18,6 +18,7 @@ python3 - <<'PY'
 from pathlib import Path
 import re
 import sys
+from collections import Counter
 
 src = Path('src/Creatures/DesertBatfly')
 hooks_path = src / 'Integration' / 'DB_RainWorldHooks.cs'
@@ -38,11 +39,10 @@ if 'DB_RainWorldHooks.Enable()' not in plugin:
 if 'DB_RainWorldHooks.Disable()' not in plugin:
     failures.append('Plugin no longer disables DesertBatfly integration')
 
-# Hook subscriptions in the central integration adapter must stay symmetric. This catches leaked
-# hooks without prescribing which hooks the species is allowed to use.
+# Hook subscriptions in the central integration adapter must stay symmetric. New hook types are
+# allowed without updating this script; only leaked subscriptions/orphan removals fail.
 adds = re.findall(r'\b(On\.[A-Za-z0-9_.]+)\s*\+=\s*([A-Za-z0-9_]+)', hooks)
 removes = re.findall(r'\b(On\.[A-Za-z0-9_.]+)\s*-=\s*([A-Za-z0-9_]+)', hooks)
-from collections import Counter
 if Counter(adds) != Counter(removes):
     missing_remove = Counter(adds) - Counter(removes)
     missing_add = Counter(removes) - Counter(adds)
@@ -64,15 +64,21 @@ if re.search(r'\bmainBodyChunk\.vel\s*=', hooks):
 if re.search(r'\b(?:self|desert|bat)\.AI\.localGoal\s*=', hooks):
     failures.append('DB_RainWorldHooks regained direct localGoal ownership')
 
-# Reflection is allowed only at explicit external-compatibility edges. Core/Behavior/World code
-# must not start depending on private reflection contracts.
+# Reflection is allowed only at explicit engine/external compatibility edges. RuntimePatch is an
+# engine-patching boundary, while Sandbox/Warp are external integration boundaries. Core,
+# Behavior and World code must not start depending on reflection contracts.
+allowed_reflection = {
+    'Integration/DB_RuntimePatch.cs',
+    'Integration/DB_Sandbox.cs',
+    'Integration/DB_WarpCompatibility.cs',
+}
 for path in files:
     text = path.read_text(encoding='utf-8')
-    if 'System.Reflection' not in text and 'BindingFlags' not in text and 'FieldInfo' not in text and 'MethodInfo' not in text:
+    if 'System.Reflection' not in text and 'BindingFlags' not in text and 'FieldInfo' not in text and 'MethodInfo' not in text and 'PropertyInfo' not in text:
         continue
     rel = path.relative_to(src).as_posix()
-    if rel not in {'Integration/DB_Sandbox.cs', 'Integration/DB_WarpCompatibility.cs'}:
-        failures.append('reflection escaped compatibility boundary: ' + rel)
+    if rel not in allowed_reflection:
+        failures.append('reflection escaped explicit integration/patch boundary: ' + rel)
 
 # Keep externally serialized/world-authored identities stable. Private class names and directory
 # layout are deliberately not checked here.
