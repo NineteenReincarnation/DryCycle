@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using DevInterface;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
 public sealed class ObjectDescriptor
 {
-    public ObjectDescriptor(PlacedObject.Type type, string displayName, string category, string source, IEnumerable<string> tags = null)
+    public ObjectDescriptor(
+        PlacedObject.Type type,
+        string displayName,
+        string category,
+        string source,
+        IEnumerable<string> tags = null)
     {
         Type = type ?? throw new ArgumentNullException(nameof(type));
         DisplayName = displayName ?? type.value ?? "Unknown";
@@ -38,15 +42,19 @@ public sealed class ObjectDescriptor
         if (query.StartsWith(":", StringComparison.Ordinal))
             return Contains(Category, query.Substring(1));
 
-        if (Contains(DisplayName, query) || Contains(Type?.value, query) || Contains(Category, query) || Contains(Source, query))
+        if (Contains(DisplayName, query) || Contains(Type?.value, query) ||
+            Contains(Category, query) || Contains(Source, query))
             return true;
+
         for (int i = 0; i < Tags.Count; i++)
             if (Contains(Tags[i], query)) return true;
+
         return FuzzySubsequence(DisplayName, query) || FuzzySubsequence(Type?.value, query);
     }
 
     private static bool Contains(string value, string query) =>
-        !string.IsNullOrEmpty(value) && value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+        !string.IsNullOrEmpty(value) &&
+        value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static bool FuzzySubsequence(string value, string query)
     {
@@ -60,43 +68,53 @@ public sealed class ObjectDescriptor
     }
 }
 
-public interface IObjectCatalogEnricher
-{
-    void Enrich(List<ObjectDescriptor> descriptors);
-}
-
 /// <summary>
-/// Unified catalog over Rain World's final PlacedObject.Type registry. No third-party registry
-/// is queried. Mods that want richer names/categories can optionally register metadata here.
+/// Unified catalog over Rain World's final PlacedObject.Type registry. DryCycle does not
+/// query any third-party registry. Other mods may optionally register richer metadata here.
 /// </summary>
 public static class ObjectCatalog
 {
-    private static readonly List<IObjectCatalogEnricher> enrichers = new();
-    private static readonly Dictionary<string, ObjectDescriptor> registered =
-        new(StringComparer.Ordinal);
+    private sealed class Registration
+    {
+        internal ObjectDescriptor Descriptor;
+        internal int Priority;
+        internal long Order;
+    }
+
+    private static readonly List<Registration> registrations = new();
     private static List<ObjectDescriptor> cached;
     private static int cachedTypeCount = -1;
+    private static long registrationOrder;
 
-    public static void RegisterDescriptor(ObjectDescriptor descriptor)
+    public static void RegisterDescriptor(ObjectDescriptor descriptor, int priority = 0)
     {
         if (descriptor?.Type?.value == null) throw new ArgumentNullException(nameof(descriptor));
-        registered[descriptor.Type.value] = descriptor;
-        cached = null;
+
+        for (int i = 0; i < registrations.Count; i++)
+        {
+            if (ReferenceEquals(registrations[i].Descriptor, descriptor)) return;
+        }
+
+        registrations.Add(new Registration
+        {
+            Descriptor = descriptor,
+            Priority = priority,
+            Order = registrationOrder++
+        });
+        Invalidate();
     }
 
-    public static bool UnregisterDescriptor(PlacedObject.Type type)
+    public static bool UnregisterDescriptor(ObjectDescriptor descriptor)
     {
-        if (type?.value == null) return false;
-        bool removed = registered.Remove(type.value);
-        if (removed) cached = null;
-        return removed;
-    }
-
-    public static void RegisterEnricher(IObjectCatalogEnricher enricher)
-    {
-        if (enricher == null || enrichers.Contains(enricher)) return;
-        enrichers.Add(enricher);
-        cached = null;
+        if (descriptor == null) return false;
+        for (int i = registrations.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(registrations[i].Descriptor, descriptor)) continue;
+            registrations.RemoveAt(i);
+            Invalidate();
+            return true;
+        }
+        return false;
     }
 
     public static IReadOnlyList<ObjectDescriptor> GetAll()
@@ -104,32 +122,46 @@ public static class ObjectCatalog
         int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
         if (cached != null && cachedTypeCount == typeCount) return cached;
 
-        List<ObjectDescriptor> descriptors = new(typeCount);
+        Dictionary<string, ObjectDescriptor> byType = new(StringComparer.Ordinal);
+        List<string> order = new(typeCount);
         for (int i = 0; i < typeCount; i++)
         {
             string entry = ExtEnum<PlacedObject.Type>.values.GetEntry(i);
             PlacedObject.Type type = new(entry, false);
             if (type == PlacedObject.Type.None) continue;
-
-            if (registered.TryGetValue(entry, out ObjectDescriptor explicitDescriptor))
-                descriptors.Add(explicitDescriptor);
-            else
-                descriptors.Add(CreateDefault(type));
+            byType[entry] = CreateDefault(type);
+            order.Add(entry);
         }
 
-        for (int i = 0; i < enrichers.Count; i++)
+        List<Registration> sortedRegistrations = new(registrations);
+        sortedRegistrations.Sort((a, b) =>
         {
-            try { enrichers[i].Enrich(descriptors); }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning("DevTool object catalog enricher failed: " + error.Message);
-            }
+            int priority = a.Priority.CompareTo(b.Priority);
+            return priority != 0 ? priority : a.Order.CompareTo(b.Order);
+        });
+
+        // Low priority applies first; high priority replaces it last.
+        for (int i = 0; i < sortedRegistrations.Count; i++)
+        {
+            ObjectDescriptor descriptor = sortedRegistrations[i].Descriptor;
+            string typeName = descriptor?.Type?.value;
+            if (string.IsNullOrEmpty(typeName) || !byType.ContainsKey(typeName)) continue;
+            byType[typeName] = descriptor;
+        }
+
+        List<ObjectDescriptor> descriptors = new(byType.Count);
+        for (int i = 0; i < order.Count; i++)
+        {
+            if (byType.TryGetValue(order[i], out ObjectDescriptor descriptor))
+                descriptors.Add(descriptor);
         }
 
         descriptors.Sort((a, b) =>
         {
             int category = string.Compare(a.Category, b.Category, StringComparison.OrdinalIgnoreCase);
-            return category != 0 ? category : string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+            return category != 0
+                ? category
+                : string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
         });
 
         cachedTypeCount = typeCount;
@@ -144,7 +176,11 @@ public static class ObjectCatalog
             if (all[i].Matches(query)) yield return all[i];
     }
 
-    public static void Invalidate() => cached = null;
+    public static void Invalidate()
+    {
+        cached = null;
+        cachedTypeCount = -1;
+    }
 
     private static ObjectDescriptor CreateDefault(PlacedObject.Type type)
     {
