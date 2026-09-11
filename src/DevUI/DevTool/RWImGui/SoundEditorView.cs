@@ -19,13 +19,17 @@ internal static class SoundEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("声音编辑器不可用。", "Sound editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("声音编辑器不可用。", "Sound editor unavailable."), true);
             return;
         }
 
-        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*"))) sceneTab = false;
-        ImGui.SameLine();
-        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene"))) sceneTab = true;
+        string libraryLabel = sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*");
+        string sceneLabel = sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene");
+        if (DevToolWidgets.ActionButton(libraryLabel, "SoundLibraryTab", sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+            sceneTab = false;
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(sceneLabel));
+        if (DevToolWidgets.ActionButton(sceneLabel, "SoundSceneTab", sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            sceneTab = true;
         ImGui.Separator();
 
         if (sceneTab) DrawScene(snapshot);
@@ -36,7 +40,7 @@ internal static class SoundEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("声音编辑器不可用。", "Sound editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("声音编辑器不可用。", "Sound editor unavailable."), true);
             return;
         }
 
@@ -48,12 +52,12 @@ internal static class SoundEditorView
         if (selected == null)
         {
             ImGui.Separator();
-            ImGui.TextDisabled(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个声音进行编辑。", "Select a sound from Scene or its world gizmo to edit it."));
+            ImGui.TextWrapped(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个声音进行编辑。", "Select a sound from Scene or its world gizmo to edit it."));
             return;
         }
 
         ImGui.Separator();
-        ImGui.Text(selected.Sample);
+        ImGui.TextWrapped(selected.Sample);
         string state = selected.Type;
         if (selected.Inherited) state += DevToolUiSettings.T(" · 继承", " · Inherited");
         else if (selected.OverWrite) state += DevToolUiSettings.T(" · 覆盖模板", " · Overrides template");
@@ -87,12 +91,12 @@ internal static class SoundEditorView
 
         if (selected.Inherited)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("继承声音 · 请修改来源模板，或添加本地覆盖。", "Inherited sound · edit its source template or add a local override."));
+            ImGui.TextWrapped(DevToolUiSettings.T("继承声音 · 请修改来源模板，或添加本地覆盖。", "Inherited sound · edit its source template or add a local override."));
         }
         else
         {
             ImGui.Separator();
-            if (ImGui.Button(DevToolUiSettings.T("删除声音", "Delete Sound")))
+            if (DevToolWidgets.ActionButton(DevToolUiSettings.T("删除声音", "Delete Sound"), "DeleteSound", DevToolButtonTone.Danger))
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Delete, selected.Index));
         }
     }
@@ -100,14 +104,18 @@ internal static class SoundEditorView
     private static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
     {
         ImGui.TextDisabled(DevToolUiSettings.T("创建声音", "CREATE SOUND"));
-        if (ImGui.RadioButton(DevToolUiSettings.T("全向", "Omni"), createType == 0)) createType = 0;
-        ImGui.SameLine();
-        if (ImGui.RadioButton(DevToolUiSettings.T("定向", "Directional"), createType == 1)) createType = 1;
-        ImGui.SameLine();
-        if (ImGui.RadioButton(DevToolUiSettings.T("点声源", "Spot"), createType == 2)) createType = 2;
+        string omni = DevToolUiSettings.T("全向", "Omni");
+        string directional = DevToolUiSettings.T("定向", "Directional");
+        string spot = DevToolUiSettings.T("点声源", "Spot");
 
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##SoundLibrarySearch", "Search##SoundLibrarySearch"), ref search, 128);
+        if (ImGui.RadioButton(omni, createType == 0)) createType = 0;
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.RadioWidth(directional));
+        if (ImGui.RadioButton(directional, createType == 1)) createType = 1;
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.RadioWidth(spot));
+        if (ImGui.RadioButton(spot, createType == 2)) createType = 2;
+
+        ImGui.Spacing();
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "SoundLibrarySearch", ref search, 128);
         ImGui.Separator();
 
         string[] samples = snapshot.Samples ?? Array.Empty<string>();
@@ -127,7 +135,7 @@ internal static class SoundEditorView
             if (ImGui.IsItemHovered())
                 DevToolTooltip.Show(DevToolUiSettings.T("添加为 ", "Add as ") + TypeName(createType));
         }
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的环境音频。", "No matching ambient samples."));
+        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的环境音频。", "No matching ambient samples."), true);
     }
 
     private static void DrawScene(EditorSoundPresentationSnapshot snapshot)
