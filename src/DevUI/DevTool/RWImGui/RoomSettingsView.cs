@@ -12,7 +12,7 @@ internal static class RoomSettingsView
     private enum Section
     {
         Environment,
-        Visual,
+        Palette,
         Gameplay,
         Terrain,
         Templates,
@@ -30,7 +30,7 @@ internal static class RoomSettingsView
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("房间设置", "ROOM SETTINGS"), BrowserBodyFontScale);
 
         DrawSectionButton(Section.Environment, DevToolUiSettings.T("环境", "Environment"));
-        DrawSectionButton(Section.Visual, DevToolUiSettings.T("视觉 / 色板", "Visual / Palette"));
+        DrawSectionButton(Section.Palette, DevToolUiSettings.T("色板", "Palette"));
         DrawSectionButton(Section.Gameplay, DevToolUiSettings.T("玩法", "Gameplay"));
         DrawSectionButton(Section.Terrain, DevToolUiSettings.T("地形", "Terrain"));
         DrawSectionButton(Section.Templates, DevToolUiSettings.T("模板", "Templates"));
@@ -89,8 +89,8 @@ internal static class RoomSettingsView
             case Section.Environment:
                 DrawEnvironment(snapshot);
                 break;
-            case Section.Visual:
-                DrawVisual(snapshot);
+            case Section.Palette:
+                DrawPalette(snapshot);
                 break;
             case Section.Gameplay:
                 DrawGameplay(snapshot);
@@ -121,14 +121,14 @@ internal static class RoomSettingsView
         DrawFloatInherited(snapshot, RoomSettingKeys.SecondWaveLength, DevToolUiSettings.T("回卷长度", "Rollback Length"), snapshot.SecondWaveLength, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.SecondWaveAmplitude, DevToolUiSettings.T("回卷幅度", "Rollback Amplitude"), snapshot.SecondWaveAmplitude, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.WaterReflectionAlpha, DevToolUiSettings.T("水面亮度", "Water Light"), snapshot.WaterReflectionAlpha, 0f, 1f);
-    }
 
-    private static void DrawVisual(EditorRoomSettingsSnapshot snapshot)
-    {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("氛围", "ATMOSPHERE"));
         DrawFloatInherited(snapshot, RoomSettingKeys.Clouds, DevToolUiSettings.T("云层", "Clouds"), snapshot.Clouds, 0f, 1f);
         DrawFloatInherited(snapshot, RoomSettingKeys.Grime, DevToolUiSettings.T("污垢", "Grime"), snapshot.Grime, 0f, 1f);
+    }
 
+    private static void DrawPalette(EditorRoomSettingsSnapshot snapshot)
+    {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("主色板", "PALETTE"));
         DrawIntInherited(snapshot, RoomSettingKeys.Palette, DevToolUiSettings.T("色板", "Palette"), snapshot.Palette);
         DrawIntInherited(snapshot, RoomSettingKeys.EffectColorA, DevToolUiSettings.T("效果颜色 A", "Effect Color A"), snapshot.EffectColorA);
@@ -427,7 +427,7 @@ internal static class RoomSettingsView
         return value switch
         {
             Section.Environment => DevToolUiSettings.T("环境", "Environment"),
-            Section.Visual => DevToolUiSettings.T("视觉 / 色板", "Visual / Palette"),
+            Section.Palette => DevToolUiSettings.T("色板", "Palette"),
             Section.Gameplay => DevToolUiSettings.T("玩法", "Gameplay"),
             Section.Terrain => DevToolUiSettings.T("地形", "Terrain"),
             Section.Templates => DevToolUiSettings.T("模板", "Templates"),
