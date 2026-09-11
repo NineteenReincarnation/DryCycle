@@ -32,16 +32,75 @@ internal static class SoundEditorActions
 
     internal static bool Create(EditorSession session, string sample, int soundType)
     {
-        if (session?.RoomSettings == null || string.IsNullOrEmpty(sample)) return false;
+        if (session?.RoomSettings?.ambientSounds == null || string.IsNullOrEmpty(sample)) return false;
         if (session.ToolMode != EditorToolMode.Sound) session.SetToolMode(EditorToolMode.Sound);
-        if (session.Owner?.activePage is not SoundPage page) return false;
-        if (soundType < 0 || soundType >= ExtEnum<AmbientSound.Type>.values.Count) return false;
+        if (session.Owner?.activePage is not SoundPage) return false;
+        if (soundType < 0 || soundType > 2) return false;
+
+        AmbientSound.Type type = soundType switch
+        {
+            0 => AmbientSound.Type.Omnidirectional,
+            1 => AmbientSound.Type.Directional,
+            _ => AmbientSound.Type.Spot
+        };
+
+        // Omni/Directional are unique by sample in vanilla. Selecting the same entry again
+        // should select the existing local sound, not inherit SoundPage.CreateSoundRep's old
+        // toggle behavior that silently deletes it.
+        if (soundType != 2)
+        {
+            for (int i = 0; i < session.RoomSettings.ambientSounds.Count; i++)
+            {
+                AmbientSound existing = session.RoomSettings.ambientSounds[i];
+                if (existing != null && !existing.inherited && existing.type == type &&
+                    string.Equals(existing.sample, sample, StringComparison.Ordinal))
+                {
+                    SoundEditorStateHub.Get(session).SelectedIndex = i;
+                    return true;
+                }
+            }
+        }
 
         RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
-        int beforeCount = session.RoomSettings.ambientSounds.Count;
+        bool overWrite = false;
 
-        page.soundType = soundType;
-        page.CreateSoundRep(sample);
+        // Creating a local non-positional sound replaces inherited/template copies, matching
+        // vanilla override semantics without using the old create/delete toggle path.
+        if (soundType != 2)
+        {
+            for (int i = session.RoomSettings.ambientSounds.Count - 1; i >= 0; i--)
+            {
+                AmbientSound existing = session.RoomSettings.ambientSounds[i];
+                if (existing == null || existing.type != type ||
+                    !string.Equals(existing.sample, sample, StringComparison.Ordinal))
+                    continue;
+
+                session.RoomSettings.ambientSounds.RemoveAt(i);
+                overWrite = true;
+            }
+        }
+
+        AmbientSound created = soundType switch
+        {
+            0 => new OmniDirectionalSound(sample, inherited: false),
+            1 => new DirectionalSound(sample, inherited: false),
+            _ => new SpotSound(sample, inherited: false)
+        };
+
+        Vector2 panelPosition = session.Owner.mousePos + new Vector2(40f, 40f);
+        created.panelPosition = panelPosition;
+        created.overWrite = overWrite;
+
+        if (created is SpotSound spot)
+        {
+            RoomCamera camera = session.Owner.game?.cameras != null && session.Owner.game.cameras.Length > 0
+                ? session.Owner.game.cameras[0]
+                : null;
+            spot.pos = (camera?.pos ?? Vector2.zero) + session.Owner.mousePos;
+        }
+
+        session.RoomSettings.ambientSounds.Add(created);
+        RefreshSoundPage(session);
 
         RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
@@ -52,13 +111,7 @@ internal static class SoundEditorActions
             session.History.Push(entry);
 
         SoundEditorState state = SoundEditorStateHub.Get(session);
-        if (state != null)
-        {
-            if (session.RoomSettings.ambientSounds.Count > beforeCount)
-                state.SelectedIndex = session.RoomSettings.ambientSounds.Count - 1;
-            else
-                state.SelectedIndex = FindLast(session, sample, soundType);
-        }
+        if (state != null) state.SelectedIndex = session.RoomSettings.ambientSounds.IndexOf(created);
         return true;
     }
 
@@ -195,17 +248,5 @@ internal static class SoundEditorActions
             return false;
         sound = session.RoomSettings.ambientSounds[index];
         return sound != null;
-    }
-
-    private static int FindLast(EditorSession session, string sample, int soundType)
-    {
-        if (session?.RoomSettings?.ambientSounds == null) return -1;
-        for (int i = session.RoomSettings.ambientSounds.Count - 1; i >= 0; i--)
-        {
-            AmbientSound sound = session.RoomSettings.ambientSounds[i];
-            if (sound != null && sound.type?.Index == soundType && string.Equals(sound.sample, sample, StringComparison.Ordinal))
-                return i;
-        }
-        return -1;
     }
 }
