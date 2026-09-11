@@ -9,11 +9,15 @@ public sealed class ObjectDescriptor
 {
     public ObjectDescriptor(PlacedObject.Type type, string displayName, string category, string source, IEnumerable<string> tags = null)
     {
-        Type = type;
-        DisplayName = displayName ?? type?.value ?? "Unknown";
+        Type = type ?? throw new ArgumentNullException(nameof(type));
+        DisplayName = displayName ?? type.value ?? "Unknown";
         Category = category ?? "Unsorted";
-        Source = source ?? "Unknown";
-        Tags = tags == null ? Array.Empty<string>() : tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        Source = source ?? "Registered Object";
+        Tags = tags == null
+            ? Array.Empty<string>()
+            : tags.Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
     }
 
     public PlacedObject.Type Type { get; }
@@ -61,11 +65,32 @@ public interface IObjectCatalogEnricher
     void Enrich(List<ObjectDescriptor> descriptors);
 }
 
+/// <summary>
+/// Unified catalog over Rain World's final PlacedObject.Type registry. No third-party registry
+/// is queried. Mods that want richer names/categories can optionally register metadata here.
+/// </summary>
 public static class ObjectCatalog
 {
     private static readonly List<IObjectCatalogEnricher> enrichers = new();
+    private static readonly Dictionary<string, ObjectDescriptor> registered =
+        new(StringComparer.Ordinal);
     private static List<ObjectDescriptor> cached;
     private static int cachedTypeCount = -1;
+
+    public static void RegisterDescriptor(ObjectDescriptor descriptor)
+    {
+        if (descriptor?.Type?.value == null) throw new ArgumentNullException(nameof(descriptor));
+        registered[descriptor.Type.value] = descriptor;
+        cached = null;
+    }
+
+    public static bool UnregisterDescriptor(PlacedObject.Type type)
+    {
+        if (type?.value == null) return false;
+        bool removed = registered.Remove(type.value);
+        if (removed) cached = null;
+        return removed;
+    }
 
     public static void RegisterEnricher(IObjectCatalogEnricher enricher)
     {
@@ -85,7 +110,11 @@ public static class ObjectCatalog
             string entry = ExtEnum<PlacedObject.Type>.values.GetEntry(i);
             PlacedObject.Type type = new(entry, false);
             if (type == PlacedObject.Type.None) continue;
-            descriptors.Add(CreateDefault(type));
+
+            if (registered.TryGetValue(entry, out ObjectDescriptor explicitDescriptor))
+                descriptors.Add(explicitDescriptor);
+            else
+                descriptors.Add(CreateDefault(type));
         }
 
         for (int i = 0; i < enrichers.Count; i++)
@@ -121,7 +150,7 @@ public static class ObjectCatalog
     {
         string name = SplitPascal(type.value);
         string category = GuessCategory(type.value);
-        return new ObjectDescriptor(type, name, category, "RW / Mod", GuessTags(type.value));
+        return new ObjectDescriptor(type, name, category, "Rain World registry", GuessTags(type.value));
     }
 
     private static string GuessCategory(string name)
