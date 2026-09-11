@@ -33,10 +33,12 @@ internal sealed class MantleCrabPostureController
     private const float PostureGain = .00115f;
     private const float PostureDamping = .18f;
     private const float MaximumAngularAcceleration = .0012f;
-    private const float RecoveryAngularAcceleration = .00072f;
+    private const float RecoveryAngularAcceleration = .00055f;
+    private const float RecoveryMaximumAngularSpeed = .0145f;
     private const float RecoveryAngularDamping = .12f;
     private const int RecoveryRetractFrames = 26;
     private const int RecoveryBraceFrames = 28;
+    private const int RecoveryBraceTimeoutFrames = 72;
     private const int RecoveryDeployFrames = 30;
     private const float RecoveryPushCycleFrames = 52f;
 
@@ -187,15 +189,22 @@ internal sealed class MantleCrabPostureController
                 break;
 
             case MantleCrabRecoveryPhase.Brace:
-                // 空中只保持收腿。落地以后才慢慢伸出一侧步足寻找杠杆点。
-                // Stay tucked in the air. Bracing only progresses once the shell is actually on terrain.
+                // 空中只保持收腿。落地以后才伸出翻身侧步足，并且优先等待真实撑地点建立。
+                // Stay tucked in the air. Once grounded, wait for a real brace before committing to the roll.
                 if (!shellContact)
                     return;
                 recoveryPhaseFrame++;
                 if (absoluteAngle <= RecoveryDeployDegrees)
+                {
                     EnterRecoveryPhase(MantleCrabRecoveryPhase.Deploy);
-                else if (recoveryPhaseFrame >= RecoveryBraceFrames)
+                }
+                else if ((recoveryPhaseFrame >= RecoveryBraceFrames && CountRecoveryBracedLegs() > 0) ||
+                         recoveryPhaseFrame >= RecoveryBraceTimeoutFrames)
+                {
+                    // 超时仍然允许进入 Roll，但没有撑腿时物理权限会很低，只会缓慢摇壳寻找新的接地点。
+                    // Timeout avoids a permanent deadlock, but an unbraced roll receives only weak rocking authority.
                     EnterRecoveryPhase(MantleCrabRecoveryPhase.Roll);
+                }
                 break;
 
             case MantleCrabRecoveryPhase.Roll:
@@ -350,7 +359,7 @@ internal sealed class MantleCrabPostureController
                 MaximumTerrainFollowDegrees * Mathf.Deg2Rad);
 
         float angleError = DeltaRadians(desiredAngle, ShellAngleRadians());
-        float torqueAuthority = recovering ? .72f : straddlesCenter ? 1f : .52f;
+        float torqueAuthority = recovering ? .60f : straddlesCenter ? 1f : .52f;
         float maxAngularAcceleration = recovering ? RecoveryAngularAcceleration : MaximumAngularAcceleration;
         float damping = recovering ? RecoveryAngularDamping : PostureDamping;
         float angularAcceleration = Mathf.Clamp(
@@ -382,12 +391,18 @@ internal sealed class MantleCrabPostureController
         if (!HasShellTerrainContact())
             return;
 
+        int bracedLegs = CountRecoveryBracedLegs();
+        float braceFactor = Mathf.Clamp01(bracedLegs * .5f);
         float phaseAuthority = recoveryPhase switch
         {
             MantleCrabRecoveryPhase.Retract => 0f,
-            MantleCrabRecoveryPhase.Brace => Mathf.Lerp(.06f, .22f, RecoveryPushAmount),
-            MantleCrabRecoveryPhase.Roll => Mathf.Lerp(.32f, .68f, RecoveryPushAmount),
-            MantleCrabRecoveryPhase.Deploy => .18f,
+            MantleCrabRecoveryPhase.Brace => bracedLegs > 0
+                ? Mathf.Lerp(.08f, .20f, RecoveryPushAmount) * Mathf.Lerp(.82f, 1f, braceFactor)
+                : .018f * RecoveryPushAmount,
+            MantleCrabRecoveryPhase.Roll => bracedLegs > 0
+                ? Mathf.Lerp(.28f, .58f, RecoveryPushAmount) * Mathf.Lerp(.82f, 1f, braceFactor)
+                : Mathf.Lerp(.035f, .09f, RecoveryPushAmount),
+            MantleCrabRecoveryPhase.Deploy => .08f,
             _ => 0f
         };
         if (phaseAuthority <= .0001f)
@@ -409,13 +424,23 @@ internal sealed class MantleCrabPostureController
         if (Mathf.Abs(direction) < .001f)
             direction = recoveryDirection;
 
-        // 翻身力矩跟随“收腿→撑地→滚身→重新伸腿”的动画阶段缓慢建立。
-        // Righting torque follows the visible tuck-brace-roll-deploy sequence instead of applying a sudden 180-degree spin.
-        float angularAcceleration = direction * RecoveryAngularAcceleration * phaseAuthority -
-                                    angularVelocity * RecoveryAngularDamping * Mathf.Lerp(.45f, 1f, phaseAuthority);
-        float limit = RecoveryAngularAcceleration * Mathf.Max(.12f, phaseAuthority);
+        // 不是直接给一个固定翻转力矩，而是追一个很低的目标角速度。
+        // 没有撑腿时只允许轻微摇壳；撑腿真正接地以后才允许逐渐建立翻身速度。
+        // Self-righting tracks a deliberately low angular speed instead of injecting a fixed spin impulse.
+        // Without a real brace the shell may only rock gently; confirmed bracing unlocks the main roll.
+        float targetAngularSpeed = direction * Mathf.Lerp(.0035f, RecoveryMaximumAngularSpeed, phaseAuthority);
+        float angularAcceleration = (targetAngularSpeed - angularVelocity) * .075f;
+        float limit = RecoveryAngularAcceleration * Mathf.Max(.10f, phaseAuthority);
         angularAcceleration = Mathf.Clamp(angularAcceleration, -limit, limit);
         ApplyPureAngularAcceleration(center, angularAcceleration);
+    }
+
+    private int CountRecoveryBracedLegs()
+    {
+        int count = 0;
+        for (int i = 0; i < crab.Legs.Length; i++)
+            if (crab.Legs[i].RecoveryBraced) count++;
+        return count;
     }
 
     private bool HasShellTerrainContact()
