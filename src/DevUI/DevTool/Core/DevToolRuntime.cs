@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Core;
@@ -37,18 +38,29 @@ internal static class DevToolRuntime
 
     private static void DevUI_Update(On.DevInterface.DevUI.orig_Update orig, global::DevInterface.DevUI self)
     {
-        orig(self);
-        if (self == null) return;
+        if (self == null)
+        {
+            orig(self);
+            return;
+        }
 
+        // Synchronize before vanilla/RegionKit controls mutate their backing state so the
+        // compatibility recorder can capture the true transaction start.
         DevToolSessionHub.Synchronize(self);
         EditorSession session = DevToolSessionHub.Current;
+        session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
-        // Keyboard shortcuts and all UI-originated mutations run on Unity's main thread.
+        // Editor shortcuts are handled before vanilla DevUI consumes the same raw keys.
         EditorInputRouter.UpdateShortcuts(session);
-        EditorUiCommandQueue.Process(session);
+        orig(self);
 
-        // Commands can change selection, object collections or tool state. Synchronize once
-        // more before publishing the detached snapshot consumed by the Present callback.
+        // Legacy controls have now completed this frame's mutation. Close any mouse/text
+        // transaction that ended during orig.Update and push it into the unified history.
+        session?.Synchronize(self);
+        session?.LegacyTransactions.AfterLegacyUpdate(session);
+
+        // RWImGui never mutates game state from Present. Execute its queued actions here.
+        EditorUiCommandQueue.Process(session);
         session?.Synchronize(self);
         EditorPresentationHub.Publish(session);
     }
@@ -103,7 +115,8 @@ public sealed class EditorSession
     {
         Owner = owner;
         Selection = new EditorSelection();
-        History = new History.EditorHistoryService(64);
+        History = new EditorHistoryService(64);
+        LegacyTransactions = new LegacyTransactionRecorder();
         observedLegacyPage = owner?.activePage;
         ToolMode = ResolveToolMode(observedLegacyPage);
         Synchronize(owner);
@@ -113,7 +126,8 @@ public sealed class EditorSession
     public EditorDocumentKey DocumentKey => documentKey;
     public EditorToolMode ToolMode { get; private set; }
     public EditorSelection Selection { get; }
-    public History.EditorHistoryService History { get; }
+    public EditorHistoryService History { get; }
+    public LegacyTransactionRecorder LegacyTransactions { get; }
     public bool FocusMode { get; private set; }
     public bool BrowserOpen { get; private set; } = true;
     public bool InspectorOpen { get; private set; } = true;
@@ -132,6 +146,7 @@ public sealed class EditorSession
             documentKey = next;
             Selection.Clear();
             History.ActivateDocument(next);
+            LegacyTransactions.Reset();
         }
 
         // A real legacy page switch is mirrored once. ImGui tool changes remain independent
@@ -140,6 +155,7 @@ public sealed class EditorSession
         {
             observedLegacyPage = owner?.activePage;
             ToolMode = ResolveToolMode(observedLegacyPage);
+            LegacyTransactions.Reset();
         }
 
         Selection.RemoveMissing(RoomSettings?.placedObjects);
