@@ -20,13 +20,17 @@ internal static class TriggerEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."), true);
             return;
         }
 
-        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*"))) sceneTab = false;
-        ImGui.SameLine();
-        if (ImGui.Button(sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene"))) sceneTab = true;
+        string libraryLabel = sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*");
+        string sceneLabel = sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene");
+        if (DevToolWidgets.ActionButton(libraryLabel, "TriggerLibraryTab", sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+            sceneTab = false;
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(sceneLabel));
+        if (DevToolWidgets.ActionButton(sceneLabel, "TriggerSceneTab", sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            sceneTab = true;
         ImGui.Separator();
 
         if (sceneTab) DrawScene(snapshot);
@@ -37,14 +41,14 @@ internal static class TriggerEditorView
     {
         if (!snapshot.Available)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("触发器编辑器不可用。", "Trigger editor unavailable."), true);
             return;
         }
 
         EditorTriggerSnapshot selected = FindSelected(snapshot);
         if (selected == null)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个触发器。", "Select a trigger from Scene or its world gizmo."));
+            ImGui.TextWrapped(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个触发器。", "Select a trigger from Scene or its world gizmo."));
             return;
         }
 
@@ -90,14 +94,13 @@ internal static class TriggerEditorView
         DrawEventEditor(snapshot, selected);
 
         ImGui.Separator();
-        if (ImGui.Button(DevToolUiSettings.T("删除触发器", "Delete Trigger")))
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("删除触发器", "Delete Trigger"), "DeleteTrigger", DevToolButtonTone.Danger))
             TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Delete, selected.Index));
     }
 
     private static void DrawLibrary(EditorTriggerPresentationSnapshot snapshot)
     {
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##TriggerLibrarySearch", "Search##TriggerLibrarySearch"), ref search, 128);
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "TriggerLibrarySearch", ref search, 128);
         ImGui.Separator();
 
         string[] types = snapshot.TriggerTypes ?? Array.Empty<string>();
@@ -113,7 +116,7 @@ internal static class TriggerEditorView
                     text: type));
         }
 
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."));
+        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."), true);
     }
 
     private static void DrawScene(EditorTriggerPresentationSnapshot snapshot)
@@ -162,7 +165,7 @@ internal static class TriggerEditorView
 
         if (!value.HasEvent)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("选择一种事件类型后再配置此触发器。", "Choose an event type to configure this trigger."));
+            ImGui.TextWrapped(DevToolUiSettings.T("选择一种事件类型后再配置此触发器。", "Choose an event type to configure this trigger."));
             return;
         }
 
@@ -185,10 +188,10 @@ internal static class TriggerEditorView
         }
 
         ImGui.TextWrapped(value.Type);
-        ImGui.TextDisabled(DevToolUiSettings.T(
+        ImGui.TextWrapped(DevToolUiSettings.T(
             "该事件没有在这里暴露原版 Rain World 参数。",
             "This event has no built-in Rain World parameters exposed here."));
-        ImGui.TextDisabled(DevToolUiSettings.T(
+        ImGui.TextWrapped(DevToolUiSettings.T(
             "如果 Mod 添加了自定义 DevInterface 控件，请切换到原版 UI 编辑。",
             "If a mod adds custom DevInterface controls, switch to Vanilla UI to edit them."));
     }
