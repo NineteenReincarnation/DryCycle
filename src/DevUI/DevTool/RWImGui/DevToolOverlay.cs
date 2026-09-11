@@ -1,5 +1,6 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Room;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -129,12 +130,18 @@ internal static class DevToolOverlay
             return;
         }
 
+        if (snapshot.ToolMode == EditorToolMode.Room)
+        {
+            RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
+            ImGui.End();
+            return;
+        }
+
         if (snapshot.ToolMode != EditorToolMode.Objects)
         {
             ImGui.Text(snapshot.ToolMode + " tools");
             ImGui.Separator();
             ImGui.TextDisabled("This workspace reuses the same overlay shell.");
-            ImGui.TextDisabled("Objects is the first functional migration target.");
             ImGui.End();
             return;
         }
@@ -247,7 +254,24 @@ internal static class DevToolOverlay
             return;
         }
 
-        ObjectInspectorView.Draw(snapshot.Inspector);
+        if (snapshot.ToolMode == EditorToolMode.Room)
+        {
+            RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
+            ImGui.Separator();
+            bool legacyVisible = snapshot.Inspector?.LegacyUiVisible == true;
+            if (ImGui.Button(legacyVisible ? "Hide Original DevUI" : "Show Original DevUI"))
+                Send(EditorUiCommandKind.ToggleLegacyUi);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Objects)
+        {
+            ObjectInspectorView.Draw(snapshot.Inspector);
+        }
+        else
+        {
+            ImGui.TextDisabled(snapshot.ToolMode + " inspector is not migrated yet.");
+        }
         ImGui.End();
     }
 
@@ -261,10 +285,17 @@ internal static class DevToolOverlay
                                  ImGuiWindowFlags.NoInputs;
         if (ImGui.Begin("##DevToolStatus", flags))
         {
-            int selected = snapshot.Inspector?.SelectionCount ?? 0;
-            string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
-            ImGui.TextDisabled("Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
-                               "   ·   " + snapshot.Document + placement);
+            if (snapshot.ToolMode == EditorToolMode.Objects)
+            {
+                int selected = snapshot.Inspector?.SelectionCount ?? 0;
+                string placement = snapshot.PlacementActive ? "   ·   Placing " + snapshot.PlacementType : string.Empty;
+                ImGui.TextDisabled("Objects " + (snapshot.SceneObjects?.Length ?? 0) + "   ·   Selected " + selected +
+                                   "   ·   " + snapshot.Document + placement);
+            }
+            else
+            {
+                ImGui.TextDisabled(snapshot.Document + "   ·   " + snapshot.ToolMode);
+            }
         }
         ImGui.End();
     }
