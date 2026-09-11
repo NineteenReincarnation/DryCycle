@@ -29,6 +29,8 @@ internal sealed class MantleCrabLocomotion
     private const float LiftLoadThreshold = .075f;
     private const float ReliableLoadThreshold = .12f;
     private const float TouchdownLoadGate = .36f;
+    private const float TouchdownReloadFloor = .42f;
+    private const float MaximumTouchdownVelocityRemoval = .18f;
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
@@ -292,6 +294,11 @@ internal sealed class MantleCrabLocomotion
         // Posture owns support and load transfer. Propulsion only owns grounded tangent speed.
         posture.ApplySupportAndPosture(effectiveGravity, TurnIntent);
 
+        // 新落地腿的关节已经通过 StandHeight 产生真实压缩。这里仅耗散由这次吃重诱发的“向上回弹”，
+        // 不会主动把身体往下砸，也不会吞掉沿地面切线的正常移动速度。
+        // Joint compression is handled through StandHeight. Here we only dissipate upward rebound created by touchdown loading.
+        AbsorbTouchdownRebound();
+
         // 保守的大体型垂直稳定器只压掉异常的 pogo 起跳，不负责主动抬身体。
         // This conservative vertical stabilizer only suppresses abnormal pogo launches.
         StabilizeVerticalMotion();
@@ -463,7 +470,12 @@ internal sealed class MantleCrabLocomotion
             else
             {
                 target = 1f;
-                rate = ReloadRate;
+
+                // 重落脚时不要让腿立刻恢复成“硬柱”。冲击越大，早期重新吃重越慢；
+                // 随着 TouchdownAbsorption 自然衰减，承重速度平滑回到正常 ReloadRate。
+                // Heavier touchdowns reload more slowly at first, then smoothly return to the normal load-transfer rate.
+                float absorption = Mathf.Clamp01(leg.TouchdownAbsorption);
+                rate = ReloadRate * Mathf.Lerp(1f, TouchdownReloadFloor, absorption);
             }
 
             legLoad[i] = Mathf.MoveTowards(legLoad[i], target, rate);
@@ -519,6 +531,72 @@ internal sealed class MantleCrabLocomotion
     private void CancelPendingStep()
     {
         pendingStepIndex = -1;
+    }
+
+    private void AbsorbTouchdownRebound()
+    {
+        if (crab.bodyChunks == null || crab.bodyChunks.Length == 0 || posture.SeverelyUnstable)
+            return;
+
+        Vector2 normal = SupportNormal;
+        if (normal.sqrMagnitude <= .0001f)
+            normal = Vector2.up;
+        else
+            normal.Normalize();
+        if (normal.y < 0f)
+            normal = -normal;
+
+        float weightedAbsorption = 0f;
+        float weightSum = 0f;
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Planted || leg.Swinging)
+                continue;
+
+            float absorption = Mathf.Clamp01(leg.TouchdownAbsorption);
+            if (absorption <= .001f)
+                continue;
+
+            float load = SupportLoad(leg);
+            if (load <= .001f)
+                continue;
+
+            float contactQuality = leg.SupportQuality(crab);
+            if (contactQuality <= .001f)
+                continue;
+
+            // 刚开始吃重时已经可以吸收一部分回弹，但主要权限仍随真实承重建立。
+            // A fresh contact may damp a little rebound immediately, while most authority grows with actual load.
+            float weight = contactQuality * Mathf.Lerp(.18f, 1f, load);
+            weightedAbsorption += absorption * weight;
+            weightSum += weight;
+        }
+
+        if (weightSum <= .001f)
+            return;
+
+        float authority = Mathf.Clamp01(weightedAbsorption / weightSum);
+        if (traversal.Mode == MantleCrabTraversalMode.StepUp)
+            authority *= .55f;
+
+        Vector2 bodyVelocity = BodyVelocity();
+        float reboundSpeed = Vector2.Dot(bodyVelocity, normal);
+        if (reboundSpeed <= .01f)
+            return;
+
+        float fraction = Mathf.Lerp(.08f, .42f, authority);
+        float remove = Mathf.Min(
+            reboundSpeed * fraction,
+            MaximumTouchdownVelocityRemoval * Mathf.Lerp(.60f, 1f, authority));
+        if (remove <= .001f)
+            return;
+
+        // 所有 BodyChunk 同量减速，只改变重心沿支撑法线的速度，不制造额外旋转。
+        // Apply the same correction to every shell chunk so COM rebound is damped without injecting angular momentum.
+        Vector2 correction = normal * remove;
+        for (int i = 0; i < crab.bodyChunks.Length; i++)
+            crab.bodyChunks[i].vel -= correction;
     }
 
     private void StabilizeVerticalMotion()
