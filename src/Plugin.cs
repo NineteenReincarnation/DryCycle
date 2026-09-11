@@ -105,7 +105,6 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             InternalGateRuntime.Disable();
-            VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
@@ -260,7 +259,6 @@ internal sealed class Plugin : BaseUnityPlugin
             RainMeterFastForwardForecastFix.Enable();
 
             InternalGateRuntime.Enable();
-            VanillaDevUIShortcutRuntime.Enable();
             MiscRuntime.Enable();
             _initialized = true;
             AIDebuggerRuntime.Install(self, Logger);
@@ -270,7 +268,6 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             AIDebuggerRuntime.Uninstall();
             InternalGateRuntime.Disable();
-            VanillaDevUIShortcutRuntime.Disable();
             MiscRuntime.Disable();
             OpenShelterSleepRuntime.Disable();
             RainDrinkingRuntime.Disable();
