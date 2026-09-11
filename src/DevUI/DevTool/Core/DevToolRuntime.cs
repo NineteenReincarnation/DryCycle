@@ -31,6 +31,7 @@ internal static class DevToolRuntime
         BuiltinInspectorAdapters.Enable();
         ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
+        EffectPreviewRuntime.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         On.RainWorldGame.Update += RainWorldGame_Update;
         enabled = true;
@@ -41,7 +42,7 @@ internal static class DevToolRuntime
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
         On.RainWorldGame.Update -= RainWorldGame_Update;
-        EffectPreviewRuntime.Reset();
+        EffectPreviewRuntime.Disable();
         ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
