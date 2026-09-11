@@ -91,12 +91,26 @@ internal static class RoomEditorActions
 
     internal static bool AddRoomEffect(EditorSession session, string typeName)
     {
-        if (session?.Owner == null || string.IsNullOrEmpty(typeName)) return false;
+        if (session?.Owner == null || session.RoomSettings?.effects == null || string.IsNullOrEmpty(typeName)) return false;
         if (session.ToolMode != EditorToolMode.Room) session.SetToolMode(EditorToolMode.Room);
         if (session.Owner.activePage is not RoomSettingsPage page) return false;
 
+        RoomSettings.RoomEffect.Type type = new(typeName, false);
+        for (int i = 0; i < session.RoomSettings.effects.Count; i++)
+        {
+            RoomSettings.RoomEffect existing = session.RoomSettings.effects[i];
+            if (existing != null && !existing.inherited && existing.type == type)
+            {
+                // The vanilla Create signal is a toggle. New UI treats Add as idempotent:
+                // selecting an already-present local effect must never delete it.
+                return true;
+            }
+        }
+
         return Mutate(session, "Add effect " + typeName, _ =>
         {
+            // Keep the original public DevInterface creation path so other mods that extend
+            // RoomSettingsPage through ordinary Rain World hooks still participate.
             page.Signal(DevUISignalType.Create, page, typeName);
             return true;
         }, refreshPage: false);
