@@ -55,7 +55,33 @@ internal static class DevToolUiSettings
         DisabledTextColor = DefaultDisabledTextColor;
     }
 
-    internal static string T(string chinese, string english) => IsChinese ? chinese : english;
+    internal static string T(string chinese, string english)
+    {
+        // Early DevTool builds prefixed the seven main tool labels with R/O/S/T/M/D/L.
+        // The rebuilt toolbar now presents the localized full name only. Keep the cleanup here
+        // so both Chinese and English stay consistent without carrying duplicate abbreviation UI.
+        return StripLegacyToolPrefix(IsChinese ? chinese : english);
+    }
+
+    private static string StripLegacyToolPrefix(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length < 4 || value[1] != ' ' || value[2] != ' ')
+            return value;
+
+        switch (value[0])
+        {
+            case 'R':
+            case 'O':
+            case 'S':
+            case 'T':
+            case 'M':
+            case 'D':
+            case 'L':
+                return value.Substring(3);
+            default:
+                return value;
+        }
+    }
 
     internal static string ToolMode(EditorToolMode mode)
     {
