@@ -316,7 +316,7 @@ internal sealed class MantleCrabLimb
             float response = phase == MantleCrabRecoveryPhase.Brace
                 ? Mathf.Lerp(.055f, .11f, Smooth01(progress))
                 : Mathf.Lerp(.10f, .16f, posture.RecoveryPushAmount);
-            SolveRecoveryBrace(crab, anchor, braceTarget, posture.RecoveryDirection, response);
+            SolveRecoveryBrace(anchor, braceTarget, posture.RecoveryDirection, response);
             RecoveryBraced = Vector2.Distance(Tip, braceTarget) < 5f &&
                              MantleCrabTerrainProbe.StillSupported(crab.room, braceTarget);
             return;
@@ -344,24 +344,28 @@ internal sealed class MantleCrabLimb
         // 收腿是沿甲壳局部坐标折叠，不是把整条腿缩短。四段真实长度始终保持不变，
         // 只是用交错的关节角把长腿收拢到甲壳附近。
         // Tucking folds the fixed-length chain in shell space; no segment is scaled or shortened.
-        Vector2[] localDirections =
-        [
-            new(inward * .97f, -.24f),
-            new(-inward * .96f, -.28f),
-            new(inward * .95f, -.31f),
-            new(-inward * .91f, -.41f)
-        ];
-
         Vector2 previous = anchor;
         for (int i = 0; i < 4; i++)
         {
-            Vector2 desiredDirection = shellAxis * localDirections[i].x + shellUp * localDirections[i].y;
+            Vector2 localDirection = RecoveryTuckLocalDirection(i, inward);
+            Vector2 desiredDirection = shellAxis * localDirection.x + shellUp * localDirection.y;
             desiredDirection.Normalize();
             recoverySolved[i] = previous + desiredDirection * Lengths[i];
             previous = recoverySolved[i];
         }
 
         BlendChainToward(anchor, recoverySolved, response);
+    }
+
+    private static Vector2 RecoveryTuckLocalDirection(int segment, float inward)
+    {
+        return segment switch
+        {
+            0 => new Vector2(inward * .97f, -.24f).normalized,
+            1 => new Vector2(-inward * .96f, -.28f).normalized,
+            2 => new Vector2(inward * .95f, -.31f).normalized,
+            _ => new Vector2(-inward * .91f, -.41f).normalized
+        };
     }
 
     private bool TryRecoveryBraceTarget(
@@ -396,22 +400,13 @@ internal sealed class MantleCrabLimb
     }
 
     private void SolveRecoveryBrace(
-        MantleCrab crab,
         Vector2 anchor,
         Vector2 target,
         float direction,
         float response)
     {
-        Vector2[] authored =
-        [
-            new(direction * .74f, -.67f),
-            new(direction * .52f, -.85f),
-            new(-direction * .18f, -.98f),
-            new(-direction * .36f, -.93f)
-        ];
-
         for (int i = 0; i < 4; i++)
-            recoveryPreferredDirections[i] = authored[i].normalized;
+            recoveryPreferredDirections[i] = RecoveryBraceDirection(i, direction);
         for (int i = 0; i < 4; i++)
             recoverySolved[i] = Pos[i];
 
@@ -427,6 +422,17 @@ internal sealed class MantleCrabLimb
             68f);
 
         BlendChainToward(anchor, recoverySolved, response);
+    }
+
+    private static Vector2 RecoveryBraceDirection(int segment, float direction)
+    {
+        return segment switch
+        {
+            0 => new Vector2(direction * .74f, -.67f).normalized,
+            1 => new Vector2(direction * .52f, -.85f).normalized,
+            2 => new Vector2(-direction * .18f, -.98f).normalized,
+            _ => new Vector2(-direction * .36f, -.93f).normalized
+        };
     }
 
     private void UpdateRecoveryDeploy(MantleCrab crab, Vector2 anchor, float progress)
