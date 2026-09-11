@@ -83,17 +83,17 @@ internal static class DevToolOverlay
             Math.Max(420f, display.X - 16f),
             Math.Max(500f, textWidth + ImGui.CalcTextSize(undo + redo).X + 300f));
 
-        // Leave enough default space for the New UI / Vanilla switch at the top-left. These
-        // values apply only on first use; saved ImGui layout takes over after the user moves it.
-        ImGui.SetNextWindowPos(new Num.Vector2(150f, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 42f), ImGuiCond.FirstUseEver);
+        // The UI switch occupies the top-left by default. This command window starts to its
+        // right, but only on first use; its saved/user placement is never overwritten later.
+        ImGui.SetNextWindowPos(new Num.Vector2(168f, 8f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 62f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(360f, 38f),
-            new Num.Vector2(Math.Max(360f, display.X - 16f), 180f));
+            new Num.Vector2(360f, 54f),
+            new Num.Vector2(Math.Max(360f, display.X - 16f), 220f));
         ImGui.SetNextWindowBgAlpha(0.95f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse |
-                                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
-        if (!ImGui.Begin("##DevToolTopBar", flags))
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+                                 ImGuiWindowFlags.NoScrollWithMouse;
+        if (!ImGui.Begin("Commands###DevToolTopBar", flags))
         {
             ImGui.End();
             return;
@@ -133,15 +133,14 @@ internal static class DevToolOverlay
 
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 56f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(44f, 316f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Num.Vector2(8f, 76f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(54f, 350f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(44f, 180f),
-            new Num.Vector2(180f, Math.Max(180f, display.Y - 16f)));
+            new Num.Vector2(52f, 220f),
+            new Num.Vector2(180f, Math.Max(220f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(0.94f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse |
-                                 ImGuiWindowFlags.NoScrollbar;
-        if (!ImGui.Begin("##DevToolActivity", flags))
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar;
+        if (!ImGui.Begin("Tools###DevToolActivity", flags))
         {
             ImGui.End();
             return;
@@ -178,7 +177,7 @@ internal static class DevToolOverlay
     private static void DrawBrowser(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float maxHeight = Math.Max(260f, display.Y - 32f);
-        ImGui.SetNextWindowPos(new Num.Vector2(62f, 64f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Num.Vector2(70f, 76f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(300f, Math.Min(440f, maxHeight)), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(220f, 180f),
@@ -301,7 +300,7 @@ internal static class DevToolOverlay
     {
         float defaultWidth = InspectorWidth(display);
         float maxHeight = Math.Max(260f, display.Y - 32f);
-        ImGui.SetNextWindowPos(new Num.Vector2(Math.Max(8f, display.X - defaultWidth - 8f), 64f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Num.Vector2(Math.Max(8f, display.X - defaultWidth - 8f), 76f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, Math.Min(440f, maxHeight)), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(260f, 180f),
@@ -365,15 +364,15 @@ internal static class DevToolOverlay
             Math.Max(220f, display.X - 16f),
             Math.Max(220f, ImGui.CalcTextSize(text).X + 28f));
 
-        ImGui.SetNextWindowPos(new Num.Vector2(150f, 58f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 38f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Num.Vector2(168f, Math.Max(8f, display.Y - 74f)), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 58f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(180f, 34f),
-            new Num.Vector2(Math.Max(180f, display.X - 16f), 160f));
+            new Num.Vector2(180f, 52f),
+            new Num.Vector2(Math.Max(180f, display.X - 16f), 180f));
         ImGui.SetNextWindowBgAlpha(0.90f);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse |
-                                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
-        if (ImGui.Begin("##DevToolStatus", flags))
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+                                 ImGuiWindowFlags.NoScrollWithMouse;
+        if (ImGui.Begin("Status###DevToolStatus", flags))
             ImGui.TextDisabled(text);
         ImGui.End();
     }
