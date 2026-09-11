@@ -28,6 +28,7 @@ internal static class DevToolRuntime
     {
         if (enabled) return;
         BuiltinInspectorAdapters.Enable();
+        ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
@@ -37,6 +38,7 @@ internal static class DevToolRuntime
     {
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
+        ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
         EditorUiCommandQueue.Clear();
@@ -105,6 +107,14 @@ internal static class DevToolRuntime
              (session.ToolMode == EditorToolMode.Dialog && self.activePage is DialogPage) ||
              (session.ToolMode == EditorToolMode.Relationships && self.activePage is RelationshipPage));
         LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
+
+        // Objects keeps the original representations as its compatibility backend, but only the
+        // single selected object exposes the full vanilla gizmo. Every other object is reduced to
+        // its center handle so the room remains readable and objects can still be selected directly.
+        ObjectGizmoPresentationController.Apply(
+            self.activePage as ObjectsPage,
+            session,
+            suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
 
         EditorPresentationHub.Publish(session);
         RoomEditorPresentationHub.Publish(session);
