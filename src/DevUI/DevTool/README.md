@@ -23,6 +23,7 @@ DevTool/
 ├── Commands/          保存、对象编辑和统一命令入口
 ├── History/           Document History、原版兼容快照、事务记录
 ├── Input/             键鼠所有权、世界 Handle 与游戏输入隔离
+├── Preview/           临时运行时预览、回滚和后续事务探测基础设施
 ├── Objects/           Object Catalog、Inspector、属性描述、多选
 ├── Room/              RoomSettings 与 RoomEffect 编辑
 ├── Sound/             环境音浏览、放置和参数编辑
@@ -64,6 +65,9 @@ DevTool/
 - 常用 RoomSettings 数值、布尔、Palette、Danger 等直接编辑。
 - RoomEffect 搜索、添加、参数编辑、删除。
 - 防止沿用原版 Create 信号的 toggle 语义导致“再次添加反而删除”。
+- Effect 浏览器已接入悬停实时预览：约 180ms 后把一个 `save=false` 的临时 `RoomEffect` 放到当前 `RoomSettings.effects` 最前端，移开、切换页面或关闭 DevTools 时按对象身份精确回滚。
+- Effect 预览不识别 Mod 名称、程序集或私有 API；任何通过正常 `RoomSettings.effects`、`GetEffect`、`GetEffectAmount` 读取效果状态的未知 Mod 都可以自动看到同一份预览状态。
+- 临时 Effect 不进入 Inspector Snapshot、History 或保存数据；Save / Undo / Redo / 真正点击添加都会先结束预览，并处理了从左侧预览直接点击右侧 Inspector 时的一帧索引竞态。
 - 所有修改进入 Room Document History。
 
 ### Sound
@@ -128,6 +132,7 @@ Level 4  Vanilla fallback
 
 ## 继续审查 / 完善的重点
 
+- Effect Preview 下一层需要做通用的运行时对象所有权 Journal 与 A/B Probe，用于只在 `Room.Loaded` 或类似初始化阶段创建视觉对象的 Effect；在完成可逆事务层之前，不直接重跑整个 `Room.Loaded()`。
 - 真正使用游戏程序集和 RWImGui 安装进行完整编译、进游戏运行测试与错误清理；当前仓库没有覆盖本 PR 的编译 CI。
 - Objects 框选、吸附、网格、对齐/分布等高效场景编辑工具。
 - 更多本体常用 PlacedObject 的语义化 Inspector 与我们自己的 Gizmo。
