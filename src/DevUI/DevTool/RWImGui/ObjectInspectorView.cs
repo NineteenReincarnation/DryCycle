@@ -41,6 +41,7 @@ internal static class ObjectInspectorView
         DrawTransform(inspector);
         DrawProperties(inspector);
         DrawLegacyControls(inspector);
+        DrawLegacyFallback(inspector);
 
         ImGui.Separator();
         if (ImGui.Button("Delete Object"))
@@ -266,6 +267,20 @@ internal static class ObjectInspectorView
                         text: control.Path));
             }
         }
+    }
+
+    private static void DrawLegacyFallback(EditorInspectorSnapshot inspector)
+    {
+        if (!inspector.LegacyUiAvailable) return;
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Compatibility");
+        string label = inspector.LegacyUiVisible ? "Hide Original DevUI" : "Show Original DevUI";
+        if (ImGui.Button(label + "##DevToolLegacyFallback"))
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Fallback for custom DevInterface controls that cannot be translated into the Inspector.");
     }
 
     private static void SendPosition(EditorInspectorSnapshot inspector)
