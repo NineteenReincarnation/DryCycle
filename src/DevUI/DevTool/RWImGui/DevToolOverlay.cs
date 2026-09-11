@@ -17,6 +17,8 @@ internal static class DevToolOverlay
     private static bool sceneTab;
     private static int sceneSelectionAnchor = -1;
     private static float browserInspectorSplit = 0.40f;
+    private static bool browserInspectorSplitterDragging;
+    private const float BrowserPaneFontScale = 1.22f;
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
@@ -214,16 +216,16 @@ internal static class DevToolOverlay
 
         if (browser && inspector)
         {
-            float splitterWidth = Math.Max(8f, 6f * scale);
-            float minLeft = Math.Min(available.X * 0.45f, Math.Max(180f, 220f * Math.Min(1.4f, scale)));
-            float minRight = Math.Min(available.X * 0.45f, Math.Max(220f, 260f * Math.Min(1.4f, scale)));
+            float splitterWidth = Math.Max(12f, 8f * Math.Min(1.5f, scale));
+            float minLeft = Math.Min(available.X * 0.25f, Math.Max(100f, 120f * Math.Min(1f, scale)));
+            float minRight = Math.Min(available.X * 0.55f, Math.Max(180f, 220f * Math.Min(1.25f, scale)));
             float usable = Math.Max(1f, available.X - splitterWidth);
-            float leftWidth = usable * browserInspectorSplit;
-            leftWidth = Math.Max(minLeft, Math.Min(leftWidth, Math.Max(minLeft, usable - minRight)));
-            browserInspectorSplit = Math.Max(0.18f, Math.Min(0.82f, leftWidth / usable));
+            float maxLeft = Math.Max(minLeft, usable - minRight);
+            float leftWidth = Math.Max(minLeft, Math.Min(usable * browserInspectorSplit, maxLeft));
 
             if (ImGui.BeginChild("##DevToolBrowserPane", new Num.Vector2(leftWidth, available.Y), ImGuiChildFlags.Borders))
             {
+                ImGui.SetWindowFontScale(BrowserPaneFontScale);
                 ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
                 ImGui.Separator();
                 DrawBrowserContents(snapshot);
@@ -232,18 +234,32 @@ internal static class DevToolOverlay
 
             ImGui.SameLine(0f, 0f);
             ImGui.InvisibleButton("##DevToolBrowserInspectorSplitter", new Num.Vector2(splitterWidth, available.Y));
+            bool splitterHovered = ImGui.IsItemHovered();
+            if (!browserInspectorSplitterDragging && splitterHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                browserInspectorSplitterDragging = true;
+            if (browserInspectorSplitterDragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+                browserInspectorSplitterDragging = false;
+
             Num.Vector2 splitMin = ImGui.GetItemRectMin();
             Num.Vector2 splitMax = ImGui.GetItemRectMax();
             ImDrawListPtr draw = ImGui.GetWindowDrawList();
             float lineX = (splitMin.X + splitMax.X) * 0.5f;
-            uint lineColor = ImGui.GetColorU32(ImGui.IsItemHovered() || ImGui.IsItemActive()
+            uint lineColor = ImGui.GetColorU32(splitterHovered || browserInspectorSplitterDragging
                 ? ImGuiCol.HeaderActive
                 : ImGuiCol.Separator);
-            draw.AddLine(new Num.Vector2(lineX, splitMin.Y), new Num.Vector2(lineX, splitMax.Y), lineColor, ImGui.IsItemActive() ? 3f : 1.5f);
-            if (ImGui.IsItemActive() && usable > 1f)
+            draw.AddLine(
+                new Num.Vector2(lineX, splitMin.Y),
+                new Num.Vector2(lineX, splitMax.Y),
+                lineColor,
+                browserInspectorSplitterDragging ? 3f : 1.5f);
+
+            // Split ratio is only changed by an explicit drag that starts on this divider.
+            // Moving or resizing the whole editor panel never writes browserInspectorSplit.
+            if (browserInspectorSplitterDragging && usable > 1f)
             {
-                browserInspectorSplit += ImGui.GetIO().MouseDelta.X / usable;
-                browserInspectorSplit = Math.Max(0.18f, Math.Min(0.82f, browserInspectorSplit));
+                float nextLeft = leftWidth + ImGui.GetIO().MouseDelta.X;
+                nextLeft = Math.Max(minLeft, Math.Min(nextLeft, maxLeft));
+                browserInspectorSplit = nextLeft / usable;
             }
 
             ImGui.SameLine(0f, 0f);
@@ -257,12 +273,15 @@ internal static class DevToolOverlay
         }
         else if (browser)
         {
+            browserInspectorSplitterDragging = false;
+            ImGui.SetWindowFontScale(BrowserPaneFontScale);
             ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
             ImGui.Separator();
             DrawBrowserContents(snapshot);
         }
         else if (inspector)
         {
+            browserInspectorSplitterDragging = false;
             ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
             ImGui.Separator();
             DrawInspectorContents(snapshot);
