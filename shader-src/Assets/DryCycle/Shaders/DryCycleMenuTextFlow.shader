@@ -98,7 +98,7 @@ Shader "DryCycle/MenuTextFlow"
                 float dark = saturate((163.0 - sampleValue) / (163.0 - 129.0));
 
                 float3 baseRgb = i.color.rgb * (1.0 - dark * _DarkStrength);
-                float3 flowed = lerp(baseRgb, 1.0.xxx, bright * _FlowStrength);
+                float3 flowed = lerp(baseRgb, float3(1.0, 1.0, 1.0), bright * _FlowStrength);
                 return fixed4(flowed, glyph.a * i.color.a);
             }
             ENDCG
