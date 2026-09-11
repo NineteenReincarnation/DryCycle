@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Text;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Preview;
@@ -16,9 +17,10 @@ namespace DryCycle.DevUI.DevTool.Preview;
 ///    reaches Room.AddObject. The original Room.Loaded body is replaced with a no-op continuation,
 ///    so the room is never loaded a second time. Each callback is A/B-probed without/with the
 ///    temporary effect while Room.AddObject is captured instead of committed.
-/// 2. If no hook produced a runtime object, try an exact-name constructor convention. A class whose
-///    simple name equals the RoomEffect.Type and derives from UpdatableAndDeletable can be created
-///    with public constructor parameters drawn from {Room, RoomEffect, float amount}.
+/// 2. If no hook produced a runtime object, try a constructor convention discovered from loaded
+///    assemblies. Exact type-name matches are preferred; one unambiguous prefix/suffix match is
+///    allowed for conventional names such as VoidSea -> VoidSeaScene. Constructors may use only
+///    public parameters drawn from {Room, RoomEffect, float amount}.
 ///
 /// Both paths fail closed. Unknown or suspicious callbacks simply remain stage-one previews.
 /// </summary>
@@ -47,9 +49,9 @@ internal static class EffectPreviewBootstrapper
             transaction.ApplyFieldMutation(pair.Key, delta.OriginalValue, delta.PreviewValue);
         }
 
-        // Hook replay is the primary universal path for mods. The naming convention is mainly a
-        // safe fallback for vanilla/DLC load-time scenes such as AboveCloudsView and for mods that
-        // register an effect class directly without a Room.Loaded HookGen callback.
+        // Hook replay is the primary universal path for mods. Constructor discovery is a safe
+        // fallback for vanilla/DLC load-time scenes and mods that use conventional effect classes
+        // without a replayable HookGen Room.Loaded callback.
         if (committed == 0)
             ConstructorConventionBootstrap.TryBootstrap(room, previewEffect, transaction);
     }
@@ -290,10 +292,10 @@ internal static class LoadedHookReplayProbe
 }
 
 /// <summary>
-/// Reflects HookGen's own registration store rather than any third-party mod API. MonoMod has used
-/// more than one internal map shape over Rain World's lifetime, so discovery supports the modern
-/// (MethodBase, Delegate) key and the older MethodBase -> delegate collection shape. Failure simply
-/// disables this compatibility layer; normal stage-one preview remains intact.
+/// Reflects HookGen's own registration store rather than any third-party mod API. Different
+/// RuntimeDetour generations have stored callbacks as MethodBase -> HookEndpoint maps, owner ->
+/// HookEntry lists, tuple keys, or direct delegate collections. Discovery understands those generic
+/// shapes and fails closed when an installation uses an unknown representation.
 /// </summary>
 internal static class HookGenLoadedHookDiscovery
 {
@@ -341,13 +343,30 @@ internal static class HookGenLoadedHookDiscovery
         HashSet<On.Room.hook_Loaded> result,
         int depth)
     {
-        if (store == null || depth > 4 || result.Count > MaxEnumeratedEntries) return;
+        if (store == null || depth > 5 || result.Count > MaxEnumeratedEntries) return;
         if (store is On.Room.hook_Loaded direct)
         {
             result.Add(direct);
             return;
         }
         if (store is string) return;
+
+        // RuntimeDetour 20xx HookEntry: { Type, Method, Hook }.
+        MethodBase directMethod = ReadMember(store, "Method") as MethodBase;
+        Delegate directHook = ReadMember(store, "Hook") as Delegate;
+        if (SameMethod(directMethod, target) && directHook != null)
+        {
+            CollectDelegates(directHook, result, depth + 1);
+            return;
+        }
+
+        // HookEndpoint: { Method, HookMap }. HookMap keys are the original HookGen delegates.
+        object hookMap = ReadMember(store, "HookMap");
+        if (SameMethod(directMethod, target) && hookMap != null)
+        {
+            CollectDelegates(hookMap, result, depth + 1);
+            return;
+        }
 
         if (store is IEnumerable enumerable)
         {
@@ -367,14 +386,15 @@ internal static class HookGenLoadedHookDiscovery
                 Delegate callback = FindDelegate(key);
                 if (SameMethod(method, target))
                 {
-                    if (callback is On.Room.hook_Loaded loaded)
-                        result.Add(loaded);
-                    else
-                        CollectDelegates(value, result, depth + 1);
+                    if (callback != null)
+                        CollectDelegates(callback, result, depth + 1);
+                    CollectStore(value, target, result, depth + 1);
+                    CollectDelegates(value, result, depth + 1);
                 }
                 else if (method == null)
                 {
-                    // Some older maps have another dictionary level before the MethodBase key.
+                    // Owner maps and older endpoint maps have another object level before the
+                    // MethodBase/HookEntry pair.
                     CollectStore(value, target, result, depth + 1);
                 }
             }
@@ -383,7 +403,7 @@ internal static class HookGenLoadedHookDiscovery
 
     private static void CollectDelegates(object value, HashSet<On.Room.hook_Loaded> result, int depth)
     {
-        if (value == null || depth > 4) return;
+        if (value == null || depth > 5) return;
         if (value is On.Room.hook_Loaded hook)
         {
             result.Add(hook);
@@ -397,6 +417,12 @@ internal static class HookGenLoadedHookDiscovery
             return;
         }
         if (value is string) return;
+
+        // HookEntry can also arrive here from owner lists.
+        Delegate memberHook = ReadMember(value, "Hook") as Delegate;
+        if (memberHook != null)
+            CollectDelegates(memberHook, result, depth + 1);
+
         if (value is IEnumerable enumerable)
         {
             int count = 0;
@@ -406,8 +432,12 @@ internal static class HookGenLoadedHookDiscovery
                 object key = ReadMember(item, "Key");
                 object nested = ReadMember(item, "Value");
                 Delegate keyDelegate = FindDelegate(key);
-                if (keyDelegate is On.Room.hook_Loaded loaded) result.Add(loaded);
-                CollectDelegates(nested ?? item, result, depth + 1);
+                if (keyDelegate != null)
+                    CollectDelegates(keyDelegate, result, depth + 1);
+                if (nested != null)
+                    CollectDelegates(nested, result, depth + 1);
+                else if (key == null)
+                    CollectDelegates(item, result, depth + 1);
             }
         }
     }
@@ -645,6 +675,9 @@ internal sealed class RoomProbeState
     private readonly PlacedObject[] placedObjects;
     private readonly AmbientSound[] ambientSounds;
     private readonly EventTrigger[] triggers;
+    private readonly AbstractWorldEntity[] abstractEntities;
+    private readonly AbstractWorldEntity[] abstractEntitiesInDens;
+    private readonly AbstractCreature[] abstractCreatures;
     private readonly bool firstTimeRealized;
     private readonly UnityEngine.Random.State randomState;
 
@@ -654,6 +687,9 @@ internal sealed class RoomProbeState
         PlacedObject[] placedObjects,
         AmbientSound[] ambientSounds,
         EventTrigger[] triggers,
+        AbstractWorldEntity[] abstractEntities,
+        AbstractWorldEntity[] abstractEntitiesInDens,
+        AbstractCreature[] abstractCreatures,
         bool firstTimeRealized,
         UnityEngine.Random.State randomState)
     {
@@ -662,6 +698,9 @@ internal sealed class RoomProbeState
         this.placedObjects = placedObjects;
         this.ambientSounds = ambientSounds;
         this.triggers = triggers;
+        this.abstractEntities = abstractEntities;
+        this.abstractEntitiesInDens = abstractEntitiesInDens;
+        this.abstractCreatures = abstractCreatures;
         this.firstTimeRealized = firstTimeRealized;
         this.randomState = randomState;
     }
@@ -670,13 +709,17 @@ internal sealed class RoomProbeState
 
     internal static RoomProbeState Capture(global::Room room, RoomSettings settings)
     {
+        AbstractRoom abstractRoom = room?.abstractRoom;
         return new RoomProbeState(
             CaptureSafeRoomFields(room),
             settings?.effects?.ToArray() ?? Array.Empty<RoomSettings.RoomEffect>(),
             settings?.placedObjects?.ToArray() ?? Array.Empty<PlacedObject>(),
             settings?.ambientSounds?.ToArray() ?? Array.Empty<AmbientSound>(),
             settings?.triggers?.ToArray() ?? Array.Empty<EventTrigger>(),
-            room?.abstractRoom?.firstTimeRealized ?? false,
+            abstractRoom?.entities?.ToArray() ?? Array.Empty<AbstractWorldEntity>(),
+            abstractRoom?.entitiesInDens?.ToArray() ?? Array.Empty<AbstractWorldEntity>(),
+            abstractRoom?.creatures?.ToArray() ?? Array.Empty<AbstractCreature>(),
+            abstractRoom?.firstTimeRealized ?? false,
             UnityEngine.Random.state);
     }
 
@@ -689,8 +732,15 @@ internal sealed class RoomProbeState
                 try { pair.Key.SetValue(room, pair.Value); }
                 catch { }
             }
-            if (room.abstractRoom != null)
-                room.abstractRoom.firstTimeRealized = firstTimeRealized;
+
+            AbstractRoom abstractRoom = room.abstractRoom;
+            if (abstractRoom != null)
+            {
+                RestoreList(abstractRoom.entities, abstractEntities);
+                RestoreList(abstractRoom.entitiesInDens, abstractEntitiesInDens);
+                RestoreList(abstractRoom.creatures, abstractCreatures);
+                abstractRoom.firstTimeRealized = firstTimeRealized;
+            }
         }
 
         if (settings != null)
@@ -790,14 +840,16 @@ internal static class ConstructorConventionBootstrap
         return false;
     }
 
-    private static Type[] FindTypes(string simpleName)
+    private static Type[] FindTypes(string effectName)
     {
         lock (TypeCache)
         {
-            if (TypeCache.TryGetValue(simpleName, out Type[] cached)) return cached;
+            if (TypeCache.TryGetValue(effectName, out Type[] cached)) return cached;
         }
 
-        List<Type> result = new();
+        List<Type> exact = new();
+        List<Type> related = new();
+        string normalizedEffect = Normalize(effectName);
         Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
         for (int a = 0; a < assemblies.Length; a++)
         {
@@ -811,21 +863,59 @@ internal static class ConstructorConventionBootstrap
             {
                 Type type = types[i];
                 if (type == null || type.IsAbstract ||
-                    !string.Equals(type.Name, simpleName, StringComparison.Ordinal) ||
-                    !typeof(UpdatableAndDeletable).IsAssignableFrom(type))
+                    !typeof(UpdatableAndDeletable).IsAssignableFrom(type) ||
+                    ChooseConstructor(type) == null)
                     continue;
-                result.Add(type);
+
+                if (string.Equals(type.Name, effectName, StringComparison.Ordinal))
+                {
+                    exact.Add(type);
+                    continue;
+                }
+
+                if (RelatedName(normalizedEffect, Normalize(type.Name)))
+                    related.Add(type);
             }
         }
 
-        Type[] array = result.ToArray();
+        Type[] result;
+        if (exact.Count > 0)
+            result = exact.ToArray();
+        else if (related.Count == 1)
+            result = related.ToArray();
+        else
+            result = Array.Empty<Type>();
+
         // Do not permanently cache a miss: a content mod can still load an assembly after the
         // DevTool runtime was initialized and the next hover should be allowed to discover it.
-        if (array.Length > 0)
+        if (result.Length > 0)
         {
-            lock (TypeCache) TypeCache[simpleName] = array;
+            lock (TypeCache) TypeCache[effectName] = result;
         }
-        return array;
+        return result;
+    }
+
+    private static bool RelatedName(string effect, string type)
+    {
+        if (string.IsNullOrEmpty(effect) || string.IsNullOrEmpty(type)) return false;
+        if (effect.Length < 5 || type.Length < 5) return false;
+        if (Math.Abs(effect.Length - type.Length) > 14) return false;
+        return type.StartsWith(effect, StringComparison.Ordinal) ||
+               type.EndsWith(effect, StringComparison.Ordinal) ||
+               effect.StartsWith(type, StringComparison.Ordinal) ||
+               effect.EndsWith(type, StringComparison.Ordinal);
+    }
+
+    private static string Normalize(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        StringBuilder builder = new(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (char.IsLetterOrDigit(c)) builder.Append(char.ToLowerInvariant(c));
+        }
+        return builder.ToString();
     }
 
     private static ConstructorInfo ChooseConstructor(Type type)
