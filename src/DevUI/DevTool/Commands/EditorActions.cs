@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
@@ -41,6 +42,26 @@ public static class EditorActions
 
     public static bool Undo(EditorSession session) => session?.History.Undo(session) ?? false;
     public static bool Redo(EditorSession session) => session?.History.Redo(session) ?? false;
+
+    public static bool PlaceObjectAtCursor(EditorSession session, bool keepPlacementMode)
+    {
+        if (session?.Owner == null || !session.PlacementActive || session.ToolMode != EditorToolMode.Objects)
+            return false;
+
+        RoomCamera camera = session.Owner.game?.cameras != null && session.Owner.game.cameras.Length > 0
+            ? session.Owner.game.cameras[0]
+            : null;
+        if (camera == null) return false;
+
+        string typeName = session.PlacementType;
+        Vector2 worldPosition = camera.pos + session.Owner.mousePos;
+        PlacedObject created = CreateObject(session, new PlacedObject.Type(typeName, false), worldPosition);
+        if (created == null) return false;
+
+        if (!keepPlacementMode)
+            session.CancelPlacement();
+        return true;
+    }
 
     public static bool SetObjectPosition(EditorSession session, PlacedObject target, Vector2 newPosition)
     {
@@ -119,9 +140,6 @@ public static class EditorActions
 
         try
         {
-            // Creation deliberately goes through Rain World's ObjectsPage API. Any mod that
-            // extends normal DevInterface creation keeps receiving the same public hook path,
-            // without DevTool knowing which mod supplied the object.
             page.CreateObjRep(type, null);
             if (session.RoomSettings.placedObjects.Count <= beforeCount) return null;
 
@@ -164,6 +182,79 @@ public static class EditorActions
         return true;
     }
 
+    public static bool DeleteSelection(EditorSession session)
+    {
+        List<PlacedObject> live = session?.RoomSettings?.placedObjects;
+        if (live == null || session.Selection.Count == 0) return false;
+
+        PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        List<PlacedObject> selected = new(session.Selection.PlacedObjects);
+        int removed = 0;
+        for (int i = 0; i < selected.Count; i++)
+        {
+            if (selected[i] != null && live.Remove(selected[i])) removed++;
+        }
+        if (removed == 0) return false;
+
+        session.Selection.Clear();
+        session.Owner.activePage?.Refresh();
+        PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (SnapshotHistoryEntry.TryCreate(
+                removed == 1 ? "Delete object" : "Delete " + removed + " objects",
+                before,
+                after,
+                out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
+    }
+
+    public static bool DuplicateSelection(EditorSession session)
+    {
+        List<PlacedObject> live = session?.RoomSettings?.placedObjects;
+        if (session?.Owner == null || live == null || session.Selection.Count == 0) return false;
+
+        ObjectsPage page = session.Owner.activePage as ObjectsPage;
+        if (page == null)
+        {
+            session.SetToolMode(EditorToolMode.Objects);
+            page = session.Owner.activePage as ObjectsPage;
+        }
+        if (page == null) return false;
+
+        PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        List<PlacedObject> originals = new(session.Selection.PlacedObjects);
+        List<PlacedObject> copies = new(originals.Count);
+
+        for (int i = 0; i < originals.Count; i++)
+        {
+            PlacedObject source = originals[i];
+            if (source?.type == null) continue;
+
+            int count = live.Count;
+            page.CreateObjRep(source.type, null);
+            if (live.Count <= count) continue;
+
+            PlacedObject copy = live[live.Count - 1];
+            CopyObjectState(source, copy, new Vector2(20f, 20f));
+            copies.Add(copy);
+        }
+
+        if (copies.Count == 0) return false;
+
+        page.Refresh();
+        session.Selection.Clear();
+        for (int i = 0; i < copies.Count; i++) session.Selection.Toggle(copies[i]);
+
+        PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (SnapshotHistoryEntry.TryCreate(
+                copies.Count == 1 ? "Duplicate object" : "Duplicate " + copies.Count + " objects",
+                before,
+                after,
+                out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
+    }
+
     private static bool ExecuteLegacyControl(EditorSession session, string label, Func<bool> action)
     {
         if (session?.Owner == null || action == null) return false;
@@ -176,6 +267,38 @@ public static class EditorActions
         if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             session.History.Push(entry);
         return true;
+    }
+
+    private static void CopyObjectState(PlacedObject source, PlacedObject target, Vector2 offset)
+    {
+        target.pos = source.pos + offset;
+        target.active = source.active;
+        target.deactivatedByWarpFilter = source.deactivatedByWarpFilter;
+        target.save = source.save;
+        target.unrecognizedAttributes = Clone(source.unrecognizedAttributes);
+
+        if (source.data != null && target.data != null)
+        {
+            try
+            {
+                target.data.FromString(source.data.ToString());
+                target.data.owner = target;
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool duplicate data copy failed: " + error.Message);
+            }
+        }
+
+        TryRefresh(target);
+    }
+
+    private static string[] Clone(string[] source)
+    {
+        if (source == null) return null;
+        string[] copy = new string[source.Length];
+        Array.Copy(source, copy, source.Length);
+        return copy;
     }
 
     private static bool RemoveExact(EditorSession session, PlacedObject target)
