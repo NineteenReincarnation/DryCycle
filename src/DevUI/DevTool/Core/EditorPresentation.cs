@@ -30,6 +30,7 @@ public sealed class EditorInspectorSnapshot
 {
     public bool HasSelection { get; init; }
     public int ObjectIndex { get; init; } = -1;
+    public int SelectionCount { get; init; }
     public string Type { get; init; } = string.Empty;
     public float X { get; init; }
     public float Y { get; init; }
@@ -40,11 +41,6 @@ public sealed class EditorInspectorSnapshot
     public LegacyControlSnapshot[] LegacyControls { get; init; } = Array.Empty<LegacyControlSnapshot>();
 }
 
-/// <summary>
-/// Immutable-enough detached presentation model created on Unity's main thread. The
-/// RWImGui Present callback consumes only these scalar/string/array values and never
-/// mutates Rain World state directly.
-/// </summary>
 public sealed class EditorPresentationSnapshot
 {
     public static readonly EditorPresentationSnapshot Empty = new();
@@ -61,6 +57,8 @@ public sealed class EditorPresentationSnapshot
     public bool CanRedo { get; init; }
     public string UndoLabel { get; init; } = string.Empty;
     public string RedoLabel { get; init; } = string.Empty;
+    public bool PlacementActive { get; init; }
+    public string PlacementType { get; init; } = string.Empty;
     public EditorObjectSnapshot[] SceneObjects { get; init; } = Array.Empty<EditorObjectSnapshot>();
     public EditorObjectTypeSnapshot[] ObjectLibrary { get; init; } = Array.Empty<EditorObjectTypeSnapshot>();
     public EditorInspectorSnapshot Inspector { get; init; } = new();
@@ -106,6 +104,7 @@ public static class EditorPresentationHub
         {
             HasSelection = selected != null && selectedIndex >= 0,
             ObjectIndex = selectedIndex,
+            SelectionCount = session.Selection.Count,
             Type = selected?.type?.value ?? string.Empty,
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
@@ -118,9 +117,7 @@ public static class EditorPresentationHub
 
         int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
         if (libraryTypeCount != typeCount || libraryCache.Length == 0)
-        {
             RebuildLibraryCache(typeCount);
-        }
 
         current = new EditorPresentationSnapshot
         {
@@ -136,6 +133,8 @@ public static class EditorPresentationHub
             CanRedo = session.History.CanRedo,
             UndoLabel = session.History.UndoLabel ?? string.Empty,
             RedoLabel = session.History.RedoLabel ?? string.Empty,
+            PlacementActive = session.PlacementActive,
+            PlacementType = session.PlacementType,
             SceneObjects = scene,
             ObjectLibrary = libraryCache,
             Inspector = inspector
@@ -185,8 +184,14 @@ public enum EditorUiCommandKind
     SetToolMode,
     SelectObject,
     ToggleObjectSelection,
+    SelectObjectRange,
     DeleteObject,
+    DeleteSelection,
+    DuplicateSelection,
     CreateObject,
+    BeginPlacement,
+    PlaceObjectAtCursor,
+    CancelPlacement,
     SetObjectPosition,
     SetObjectProperty,
     InvokeLegacyButton,
@@ -199,26 +204,32 @@ public readonly struct EditorUiCommand
     public EditorUiCommand(
         EditorUiCommandKind kind,
         int index = -1,
+        int secondaryIndex = -1,
         string text = null,
         float x = 0f,
         float y = 0f,
+        bool flag = false,
         EditorToolMode mode = EditorToolMode.Room,
         EditorPropertyValue propertyValue = default)
     {
         Kind = kind;
         Index = index;
+        SecondaryIndex = secondaryIndex;
         Text = text;
         X = x;
         Y = y;
+        Flag = flag;
         Mode = mode;
         PropertyValue = propertyValue;
     }
 
     public EditorUiCommandKind Kind { get; }
     public int Index { get; }
+    public int SecondaryIndex { get; }
     public string Text { get; }
     public float X { get; }
     public float Y { get; }
+    public bool Flag { get; }
     public EditorToolMode Mode { get; }
     public EditorPropertyValue PropertyValue { get; }
 }
@@ -281,12 +292,30 @@ public static class EditorUiCommandQueue
             case EditorUiCommandKind.ToggleObjectSelection:
                 session.Selection.Toggle(ResolveObject(session, command.Index));
                 break;
+            case EditorUiCommandKind.SelectObjectRange:
+                session.Selection.SelectRange(session.RoomSettings?.placedObjects, command.SecondaryIndex, command.Index, command.Flag);
+                break;
             case EditorUiCommandKind.DeleteObject:
                 EditorActions.DeleteObject(session, ResolveObject(session, command.Index));
+                break;
+            case EditorUiCommandKind.DeleteSelection:
+                EditorActions.DeleteSelection(session);
+                break;
+            case EditorUiCommandKind.DuplicateSelection:
+                EditorActions.DuplicateSelection(session);
                 break;
             case EditorUiCommandKind.CreateObject:
                 if (!string.IsNullOrEmpty(command.Text))
                     EditorActions.CreateObject(session, new PlacedObject.Type(command.Text, false), new Vector2(command.X, command.Y));
+                break;
+            case EditorUiCommandKind.BeginPlacement:
+                session.BeginPlacement(command.Text);
+                break;
+            case EditorUiCommandKind.PlaceObjectAtCursor:
+                EditorActions.PlaceObjectAtCursor(session, command.Flag);
+                break;
+            case EditorUiCommandKind.CancelPlacement:
+                session.CancelPlacement();
                 break;
             case EditorUiCommandKind.SetObjectPosition:
                 EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
