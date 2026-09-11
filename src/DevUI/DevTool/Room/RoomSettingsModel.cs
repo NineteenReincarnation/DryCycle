@@ -180,9 +180,15 @@ internal static class RoomSettingsPresentation
             if (EffectPreviewRuntime.IsPreviewEffect(effect))
                 continue;
 
+            // UI commands use the document index with the preview entry removed. If the pointer
+            // leaves the browser and immediately clicks the inspector in the same frontend frame,
+            // the preview rolls back before command processing and this logical index still points
+            // at the correct real RoomEffect.
+            int logicalIndex = result.Count;
+
             if (effect == null)
             {
-                result.Add(new EditorRoomEffectSnapshot { Index = i, Type = "<null>" });
+                result.Add(new EditorRoomEffectSnapshot { Index = logicalIndex, Type = "<null>" });
                 continue;
             }
 
@@ -197,7 +203,7 @@ internal static class RoomSettingsPresentation
 
             result.Add(new EditorRoomEffectSnapshot
             {
-                Index = i,
+                Index = logicalIndex,
                 Type = effect.type?.value ?? string.Empty,
                 Category = EffectCategory(page, effect.type),
                 Inherited = effect.inherited,
