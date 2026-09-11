@@ -57,6 +57,10 @@ internal static class DevToolRuntime
         EditorInputRouter.UpdateShortcuts(session);
         orig(self);
 
+        // A click/drag on any retained world-space Handle should select the owning object in
+        // the modern editor. This reuses Rain World's own representation hit testing.
+        session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
+
         // Legacy DevInterface controls have now completed this frame's mutation. Close any
         // pointer/text transaction that ended during orig.Update and push it into history.
         session?.Synchronize(self);
@@ -73,6 +77,7 @@ internal static class DevToolRuntime
         bool suppressLegacyObjectsUi =
             EditorInputRouter.FrontendAttached &&
             session?.ToolMode == EditorToolMode.Objects &&
+            session.LegacyUiVisible == false &&
             self.activePage is ObjectsPage;
         LegacyUiPresentationController.Apply(self.activePage, suppressLegacyObjectsUi);
 
@@ -146,6 +151,7 @@ public sealed class EditorSession
     public bool FocusMode { get; private set; }
     public bool BrowserOpen { get; private set; } = true;
     public bool InspectorOpen { get; private set; } = true;
+    public bool LegacyUiVisible { get; private set; }
     public string ObjectSearch { get; set; } = string.Empty;
 
     public Room Room => Owner?.room;
@@ -162,6 +168,7 @@ public sealed class EditorSession
             Selection.Clear();
             History.ActivateDocument(next);
             LegacyTransactions.Reset();
+            LegacyUiVisible = false;
         }
 
         // Real backend page switches are mirrored into the tool mode. The history boundary
@@ -171,6 +178,7 @@ public sealed class EditorSession
             observedLegacyPage = owner?.activePage;
             ToolMode = ResolveToolMode(observedLegacyPage);
             LegacyTransactions.Reset();
+            LegacyUiVisible = false;
         }
 
         Selection.RemoveMissing(RoomSettings?.placedObjects);
@@ -206,15 +214,38 @@ public sealed class EditorSession
         // nodes. The newly-created page will be suppressed again after its first update.
         LegacyUiPresentationController.Restore(Owner.activePage);
         LegacyTransactions.Reset();
+        LegacyUiVisible = false;
         Owner.SwitchPage(pageIndex);
         observedLegacyPage = Owner.activePage;
         ToolMode = ResolveToolMode(observedLegacyPage);
+    }
+
+    internal void SynchronizeSelectionFromLegacyNode(DevUINode node)
+    {
+        DevUINode current = node;
+        while (current != null)
+        {
+            if (current is PlacedObjectRepresentation representation && representation.pObj != null)
+            {
+                Selection.SelectOnly(representation.pObj);
+                return;
+            }
+            current = current.parentNode;
+        }
     }
 
     public void ToggleFocusMode() => FocusMode = !FocusMode;
     public void SetFocusMode(bool value) => FocusMode = value;
     public void ToggleBrowser() => BrowserOpen = !BrowserOpen;
     public void ToggleInspector() => InspectorOpen = !InspectorOpen;
+
+    public void ToggleLegacyUi()
+    {
+        if (ToolMode != EditorToolMode.Objects) return;
+        LegacyUiVisible = !LegacyUiVisible;
+        if (LegacyUiVisible)
+            LegacyUiPresentationController.Restore(Owner?.activePage);
+    }
 
     private static int PageIndex(EditorToolMode mode)
     {
