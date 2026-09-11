@@ -28,6 +28,7 @@ internal sealed class MantleCrabLocomotion
     private const float LostContactUnloadRate = .14f;
     private const float LiftLoadThreshold = .075f;
     private const float ReliableLoadThreshold = .12f;
+    private const float TouchdownLoadGate = .36f;
 
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
@@ -179,11 +180,33 @@ internal sealed class MantleCrabLocomotion
 
         int swinging = 0;
         float furthestSwingProgress = 0f;
+        bool anySettling = false;
         for (int i = 0; i < crab.Legs.Length; i++)
         {
-            if (!crab.Legs[i].Swinging) continue;
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Swinging) continue;
             swinging++;
-            furthestSwingProgress = Mathf.Max(furthestSwingProgress, crab.Legs[i].SwingProgress);
+            furthestSwingProgress = Mathf.Max(furthestSwingProgress, leg.SwingProgress);
+            anySettling |= leg.SwingPhase == MantleCrabSwingPhase.Settle;
+        }
+
+        // 大型生物必须先把当前这一步真正踩实。Settle 期间不允许另一条腿开始预卸载，
+        // 否则会出现“前脚刚碰地，后脚已经开始抬”的流水线机械感。
+        // A large animal must finish planting the current step before another limb starts unloading.
+        if (anySettling)
+        {
+            CancelPendingStep();
+            return;
+        }
+
+        // Settle 结束后也给新落地腿一点真实接管重量的时间。达到约三分之一承重后，
+        // 才允许下一次卸载进入队列；其余稳定性规则仍然继续生效。
+        // After visual settle, let the touchdown leg accept a meaningful share of body load before the next release begins.
+        if (lastStepIndex >= 0 && lastStepIndex < crab.Legs.Length)
+        {
+            MantleCrabLimb lastStep = crab.Legs[lastStepIndex];
+            if (lastStep.Planted && !lastStep.Swinging && legLoad[lastStepIndex] < TouchdownLoadGate)
+                return;
         }
 
         // 已经决定要迈哪条腿以后，不再每帧重新投票。先把重量真正转走，再进入 Swing。
