@@ -71,24 +71,24 @@ public static class EditorInputRouter
             session.LegacyTransactions.HasPendingTransaction)
             return;
 
-        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
-                    Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
-        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool ctrl = global::UnityEngine.Input.GetKey(KeyCode.LeftControl) || global::UnityEngine.Input.GetKey(KeyCode.RightControl) ||
+                    global::UnityEngine.Input.GetKey(KeyCode.LeftCommand) || global::UnityEngine.Input.GetKey(KeyCode.RightCommand);
+        bool shift = global::UnityEngine.Input.GetKey(KeyCode.LeftShift) || global::UnityEngine.Input.GetKey(KeyCode.RightShift);
 
         // Save/Undo/Redo belong to the rebuilt core, not to one visual frontend. They remain
         // available in Vanilla presentation mode because the old shortcut runtime was removed.
-        if (ctrl && Input.GetKeyDown(KeyCode.S))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S))
         {
             EditorActions.Save(session);
             return;
         }
-        if (ctrl && Input.GetKeyDown(KeyCode.Z))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Z))
         {
             if (shift) EditorActions.Redo(session);
             else EditorActions.Undo(session);
             return;
         }
-        if (ctrl && Input.GetKeyDown(KeyCode.Y))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Y))
         {
             EditorActions.Redo(session);
             return;
@@ -99,21 +99,21 @@ public static class EditorInputRouter
         if (EditorUiModeState.UseVanilla)
             return;
 
-        if (session.PlacementActive && Input.GetKeyDown(KeyCode.Escape))
+        if (session.PlacementActive && global::UnityEngine.Input.GetKeyDown(KeyCode.Escape))
         {
             session.CancelPlacement();
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
             EditorActions.DuplicateSelection(session);
-        else if (Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
+        else if (global::UnityEngine.Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
             EditorActions.DeleteSelection(session);
-        else if (ctrl && Input.GetKeyDown(KeyCode.B))
+        else if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.B))
             session.ToggleBrowser();
-        else if (ctrl && Input.GetKeyDown(KeyCode.I))
+        else if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.I))
             session.ToggleInspector();
-        else if (!ctrl && Input.GetKeyDown(KeyCode.Tab))
+        else if (!ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Tab))
             session.ToggleFocusMode();
     }
 
@@ -135,11 +135,11 @@ public static class EditorInputRouter
         bool devToolsWasActive = self.devToolsActive;
         DevInterface.DevUI focusedDevUi = self.devUI;
 
-        self.mDown = Input.GetKey(KeyCode.M);
-        self.hDown = Input.GetKey(KeyCode.H);
-        self.pDown = Input.GetKey(KeyCode.P);
-        self.kDown = Input.GetKey(KeyCode.K);
-        self.oDown = Input.GetKey(KeyCode.O);
+        self.mDown = global::UnityEngine.Input.GetKey(KeyCode.M);
+        self.hDown = global::UnityEngine.Input.GetKey(KeyCode.H);
+        self.pDown = global::UnityEngine.Input.GetKey(KeyCode.P);
+        self.kDown = global::UnityEngine.Input.GetKey(KeyCode.K);
+        self.oDown = global::UnityEngine.Input.GetKey(KeyCode.O);
 
         self.devToolsActive = false;
         try
@@ -160,7 +160,7 @@ public static class EditorInputRouter
         bool captured = IsKeyboardCapturedThisFrame(self) || HasKeyboardOwner(self);
         if (captured)
         {
-            self.lastRestartButton = Input.GetKey(KeyCode.R);
+            self.lastRestartButton = global::UnityEngine.Input.GetKey(KeyCode.R);
             self.lastPauseButton = true;
         }
 
@@ -276,9 +276,9 @@ public static class EditorInputRouter
 
         if (!ShouldFilterEditorShortcuts(self)) return;
 
-        bool reserveZ = !DryCycleOptions.CtrlZGameplayUnlocked && Input.GetKey(KeyCode.Z);
-        bool reserveS = !DryCycleOptions.CtrlSGameplayUnlocked && Input.GetKey(KeyCode.S);
-        bool reserveY = !DryCycleOptions.CtrlYGameplayUnlocked && Input.GetKey(KeyCode.Y);
+        bool reserveZ = !DryCycleOptions.CtrlZGameplayUnlocked && global::UnityEngine.Input.GetKey(KeyCode.Z);
+        bool reserveS = !DryCycleOptions.CtrlSGameplayUnlocked && global::UnityEngine.Input.GetKey(KeyCode.S);
+        bool reserveY = !DryCycleOptions.CtrlYGameplayUnlocked && global::UnityEngine.Input.GetKey(KeyCode.Y);
         if (!reserveZ && !reserveS && !reserveY) return;
 
         int playerNumber = self.playerState?.playerNumber ?? 0;
@@ -358,8 +358,8 @@ public static class EditorInputRouter
     {
         RainWorldGame game = player?.room?.game;
         if (game == null || !game.devToolsActive || game.devUI == null) return false;
-        return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
-               Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
+        return global::UnityEngine.Input.GetKey(KeyCode.LeftControl) || global::UnityEngine.Input.GetKey(KeyCode.RightControl) ||
+               global::UnityEngine.Input.GetKey(KeyCode.LeftCommand) || global::UnityEngine.Input.GetKey(KeyCode.RightCommand);
     }
 
     private static void NeutralizeGameplayInput(ref Player.InputPackage input)
