@@ -9,6 +9,9 @@ internal static class UiModeSwitch
 {
     internal static void Draw()
     {
+        // Apply one shared visual language before any rebuilt editor window is drawn this frame.
+        DevToolUiTheme.Apply();
+
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(250f * scale, 124f * scale), ImGuiCond.FirstUseEver);
