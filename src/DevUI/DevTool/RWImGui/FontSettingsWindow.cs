@@ -12,12 +12,17 @@ internal static class FontSettingsWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
-        float width = 320f;
+        float uiScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        float width = Math.Min(Math.Max(320f, display.X - 16f), 320f * uiScale);
+        float height = Math.Min(Math.Max(286f, display.Y - 16f), 286f * uiScale);
+
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 8f), 8f),
             ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, 286f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(new Num.Vector2(280f, 230f), new Num.Vector2(520f, 560f));
+        ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(Math.Min(280f * uiScale, Math.Max(280f, display.X - 16f)), 230f),
+            new Num.Vector2(Math.Max(280f, display.X - 16f), Math.Max(230f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"), ImGuiWindowFlags.NoCollapse))
@@ -34,11 +39,18 @@ internal static class FontSettingsWindow
         if (ImGui.SliderFloat(
                 DevToolUiSettings.T("字号##DevToolFontSize", "Size##DevToolFontSize"),
                 ref size,
-                11f,
-                32f,
+                12f,
+                72f,
                 "%.1f px"))
         {
-            DevToolUiSettings.FontSize = Math.Max(11f, Math.Min(32f, size));
+            DevToolUiSettings.FontSize = Math.Max(12f, Math.Min(72f, size));
+
+            // Keep this control window usable while the font scale changes. Other floating panels
+            // keep their developer-authored sizes and can be batch-selected/repositioned.
+            float nextScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+            ImGui.SetWindowSize(new Num.Vector2(
+                Math.Min(Math.Max(320f, display.X - 16f), 320f * nextScale),
+                Math.Min(Math.Max(286f, display.Y - 16f), 286f * nextScale)));
         }
 
         int weight = DevToolUiSettings.FontWeight;
@@ -60,6 +72,7 @@ internal static class FontSettingsWindow
         ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
                            (string.IsNullOrEmpty(fontName) ? DevToolUiSettings.T("默认", "Default") : fontName));
         ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);
+        ImGui.TextDisabled(DevToolUiSettings.T("默认字号：36 px（旧版 18 px 的 2 倍）", "Default size: 36 px (2x the old 18 px scale)"));
 
         if (DevToolUiSettings.IsChinese && weightVariants <= 1)
         {
@@ -87,6 +100,7 @@ internal static class FontSettingsWindow
         ImGui.TextDisabled(DevToolUiSettings.T("预览", "PREVIEW"));
         ImGui.Text(DevToolUiSettings.T("雨世界开发工具 · 字体预览 123 ABC", "Rain World DevTool · Font preview 123 ABC"));
         ImGui.TextDisabled(DevToolUiSettings.T("弱化文字预览 · 参数说明", "Muted text preview · parameter hint"));
+        ImGui.TextDisabled(DevToolUiSettings.T("窗口描边：黑色 2 px", "Window outline: black 2 px"));
 
         if (ImGui.Button(DevToolUiSettings.T("恢复默认", "Reset Defaults")))
             DevToolUiSettings.ResetFontAppearance();
