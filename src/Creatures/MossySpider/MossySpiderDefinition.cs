@@ -1,6 +1,5 @@
 using DryCycle.Framework.Creature.Core;
 using UnityEngine;
-using CreatureTemplateBuilder = DryCycle.Registration.CreatureTemplateBuilder;
 
 namespace DryCycle.Creatures.MossySpider;
 
@@ -30,43 +29,37 @@ internal static class MossySpiderDefinition
 
     private static CreatureTemplate CreateTemplate()
     {
-        CreatureTemplateBuilder builder = new(
-            MossySpiderEnums.Type,
-            "Mossy Spider")
-        {
-            // MossySpider owns its AI behavior while reusing Deer's existing pre-baked
-            // AI-map slot so ordinary installed room files remain load-compatible.
-            HasAI = true,
-            RequireAIMap = true,
-            DoPreBakedPathing = false,
-            PreBakedPathingAncestorType = CreatureTemplate.Type.Deer,
-            BaseDamageResistance = 8f,
-            BaseStunResistance = 3f
-        };
+        // MossySpider owns its AI behavior while reusing Deer's existing pre-baked
+        // AI-map slot so ordinary installed room files remain load-compatible.
+        CreatureTemplate template = new CreatureTemplateBuilder(MossySpiderEnums.Type)
+            .Name("Mossy Spider")
+            .AI()
+            .RequireAIMap()
+            .ReusePreBakedPathing(CreatureTemplate.Type.Deer)
+            .DamageResistance(8f)
+            .StunResistance(3f)
 
-        // Body-space accessibility: everything except Wall, Climb and Solid is usable.
-        builder
-            .SetExactTileResistance(AItile.Accessibility.OffScreen, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.Floor, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.CurvedFloor, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.Corridor, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.Climb, 100f, PathCost.Legality.IllegalTile)
-            .SetExactTileResistance(AItile.Accessibility.Wall, 100f, PathCost.Legality.IllegalTile)
-            .SetExactTileResistance(AItile.Accessibility.Ceiling, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.Air, 1f, PathCost.Legality.Allowed)
-            .SetExactTileResistance(AItile.Accessibility.Solid, 100f, PathCost.Legality.SolidTile)
-            .SetExactTileResistance(AItile.Accessibility.Sand, 1f, PathCost.Legality.Allowed)
+            // Body-space accessibility: everything except Wall, Climb and Solid is usable.
+            .ExactTile(AItile.Accessibility.OffScreen, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.Floor, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.CurvedFloor, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.Corridor, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.Climb, 100f, PathCost.Legality.IllegalTile)
+            .ExactTile(AItile.Accessibility.Wall, 100f, PathCost.Legality.IllegalTile)
+            .ExactTile(AItile.Accessibility.Ceiling, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.Air, 1f, PathCost.Legality.Allowed)
+            .ExactTile(AItile.Accessibility.Solid, 100f, PathCost.Legality.SolidTile)
+            .ExactTile(AItile.Accessibility.Sand, 1f, PathCost.Legality.Allowed)
 
             // The creature migrates through side/off-screen space like a large walker.
             // It does not use ordinary shortcuts, dens or pole/wall-specific movement.
-            .AddConnectionResistance(MovementConnection.MovementType.Standard, 1f)
-            .AddConnectionResistance(MovementConnection.MovementType.OpenDiagonal, 1f)
-            .AddConnectionResistance(MovementConnection.MovementType.OutsideRoom, 1f)
-            .AddConnectionResistance(MovementConnection.MovementType.SideHighway, 1f)
-            .AddConnectionResistance(MovementConnection.MovementType.OffScreenMovement, 1f)
-            .AddConnectionResistance(MovementConnection.MovementType.BetweenRooms, 1f);
-
-        CreatureTemplate template = builder.Build();
+            .Connection(MovementConnection.MovementType.Standard, 1f)
+            .Connection(MovementConnection.MovementType.OpenDiagonal, 1f)
+            .Connection(MovementConnection.MovementType.OutsideRoom, 1f)
+            .Connection(MovementConnection.MovementType.SideHighway, 1f)
+            .Connection(MovementConnection.MovementType.OffScreenMovement, 1f)
+            .Connection(MovementConnection.MovementType.BetweenRooms, 1f)
+            .Build();
 
         // Custom AbstractAI owns migration; keep automatic generic roaming disabled.
         template.canAutoAbstractPath = false;

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using DryCycle.Framework.Creature.Core;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -29,27 +28,22 @@ internal static class DB_Definition
 
     private static CreatureTemplate CreateTemplate()
     {
-        CreatureTemplate ancestor = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
+        // Fly owns a non-ArtificialIntelligence controller and an existing pre-baked pathing slot.
+        // Inherit its ordinary template behavior while reusing that baked slot instead of creating a new one.
+        CreatureTemplate template = new CreatureTemplateBuilder(CreatureType)
+            .Name("Desert Batfly")
+            .Ancestor(CreatureTemplate.Type.Fly)
+            .AI(false)
+            .ReusePreBakedPathing(CreatureTemplate.Type.Fly)
+            .DamageResistance(0.3f)
+            .StunResistance(1f)
+            .InstantDeathLimit(0.9f)
+            .Build();
 
-        // Fly owns a non-ArtificialIntelligence controller; retain that lifecycle.
-        CreatureTemplate template = new(
-            CreatureType,
-            ancestor,
-            new List<TileTypeResistance>(),
-            new List<TileConnectionResistance>(),
-            new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Ignores, 0f));
-
-        template.name = "Desert Batfly";
         template.quantified = false;
-        template.AI = false;
-        template.preBakedPathingAncestor = ancestor;
-        template.doPreBakedPathing = false;
         template.bodySize = 0.18f;
         template.grasps = 1;
         template.meatPoints = 0;
-        template.baseDamageResistance = 0.3f;
-        template.baseStunResistance = 1f;
-        template.instantDeathDamageLimit = 0.9f;
         template.quickDeath = true;
         template.shortcutColor = new UnityEngine.Color(0.65f, 0.48f, 0.29f);
         return template;
