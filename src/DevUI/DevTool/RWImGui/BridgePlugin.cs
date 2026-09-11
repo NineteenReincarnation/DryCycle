@@ -157,7 +157,13 @@ internal static class DevToolFrontend
 
         try
         {
-            DevToolOverlay.Draw(snapshot);
+            // The switch is intentionally always available while DevTools are open. In
+            // Vanilla mode it is the only RWImGui window left on screen, so returning to
+            // the rebuilt editor never depends on an original DevInterface control.
+            UiModeSwitch.Draw();
+            if (!EditorUiModeState.UseVanilla)
+                DevToolOverlay.Draw(snapshot);
+
             ImGuiIOPtr io = ImGui.GetIO();
             EditorInputRouter.SetFrontendCapture(io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput);
         }
