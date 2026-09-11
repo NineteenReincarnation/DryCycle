@@ -9,7 +9,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// RWImGui's renderer. The reference executable uses a 100x1 gradient texture and a screen-space
 /// diagonal coordinate. RWImGui does not expose a per-command Unity material/shader binding, so
 /// the frontend evaluates the same gradient on the CPU and clips ordinary ImGui text into narrow
-/// cells. Every title shares one screen-space phase, so the highlight travels continuously through
+/// strips. Every title shares one screen-space phase, so the highlight travels continuously through
 /// the whole editor rather than restarting on every label.
 /// </summary>
 internal static class DevToolTitleFlow
@@ -54,38 +54,32 @@ internal static class DevToolTitleFlow
         float seconds = (Environment.TickCount & int.MaxValue) * 0.001f;
         float phase = seconds * FlowSpeed;
 
-        // A few pixels per cell is enough to preserve the original gradient's sharp white bands,
-        // while keeping the draw-command count bounded for large fonts and ultrawide displays.
-        float desiredCellWidth = Math.Max(3f, Math.Min(7f, textSize.Y * 0.22f));
-        int columns = Math.Max(1, Math.Min(64, (int)Math.Ceiling(textSize.X / desiredCellWidth)));
-        int rows = textSize.Y >= 20f ? 3 : 2;
-        float cellWidth = textSize.X / columns;
-        float cellHeight = textSize.Y / rows;
+        // The reference Y weight is small enough that one title-height sample preserves its
+        // diagonal motion. Only slicing along X avoids multiplying ImGui draw commands by 2-3x.
+        float desiredStripWidth = Math.Max(3f, Math.Min(7f, textSize.Y * 0.22f));
+        int columns = Math.Max(1, Math.Min(48, (int)Math.Ceiling(textSize.X / desiredStripWidth)));
+        float stripWidth = textSize.X / columns;
+        float sampleY = (textPosition.Y + textSize.Y * 0.5f) / screenHeight;
+        float y0 = textPosition.Y;
+        float y1 = textPosition.Y + textSize.Y;
 
-        for (int row = 0; row < rows; row++)
+        for (int column = 0; column < columns; column++)
         {
-            float y0 = textPosition.Y + row * cellHeight;
-            float y1 = row == rows - 1 ? textPosition.Y + textSize.Y : y0 + cellHeight + 0.5f;
-            float sampleY = (y0 + y1) * 0.5f / screenHeight;
+            float x0 = textPosition.X + column * stripWidth;
+            float x1 = column == columns - 1 ? textPosition.X + textSize.X : x0 + stripWidth + 0.5f;
+            float sampleX = (x0 + x1) * 0.5f / screenWidth;
+            float coordinate = Frac(ScreenXWeight * sampleX + ScreenYWeight * sampleY + phase);
+            float sample = SampleGradient(coordinate);
 
-            for (int column = 0; column < columns; column++)
-            {
-                float x0 = textPosition.X + column * cellWidth;
-                float x1 = column == columns - 1 ? textPosition.X + textSize.X : x0 + cellWidth + 0.5f;
-                float sampleX = (x0 + x1) * 0.5f / screenWidth;
-                float coordinate = Frac(ScreenXWeight * sampleX + ScreenYWeight * sampleY + phase);
-                float sample = SampleGradient(coordinate);
+            float bright = Math.Max(0f, (sample - ReferenceBase) / (255f - ReferenceBase));
+            float dark = Math.Max(0f, (ReferenceBase - sample) / (ReferenceBase - ReferenceDark));
+            if (bright < 0.015f && dark < 0.015f)
+                continue;
 
-                float bright = Math.Max(0f, (sample - ReferenceBase) / (255f - ReferenceBase));
-                float dark = Math.Max(0f, (ReferenceBase - sample) / (ReferenceBase - ReferenceDark));
-                if (bright < 0.015f && dark < 0.015f)
-                    continue;
-
-                Num.Vector4 color = FlowColor(baseColor, bright, dark, strength);
-                draw.PushClipRect(new Num.Vector2(x0, y0), new Num.Vector2(x1, y1), true);
-                draw.AddText(textPosition, ImGui.GetColorU32(color), text);
-                draw.PopClipRect();
-            }
+            Num.Vector4 color = FlowColor(baseColor, bright, dark, strength);
+            draw.PushClipRect(new Num.Vector2(x0, y0), new Num.Vector2(x1, y1), true);
+            draw.AddText(textPosition, ImGui.GetColorU32(color), text);
+            draw.PopClipRect();
         }
     }
 
