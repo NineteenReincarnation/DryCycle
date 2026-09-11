@@ -51,20 +51,21 @@ internal static class ObjectInspectorView
     {
         ImGui.TextDisabled("Transform");
 
-        SynchronizePosition(inspector);
+        // Keep external/gizmo movement visible, but never overwrite an edit buffer while
+        // an ImGui item is active. This is what lets typed values survive across frames.
+        if (!ImGui.IsAnyItemActive())
+            SynchronizePosition(inspector);
+
         ImGui.SetNextItemWidth(-1f);
-        bool xChanged = ImGui.InputFloat("X##DevToolPosX", ref positionX, 1f, 20f, "%.1f");
+        ImGui.InputFloat("X##DevToolPosX", ref positionX, 1f, 20f, "%.1f");
         bool xCommit = ImGui.IsItemDeactivatedAfterEdit();
 
         ImGui.SetNextItemWidth(-1f);
-        bool yChanged = ImGui.InputFloat("Y##DevToolPosY", ref positionY, 1f, 20f, "%.1f");
+        ImGui.InputFloat("Y##DevToolPosY", ref positionY, 1f, 20f, "%.1f");
         bool yCommit = ImGui.IsItemDeactivatedAfterEdit();
 
         if (xCommit || yCommit)
             SendPosition(inspector);
-
-        if (!xChanged && !yChanged && !ImGui.IsAnyItemActive())
-            SynchronizePosition(inspector);
     }
 
     private static void DrawProperties(EditorInspectorSnapshot inspector)
@@ -234,8 +235,7 @@ internal static class ObjectInspectorView
             }
 
             float factor = Get(LegacySliderEdits, stateKey, control.Factor);
-            bool changed = ImGui.SliderFloat(label, ref factor, 0f, 1f,
-                string.IsNullOrEmpty(control.ValueText) ? "%.3f" : control.ValueText);
+            bool changed = ImGui.SliderFloat(label, ref factor, 0f, 1f, "%.3f");
             LegacySliderEdits[stateKey] = factor;
             if (ImGui.IsItemDeactivatedAfterEdit())
             {
@@ -248,6 +248,12 @@ internal static class ObjectInspectorView
             else if (!changed && !ImGui.IsItemActive())
             {
                 LegacySliderEdits[stateKey] = control.Factor;
+            }
+
+            if (!string.IsNullOrWhiteSpace(control.ValueText))
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled(control.ValueText);
             }
 
             if (control.CanReset)
