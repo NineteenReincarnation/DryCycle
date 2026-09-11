@@ -11,18 +11,17 @@ namespace DryCycle.DevUI.DevTool.Preview;
 /// <summary>
 /// Second-stage preview bootstrap for effects whose runtime object is normally created only from
 /// Room.Loaded. The implementation intentionally has no knowledge of mod ids, namespaces or custom
-/// registries. It uses two generic strategies:
+/// registries. It uses three generic strategies, from safest to broadest:
 ///
-/// 1. Replay only HookGen Room.Loaded callbacks whose IL demonstrably reads RoomEffect state and
-///    reaches Room.AddObject. The original Room.Loaded body is replaced with a no-op continuation,
-///    so the room is never loaded a second time. Each callback is A/B-probed without/with the
-///    temporary effect while Room.AddObject is captured instead of committed.
-/// 2. If no hook produced a runtime object, try a constructor convention discovered from loaded
-///    assemblies. Exact type-name matches are preferred; one unambiguous prefix/suffix match is
-///    allowed for conventional names such as VoidSea -> VoidSeaScene. Constructors may use only
-///    public parameters drawn from {Room, RoomEffect, float amount}.
+/// 1. Infer a constructor recipe directly from the IL around the matching RoomEffect.Type branch.
+///    This works for vanilla Room.Loaded and third-party HookGen callbacks without executing the
+///    callback itself, so unrelated load-time code is never replayed.
+/// 2. For simple HookGen callbacks that are proven free of obvious persistent/global mutations,
+///    run a reversible A/B probe with Room.AddObject captured rather than committed.
+/// 3. If neither path produced an object, use a conservative loaded-type naming convention.
 ///
-/// Both paths fail closed. Unknown or suspicious callbacks simply remain stage-one previews.
+/// Every committed runtime object is owned by EffectPreviewOwnershipTransaction. Unknown or
+/// suspicious patterns fail closed to the stage-one temporary RoomEffect overlay.
 /// </summary>
 internal static class EffectPreviewBootstrapper
 {
@@ -33,6 +32,13 @@ internal static class EffectPreviewBootstrapper
         EffectPreviewOwnershipTransaction transaction)
     {
         if (room == null || settings?.effects == null || previewEffect == null || transaction == null)
+            return;
+
+        int recipeObjects = EffectConstructorRecipeBootstrap.TryBootstrap(
+            room,
+            previewEffect,
+            transaction);
+        if (recipeObjects > 0)
             return;
 
         ProbeProduct product = LoadedHookReplayProbe.Probe(room, settings, previewEffect);
@@ -49,11 +55,330 @@ internal static class EffectPreviewBootstrapper
             transaction.ApplyFieldMutation(pair.Key, delta.OriginalValue, delta.PreviewValue);
         }
 
-        // Hook replay is the primary universal path for mods. Constructor discovery is a safe
-        // fallback for vanilla/DLC load-time scenes and mods that use conventional effect classes
-        // without a replayable HookGen Room.Loaded callback.
         if (committed == 0)
             ConstructorConventionBootstrap.TryBootstrap(room, previewEffect, transaction);
+    }
+}
+
+/// <summary>
+/// Reads constructor recipes from already-loaded IL rather than re-running Room.Loaded. A recipe is
+/// accepted only when a matching RoomEffect.Type static field is followed by a very small/simple
+/// conditional branch, construction of an UpdatableAndDeletable, and Room.AddObject. Additional
+/// conditional branches make the recipe ambiguous and are rejected instead of guessing.
+/// </summary>
+internal static class EffectConstructorRecipeBootstrap
+{
+    private const int MaxBranchScanInstructions = 64;
+    private const int MaxConstructorDistanceFromAdd = 14;
+
+    internal static int TryBootstrap(
+        global::Room room,
+        RoomSettings.RoomEffect effect,
+        EffectPreviewOwnershipTransaction transaction)
+    {
+        string typeName = effect?.type?.value;
+        if (room == null || string.IsNullOrWhiteSpace(typeName) || transaction == null)
+            return 0;
+
+        List<ConstructorInfo> recipes = new();
+        HashSet<string> recipeKeys = new(StringComparer.Ordinal);
+
+        MethodInfo vanillaLoaded = typeof(global::Room).GetMethod(
+            nameof(global::Room.Loaded),
+            BindingFlags.Instance | BindingFlags.Public);
+        CollectRecipes(vanillaLoaded, typeName, recipes, recipeKeys);
+
+        On.Room.hook_Loaded[] hooks = HookGenLoadedHookDiscovery.Discover(vanillaLoaded);
+        for (int i = 0; i < hooks.Length; i++)
+            CollectRecipes(hooks[i]?.Method, typeName, recipes, recipeKeys);
+
+        int committed = 0;
+        for (int i = 0; i < recipes.Count; i++)
+        {
+            ConstructorInfo ctor = recipes[i];
+            UpdatableAndDeletable primary = null;
+            EffectPreviewObjectCapture.CaptureResult nested = EffectPreviewObjectCapture.Capture(
+                room,
+                () => primary = ctor.Invoke(
+                    ConstructorConventionBootstrap.BuildArguments(ctor, room, effect)) as UpdatableAndDeletable);
+
+            if (!nested.Success || primary == null)
+            {
+                EffectPreviewOwnershipTransaction.DisposeCapturedObject(primary, room);
+                DisposeAll(nested.Objects, room);
+                continue;
+            }
+
+            if (transaction.CommitObject(primary))
+                committed++;
+
+            HashSet<UpdatableAndDeletable> seen =
+                new(ReferenceEqualityComparer<UpdatableAndDeletable>.Instance) { primary };
+            for (int n = 0; n < nested.Objects.Length; n++)
+            {
+                UpdatableAndDeletable obj = nested.Objects[n];
+                if (obj == null || !seen.Add(obj)) continue;
+                if (transaction.CommitObject(obj))
+                    committed++;
+                else
+                    EffectPreviewOwnershipTransaction.DisposeCapturedObject(obj, room);
+            }
+        }
+        return committed;
+    }
+
+    private static void CollectRecipes(
+        MethodInfo method,
+        string effectTypeName,
+        List<ConstructorInfo> recipes,
+        HashSet<string> recipeKeys)
+    {
+        if (method == null) return;
+        List<DecodedInstruction> il = DecodedInstructionReader.Read(method);
+        if (il.Count == 0) return;
+
+        for (int i = 0; i < il.Count; i++)
+        {
+            if (il[i].Operand is not FieldInfo effectField ||
+                !MatchesEffectTypeField(effectField, effectTypeName))
+                continue;
+
+            int conditionalBranches = 0;
+            int limit = Math.Min(il.Count, i + MaxBranchScanInstructions);
+            for (int j = i + 1; j < limit; j++)
+            {
+                DecodedInstruction instruction = il[j];
+
+                if (instruction.Operand is FieldInfo nextEffectField &&
+                    nextEffectField.FieldType == typeof(RoomSettings.RoomEffect.Type))
+                    break;
+
+                if (instruction.OpCode.FlowControl == FlowControl.Cond_Branch)
+                {
+                    conditionalBranches++;
+                    if (conditionalBranches > 1)
+                        break;
+                }
+                else if (instruction.OpCode.FlowControl == FlowControl.Branch ||
+                         instruction.OpCode.FlowControl == FlowControl.Return ||
+                         instruction.OpCode.FlowControl == FlowControl.Throw)
+                {
+                    break;
+                }
+
+                if (instruction.Operand is not MethodBase called || !IsRoomAddObject(called))
+                    continue;
+
+                ConstructorInfo ctor = FindNearestConstructor(il, i + 1, j);
+                if (ctor != null && ConstructorConventionBootstrap.SupportsConstructor(ctor))
+                    AddRecipe(ctor, recipes, recipeKeys);
+            }
+        }
+    }
+
+    private static ConstructorInfo FindNearestConstructor(
+        List<DecodedInstruction> il,
+        int branchStart,
+        int addObjectIndex)
+    {
+        int min = Math.Max(branchStart, addObjectIndex - MaxConstructorDistanceFromAdd);
+        for (int i = addObjectIndex - 1; i >= min; i--)
+        {
+            if (il[i].OpCode != OpCodes.Newobj || il[i].Operand is not ConstructorInfo ctor)
+                continue;
+
+            Type createdType = ctor.DeclaringType;
+            if (createdType == null || createdType.IsAbstract ||
+                !typeof(UpdatableAndDeletable).IsAssignableFrom(createdType) ||
+                typeof(PhysicalObject).IsAssignableFrom(createdType))
+                continue;
+            return ctor;
+        }
+        return null;
+    }
+
+    private static bool MatchesEffectTypeField(FieldInfo field, string requested)
+    {
+        if (field == null || field.FieldType != typeof(RoomSettings.RoomEffect.Type))
+            return false;
+        if (string.Equals(field.Name, requested, StringComparison.Ordinal))
+            return true;
+
+        try
+        {
+            return field.GetValue(null) is RoomSettings.RoomEffect.Type type &&
+                   string.Equals(type.value, requested, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsRoomAddObject(MethodBase method) =>
+        method?.DeclaringType == typeof(global::Room) &&
+        string.Equals(method.Name, nameof(global::Room.AddObject), StringComparison.Ordinal);
+
+    private static void AddRecipe(
+        ConstructorInfo ctor,
+        List<ConstructorInfo> recipes,
+        HashSet<string> keys)
+    {
+        string key;
+        try { key = ctor.Module.ModuleVersionId + ":" + ctor.MetadataToken; }
+        catch { key = ctor.DeclaringType?.AssemblyQualifiedName + ":" + ctor; }
+        if (!keys.Add(key)) return;
+        recipes.Add(ctor);
+    }
+
+    private static void DisposeAll(UpdatableAndDeletable[] objects, global::Room room)
+    {
+        if (objects == null) return;
+        for (int i = 0; i < objects.Length; i++)
+            EffectPreviewOwnershipTransaction.DisposeCapturedObject(objects[i], room);
+    }
+}
+
+internal readonly struct DecodedInstruction
+{
+    internal DecodedInstruction(int offset, OpCode opCode, object operand)
+    {
+        Offset = offset;
+        OpCode = opCode;
+        Operand = operand;
+    }
+
+    internal int Offset { get; }
+    internal OpCode OpCode { get; }
+    internal object Operand { get; }
+}
+
+internal static class DecodedInstructionReader
+{
+    private static readonly OpCode[] OneByte = new OpCode[256];
+    private static readonly OpCode[] TwoByte = new OpCode[256];
+
+    static DecodedInstructionReader()
+    {
+        FieldInfo[] fields = typeof(OpCodes).GetFields(BindingFlags.Static | BindingFlags.Public);
+        for (int i = 0; i < fields.Length; i++)
+        {
+            if (fields[i].GetValue(null) is not OpCode op) continue;
+            ushort value = unchecked((ushort)op.Value);
+            if (op.Size == 1) OneByte[value & 0xff] = op;
+            else if (op.Size == 2) TwoByte[value & 0xff] = op;
+        }
+    }
+
+    internal static List<DecodedInstruction> Read(MethodBase method)
+    {
+        List<DecodedInstruction> result = new();
+        byte[] il;
+        try { il = method?.GetMethodBody()?.GetILAsByteArray(); }
+        catch { return result; }
+        if (il == null || il.Length == 0) return result;
+
+        int p = 0;
+        while (p < il.Length)
+        {
+            int offset = p;
+            OpCode op;
+            byte first = il[p++];
+            if (first == 0xfe)
+            {
+                if (p >= il.Length) break;
+                op = TwoByte[il[p++]];
+            }
+            else
+            {
+                op = OneByte[first];
+            }
+
+            int operandStart = p;
+            int operandSize = OperandSize(op.OperandType, il, p);
+            if (operandSize < 0 || p + operandSize > il.Length) break;
+
+            object operand = null;
+            if (operandSize >= 4)
+            {
+                int token = BitConverter.ToInt32(il, operandStart);
+                if (op.OperandType == OperandType.InlineMethod)
+                    operand = ResolveMethod(method, token);
+                else if (op.OperandType == OperandType.InlineField)
+                    operand = ResolveField(method, token);
+            }
+
+            result.Add(new DecodedInstruction(offset, op, operand));
+            p += operandSize;
+        }
+        return result;
+    }
+
+    internal static MethodBase ResolveMethod(MethodBase context, int token)
+    {
+        try
+        {
+            Type[] typeArgs = context.DeclaringType?.IsGenericType == true
+                ? context.DeclaringType.GetGenericArguments()
+                : Type.EmptyTypes;
+            Type[] methodArgs = context.IsGenericMethod ? context.GetGenericArguments() : Type.EmptyTypes;
+            return context.Module.ResolveMethod(token, typeArgs, methodArgs);
+        }
+        catch
+        {
+            try { return context.Module.ResolveMethod(token); }
+            catch { return null; }
+        }
+    }
+
+    internal static FieldInfo ResolveField(MethodBase context, int token)
+    {
+        try
+        {
+            Type[] typeArgs = context.DeclaringType?.IsGenericType == true
+                ? context.DeclaringType.GetGenericArguments()
+                : Type.EmptyTypes;
+            Type[] methodArgs = context.IsGenericMethod ? context.GetGenericArguments() : Type.EmptyTypes;
+            return context.Module.ResolveField(token, typeArgs, methodArgs);
+        }
+        catch
+        {
+            try { return context.Module.ResolveField(token); }
+            catch { return null; }
+        }
+    }
+
+    internal static int OperandSize(OperandType type, byte[] il, int p)
+    {
+        return type switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineBrTarget => 1,
+            OperandType.ShortInlineI => 1,
+            OperandType.ShortInlineVar => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineBrTarget => 4,
+            OperandType.InlineField => 4,
+            OperandType.InlineI => 4,
+            OperandType.InlineMethod => 4,
+            OperandType.InlineSig => 4,
+            OperandType.InlineString => 4,
+            OperandType.InlineTok => 4,
+            OperandType.InlineType => 4,
+            OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 => 8,
+            OperandType.InlineR => 8,
+            OperandType.InlineSwitch => SwitchSize(il, p),
+            _ => -1
+        };
+    }
+
+    private static int SwitchSize(byte[] il, int p)
+    {
+        if (p + 4 > il.Length) return -1;
+        int count = BitConverter.ToInt32(il, p);
+        if (count < 0 || count > 65535) return -1;
+        return 4 + count * 4;
     }
 }
 
@@ -91,8 +416,6 @@ internal static class LoadedHookReplayProbe
         if (RoomLoadedMethod == null || room == null || settings?.effects == null || previewEffect == null)
             return product;
 
-        // Begin() has already inserted the preview overlay. Baseline callbacks must observe the
-        // exact real document, so temporarily detach only our exact effect object.
         RemoveExact(settings.effects, previewEffect);
         try
         {
@@ -161,8 +484,6 @@ internal static class LoadedHookReplayProbe
     {
         MethodInfo method = hook.Method;
         if (method == null) return false;
-
-        // Never replay our own callbacks through this generic compatibility path.
         if (ReferenceEquals(method.Module.Assembly, typeof(LoadedHookReplayProbe).Assembly))
             return false;
 
@@ -172,7 +493,7 @@ internal static class LoadedHookReplayProbe
                 return cached;
         }
 
-        bool result = HookMethodAnalyzer.LooksLikeEffectObjectBootstrap(method);
+        bool result = HookMethodAnalyzer.LooksLikeSafeEffectObjectBootstrap(method);
         lock (CandidateCache) CandidateCache[method] = result;
         return result;
     }
@@ -229,10 +550,6 @@ internal static class LoadedHookReplayProbe
             Type type = field.FieldType;
             bool scalar = type.IsValueType || type == typeof(string);
             bool ownedReference = variantValue is UpdatableAndDeletable obj && retainedSet.Contains(obj);
-
-            // Reference mutations are adopted only when they point at an object that survived the
-            // A/B diff. This supports patterns such as room.customManager = obj without ever
-            // replacing core Room references merely because a replayed hook touched them.
             if (!scalar && !ownedReference)
                 continue;
 
@@ -255,8 +572,6 @@ internal static class LoadedHookReplayProbe
 
     private static void ProbeOrigLoaded(global::Room self)
     {
-        // Intentionally empty. The whole point of this probe is to run a HookGen callback without
-        // re-entering vanilla Room.Loaded or the rest of the detour chain.
     }
 
     private static void LogHookFailureOnce(On.Room.hook_Loaded hook, string phase, Exception error)
@@ -294,8 +609,7 @@ internal static class LoadedHookReplayProbe
 /// <summary>
 /// Reflects HookGen's own registration store rather than any third-party mod API. Different
 /// RuntimeDetour generations have stored callbacks as MethodBase -> HookEndpoint maps, owner ->
-/// HookEntry lists, tuple keys, or direct delegate collections. Discovery understands those generic
-/// shapes and fails closed when an installation uses an unknown representation.
+/// HookEntry lists, tuple keys, or direct delegate collections.
 /// </summary>
 internal static class HookGenLoadedHookDiscovery
 {
@@ -351,7 +665,6 @@ internal static class HookGenLoadedHookDiscovery
         }
         if (store is string) return;
 
-        // RuntimeDetour 20xx HookEntry: { Type, Method, Hook }.
         MethodBase directMethod = ReadMember(store, "Method") as MethodBase;
         Delegate directHook = ReadMember(store, "Hook") as Delegate;
         if (SameMethod(directMethod, target) && directHook != null)
@@ -360,7 +673,6 @@ internal static class HookGenLoadedHookDiscovery
             return;
         }
 
-        // HookEndpoint: { Method, HookMap }. HookMap keys are the original HookGen delegates.
         object hookMap = ReadMember(store, "HookMap");
         if (SameMethod(directMethod, target) && hookMap != null)
         {
@@ -393,8 +705,6 @@ internal static class HookGenLoadedHookDiscovery
                 }
                 else if (method == null)
                 {
-                    // Owner maps and older endpoint maps have another object level before the
-                    // MethodBase/HookEntry pair.
                     CollectStore(value, target, result, depth + 1);
                 }
             }
@@ -418,7 +728,6 @@ internal static class HookGenLoadedHookDiscovery
         }
         if (value is string) return;
 
-        // HookEntry can also arrive here from owner lists.
         Delegate memberHook = ReadMember(value, "Hook") as Delegate;
         if (memberHook != null)
             CollectDelegates(memberHook, result, depth + 1);
@@ -495,31 +804,17 @@ internal static class HookMethodAnalyzer
     {
         None = 0,
         EffectRead = 1,
-        AddObject = 2
+        AddObject = 2,
+        RiskySideEffect = 4
     }
 
-    private static readonly OpCode[] OneByte = new OpCode[256];
-    private static readonly OpCode[] TwoByte = new OpCode[256];
-
-    static HookMethodAnalyzer()
-    {
-        FieldInfo[] fields = typeof(OpCodes).GetFields(BindingFlags.Static | BindingFlags.Public);
-        for (int i = 0; i < fields.Length; i++)
-        {
-            if (fields[i].GetValue(null) is not OpCode op) continue;
-            ushort value = unchecked((ushort)op.Value);
-            if (op.Size == 1) OneByte[value & 0xff] = op;
-            else if (op.Size == 2) TwoByte[value & 0xff] = op;
-        }
-    }
-
-    internal static bool LooksLikeEffectObjectBootstrap(MethodInfo root)
+    internal static bool LooksLikeSafeEffectObjectBootstrap(MethodInfo root)
     {
         if (root == null) return false;
         HashSet<MethodBase> visited = new();
         Signals signals = Scan(root, root.Module.Assembly, visited, 0);
-        return (signals & (Signals.EffectRead | Signals.AddObject)) ==
-               (Signals.EffectRead | Signals.AddObject);
+        Signals required = Signals.EffectRead | Signals.AddObject;
+        return (signals & required) == required && (signals & Signals.RiskySideEffect) == 0;
     }
 
     private static Signals Scan(
@@ -531,140 +826,76 @@ internal static class HookMethodAnalyzer
         if (method == null || depth > 4 || visited.Count > 96 || !visited.Add(method))
             return Signals.None;
 
-        MethodBody body;
-        byte[] il;
-        try
-        {
-            body = method.GetMethodBody();
-            il = body?.GetILAsByteArray();
-        }
-        catch
-        {
-            return Signals.None;
-        }
-        if (il == null || il.Length == 0) return Signals.None;
+        List<DecodedInstruction> il = DecodedInstructionReader.Read(method);
+        if (il.Count == 0) return Signals.None;
 
         Signals signals = Signals.None;
-        int p = 0;
-        while (p < il.Length)
+        for (int i = 0; i < il.Count; i++)
         {
-            OpCode op;
-            byte first = il[p++];
-            if (first == 0xfe)
-            {
-                if (p >= il.Length) break;
-                op = TwoByte[il[p++]];
-            }
-            else
-            {
-                op = OneByte[first];
-            }
+            DecodedInstruction instruction = il[i];
+            if (instruction.OpCode == OpCodes.Stsfld)
+                signals |= Signals.RiskySideEffect;
 
-            int operandStart = p;
-            int operandSize = OperandSize(op.OperandType, il, p);
-            if (operandSize < 0 || p + operandSize > il.Length) break;
-
-            if (op.OperandType == OperandType.InlineMethod && operandSize >= 4)
+            if (instruction.Operand is FieldInfo field &&
+                field.DeclaringType == typeof(RoomSettings) &&
+                string.Equals(field.Name, "effects", StringComparison.Ordinal))
             {
-                int token = BitConverter.ToInt32(il, operandStart);
-                MethodBase called = ResolveMethod(method, token);
-                if (called != null)
-                {
-                    if (called.DeclaringType == typeof(global::Room) &&
-                        string.Equals(called.Name, nameof(global::Room.AddObject), StringComparison.Ordinal))
-                        signals |= Signals.AddObject;
-
-                    if (called.DeclaringType == typeof(RoomSettings) &&
-                        called.Name.IndexOf("GetEffect", StringComparison.Ordinal) >= 0)
-                        signals |= Signals.EffectRead;
-
-                    if (called.Module?.Assembly == rootAssembly && called != method)
-                        signals |= Scan(called, rootAssembly, visited, depth + 1);
-                }
-            }
-            else if (op.OperandType == OperandType.InlineField && operandSize >= 4)
-            {
-                int token = BitConverter.ToInt32(il, operandStart);
-                FieldInfo field = ResolveField(method, token);
-                if (field?.DeclaringType == typeof(RoomSettings) &&
-                    string.Equals(field.Name, "effects", StringComparison.Ordinal))
-                    signals |= Signals.EffectRead;
+                signals |= Signals.EffectRead;
             }
 
-            if ((signals & (Signals.EffectRead | Signals.AddObject)) ==
-                (Signals.EffectRead | Signals.AddObject))
-                return signals;
+            if (instruction.Operand is not MethodBase called)
+                continue;
 
-            p += operandSize;
+            if (called.DeclaringType == typeof(global::Room) &&
+                string.Equals(called.Name, nameof(global::Room.AddObject), StringComparison.Ordinal))
+                signals |= Signals.AddObject;
+
+            if (called.DeclaringType == typeof(RoomSettings) &&
+                called.Name.IndexOf("GetEffect", StringComparison.Ordinal) >= 0)
+                signals |= Signals.EffectRead;
+
+            if (IsRiskyCall(called))
+                signals |= Signals.RiskySideEffect;
+
+            if (called.Module?.Assembly == rootAssembly && called != method)
+                signals |= Scan(called, rootAssembly, visited, depth + 1);
         }
         return signals;
     }
 
-    private static MethodBase ResolveMethod(MethodBase context, int token)
+    private static bool IsRiskyCall(MethodBase called)
     {
-        try
-        {
-            Type[] typeArgs = context.DeclaringType?.IsGenericType == true
-                ? context.DeclaringType.GetGenericArguments()
-                : Type.EmptyTypes;
-            Type[] methodArgs = context.IsGenericMethod ? context.GetGenericArguments() : Type.EmptyTypes;
-            return context.Module.ResolveMethod(token, typeArgs, methodArgs);
-        }
-        catch
-        {
-            try { return context.Module.ResolveMethod(token); }
-            catch { return null; }
-        }
-    }
+        Type type = called?.DeclaringType;
+        string typeName = type?.FullName ?? string.Empty;
+        string methodName = called?.Name ?? string.Empty;
 
-    private static FieldInfo ResolveField(MethodBase context, int token)
-    {
-        try
-        {
-            Type[] typeArgs = context.DeclaringType?.IsGenericType == true
-                ? context.DeclaringType.GetGenericArguments()
-                : Type.EmptyTypes;
-            Type[] methodArgs = context.IsGenericMethod ? context.GetGenericArguments() : Type.EmptyTypes;
-            return context.Module.ResolveField(token, typeArgs, methodArgs);
-        }
-        catch
-        {
-            try { return context.Module.ResolveField(token); }
-            catch { return null; }
-        }
-    }
+        if (type == typeof(AbstractRoom) &&
+            (methodName.IndexOf("AddEntity", StringComparison.Ordinal) >= 0 ||
+             methodName.IndexOf("RemoveEntity", StringComparison.Ordinal) >= 0))
+            return true;
 
-    private static int OperandSize(OperandType type, byte[] il, int p)
-    {
-        return type switch
-        {
-            OperandType.InlineNone => 0,
-            OperandType.ShortInlineBrTarget => 1,
-            OperandType.ShortInlineI => 1,
-            OperandType.ShortInlineVar => 1,
-            OperandType.InlineVar => 2,
-            OperandType.InlineBrTarget => 4,
-            OperandType.InlineField => 4,
-            OperandType.InlineI => 4,
-            OperandType.InlineMethod => 4,
-            OperandType.InlineSig => 4,
-            OperandType.InlineString => 4,
-            OperandType.InlineTok => 4,
-            OperandType.InlineType => 4,
-            OperandType.ShortInlineR => 4,
-            OperandType.InlineI8 => 8,
-            OperandType.InlineR => 8,
-            OperandType.InlineSwitch => SwitchSize(il, p),
-            _ => -1
-        };
-    }
+        if (typeName.StartsWith("System.IO.File", StringComparison.Ordinal) ||
+            typeName.StartsWith("System.IO.Directory", StringComparison.Ordinal))
+            return true;
 
-    private static int SwitchSize(byte[] il, int p)
-    {
-        if (p + 4 > il.Length) return -1;
-        int count = BitConverter.ToInt32(il, p);
-        if (count < 0 || count > 65535) return -1;
-        return 4 + count * 4;
+        if (typeName == "UnityEngine.AssetBundle" &&
+            methodName.IndexOf("Load", StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (typeName.StartsWith("System.Collections.Generic.Dictionary", StringComparison.Ordinal) &&
+            string.Equals(methodName, "set_Item", StringComparison.Ordinal))
+            return true;
+
+        if ((typeName.IndexOf("SaveState", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             typeName.IndexOf("RegionState", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             typeName.IndexOf("PlayerProgression", StringComparison.OrdinalIgnoreCase) >= 0) &&
+            (methodName.StartsWith("Save", StringComparison.OrdinalIgnoreCase) ||
+             methodName.StartsWith("Set", StringComparison.OrdinalIgnoreCase) ||
+             methodName.StartsWith("Consume", StringComparison.OrdinalIgnoreCase) ||
+             methodName.StartsWith("Destroy", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return false;
     }
 }
 
@@ -840,6 +1071,56 @@ internal static class ConstructorConventionBootstrap
         return false;
     }
 
+    internal static bool SupportsConstructor(ConstructorInfo ctor)
+    {
+        if (ctor == null || !ctor.IsPublic) return false;
+        Type created = ctor.DeclaringType;
+        if (created == null || created.IsAbstract ||
+            !typeof(UpdatableAndDeletable).IsAssignableFrom(created) ||
+            typeof(PhysicalObject).IsAssignableFrom(created))
+            return false;
+
+        ParameterInfo[] parameters = ctor.GetParameters();
+        if (parameters.Length > 3) return false;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            Type parameter = parameters[i].ParameterType;
+            if (parameter != typeof(global::Room) &&
+                parameter != typeof(RoomSettings.RoomEffect) &&
+                parameter != typeof(float) &&
+                parameter != typeof(RoomCamera))
+                return false;
+        }
+        return true;
+    }
+
+    internal static object[] BuildArguments(
+        ConstructorInfo ctor,
+        global::Room room,
+        RoomSettings.RoomEffect effect)
+    {
+        ParameterInfo[] parameters = ctor.GetParameters();
+        object[] args = new object[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            Type type = parameters[i].ParameterType;
+            if (type == typeof(global::Room)) args[i] = room;
+            else if (type == typeof(RoomSettings.RoomEffect)) args[i] = effect;
+            else if (type == typeof(float)) args[i] = effect.amount;
+            else if (type == typeof(RoomCamera)) args[i] = ResolveCamera(room);
+        }
+        return args;
+    }
+
+    private static RoomCamera ResolveCamera(global::Room room)
+    {
+        RoomCamera[] cameras = room?.game?.cameras;
+        if (cameras == null || cameras.Length == 0) return null;
+        for (int i = 0; i < cameras.Length; i++)
+            if (cameras[i] != null && ReferenceEquals(cameras[i].room, room)) return cameras[i];
+        return cameras[0];
+    }
+
     private static Type[] FindTypes(string effectName)
     {
         lock (TypeCache)
@@ -864,6 +1145,7 @@ internal static class ConstructorConventionBootstrap
                 Type type = types[i];
                 if (type == null || type.IsAbstract ||
                     !typeof(UpdatableAndDeletable).IsAssignableFrom(type) ||
+                    typeof(PhysicalObject).IsAssignableFrom(type) ||
                     ChooseConstructor(type) == null)
                     continue;
 
@@ -886,8 +1168,6 @@ internal static class ConstructorConventionBootstrap
         else
             result = Array.Empty<Type>();
 
-        // Do not permanently cache a miss: a content mod can still load an assembly after the
-        // DevTool runtime was initialized and the next hover should be allowed to discover it.
         if (result.Length > 0)
         {
             lock (TypeCache) TypeCache[effectName] = result;
@@ -925,12 +1205,12 @@ internal static class ConstructorConventionBootstrap
         int bestScore = int.MinValue;
         for (int i = 0; i < constructors.Length; i++)
         {
-            ParameterInfo[] parameters = constructors[i].GetParameters();
-            if (parameters.Length > 3) continue;
+            ConstructorInfo ctor = constructors[i];
+            if (!SupportsConstructor(ctor)) continue;
 
-            int score = 0;
-            bool valid = true;
-            bool hasContext = false;
+            ParameterInfo[] parameters = ctor.GetParameters();
+            int score = parameters.Length == 0 ? 1 : 0;
+            bool hasContext = parameters.Length == 0;
             for (int p = 0; p < parameters.Length; p++)
             {
                 Type parameter = parameters[p].ParameterType;
@@ -944,39 +1224,20 @@ internal static class ConstructorConventionBootstrap
                     score += 70;
                     hasContext = true;
                 }
+                else if (parameter == typeof(RoomCamera))
+                {
+                    score += 30;
+                    hasContext = true;
+                }
                 else if (parameter == typeof(float))
                 {
                     score += 10;
                 }
-                else
-                {
-                    valid = false;
-                    break;
-                }
             }
-            if (!valid || (!hasContext && parameters.Length != 0)) continue;
-            if (parameters.Length == 0) score = 1;
-            if (score <= bestScore) continue;
+            if (!hasContext || score <= bestScore) continue;
             bestScore = score;
-            best = constructors[i];
+            best = ctor;
         }
         return best;
-    }
-
-    private static object[] BuildArguments(
-        ConstructorInfo ctor,
-        global::Room room,
-        RoomSettings.RoomEffect effect)
-    {
-        ParameterInfo[] parameters = ctor.GetParameters();
-        object[] args = new object[parameters.Length];
-        for (int i = 0; i < parameters.Length; i++)
-        {
-            Type type = parameters[i].ParameterType;
-            if (type == typeof(global::Room)) args[i] = room;
-            else if (type == typeof(RoomSettings.RoomEffect)) args[i] = effect;
-            else if (type == typeof(float)) args[i] = effect.amount;
-        }
-        return args;
     }
 }
