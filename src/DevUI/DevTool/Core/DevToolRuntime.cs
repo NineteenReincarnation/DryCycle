@@ -5,6 +5,7 @@ using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
@@ -40,12 +41,15 @@ internal static class DevToolRuntime
         RoomEditorCommandQueue.Clear();
         SoundEditorCommandQueue.Clear();
         TriggerEditorCommandQueue.Clear();
+        MapEditorCommandQueue.Clear();
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
         SoundEditorPresentationHub.Clear();
         TriggerEditorPresentationHub.Clear();
+        MapEditorPresentationHub.Clear();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
+        MapEditorStateHub.Reset();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -73,6 +77,7 @@ internal static class DevToolRuntime
         RoomEditorCommandQueue.Process(session);
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
+        MapEditorCommandQueue.Process(session);
         session?.Synchronize(self);
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
@@ -85,13 +90,15 @@ internal static class DevToolRuntime
             ((session.ToolMode == EditorToolMode.Objects && self.activePage is ObjectsPage) ||
              (session.ToolMode == EditorToolMode.Room && self.activePage is RoomSettingsPage) ||
              (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage) ||
-             (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage));
+             (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage) ||
+             (session.ToolMode == EditorToolMode.Map && self.activePage is MapPage));
         LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
         EditorPresentationHub.Publish(session);
         RoomEditorPresentationHub.Publish(session);
         SoundEditorPresentationHub.Publish(session);
         TriggerEditorPresentationHub.Publish(session);
+        MapEditorPresentationHub.Publish(session);
     }
 }
 
@@ -256,7 +263,8 @@ public sealed class EditorSession
     public void ToggleLegacyUi()
     {
         if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room &&
-            ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers) return;
+            ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers &&
+            ToolMode != EditorToolMode.Map) return;
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
