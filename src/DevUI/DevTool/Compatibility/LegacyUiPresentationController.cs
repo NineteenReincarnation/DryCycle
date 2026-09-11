@@ -38,6 +38,16 @@ internal static class LegacyUiPresentationController
             return;
         }
 
+        if (page is MapPage mapPage)
+        {
+            // MapPage persists RoomPanel.pos/devPos through SaveMapConfig(). Never move its
+            // legacy controls off-screen to hide them: doing so can corrupt the saved map.
+            // The rebuilt Map workspace owns input separately, so visual-only suppression is
+            // sufficient here and leaves every map coordinate untouched.
+            SuppressVisualSubtree(mapPage);
+            return;
+        }
+
         SuppressChildren(page);
     }
 
@@ -178,6 +188,17 @@ internal static class LegacyUiPresentationController
             SuppressSubtree(node.subNodes[i]);
     }
 
+    private static void SuppressVisualSubtree(DevUINode node)
+    {
+        if (node == null) return;
+        RememberVisualState(node);
+        HideVisuals(node);
+
+        if (node.subNodes == null) return;
+        for (int i = 0; i < node.subNodes.Count; i++)
+            SuppressVisualSubtree(node.subNodes[i]);
+    }
+
     private static void RememberAndHideLabels(DevUINode node)
     {
         if (node == null) return;
@@ -192,10 +213,20 @@ internal static class LegacyUiPresentationController
 
     private static void Remember(DevUINode node)
     {
+        Remember(node, capturePosition: true);
+    }
+
+    private static void RememberVisualState(DevUINode node)
+    {
+        Remember(node, capturePosition: false);
+    }
+
+    private static void Remember(DevUINode node, bool capturePosition)
+    {
         if (node == null || hidden.ContainsKey(node)) return;
 
         NodeState state = new();
-        if (node is PositionedDevUINode positioned)
+        if (capturePosition && node is PositionedDevUINode positioned)
         {
             state.HasPosition = true;
             state.Position = positioned.pos;
