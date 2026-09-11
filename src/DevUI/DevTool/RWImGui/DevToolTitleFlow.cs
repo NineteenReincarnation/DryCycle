@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -19,6 +20,11 @@ internal static class DevToolTitleFlow
     private const float FlowSpeed = -0.125f;
     private const float ScreenXWeight = 0.70f;
     private const float ScreenYWeight = -0.19f;
+    private const float OverlayColorMergeTolerance = 0.035f;
+
+    // Use a monotonic process-local clock instead of Environment.TickCount. TickCount crosses its
+    // sign bit after roughly 24.9 days, which used to make the shared phase visibly jump backwards.
+    private static readonly long PhaseOrigin = Stopwatch.GetTimestamp();
 
     // Luminance of the 100x1 textgradient.png embedded in RainWorldRender.exe. Keeping the source
     // data here makes the frontend self-contained and avoids deploying another texture beside the
@@ -51,8 +57,8 @@ internal static class DevToolTitleFlow
         Num.Vector2 display = ImGui.GetIO().DisplaySize;
         float screenWidth = Math.Max(1f, display.X);
         float screenHeight = Math.Max(1f, display.Y);
-        float seconds = (Environment.TickCount & int.MaxValue) * 0.001f;
-        float phase = seconds * FlowSpeed;
+        double elapsedSeconds = (Stopwatch.GetTimestamp() - PhaseOrigin) / (double)Stopwatch.Frequency;
+        float phase = (float)(elapsedSeconds * FlowSpeed);
 
         // The reference Y weight is small enough that one title-height sample preserves its
         // diagonal motion. Only slicing along X avoids multiplying ImGui draw commands by 2-3x.
@@ -62,11 +68,22 @@ internal static class DevToolTitleFlow
         float sampleY = (textPosition.Y + textSize.Y * 0.5f) / screenHeight;
         float y0 = textPosition.Y;
         float y1 = textPosition.Y + textSize.Y;
+        float textRight = textPosition.X + textSize.X;
+
+        // Adjacent samples on the broad metallic ramp are often visually indistinguishable. Keep
+        // the fine sampling used by the reference profile, but merge near-identical neighbouring
+        // strips into one clipped draw. This preserves the moving narrow bands while substantially
+        // reducing ImGui draw-command churn for long headings.
+        bool runActive = false;
+        float runX0 = 0f;
+        float runX1 = 0f;
+        int runSamples = 0;
+        Num.Vector4 runColor = default;
 
         for (int column = 0; column < columns; column++)
         {
             float x0 = textPosition.X + column * stripWidth;
-            float x1 = column == columns - 1 ? textPosition.X + textSize.X : x0 + stripWidth + 0.5f;
+            float x1 = column == columns - 1 ? textRight : x0 + stripWidth;
             float sampleX = (x0 + x1) * 0.5f / screenWidth;
             float coordinate = Frac(ScreenXWeight * sampleX + ScreenYWeight * sampleY + phase);
             float sample = SampleGradient(coordinate);
@@ -74,13 +91,66 @@ internal static class DevToolTitleFlow
             float bright = Math.Max(0f, (sample - ReferenceBase) / (255f - ReferenceBase));
             float dark = Math.Max(0f, (ReferenceBase - sample) / (ReferenceBase - ReferenceDark));
             if (bright < 0.015f && dark < 0.015f)
+            {
+                FlushRun(draw, textPosition, y0, y1, textRight, text, ref runActive, runX0, runX1, runColor);
+                runSamples = 0;
                 continue;
+            }
 
             Num.Vector4 color = FlowColor(baseColor, bright, dark, strength);
-            draw.PushClipRect(new Num.Vector2(x0, y0), new Num.Vector2(x1, y1), true);
-            draw.AddText(textPosition, ImGui.GetColorU32(color), text);
-            draw.PopClipRect();
+            if (runActive && ColorsNear(runColor, color))
+            {
+                runX1 = x1;
+                runSamples++;
+                float weight = 1f / runSamples;
+                runColor = new Num.Vector4(
+                    runColor.X + (color.X - runColor.X) * weight,
+                    runColor.Y + (color.Y - runColor.Y) * weight,
+                    runColor.Z + (color.Z - runColor.Z) * weight,
+                    baseColor.W);
+                continue;
+            }
+
+            FlushRun(draw, textPosition, y0, y1, textRight, text, ref runActive, runX0, runX1, runColor);
+            runActive = true;
+            runX0 = x0;
+            runX1 = x1;
+            runSamples = 1;
+            runColor = color;
         }
+
+        FlushRun(draw, textPosition, y0, y1, textRight, text, ref runActive, runX0, runX1, runColor);
+    }
+
+    private static void FlushRun(
+        ImDrawListPtr draw,
+        Num.Vector2 textPosition,
+        float y0,
+        float y1,
+        float textRight,
+        string text,
+        ref bool runActive,
+        float x0,
+        float x1,
+        Num.Vector4 color)
+    {
+        if (!runActive)
+            return;
+
+        // Half a pixel of overlap avoids hairline gaps from backend scissor rounding. The next run
+        // is drawn afterwards, so its own colour still owns the shared boundary.
+        float clipRight = Math.Min(textRight, x1 + 0.5f);
+        draw.PushClipRect(new Num.Vector2(x0, y0), new Num.Vector2(clipRight, y1), true);
+        draw.AddText(textPosition, ImGui.GetColorU32(color), text);
+        draw.PopClipRect();
+        runActive = false;
+    }
+
+    private static bool ColorsNear(Num.Vector4 a, Num.Vector4 b)
+    {
+        return Math.Abs(a.X - b.X) <= OverlayColorMergeTolerance &&
+               Math.Abs(a.Y - b.Y) <= OverlayColorMergeTolerance &&
+               Math.Abs(a.Z - b.Z) <= OverlayColorMergeTolerance;
     }
 
     private static Num.Vector4 FlowColor(Num.Vector4 source, float bright, float dark, float strength)
