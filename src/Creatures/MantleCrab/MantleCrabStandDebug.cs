@@ -9,33 +9,33 @@ namespace DryCycle.Creatures.MantleCrab;
 
 /// <summary>
 /// MantleCrab 站立问题专用诊断日志。
-/// 这不是长期游戏系统：它只负责把“身体为什么塌下来”需要的关键状态写进独立文件。
-///
-/// Dedicated standing diagnostic log for MantleCrab. This is intentionally separate from the normal
-/// BepInEx log so a short reproduction can be sent back without unrelated mod noise.
+/// 日志直接写到桌面，并且每次写完立即释放文件句柄，方便测试时直接拖拽/复制。
 /// </summary>
 internal static class MantleCrabStandDebug
 {
     private const string FileName = "MantleCrabStandDebug.log";
 
     private static readonly object Sync = new();
-    private static StreamWriter writer;
+    private static bool initialized;
     private static bool failed;
 
-    internal static string LogPath => Path.Combine(Paths.BepInExRootPath, FileName);
+    internal static string LogPath
+    {
+        get
+        {
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (!string.IsNullOrWhiteSpace(desktop))
+                return Path.Combine(desktop, FileName);
+            return Path.Combine(Paths.BepInExRootPath, FileName);
+        }
+    }
 
     internal static void RecordPlanning(MantleCrab crab, MantleCrabLocomotion locomotion)
     {
         if (crab == null || locomotion == null)
             return;
 
-        WriteSnapshot(
-            crab,
-            locomotion,
-            "PLAN",
-            null,
-            null,
-            null);
+        WriteSnapshot(crab, locomotion, "PLAN", null, null, null);
     }
 
     internal static void RecordGroundForces(
@@ -43,7 +43,7 @@ internal static class MantleCrabStandDebug
         MantleCrabLocomotion locomotion,
         Vector2 beforeSupport,
         Vector2 afterSupport,
-        Vector2 afterVerticalStabilizer)
+        Vector2 afterStandingCorrection)
     {
         if (crab == null || locomotion == null)
             return;
@@ -54,7 +54,7 @@ internal static class MantleCrabStandDebug
             "GROUND",
             beforeSupport,
             afterSupport,
-            afterVerticalStabilizer);
+            afterStandingCorrection);
     }
 
     private static void WriteSnapshot(
@@ -63,10 +63,10 @@ internal static class MantleCrabStandDebug
         string stage,
         Vector2? beforeSupport,
         Vector2? afterSupport,
-        Vector2? afterVerticalStabilizer)
+        Vector2? afterStandingCorrection)
     {
-        EnsureWriter();
-        if (writer == null)
+        EnsureFile();
+        if (failed)
             return;
 
         try
@@ -140,20 +140,55 @@ internal static class MantleCrabStandDebug
             {
                 line.Append(" beforeSupportVel=").Append(V(beforeSupport.Value))
                     .Append(" afterSupportVel=").Append(V(afterSupport ?? Vector2.zero))
-                    .Append(" afterVerticalStabilizerVel=").Append(V(afterVerticalStabilizer ?? Vector2.zero))
+                    .Append(" afterStandingCorrectionVel=").Append(V(afterStandingCorrection ?? Vector2.zero))
                     .Append(" supportDeltaY=").Append(F((afterSupport ?? Vector2.zero).y - beforeSupport.Value.y));
             }
 
-            line.Append(" :: ").Append(legs);
+            line.Append(" :: ").Append(legs).AppendLine();
 
             lock (Sync)
             {
-                writer.WriteLine(line.ToString());
+                // 不保持文件打开。Windows 文件选择器/拖拽时不会再碰到日志文件被进程长期占用的问题。
+                File.AppendAllText(LogPath, line.ToString(), new UTF8Encoding(false));
             }
         }
         catch (Exception ex)
         {
-            DisableAfterFailure(ex);
+            failed = true;
+            global::DryCycle.Plugin.Logger?.LogError($"MantleCrab standing debug logging disabled: {ex}");
+        }
+    }
+
+    private static void EnsureFile()
+    {
+        if (initialized || failed)
+            return;
+
+        lock (Sync)
+        {
+            if (initialized || failed)
+                return;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(LogPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                    Directory.CreateDirectory(directory);
+
+                StringBuilder header = new();
+                header.AppendLine("MantleCrab standing diagnostic log");
+                header.AppendLine("PLAN appears before walking-leg updates. GROUND appears when standing forces are actually applied.");
+                header.AppendLine("P=Planted, G=body considers foot grounded, S=Swinging, CS=stored Contact is on terrain, TS=actual Tip is on terrain.");
+                header.AppendLine();
+                File.WriteAllText(LogPath, header.ToString(), new UTF8Encoding(false));
+                initialized = true;
+                global::DryCycle.Plugin.Logger?.LogWarning($"MantleCrab standing debug log: {LogPath}");
+            }
+            catch (Exception ex)
+            {
+                failed = true;
+                global::DryCycle.Plugin.Logger?.LogError($"Failed to create MantleCrab standing debug log at {LogPath}: {ex}");
+            }
         }
     }
 
@@ -180,56 +215,6 @@ internal static class MantleCrabStandDebug
 
         velocity /= totalMass;
         return center / totalMass;
-    }
-
-    private static void EnsureWriter()
-    {
-        if (writer != null || failed)
-            return;
-
-        lock (Sync)
-        {
-            if (writer != null || failed)
-                return;
-
-            try
-            {
-                Directory.CreateDirectory(Paths.BepInExRootPath);
-                writer = new StreamWriter(
-                    new FileStream(LogPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite),
-                    new UTF8Encoding(false))
-                {
-                    AutoFlush = true
-                };
-
-                writer.WriteLine("MantleCrab standing diagnostic log");
-                writer.WriteLine("PLAN appears every creature frame before walking-leg updates. GROUND appears only when MantleCrab.Update actually calls ApplyGroundForces.");
-                writer.WriteLine("If a frame has PLAN but no GROUND, the creature skipped its standing-force pass that frame (for example SupportingFeet == 0).");
-                writer.WriteLine("P=Planted, G=body considers foot grounded, S=Swinging, CS=stored Contact is on terrain, TS=actual Tip is on terrain.");
-                writer.WriteLine();
-
-                global::DryCycle.Plugin.Logger?.LogWarning($"MantleCrab standing debug log: {LogPath}");
-            }
-            catch (Exception ex)
-            {
-                failed = true;
-                global::DryCycle.Plugin.Logger?.LogError($"Failed to create MantleCrab standing debug log at {LogPath}: {ex}");
-            }
-        }
-    }
-
-    private static void DisableAfterFailure(Exception ex)
-    {
-        failed = true;
-        try
-        {
-            writer?.Dispose();
-        }
-        catch
-        {
-        }
-        writer = null;
-        global::DryCycle.Plugin.Logger?.LogError($"MantleCrab standing debug logging disabled after write failure: {ex}");
     }
 
     private static string F(float value) =>
