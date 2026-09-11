@@ -19,6 +19,12 @@ internal static class MiscRuntime
         DevUIShortcutInputGuard.Enable();
         DryCycle.WorldLink.WorldLinkRuntime.Enable();
 
+        // The new DevTool owns Ctrl+S/Z/Y and document history. Plugin initialization
+        // currently enables the legacy shortcut runtime immediately before MiscRuntime;
+        // retire it here so both systems can never respond to the same key gesture.
+        DryCycle.OptimizedVanilla.VanillaDevUIShortcutRuntime.Disable();
+        DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
+
         // These two utilities only exist as temporary RegionKit fallbacks. They are
         // disabled by default to avoid duplicate hooks/UI once RegionKit is working.
         if (DryCycle.DayNight.RegionDayNightOptions.EnableLegacyIndividualPlacedObjectViewer)
@@ -36,6 +42,8 @@ internal static class MiscRuntime
 
     public static void Disable()
     {
+        DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
+
         if (!_enabled)
         {
             // WorldLink Enable is transactional, but keep this defensive cleanup so a
