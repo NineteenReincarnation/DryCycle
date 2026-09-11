@@ -1,7 +1,9 @@
 using System;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
+using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Commands;
@@ -52,6 +54,47 @@ public static class EditorActions
         return true;
     }
 
+    public static bool SetObjectProperty(
+        EditorSession session,
+        PlacedObject target,
+        string key,
+        EditorPropertyValue value)
+    {
+        if (session?.RoomSettings == null || target == null || string.IsNullOrEmpty(key)) return false;
+
+        bool accepted = false;
+        MutateObject(
+            session,
+            target,
+            "Change " + key,
+            () => accepted = ObjectInspectorRegistry.TrySetValue(target, key, value));
+        return accepted;
+    }
+
+    public static bool InvokeLegacyButton(EditorSession session, PlacedObject target, string path)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy button",
+            () => LegacyDevInterfaceBridge.ClickButton(session.Owner, target, path));
+    }
+
+    public static bool SetLegacySlider(EditorSession session, PlacedObject target, string path, float factor)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy slider",
+            () => LegacyDevInterfaceBridge.SetSlider(session.Owner, target, path, factor));
+    }
+
+    public static bool ResetLegacySlider(EditorSession session, PlacedObject target, string path)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy slider reset",
+            () => LegacyDevInterfaceBridge.ResetSlider(session.Owner, target, path));
+    }
+
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
@@ -76,6 +119,9 @@ public static class EditorActions
 
         try
         {
+            // Creation deliberately goes through Rain World's ObjectsPage API. Any mod that
+            // extends normal DevInterface creation keeps receiving the same public hook path,
+            // without DevTool knowing which mod supplied the object.
             page.CreateObjRep(type, null);
             if (session.RoomSettings.placedObjects.Count <= beforeCount) return null;
 
@@ -115,6 +161,20 @@ public static class EditorActions
             "Delete " + (target.type?.value ?? "object"),
             s => before?.Restore(s) ?? false,
             s => RemoveExact(s, target)));
+        return true;
+    }
+
+    private static bool ExecuteLegacyControl(EditorSession session, string label, Func<bool> action)
+    {
+        if (session?.Owner == null || action == null) return false;
+
+        IEditorStateSnapshot before = LegacySnapshotFactory.CaptureForPointer(session);
+        bool succeeded = action();
+        if (!succeeded || before == null) return succeeded;
+
+        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
         return true;
     }
 
