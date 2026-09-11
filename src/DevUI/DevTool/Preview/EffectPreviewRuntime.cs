@@ -123,16 +123,13 @@ public static class EffectPreviewIntentHub
 }
 
 /// <summary>
-/// Universal first-stage RoomEffect preview runtime.
+/// Universal RoomEffect preview runtime.
 ///
-/// This code deliberately knows nothing about RegionKit, POM, assembly names or third-party
-/// namespaces. A preview is represented as an ordinary RoomSettings.RoomEffect inserted at the
-/// front of RoomSettings.effects with save=false. Any mod that observes the normal Rain World
-/// effect list, GetEffect or GetEffectAmount therefore sees the preview automatically.
-///
-/// Effects whose visuals are created only from Room.Loaded are intentionally not re-bootstraped
-/// here. Re-running Room.Loaded without an ownership journal is unsafe. The later transaction /
-/// A-B probe layer can build on this reversible overlay without changing the frontend contract.
+/// Stage one inserts an ordinary temporary RoomEffect at the front of RoomSettings.effects so any
+/// vanilla or mod code that reads GetEffect/GetEffectAmount sees it without a compatibility API.
+/// Stage two may bootstrap load-time runtime objects through the generic HookGen A/B probe and the
+/// exact-name constructor convention. Every stage-two artifact is owned by one transaction and is
+/// rolled back by identity when hover ends.
 /// </summary>
 internal static class EffectPreviewRuntime
 {
@@ -140,9 +137,11 @@ internal static class EffectPreviewRuntime
     private const double HoverDelaySeconds = 0.18;
     private const float PreviewAmount = 0.50f;
 
+    private static bool enabled;
     private static global::Room activeRoom;
     private static RoomSettings activeSettings;
     private static RoomSettings.RoomEffect previewEffect;
+    private static EffectPreviewOwnershipTransaction ownership;
     private static string activeType = string.Empty;
     private static string pendingType = string.Empty;
     private static long pendingSinceTicks;
@@ -155,6 +154,21 @@ internal static class EffectPreviewRuntime
 
     internal static bool IsPreviewEffect(RoomSettings.RoomEffect effect) =>
         effect != null && previewEffect != null && ReferenceEquals(effect, previewEffect);
+
+    internal static void Enable()
+    {
+        if (enabled) return;
+        EffectPreviewObjectCapture.Enable();
+        enabled = true;
+    }
+
+    internal static void Disable()
+    {
+        if (!enabled) return;
+        Reset();
+        EffectPreviewObjectCapture.Disable();
+        enabled = false;
+    }
 
     internal static void BeforeDevUiUpdate(global::DevInterface.DevUI ui)
     {
@@ -276,9 +290,29 @@ internal static class EffectPreviewRuntime
             activeSettings = settings;
             previewEffect = effect;
             activeType = typeName;
+            ownership = new EffectPreviewOwnershipTransaction(room);
+
+            try
+            {
+                EffectPreviewBootstrapper.Bootstrap(room, settings, effect, ownership);
+            }
+            catch (Exception error)
+            {
+                // Bootstrap is optional. A fault here must degrade to stage-one state reading, not
+                // cancel the hover preview or leave partially committed runtime objects behind.
+                Plugin.Logger?.LogWarning(
+                    "DevTool effect preview bootstrap failed for '" + typeName + "': " + error.Message);
+                ownership.Rollback("bootstrap failure");
+                ownership = new EffectPreviewOwnershipTransaction(room);
+                LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
+            }
         }
         catch (Exception error)
         {
+            try { ownership?.Rollback("begin failure"); }
+            catch { }
+            if (settings?.effects != null && previewEffect != null)
+                LoadedHookReplayProbe.RemoveExact(settings.effects, previewEffect);
             Plugin.Logger?.LogWarning("DevTool effect preview begin failed for '" + typeName + "': " + error.Message);
             ClearActiveState();
         }
@@ -286,20 +320,26 @@ internal static class EffectPreviewRuntime
 
     private static void End(string reason)
     {
-        if (previewEffect == null)
-        {
-            ClearActiveState();
-            return;
-        }
-
         RoomSettings settings = activeSettings;
         global::Room room = activeRoom;
         string typeName = activeType;
         RoomSettings.RoomEffect target = previewEffect;
-        bool removed = false;
 
+        if (target == null)
+        {
+            try { ownership?.Rollback(reason); }
+            catch { }
+            ClearActiveState();
+            return;
+        }
+
+        bool removed = false;
         try
         {
+            // Runtime objects may need GetEffect/GetEffectAmount during Destroy(), so keep the
+            // temporary effect visible until all owned objects and manager fields have rolled back.
+            ownership?.Rollback(reason);
+
             List<RoomSettings.RoomEffect> effects = settings?.effects;
             if (effects != null)
             {
@@ -328,16 +368,16 @@ internal static class EffectPreviewRuntime
                     " (reason=" + reason + ")");
             }
 
-            // Stage-one leak telemetry only. These counts are not used to delete anything because
-            // a normal room may legitimately create particles during the hover interval. The later
-            // transaction journal will attribute ownership at engine choke points instead.
+            // Counts are checked only after the ownership transaction has rolled back. A mismatch
+            // now is a real leak/surprising third-party mutation rather than an expected preview
+            // object that is still alive.
             int updateNow = room?.updateList?.Count ?? -1;
             int drawableNow = room?.drawableObjects?.Count ?? -1;
             if ((baselineUpdateCount >= 0 && updateNow >= 0 && updateNow != baselineUpdateCount) ||
                 (baselineDrawableCount >= 0 && drawableNow >= 0 && drawableNow != baselineDrawableCount))
             {
-                Plugin.Logger?.LogDebug(
-                    "DevTool effect preview observed runtime list movement for '" + typeName +
+                Plugin.Logger?.LogWarning(
+                    "DevTool effect preview rollback leak check changed for '" + typeName +
                     "': update " + baselineUpdateCount + "->" + updateNow +
                     ", drawable " + baselineDrawableCount + "->" + drawableNow + ".");
             }
@@ -363,6 +403,7 @@ internal static class EffectPreviewRuntime
         activeRoom = null;
         activeSettings = null;
         previewEffect = null;
+        ownership = null;
         activeType = string.Empty;
         baselineEffectCount = 0;
         baselineUpdateCount = -1;
