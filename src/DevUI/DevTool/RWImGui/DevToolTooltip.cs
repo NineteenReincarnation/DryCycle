@@ -37,8 +37,7 @@ internal static class DevToolTooltip
 
         ImGui.SetNextWindowPos(new Num.Vector2(x, y), ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.PopupAlpha);
-        if (!ImGui.BeginTooltip()) return;
-
+        ImGui.BeginTooltip();
         ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + PreferredWidth);
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
