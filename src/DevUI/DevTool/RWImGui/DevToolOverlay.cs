@@ -1,5 +1,6 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
@@ -23,10 +24,12 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
-        // Map and Relationships are true editor workspaces, so their own canvas/matrix owns
-        // the central area. Other modes leave the complete Rain World room visible underneath.
+        // Map, Dialog and Relationships are true editor workspaces, so their own central
+        // content replaces the room view. Scene-oriented modes keep the full room visible.
         if (snapshot.ToolMode == EditorToolMode.Map)
             DrawMapCanvas(snapshot, display);
+        else if (snapshot.ToolMode == EditorToolMode.Dialog)
+            DrawDialogPreview(snapshot, display);
         else if (snapshot.ToolMode == EditorToolMode.Relationships)
             DrawRelationshipMatrix(snapshot, display);
 
@@ -46,6 +49,12 @@ internal static class DevToolOverlay
     {
         GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
         MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
+    }
+
+    private static void DrawDialogPreview(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        GetCentralWorkspaceRect(snapshot, display, out Num.Vector2 pos, out Num.Vector2 size);
+        DialogEditorView.DrawPreview(DialogEditorPresentationHub.Current, pos, size);
     }
 
     private static void DrawRelationshipMatrix(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -174,62 +183,29 @@ internal static class DevToolOverlay
         }
 
         if (snapshot.ToolMode == EditorToolMode.Room)
-        {
             RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
-            ImGui.End();
-            return;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Sound)
-        {
+        else if (snapshot.ToolMode == EditorToolMode.Sound)
             SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
-            ImGui.End();
-            return;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Triggers)
-        {
+        else if (snapshot.ToolMode == EditorToolMode.Triggers)
             TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
-            ImGui.End();
-            return;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Map)
-        {
+        else if (snapshot.ToolMode == EditorToolMode.Map)
             MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
-            ImGui.End();
-            return;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Relationships)
-        {
+        else if (snapshot.ToolMode == EditorToolMode.Dialog)
+            DialogEditorView.DrawBrowser(DialogEditorPresentationHub.Current);
+        else if (snapshot.ToolMode == EditorToolMode.Relationships)
             RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
-            ImGui.End();
-            return;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Dialog)
+        else if (snapshot.ToolMode == EditorToolMode.Objects)
         {
-            ImGui.TextDisabled("Dialog migration is not implemented yet.");
-            ImGui.TextWrapped("Use Vanilla mode for dialog editing until the conversation tree/editor is migrated.");
-            ImGui.End();
-            return;
+            if (ImGui.Button(sceneTab ? "Library" : "Library*")) sceneTab = false;
+            ImGui.SameLine();
+            if (ImGui.Button(sceneTab ? "Scene*" : "Scene")) sceneTab = true;
+            ImGui.Separator();
+            if (sceneTab) DrawSceneObjectList(snapshot);
+            else DrawObjectLibrary(snapshot);
         }
+        else
+            ImGui.TextDisabled(snapshot.ToolMode + " tools unavailable.");
 
-        if (snapshot.ToolMode != EditorToolMode.Objects)
-        {
-            ImGui.Text(snapshot.ToolMode + " tools");
-            ImGui.End();
-            return;
-        }
-
-        if (ImGui.Button(sceneTab ? "Library" : "Library*")) sceneTab = false;
-        ImGui.SameLine();
-        if (ImGui.Button(sceneTab ? "Scene*" : "Scene")) sceneTab = true;
-        ImGui.Separator();
-
-        if (sceneTab) DrawSceneObjectList(snapshot);
-        else DrawObjectLibrary(snapshot);
         ImGui.End();
     }
 
@@ -256,7 +232,6 @@ internal static class DevToolOverlay
             EditorObjectTypeSnapshot item = library[i];
             if (!Matches(item, objectSearch)) continue;
             matches++;
-
             if (!string.Equals(lastCategory, item.Category, StringComparison.Ordinal))
             {
                 if (lastCategory != null) ImGui.Spacing();
@@ -265,12 +240,10 @@ internal static class DevToolOverlay
             }
 
             bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
-            string label = item.DisplayName + "##PlaceObject" + item.Type;
-            if (ImGui.Selectable(label, selected))
+            if (ImGui.Selectable(item.DisplayName + "##PlaceObject" + item.Type, selected))
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(item.Source + " · " + item.Type);
         }
-
         if (matches == 0) ImGui.TextDisabled("No matching objects.");
     }
 
@@ -278,7 +251,6 @@ internal static class DevToolOverlay
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         ImGui.TextDisabled(objects.Length + " placed objects");
-
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
         if (selectedCount > 0)
         {
@@ -295,7 +267,6 @@ internal static class DevToolOverlay
             EditorObjectSnapshot item = objects[i];
             string label = item.Type + "  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##SceneObject" + item.Index;
             if (!ImGui.Selectable(label, item.Selected)) continue;
-
             if (io.KeyShift && sceneSelectionAnchor >= 0)
             {
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
@@ -337,9 +308,7 @@ internal static class DevToolOverlay
             DrawLegacyFallback(snapshot, "Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
         }
         else if (snapshot.ToolMode == EditorToolMode.Objects)
-        {
             ObjectInspectorView.Draw(snapshot.Inspector);
-        }
         else if (snapshot.ToolMode == EditorToolMode.Sound)
         {
             SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
@@ -355,20 +324,16 @@ internal static class DevToolOverlay
             MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
             DrawLegacyFallback(snapshot, "Fallback for vanilla or mod-added MapPage controls not represented by the graph editor.");
         }
+        else if (snapshot.ToolMode == EditorToolMode.Dialog)
+            DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
         else if (snapshot.ToolMode == EditorToolMode.Relationships)
         {
             RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
             DrawLegacyFallback(snapshot, "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
         }
-        else if (snapshot.ToolMode == EditorToolMode.Dialog)
-        {
-            ImGui.TextDisabled("Dialog inspector is not migrated yet.");
-            ImGui.TextWrapped("Switch to Vanilla UI to edit dialogs for now.");
-        }
         else
-        {
-            ImGui.TextDisabled(snapshot.ToolMode + " inspector is not migrated yet.");
-        }
+            ImGui.TextDisabled(snapshot.ToolMode + " inspector unavailable.");
+
         ImGui.End();
     }
 
@@ -413,15 +378,18 @@ internal static class DevToolOverlay
                 EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
                 ImGui.TextDisabled("Map " + (map.Rooms?.Length ?? 0) + " rooms   ·   " + map.RegionName);
             }
+            else if (snapshot.ToolMode == EditorToolMode.Dialog)
+            {
+                EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
+                ImGui.TextDisabled("Dialog " + dialog.SelectedFileName + "   ·   " + (dialog.Events?.Length ?? 0) + " events");
+            }
             else if (snapshot.ToolMode == EditorToolMode.Relationships)
             {
                 EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
                 ImGui.TextDisabled("Relationships   ·   Primary " + rel.PrimaryCreature + "   ·   " + snapshot.Document);
             }
             else
-            {
                 ImGui.TextDisabled(snapshot.Document + "   ·   " + snapshot.ToolMode);
-            }
         }
         ImGui.End();
     }
@@ -429,20 +397,14 @@ internal static class DevToolOverlay
     private static void HandlePlacement(EditorPresentationSnapshot snapshot, Num.Vector2 display, ImGuiIOPtr io)
     {
         if (!snapshot.PlacementActive || snapshot.ToolMode != EditorToolMode.Objects) return;
-
         bool overWindow = ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         if (!overWindow && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
         {
             Send(EditorUiCommandKind.CancelPlacement);
             return;
         }
-
         if (!overWindow && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-        {
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                EditorUiCommandKind.PlaceObjectAtCursor,
-                flag: io.KeyShift));
-        }
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.PlaceObjectAtCursor, flag: io.KeyShift));
 
         Num.Vector2 mouse = io.MousePos;
         Num.Vector2 hintSize = new(230f, 44f);
@@ -478,7 +440,6 @@ internal static class DevToolOverlay
             for (int i = 0; i < tags.Length; i++) if (Contains(tags[i], needle)) return true;
             return false;
         }
-
         return Contains(item.DisplayName, query) || Contains(item.Type, query) ||
                Contains(item.Category, query) || Contains(item.Source, query) ||
                Fuzzy(item.DisplayName, query) || Fuzzy(item.Type, query);
