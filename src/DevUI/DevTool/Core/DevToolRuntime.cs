@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -16,6 +17,7 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
+        EditorInputRouter.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
     }
@@ -24,6 +26,7 @@ internal static class DevToolRuntime
     {
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
+        EditorInputRouter.Disable();
         DevToolSessionHub.Reset();
         enabled = false;
     }
@@ -31,8 +34,9 @@ internal static class DevToolRuntime
     private static void DevUI_Update(On.DevInterface.DevUI.orig_Update orig, global::DevInterface.DevUI self)
     {
         orig(self);
-        if (self != null)
-            DevToolSessionHub.Synchronize(self);
+        if (self == null) return;
+        DevToolSessionHub.Synchronize(self);
+        EditorInputRouter.UpdateShortcuts(DevToolSessionHub.Current);
     }
 }
 
@@ -79,13 +83,15 @@ public readonly struct EditorDocumentKey : IEquatable<EditorDocumentKey>
 public sealed class EditorSession
 {
     private EditorDocumentKey documentKey;
+    private Page observedLegacyPage;
 
     internal EditorSession(global::DevInterface.DevUI owner)
     {
         Owner = owner;
         Selection = new EditorSelection();
         History = new History.EditorHistoryService(64);
-        ToolMode = ResolveToolMode(owner?.activePage);
+        observedLegacyPage = owner?.activePage;
+        ToolMode = ResolveToolMode(observedLegacyPage);
         Synchronize(owner);
     }
 
@@ -114,8 +120,14 @@ public sealed class EditorSession
             History.ActivateDocument(next);
         }
 
-        // Legacy page changes are mirrored as a tool choice but do not reset room history.
-        ToolMode = ResolveToolMode(owner?.activePage);
+        // A real legacy page switch is mirrored once. ImGui tool changes remain independent
+        // afterwards, so Objects/Sound/Room can share one Scene document and history stack.
+        if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
+        {
+            observedLegacyPage = owner?.activePage;
+            ToolMode = ResolveToolMode(observedLegacyPage);
+        }
+
         Selection.RemoveMissing(RoomSettings?.placedObjects);
     }
 
