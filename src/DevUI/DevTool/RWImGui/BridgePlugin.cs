@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Security;
+using System.Text;
 using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
@@ -92,15 +94,30 @@ public sealed class BridgePlugin : BaseUnityPlugin
 [SuppressUnmanagedCodeSecurity]
 internal static class DevToolFrontend
 {
+    private sealed class FontCandidate
+    {
+        internal ImFontPtr Font;
+        internal string Name;
+        internal int Weight;
+    }
+
     private static readonly DevToolInputContext InputContext = new();
+    private static readonly List<FontCandidate> CjkFonts = new();
     private static ManualLogSource log;
     private static volatile bool visible;
     private static int contextBusyLogged;
     private static int drawFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
-    private static bool cjkFontResolved;
+    private static bool cjkFontsScanned;
     private static ImFontPtr cjkFont;
+    private static string resolvedFontName = string.Empty;
+    private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+    private static int resolvedFontWeightVariantCount = 1;
+
+    internal static string ResolvedFontName => resolvedFontName;
+    internal static int ResolvedFontWeight => resolvedFontWeight;
+    internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
@@ -181,14 +198,20 @@ internal static class DevToolFrontend
 
             bool pushedChineseFont = TryPushChineseFont();
             float oldGlobalScale = io.FontGlobalScale;
-            io.FontGlobalScale = ResolveUiFontScale(pushedChineseFont);
+            float baseFontSize = ResolveActiveBaseFontSize(oldGlobalScale);
+            io.FontGlobalScale = oldGlobalScale * ResolveUiFontScale(baseFontSize);
+
+            ImGui.PushStyleColor(ImGuiCol.Text, DevToolUiSettings.TextColor);
+            ImGui.PushStyleColor(ImGuiCol.TextDisabled, DevToolUiSettings.DisabledTextColor);
             try
             {
                 UiModeSwitch.Draw();
+                FontSettingsWindow.Draw(io.DisplaySize);
                 DevToolOverlay.Draw(snapshot);
             }
             finally
             {
+                ImGui.PopStyleColor(2);
                 io.FontGlobalScale = oldGlobalScale;
                 if (pushedChineseFont) ImGui.PopFont();
             }
@@ -203,20 +226,30 @@ internal static class DevToolFrontend
         }
     }
 
-    private static unsafe float ResolveUiFontScale(bool chineseFontActive)
+    private static float ResolveActiveBaseFontSize(float oldGlobalScale)
     {
-        if (!DevToolUiSettings.IsChinese || !chineseFontActive || cjkFont.NativePtr == null || cjkFont.FontSize <= 0.01f)
-            return 1f;
+        float rendered = ImGui.GetFontSize();
+        if (oldGlobalScale > 0.01f)
+            rendered /= oldGlobalScale;
+        return rendered > 0.01f ? rendered : 13f;
+    }
 
-        // Chinese glyphs become noticeably harder to read at the small sizes commonly used by
-        // developer overlays. Keep the visual size around 18 px while preserving the atlas font.
-        float scale = DevToolUiSettings.PreferredChineseFontSize / cjkFont.FontSize;
-        return Math.Max(1f, Math.Min(1.35f, scale));
+    private static float ResolveUiFontScale(float baseFontSize)
+    {
+        if (baseFontSize <= 0.01f) return 1f;
+        float scale = DevToolUiSettings.FontSize / baseFontSize;
+        return Math.Max(0.65f, Math.Min(2.5f, scale));
     }
 
     private static unsafe bool TryPushChineseFont()
     {
-        if (!DevToolUiSettings.IsChinese) return false;
+        if (!DevToolUiSettings.IsChinese)
+        {
+            resolvedFontName = "Default";
+            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+            resolvedFontWeightVariantCount = 1;
+            return false;
+        }
 
         ResolveCjkFont();
         if (cjkFont.NativePtr == null)
@@ -233,12 +266,45 @@ internal static class DevToolFrontend
 
     private static unsafe void ResolveCjkFont()
     {
-        if (cjkFontResolved) return;
-        cjkFontResolved = true;
+        EnsureCjkFontsScanned();
+        if (CjkFonts.Count == 0)
+        {
+            cjkFont = default;
+            resolvedFontName = string.Empty;
+            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+            resolvedFontWeightVariantCount = 0;
+            return;
+        }
 
-        float targetSize = DevToolUiSettings.PreferredChineseFontSize;
-        float bestDistance = float.MaxValue;
-        int bestIndex = -1;
+        FontCandidate best = null;
+        float bestScore = float.MaxValue;
+        HashSet<int> weights = new();
+        for (int i = 0; i < CjkFonts.Count; i++)
+        {
+            FontCandidate candidate = CjkFonts[i];
+            weights.Add(candidate.Weight);
+
+            // Weight is the primary choice. Font size only breaks ties because final visual size
+            // is controlled independently through FontGlobalScale.
+            float score = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight) * 0.1f +
+                          Math.Abs(candidate.Font.FontSize - DevToolUiSettings.FontSize);
+            if (score >= bestScore) continue;
+            bestScore = score;
+            best = candidate;
+        }
+
+        if (best == null) return;
+        cjkFont = best.Font;
+        resolvedFontName = best.Name;
+        resolvedFontWeight = best.Weight;
+        resolvedFontWeightVariantCount = weights.Count;
+    }
+
+    private static unsafe void EnsureCjkFontsScanned()
+    {
+        if (cjkFontsScanned) return;
+        cjkFontsScanned = true;
+        CjkFonts.Clear();
 
         ImVector<ImFontPtr> fonts = ImGui.GetIO().Fonts.Fonts;
         for (int i = 0; i < fonts.Size; i++)
@@ -252,26 +318,56 @@ internal static class DevToolFrontend
                 candidate.FindGlyphNoFallback((ushort)'间').NativePtr == null)
                 continue;
 
-            float distance = Math.Abs(candidate.FontSize - targetSize);
-            if (distance >= bestDistance) continue;
-            bestDistance = distance;
-            bestIndex = i;
-            cjkFont = candidate;
+            string name = ReadFontName(candidate, i);
+            CjkFonts.Add(new FontCandidate
+            {
+                Font = candidate,
+                Name = name,
+                Weight = InferFontWeight(name)
+            });
         }
 
-        if (cjkFont.NativePtr != null)
+        if (CjkFonts.Count > 0)
         {
             if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
-                log?.LogInfo(
-                    $"DryCycle DevTool selected CJK atlas font index={bestIndex}, size={cjkFont.FontSize:0.##}. " +
-                    "Noto Sans SC / compatible Simplified Chinese atlas glyphs will be used.");
+                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} CJK-capable ImGui atlas font(s).");
             return;
         }
 
         if (Interlocked.Exchange(ref cjkFontMissingLogged, 1) == 0)
             log?.LogWarning(
-                "DryCycle DevTool could not find Simplified Chinese glyphs in RWImGUI's font atlas. " +
-                "RWImGUI 1.12 normally includes NotoSansSC-Regular.ttf; falling back to English UI.");
+                "DryCycle DevTool could not find Simplified Chinese glyphs in RWImGUI's font atlas; " +
+                "falling back to English UI.");
+    }
+
+    private static unsafe string ReadFontName(ImFontPtr font, int index)
+    {
+        if (font.NativePtr == null || font.NativePtr->ConfigData == null)
+            return "CJK Font #" + index;
+
+        byte* name = font.NativePtr->ConfigData->Name;
+        int length = 0;
+        while (length < 40 && name[length] != 0) length++;
+        if (length == 0) return "CJK Font #" + index;
+
+        byte[] bytes = new byte[length];
+        for (int i = 0; i < length; i++) bytes[i] = name[i];
+        string value = Encoding.UTF8.GetString(bytes).Trim();
+        return string.IsNullOrEmpty(value) ? "CJK Font #" + index : value;
+    }
+
+    private static int InferFontWeight(string name)
+    {
+        string value = (name ?? string.Empty).ToLowerInvariant().Replace(" ", string.Empty).Replace("-", string.Empty);
+        if (value.Contains("black") || value.Contains("heavy")) return 900;
+        if (value.Contains("extrabold") || value.Contains("ultrabold")) return 800;
+        if (value.Contains("semibold") || value.Contains("demibold")) return 600;
+        if (value.Contains("bold")) return 700;
+        if (value.Contains("medium")) return 500;
+        if (value.Contains("extralight") || value.Contains("ultralight")) return 200;
+        if (value.Contains("light")) return 300;
+        if (value.Contains("thin")) return 100;
+        return 400;
     }
 }
 
