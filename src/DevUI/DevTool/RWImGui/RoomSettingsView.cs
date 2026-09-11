@@ -136,7 +136,8 @@ internal static class RoomSettingsView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("渐变色板", "FADE PALETTE"));
         int fadePalette = Get(IntEdits, RoomSettingKeys.FadePalette, snapshot.HasFadePalette ? snapshot.FadePalette : -1);
-        bool fadeChanged = ImGui.InputInt(DevToolUiSettings.T("渐变色板编号##RoomFadePalette", "Fade Palette##RoomFadePalette"), ref fadePalette, 1, 10);
+        BeginSettingRow(DevToolUiSettings.T("渐变色板编号", "Fade Palette"), 0f, out _);
+        bool fadeChanged = ImGui.InputInt("##RoomFadePalette", ref fadePalette, 1, 10);
         IntEdits[RoomSettingKeys.FadePalette] = fadePalette;
         if (ImGui.IsItemDeactivatedAfterEdit())
             SendSetting(RoomSettingKeys.FadePalette, new EditorPropertyValue(EditorPropertyKind.Integer, integer: fadePalette));
@@ -152,7 +153,9 @@ internal static class RoomSettingsView
     private static void DrawGameplay(EditorRoomSettingsSnapshot snapshot)
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("危险", "DANGER"));
-        if (ImGui.BeginCombo(DevToolUiSettings.T("危险类型##RoomDangerType", "Danger Type##RoomDangerType"), snapshot.DangerType))
+        float dangerTrailingWidth = InheritanceControlWidth(snapshot, RoomSettingKeys.DangerType);
+        BeginSettingRow(DevToolUiSettings.T("危险类型", "Danger Type"), dangerTrailingWidth, out float dangerTrailingX);
+        if (ImGui.BeginCombo("##RoomDangerType", snapshot.DangerType))
         {
             string[] options = snapshot.DangerTypes ?? Array.Empty<string>();
             for (int i = 0; i < options.Length; i++)
@@ -168,15 +171,17 @@ internal static class RoomSettingsView
             }
             ImGui.EndCombo();
         }
-        DrawInheritanceControl(snapshot, RoomSettingKeys.DangerType);
+        DrawInheritanceControl(snapshot, RoomSettingKeys.DangerType, dangerTrailingX);
 
         bool script = snapshot.RoomSpecificScript;
-        if (ImGui.Checkbox(DevToolUiSettings.T("房间专属脚本", "Room Specific Script"), ref script))
+        DrawCheckboxRow(DevToolUiSettings.T("房间专属脚本", "Room Specific Script"), "##RoomSpecificScript", ref script);
+        if (ImGui.IsItemEdited())
             SendSetting(RoomSettingKeys.RoomSpecificScript,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: script));
 
         bool wetTerrain = snapshot.WetTerrain;
-        if (ImGui.Checkbox(DevToolUiSettings.T("湿润地形", "Wet Terrain"), ref wetTerrain))
+        DrawCheckboxRow(DevToolUiSettings.T("湿润地形", "Wet Terrain"), "##RoomWetTerrain", ref wetTerrain);
+        if (ImGui.IsItemEdited())
             SendSetting(RoomSettingKeys.WetTerrain,
                 new EditorPropertyValue(EditorPropertyKind.Boolean, boolean: wetTerrain));
 
@@ -219,11 +224,14 @@ internal static class RoomSettingsView
         string current = fade
             ? (snapshot.HasTerrainFadePalette ? snapshot.TerrainFadePalette : "NO PALETTE")
             : snapshot.TerrainPalette;
-        string label = fade
-            ? DevToolUiSettings.T("地形渐变色板##TerrainFadePalette", "Terrain Fade Palette##TerrainFadePalette")
-            : DevToolUiSettings.T("地形色板##TerrainPalette", "Terrain Palette##TerrainPalette");
+        string visibleLabel = fade
+            ? DevToolUiSettings.T("地形渐变色板", "Terrain Fade Palette")
+            : DevToolUiSettings.T("地形色板", "Terrain Palette");
+        string id = fade ? "##TerrainFadePalette" : "##TerrainPalette";
+        float trailingWidth = fade ? 0f : InheritanceControlWidth(snapshot, RoomSettingKeys.TerrainPalette);
+        BeginSettingRow(visibleLabel, trailingWidth, out float trailingX);
 
-        if (ImGui.BeginCombo(label, string.IsNullOrEmpty(current) ? "NO PALETTE" : current))
+        if (ImGui.BeginCombo(id, string.IsNullOrEmpty(current) ? "NO PALETTE" : current))
         {
             if (fade && ImGui.Selectable("NO PALETTE##TerrainFadeNone", !snapshot.HasTerrainFadePalette))
                 SendSetting(RoomSettingKeys.TerrainFadePalette,
@@ -244,7 +252,7 @@ internal static class RoomSettingsView
             ImGui.EndCombo();
         }
 
-        if (!fade) DrawInheritanceControl(snapshot, RoomSettingKeys.TerrainPalette);
+        if (!fade) DrawInheritanceControl(snapshot, RoomSettingKeys.TerrainPalette, trailingX);
     }
 
     private static void DrawTemplates(EditorRoomSettingsSnapshot snapshot)
@@ -260,7 +268,8 @@ internal static class RoomSettingsView
             ? "NONE"
             : snapshot.RegionName + " - " + snapshot.CurrentTemplate;
 
-        if (ImGui.BeginCombo(DevToolUiSettings.T("当前模板##RoomTemplate", "Current Template##RoomTemplate"), preview))
+        BeginSettingRow(DevToolUiSettings.T("当前模板", "Current Template"), 0f, out _);
+        if (ImGui.BeginCombo("##RoomTemplate", preview))
         {
             bool none = string.Equals(snapshot.CurrentTemplate, "NONE", StringComparison.OrdinalIgnoreCase);
             if (ImGui.Selectable("NONE##RoomTemplateNone", none))
@@ -333,7 +342,8 @@ internal static class RoomSettingsView
                 string sliderLabel = string.IsNullOrEmpty(names[slider])
                     ? DevToolUiSettings.T("数值 ", "Value ") + (slider + 1)
                     : names[slider];
-                bool changed = ImGui.SliderFloat(sliderLabel + "##" + key, ref value, 0f, 1f, "%.3f");
+                BeginSettingRow(sliderLabel, 0f, out _);
+                bool changed = ImGui.SliderFloat("##" + key, ref value, 0f, 1f, "%.3f");
                 FloatEdits[key] = value;
 
                 if (!effect.Inherited && ImGui.IsItemDeactivatedAfterEdit())
@@ -375,8 +385,9 @@ internal static class RoomSettingsView
         {
             string stateKey = (terrain ? "terrainFade:" : "fade:") + i;
             float value = Get(FloatEdits, stateKey, fades[i]);
+            BeginSettingRow(DevToolUiSettings.T("屏幕 ", "Screen ") + i, 0f, out _);
             bool changed = ImGui.SliderFloat(
-                DevToolUiSettings.T("屏幕 ", "Screen ") + i + "##" + stateKey,
+                "##" + stateKey,
                 ref value,
                 0f,
                 1f,
@@ -440,8 +451,10 @@ internal static class RoomSettingsView
         float min,
         float max)
     {
-        DrawFloat(key, label, current, min, max);
-        DrawInheritanceControl(snapshot, key);
+        float trailingWidth = InheritanceControlWidth(snapshot, key);
+        BeginSettingRow(label, trailingWidth, out float trailingX);
+        DrawFloat(key, current, min, max);
+        DrawInheritanceControl(snapshot, key, trailingX);
     }
 
     private static void DrawIntInherited(
@@ -450,13 +463,53 @@ internal static class RoomSettingsView
         string label,
         int current)
     {
-        DrawInt(key, label, current);
-        DrawInheritanceControl(snapshot, key);
+        float trailingWidth = InheritanceControlWidth(snapshot, key);
+        BeginSettingRow(label, trailingWidth, out float trailingX);
+        DrawInt(key, current);
+        DrawInheritanceControl(snapshot, key, trailingX);
     }
 
-    private static void DrawInheritanceControl(EditorRoomSettingsSnapshot snapshot, string key)
+    private static void BeginSettingRow(string label, float trailingWidth, out float trailingX)
     {
-        ImGui.SameLine();
+        float startX = ImGui.GetCursorPosX();
+        float available = ImGui.GetContentRegionAvail().X;
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float gap = Math.Max(6f, style.ItemSpacing.X);
+        float labelWidth = Math.Max(118f, Math.Min(240f, available * 0.30f));
+        trailingX = startX + Math.Max(0f, available - trailingWidth);
+        float controlX = startX + labelWidth;
+        float controlWidth = Math.Max(72f, trailingX - gap - controlX);
+
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine(controlX);
+        ImGui.SetNextItemWidth(controlWidth);
+    }
+
+    private static void DrawCheckboxRow(string label, string id, ref bool value)
+    {
+        float startX = ImGui.GetCursorPosX();
+        float available = ImGui.GetContentRegionAvail().X;
+        float labelWidth = Math.Max(118f, Math.Min(240f, available * 0.30f));
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(label);
+        ImGui.SameLine(startX + labelWidth);
+        ImGui.Checkbox(id, ref value);
+    }
+
+    private static float InheritanceControlWidth(EditorRoomSettingsSnapshot snapshot, string key)
+    {
+        string text = snapshot.IsLocal(key)
+            ? DevToolUiSettings.T("继承", "Inherit")
+            : snapshot.InheritedFromTemplate(key) ? "<T>" : "<A>";
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float padding = snapshot.IsLocal(key) ? style.FramePadding.X * 2f : 0f;
+        return ImGui.CalcTextSize(text).X + padding + 8f;
+    }
+
+    private static void DrawInheritanceControl(EditorRoomSettingsSnapshot snapshot, string key, float trailingX)
+    {
+        ImGui.SameLine(trailingX);
         if (snapshot.IsLocal(key))
         {
             if (DevToolWidgets.ActionButton(
@@ -473,10 +526,10 @@ internal static class RoomSettingsView
         }
     }
 
-    private static void DrawFloat(string key, string label, float current, float min, float max)
+    private static void DrawFloat(string key, float current, float min, float max)
     {
         float value = Get(FloatEdits, key, current);
-        bool changed = ImGui.SliderFloat(label + "##RoomSetting" + key, ref value, min, max, "%.3f");
+        bool changed = ImGui.SliderFloat("##RoomSetting" + key, ref value, min, max, "%.3f");
         FloatEdits[key] = value;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -488,10 +541,10 @@ internal static class RoomSettingsView
         }
     }
 
-    private static void DrawInt(string key, string label, int current)
+    private static void DrawInt(string key, int current)
     {
         int value = Get(IntEdits, key, current);
-        bool changed = ImGui.InputInt(label + "##RoomSetting" + key, ref value, 1, 10);
+        bool changed = ImGui.InputInt("##RoomSetting" + key, ref value, 1, 10);
         IntEdits[key] = value;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
