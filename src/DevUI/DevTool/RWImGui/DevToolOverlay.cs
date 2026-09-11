@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
@@ -142,13 +143,13 @@ internal static class DevToolOverlay
 
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        string roomLabel = DevToolUiSettings.T("R  房间", "R  Room");
-        string objectsLabel = DevToolUiSettings.T("O  物件", "O  Objects");
-        string soundLabel = DevToolUiSettings.T("S  声音", "S  Sound");
-        string triggersLabel = DevToolUiSettings.T("T  触发器", "T  Triggers");
-        string mapLabel = DevToolUiSettings.T("M  地图", "M  Map");
-        string dialogLabel = DevToolUiSettings.T("D  对话", "D  Dialog");
-        string relationshipsLabel = DevToolUiSettings.T("L  关系", "L  Relationships");
+        string roomLabel = DevToolUiSettings.T("房间", "Room");
+        string objectsLabel = DevToolUiSettings.T("物件", "Objects");
+        string soundLabel = DevToolUiSettings.T("声音", "Sound");
+        string triggersLabel = DevToolUiSettings.T("触发器", "Triggers");
+        string mapLabel = DevToolUiSettings.T("地图", "Map");
+        string dialogLabel = DevToolUiSettings.T("对话", "Dialog");
+        string relationshipsLabel = DevToolUiSettings.T("关系", "Relationships");
 
         float widest = ImGui.CalcTextSize(relationshipsLabel).X;
         widest = Math.Max(widest, ImGui.CalcTextSize(triggersLabel).X);
@@ -230,8 +231,16 @@ internal static class DevToolOverlay
 
         FloatingWindowSnap.TrackCurrentWindow("BrowserInspector");
 
+        bool objectNoSelection = snapshot.ToolMode == EditorToolMode.Objects && snapshot.Inspector?.HasSelection != true;
         bool browser = snapshot.BrowserOpen;
-        bool inspector = snapshot.InspectorOpen;
+        bool inspector = snapshot.InspectorOpen && !objectNoSelection;
+
+        // In Objects mode an empty Inspector is wasted room. If the developer left Inspector on
+        // while Browser is hidden, temporarily give the whole panel to Library/Scene until a
+        // selection exists; the stored Browser/Inspector preferences themselves are unchanged.
+        if (objectNoSelection && !browser && snapshot.InspectorOpen)
+            browser = true;
+
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         if (available.X < 1f || available.Y < 1f)
         {
@@ -295,15 +304,23 @@ internal static class DevToolOverlay
         else if (browser)
         {
             browserInspectorSplitterDragging = false;
-            ImGui.SetWindowFontScale(BrowserPaneFontScale);
-            DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
-            DrawBrowserContents(snapshot);
+            if (ImGui.BeginChild("##DevToolBrowserPaneFull", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
+            {
+                ImGui.SetWindowFontScale(BrowserPaneFontScale);
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
+                DrawBrowserContents(snapshot);
+            }
+            ImGui.EndChild();
         }
         else if (inspector)
         {
             browserInspectorSplitterDragging = false;
-            DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
-            DrawInspectorContents(snapshot);
+            if (ImGui.BeginChild("##DevToolInspectorPaneFull", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
+            {
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
+                DrawInspectorContents(snapshot);
+            }
+            ImGui.EndChild();
         }
 
         ImGui.End();
@@ -325,10 +342,20 @@ internal static class DevToolOverlay
             RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
         else if (snapshot.ToolMode == EditorToolMode.Objects)
         {
-            if (ImGui.Button(sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*"))) sceneTab = false;
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("资源库", "Library"),
+                    "ObjectsLibraryTab",
+                    sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+                sceneTab = false;
             ImGui.SameLine();
-            if (ImGui.Button(sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene"))) sceneTab = true;
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("场景", "Scene"),
+                    "ObjectsSceneTab",
+                    sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                sceneTab = true;
+            ImGui.Spacing();
             ImGui.Separator();
+            ImGui.Spacing();
             if (sceneTab) DrawSceneObjectList(snapshot);
             else DrawObjectLibrary(snapshot);
         }
@@ -373,58 +400,125 @@ internal static class DevToolOverlay
 
     private static void DrawObjectLibrary(EditorPresentationSnapshot snapshot)
     {
+        DevToolWidgets.MutedText(DevToolUiSettings.T("搜索", "Search"));
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##DevToolObjectSearch", "Search##DevToolObjectSearch"), ref objectSearch, 128);
-        ImGui.TextDisabled("@source   #tag   :category");
+        ImGui.InputText("##DevToolObjectSearch", ref objectSearch, 128);
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "普通搜索会匹配名称、类型、来源和类别。\n高级：@来源   #标签   :类别",
+                "Search matches name, type, source and category.\nAdvanced: @source   #tag   :category"));
 
         if (snapshot.PlacementActive)
         {
-            ImGui.Separator();
+            ImGui.Spacing();
+            DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置", "PLACEMENT"), BrowserPaneFontScale);
             ImGui.Text(DevToolUiSettings.T("正在放置 ", "Placing ") + snapshot.PlacementType);
-            ImGui.TextDisabled(DevToolUiSettings.T(
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
                 "左键放置 · Shift 连续放置 · Esc/右键取消",
-                "Left click room · Shift = repeat · Esc/right click = cancel"));
-            if (ImGui.Button(DevToolUiSettings.T("取消放置", "Cancel placement"))) Send(EditorUiCommandKind.CancelPlacement);
+                "Left click room · Shift = repeat · Esc/right click = cancel"), true);
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("取消放置", "Cancel placement"),
+                    "CancelObjectPlacement",
+                    DevToolButtonTone.Subtle))
+                Send(EditorUiCommandKind.CancelPlacement);
         }
 
-        ImGui.Separator();
-        string lastCategory = null;
-        int matches = 0;
+        ImGui.Spacing();
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
+        List<string> sources = new();
+        int matches = 0;
+
         for (int i = 0; i < library.Length; i++)
         {
             EditorObjectTypeSnapshot item = library[i];
             if (!Matches(item, objectSearch)) continue;
             matches++;
-            if (!string.Equals(lastCategory, item.Category, StringComparison.Ordinal))
-            {
-                if (lastCategory != null) ImGui.Spacing();
-                lastCategory = item.Category;
-                ImGui.TextDisabled(lastCategory);
-            }
-
-            bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
-            if (ImGui.Selectable(item.DisplayName + "##PlaceObject" + item.Type, selected))
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
-            if (ImGui.IsItemHovered()) DevToolTooltip.Show(item.Source + " · " + item.Type);
+            string source = string.IsNullOrWhiteSpace(item.Source)
+                ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                : item.Source;
+            if (!ContainsExact(sources, source)) sources.Add(source);
         }
-        if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
+
+        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+        {
+            string source = sources[sourceIndex];
+            DevToolWidgets.SourceHeader(source, ObjectSourceColor(source), 1.42f * BrowserPaneFontScale, BrowserPaneFontScale);
+
+            string lastCategory = null;
+            for (int i = 0; i < library.Length; i++)
+            {
+                EditorObjectTypeSnapshot item = library[i];
+                if (!Matches(item, objectSearch)) continue;
+                string itemSource = string.IsNullOrWhiteSpace(item.Source)
+                    ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                    : item.Source;
+                if (!string.Equals(itemSource, source, StringComparison.OrdinalIgnoreCase)) continue;
+
+                string category = string.IsNullOrWhiteSpace(item.Category)
+                    ? DevToolUiSettings.T("未分类", "Unsorted")
+                    : item.Category;
+                if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+                {
+                    if (lastCategory != null) ImGui.Spacing();
+                    lastCategory = category;
+                    DevToolWidgets.MutedText(category);
+                }
+
+                bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
+                if (ImGui.Selectable(item.DisplayName + "##PlaceObject" + item.Type, selected))
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
+                if (ImGui.IsItemHovered()) DevToolTooltip.Show(item.Source + " · " + item.Type);
+            }
+        }
+
+        if (matches == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
+    }
+
+    private static Num.Vector4 ObjectSourceColor(string source)
+    {
+        if (source.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.36f, 0.72f, 1f, 1f);
+        if (source.IndexOf("RegionKit", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.StartsWith("RK", StringComparison.OrdinalIgnoreCase))
+            return new Num.Vector4(1f, 0.70f, 0.34f, 1f);
+        if (source.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.IndexOf("Rain World", StringComparison.OrdinalIgnoreCase) >= 0)
+            return new Num.Vector4(0.88f, 0.88f, 0.88f, 1f);
+        return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
+    }
+
+    private static bool ContainsExact(List<string> values, string value)
+    {
+        for (int i = 0; i < values.Count; i++)
+            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     private static void DrawSceneObjectList(EditorPresentationSnapshot snapshot)
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
-        ImGui.TextDisabled(DevToolUiSettings.T($"已放置 {objects.Length} 个物件", $"{objects.Length} placed objects"));
+        DevToolWidgets.MutedText(DevToolUiSettings.T($"已放置 {objects.Length} 个物件", $"{objects.Length} placed objects"));
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
         if (selectedCount > 0)
         {
             ImGui.SameLine();
-            if (ImGui.SmallButton(DevToolUiSettings.T("复制##SceneSelection", "Duplicate##SceneSelection"))) Send(EditorUiCommandKind.DuplicateSelection);
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("复制", "Duplicate"),
+                    "SceneSelectionDuplicate",
+                    DevToolButtonTone.Normal))
+                Send(EditorUiCommandKind.DuplicateSelection);
             ImGui.SameLine();
-            if (ImGui.SmallButton(DevToolUiSettings.T("删除##SceneSelection", "Delete##SceneSelection"))) Send(EditorUiCommandKind.DeleteSelection);
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("删除", "Delete"),
+                    "SceneSelectionDelete",
+                    DevToolButtonTone.Danger))
+                Send(EditorUiCommandKind.DeleteSelection);
         }
 
+        ImGui.Spacing();
         ImGui.Separator();
+        ImGui.Spacing();
         ImGuiIOPtr io = ImGui.GetIO();
         for (int i = 0; i < objects.Length; i++)
         {
