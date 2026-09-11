@@ -1,5 +1,6 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
@@ -21,6 +22,11 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
+        // Map is a true editor workspace, so its canvas owns the central area. Draw it first
+        // so the top bar and side panels remain above it in ImGui z-order.
+        if (snapshot.ToolMode == EditorToolMode.Map)
+            DrawMapCanvas(snapshot, display);
+
         DrawTopBar(snapshot, display);
         if (!snapshot.FocusMode)
         {
@@ -31,6 +37,21 @@ internal static class DevToolOverlay
         }
 
         HandlePlacement(snapshot, display, io);
+    }
+
+    private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        float inspectorWidth = InspectorWidth(display);
+        float left = snapshot.FocusMode ? 8f : snapshot.BrowserOpen ? 366f : 58f;
+        float right = snapshot.FocusMode
+            ? display.X - 8f
+            : snapshot.InspectorOpen
+                ? display.X - inspectorWidth - 16f
+                : display.X - 8f;
+        float bottom = snapshot.FocusMode ? display.Y - 8f : display.Y - 38f;
+        Num.Vector2 pos = new(left, 56f);
+        Num.Vector2 size = new(Math.Max(120f, right - left), Math.Max(120f, bottom - 56f));
+        MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
     }
 
     private static void DrawTopBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -153,6 +174,13 @@ internal static class DevToolOverlay
             return;
         }
 
+        if (snapshot.ToolMode == EditorToolMode.Map)
+        {
+            MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
+            ImGui.End();
+            return;
+        }
+
         if (snapshot.ToolMode != EditorToolMode.Objects)
         {
             ImGui.Text(snapshot.ToolMode + " tools");
@@ -258,7 +286,7 @@ internal static class DevToolOverlay
 
     private static void DrawInspector(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float width = Math.Min(360f, Math.Max(300f, display.X * 0.26f));
+        float width = InspectorWidth(display);
         float height = Math.Max(260f, display.Y - 94f);
         ImGui.SetNextWindowPos(new Num.Vector2(display.X - width - 8f, 56f), ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Always);
@@ -287,7 +315,11 @@ internal static class DevToolOverlay
         else if (snapshot.ToolMode == EditorToolMode.Triggers)
         {
             TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, "Fallback for TriggeredEvent controls and custom TriggerPage extensions not migrated yet.");
+            DrawLegacyFallback(snapshot, "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
+        }
+        else if (snapshot.ToolMode == EditorToolMode.Map)
+        {
+            MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
         }
         else
         {
@@ -332,6 +364,11 @@ internal static class DevToolOverlay
                 EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
                 ImGui.TextDisabled("Triggers " + (trigger.Triggers?.Length ?? 0) + "   ·   " + snapshot.Document);
             }
+            else if (snapshot.ToolMode == EditorToolMode.Map)
+            {
+                EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
+                ImGui.TextDisabled("Map " + (map.Rooms?.Length ?? 0) + " rooms   ·   " + map.RegionName);
+            }
             else
             {
                 ImGui.TextDisabled(snapshot.Document + "   ·   " + snapshot.ToolMode);
@@ -375,6 +412,9 @@ internal static class DevToolOverlay
         }
         ImGui.End();
     }
+
+    private static float InspectorWidth(Num.Vector2 display) =>
+        Math.Min(360f, Math.Max(300f, display.X * 0.26f));
 
     private static bool Matches(EditorObjectTypeSnapshot item, string query)
     {
