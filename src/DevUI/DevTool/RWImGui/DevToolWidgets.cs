@@ -26,8 +26,6 @@ internal static class DevToolWidgets
     }
 
     private static readonly Num.Vector4 Accent = new(0.30f, 0.58f, 0.92f, 1f);
-    private static readonly Num.Vector4 SecondaryAccent = new(0.68f, 0.80f, 0.90f, 1f);
-    private static readonly Num.Vector4 TertiaryAccent = new(0.78f, 0.86f, 1.00f, 1f);
     private static readonly Num.Vector4 AccentSoft = new(0.19f, 0.38f, 0.62f, 0.78f);
     private static readonly Num.Vector4 AccentHover = new(0.27f, 0.50f, 0.80f, 0.92f);
     private static readonly Num.Vector4 AccentActive = new(0.34f, 0.63f, 0.98f, 1f);
@@ -36,6 +34,12 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 Danger = new(0.57f, 0.20f, 0.22f, 0.88f);
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
+
+    // Gold hierarchy is intentional. The moving neutral-white flow is layered on top so the
+    // material reads as polished metal instead of a flat yellow label.
+    private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
+    private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
+    private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
 
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
@@ -211,15 +215,15 @@ internal static class DevToolWidgets
         switch (level)
         {
             case FlowTitleLevel.Primary:
-                body = Accent;
+                body = PrimaryGold;
                 flowStrength = 0.72f;
                 break;
             case FlowTitleLevel.Secondary:
-                body = SecondaryAccent;
+                body = SecondaryGold;
                 flowStrength = 0.58f;
                 break;
             default:
-                body = TertiaryAccent;
+                body = TertiaryGold;
                 flowStrength = 0.46f;
                 break;
         }
@@ -239,8 +243,6 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
-        // The body keeps the editor's established blue hierarchy. The Rain World-style material
-        // impression comes only from the moving neutral highlight layered over it.
         ImGui.TextColored(body, text);
         DevToolTitleFlow.Draw(draw, pos, textSize, text, body, flowStrength);
         ImGui.SetWindowFontScale(restoreScale);
