@@ -10,8 +10,8 @@ namespace DryCycle.Creatures.DesertBatfly;
 ///
 /// Returning bats still use Rain World's native BatHive Dijkstra maps, but only a small number
 /// may occupy the final ingress corridor for each hive at once. Other bats hold at distributed,
-/// non-hive shelter points until a slot opens. This prevents weather, travel and injury systems
-/// from independently funneling the whole colony into one physical entrance.
+/// non-hive shelter points until a slot opens. This prevents weather, travel, injury and native
+/// rain systems from independently funneling the whole colony into one physical entrance.
 /// </summary>
 internal static class DB_HiveTraffic
 {
@@ -115,7 +115,8 @@ internal static class DB_HiveTraffic
         => bat != null && claims.TryGetValue(bat, out Claim claim) && claim.Admitted;
 
     private static bool IsHiveIngressOwner(DB_BehaviorOwner owner)
-        => owner is DB_BehaviorOwner.InjuryRecovery or
+        => owner is DB_BehaviorOwner.NativeSpecial or
+                    DB_BehaviorOwner.InjuryRecovery or
                     DB_BehaviorOwner.Travel or
                     DB_BehaviorOwner.EnvironmentHardSurvival or
                     DB_BehaviorOwner.EnvironmentLocalSurvival;
@@ -131,6 +132,11 @@ internal static class DB_HiveTraffic
             return true;
         if (owner == DB_BehaviorOwner.Travel && DB_EnvironmentRuntime.HardSurvival(bat))
             return true;
+        if (owner == DB_BehaviorOwner.NativeSpecial && bat?.AI?.fleeFromRain == true)
+        {
+            RainCycle cycle = bat.room?.world?.rainCycle;
+            return cycle != null && (cycle.RainGameOver || cycle.RainApproaching < 0.12f);
+        }
         return false;
     }
 
