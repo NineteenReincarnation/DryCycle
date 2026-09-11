@@ -125,6 +125,18 @@ internal sealed class EffectPreviewOwnershipTransaction
     {
         if (room == null || obj == null) return false;
 
+        // RoomEffect preview is a visual/editor facility. Committing a PhysicalObject can mutate
+        // AbstractRoom.entities, creature lists, save-state ownership and consumable state through
+        // Room.CleanOutObjectNotInThisRoom. Unknown mods must never gain that persistence surface
+        // merely because the pointer hovered a browser row, so physical objects fail closed.
+        if (obj is PhysicalObject)
+        {
+            Plugin.Logger?.LogDebug(
+                "DevTool effect preview rejected physical runtime object '" + obj.GetType().FullName + "'.");
+            DisposeCapturedObject(obj, room);
+            return false;
+        }
+
         HashSet<IDrawable> before = SnapshotDrawables(room);
         try
         {
@@ -134,7 +146,7 @@ internal sealed class EffectPreviewOwnershipTransaction
         {
             Plugin.Logger?.LogWarning(
                 "DevTool effect preview object commit failed for '" + obj.GetType().FullName + "': " + error.Message);
-            DisposeCapturedObject(obj, room);
+            CleanupFailedCommit(obj);
             return false;
         }
 
@@ -261,6 +273,27 @@ internal sealed class EffectPreviewOwnershipTransaction
                 obj.RemoveFromRoom();
         }
         catch { }
+    }
+
+    private void CleanupFailedCommit(UpdatableAndDeletable obj)
+    {
+        if (obj == null) return;
+        try
+        {
+            obj.Destroy();
+            if (ContainsReference(room?.updateList, obj) || ReferenceEquals(obj.room, room))
+                room?.CleanOutObjectNotInThisRoom(obj);
+            else
+                DisposeCapturedObject(obj, room);
+        }
+        catch
+        {
+            try
+            {
+                if (ReferenceEquals(obj.room, room)) obj.RemoveFromRoom();
+            }
+            catch { }
+        }
     }
 
     private void CleanCameraLeasers()
