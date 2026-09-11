@@ -112,7 +112,7 @@ internal static class ObjectGizmoPresentationController
             return;
         }
 
-        DevUI owner = self.owner;
+        global::DevInterface.DevUI owner = self.owner;
         if (owner == null)
         {
             self.dragged = false;
