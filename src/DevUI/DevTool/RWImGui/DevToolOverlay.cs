@@ -99,6 +99,8 @@ internal static class DevToolOverlay
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("Commands");
+
         ImGui.TextDisabled(room);
         ImGui.SameLine();
         ImGui.TextDisabled("·");
@@ -146,6 +148,8 @@ internal static class DevToolOverlay
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("Tools");
+
         DrawModeButton("R", DevToolUiSettings.T("房间", "Room"), EditorToolMode.Room, snapshot.ToolMode);
         DrawModeButton("O", DevToolUiSettings.T("物件", "Objects"), EditorToolMode.Objects, snapshot.ToolMode);
         DrawModeButton("S", DevToolUiSettings.T("声音", "Sound"), EditorToolMode.Sound, snapshot.ToolMode);
@@ -157,11 +161,11 @@ internal static class DevToolOverlay
         ImGui.Separator();
         if (ImGui.Button(snapshot.BrowserOpen ? "<" : ">", new Num.Vector2(28f, 0f)))
             Send(EditorUiCommandKind.ToggleBrowser);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(DevToolUiSettings.T("显示/隐藏浏览器 · Ctrl+B", "Toggle browser · Ctrl+B"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏浏览器 · Ctrl+B", "Toggle browser · Ctrl+B"));
 
         if (ImGui.Button(snapshot.InspectorOpen ? "I" : "i", new Num.Vector2(28f, 0f)))
             Send(EditorUiCommandKind.ToggleInspector);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(DevToolUiSettings.T("显示/隐藏检查器 · Ctrl+I", "Toggle inspector · Ctrl+I"));
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏检查器 · Ctrl+I", "Toggle inspector · Ctrl+I"));
         ImGui.End();
     }
 
@@ -171,7 +175,7 @@ internal static class DevToolOverlay
         if (ImGui.Button(text + "##DevToolMode" + mode, new Num.Vector2(28f, 28f)))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: mode));
         if (current == mode) ImGui.PopStyleVar();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
     private static void DrawBrowser(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -189,6 +193,8 @@ internal static class DevToolOverlay
             ImGui.End();
             return;
         }
+
+        FloatingWindowSnap.TrackCurrentWindow("Browser");
 
         if (snapshot.ToolMode == EditorToolMode.Room)
             RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
@@ -252,7 +258,7 @@ internal static class DevToolOverlay
             bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
             if (ImGui.Selectable(item.DisplayName + "##PlaceObject" + item.Type, selected))
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(item.Source + " · " + item.Type);
+            if (ImGui.IsItemHovered()) DevToolTooltip.Show(item.Source + " · " + item.Type);
         }
         if (matches == 0) ImGui.TextDisabled(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
     }
@@ -315,6 +321,8 @@ internal static class DevToolOverlay
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow("Inspector");
+
         if (snapshot.ToolMode == EditorToolMode.Room)
         {
             RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
@@ -358,7 +366,7 @@ internal static class DevToolOverlay
                 ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
                 : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI")))
             Send(EditorUiCommandKind.ToggleLegacyUi);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
+        if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
     private static void DrawStatusBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -377,7 +385,10 @@ internal static class DevToolOverlay
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
                                  ImGuiWindowFlags.NoScrollWithMouse;
         if (ImGui.Begin(DevToolUiSettings.T("状态###DevToolStatus", "Status###DevToolStatus"), flags))
+        {
+            FloatingWindowSnap.TrackCurrentWindow("Status");
             ImGui.TextDisabled(text);
+        }
         ImGui.End();
     }
 
