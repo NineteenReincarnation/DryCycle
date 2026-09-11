@@ -36,16 +36,11 @@ internal static class DevToolWidgets
 
         if (primary)
         {
-            // Browser / Inspector are the first visual level inside the combined editor panel.
-            // Keep them large and clean: no separator directly under the title.
             DrawOutlinedText(text, Accent, 1.28f * restoreScale, 1.75f, restoreScale);
             ImGui.Spacing();
             return;
         }
 
-        // Titles owned by the active editor (Room Settings, Environment, Objects, etc.) are
-        // one level below Browser / Inspector. Use a softer, less saturated blue so the visual
-        // hierarchy remains obvious even at large global font sizes.
         DrawOutlinedText(text, SecondaryAccent, 1.15f * restoreScale, 1.35f, restoreScale);
         ImGui.Separator();
         ImGui.Spacing();
@@ -139,6 +134,35 @@ internal static class DevToolWidgets
         if (wrapped) ImGui.TextWrapped(text);
         else ImGui.TextUnformatted(text);
         ImGui.PopStyleColor();
+    }
+
+    internal static bool FullWidthInputText(string label, string id, ref string value, uint maxLength)
+    {
+        MutedText(label);
+        ImGui.SetNextItemWidth(-1f);
+        return ImGui.InputText("##" + id, ref value, maxLength);
+    }
+
+    internal static float ButtonWidth(string label)
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+        return ImGui.CalcTextSize(label).X + style.FramePadding.X * 2f;
+    }
+
+    internal static float RadioWidth(string label)
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+        return ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize(label).X;
+    }
+
+    internal static bool SameLineIfFits(float nextItemWidth, float extraReserve = 0f)
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float nextX = ImGui.GetItemRectMax().X + style.ItemSpacing.X;
+        float right = ImGui.GetWindowPos().X + ImGui.GetWindowWidth() - style.WindowPadding.X - extraReserve;
+        if (nextX + nextItemWidth > right) return false;
+        ImGui.SameLine();
+        return true;
     }
 
     private static bool IsPrimaryPaneTitle(string text)
