@@ -28,7 +28,7 @@ internal static class ObjectInspectorView
         if (!inspector.HasSelection)
         {
             Reset(-1);
-            ImGui.TextDisabled("Nothing selected.");
+            ImGui.TextDisabled(DevToolUiSettings.T("未选择物件。", "Nothing selected."));
             return;
         }
 
@@ -38,7 +38,7 @@ internal static class ObjectInspectorView
         ImGui.Text(inspector.Type);
         ImGui.TextDisabled(inspector.DataType);
         if (inspector.SelectionCount > 1)
-            ImGui.TextDisabled("Editing shared properties for the current selection.");
+            ImGui.TextDisabled(DevToolUiSettings.T("正在编辑当前多选物件共有的属性。", "Editing shared properties for the current selection."));
         ImGui.Separator();
 
         DrawTransform(inspector);
@@ -49,13 +49,13 @@ internal static class ObjectInspectorView
         ImGui.Separator();
         if (inspector.SelectionCount > 1)
         {
-            if (ImGui.Button("Duplicate Selection  Ctrl+D"))
+            if (ImGui.Button(DevToolUiSettings.T("复制所选  Ctrl+D", "Duplicate Selection  Ctrl+D")))
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DuplicateSelection));
             ImGui.SameLine();
-            if (ImGui.Button("Delete Selection"))
+            if (ImGui.Button(DevToolUiSettings.T("删除所选", "Delete Selection")))
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteSelection));
         }
-        else if (ImGui.Button("Delete Object"))
+        else if (ImGui.Button(DevToolUiSettings.T("删除物件", "Delete Object")))
         {
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
         }
@@ -63,7 +63,9 @@ internal static class ObjectInspectorView
 
     private static void DrawTransform(EditorInspectorSnapshot inspector)
     {
-        ImGui.TextDisabled(inspector.SelectionCount > 1 ? "Transform · group anchor" : "Transform");
+        ImGui.TextDisabled(inspector.SelectionCount > 1
+            ? DevToolUiSettings.T("变换 · 组锚点", "Transform · group anchor")
+            : DevToolUiSettings.T("变换", "Transform"));
 
         // The primary object is the anchor for a multi-selection. Moving it from the
         // Inspector applies the same delta to every selected object on the Unity thread.
@@ -90,7 +92,9 @@ internal static class ObjectInspectorView
             if (inspector.SelectionCount > 1)
             {
                 ImGui.Separator();
-                ImGui.TextDisabled("No editable properties are shared by every selected object.");
+                ImGui.TextDisabled(DevToolUiSettings.T(
+                    "所选物件之间没有共同的可编辑属性。",
+                    "No editable properties are shared by every selected object."));
             }
             return;
         }
@@ -103,7 +107,9 @@ internal static class ObjectInspectorView
             if (!string.Equals(group, property.Group, StringComparison.Ordinal))
             {
                 group = property.Group;
-                ImGui.TextDisabled(string.IsNullOrEmpty(group) ? "Properties" : group);
+                ImGui.TextDisabled(string.IsNullOrEmpty(group)
+                    ? DevToolUiSettings.T("属性", "Properties")
+                    : group);
             }
             DrawProperty(inspector, property);
         }
@@ -115,7 +121,7 @@ internal static class ObjectInspectorView
 
         bool mixed = IsMixed(inspector, property.Key);
         string stateKey = inspector.ObjectIndex + ":" + inspector.SelectionCount + ":" + property.Key;
-        string displayName = property.DisplayName + (mixed ? "  [Mixed]" : string.Empty);
+        string displayName = property.DisplayName + (mixed ? DevToolUiSettings.T("  [混合]", "  [Mixed]") : string.Empty);
         string label = displayName + "##DevToolProperty_" + stateKey;
 
         switch (property.Kind)
@@ -213,9 +219,9 @@ internal static class ObjectInspectorView
         if (ImGui.IsItemHovered())
         {
             if (mixed && !string.IsNullOrEmpty(property.Source))
-                ImGui.SetTooltip("Selected objects contain different values.\n" + property.Source);
+                ImGui.SetTooltip(DevToolUiSettings.T("所选物件的值不同。\n", "Selected objects contain different values.\n") + property.Source);
             else if (mixed)
-                ImGui.SetTooltip("Selected objects contain different values.");
+                ImGui.SetTooltip(DevToolUiSettings.T("所选物件的值不同。", "Selected objects contain different values."));
             else if (!string.IsNullOrEmpty(property.Source))
                 ImGui.SetTooltip(property.Source);
         }
@@ -225,7 +231,7 @@ internal static class ObjectInspectorView
     {
         string[] options = property.Options ?? Array.Empty<string>();
         string preview = mixed
-            ? "<Mixed>"
+            ? DevToolUiSettings.T("<混合>", "<Mixed>")
             : property.IntegerValue >= 0 && property.IntegerValue < options.Length
                 ? options[property.IntegerValue]
                 : property.StringValue ?? string.Empty;
@@ -250,8 +256,10 @@ internal static class ObjectInspectorView
         if (controls.Length == 0) return;
 
         ImGui.Separator();
-        ImGui.TextDisabled("Legacy DevInterface");
-        ImGui.TextWrapped("Standard Rain World controls exposed by the object's original representation.");
+        ImGui.TextDisabled(DevToolUiSettings.T("原版 DevInterface", "Legacy DevInterface"));
+        ImGui.TextWrapped(DevToolUiSettings.T(
+            "这里显示物件原始 Representation 暴露的标准 Rain World 控件。",
+            "Standard Rain World controls exposed by the object's original representation."));
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -295,7 +303,7 @@ internal static class ObjectInspectorView
             if (control.CanReset)
             {
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Reset##" + stateKey))
+                if (ImGui.SmallButton(DevToolUiSettings.T("重置##", "Reset##") + stateKey))
                     EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                         EditorUiCommandKind.ResetLegacySlider,
                         inspector.ObjectIndex,
@@ -309,13 +317,17 @@ internal static class ObjectInspectorView
         if (!inspector.LegacyUiAvailable) return;
 
         ImGui.Separator();
-        ImGui.TextDisabled("Compatibility");
-        string label = inspector.LegacyUiVisible ? "Hide Original DevUI" : "Show Original DevUI";
+        ImGui.TextDisabled(DevToolUiSettings.T("兼容", "Compatibility"));
+        string label = inspector.LegacyUiVisible
+            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
+            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
         if (ImGui.Button(label + "##DevToolLegacyFallback"))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Fallback for custom DevInterface controls that cannot be translated into the Inspector.");
+            ImGui.SetTooltip(DevToolUiSettings.T(
+                "用于无法转换到新检查器的自定义 DevInterface 控件。",
+                "Fallback for custom DevInterface controls that cannot be translated into the Inspector."));
     }
 
     private static void SendPosition(EditorInspectorSnapshot inspector)
