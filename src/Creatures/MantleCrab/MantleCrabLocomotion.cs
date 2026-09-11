@@ -39,6 +39,14 @@ internal sealed class MantleCrabLocomotion
     private const float ForwardSupportNearDistance = 6f;
     private const float ForwardSupportFullDistance = 46f;
 
+    // 抬腿前先把重心轻微移向剩余支撑脚。这里只做几像素级真实平移，不播放额外身体摇摆动画。
+    // Before lift-off, shift the shell a few pixels toward the remaining support centroid using real velocity correction.
+    private const float PreloadMaximumShift = 7f;
+    private const float PreloadPositionGain = .0018f;
+    private const float PreloadVelocityDamping = .022f;
+    private const float PreloadMaximumAcceleration = .020f;
+    private const float PreloadMinimumSupportQuality = .48f;
+
     private readonly MantleCrab crab;
     private readonly int[] stepCooldown = new int[4];
     private readonly float[] legLoad = new float[4];
@@ -309,6 +317,11 @@ internal sealed class MantleCrabLocomotion
         // 保守的大体型垂直稳定器只压掉异常的 pogo 起跳，不负责主动抬身体。
         // This conservative vertical stabilizer only suppresses abnormal pogo launches.
         StabilizeVerticalMotion();
+
+        // 正式抬腿之前先把甲壳重心轻微移到剩余支撑脚上。这个修正只沿 WalkAxis 平移整个刚体，
+        // 不直接转动甲壳，也不替代原有承重和姿态系统。
+        // Preload the remaining supports before lift-off by shifting the whole rigid shell along the walking axis.
+        ApplyPreloadShift();
 
         if (!crab.Consious || crab.room == null || crab.SupportingFeet < 2 || posture.SeverelyUnstable)
         {
@@ -604,6 +617,107 @@ internal sealed class MantleCrabLocomotion
     private void CancelPendingStep()
     {
         pendingStepIndex = -1;
+    }
+
+    /// <summary>
+    /// 在正式抬腿之前把甲壳重心缓慢移向其余可靠支撑脚的中心。
+    /// 预载从卸载过程中逐渐建立，在 Lift 阶段保持，Transfer/Lower 中逐步释放；所有 BodyChunk 接受同量修正，因此不会制造假旋转。
+    ///
+    /// Shifts the rigid shell toward the remaining support centroid before lift-off, then fades the preload through swing.
+    /// </summary>
+    private void ApplyPreloadShift()
+    {
+        if (!crab.Consious || crab.bodyChunks == null || crab.bodyChunks.Length == 0 ||
+            crab.SupportingFeet < 2 || posture.SeverelyUnstable || posture.Recovering)
+            return;
+
+        int activeIndex = -1;
+        float amount = 0f;
+
+        if (pendingStepIndex >= 0 && pendingStepIndex < crab.Legs.Length)
+        {
+            activeIndex = pendingStepIndex;
+            float unload = Mathf.Clamp01(1f - legLoad[activeIndex]);
+            float t = Mathf.InverseLerp(.05f, .88f, unload);
+            amount = t * t * (3f - 2f * t);
+        }
+        else if (lastStepIndex >= 0 && lastStepIndex < crab.Legs.Length)
+        {
+            MantleCrabLimb activeLeg = crab.Legs[lastStepIndex];
+            if (activeLeg.Swinging)
+            {
+                activeIndex = lastStepIndex;
+                float t = Mathf.Clamp01(activeLeg.SwingPhaseProgress);
+                t = t * t * (3f - 2f * t);
+                amount = activeLeg.SwingPhase switch
+                {
+                    MantleCrabSwingPhase.Lift => 1f,
+                    MantleCrabSwingPhase.Transfer => Mathf.Lerp(1f, .30f, t),
+                    MantleCrabSwingPhase.Lower => Mathf.Lerp(.30f, 0f, t),
+                    _ => 0f
+                };
+            }
+        }
+
+        if (activeIndex < 0 || amount <= .001f)
+            return;
+
+        // 上台阶时预载仍然存在，但不能强行把刚准备向高处送出的重心拉回去。
+        // Keep preload during a climb, but soften it so the support-transfer system cannot block real elevation gain.
+        if (traversal.Mode == MantleCrabTraversalMode.StepUp)
+            amount *= .72f;
+
+        Vector2 axis = WalkAxis;
+        if (axis.sqrMagnitude <= .0001f)
+            axis = Vector2.right;
+        else
+            axis.Normalize();
+
+        float supportCoordinate = 0f;
+        float supportQuality = 0f;
+        int supportCount = 0;
+        for (int i = 0; i < crab.Legs.Length; i++)
+        {
+            if (i == activeIndex)
+                continue;
+
+            MantleCrabLimb leg = crab.Legs[i];
+            if (!leg.Planted || leg.Swinging)
+                continue;
+
+            float quality = EffectiveSupportQuality(leg);
+            if (quality < ReliableLoadThreshold)
+                continue;
+
+            supportCoordinate += Vector2.Dot(leg.Contact, axis) * quality;
+            supportQuality += quality;
+            supportCount++;
+        }
+
+        if (supportCount < 2 || supportQuality < PreloadMinimumSupportQuality)
+            return;
+
+        supportCoordinate /= supportQuality;
+        Vector2 center = BodyCenter(out _);
+        float bodyCoordinate = Vector2.Dot(center, axis);
+        float maximumShift = PreloadMaximumShift * Mathf.Max(.65f, crab.ShellScale);
+        float error = Mathf.Clamp(supportCoordinate - bodyCoordinate, -maximumShift, maximumShift);
+
+        // 用轻微 PD 修正把重心送向剩余支撑中心。它会自然减慢卸载阶段的身体平移，
+        // 但最大加速度远低于普通推进，不会反过来拖着整只螃蟹滑行。
+        // A small PD correction settles the COM over remaining contacts without becoming another locomotion motor.
+        float alongVelocity = Vector2.Dot(BodyVelocity(), axis);
+        float acceleration = Mathf.Clamp(
+            error * PreloadPositionGain - alongVelocity * PreloadVelocityDamping,
+            -PreloadMaximumAcceleration,
+            PreloadMaximumAcceleration) * amount;
+
+        if (Mathf.Abs(acceleration) <= .0001f)
+            return;
+
+        Vector2 correction = axis * acceleration;
+        for (int i = 0; i < crab.bodyChunks.Length; i++)
+            crab.bodyChunks[i].vel += correction;
     }
 
     private void AbsorbTouchdownRebound()
