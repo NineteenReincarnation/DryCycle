@@ -117,22 +117,26 @@ internal static class DevToolOverlay
         }
 
         ImGui.SameLine(0f, 20f);
-        if (ImGui.Button(DevToolUiSettings.T("保存  Ctrl+S", "Save  Ctrl+S"))) Send(EditorUiCommandKind.Save);
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("保存  Ctrl+S", "Save  Ctrl+S"), "TopSave", DevToolButtonTone.Primary))
+            Send(EditorUiCommandKind.Save);
 
         ImGui.SameLine();
         bool undoDisabled = !snapshot.CanUndo;
         if (undoDisabled) ImGui.BeginDisabled();
-        if (ImGui.Button(undo + "##DevToolUndo")) Send(EditorUiCommandKind.Undo);
+        if (DevToolWidgets.ActionButton(undo, "DevToolUndo", DevToolButtonTone.Normal))
+            Send(EditorUiCommandKind.Undo);
         if (undoDisabled) ImGui.EndDisabled();
 
         ImGui.SameLine();
         bool redoDisabled = !snapshot.CanRedo;
         if (redoDisabled) ImGui.BeginDisabled();
-        if (ImGui.Button(redo + "##DevToolRedo")) Send(EditorUiCommandKind.Redo);
+        if (DevToolWidgets.ActionButton(redo, "DevToolRedo", DevToolButtonTone.Normal))
+            Send(EditorUiCommandKind.Redo);
         if (redoDisabled) ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button(DevToolUiSettings.T("专注  Tab", "Focus  Tab"))) Send(EditorUiCommandKind.ToggleFocus);
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注  Tab", "Focus  Tab"), "TopFocus", DevToolButtonTone.Subtle))
+            Send(EditorUiCommandKind.ToggleFocus);
         ImGui.End();
     }
 
@@ -175,18 +179,21 @@ internal static class DevToolOverlay
         DrawModeButton(dialogLabel, DevToolUiSettings.T("对话", "Dialog"), EditorToolMode.Dialog, snapshot.ToolMode);
         DrawModeButton(relationshipsLabel, DevToolUiSettings.T("关系", "Relationships"), EditorToolMode.Relationships, snapshot.ToolMode);
 
+        ImGui.Spacing();
         ImGui.Separator();
+        ImGui.Spacing();
+
         string browserLabel = snapshot.BrowserOpen
             ? DevToolUiSettings.T("隐藏浏览器  Ctrl+B", "Hide Browser  Ctrl+B")
             : DevToolUiSettings.T("显示浏览器  Ctrl+B", "Show Browser  Ctrl+B");
-        if (ImGui.Button(browserLabel + "##DevToolToggleBrowser", new Num.Vector2(-1f, 0f)))
+        if (DevToolWidgets.ActionButton(browserLabel, "DevToolToggleBrowser", DevToolButtonTone.Subtle, true))
             Send(EditorUiCommandKind.ToggleBrowser);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏左栏浏览器", "Toggle left Browser pane"));
 
         string inspectorLabel = snapshot.InspectorOpen
             ? DevToolUiSettings.T("隐藏检查器  Ctrl+I", "Hide Inspector  Ctrl+I")
             : DevToolUiSettings.T("显示检查器  Ctrl+I", "Show Inspector  Ctrl+I");
-        if (ImGui.Button(inspectorLabel + "##DevToolToggleInspector", new Num.Vector2(-1f, 0f)))
+        if (DevToolWidgets.ActionButton(inspectorLabel, "DevToolToggleInspector", DevToolButtonTone.Subtle, true))
             Send(EditorUiCommandKind.ToggleInspector);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器", "Toggle right Inspector pane"));
         ImGui.End();
@@ -194,10 +201,8 @@ internal static class DevToolOverlay
 
     private static void DrawModeButton(string label, string tooltip, EditorToolMode mode, EditorToolMode current)
     {
-        if (current == mode) ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 2f);
-        if (ImGui.Button(label + "##DevToolMode" + mode, new Num.Vector2(-1f, 0f)))
+        if (DevToolWidgets.NavItem(label, "DevToolMode" + mode, current == mode))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: mode));
-        if (current == mode) ImGui.PopStyleVar();
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
@@ -246,8 +251,7 @@ internal static class DevToolOverlay
             if (ImGui.BeginChild("##DevToolBrowserPane", new Num.Vector2(leftWidth, available.Y), ImGuiChildFlags.Borders))
             {
                 ImGui.SetWindowFontScale(BrowserPaneFontScale);
-                ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
-                ImGui.Separator();
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
                 DrawBrowserContents(snapshot);
             }
             ImGui.EndChild();
@@ -273,8 +277,6 @@ internal static class DevToolOverlay
                 lineColor,
                 browserInspectorSplitterDragging ? 3f : 1.5f);
 
-            // Split ratio is only changed by an explicit drag that starts on this divider.
-            // Moving or resizing the whole editor panel never writes browserInspectorSplit.
             if (browserInspectorSplitterDragging && usable > 1f)
             {
                 float nextLeft = leftWidth + ImGui.GetIO().MouseDelta.X;
@@ -285,8 +287,7 @@ internal static class DevToolOverlay
             ImGui.SameLine(0f, 0f);
             if (ImGui.BeginChild("##DevToolInspectorPane", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
             {
-                ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
-                ImGui.Separator();
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
                 DrawInspectorContents(snapshot);
             }
             ImGui.EndChild();
@@ -295,15 +296,13 @@ internal static class DevToolOverlay
         {
             browserInspectorSplitterDragging = false;
             ImGui.SetWindowFontScale(BrowserPaneFontScale);
-            ImGui.TextDisabled(DevToolUiSettings.T("浏览器", "BROWSER"));
-            ImGui.Separator();
+            DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
             DrawBrowserContents(snapshot);
         }
         else if (inspector)
         {
             browserInspectorSplitterDragging = false;
-            ImGui.TextDisabled(DevToolUiSettings.T("检查器", "INSPECTOR"));
-            ImGui.Separator();
+            DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
             DrawInspectorContents(snapshot);
         }
 
@@ -455,11 +454,14 @@ internal static class DevToolOverlay
 
     private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
     {
+        ImGui.Spacing();
         ImGui.Separator();
+        ImGui.Spacing();
         bool legacyVisible = snapshot.Inspector?.LegacyUiVisible == true;
-        if (ImGui.Button(legacyVisible
-                ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
-                : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI")))
+        string label = legacyVisible
+            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
+            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
+        if (DevToolWidgets.ActionButton(label, "LegacyDevUI", DevToolButtonTone.Primary))
             Send(EditorUiCommandKind.ToggleLegacyUi);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
