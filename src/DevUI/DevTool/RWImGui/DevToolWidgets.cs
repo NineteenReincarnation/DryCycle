@@ -19,6 +19,7 @@ internal enum DevToolButtonTone
 internal static class DevToolWidgets
 {
     private static readonly Num.Vector4 Accent = new(0.30f, 0.58f, 0.92f, 1f);
+    private static readonly Num.Vector4 SecondaryAccent = new(0.68f, 0.80f, 0.90f, 1f);
     private static readonly Num.Vector4 AccentSoft = new(0.19f, 0.38f, 0.62f, 0.78f);
     private static readonly Num.Vector4 AccentHover = new(0.27f, 0.50f, 0.80f, 0.92f);
     private static readonly Num.Vector4 AccentActive = new(0.34f, 0.63f, 0.98f, 1f);
@@ -30,8 +31,22 @@ internal static class DevToolWidgets
 
     internal static void PaneTitle(string text, float restoreScale = 1f)
     {
+        bool primary = IsPrimaryPaneTitle(text);
         ImGui.Spacing();
-        DrawOutlinedText(text, Accent, 1.16f * restoreScale, 1.5f, restoreScale);
+
+        if (primary)
+        {
+            // Browser / Inspector are the first visual level inside the combined editor panel.
+            // Keep them large and clean: no separator directly under the title.
+            DrawOutlinedText(text, Accent, 1.28f * restoreScale, 1.75f, restoreScale);
+            ImGui.Spacing();
+            return;
+        }
+
+        // Titles owned by the active editor (Room Settings, Environment, Objects, etc.) are
+        // one level below Browser / Inspector. Use a softer, less saturated blue so the visual
+        // hierarchy remains obvious even at large global font sizes.
+        DrawOutlinedText(text, SecondaryAccent, 1.15f * restoreScale, 1.35f, restoreScale);
         ImGui.Separator();
         ImGui.Spacing();
     }
@@ -124,6 +139,14 @@ internal static class DevToolWidgets
         if (wrapped) ImGui.TextWrapped(text);
         else ImGui.TextUnformatted(text);
         ImGui.PopStyleColor();
+    }
+
+    private static bool IsPrimaryPaneTitle(string text)
+    {
+        return text == "BROWSER" ||
+               text == "INSPECTOR" ||
+               text == "浏览器" ||
+               text == "检查器";
     }
 
     private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke, float restoreScale)
