@@ -208,6 +208,21 @@ public static class EditorActions
             () => LegacyDevInterfaceBridge.SetDirection(session.Owner, target, path, x, y));
     }
 
+    public static bool SetLegacyColor(
+        EditorSession session,
+        PlacedObject target,
+        string path,
+        float r,
+        float g,
+        float b,
+        float a)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy color",
+            () => LegacyDevInterfaceBridge.SetColor(session.Owner, target, path, r, g, b, a));
+    }
+
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
