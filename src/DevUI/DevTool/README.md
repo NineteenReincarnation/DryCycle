@@ -23,7 +23,7 @@ DevTool/
 ├── Commands/          保存、对象编辑和统一命令入口
 ├── History/           Document History、原版兼容快照、事务记录
 ├── Input/             键鼠所有权、世界 Handle 与游戏输入隔离
-├── Preview/           临时运行时预览、回滚和后续事务探测基础设施
+├── Preview/           临时运行时预览、回滚、所有权传播和安全探测
 ├── Objects/           Object Catalog、Inspector、属性描述、多选
 ├── Room/              RoomSettings 与 RoomEffect 编辑
 ├── Sound/             环境音浏览、放置和参数编辑
@@ -67,8 +67,14 @@ DevTool/
 - 防止沿用原版 Create 信号的 toggle 语义导致“再次添加反而删除”。
 - Effect 浏览器已接入悬停实时预览：约 180ms 后把一个 `save=false` 的临时 `RoomEffect` 放到当前 `RoomSettings.effects` 最前端，移开、切换页面或关闭 DevTools 时按对象身份精确回滚。
 - Effect 预览不识别 Mod 名称、程序集或私有 API；任何通过正常 `RoomSettings.effects`、`GetEffect`、`GetEffectAmount` 读取效果状态的未知 Mod 都可以自动看到同一份预览状态。
+- 对只在加载阶段创建视觉对象的 Effect，已加入第二层通用 bootstrap：优先从本体 `Room.Loaded` 和已注册 HookGen `Room.Loaded` 回调的 IL 中寻找“Effect 判断 → 构造 UAD → `Room.AddObject`”关系，只执行可证明安全的构造器，不重跑整个房间加载流程。
+- IL 无法直接确定构造器时，只允许经过安全扫描的 HookGen 回调进入 A/B Probe；明显涉及静态写入、AbstractEntity、文件、AssetBundle、存档等持久副作用的回调直接 fail closed，不做高级预览。
+- 高级预览的 Runtime Object、Drawable、Camera SpriteLeaser 和安全 Room 字段由独立 Ownership Transaction 持有；结束 Preview 时按对象身份逆序回滚，不按类型名猜测删除对象。
+- 预览对象运行后继续通过 `Room.AddObject` 生成的非物理子对象可以继承同一份 Preview ownership。正常 `Room.Update` 内优先使用 `Room.updateIndex` 精确确认当前生成者身份；仅在 Update 循环之外才使用“该调用类型的所有房间实例都属于 Preview”的保守栈回退。
+- Preview 如果生成 `PhysicalObject`、出现强回滚泄漏或高级 bootstrap 抛出异常，会只按 `RoomEffect.Type` 在当前插件会话中标记为 Unsafe；之后该 Effect 仍保留第一层 RoomEffect 状态预览，但不再反复执行高级 bootstrap。这里同样不记录 Mod 名或程序集。
+- 回滚后会检查 Preview-owned Object、Drawable、Camera SpriteLeaser、Room 字段以及房间运行时 baseline；强所有权泄漏会触发 Unsafe，普通房间自身的粒子/滴水等 baseline 波动只记诊断，不误判为 Mod 污染。
 - 临时 Effect 不进入 Inspector Snapshot、History 或保存数据；Save / Undo / Redo / 真正点击添加都会先结束预览，并处理了从左侧预览直接点击右侧 Inspector 时的一帧索引竞态。
-- 所有修改进入 Room Document History。
+- 所有正式修改进入 Room Document History。
 
 ### Sound
 
@@ -128,12 +134,13 @@ Level 4  Vanilla fallback
          无法理解的特殊控件完整退回原版 DevUI
 ```
 
-这条兼容链不包含对 POM、Fisobs、M4r、RegionKit 私有 API 的运行时依赖。
+Effect Hover Preview 额外遵守一条规则：兼容对象是 Rain World 的运行时行为，而不是具体 Mod。代码中不建立 `RegionKitAdapter`、`POMAdapter` 或按程序集名称分支的 Effect 兼容表。
 
 ## 继续审查 / 完善的重点
 
-- Effect Preview 下一层需要做通用的运行时对象所有权 Journal 与 A/B Probe，用于只在 `Room.Loaded` 或类似初始化阶段创建视觉对象的 Effect；在完成可逆事务层之前，不直接重跑整个 `Room.Loaded()`。
-- 真正使用游戏程序集和 RWImGui 安装进行完整编译、进游戏运行测试与错误清理；当前仓库没有覆盖本 PR 的编译 CI。
+- 真正使用游戏安装中的 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、RuntimeDetour 和 RWImGui 进行完整联编、进游戏运行测试与错误清理；当前仓库没有覆盖这套环境的编译 CI。
+- Effect Preview 继续扩展通用 IL Recipe 参数推导。当前安全构造器主要覆盖 `Room`、`RoomEffect`、`float`、`RoomCamera` 和无参模式；带额外 `bool / enum / int` 条件或复杂多分支初始化的 Effect 仍应 fail closed，而不是猜参数。
+- Effect Preview 继续审查 Camera / Futile / 全局 shader 等不经过 `Room.AddObject` 的运行时副作用；只有能建立可证明所有权和可逆性的通用 Journal 后才扩大自动预览范围。
 - Objects 框选、吸附、网格、对齐/分布等高效场景编辑工具。
 - 更多本体常用 PlacedObject 的语义化 Inspector 与我们自己的 Gizmo。
 - Map 的连接端口编辑、房间 attractiveness/default material 等高级数据编辑。
