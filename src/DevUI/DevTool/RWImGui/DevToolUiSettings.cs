@@ -18,10 +18,12 @@ internal static class DevToolUiSettings
     internal const float WindowAlpha = 0.52f;
     internal const float PopupAlpha = 0.68f;
 
-    // 18 px is the original rebuilt-editor design scale. The default typography is intentionally
-    // doubled to 36 px, while layout spacing follows the same 2x scale.
+    // 18 px is the original rebuilt-editor design scale. English keeps the established 36 px
+    // presentation size, while Simplified Chinese gets a slightly larger 42 px default because
+    // the CJK atlas has a visibly smaller glyph body at the same nominal ImGui font size.
     internal const float ReferenceFontSize = 18f;
     internal const float DefaultFontSize = 36f;
+    internal const float DefaultChineseFontSize = 42f;
     internal const int DefaultFontWeight = 400;
     internal const float WindowOutlineWidth = 2f;
 
@@ -31,25 +33,41 @@ internal static class DevToolUiSettings
     // the semi-transparent room view.
     private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.76f, 0.80f, 0.86f, 1f);
 
-    // Chinese is intentionally the default for DryCycle's development workflow.
-    internal static DevToolUiLanguage Language { get; private set; } = DevToolUiLanguage.Chinese;
+    // Chinese is intentionally the default for DryCycle's development workflow. Keep independent
+    // font sizes for the two language modes so enlarging Chinese does not silently enlarge English,
+    // and changing one language's size slider does not destroy the other language's preference.
+    private static DevToolUiLanguage language = DevToolUiLanguage.Chinese;
+    private static float chineseFontSize = DefaultChineseFontSize;
+    private static float englishFontSize = DefaultFontSize;
 
-    internal static float FontSize { get; set; } = DefaultFontSize;
+    internal static DevToolUiLanguage Language => language;
+
+    internal static float FontSize
+    {
+        get => IsChinese ? chineseFontSize : englishFontSize;
+        set
+        {
+            if (IsChinese) chineseFontSize = value;
+            else englishFontSize = value;
+        }
+    }
+
     internal static int FontWeight { get; set; } = DefaultFontWeight;
     internal static Num.Vector4 TextColor { get; set; } = DefaultTextColor;
     internal static Num.Vector4 DisabledTextColor { get; set; } = DefaultDisabledTextColor;
 
-    internal static bool IsChinese => Language == DevToolUiLanguage.Chinese;
+    internal static bool IsChinese => language == DevToolUiLanguage.Chinese;
     internal static float UiScale => FontSize / ReferenceFontSize;
 
-    internal static void SetLanguage(DevToolUiLanguage language)
+    internal static void SetLanguage(DevToolUiLanguage value)
     {
-        Language = language;
+        language = value;
     }
 
     internal static void ResetFontAppearance()
     {
-        FontSize = DefaultFontSize;
+        chineseFontSize = DefaultChineseFontSize;
+        englishFontSize = DefaultFontSize;
         FontWeight = DefaultFontWeight;
         TextColor = DefaultTextColor;
         DisabledTextColor = DefaultDisabledTextColor;
