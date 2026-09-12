@@ -23,30 +23,37 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
+    private static bool nativeImGuiReady;
     private bool sessionWasVisible;
     private bool sessionWasPaused;
 
     private void OnEnable()
     {
         log = Logger;
+        nativeImGuiReady = false;
         sessionWasVisible = false;
         sessionWasPaused = false;
         EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
 
-        // RWImGui is a hard dependency, so its plugin has already been loaded when this bridge is
-        // enabled. Try the atlas immediately: this is earlier than RainWorld.OnModsInit and avoids
-        // the old race where the first ImGui frame had already locked/uploaded the atlas by the
-        // time DryCycle tried to add its local CJK faces.
-        TryRegisterLocalFontsDuringSafeStartup();
-
+        // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
+        // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
+        // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
+        // terminate the process before BepInEx has a chance to print a managed exception.
+        On.RainWorld.Start += RainWorld_Start;
         On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
     private void Update()
     {
+        // If RWImGui created the shared context after RainWorld.Start returned, this gives the font
+        // registration one final safe pre-render opportunity. The helper refuses to touch a missing
+        // context and DevToolFontCatalog refuses to mutate an atlas once the first frame has begun.
+        if (nativeImGuiReady && !DevToolFontCatalog.RegistrationAttempted)
+            TryRegisterLocalFontsDuringSafeStartup();
+
         // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
         EditorSession session = DevToolSessionHub.Current;
@@ -78,8 +85,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void OnDisable()
     {
+        On.RainWorld.Start -= RainWorld_Start;
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        nativeImGuiReady = false;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorUiModeState.SetOverlayHidden(false);
         sessionWasVisible = false;
@@ -88,12 +97,20 @@ public sealed class BridgePlugin : BaseUnityPlugin
         TryUnregisterCallback();
     }
 
+    private static void RainWorld_Start(On.RainWorld.orig_Start orig, RainWorld self)
+    {
+        // Let RWImGui's own Start hook run first. Its native function-pointer bootstrap is the
+        // boundary after which calling ImGui.NET is valid. Only then probe the shared font atlas.
+        orig(self);
+        nativeImGuiReady = true;
+        TryRegisterLocalFontsDuringSafeStartup();
+    }
+
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
         // Different RWImGui releases create/configure the shared atlas at slightly different
-        // points. Probe both sides of PreModsInit, but only call the catalog when mutation is still
-        // provably safe. A failed readiness probe does not consume the catalog's one registration
-        // attempt, so OnModsInit can still succeed later in startup.
+        // points. Probe both sides of PreModsInit, but the helper remains a no-op until Start has
+        // established that ImGui.NET's native function pointers are safe to call.
         TryRegisterLocalFontsDuringSafeStartup();
         orig(self);
         TryRegisterLocalFontsDuringSafeStartup();
@@ -101,30 +118,29 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
-        // The previous implementation registered only after orig(self). On installations where
-        // RWImGui has already begun rendering by then, ImGui.GetFrameCount() is non-zero and the
-        // font selector is permanently stuck on the existing FiraCode face. Register before the
-        // chain first, while retaining a post-orig diagnostic fallback.
         TryRegisterLocalFontsDuringSafeStartup();
         orig(self);
-
-        if (!DevToolFontCatalog.RegistrationSucceeded)
-            DevToolFontCatalog.TryRegisterLocalFonts(log);
-
+        TryRegisterLocalFontsDuringSafeStartup();
         TryRegisterCallback();
     }
 
     private static unsafe bool TryRegisterLocalFontsDuringSafeStartup()
     {
-        if (DevToolFontCatalog.RegistrationSucceeded) return true;
+        if (!nativeImGuiReady || DevToolFontCatalog.RegistrationSucceeded) return false;
 
         try
         {
-            // Do not call TryRegisterLocalFonts until a real atlas exists. This keeps early startup
-            // probes retryable instead of letting an unavailable context consume the catalog's
-            // single attempt. Once a frame starts, the catalog's post-OnModsInit call records the
-            // useful "safe window missed" diagnostic instead of mutating a live renderer atlas.
-            if (ImGui.GetFrameCount() != 0) return false;
+            // GetCurrentContext is the only native probe permitted before touching IO/Fonts. A null
+            // context is normal during startup and must remain retryable instead of consuming the
+            // catalog's one registration attempt.
+            if (ImGui.GetCurrentContext() == IntPtr.Zero) return false;
+
+            if (ImGui.GetFrameCount() != 0)
+            {
+                // The context is valid but the mutation window is already closed. Let the catalog
+                // record the diagnostic once; it exits before touching a live atlas in this case.
+                return DevToolFontCatalog.TryRegisterLocalFonts(log);
+            }
 
             ImGuiIOPtr io = ImGui.GetIO();
             if (io.Fonts.NativePtr == null || io.Fonts.Locked || io.Fonts.TexID != 0UL)
@@ -132,9 +148,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
             return DevToolFontCatalog.TryRegisterLocalFonts(log);
         }
-        catch
+        catch (Exception error)
         {
-            // RWImGui may not have created a current context yet. PreModsInit/OnModsInit will retry.
+            // A managed binding/context mismatch should not take the whole game down. Keep the
+            // startup probe retryable and leave a concrete diagnostic in LogOutput.
+            log?.LogWarning("DryCycle DevTool deferred local font registration: " + error.Message);
             return false;
         }
     }
