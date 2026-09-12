@@ -1,5 +1,7 @@
 using System;
+using System.Runtime.CompilerServices;
 using RWCustom;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.World;
 
@@ -8,17 +10,26 @@ namespace DryCycle.DevUI.DevTool.World;
 ///
 /// Vanilla ShortcutHandler resolves the target entrance with AbstractRoom.ExitIndex(sourceRoom),
 /// which uses Array.IndexOf and therefore cannot distinguish repeated A <-> B room links.
-/// This runtime corrects the target entrance immediately before the vessel enters/abstractizes,
-/// and enforces explicit one-way edges at the source shortcut.
+/// We capture the exact route when the creature enters the source exit, then apply the recorded
+/// target node when the vessel reaches the destination room or is abstractized on the way there.
 /// </summary>
 internal static class WorldTopologyRuntime
 {
+    private sealed class PendingRoute
+    {
+        internal string TargetRoom = string.Empty;
+        internal int TargetNode = -1;
+    }
+
+    private static ConditionalWeakTable<AbstractCreature, PendingRoute> pendingRoutes = new();
     private static bool enabled;
 
     internal static void Enable()
     {
         if (enabled) return;
         enabled = true;
+        pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+        On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
         On.ShortcutHandler.VesselAllowedInRoom += ShortcutHandler_VesselAllowedInRoom;
         On.AbstractCreature.Abstractize += AbstractCreature_Abstractize;
         On.Creature.SuckedIntoShortCut += Creature_SuckedIntoShortCut;
@@ -28,9 +39,22 @@ internal static class WorldTopologyRuntime
     {
         if (!enabled) return;
         enabled = false;
+        On.ShortcutHandler.SuckInCreature -= ShortcutHandler_SuckInCreature;
         On.ShortcutHandler.VesselAllowedInRoom -= ShortcutHandler_VesselAllowedInRoom;
         On.AbstractCreature.Abstractize -= AbstractCreature_Abstractize;
         On.Creature.SuckedIntoShortCut -= Creature_SuckedIntoShortCut;
+        pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+    }
+
+    private static void ShortcutHandler_SuckInCreature(
+        On.ShortcutHandler.orig_SuckInCreature orig,
+        ShortcutHandler self,
+        Creature creature,
+        Room room,
+        ShortcutData shortcut)
+    {
+        CapturePendingRoute(creature, room, shortcut);
+        orig(self, creature, room, shortcut);
     }
 
     private static bool ShortcutHandler_VesselAllowedInRoom(
@@ -38,7 +62,7 @@ internal static class WorldTopologyRuntime
         ShortcutHandler self,
         ShortcutHandler.Vessel vessel)
     {
-        TryCorrectVesselEntrance(self?.game?.world, vessel);
+        ApplyPendingRouteToVessel(vessel);
         return orig(self, vessel);
     }
 
@@ -47,30 +71,8 @@ internal static class WorldTopologyRuntime
         AbstractCreature self,
         WorldCoordinate coord)
     {
-        if (self?.world != null &&
-            self.pos.Valid &&
-            coord.Valid &&
-            self.pos.room >= 0 &&
-            coord.room >= 0 &&
-            self.pos.room != coord.room &&
-            self.pos.abstractNode >= 0)
-        {
-            AbstractRoom source = self.world.GetAbstractRoom(self.pos.room);
-            AbstractRoom target = self.world.GetAbstractRoom(coord.room);
-            if (source != null && target != null &&
-                TryGetExplicitRoute(
-                    self.world.name,
-                    source.name,
-                    self.pos.abstractNode,
-                    out WorldConnectionEndpoint destination,
-                    out bool allowsTravel) &&
-                allowsTravel &&
-                string.Equals(destination.Room, target.name, StringComparison.OrdinalIgnoreCase) &&
-                IsValidTargetExit(target, destination.NodeIndex))
-            {
-                coord.abstractNode = destination.NodeIndex;
-            }
-        }
+        if (TryConsumePendingRoute(self, coord.room, out int targetNode))
+            coord.abstractNode = targetNode;
 
         orig(self, coord);
     }
@@ -83,39 +85,91 @@ internal static class WorldTopologyRuntime
     {
         if (!carriedByOther && ShouldBlockReverseTravel(self, entrancePos))
         {
-            global::DryCycle.Plugin.Logger?.LogDebug(
-                "WorldTopology blocked reverse travel at " +
-                self.room.abstractRoom.name + ":" +
-                self.room.shortcutData(entrancePos).destNode);
+            CancelBlockedShortcutEntry(self, entrancePos);
             return;
         }
 
         orig(self, entrancePos, carriedByOther);
     }
 
-    private static void TryCorrectVesselEntrance(World world, ShortcutHandler.Vessel vessel)
+    private static void CapturePendingRoute(Creature creature, Room room, ShortcutData shortcut)
     {
-        if (world == null || vessel?.room == null || vessel.creature?.abstractCreature == null) return;
-
-        AbstractCreature creature = vessel.creature.abstractCreature;
-        if (!creature.pos.Valid || creature.pos.room < 0 || creature.pos.abstractNode < 0) return;
-
-        AbstractRoom source = world.GetAbstractRoom(creature.pos.room);
-        AbstractRoom target = vessel.room;
-        if (source == null || target == null || source.index == target.index) return;
+        AbstractCreature abstractCreature = creature?.abstractCreature;
+        AbstractRoom source = room?.abstractRoom;
+        World world = room?.world;
+        if (abstractCreature == null || source == null || world == null ||
+            shortcut.shortCutType != ShortcutData.Type.RoomExit ||
+            shortcut.destNode < 0)
+        {
+            if (abstractCreature != null) pendingRoutes.Remove(abstractCreature);
+            return;
+        }
 
         if (!TryGetExplicitRoute(
                 world.name,
                 source.name,
-                creature.pos.abstractNode,
+                shortcut.destNode,
                 out WorldConnectionEndpoint destination,
                 out bool allowsTravel) ||
-            !allowsTravel ||
-            !string.Equals(destination.Room, target.name, StringComparison.OrdinalIgnoreCase) ||
-            !IsValidTargetExit(target, destination.NodeIndex))
+            !allowsTravel)
+        {
+            pendingRoutes.Remove(abstractCreature);
             return;
+        }
 
-        vessel.entranceNode = destination.NodeIndex;
+        AbstractRoom target = world.GetAbstractRoom(destination.Room);
+        if (!IsValidTargetExit(target, destination.NodeIndex))
+        {
+            pendingRoutes.Remove(abstractCreature);
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "WorldTopology ignored invalid target endpoint " + destination + ".");
+            return;
+        }
+
+        pendingRoutes.Remove(abstractCreature);
+        pendingRoutes.Add(abstractCreature, new PendingRoute
+        {
+            TargetRoom = destination.Room,
+            TargetNode = destination.NodeIndex
+        });
+    }
+
+    private static void ApplyPendingRouteToVessel(ShortcutHandler.Vessel vessel)
+    {
+        AbstractCreature creature = vessel?.creature?.abstractCreature;
+        AbstractRoom target = vessel?.room;
+        if (creature == null || target == null) return;
+        if (!pendingRoutes.TryGetValue(creature, out PendingRoute pending)) return;
+        if (!string.Equals(pending.TargetRoom, target.name, StringComparison.OrdinalIgnoreCase)) return;
+        if (!IsValidTargetExit(target, pending.TargetNode))
+        {
+            pendingRoutes.Remove(creature);
+            return;
+        }
+
+        vessel.entranceNode = pending.TargetNode;
+        pendingRoutes.Remove(creature);
+    }
+
+    private static bool TryConsumePendingRoute(
+        AbstractCreature creature,
+        int targetRoomIndex,
+        out int targetNode)
+    {
+        targetNode = -1;
+        if (creature?.world == null || targetRoomIndex < 0 ||
+            !pendingRoutes.TryGetValue(creature, out PendingRoute pending))
+            return false;
+
+        AbstractRoom target = creature.world.GetAbstractRoom(targetRoomIndex);
+        if (target == null ||
+            !string.Equals(pending.TargetRoom, target.name, StringComparison.OrdinalIgnoreCase) ||
+            !IsValidTargetExit(target, pending.TargetNode))
+            return false;
+
+        targetNode = pending.TargetNode;
+        pendingRoutes.Remove(creature);
+        return true;
     }
 
     private static bool ShouldBlockReverseTravel(Creature creature, IntVector2 entrancePos)
@@ -136,6 +190,45 @@ internal static class WorldTopologyRuntime
                    out _,
                    out bool allowsTravel) &&
                !allowsTravel;
+    }
+
+    private static void CancelBlockedShortcutEntry(Creature creature, IntVector2 entrancePos)
+    {
+        Room room = creature?.room;
+        if (room == null) return;
+
+        pendingRoutes.Remove(creature.abstractCreature);
+        creature.enteringShortCut = null;
+        creature.inShortcut = false;
+        creature.inShortcutVessel = null;
+        creature.shortcutDelay = Math.Max(creature.shortcutDelay, 20);
+
+        Vector2 direction = Custom.IntVector2ToVector2(room.ShorcutEntranceHoleDirection(entrancePos));
+        if (direction.sqrMagnitude < 0.001f) direction = Vector2.up;
+        direction.Normalize();
+        Vector2 anchor = room.MiddleOfTile(entrancePos) + direction * 10f;
+
+        var connected = creature.abstractCreature?.GetAllConnectedObjects();
+        if (connected != null)
+        {
+            for (int i = 0; i < connected.Count; i++)
+            {
+                PhysicalObject realized = connected[i]?.realizedObject;
+                if (realized?.bodyChunks == null || realized.room != room) continue;
+                for (int chunkIndex = 0; chunkIndex < realized.bodyChunks.Length; chunkIndex++)
+                {
+                    BodyChunk chunk = realized.bodyChunks[chunkIndex];
+                    float distance = 6f + Math.Max(0f, chunk.rad);
+                    chunk.pos = anchor + direction * distance;
+                    chunk.lastPos = chunk.pos;
+                    chunk.vel = direction * 2.5f;
+                }
+            }
+        }
+
+        global::DryCycle.Plugin.Logger?.LogDebug(
+            "WorldTopology blocked reverse travel at " +
+            room.abstractRoom.name + ":" + room.shortcutData(entrancePos).destNode + ".");
     }
 
     /// <summary>
