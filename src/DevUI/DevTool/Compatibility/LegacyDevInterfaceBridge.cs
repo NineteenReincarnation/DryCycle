@@ -8,7 +8,9 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 public enum LegacyControlKind
 {
     Button,
-    Slider
+    Slider,
+    Cycler,
+    Integer
 }
 
 /// <summary>
@@ -25,6 +27,8 @@ public sealed class LegacyControlSnapshot
     public string ValueText { get; init; } = string.Empty;
     public float Factor { get; init; }
     public bool CanReset { get; init; }
+    public int SelectedIndex { get; init; } = -1;
+    public string[] Options { get; init; } = Array.Empty<string>();
 }
 
 internal static class LegacyDevInterfaceBridge
@@ -46,7 +50,7 @@ internal static class LegacyDevInterfaceBridge
     {
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
-        if (ResolveNode(representation, path) is not Button button) return false;
+        if (ResolveNode(representation, path) is not Button button || button is ButtonWithSelectPanel) return false;
 
         try
         {
@@ -101,6 +105,57 @@ internal static class LegacyDevInterfaceBridge
         }
     }
 
+    internal static bool SetCycler(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        if (ResolveNode(representation, path) is not Cycler cycler) return false;
+        if (cycler.alternatives == null || selectedIndex < 0 || selectedIndex >= cycler.alternatives.Count) return false;
+
+        try
+        {
+            cycler.currentAlternative = selectedIndex;
+            cycler.Text = (cycler.baseName ?? string.Empty) + (cycler.alternatives[selectedIndex] ?? string.Empty);
+
+            // Vanilla Cycler is intentionally polling-based: parent panels generally copy
+            // currentAlternative into their data from Update(), rather than receiving a signal.
+            // Run that parent update immediately so the history snapshot taken by the new editor
+            // observes the same data mutation in this command, not one frame later. Suppress the
+            // legacy click edge while doing so, otherwise Cycler.Update could advance twice.
+            SynchronizePollingParent(owner, cycler);
+            owner.activePage?.Refresh();
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy cycler mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static bool IncrementInteger(global::DevInterface.DevUI owner, PlacedObject target, string path, int change)
+    {
+        if (change == 0) return false;
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        if (ResolveNode(representation, path) is not IntegerControl control) return false;
+
+        try
+        {
+            // Increment is the virtual behavior boundary used by vanilla IntegerControl itself.
+            // Calling it preserves subclass side effects such as palette/application refreshes.
+            control.Increment(change);
+            control.Refresh();
+            owner.activePage?.Refresh();
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy integer mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
     private static void CaptureChildren(DevUINode parent, string parentPath, List<LegacyControlSnapshot> output)
     {
         if (parent?.subNodes == null) return;
@@ -111,8 +166,8 @@ internal static class LegacyDevInterfaceBridge
             if (node == null) continue;
             string path = string.IsNullOrEmpty(parentPath) ? i.ToString() : parentPath + "." + i;
 
-            // A Slider is a composite vanilla control. Capture it once and do not expose
-            // its internal labels/nub as separate inspector rows.
+            // These are composite controls. Capture each as one semantic control and never leak
+            // their implementation labels, arrow buttons or slider nub into the new inspector.
             if (node is Slider slider)
             {
                 output.Add(new LegacyControlSnapshot
@@ -127,6 +182,40 @@ internal static class LegacyDevInterfaceBridge
                 });
                 continue;
             }
+
+            if (node is Cycler cycler)
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = cycler.IDstring ?? string.Empty,
+                    Label = CyclerTitle(cycler),
+                    Kind = LegacyControlKind.Cycler,
+                    ValueText = CyclerValue(cycler),
+                    SelectedIndex = cycler.currentAlternative,
+                    Options = CyclerOptions(cycler)
+                });
+                continue;
+            }
+
+            if (node is IntegerControl integerControl)
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = integerControl.IDstring ?? string.Empty,
+                    Label = IntegerTitle(integerControl),
+                    Kind = LegacyControlKind.Integer,
+                    ValueText = SafeIntegerValue(integerControl)
+                });
+                continue;
+            }
+
+            // ButtonWithSelectPanel is not a plain action button: choosing an item creates a
+            // SelectPanel and routes the chosen ID through OnValueChange/IDevUISignals. Until its
+            // option model is migrated explicitly, do not misrepresent it as a one-shot Button.
+            if (node is ButtonWithSelectPanel)
+                continue;
 
             if (node is Button button && !IsInfrastructureButton(button))
             {
@@ -179,6 +268,61 @@ internal static class LegacyDevInterfaceBridge
         catch
         {
             return 0f;
+        }
+    }
+
+    private static string CyclerTitle(Cycler cycler)
+    {
+        if (!string.IsNullOrWhiteSpace(cycler?.baseName))
+            return cycler.baseName.Trim().TrimEnd(':').Trim();
+        return cycler?.IDstring ?? "Cycler";
+    }
+
+    private static string CyclerValue(Cycler cycler)
+    {
+        if (cycler?.alternatives == null || cycler.currentAlternative < 0 || cycler.currentAlternative >= cycler.alternatives.Count)
+            return string.Empty;
+        return cycler.alternatives[cycler.currentAlternative] ?? string.Empty;
+    }
+
+    private static string[] CyclerOptions(Cycler cycler)
+    {
+        if (cycler?.alternatives == null || cycler.alternatives.Count == 0)
+            return Array.Empty<string>();
+        string[] options = new string[cycler.alternatives.Count];
+        for (int i = 0; i < options.Length; i++) options[i] = cycler.alternatives[i] ?? string.Empty;
+        return options;
+    }
+
+    private static string IntegerTitle(IntegerControl control)
+    {
+        try
+        {
+            if (control.subNodes.Count > 0 && control.subNodes[0] is DevUILabel title && !string.IsNullOrWhiteSpace(title.Text))
+                return title.Text;
+        }
+        catch { }
+        return control?.IDstring ?? "Integer";
+    }
+
+    private static string SafeIntegerValue(IntegerControl control)
+    {
+        try { return control.NumberLabelText ?? string.Empty; }
+        catch { return string.Empty; }
+    }
+
+    private static void SynchronizePollingParent(global::DevInterface.DevUI owner, DevUINode node)
+    {
+        if (owner == null || node?.parentNode == null) return;
+        bool oldMouseClick = owner.mouseClick;
+        try
+        {
+            owner.mouseClick = false;
+            node.parentNode.Update();
+        }
+        finally
+        {
+            owner.mouseClick = oldMouseClick;
         }
     }
 
