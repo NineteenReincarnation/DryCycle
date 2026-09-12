@@ -25,6 +25,7 @@ internal static class DevToolUiSettings
     internal const float DefaultFontSize = 36f;
     internal const float DefaultChineseFontSize = 42f;
     internal const int DefaultFontWeight = 400;
+    internal const int DefaultChineseFontWeight = 700;
     internal const float WindowOutlineWidth = 2f;
 
     private static readonly Num.Vector4 DefaultTextColor = new(0.94f, 0.94f, 0.94f, 1f);
@@ -34,11 +35,14 @@ internal static class DevToolUiSettings
     private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.76f, 0.80f, 0.86f, 1f);
 
     // Chinese is intentionally the default for DryCycle's development workflow. Keep independent
-    // font sizes for the two language modes so enlarging Chinese does not silently enlarge English,
-    // and changing one language's size slider does not destroy the other language's preference.
+    // font size/weight preferences for the two language modes so changing CJK typography does not
+    // silently alter the English editor presentation.
     private static DevToolUiLanguage language = DevToolUiLanguage.Chinese;
     private static float chineseFontSize = DefaultChineseFontSize;
     private static float englishFontSize = DefaultFontSize;
+    private static int chineseFontWeight = DefaultChineseFontWeight;
+    private static int englishFontWeight = DefaultFontWeight;
+    private static string chineseFontFamily = DevToolFontCatalog.DefaultChineseFamily;
 
     internal static DevToolUiLanguage Language => language;
 
@@ -52,7 +56,24 @@ internal static class DevToolUiSettings
         }
     }
 
-    internal static int FontWeight { get; set; } = DefaultFontWeight;
+    internal static int FontWeight
+    {
+        get => IsChinese ? chineseFontWeight : englishFontWeight;
+        set
+        {
+            if (IsChinese) chineseFontWeight = value;
+            else englishFontWeight = value;
+        }
+    }
+
+    internal static string ChineseFontFamily
+    {
+        get => chineseFontFamily;
+        set => chineseFontFamily = string.IsNullOrWhiteSpace(value)
+            ? DevToolFontCatalog.DefaultChineseFamily
+            : value.Trim();
+    }
+
     internal static Num.Vector4 TextColor { get; set; } = DefaultTextColor;
     internal static Num.Vector4 DisabledTextColor { get; set; } = DefaultDisabledTextColor;
 
@@ -68,7 +89,9 @@ internal static class DevToolUiSettings
     {
         chineseFontSize = DefaultChineseFontSize;
         englishFontSize = DefaultFontSize;
-        FontWeight = DefaultFontWeight;
+        chineseFontWeight = DefaultChineseFontWeight;
+        englishFontWeight = DefaultFontWeight;
+        chineseFontFamily = DevToolFontCatalog.DefaultChineseFamily;
         TextColor = DefaultTextColor;
         DisabledTextColor = DefaultDisabledTextColor;
     }
