@@ -72,6 +72,20 @@ internal sealed class WorldDocument
     internal bool TryGetRoom(string roomName, out WorldRoomRecord room) =>
         rooms.TryGetValue(NormalizeRoom(roomName), out room);
 
+    internal bool TryGetConnection(string roomName, int exitIndex, out string destination)
+    {
+        destination = string.Empty;
+        if (exitIndex < 0 || !TryGetRoom(roomName, out WorldRoomRecord room)) return false;
+        if (exitIndex >= room.Connections.Count)
+        {
+            destination = "DISCONNECTED";
+            return true;
+        }
+
+        destination = room.Connections[exitIndex];
+        return true;
+    }
+
     internal bool TrySetConnection(string roomName, int exitIndex, string destinationRoom)
     {
         if (exitIndex < 0 || !TryGetRoom(roomName, out WorldRoomRecord room)) return false;
