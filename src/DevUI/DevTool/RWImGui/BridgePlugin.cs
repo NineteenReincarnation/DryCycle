@@ -26,6 +26,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private static bool nativeImGuiReady;
     private bool sessionWasVisible;
     private bool sessionWasPaused;
+    private int focusReturnGraceFrames;
 
     private void OnEnable()
     {
@@ -33,6 +34,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         nativeImGuiReady = false;
         sessionWasVisible = false;
         sessionWasPaused = false;
+        focusReturnGraceFrames = 0;
         EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
@@ -60,12 +62,20 @@ public sealed class BridgePlugin : BaseUnityPlugin
         RainWorldGame game = session?.Owner?.game;
         bool rawSessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
 
-        // Alt+Tab may temporarily make Rain World's live-session probe fail while the OS focus is
-        // elsewhere. Treat that as a suspended presentation, not as DevTools being closed. Keeping
-        // the consumer context attached preserves ImGui window positions, sizes and expanded state
-        // instead of rebuilding the UI at its default geometry when focus returns.
+        // Alt+Tab can interrupt Rain World's live-session probe for several frames, including the
+        // first frames after focus returns. Keep a short return grace window so the RWImGui consumer
+        // context is never detached just because the game has not rebuilt its live-session signal yet.
+        // This preserves window positions/sizes and open UI state instead of falling back to defaults.
         bool appFocused = UnityEngine.Application.isFocused;
-        bool sessionVisible = rawSessionVisible || (!appFocused && sessionWasVisible);
+        if (!appFocused && sessionWasVisible)
+            focusReturnGraceFrames = 12;
+        else if (rawSessionVisible)
+            focusReturnGraceFrames = 0;
+        else if (focusReturnGraceFrames > 0)
+            focusReturnGraceFrames--;
+
+        bool preserveAcrossFocusTransition = sessionWasVisible && (!appFocused || focusReturnGraceFrames > 0);
+        bool sessionVisible = rawSessionVisible || preserveAcrossFocusTransition;
         bool sessionPaused = sessionVisible && game?.GamePaused == true;
 
         // Escape must actually get the rebuilt overlay out of the way while Rain World's pause /
@@ -100,6 +110,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorUiModeState.SetOverlayHidden(false);
         sessionWasVisible = false;
         sessionWasPaused = false;
+        focusReturnGraceFrames = 0;
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
     }
