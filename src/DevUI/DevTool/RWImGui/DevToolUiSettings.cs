@@ -9,6 +9,12 @@ internal enum DevToolUiLanguage
     English
 }
 
+internal enum DevToolScenePlacement
+{
+    Left,
+    Center
+}
+
 /// <summary>
 /// Lightweight frontend-only presentation settings. Keep these separate from editor data so
 /// language, font and transparency never enter room saves or Undo/Redo history.
@@ -38,6 +44,7 @@ internal static class DevToolUiSettings
     // font size/weight preferences for the two language modes so changing CJK typography does not
     // silently alter the English editor presentation.
     private static DevToolUiLanguage language = DevToolUiLanguage.Chinese;
+    private static DevToolScenePlacement scenePlacement = DevToolScenePlacement.Center;
     private static float chineseFontSize = DefaultChineseFontSize;
     private static float englishFontSize = DefaultFontSize;
     private static int chineseFontWeight = DefaultChineseFontWeight;
@@ -45,6 +52,14 @@ internal static class DevToolUiSettings
     private static string chineseFontFamily = DevToolFontCatalog.DefaultChineseFamily;
 
     internal static DevToolUiLanguage Language => language;
+
+    internal static DevToolScenePlacement ScenePlacement
+    {
+        get => scenePlacement;
+        set => scenePlacement = value;
+    }
+
+    internal static bool SceneInCenter => scenePlacement == DevToolScenePlacement.Center;
 
     internal static float FontSize
     {
