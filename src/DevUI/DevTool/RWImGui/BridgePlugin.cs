@@ -58,7 +58,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
         EditorSession session = DevToolSessionHub.Current;
         RainWorldGame game = session?.Owner?.game;
-        bool sessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+        bool rawSessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+
+        // Alt+Tab may temporarily make Rain World's live-session probe fail while the OS focus is
+        // elsewhere. Treat that as a suspended presentation, not as DevTools being closed. Keeping
+        // the consumer context attached preserves ImGui window positions, sizes and expanded state
+        // instead of rebuilding the UI at its default geometry when focus returns.
+        bool appFocused = UnityEngine.Application.isFocused;
+        bool sessionVisible = rawSessionVisible || (!appFocused && sessionWasVisible);
         bool sessionPaused = sessionVisible && game?.GamePaused == true;
 
         // Escape must actually get the rebuilt overlay out of the way while Rain World's pause /
