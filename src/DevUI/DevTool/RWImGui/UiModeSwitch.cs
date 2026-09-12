@@ -23,6 +23,10 @@ internal static class UiModeSwitch
         }
         else
         {
+            // Shortcut discovery has one permanent, shared surface instead of leaking temporary
+            // key hints into every editor panel. The window is itself part of the floating layout.
+            ShortcutWindow.Draw(EditorPresentationHub.Current, display);
+
             // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
             // no selection/group exists prevents an empty fourth panel from competing with the room.
             if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
