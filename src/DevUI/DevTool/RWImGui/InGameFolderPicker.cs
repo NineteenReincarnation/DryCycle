@@ -337,8 +337,15 @@ internal static class InGameFolderPicker
         {
             string expanded = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
             if (!Directory.Exists(expanded)) return string.Empty;
-            return Path.GetFullPath(expanded)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            string full = Path.GetFullPath(expanded);
+            string root = Path.GetPathRoot(full) ?? string.Empty;
+            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string trimmedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!string.IsNullOrEmpty(root) &&
+                string.Equals(trimmed, trimmedRoot, StringComparison.OrdinalIgnoreCase))
+                return root;
+            return trimmed;
         }
         catch
         {
