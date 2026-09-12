@@ -35,9 +35,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
 
-        // Never mutate ImGui's font atlas from RainWorld.Start or BepInEx load. RWImGui owns that
-        // initialization path. Local DevTool faces are offered later from OnModsInit, after RWImGui
-        // has created the context but only while the atlas still has no renderer texture/frame.
+        // RWImGui is a hard dependency, so its plugin has already been loaded when this bridge is
+        // enabled. Try the atlas immediately: this is earlier than RainWorld.OnModsInit and avoids
+        // the old race where the first ImGui frame had already locked/uploaded the atlas by the
+        // time DryCycle tried to add its local CJK faces.
+        TryRegisterLocalFontsDuringSafeStartup();
+
+        On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
@@ -74,6 +78,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void OnDisable()
     {
+        On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorUiModeState.SetOverlayHidden(false);
@@ -83,14 +88,55 @@ public sealed class BridgePlugin : BaseUnityPlugin
         TryUnregisterCallback();
     }
 
+    private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
+    {
+        // Different RWImGui releases create/configure the shared atlas at slightly different
+        // points. Probe both sides of PreModsInit, but only call the catalog when mutation is still
+        // provably safe. A failed readiness probe does not consume the catalog's one registration
+        // attempt, so OnModsInit can still succeed later in startup.
+        TryRegisterLocalFontsDuringSafeStartup();
+        orig(self);
+        TryRegisterLocalFontsDuringSafeStartup();
+    }
+
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
+        // The previous implementation registered only after orig(self). On installations where
+        // RWImGui has already begun rendering by then, ImGui.GetFrameCount() is non-zero and the
+        // font selector is permanently stuck on the existing FiraCode face. Register before the
+        // chain first, while retaining a post-orig diagnostic fallback.
+        TryRegisterLocalFontsDuringSafeStartup();
         orig(self);
 
-        // RWImGui's own OnModsInit has now completed, while the first renderer frame has not. The
-        // catalog performs additional frame/atlas-texture safety checks before adding anything.
-        DevToolFontCatalog.TryRegisterLocalFonts(log);
+        if (!DevToolFontCatalog.RegistrationSucceeded)
+            DevToolFontCatalog.TryRegisterLocalFonts(log);
+
         TryRegisterCallback();
+    }
+
+    private static bool TryRegisterLocalFontsDuringSafeStartup()
+    {
+        if (DevToolFontCatalog.RegistrationSucceeded) return true;
+
+        try
+        {
+            // Do not call TryRegisterLocalFonts until a real atlas exists. This keeps early startup
+            // probes retryable instead of letting an unavailable context consume the catalog's
+            // single attempt. Once a frame starts, the catalog's post-OnModsInit call records the
+            // useful "safe window missed" diagnostic instead of mutating a live renderer atlas.
+            if (ImGui.GetFrameCount() != 0) return false;
+
+            ImGuiIOPtr io = ImGui.GetIO();
+            if (io.Fonts.NativePtr == null || io.Fonts.Locked || io.Fonts.TexID != 0UL)
+                return false;
+
+            return DevToolFontCatalog.TryRegisterLocalFonts(log);
+        }
+        catch
+        {
+            // RWImGui may not have created a current context yet. PreModsInit/OnModsInit will retry.
+            return false;
+        }
     }
 
     private static unsafe void TryRegisterCallback()
@@ -269,6 +315,9 @@ internal static class DevToolFrontend
                 {
                     FontSettingsWindow.Draw(io.DisplaySize);
                     DevToolOverlay.Draw(snapshot);
+                    SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
+                    ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
+                    ActionToastOverlay.Draw(snapshot, io.DisplaySize);
                 }
 
                 FloatingWindowSnap.EndFrame();
