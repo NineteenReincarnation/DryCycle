@@ -138,26 +138,26 @@ public static class DevToolShortcutRegistry
         RegisterCommon(new DevToolShortcutDescriptor("inspector", "Ctrl+I", "显示 / 隐藏检查器", "Show / hide Inspector", 60));
         RegisterCommon(new DevToolShortcutDescriptor("presentation", "Ctrl+Shift+U", "切换新 UI / 原版 DevUI", "Toggle New UI / Vanilla DevUI", 70));
         RegisterCommon(new DevToolShortcutDescriptor("escape", "Esc", "取消当前放置；否则隐藏 DevTool UI", "Cancel placement; otherwise hide DevTool UI", 80));
-        RegisterCommon(new DevToolShortcutDescriptor("window-marquee", "Shift+左键拖框 / Shift+drag", "多选编辑器窗口", "Multi-select editor windows", 100));
+        RegisterCommon(new DevToolShortcutDescriptor("window-marquee", "Shift+LMB Drag", "多选编辑器窗口", "Multi-select editor windows", 100));
         RegisterCommon(new DevToolShortcutDescriptor("window-group", "Ctrl+G", "将当前选中的窗口编组", "Group selected windows", 110));
-        RegisterCommon(new DevToolShortcutDescriptor("window-group-move", "拖动组内标题栏 / Drag title", "整组移动已编组窗口", "Move the whole window group", 120));
+        RegisterCommon(new DevToolShortcutDescriptor("window-group-move", "Drag Title", "整组移动已编组窗口", "Move the whole window group", 120));
 
         RegisterMode(EditorToolMode.Objects,
             new DevToolShortcutDescriptor("objects-duplicate", "Ctrl+D", "复制当前选中物件", "Duplicate selected objects", 10));
         RegisterMode(EditorToolMode.Objects,
             new DevToolShortcutDescriptor("objects-delete", "Delete", "删除当前选中物件", "Delete selected objects", 20));
         RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-toggle-selection", "Ctrl+左键 / Ctrl+click", "切换场景列表中的单个物件选择", "Toggle one object in the Scene selection", 30));
+            new DevToolShortcutDescriptor("objects-toggle-selection", "Ctrl+LMB", "切换场景列表中的单个物件选择", "Toggle one object in the Scene selection", 30));
         RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-range-selection", "Shift+左键 / Shift+click", "从上次锚点范围选择场景物件", "Range-select Scene objects from the last anchor", 40));
+            new DevToolShortcutDescriptor("objects-range-selection", "Shift+LMB", "从上次锚点范围选择场景物件", "Range-select Scene objects from the last anchor", 40));
         RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-place", "左键 / Click", "放置当前选择的物件", "Place the selected object", 50));
+            new DevToolShortcutDescriptor("objects-place", "LMB", "放置当前选择的物件", "Place the selected object", 50));
         RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-place-repeat", "Shift+左键 / Shift+click", "连续放置当前物件", "Place repeatedly", 60));
+            new DevToolShortcutDescriptor("objects-place-repeat", "Shift+LMB", "连续放置当前物件", "Place repeatedly", 60));
         RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-place-cancel", "右键 / Esc", "取消物件放置", "Cancel object placement", 70));
+            new DevToolShortcutDescriptor("objects-place-cancel", "RMB / Esc", "取消物件放置", "Cancel object placement", 70));
 
         RegisterMode(EditorToolMode.Sound,
-            new DevToolShortcutDescriptor("sound-handle", "左键拖动 / Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 10));
+            new DevToolShortcutDescriptor("sound-handle", "LMB Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 10));
     }
 }
