@@ -4,6 +4,7 @@ using System.IO;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.TerrainExt.QuicksandZone;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -91,13 +92,14 @@ public sealed class EditorMapRoomVisualSnapshot
 /// <summary>
 /// Geometry cache for the unified World Map.
 ///
-/// Vanilla's MapObject raster remains the cheap base layer, including its TerrainManager coverage
-/// sampling, but continuous terrain is also reconstructed from authored splines. This preserves
-/// LocalTerrain/CurvedSlope shape and lets DryCycle terrain such as QuicksandZone expose material
-/// identity that the coarse vanilla minimap texture cannot represent.
+/// Vanilla's MapObject raster remains the cheap base layer, including TerrainManager coverage,
+/// while continuous terrain is reconstructed from authored splines. DryCycle terrain such as
+/// QuicksandZone can therefore expose both its actual surface and its material intervals instead
+/// of being collapsed into a coarse tile-coverage colour.
 ///
-/// The frontend receives compact horizontal raster runs and simplified polylines. No room tile map
-/// or spline is re-sampled every ImGui frame.
+/// Static rooms are revision driven: the atlas/raster, node coordinates and curve settings are
+/// only rebuilt when their inputs change. The ImGui frontend consumes compact raster runs and
+/// simplified polylines and never resamples room geometry itself.
 /// </summary>
 internal static class MapRoomGeometryPresentationHub
 {
@@ -113,6 +115,8 @@ internal static class MapRoomGeometryPresentationHub
         internal int RasterWidth;
         internal int RasterHeight;
         internal bool RasterInitialized;
+        internal int NodeFingerprint;
+        internal bool NodesInitialized;
         internal int SettingsFingerprint;
         internal string SettingsPath = string.Empty;
         internal DateTime SettingsWriteTimeUtc;
@@ -123,10 +127,13 @@ internal static class MapRoomGeometryPresentationHub
         internal EditorMapPolylineSnapshot[] Curves = Array.Empty<EditorMapPolylineSnapshot>();
         internal EditorMapNodeVisualSnapshot[] Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
         internal EditorMapRoomVisualSnapshot Snapshot = EditorMapRoomVisualSnapshot.Empty;
+        internal int Revision = 1;
+        internal int PublishedRevision;
     }
 
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static string region = string.Empty;
+    private static int lastPrimeFrame = -1;
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex) =>
         cache.TryGetValue(roomIndex, out CacheEntry entry)
@@ -146,7 +153,13 @@ internal static class MapRoomGeometryPresentationHub
         {
             cache.Clear();
             region = nextRegion;
+            lastPrimeFrame = -1;
         }
+
+        // WorldWorkspace and WorldMapView can both request geometry during one UI frame. Treat the
+        // cache as a frame-level presentation source so the second request is effectively free.
+        if (lastPrimeFrame == Time.frameCount) return;
+        lastPrimeFrame = Time.frameCount;
 
         HashSet<int> alive = new();
         for (int i = 0; i < page.subNodes.Count; i++)
@@ -185,22 +198,31 @@ internal static class MapRoomGeometryPresentationHub
     {
         cache.Clear();
         region = string.Empty;
+        lastPrimeFrame = -1;
     }
 
     private static void RefreshDimensions(CacheEntry entry, MapObject.RoomRepresentation roomRep)
     {
+        float width = entry.WidthTiles;
+        float height = entry.HeightTiles;
         if (roomRep?.texture != null)
         {
-            entry.WidthTiles = Math.Max(1f, roomRep.texture.width);
-            entry.HeightTiles = Math.Max(1f, roomRep.texture.height);
-            return;
+            width = Math.Max(1f, roomRep.texture.width);
+            height = Math.Max(1f, roomRep.texture.height);
+        }
+        else if (roomRep?.mapTex != null)
+        {
+            width = Math.Max(1f, roomRep.mapTex.sourcePixelSize.x);
+            height = Math.Max(1f, roomRep.mapTex.sourcePixelSize.y);
         }
 
-        if (roomRep?.mapTex != null)
-        {
-            entry.WidthTiles = Math.Max(1f, roomRep.mapTex.sourcePixelSize.x);
-            entry.HeightTiles = Math.Max(1f, roomRep.mapTex.sourcePixelSize.y);
-        }
+        if (Math.Abs(width - entry.WidthTiles) < 0.001f &&
+            Math.Abs(height - entry.HeightTiles) < 0.001f)
+            return;
+
+        entry.WidthTiles = width;
+        entry.HeightTiles = height;
+        entry.Revision++;
     }
 
     private static void RefreshRaster(CacheEntry entry, MapObject.RoomRepresentation roomRep)
@@ -231,7 +253,6 @@ internal static class MapRoomGeometryPresentationHub
                 x++;
                 while (x < width && ClassifyPixel(pixels[y * width + x]) == kind)
                     x++;
-
                 runs.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind.Value));
             }
         }
@@ -243,6 +264,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.WidthTiles = Math.Max(1f, width);
         entry.HeightTiles = Math.Max(1f, height);
         entry.RasterRuns = runs.ToArray();
+        entry.Revision++;
     }
 
     private static bool TryReadMapPixels(
@@ -268,8 +290,8 @@ internal static class MapRoomGeometryPresentationHub
                 return pixels != null && pixels.Length == width * height;
             }
 
-            // MapObject may reuse a Futile atlas element without retaining RoomRepresentation.texture.
-            // Sample that atlas element instead so cached rooms still keep their real minimap shape.
+            // MapObject can reuse a cached Futile atlas element and leave RoomRepresentation.texture
+            // null. Sampling the atlas element keeps those rooms from degrading into plain boxes.
             FAtlasElement element = roomRep?.mapTex;
             if (element?.atlas?.texture is not Texture2D atlasTexture) return false;
 
@@ -286,18 +308,14 @@ internal static class MapRoomGeometryPresentationHub
         {
             global::DryCycle.Plugin.Logger?.LogDebug(
                 "WorldMap minimap raster unavailable for " + (roomRep?.room?.name ?? "?") + ": " + error.Message);
-            pixels = null;
-            width = 0;
-            height = 0;
-            sourceKey = 0;
             return false;
         }
     }
 
     private static EditorMapGeometryKind? ClassifyPixel(Color color)
     {
-        // These colours come directly from MapObject.CreateMapTexture. Shortcut colours are not
-        // duplicated here because interactive node markers are drawn from real node coordinates.
+        // Exact buckets emitted by MapObject.CreateMapTexture. Shortcut colour is intentionally left
+        // to node markers so one visual primitive remains responsible for one semantic layer.
         if (color.b > color.r + 0.12f && color.b > color.g + 0.12f)
             return EditorMapGeometryKind.Water;
         if (color.r < 0.40f && color.g < 0.40f && color.b < 0.40f)
@@ -311,19 +329,42 @@ internal static class MapRoomGeometryPresentationHub
 
     private static void RefreshNodes(CacheEntry entry, MapObject.RoomRepresentation roomRep)
     {
-        if (roomRep?.nodePositions == null || roomRep.nodePositions.Length == 0)
+        Vector2[] positions = roomRep?.nodePositions;
+        if (positions == null || positions.Length == 0)
         {
+            if (entry.NodesInitialized && entry.Nodes.Length == 0) return;
             entry.Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
+            entry.NodesInitialized = true;
+            entry.NodeFingerprint = 0;
+            entry.Revision++;
             return;
         }
 
-        EditorMapNodeVisualSnapshot[] nodes = new EditorMapNodeVisualSnapshot[roomRep.nodePositions.Length];
-        for (int i = 0; i < nodes.Length; i++)
+        unchecked
         {
-            Vector2 point = roomRep.nodePositions[i];
-            nodes[i] = new EditorMapNodeVisualSnapshot(i, point.x, point.y);
+            int fingerprint = positions.Length;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                fingerprint = fingerprint * 31 + positions[i].x.GetHashCode();
+                fingerprint = fingerprint * 31 + positions[i].y.GetHashCode();
+            }
+            if (entry.NodesInitialized && fingerprint == entry.NodeFingerprint) return;
+
+            List<EditorMapNodeVisualSnapshot> nodes = new(positions.Length);
+            for (int i = 0; i < positions.Length; i++)
+            {
+                Vector2 point = positions[i];
+                // MiniMap itself treats (0,0) as "not prepared yet" and falls back to its node
+                // square. Do the same so an unfinished RoomPreparer does not pin an Exit to a corner.
+                if (Math.Abs(point.x) < 0.001f && Math.Abs(point.y) < 0.001f) continue;
+                nodes.Add(new EditorMapNodeVisualSnapshot(i, point.x, point.y));
+            }
+
+            entry.Nodes = nodes.ToArray();
+            entry.NodesInitialized = true;
+            entry.NodeFingerprint = fingerprint;
+            entry.Revision++;
         }
-        entry.Nodes = nodes;
     }
 
     private static void RefreshCurves(CacheEntry entry, global::World world, AbstractRoom room)
@@ -337,12 +378,10 @@ internal static class MapRoomGeometryPresentationHub
             return;
         }
 
-        // Unloaded rooms are only reparsed when their settings file timestamp changes. This keeps
-        // hundreds of-room regions cheap while still reflecting external editor/mod changes.
-        if (entry.CurvesInitialized && !string.IsNullOrWhiteSpace(entry.SettingsPath))
+        if (entry.CurvesInitialized)
         {
-            DateTime currentWriteTime = FileWriteTime(entry.SettingsPath);
-            if (currentWriteTime == entry.SettingsWriteTimeUtc) return;
+            if (string.IsNullOrWhiteSpace(entry.SettingsPath)) return;
+            if (FileWriteTime(entry.SettingsPath) == entry.SettingsWriteTimeUtc) return;
         }
 
         RoomSettings settings = null;
@@ -350,13 +389,7 @@ internal static class MapRoomGeometryPresentationHub
         {
             string roomName = WorldLoader.RoomNameManipulator(room.FileName, world.game);
             SlugcatStats.Timeline timeline = world.game != null ? world.game.TimelinePoint : null;
-            settings = new RoomSettings(
-                roomName,
-                world.region,
-                template: false,
-                firstTemplate: false,
-                timeline,
-                world.game);
+            settings = new RoomSettings(roomName, world.region, false, false, timeline, world.game);
         }
         catch (Exception error)
         {
@@ -364,8 +397,8 @@ internal static class MapRoomGeometryPresentationHub
                 "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
         }
 
-        if (settings == null) return;
-        RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
+        if (settings != null)
+            RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
     }
 
     private static void RebuildCurves(CacheEntry entry, RoomSettings settings, int fingerprint)
@@ -375,6 +408,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.SettingsWriteTimeUtc = FileWriteTime(entry.SettingsPath);
         entry.Curves = BuildCurveGeometry(settings).ToArray();
         entry.CurvesInitialized = true;
+        entry.Revision++;
     }
 
     private static DateTime FileWriteTime(string path)
@@ -601,6 +635,7 @@ internal static class MapRoomGeometryPresentationHub
 
     private static void Publish(CacheEntry entry)
     {
+        if (entry.PublishedRevision == entry.Revision) return;
         entry.Snapshot = new EditorMapRoomVisualSnapshot
         {
             Available = entry.WidthTiles > 0f && entry.HeightTiles > 0f,
@@ -611,5 +646,6 @@ internal static class MapRoomGeometryPresentationHub
             Curves = entry.Curves,
             Nodes = entry.Nodes
         };
+        entry.PublishedRevision = entry.Revision;
     }
 }
