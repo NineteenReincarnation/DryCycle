@@ -25,7 +25,7 @@ internal static class DevToolRuntime
 {
     private static bool enabled;
 
-    // Compatibility accessor for generic DevUI infrastructure that needs the live editor session.
+    // Compatibility accessor for infrastructure that needs the live editor session.
     // DevToolSessionHub remains the single source of truth.
     internal static EditorSession ActiveSession => DevToolSessionHub.Current;
 
@@ -57,11 +57,6 @@ internal static class DevToolRuntime
         MapEditorCommandQueue.Clear();
         DialogEditorCommandQueue.Clear();
         RelationshipEditorCommandQueue.Clear();
-        UniversalDevUiCommandQueue.Clear();
-        UniversalDevUiPresentationHub.Clear();
-        DevUiPageCoverageTracker.Reset();
-        DevUiSemanticConformanceAudit.Reset();
-        DevUiCompatibilityGate.Reset();
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
         SoundEditorPresentationHub.Clear();
@@ -100,7 +95,6 @@ internal static class DevToolRuntime
         session?.LegacyTransactions.AfterLegacyUpdate(session);
 
         EditorUiCommandQueue.Process(session);
-        UniversalDevUiCommandQueue.Process(session);
         RoomEditorCommandQueue.Process(session);
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
@@ -135,8 +129,6 @@ internal static class DevToolRuntime
             suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
 
         EditorPresentationHub.Publish(session);
-        UniversalDevUiPresentationHub.Publish(self);
-        DevUiPageCoverageTracker.Observe(self, UniversalDevUiPresentationHub.Current);
         RoomEditorPresentationHub.Publish(session);
         SoundEditorPresentationHub.Publish(session);
         TriggerEditorPresentationHub.Publish(session);
