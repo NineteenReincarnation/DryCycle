@@ -127,11 +127,11 @@ internal static class WorldMapView
         ImGui.SameLine(0f, 18f);
         DevToolWidgets.MutedText(DevToolUiSettings.T("新连接", "New link"));
         ImGui.SameLine();
-        DrawDirectionButton(WorldConnectionDirection.Bidirectional, "↔", "Both");
+        DrawDirectionButton(WorldConnectionDirection.Bidirectional, "Both", "Both");
         ImGui.SameLine();
-        DrawDirectionButton(WorldConnectionDirection.AToB, "→", "AToB");
+        DrawDirectionButton(WorldConnectionDirection.AToB, "A > B", "AToB");
         ImGui.SameLine();
-        DrawDirectionButton(WorldConnectionDirection.BToA, "←", "BToA");
+        DrawDirectionButton(WorldConnectionDirection.BToA, "A < B", "BToA");
 
         if (linkingRoom >= 0)
         {
@@ -144,10 +144,10 @@ internal static class WorldMapView
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
         ImGui.Checkbox(label + "##" + id, ref value);
 
-    private static void DrawDirectionButton(WorldConnectionDirection direction, string glyph, string id)
+    private static void DrawDirectionButton(WorldConnectionDirection direction, string label, string id)
     {
         if (DevToolWidgets.ActionButton(
-                glyph,
+                label,
                 "WorldMapDirection" + id,
                 linkDirection == direction ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
             linkDirection = direction;
@@ -893,9 +893,9 @@ internal static class WorldMapView
 
     private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
     {
-        WorldConnectionDirection.AToB => "→",
-        WorldConnectionDirection.BToA => "←",
-        _ => "↔"
+        WorldConnectionDirection.AToB => "->",
+        WorldConnectionDirection.BToA => "<-",
+        _ => "<->"
     };
 
     private static string ExplicitEdgeId(string connectionId)
