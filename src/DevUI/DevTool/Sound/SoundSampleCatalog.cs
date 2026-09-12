@@ -8,6 +8,9 @@ namespace DryCycle.DevUI.DevTool.Sound;
 
 internal static class SoundSampleCatalog
 {
+    private const string DownpourModId = "moreslugcats";
+    private const string WatcherModId = "watcher";
+
     private static readonly Dictionary<string, EditorSoundSampleSnapshot> samples =
         new(StringComparer.OrdinalIgnoreCase);
     private static SoundPage observedPage;
@@ -66,37 +69,27 @@ internal static class SoundSampleCatalog
         if (!string.IsNullOrEmpty(resolved) && File.Exists(resolved))
         {
             if (TryIdentifyMod(resolved, out ModManager.Mod mod))
-            {
-                bool dlc = ModManager.PrePackagedModIDs.Contains(mod.id);
-                return new EditorSoundSampleSnapshot
-                {
-                    Sample = sample,
-                    SourceKind = dlc ? EditorSoundSourceKind.Dlc : EditorSoundSourceKind.Mod,
-                    SourceName = SafeModName(mod),
-                    SourceId = mod.id ?? string.Empty,
-                    Available = true
-                };
-            }
+                return FromMod(sample, mod);
 
-            return new EditorSoundSampleSnapshot
-            {
-                Sample = sample,
-                SourceKind = EditorSoundSourceKind.Vanilla,
-                SourceName = "Vanilla",
-                Available = true
-            };
+            // Official DLC assets may be served by Rain World's combined consolefiles directory,
+            // so the effective path is not always physically beneath the DLC mod root. Recover
+            // provenance from the official package roots without doing this for arbitrary mods.
+            if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
+                return FromMod(sample, officialDlc);
+
+            return Vanilla(sample);
         }
 
         if (knownAvailable)
         {
-            // SoundPage also exposes clips backed by the game's bundled ambient AudioClip archive.
-            return new EditorSoundSampleSnapshot
-            {
-                Sample = sample,
-                SourceKind = EditorSoundSourceKind.Vanilla,
-                SourceName = "Vanilla",
-                Available = true
-            };
+            // SoundPage can also expose clips backed by a bundled ambient AudioClip archive. The
+            // old implementation treated all of these as Vanilla, which merged Downpour and
+            // Watcher into the base-game section. Official-package probing keeps those DLCs
+            // distinct while avoiding false attribution to arbitrary third-party mods.
+            if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
+                return FromMod(sample, officialDlc);
+
+            return Vanilla(sample);
         }
 
         return new EditorSoundSampleSnapshot
@@ -106,6 +99,48 @@ internal static class SoundSampleCatalog
             SourceName = "Missing",
             Available = false
         };
+    }
+
+    private static EditorSoundSampleSnapshot Vanilla(string sample) => new()
+    {
+        Sample = sample,
+        SourceKind = EditorSoundSourceKind.Vanilla,
+        SourceName = "Vanilla",
+        SourceId = string.Empty,
+        Available = true
+    };
+
+    private static EditorSoundSampleSnapshot FromMod(string sample, ModManager.Mod mod)
+    {
+        string id = mod?.id ?? string.Empty;
+        EditorSoundSourceKind kind = ClassifyMod(id);
+        string name = kind switch
+        {
+            EditorSoundSourceKind.Downpour => "Downpour",
+            EditorSoundSourceKind.Watcher => "Watcher",
+            _ => SafeModName(mod)
+        };
+
+        return new EditorSoundSampleSnapshot
+        {
+            Sample = sample,
+            SourceKind = kind,
+            SourceName = name,
+            SourceId = id,
+            Available = true
+        };
+    }
+
+    private static EditorSoundSourceKind ClassifyMod(string id)
+    {
+        if (string.Equals(id, DownpourModId, StringComparison.OrdinalIgnoreCase))
+            return EditorSoundSourceKind.Downpour;
+        if (string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase))
+            return EditorSoundSourceKind.Watcher;
+
+        // "PrePackagedModIDs" also contains DevTools/MMF/Jolly/Expedition, so it must not be
+        // treated as a synonym for paid DLC provenance.
+        return EditorSoundSourceKind.Mod;
     }
 
     private static string TryResolveAmbientFile(string sample)
@@ -172,6 +207,30 @@ internal static class SoundSampleCatalog
 
         return false;
     }
+
+    private static bool TryIdentifyOfficialDlcBySample(string sample, out ModManager.Mod owner)
+    {
+        owner = null;
+        if (string.IsNullOrWhiteSpace(sample)) return false;
+
+        // Match AssetManager's active-mod priority direction. Restrict this fallback to the two
+        // official DLC ids so a same-named file in a lower-priority third-party mod never steals
+        // ownership from a base-game/bundled clip.
+        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
+        {
+            ModManager.Mod mod = ModManager.ActiveMods[i];
+            if (mod == null || !IsOfficialDlc(mod.id)) continue;
+            if (!ModContainsAmbient(mod, sample)) continue;
+            owner = mod;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsOfficialDlc(string id) =>
+        string.Equals(id, DownpourModId, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase);
 
     private static bool ModContainsAmbient(ModManager.Mod mod, string sample)
     {
