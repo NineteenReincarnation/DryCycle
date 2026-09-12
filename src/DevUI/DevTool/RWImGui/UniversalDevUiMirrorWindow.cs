@@ -1,26 +1,18 @@
 using System;
 using DryCycle.DevUI.DevTool.Compatibility;
-using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Movable frontend surface for the page-agnostic semantic mirror and its generic audit status.
-/// It is intentionally separate from page-specific inspectors so the same compatibility path can
-/// be exercised against every active vanilla/RK/DryCycle/third-party DevInterface page.
+/// Standalone movable diagnostics surface for the page-agnostic semantic mirror and migration audits.
+/// It deliberately stays outside page-specific inspectors and normal editor workflows.
 /// </summary>
 internal static class UniversalDevUiMirrorWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
-        // Map owns the same generic mirror inside its Inspector. A second floating copy only covers
-        // the graph and creates duplicate controls, so the standalone audit surface stays hidden
-        // while the Map workspace is active.
-        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
-            return;
-
         DevUiGenericProtocolBootstrap.Ensure();
         UniversalDevUiPresentationSnapshot snapshot = UniversalDevUiPresentationHub.Current;
         if (!snapshot.Available) return;
@@ -38,7 +30,7 @@ internal static class UniversalDevUiMirrorWindow
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
-                DevToolUiSettings.T("通用 DevUI###UniversalDevUiMirrorWindow", "Universal DevUI###UniversalDevUiMirrorWindow"),
+                DevToolUiSettings.T("DevUI 兼容性诊断###UniversalDevUiMirrorWindow", "DevUI Compatibility Diagnostics###UniversalDevUiMirrorWindow"),
                 ImGuiWindowFlags.None))
         {
             ImGui.End();
