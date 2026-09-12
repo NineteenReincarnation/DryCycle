@@ -143,7 +143,7 @@ internal static class EffectPreviewExtendedRecipeBootstrap
                 type == typeof(RoomSettings.RoomEffect.Type) ||
                 type == typeof(RoomCamera) ||
                 type == typeof(RainWorldGame) ||
-                type == typeof(World) ||
+                type == typeof(global::World) ||
                 type == typeof(AbstractRoom))
                 continue;
 
@@ -205,7 +205,7 @@ internal static class EffectPreviewExtendedRecipeBootstrap
             else if (type == typeof(RoomSettings.RoomEffect.Type)) args[i] = effect.type;
             else if (type == typeof(RoomCamera)) args[i] = ResolveCamera(room);
             else if (type == typeof(RainWorldGame)) args[i] = room.game;
-            else if (type == typeof(World)) args[i] = room.world;
+            else if (type == typeof(global::World)) args[i] = room.world;
             else if (type == typeof(AbstractRoom)) args[i] = room.abstractRoom;
             else if (type == typeof(float))
             {
