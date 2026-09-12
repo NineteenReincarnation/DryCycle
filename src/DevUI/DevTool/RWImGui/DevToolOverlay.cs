@@ -39,10 +39,10 @@ internal static class DevToolOverlay
         else if (snapshot.ToolMode == EditorToolMode.Relationships)
             DrawRelationshipMatrix(snapshot, display);
 
-        // Map/World owns its own command toolbar so the old Control Center does not sit behind the
-        // full-height workspace. Other tools keep the existing shared control surface.
-        if (snapshot.ToolMode != EditorToolMode.Map)
-            ControlCenterWindow.Draw(snapshot, display);
+        // The shared Control Center is part of the editor chrome, not a page-specific panel.
+        // Keep it alive while switching into Map/World so the developer's current view does not
+        // disappear merely because the active DevInterface page changed.
+        ControlCenterWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
         {
