@@ -1,5 +1,6 @@
 using System;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -14,6 +15,12 @@ internal static class UniversalDevUiMirrorWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
+        // Map owns the same generic mirror inside its Inspector. A second floating copy only covers
+        // the graph and creates duplicate controls, so the standalone audit surface stays hidden
+        // while the Map workspace is active.
+        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
+            return;
+
         DevUiGenericProtocolBootstrap.Ensure();
         UniversalDevUiPresentationSnapshot snapshot = UniversalDevUiPresentationHub.Current;
         if (!snapshot.Available) return;
