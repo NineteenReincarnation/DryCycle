@@ -36,13 +36,12 @@ internal static class DevToolOverlay
         else if (snapshot.ToolMode == EditorToolMode.Relationships)
             DrawRelationshipMatrix(snapshot, display);
 
-        DrawTopBar(snapshot, display);
+        ControlCenterWindow.Draw(snapshot, display);
         if (!snapshot.FocusMode)
         {
             DrawActivityBar(snapshot, display);
             if (snapshot.BrowserOpen || snapshot.InspectorOpen)
                 DrawBrowserInspectorPanel(snapshot, display);
-            DrawStatusBar(snapshot, display);
         }
 
         HandlePlacement(snapshot, display, io);
