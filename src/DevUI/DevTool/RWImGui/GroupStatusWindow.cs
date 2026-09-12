@@ -7,6 +7,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Presentation-only inspector for persistent UI layout groups.
 /// Groups never enter room data, saves or Undo/Redo history.
+/// Shortcut instructions live exclusively in ShortcutWindow.
 /// </summary>
 internal static class GroupStatusWindow
 {
@@ -36,9 +37,6 @@ internal static class GroupStatusWindow
         ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.20f : 1.14f);
 
         ImGui.TextDisabled(DevToolUiSettings.T(
-            "Shift + 左键框选 · Ctrl+G 编组",
-            "Shift + drag select · Ctrl+G group"));
-        ImGui.TextDisabled(DevToolUiSettings.T(
             $"当前选择：{FloatingWindowSnap.SelectedWindowCount} 个窗口",
             $"Selected: {FloatingWindowSnap.SelectedWindowCount} windows"));
         ImGui.Separator();
@@ -47,8 +45,8 @@ internal static class GroupStatusWindow
         if (groups.Length == 0)
         {
             ImGui.TextWrapped(DevToolUiSettings.T(
-                "还没有编组。框选至少两个窗口后按 Ctrl+G。",
-                "No groups yet. Marquee-select at least two windows, then press Ctrl+G."));
+                "当前还没有窗口编组。编组操作统一显示在左下角快捷键窗口中。",
+                "No window groups yet. Group operations are listed in the Shortcuts window at bottom-left."));
             ImGui.End();
             return;
         }
@@ -98,6 +96,7 @@ internal static class GroupStatusWindow
             "BrowserInspector" => DevToolUiSettings.T("编辑面板", "Editor panel"),
             "Status" => DevToolUiSettings.T("状态", "Status"),
             "Font" => DevToolUiSettings.T("字体", "Font"),
+            "Shortcuts" => DevToolUiSettings.T("快捷键", "Shortcuts"),
             "Map" => DevToolUiSettings.T("地图工作区", "Map workspace"),
             "Dialog" => DevToolUiSettings.T("对话工作区", "Dialog workspace"),
             "Relationships" => DevToolUiSettings.T("关系工作区", "Relationships workspace"),
