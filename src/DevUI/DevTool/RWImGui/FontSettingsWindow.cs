@@ -1,4 +1,5 @@
 using System;
+using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -12,6 +13,11 @@ internal static class FontSettingsWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
+        // The Map workspace needs uninterrupted horizontal/vertical space. Typography settings are
+        // presentation-only and do not need to cover the graph while Map is the active tool.
+        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
+            return;
+
         float uiScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
         float width = Math.Min(Math.Max(390f, display.X - 16f), 390f * uiScale);
         float height = Math.Min(Math.Max(430f, display.Y - 16f), 430f * Math.Min(1.35f, uiScale));
