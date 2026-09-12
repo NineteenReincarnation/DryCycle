@@ -47,7 +47,8 @@ internal readonly struct WorldTopologyCommand
 
 /// <summary>
 /// Main-thread mutation queue for endpoint-based world topology authoring.
-/// RWImGui describes requested edits; validation and live world mutation happen on DevUI.Update.
+/// Every successful edit is captured as one history transaction spanning live AbstractRoom data,
+/// lossless world.txt edits and WorldTopology.json endpoint metadata.
 /// </summary>
 internal static class WorldTopologyCommandQueue
 {
@@ -97,28 +98,32 @@ internal static class WorldTopologyCommandQueue
         switch (command.Kind)
         {
             case WorldTopologyCommandKind.AddExplicitMapping:
-                AddExplicitMapping(page.world, region, command);
+                AddExplicitMapping(session, page.world, region, command);
                 break;
 
             case WorldTopologyCommandKind.CreateConnection:
-                CreateConnection(page.world, region, command);
+                CreateConnection(session, page.world, region, command);
                 break;
 
             case WorldTopologyCommandKind.DeleteConnection:
-                DeleteConnection(page.world, region, command);
+                DeleteConnection(session, page.world, region, command);
                 break;
 
             case WorldTopologyCommandKind.RemoveExplicitMapping:
-                RemoveExplicitMapping(page.world, region, command.EdgeId);
+                RemoveExplicitMapping(session, page.world, region, command.EdgeId);
                 break;
 
             case WorldTopologyCommandKind.SetDirection:
-                SetDirection(page.world, region, command.EdgeId, command.Direction);
+                SetDirection(session, page.world, region, command.EdgeId, command.Direction);
                 break;
         }
     }
 
-    private static void AddExplicitMapping(World world, string region, WorldTopologyCommand command)
+    private static void AddExplicitMapping(
+        EditorSession session,
+        World world,
+        string region,
+        WorldTopologyCommand command)
     {
         if (!TryResolveEndpoints(world, command, out AbstractRoom roomA, out AbstractRoom roomB, out string endpointError))
         {
@@ -144,6 +149,13 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
+        WorldTopologyEditSnapshot before = Capture(world, region, roomA, command.NodeA, roomB, command.NodeB);
+        if (before == null)
+        {
+            Fail("Could not capture the current topology state.");
+            return;
+        }
+
         if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out error))
         {
             Fail(error);
@@ -159,17 +171,27 @@ internal static class WorldTopologyCommandQueue
                 command.Direction,
                 out error))
         {
-            WorldTopologyRegistry.RemoveEdge(region, edgeId);
+            before.Apply(session);
             Fail(error);
             return;
         }
+
+        PushHistory(
+            session,
+            "Resolve world connection",
+            before,
+            Capture(world, region, roomA, command.NodeA, roomB, command.NodeB));
 
         Succeed(
             "Mapped " + roomA.name + ":" + command.NodeA + " " + DirectionGlyph(command.Direction) + " " +
             roomB.name + ":" + command.NodeB + " (" + ShortId(edgeId) + ").");
     }
 
-    private static void CreateConnection(World world, string region, WorldTopologyCommand command)
+    private static void CreateConnection(
+        EditorSession session,
+        World world,
+        string region,
+        WorldTopologyCommand command)
     {
         if (!TryResolveEndpoints(world, command, out AbstractRoom roomA, out AbstractRoom roomB, out string endpointError))
         {
@@ -196,7 +218,14 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out error))
+        WorldTopologyEditSnapshot before = Capture(world, region, roomA, command.NodeA, roomB, command.NodeB);
+        if (before == null)
+        {
+            Fail("Could not capture the current topology state.");
+            return;
+        }
+
+        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out _, out error))
         {
             Fail(error);
             return;
@@ -211,17 +240,27 @@ internal static class WorldTopologyCommandQueue
                 command.Direction,
                 out error))
         {
-            WorldTopologyRegistry.RemoveEdge(region, edgeId);
+            before.Apply(session);
             Fail(error);
             return;
         }
+
+        PushHistory(
+            session,
+            "Create world connection",
+            before,
+            Capture(world, region, roomA, command.NodeA, roomB, command.NodeB));
 
         Succeed(
             "Created " + roomA.name + ":" + command.NodeA + " " + DirectionGlyph(command.Direction) + " " +
             roomB.name + ":" + command.NodeB + ".");
     }
 
-    private static void DeleteConnection(World world, string region, WorldTopologyCommand command)
+    private static void DeleteConnection(
+        EditorSession session,
+        World world,
+        string region,
+        WorldTopologyCommand command)
     {
         if (!TryResolveEndpoints(world, command, out AbstractRoom roomA, out AbstractRoom roomB, out string endpointError))
         {
@@ -235,9 +274,17 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
+        WorldTopologyEditSnapshot before = Capture(world, region, roomA, command.NodeA, roomB, command.NodeB);
+        if (before == null)
+        {
+            Fail("Could not capture the current topology state.");
+            return;
+        }
+
         if (!SetWorldConnection(region, roomA, command.NodeA, null, out error) ||
             !SetWorldConnection(region, roomB, command.NodeB, null, out error))
         {
+            before.Apply(session);
             Fail(error ?? "Could not disconnect the endpoints in world.txt.");
             return;
         }
@@ -245,8 +292,19 @@ internal static class WorldTopologyCommandQueue
         SetLiveConnection(roomA, command.NodeA, -1);
         SetLiveConnection(roomB, command.NodeB, -1);
 
-        if (!string.IsNullOrWhiteSpace(command.EdgeId))
-            WorldTopologyRegistry.RemoveEdge(region, command.EdgeId);
+        if (!string.IsNullOrWhiteSpace(command.EdgeId) &&
+            !WorldTopologyRegistry.RemoveEdge(region, command.EdgeId))
+        {
+            before.Apply(session);
+            Fail("The explicit connection mapping no longer exists.");
+            return;
+        }
+
+        PushHistory(
+            session,
+            "Disconnect world connection",
+            before,
+            Capture(world, region, roomA, command.NodeA, roomB, command.NodeB));
 
         Succeed(
             "Disconnected " + roomA.name + ":" + command.NodeA + " and " +
@@ -254,6 +312,7 @@ internal static class WorldTopologyCommandQueue
     }
 
     private static void SetDirection(
+        EditorSession session,
         World world,
         string region,
         string edgeId,
@@ -280,30 +339,48 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error) ||
-            !ApplyDirectionToWorld(
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error))
+        {
+            Fail(error);
+            return;
+        }
+
+        WorldTopologyEditSnapshot before = Capture(world, region, roomA, edge.A.NodeIndex, roomB, edge.B.NodeIndex);
+        if (before == null)
+        {
+            Fail("Could not capture the current topology state.");
+            return;
+        }
+
+        if (!ApplyDirectionToWorld(
                 region,
                 roomA,
                 edge.A.NodeIndex,
                 roomB,
                 edge.B.NodeIndex,
                 direction,
-                out error))
+                out error) ||
+            !WorldTopologyRegistry.SetDirection(region, edgeId, direction))
         {
-            Fail(error);
+            before.Apply(session);
+            Fail(error ?? "Could not update the connection direction.");
             return;
         }
 
-        if (!WorldTopologyRegistry.SetDirection(region, edgeId, direction))
-        {
-            Fail("Could not update the connection direction in WorldTopology.json.");
-            return;
-        }
+        PushHistory(
+            session,
+            "Change world connection direction",
+            before,
+            Capture(world, region, roomA, edge.A.NodeIndex, roomB, edge.B.NodeIndex));
 
         Succeed("Changed connection direction to " + DirectionText(direction) + ".");
     }
 
-    private static void RemoveExplicitMapping(World world, string region, string edgeId)
+    private static void RemoveExplicitMapping(
+        EditorSession session,
+        World world,
+        string region,
+        string edgeId)
     {
         if (!TryFindEdge(region, edgeId, out WorldConnectionEdge edge))
         {
@@ -321,30 +398,60 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error))
+        {
+            Fail(error);
+            return;
+        }
+
+        WorldTopologyEditSnapshot before = Capture(world, region, roomA, edge.A.NodeIndex, roomB, edge.B.NodeIndex);
+        if (before == null)
+        {
+            Fail("Could not capture the current topology state.");
+            return;
+        }
+
         // Vanilla needs reciprocal room references in order to recover an entrance node through
         // ExitIndex(sourceRoom). Restore that shape before removing the exact endpoint sidecar.
-        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error) ||
-            !ApplyDirectionToWorld(
+        if (!ApplyDirectionToWorld(
                 region,
                 roomA,
                 edge.A.NodeIndex,
                 roomB,
                 edge.B.NodeIndex,
                 WorldConnectionDirection.Bidirectional,
-                out error))
+                out error) ||
+            !WorldTopologyRegistry.RemoveEdge(region, edgeId))
         {
-            Fail(error);
+            before.Apply(session);
+            Fail(error ?? "Could not remove the explicit connection mapping.");
             return;
         }
 
-        if (!WorldTopologyRegistry.RemoveEdge(region, edgeId))
-        {
-            Fail("The explicit connection mapping no longer exists.");
-            return;
-        }
+        PushHistory(
+            session,
+            "Remove world connection mapping",
+            before,
+            Capture(world, region, roomA, edge.A.NodeIndex, roomB, edge.B.NodeIndex));
 
         Succeed("Removed explicit mapping and restored a vanilla bidirectional room link.");
     }
+
+    private static WorldTopologyEditSnapshot Capture(
+        World world,
+        string region,
+        AbstractRoom roomA,
+        int nodeA,
+        AbstractRoom roomB,
+        int nodeB) =>
+        WorldTopologyEditSnapshot.Capture(world, region, roomA.name, nodeA, roomB.name, nodeB);
+
+    private static void PushHistory(
+        EditorSession session,
+        string label,
+        WorldTopologyEditSnapshot before,
+        WorldTopologyEditSnapshot after) =>
+        WorldTopologyHistoryEntry.Push(session, label, before, after);
 
     private static bool ApplyDirectionToWorld(
         string region,
