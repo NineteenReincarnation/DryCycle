@@ -26,6 +26,10 @@ internal static class LegacyUiPresentationController
 
     internal static void Apply(Page page, bool suppressLegacyControls)
     {
+        // Scan before any legacy node is moved or hidden. This keeps migration diagnostics tied
+        // to the real runtime tree produced by vanilla, RegionKit and DryCycle for this frame.
+        DevUiMigrationCoverage.Observe(page);
+
         if (!ReferenceEquals(hiddenPage, page))
         {
             RestoreHiddenPage();
@@ -62,6 +66,7 @@ internal static class LegacyUiPresentationController
         RestoreHiddenPage();
         hidden.Clear();
         hiddenPage = null;
+        DevUiMigrationCoverage.Reset();
     }
 
     private static void SuppressChildren(DevUINode parent)
