@@ -2,42 +2,24 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using BepInEx.Logging;
 using ImGuiNET;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Discovers and registers developer-supplied fonts from the mod-local ui/fonts directory.
-/// Font files remain presentation assets only; editor documents never reference them.
+/// Describes fonts that are already present in RWImGui's shared font atlas.
 ///
-/// The path intentionally follows the same convention used by other RWImGui tooling:
-///   <mod root>/newest/plugins/DryCycle.DevTool.RWImGui.dll
-///   <mod root>/newest/ui/fonts/*.ttf
-///
-/// Fonts must be registered after RWImGui creates its native ImGui context but before the first
-/// renderer frame builds the font atlas texture. Runtime switching only selects faces that are
-/// already present in that startup atlas.
+/// DryCycle deliberately does not call ImFontAtlas.AddFont* itself. RWImGui owns the native ImGui
+/// context, renderer backend and atlas texture lifetime; mutating that shared atlas from a consumer
+/// plugin after or during backend initialization can invalidate the renderer texture and trigger a
+/// native ImGui "Font Atlas not built" assertion. Local files remain discoverable assets, but a face
+/// is selectable only after RWImGui (or another atlas owner) has registered it during its own font
+/// initialization lifecycle.
 /// </summary>
 internal static unsafe class DevToolFontCatalog
 {
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
     internal const string UbuntuMonoFamily = "Ubuntu Mono";
-
-    private sealed class RegisteredFace
-    {
-        internal ImFontPtr Font;
-        internal string FileName;
-        internal string Family;
-        internal int Weight;
-    }
-
-    private static readonly List<RegisteredFace> RegisteredFaces = new();
-    private static readonly HashSet<string> RegisteredPaths = new(StringComparer.OrdinalIgnoreCase);
-    private static bool registrationComplete;
-    private static bool registrationBusy;
-    private static bool registrationFailureLogged;
-    private static bool lateRegistrationWarningLogged;
 
     internal static string FontDirectory
     {
@@ -50,126 +32,13 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Adds every local font face to the shared ImGui atlas once. The atlas uses ImGui's
-    /// Simplified-Chinese common glyph set so several developer-selectable weights/families can
-    /// coexist without the extreme texture cost of rasterising the entire CJK block per face.
-    /// Faces that do not actually contain Chinese remain harmless and are filtered from the UI,
-    /// except for explicitly allowed Chinese-interface faces such as UbuntuMono-Regular.ttf.
+    /// Enumerates only faces that are already part of the live RWImGui atlas. This method is called
+    /// from the DevTool render context, never during BepInEx/RainWorld startup.
     /// </summary>
-    internal static bool TryRegisterFonts(ManualLogSource log)
-    {
-        if (registrationComplete) return true;
-        if (registrationBusy) return false;
-
-        // AddFontFromFileTTF invalidates an already-built atlas. RWImGui's DX11 backend only
-        // uploads that texture during its normal frame lifecycle, so mutating the atlas after a
-        // frame has started causes ImGui::NewFrame() to assert with "Font Atlas not built".
-        // Refuse late mutation rather than risking a native process abort.
-        if (ImGui.GetFrameCount() > 0)
-        {
-            if (!lateRegistrationWarningLogged)
-            {
-                lateRegistrationWarningLogged = true;
-                log?.LogWarning(
-                    "DryCycle DevTool refused late font registration because the ImGui font atlas " +
-                    "has already entered the render loop. Local fonts must be registered before the first frame.");
-            }
-            return false;
-        }
-
-        registrationBusy = true;
-        try
-        {
-            string directory = FontDirectory;
-            if (!Directory.Exists(directory))
-            {
-                log?.LogWarning("DryCycle DevTool font directory not found: " + directory);
-                return false;
-            }
-
-            string[] files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly);
-            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
-
-            ImGuiIOPtr io = ImGui.GetIO();
-            IntPtr glyphRanges = io.Fonts.GetGlyphRangesChineseSimplifiedCommon();
-            int added = 0;
-
-            for (int i = 0; i < files.Length; i++)
-            {
-                string file = files[i];
-                string extension = Path.GetExtension(file);
-                if (!string.Equals(extension, ".ttf", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(extension, ".otf", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(extension, ".ttc", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                string fullPath = Path.GetFullPath(file);
-                if (!RegisteredPaths.Add(fullPath)) continue;
-
-                ImFontPtr font;
-                try
-                {
-                    font = io.Fonts.AddFontFromFileTTF(
-                        fullPath,
-                        DevToolUiSettings.ReferenceFontSize,
-                        default,
-                        glyphRanges);
-                }
-                catch (Exception error)
-                {
-                    RegisteredPaths.Remove(fullPath);
-                    log?.LogWarning("DryCycle DevTool could not register font '" + Path.GetFileName(file) + "': " + error.Message);
-                    continue;
-                }
-
-                if (font.NativePtr == null)
-                {
-                    RegisteredPaths.Remove(fullPath);
-                    continue;
-                }
-
-                string faceName = Path.GetFileNameWithoutExtension(file);
-                RegisteredFaces.Add(new RegisteredFace
-                {
-                    Font = font,
-                    FileName = Path.GetFileName(file),
-                    Family = FamilyFromName(faceName),
-                    Weight = InferWeight(faceName)
-                });
-                added++;
-            }
-
-            registrationComplete = true;
-            log?.LogInfo($"DryCycle DevTool registered {added} local font face(s) before the first ImGui frame from {directory}.");
-            return true;
-        }
-        catch (Exception error)
-        {
-            if (!registrationFailureLogged)
-            {
-                registrationFailureLogged = true;
-                log?.LogWarning("DryCycle DevTool local font registration is unavailable: " + error.Message);
-            }
-            return false;
-        }
-        finally
-        {
-            registrationBusy = false;
-        }
-    }
-
     internal static string[] GetAvailableChineseFamilies()
     {
         List<string> families = new();
-        for (int i = 0; i < RegisteredFaces.Count; i++)
-        {
-            RegisteredFace face = RegisteredFaces[i];
-            if (!IsChineseUiSelectable(face.Font, face.FileName)) continue;
-            AddUnique(families, face.Family);
-        }
 
-        // Other RWImGui users may have registered their own CJK faces before DryCycle. Include
-        // those as well so the selector is a shared-atlas selector rather than a DryCycle-only list.
         try
         {
             ImVector<ImFontPtr> fonts = ImGui.GetIO().Fonts.Fonts;
@@ -183,7 +52,7 @@ internal static unsafe class DevToolFontCatalog
         }
         catch
         {
-            // Font settings remain usable while RWImGui is still finalising the atlas.
+            // Keep the font settings window usable if the backend is temporarily between contexts.
         }
 
         families.Sort((a, b) =>
@@ -197,9 +66,36 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
+    /// Returns how many font files are available in Ancient Site/newest/ui/fonts. This is metadata
+    /// only; finding a file here never mutates the shared ImGui atlas.
+    /// </summary>
+    internal static int CountLocalFontFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(FontDirectory)) return 0;
+            string[] files = Directory.GetFiles(FontDirectory, "*.*", SearchOption.TopDirectoryOnly);
+            int count = 0;
+            for (int i = 0; i < files.Length; i++)
+            {
+                string extension = Path.GetExtension(files[i]);
+                if (string.Equals(extension, ".ttf", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(extension, ".otf", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(extension, ".ttc", StringComparison.OrdinalIgnoreCase))
+                    count++;
+            }
+            return count;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// Determines whether a face is allowed in the Chinese-interface font selector. Normally a
-    /// face must expose representative Simplified-Chinese glyphs. UbuntuMono-Regular.ttf is an
-    /// explicit developer-facing option and is therefore allowed by family name as well.
+    /// face must expose representative Simplified-Chinese glyphs. UbuntuMono-Regular.ttf remains an
+    /// explicit developer-facing option when it is already present in RWImGui's atlas.
     /// </summary>
     internal static bool IsChineseUiSelectable(ImFontPtr font, string candidateName)
     {
@@ -302,7 +198,7 @@ internal static unsafe class DevToolFontCatalog
                token == "black" || token == "heavy";
     }
 
-    private static unsafe string ReadFontName(ImFontPtr font, int index)
+    private static string ReadFontName(ImFontPtr font, int index)
     {
         if (font.NativePtr == null || font.NativePtr->ConfigData == null)
             return "CJK Font " + index;
