@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
 using ImGuiNET;
@@ -49,7 +50,10 @@ internal static class MapEditorView
             bool visible = LayerVisible[i];
             string layerLabel = "L" + i;
             if (ImGui.Checkbox(layerLabel + "##MapLayerFilter" + i, ref visible))
+            {
                 LayerVisible[i] = visible;
+                fitRequested = true;
+            }
             if (i < LayerVisible.Length - 1)
                 DevToolWidgets.SameLineIfFits(ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize("L" + (i + 1)).X);
         }
@@ -82,6 +86,7 @@ internal static class MapEditorView
         {
             inspectorRoom = -1;
             ImGui.TextWrapped(DevToolUiSettings.T("从图中或房间列表选择一个房间。", "Select a room from the graph or room list."));
+            DrawGenericPageControls();
             return;
         }
 
@@ -142,10 +147,37 @@ internal static class MapEditorView
             inspectorSubregion = room.Subregion ?? string.Empty;
 
         ImGui.Separator();
-        ImGui.TextWrapped(DevToolUiSettings.T("连接关系直接读取 World/AbstractRoom。", "Connections are taken directly from World/AbstractRoom."));
-        ImGui.TextWrapped(DevToolUiSettings.T("Ctrl+S 会通过 MapPage.SaveMapConfig() 保存地图位置。", "Map position edits are saved by Ctrl+S with MapPage.SaveMapConfig()."));
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "拖动中央图中的房间可直接修改 Dev Position；滚轮缩放，中键/右键拖动画布。",
+            "Drag rooms in the center graph to edit Dev Position; wheel zooms and middle/right drag pans."), true);
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "Ctrl+S 使用 MapPage.SaveMapConfig() 保存地图配置。",
+            "Ctrl+S saves through MapPage.SaveMapConfig()."), true);
+
+        DrawGenericPageControls();
     }
 
+    private static void DrawGenericPageControls()
+    {
+        UniversalDevUiPresentationSnapshot generic = UniversalDevUiPresentationHub.Current;
+        if (generic?.Available != true) return;
+
+        ImGui.Spacing();
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("页面扩展控件##MapGenericPageControls", "PAGE EXTENSION CONTROLS##MapGenericPageControls")))
+            return;
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "这里使用通用 DevInterface 协议镜像原版、RegionKit、DryCycle 和其他 Mod 注入的地图控件。",
+            "Generic DevInterface protocols mirror vanilla, RegionKit, DryCycle and other mod-added Map controls here."), true);
+        UniversalDevUiMirrorView.Draw(generic);
+    }
+
+    /// <summary>
+    /// Standalone canvas retained for focus mode. Normal Map mode uses DrawEmbeddedCanvas inside
+    /// the unified Browser | Map | Inspector workspace and therefore no longer opens a second
+    /// floating Region Map window over the editor panel.
+    /// </summary>
     internal static void DrawCanvas(EditorMapPresentationSnapshot snapshot, Num.Vector2 position, Num.Vector2 size)
     {
         if (!snapshot.Available || size.X < 120f || size.Y < 120f) return;
@@ -163,16 +195,40 @@ internal static class MapEditorView
         }
 
         FloatingWindowSnap.TrackCurrentWindow("MapCanvas");
+        DrawCanvasSurface(snapshot, "##MapCanvasInput");
+        ImGui.End();
+    }
 
-        Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
-        Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
-        if (canvasSize.X < 50f || canvasSize.Y < 50f)
+    internal static void DrawEmbeddedCanvas(EditorMapPresentationSnapshot snapshot)
+    {
+        if (!snapshot.Available)
         {
-            ImGui.End();
+            DevToolWidgets.MutedText(DevToolUiSettings.T("地图编辑器不可用。", "Map editor unavailable."), true);
             return;
         }
 
-        ImGui.InvisibleButton("##MapCanvasInput", canvasSize);
+        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
+        ImGui.SameLine();
+        ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("适配", "Fit"), "MapCanvasFit", DevToolButtonTone.Subtle))
+            fitRequested = true;
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton("100%", "MapCanvasZoom100", DevToolButtonTone.Subtle))
+            zoom = 1f;
+
+        ImGui.Spacing();
+        DrawCanvasSurface(snapshot, "##MapEmbeddedCanvasInput");
+    }
+
+    private static void DrawCanvasSurface(EditorMapPresentationSnapshot snapshot, string inputId)
+    {
+        Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
+        Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
+        if (canvasSize.X < 50f || canvasSize.Y < 50f)
+            return;
+
+        ImGui.InvisibleButton(inputId, canvasSize);
         bool hovered = ImGui.IsItemHovered();
         ImGuiIOPtr io = ImGui.GetIO();
 
@@ -193,15 +249,16 @@ internal static class MapEditorView
             pan = mouseInCanvas - worldAtMouse * zoom;
         }
 
-        if (hovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+        if (hovered && (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || ImGui.IsMouseDragging(ImGuiMouseButton.Right)))
             pan += io.MouseDelta;
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        Num.Vector2 canvasMax = canvasMin + canvasSize;
+        draw.AddRectFilled(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.ChildBg));
+        draw.AddRect(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.Border));
         DrawGrid(draw, canvasMin, canvasSize);
         DrawConnections(draw, snapshot, canvasMin);
         DrawRooms(draw, snapshot, canvasMin, hovered, io);
-
-        ImGui.End();
     }
 
     private static void DrawGrid(ImDrawListPtr draw, Num.Vector2 canvasMin, Num.Vector2 canvasSize)
