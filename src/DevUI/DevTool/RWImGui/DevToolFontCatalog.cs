@@ -21,6 +21,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static unsafe class DevToolFontCatalog
 {
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
+    internal const string UbuntuMonoFamily = "Ubuntu Mono";
 
     private sealed class RegisteredFace
     {
@@ -50,7 +51,8 @@ internal static unsafe class DevToolFontCatalog
     /// Adds every local font face to the shared ImGui atlas once. The atlas uses ImGui's
     /// Simplified-Chinese common glyph set so several developer-selectable weights/families can
     /// coexist without the extreme texture cost of rasterising the entire CJK block per face.
-    /// Faces that do not actually contain Chinese remain harmless and are filtered from the UI.
+    /// Faces that do not actually contain Chinese remain harmless and are filtered from the UI,
+    /// except for explicitly allowed Chinese-interface faces such as UbuntuMono-Regular.ttf.
     /// </summary>
     internal static bool TryRegisterFonts(ManualLogSource log)
     {
@@ -144,7 +146,7 @@ internal static unsafe class DevToolFontCatalog
         for (int i = 0; i < RegisteredFaces.Count; i++)
         {
             RegisteredFace face = RegisteredFaces[i];
-            if (!SupportsChinese(face.Font)) continue;
+            if (!IsChineseUiSelectable(face.Font, face.FileName)) continue;
             AddUnique(families, face.Family);
         }
 
@@ -156,8 +158,8 @@ internal static unsafe class DevToolFontCatalog
             for (int i = 0; i < fonts.Size; i++)
             {
                 ImFontPtr font = fonts[i];
-                if (!SupportsChinese(font)) continue;
                 string name = ReadFontName(font, i);
+                if (!IsChineseUiSelectable(font, name)) continue;
                 AddUnique(families, FamilyFromName(name));
             }
         }
@@ -174,6 +176,16 @@ internal static unsafe class DevToolFontCatalog
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
         });
         return families.ToArray();
+    }
+
+    /// <summary>
+    /// Determines whether a face is allowed in the Chinese-interface font selector. Normally a
+    /// face must expose representative Simplified-Chinese glyphs. UbuntuMono-Regular.ttf is an
+    /// explicit developer-facing option and is therefore allowed by family name as well.
+    /// </summary>
+    internal static bool IsChineseUiSelectable(ImFontPtr font, string candidateName)
+    {
+        return SupportsChinese(font) || IsUbuntuMono(candidateName);
     }
 
     internal static bool IsFamilyMatch(string candidateName, string family)
@@ -207,7 +219,10 @@ internal static unsafe class DevToolFontCatalog
         while (count > 1 && IsWeightToken(parts[count - 1])) count--;
 
         string family = string.Join(" ", parts, 0, count).Trim();
-        return string.IsNullOrEmpty(family) ? value : family;
+        if (string.IsNullOrEmpty(family)) family = value;
+        return string.Equals(NormalizeFamily(family), "UbuntuMono", StringComparison.OrdinalIgnoreCase)
+            ? UbuntuMonoFamily
+            : family;
     }
 
     internal static int InferWeight(string name)
@@ -238,6 +253,14 @@ internal static unsafe class DevToolFontCatalog
         {
             return false;
         }
+    }
+
+    private static bool IsUbuntuMono(string candidateName)
+    {
+        return string.Equals(
+            NormalizeFamily(FamilyFromName(candidateName)),
+            NormalizeFamily(UbuntuMonoFamily),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AddUnique(List<string> values, string value)
