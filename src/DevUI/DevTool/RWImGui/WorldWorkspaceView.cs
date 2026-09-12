@@ -9,10 +9,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Region-level workspace shared by the rebuilt Map editor and the future World Editor migration.
+/// Region-level workspace shared by the rebuilt Map editor and DryCycle world-data tools.
 /// The UI is intentionally organized around stable semantic roles (Explorer / Canvas / Inspector)
-/// instead of mirroring MapPage's legacy screen layout, so world.txt data can grow into the same
-/// workspace without another structural rewrite.
+/// instead of mirroring MapPage's legacy screen layout.
 /// </summary>
 internal static class WorldWorkspaceView
 {
@@ -143,7 +142,11 @@ internal static class WorldWorkspaceView
                 DevToolUiSettings.T("保存", "Save"),
                 "WorldWorkspaceSave",
                 DevToolButtonTone.Primary))
+        {
             Send(EditorUiCommandKind.Save);
+            if (workspaceMode == WorkspaceMode.WorldData)
+                WorldWorkspaceDataView.SaveDirty();
+        }
 
         ImGui.SameLine();
         if (!editor.CanUndo) ImGui.BeginDisabled();
@@ -417,12 +420,12 @@ internal static class WorldWorkspaceView
                 break;
             case WorkspaceMode.WorldGraph:
                 DevToolWidgets.MutedText(DevToolUiSettings.T(
-                    "当前连接来自 World / AbstractRoom。后续 World Editor 的建连、断连和条件连接会进入同一画布。",
-                    "Connections come from World / AbstractRoom. World Editor link creation, removal and conditional links will use this same canvas."), true);
+                    "当前连接来自 World / AbstractRoom。后续世界拓扑编辑会进入同一画布。",
+                    "Connections come from World / AbstractRoom. Future topology editing will use this same canvas."), true);
                 MapEditorView.DrawEmbeddedCanvas(snapshot);
                 break;
             case WorkspaceMode.WorldData:
-                DrawWorldSummary(snapshot);
+                WorldWorkspaceDataView.Draw(snapshot);
                 break;
             case WorkspaceMode.Subregions:
                 DrawSubregionSummary(snapshot);
@@ -431,34 +434,6 @@ internal static class WorldWorkspaceView
                 DrawValidationCenter(snapshot);
                 break;
         }
-    }
-
-    private static void DrawWorldSummary(EditorMapPresentationSnapshot snapshot)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        int offscreen = 0;
-        int disabled = 0;
-        int unassigned = 0;
-        for (int i = 0; i < rooms.Length; i++)
-        {
-            if (rooms[i].OffScreenDen) offscreen++;
-            if (rooms[i].Disabled) disabled++;
-            if (string.IsNullOrWhiteSpace(rooms[i].Subregion)) unassigned++;
-        }
-
-        ImGui.Text(snapshot.RegionName);
-        ImGui.Separator();
-        DrawMetric(DevToolUiSettings.T("房间", "Rooms"), rooms.Length.ToString());
-        DrawMetric(DevToolUiSettings.T("连接", "Connections"), (snapshot.Connections?.Length ?? 0).ToString());
-        DrawMetric(DevToolUiSettings.T("屏幕外巢穴", "Off-screen dens"), offscreen.ToString());
-        DrawMetric(DevToolUiSettings.T("地图隐藏房间", "Hidden map rooms"), disabled.ToString());
-        DrawMetric(DevToolUiSettings.T("未分配子区域", "Unassigned subregions"), unassigned.ToString());
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "这里预留给 world.txt / World Editor 的区域级数据。MapPage 与 World Editor 将共享房间身份和选择状态，而不会混淆地图位置与世界逻辑。",
-            "This surface is reserved for region-level world.txt / World Editor data. MapPage and World Editor will share room identity and selection without conflating map layout with world logic."), true);
     }
 
     private static void DrawSubregionSummary(EditorMapPresentationSnapshot snapshot)
@@ -483,8 +458,8 @@ internal static class WorldWorkspaceView
         {
             ImGui.TextUnformatted(DevToolUiSettings.T("基础验证通过", "Basic validation passed"));
             DevToolWidgets.MutedText(DevToolUiSettings.T(
-                "当前检查覆盖未分配子区域和孤立房间。World Editor 数据接入后会继续增加悬空连接、Gate、Den、条件连接等规则。",
-                "Current checks cover unassigned subregions and isolated rooms. World Editor migration will add dangling links, gates, dens, conditional links and more."), true);
+                "当前检查覆盖未分配子区域和孤立房间。后续可以继续增加悬空连接、Den 和其它区域规则。",
+                "Current checks cover unassigned subregions and isolated rooms. Dangling links, dens and other region rules can be added later."), true);
             return;
         }
 
@@ -649,8 +624,8 @@ internal static class WorldWorkspaceView
         ImGui.Spacing();
         DrawMetric(DevToolUiSettings.T("来源", "Source"), "World / AbstractRoom");
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "当前只读。World Editor 移植后，创建、删除、方向、条件连接等操作会在这里和中央拓扑画布统一编辑。",
-            "Read-only for now. World Editor migration will add creation, removal, direction and conditional-link editing here and on the topology canvas."), true);
+            "当前只读。后续创建、删除、方向和条件连接等操作会在这里和中央拓扑画布统一编辑。",
+            "Read-only for now. Creation, removal, direction and conditional-link editing can be added here and on the topology canvas later."), true);
     }
 
     private static void DrawSubregionInspector(EditorMapPresentationSnapshot snapshot)
@@ -664,8 +639,8 @@ internal static class WorldWorkspaceView
         ImGui.Separator();
         DrawMetric(DevToolUiSettings.T("房间", "Rooms"), count.ToString());
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "后续可在这里加入批量分配、颜色、显示顺序和 World Editor 子区域数据。",
-            "Batch assignment, color, display order and World Editor subregion data can be added here."), true);
+            "后续可在这里加入批量分配、颜色和显示顺序等子区域数据。",
+            "Batch assignment, color and display-order data can be added here later."), true);
     }
 
     private static void DrawStatus(EditorMapPresentationSnapshot snapshot)
@@ -697,8 +672,12 @@ internal static class WorldWorkspaceView
             _ => DevToolUiSettings.T("验证", "Validation")
         };
 
+        string dirty = workspaceMode == WorkspaceMode.WorldData && WorldWorkspaceDataView.HasDirtyData
+            ? DevToolUiSettings.T("   ·   世界数据未保存", "   ·   world data dirty")
+            : string.Empty;
+
         ImGui.TextDisabled(selection + "   ·   " + mode + "   ·   " +
-                           (snapshot.Connections?.Length ?? 0) + DevToolUiSettings.T(" 条连接", " connections"));
+                           (snapshot.Connections?.Length ?? 0) + DevToolUiSettings.T(" 条连接", " connections") + dirty);
     }
 
     private static List<SubregionSummary> BuildSubregions(EditorMapPresentationSnapshot snapshot)
