@@ -11,6 +11,10 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class GroupStatusWindow
 {
+    private const int SnapshotRefreshFrames = 8;
+    private static FloatingWindowSnap.WindowGroupSnapshot[] cachedGroups = Array.Empty<FloatingWindowSnap.WindowGroupSnapshot>();
+    private static int nextSnapshotRefreshFrame;
+
     internal static void Draw(Num.Vector2 display)
     {
         float width = Math.Min(460f, Math.Max(330f, display.X * 0.22f));
@@ -41,7 +45,7 @@ internal static class GroupStatusWindow
             $"Selected: {FloatingWindowSnap.SelectedWindowCount} windows"));
         ImGui.Separator();
 
-        FloatingWindowSnap.WindowGroupSnapshot[] groups = FloatingWindowSnap.GetGroupSnapshots();
+        FloatingWindowSnap.WindowGroupSnapshot[] groups = GetCachedGroups();
         if (groups.Length == 0)
         {
             ImGui.TextWrapped(DevToolUiSettings.T(
@@ -68,17 +72,31 @@ internal static class GroupStatusWindow
             if (ImGui.SmallButton(DevToolUiSettings.T("解散##DissolveGroup", "Dissolve##DissolveGroup") + group.Id))
             {
                 FloatingWindowSnap.DissolveGroup(group.Id);
+                InvalidateGroupCache();
                 continue;
             }
 
             string[] members = group.Members ?? Array.Empty<string>();
             for (int member = 0; member < members.Length; member++)
-            {
                 ImGui.BulletText(FriendlyWindowName(members[member]));
-            }
         }
 
         ImGui.End();
+    }
+
+    private static FloatingWindowSnap.WindowGroupSnapshot[] GetCachedGroups()
+    {
+        int frame = ImGui.GetFrameCount();
+        if (frame < nextSnapshotRefreshFrame) return cachedGroups;
+
+        cachedGroups = FloatingWindowSnap.GetGroupSnapshots();
+        nextSnapshotRefreshFrame = frame + SnapshotRefreshFrames;
+        return cachedGroups;
+    }
+
+    private static void InvalidateGroupCache()
+    {
+        nextSnapshotRefreshFrame = 0;
     }
 
     private static string FriendlyWindowName(string id)
