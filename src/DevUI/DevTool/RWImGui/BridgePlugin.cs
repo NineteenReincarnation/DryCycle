@@ -35,10 +35,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
 
-        // Do not hook RainWorld.Start to mutate ImGui's font atlas. RWImGui owns that startup
-        // lifecycle and its hook ordering is not a supported extension point. Touching io.Fonts from
-        // a neighbouring Start detour can run while RWImGui is still initialising its backend or
-        // after the renderer has already built the atlas, both of which can trigger native asserts.
+        // Never mutate ImGui's font atlas from RainWorld.Start or BepInEx load. RWImGui owns that
+        // initialization path. Local DevTool faces are offered later from OnModsInit, after RWImGui
+        // has created the context but only while the atlas still has no renderer texture/frame.
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
@@ -87,6 +86,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         orig(self);
+
+        // RWImGui's own OnModsInit has now completed, while the first renderer frame has not. The
+        // catalog performs additional frame/atlas-texture safety checks before adding anything.
+        DevToolFontCatalog.TryRegisterLocalFonts(log);
         TryRegisterCallback();
     }
 
@@ -133,7 +136,7 @@ internal static class DevToolFrontend
     // Do not construct a consumer IMGUIContext merely because BepInEx loads the bridge assembly.
     // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
     // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
-    // consumer context construction as well as font-atlas mutation.
+    // consumer context construction.
     private static DevToolInputContext inputContext;
     private static readonly List<FontCandidate> CjkFonts = new();
     private static ManualLogSource log;
@@ -418,7 +421,14 @@ internal static class DevToolFrontend
             ImFontPtr candidate = fonts[i];
             if (candidate.NativePtr == null) continue;
 
-            string name = ReadFontName(candidate, i);
+            string name;
+            int weight;
+            if (!DevToolFontCatalog.TryGetRegisteredFace(candidate, out name, out weight))
+            {
+                name = ReadFontName(candidate, i);
+                weight = InferFontWeight(name);
+            }
+
             if (!DevToolFontCatalog.IsChineseUiSelectable(candidate, name))
                 continue;
 
@@ -426,7 +436,7 @@ internal static class DevToolFrontend
             {
                 Font = candidate,
                 Name = name,
-                Weight = InferFontWeight(name)
+                Weight = weight
             });
         }
 
@@ -450,7 +460,7 @@ internal static class DevToolFrontend
 
         byte* name = font.NativePtr->ConfigData->Name;
         int length = 0;
-        while (length < 40 && name[length] != 0) length++;
+        while (length < 80 && name[length] != 0) length++;
         if (length == 0) return "CJK Font #" + index;
 
         byte[] bytes = new byte[length];
@@ -461,7 +471,7 @@ internal static class DevToolFrontend
 
     private static int InferFontWeight(string name)
     {
-        string value = (name ?? string.Empty).ToLowerInvariant().Replace(" ", string.Empty).Replace("-", string.Empty);
+        string value = (name ?? string.Empty).ToLowerInvariant().Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty);
         if (value.Contains("black") || value.Contains("heavy")) return 900;
         if (value.Contains("extrabold") || value.Contains("ultrabold")) return 800;
         if (value.Contains("semibold") || value.Contains("demibold")) return 600;
