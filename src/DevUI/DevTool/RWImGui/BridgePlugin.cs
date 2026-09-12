@@ -35,10 +35,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
 
-        // Do not touch ImGui.GetIO() here. BepInEx constructs this plugin before RWImGui owns an
-        // ImGui context; calling font-atlas APIs during plugin loading can terminate the native
-        // backend before BepInEx has a chance to log a managed exception. Font registration is
-        // deferred to DevToolFrontend.EnsureContext(), after our RWImGui context becomes current.
+        // BepInEx constructs this plugin before RWImGui creates its native ImGui context, so font
+        // APIs are not legal here. Hook RainWorld.Start instead. Because RWImGui is loaded first,
+        // calling orig(self) lets its Start hook create the ImGui context and initialise DX11; the
+        // code after orig then runs before Unity can submit the first Present/NewFrame and is the
+        // safe window for adding fonts to the startup atlas.
+        On.RainWorld.Start += RainWorld_Start;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
@@ -75,6 +77,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void OnDisable()
     {
+        On.RainWorld.Start -= RainWorld_Start;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DevToolFrontend.SetVisibleFromMainThread(false);
         EditorUiModeState.SetOverlayHidden(false);
@@ -82,6 +85,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
         sessionWasPaused = false;
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
+    }
+
+    private static void RainWorld_Start(On.RainWorld.orig_Start orig, RainWorld self)
+    {
+        orig(self);
+        DevToolFrontend.RegisterLocalFontsBeforeFirstFrame();
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
@@ -139,7 +148,8 @@ internal static class DevToolFrontend
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static bool cjkFontsScanned;
-    private static bool localFontsRegisteredForContext;
+    private static bool startupFontsRegistrationAttempted;
+    private static bool startupFontsRegistered;
     private static ImFontPtr cjkFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -150,6 +160,37 @@ internal static class DevToolFrontend
     internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
+
+    /// <summary>
+    /// Called from BridgePlugin's RainWorld.Start hook immediately after RWImGui's own Start hook
+    /// returns. The native ImGui context exists at this point, but no Present/NewFrame has run yet.
+    /// This is deliberately the only place where DryCycle mutates the font atlas.
+    /// </summary>
+    internal static void RegisterLocalFontsBeforeFirstFrame()
+    {
+        if (startupFontsRegistrationAttempted) return;
+        startupFontsRegistrationAttempted = true;
+
+        try
+        {
+            startupFontsRegistered = DevToolFontCatalog.TryRegisterFonts(log);
+            if (!startupFontsRegistered)
+            {
+                log?.LogWarning(
+                    "DryCycle DevTool local fonts were not added to the startup atlas. " +
+                    "The editor will use fonts already provided by RWImGui.");
+                return;
+            }
+
+            cjkFontsScanned = false;
+            cjkFont = default;
+        }
+        catch (Exception error)
+        {
+            startupFontsRegistered = false;
+            log?.LogWarning("DryCycle DevTool startup font registration failed: " + error.Message);
+        }
+    }
 
     internal static void SetVisibleFromMainThread(bool value)
     {
@@ -175,10 +216,8 @@ internal static class DevToolFrontend
         try
         {
             if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
-            {
-                EnsureLocalFontsRegistered();
                 return;
-            }
+
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
@@ -187,30 +226,17 @@ internal static class DevToolFrontend
                 return;
             }
 
+            // Never add fonts here. At this point the renderer may already have built/uploaded the
+            // atlas texture, and AddFontFromFileTTF would invalidate it and trip ImGui::NewFrame's
+            // native 'Font Atlas not built' assertion on the next Present.
             ImGUIAPI.SwitchContext(InputContext);
             Interlocked.Exchange(ref contextBusyLogged, 0);
-            EnsureLocalFontsRegistered();
         }
         catch (Exception error)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             log?.LogWarning("DevTool RWImGui context activation failed: " + error.Message);
         }
-    }
-
-    private static void EnsureLocalFontsRegistered()
-    {
-        if (localFontsRegisteredForContext) return;
-        if (!ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
-
-        // This is the same lifecycle boundary used by working RWImGui font integrations: only
-        // access ImGui.GetIO().Fonts after a real RWImGui context is current, and before this
-        // DevTool context submits its first interactive frame.
-        if (!DevToolFontCatalog.TryRegisterFonts(log)) return;
-
-        localFontsRegisteredForContext = true;
-        cjkFontsScanned = false;
-        cjkFont = default;
     }
 
     private static void ReleaseContext()
@@ -438,7 +464,7 @@ internal static class DevToolFrontend
         if (CjkFonts.Count > 0)
         {
             if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
-                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} Chinese-UI selectable ImGui atlas font(s).");
+                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} Chinese-UI selectable ImGui atlas font(s). startupLocalFonts={startupFontsRegistered}.");
             return;
         }
 
