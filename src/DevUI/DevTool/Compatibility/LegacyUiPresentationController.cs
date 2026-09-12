@@ -21,6 +21,12 @@ internal static class LegacyUiPresentationController
     }
 
     private static readonly Dictionary<DevUINode, NodeState> hidden = new();
+
+    // MapPage owns several Futile nodes outside the DevUINode tree (CreatureVis labels/lines).
+    // They are updated after the normal node tree and therefore must be suppressed separately.
+    // Keep their original visibility so switching back to vanilla DevUI remains lossless.
+    private static readonly Dictionary<FNode, bool> hiddenDirectMapVisuals = new();
+
     private static Page hiddenPage;
     private static readonly Vector2 Offscreen = new(-100000f, -100000f);
 
@@ -50,6 +56,11 @@ internal static class LegacyUiPresentationController
             // The rebuilt Map workspace owns input separately, so visual-only suppression is
             // sufficient here and leaves every map coordinate untouched.
             SuppressVisualSubtree(mapPage);
+
+            // Vanilla MapPage.CreatureVis does not live under subNodes/fSprites. Those Futile
+            // labels/lines are added directly to Futile.stage and CreatureVis.Update() can make
+            // them visible again every frame. Suppress them after the vanilla update as well.
+            SuppressMapDirectVisuals(mapPage);
             return;
         }
 
@@ -66,6 +77,7 @@ internal static class LegacyUiPresentationController
     {
         RestoreHiddenPage();
         hidden.Clear();
+        hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
         DevUiFullAudit.Reset();
         DevUiMigrationCoverage.Reset();
@@ -206,6 +218,29 @@ internal static class LegacyUiPresentationController
             SuppressVisualSubtree(node.subNodes[i]);
     }
 
+    private static void SuppressMapDirectVisuals(MapPage page)
+    {
+        if (page?.creatureVisualizations == null) return;
+
+        for (int i = 0; i < page.creatureVisualizations.Count; i++)
+        {
+            MapPage.CreatureVis visual = page.creatureVisualizations[i];
+            if (visual == null) continue;
+            RememberAndHideDirectMapVisual(visual.label);
+            RememberAndHideDirectMapVisual(visual.label2);
+            RememberAndHideDirectMapVisual(visual.sprite);
+            RememberAndHideDirectMapVisual(visual.sprite2);
+        }
+    }
+
+    private static void RememberAndHideDirectMapVisual(FNode node)
+    {
+        if (node == null) return;
+        if (!hiddenDirectMapVisuals.ContainsKey(node))
+            hiddenDirectMapVisuals[node] = node.isVisible;
+        node.isVisible = false;
+    }
+
     private static void RememberAndHideLabels(DevUINode node)
     {
         if (node == null) return;
@@ -273,7 +308,7 @@ internal static class LegacyUiPresentationController
 
     private static void RestoreHiddenPage()
     {
-        if (hidden.Count == 0)
+        if (hidden.Count == 0 && hiddenDirectMapVisuals.Count == 0)
         {
             hiddenPage = null;
             return;
@@ -292,6 +327,12 @@ internal static class LegacyUiPresentationController
             RestoreVisibility(node.fLabels, state.LabelVisibility);
         }
 
+        foreach (KeyValuePair<FNode, bool> pair in hiddenDirectMapVisuals)
+        {
+            if (pair.Key != null)
+                pair.Key.isVisible = pair.Value;
+        }
+
         foreach (KeyValuePair<DevUINode, NodeState> pair in hidden)
         {
             if (!pair.Value.HasPosition || pair.Key is not PositionedDevUINode positioned) continue;
@@ -303,6 +344,7 @@ internal static class LegacyUiPresentationController
         }
 
         hidden.Clear();
+        hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
     }
 
