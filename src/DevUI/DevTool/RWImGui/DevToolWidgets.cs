@@ -35,9 +35,8 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
-    // Gold hierarchy is intentional. The moving neutral-white flow is layered on top so the
-    // material reads as polished metal instead of a flat yellow label. The warm lower-right relief
-    // gives the body depth without turning the whole heading into a glow.
+    // Keep the gold hierarchy and relief as the static title treatment. The separate flowing
+    // title effect remains implemented and available, but is intentionally not applied here.
     private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
     private static readonly Num.Vector4 PrimaryGoldRelief = new(0.35f, 0.22f, 0.08f, 0.82f);
     private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
@@ -277,30 +276,25 @@ internal static class DevToolWidgets
     {
         Num.Vector4 body;
         Num.Vector4 relief;
-        float flowStrength;
 
         switch (level)
         {
             case FlowTitleLevel.Primary:
                 body = PrimaryGold;
                 relief = PrimaryGoldRelief;
-                flowStrength = 0.72f;
                 break;
             case FlowTitleLevel.Secondary:
                 body = SecondaryGold;
                 relief = SecondaryGoldRelief;
-                flowStrength = 0.58f;
                 break;
             default:
                 body = TertiaryGold;
                 relief = TertiaryGoldRelief;
-                flowStrength = 0.46f;
                 break;
         }
 
         ImGui.SetWindowFontScale(fontScale);
         Num.Vector2 pos = ImGui.GetCursorScreenPos();
-        Num.Vector2 textSize = ImGui.CalcTextSize(text);
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         const uint outline = 0xFF000000u;
 
@@ -318,7 +312,6 @@ internal static class DevToolWidgets
         // blue-palette experiment.
         draw.AddText(pos + new Num.Vector2(0.8f, 1.0f), ImGui.GetColorU32(relief), text);
         ImGui.TextColored(body, text);
-        DevToolTitleFlow.Draw(draw, pos, textSize, text, body, flowStrength);
         ImGui.SetWindowFontScale(restoreScale);
     }
 
