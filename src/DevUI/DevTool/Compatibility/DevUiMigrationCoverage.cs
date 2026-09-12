@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
@@ -297,6 +298,12 @@ public static class DevUiMigrationCoverage
         if (!presentationFragment)
             AddObservation(node, path, insideRepresentation, pageType, output);
 
+        // RegionKit AdvancedShader is no longer migrated node-by-node. Its complete persisted
+        // data model is exposed by a first-class native inspector, so descending into its hidden
+        // legacy panels would double-count obsolete implementation details as migration debt.
+        if (RegionKitAdvancedShaderInspectorAdapter.IsRepresentation(node))
+            return;
+
         if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
             LegacyDevInterfaceBridge.CanAdaptBoolean(node) ||
             LegacyDevInterfaceBridge.CanAdaptExtEnum(node) ||
@@ -365,6 +372,13 @@ public static class DevUiMigrationCoverage
         {
             state = DevUiMigrationState.NativeNewUi;
             note = "Rebuilt page navigation/command infrastructure";
+            return;
+        }
+
+        if (insideRepresentation && RegionKitAdvancedShaderInspectorAdapter.IsRepresentation(node))
+        {
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "RegionKit AdvancedShader full native inspector";
             return;
         }
 
