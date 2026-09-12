@@ -2,7 +2,6 @@ using System;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using ImGuiNET;
-using UnityEngine;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -114,17 +113,20 @@ internal static class ActionToastOverlay
         ImGuiIOPtr io = ImGui.GetIO();
         if (io.WantTextInput || EditorInputRouter.WantsTextInput) return;
 
-        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
-                    Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
-        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightControl) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftCommand) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightCommand);
+        bool shift = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftShift) ||
+                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
 
-        if (ctrl && Input.GetKeyDown(KeyCode.S))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.S))
         {
             Notify("保存", "Save", "Ctrl+S");
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.Z))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Z))
         {
             if (shift)
             {
@@ -139,33 +141,33 @@ internal static class ActionToastOverlay
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.Y))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Y))
         {
             bool canRedo = snapshot?.CanRedo == true;
             Notify(canRedo ? "重做" : "没有可重做内容", canRedo ? "Redo" : "Nothing to redo", "Ctrl+Y", !canRedo);
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
         {
             int selected = snapshot.Inspector?.SelectionCount ?? 0;
             Notify(selected > 0 ? "复制所选物件" : "没有选中物件", selected > 0 ? "Duplicate selection" : "Nothing selected", "Ctrl+D", selected <= 0);
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.B))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.B))
         {
             Notify("切换浏览器", "Toggle Browser", "Ctrl+B");
             return;
         }
 
-        if (ctrl && Input.GetKeyDown(KeyCode.I))
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.I))
         {
             Notify("切换检查器", "Toggle Inspector", "Ctrl+I");
             return;
         }
 
-        if (!ctrl && Input.GetKeyDown(KeyCode.Tab))
+        if (!ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Tab))
             Notify(snapshot?.FocusMode == true ? "退出专注" : "进入专注", snapshot?.FocusMode == true ? "Exit Focus" : "Enter Focus", "Tab");
     }
 }
