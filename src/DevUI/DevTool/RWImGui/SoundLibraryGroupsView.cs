@@ -15,7 +15,6 @@ internal static class SoundLibraryGroupsView
     private static string groupIdEdit = string.Empty;
     private static string groupNameEdit = string.Empty;
     private static string targetGroupId = string.Empty;
-    private static string folderPickerError = string.Empty;
     private const float BrowserBodyFontScale = 1.22f;
 
     internal static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
@@ -79,36 +78,23 @@ internal static class SoundLibraryGroupsView
     {
         SoundGroupLibrarySnapshot library = SoundGroupLibrary.Current;
         SynchronizeGroupPath(library);
-        ConsumeFolderPickerResult();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("本地音效组库", "LOCAL SOUND GROUP LIBRARY"), BrowserBodyFontScale);
         DevToolWidgets.FullWidthInputText(
             DevToolUiSettings.T("保存目录", "Library folder"),
             "SoundGroupLibraryFolder",
             ref groupPathEdit,
-            512);
+            1024);
         if (ImGui.IsItemDeactivatedAfterEdit())
-        {
-            folderPickerError = string.Empty;
             SetGroupDirectory(groupPathEdit);
-        }
 
-        bool choosingFolder = NativeFolderPicker.IsPending;
-        string chooseLabel = choosingFolder
-            ? DevToolUiSettings.T("选择中...", "Choosing...")
-            : DevToolUiSettings.T("选择文件夹", "Choose Folder");
-        if (choosingFolder) ImGui.BeginDisabled();
         if (DevToolWidgets.ActionButton(
-                chooseLabel,
+                DevToolUiSettings.T("选择文件夹", "Choose Folder"),
                 "SoundGroupChooseFolder",
                 DevToolButtonTone.Normal))
         {
-            folderPickerError = string.Empty;
-            NativeFolderPicker.Request(
-                groupPathEdit,
-                DevToolUiSettings.T("选择音效组库文件夹", "Select Sound Group Library Folder"));
+            InGameFolderPicker.Open(groupPathEdit);
         }
-        if (choosingFolder) ImGui.EndDisabled();
 
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("恢复默认", "Default")));
         if (DevToolWidgets.ActionButton(
@@ -116,7 +102,6 @@ internal static class SoundLibraryGroupsView
                 "SoundGroupDefaultFolder",
                 DevToolButtonTone.Normal))
         {
-            folderPickerError = string.Empty;
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.ResetGroupDirectory));
         }
 
@@ -126,15 +111,15 @@ internal static class SoundLibraryGroupsView
                 "SoundGroupReload",
                 DevToolButtonTone.Normal))
         {
-            folderPickerError = string.Empty;
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.ReloadGroups));
         }
 
-        if (!string.IsNullOrWhiteSpace(folderPickerError))
+        if (InGameFolderPicker.Draw(
+                DevToolUiSettings.T("选择音效组库文件夹", "Select Sound Group Library Folder"),
+                out string selectedFolder))
         {
-            ImGui.PushStyleColor(ImGuiCol.Text, new Num.Vector4(1f, 0.58f, 0.36f, 1f));
-            ImGui.TextWrapped(DevToolUiSettings.T("文件夹选择器：", "Folder picker: ") + folderPickerError);
-            ImGui.PopStyleColor();
+            groupPathEdit = selectedFolder;
+            SetGroupDirectory(selectedFolder);
         }
 
         DevToolWidgets.MutedText(
@@ -148,9 +133,15 @@ internal static class SoundLibraryGroupsView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("新建本地音效组", "NEW LOCAL SOUND GROUP"), BrowserBodyFontScale);
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("编组 ID", "Group ID"), "SoundGroupNewId", ref groupIdEdit, 128);
-        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("显示名称", "Display name"), "SoundGroupNewName", ref groupNameEdit, 128);
+        DrawUnicodeInputText(
+            DevToolUiSettings.T("显示名称", "Display name"),
+            "SoundGroupNewName",
+            ref groupNameEdit,
+            512);
         DevToolWidgets.MutedText(
-            DevToolUiSettings.T("ID 用于去重和共享，建议使用 ModID.GroupName。", "IDs are used for deduplication and sharing; ModID.GroupName is recommended."),
+            DevToolUiSettings.T(
+                "显示名称支持中文和其他 Unicode 字符；ID 用于去重和共享，建议使用 ModID.GroupName。",
+                "Display names support Unicode; IDs are used for deduplication and sharing, so ModID.GroupName is recommended."),
             true);
 
         bool canCreate = !string.IsNullOrWhiteSpace(groupIdEdit) && !string.IsNullOrWhiteSpace(groupNameEdit);
@@ -240,9 +231,6 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawSelectedResourceStatus(EditorSoundPresentationSnapshot snapshot, EditorSoundSnapshot selected)
     {
-        // Resource ownership is resolved on the Rain World/DevUI thread and copied into the
-        // immutable presentation snapshot. The RWImGui thread must not touch AssetManager or
-        // the live SoundPage merely to render this status line.
         DevToolSourceMark source = DevToolSourcePresentation.FromSound(
             selected.ResourceSourceKind,
             selected.ResourceSourceId,
@@ -321,21 +309,6 @@ internal static class SoundLibraryGroupsView
         ImGui.Spacing();
     }
 
-    private static void ConsumeFolderPickerResult()
-    {
-        if (!NativeFolderPicker.TryConsume(
-                out string selectedPath,
-                out string pickerError,
-                out bool wasCancelled))
-            return;
-
-        folderPickerError = pickerError ?? string.Empty;
-        if (wasCancelled || string.IsNullOrWhiteSpace(selectedPath)) return;
-
-        groupPathEdit = selectedPath.Trim();
-        SetGroupDirectory(groupPathEdit);
-    }
-
     private static void SetGroupDirectory(string directory)
     {
         SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
@@ -349,6 +322,16 @@ internal static class SoundLibraryGroupsView
         if (string.Equals(path, observedGroupPath, StringComparison.Ordinal)) return;
         observedGroupPath = path;
         groupPathEdit = path;
+    }
+
+    private static bool DrawUnicodeInputText(string label, string id, ref string value, uint utf8Capacity)
+    {
+        // ImGui.NET's string overload is UTF-8. Keep a generous byte capacity and do not install
+        // any character filter so IME commits (Chinese/Japanese/etc.) are accepted intact.
+        DevToolWidgets.MutedText(label);
+        ImGui.SetNextItemWidth(-1f);
+        value ??= string.Empty;
+        return ImGui.InputText("##" + id, ref value, utf8Capacity);
     }
 
     private static bool MatchesSample(EditorSoundSampleSnapshot value, string query)
