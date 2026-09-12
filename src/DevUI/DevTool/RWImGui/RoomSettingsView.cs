@@ -24,6 +24,7 @@ internal static class RoomSettingsView
     private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
     private static Section section = Section.Environment;
     private static string effectSearch = string.Empty;
+    private static bool effectsExpanded = true;
     private const float BrowserBodyFontScale = 1.22f;
 
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
@@ -100,13 +101,15 @@ internal static class RoomSettingsView
             return;
         }
 
-        bool collapseAllEffects = false;
+        bool switchAllEffects = false;
         if (section == Section.Effects)
         {
-            collapseAllEffects = DevToolWidgets.PaneTitleWithAction(
+            switchAllEffects = DevToolWidgets.PaneTitleWithAction(
                 SectionName(section),
-                DevToolUiSettings.T("折叠所有", "Collapse All"),
-                "RoomEffectsCollapseAll");
+                DevToolUiSettings.T("切换", "Switch"),
+                "RoomEffectsSwitchAll");
+            if (switchAllEffects)
+                effectsExpanded = !effectsExpanded;
         }
         else
         {
@@ -131,7 +134,7 @@ internal static class RoomSettingsView
                 DrawTemplates(snapshot);
                 break;
             case Section.Effects:
-                DrawEffects(snapshot, collapseAllEffects);
+                DrawEffects(snapshot, switchAllEffects);
                 break;
         }
     }
@@ -262,7 +265,7 @@ internal static class RoomSettingsView
 
         if (ImGui.BeginCombo(id, string.IsNullOrEmpty(current) ? "NO PALETTE" : current))
         {
-            if (fade && ImGui.Selectable("NO PALETTE##TerrainFadeNone", !snapshot.HasTerrainFadePalette))
+            if (fade && ImGui.Selectable("NO PALETTE##TerrainFadeNone", !snapshot.HasFadePalette))
                 SendSetting(RoomSettingKeys.TerrainFadePalette,
                     new EditorPropertyValue(EditorPropertyKind.String, text: "NO PALETTE"));
 
@@ -337,7 +340,7 @@ internal static class RoomSettingsView
         }
     }
 
-    private static void DrawEffects(EditorRoomSettingsSnapshot snapshot, bool collapseAll)
+    private static void DrawEffects(EditorRoomSettingsSnapshot snapshot, bool switchAll)
     {
         EditorRoomEffectSnapshot[] effects = snapshot.Effects ?? Array.Empty<EditorRoomEffectSnapshot>();
         if (effects.Length == 0)
@@ -354,8 +357,8 @@ internal static class RoomSettingsView
             if (effect.Inherited) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
             else if (effect.OverWrite) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
 
-            if (collapseAll)
-                ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+            if (switchAll)
+                ImGui.SetNextItemOpen(effectsExpanded, ImGuiCond.Always);
             ImGui.PushStyleColor(ImGuiCol.Header, new Num.Vector4(0.18f, 0.34f, 0.54f, 0.72f));
             ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Num.Vector4(0.24f, 0.45f, 0.72f, 0.88f));
             ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Num.Vector4(0.30f, 0.56f, 0.90f, 0.95f));
