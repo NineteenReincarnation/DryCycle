@@ -11,10 +11,61 @@ internal static class SoundLibraryGroupsView
     private static string search = string.Empty;
     private static string groupPathEdit = string.Empty;
     private static string observedGroupPath = string.Empty;
-    private static string groupIdEdit = string.Empty;
-    private static string groupNameEdit = string.Empty;
-    private static string targetGroupId = string.Empty;
+    private static string quickGroupName = string.Empty;
+    private static string quickGroupId = string.Empty;
+    private static bool quickGroupIdManual;
     private const float BrowserBodyFontScale = 1.22f;
+
+    internal static void DrawWorkingGroupBar()
+    {
+        SoundWorkspaceState.SynchronizeGroups();
+        SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
+        bool hasActive = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot active);
+
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("工作音效组", "WORKING GROUP"), BrowserBodyFontScale);
+        if (hasActive)
+        {
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.BeginCombo("##SoundWorkingGroup", active.Name + " · " + active.Id))
+            {
+                for (int i = 0; i < groups.Length; i++)
+                {
+                    SoundGroupSnapshot group = groups[i];
+                    if (!group.IsLocal) continue;
+                    bool selected = string.Equals(group.Id, active.Id, StringComparison.OrdinalIgnoreCase);
+                    string label = group.Name + " · " + group.Id + "  (" + (group.Sounds?.Length ?? 0) + ")";
+                    if (ImGui.Selectable(label + "##WorkingGroup" + i, selected))
+                        SoundWorkspaceState.SetActiveGroup(group.Id);
+                    if (selected) ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+            ImGui.TextDisabled(DevToolUiSettings.T(
+                $"{active.Sounds?.Length ?? 0} 个声音 · Library / Scene / Inspector 共用",
+                $"{active.Sounds?.Length ?? 0} sounds · shared by Library / Scene / Inspector"));
+        }
+        else
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T("还没有可写入的本地音效组。", "No writable local sound group yet."),
+                true);
+        }
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("+ 新建工作组", "+ New Working Group"),
+                "SoundQuickCreateGroup",
+                DevToolButtonTone.Subtle,
+                true))
+        {
+            quickGroupName = string.Empty;
+            quickGroupId = SoundWorkspaceState.SuggestUniqueGroupId(string.Empty);
+            quickGroupIdManual = false;
+            ImGui.OpenPopup("##SoundQuickGroupPopup");
+        }
+
+        DrawQuickGroupPopup();
+        ImGui.Separator();
+    }
 
     internal static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
     {
@@ -29,6 +80,8 @@ internal static class SoundLibraryGroupsView
         DevToolWidgets.SameLineIfFits(DevToolWidgets.RadioWidth(spot));
         if (ImGui.RadioButton(spot, createType == 2)) createType = 2;
 
+        ImGui.Spacing();
+        DrawLibraryDestination();
         ImGui.Spacing();
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "SoundLibrarySearch", ref search, 128);
         ImGui.Spacing();
@@ -56,16 +109,29 @@ internal static class SoundLibraryGroupsView
 
             if (ImGui.Selectable(sample.Sample + "##CreateSound" + i, false))
             {
+                SoundLibraryDestination destination = SoundWorkspaceState.LibraryDestination;
+                bool hasGroup = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot activeGroup);
+                if (destination != SoundLibraryDestination.Scene && !hasGroup)
+                    destination = SoundLibraryDestination.Scene;
+
+                if (destination != SoundLibraryDestination.WorkingGroup)
+                    SoundWorkspaceState.ClearSelection();
+
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                    SoundEditorCommandKind.Create,
+                    SoundEditorCommandKind.CreateFromLibrary,
+                    index: (int)destination,
+                    key: hasGroup ? activeGroup.Id : string.Empty,
                     text: sample.Sample,
                     secondaryIndex: createType));
+
+                NotifyLibraryDestination(sample.Sample, destination, activeGroup);
             }
             if (ImGui.IsItemHovered())
             {
                 DevToolTooltip.Show(
                     DevToolUiSettings.T("来源：", "Source: ") + source.Label + "\n" +
-                    DevToolUiSettings.T("添加为 ", "Add as ") + TypeName(createType));
+                    DevToolUiSettings.T("添加为：", "Add as: ") + TypeName(createType) + "\n" +
+                    DevToolUiSettings.T("目标：", "Destination: ") + DestinationName(SoundWorkspaceState.LibraryDestination));
             }
         }
 
@@ -78,7 +144,141 @@ internal static class SoundLibraryGroupsView
         SoundGroupLibrarySnapshot library = SoundGroupLibrary.Current;
         SynchronizeGroupPath(library);
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("本地音效组库", "LOCAL SOUND GROUP LIBRARY"), BrowserBodyFontScale);
+        if (ImGui.CollapsingHeader(DevToolUiSettings.T("库设置##SoundGroupLibrarySettings", "Library Settings##SoundGroupLibrarySettings")))
+            DrawLibrarySettings(library);
+
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("已加载音效组", "LOADED SOUND GROUPS"), BrowserBodyFontScale);
+        SoundGroupSnapshot[] groups = library.Groups ?? Array.Empty<SoundGroupSnapshot>();
+        if (groups.Length == 0)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("还没有音效组。", "No sound groups loaded."), true);
+        }
+        else
+        {
+            for (int i = 0; i < groups.Length; i++)
+                DrawGroupCard(groups[i], i);
+        }
+
+        if (InGameFolderPicker.Draw(
+                DevToolUiSettings.T("选择音效组库文件夹", "Select Sound Group Library Folder"),
+                out string selectedFolder))
+        {
+            groupPathEdit = selectedFolder;
+            SetGroupDirectory(selectedFolder);
+        }
+    }
+
+    internal static void DrawAddToGroup(EditorSoundSnapshot selected)
+    {
+        ImGui.Separator();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("工作音效组", "WORKING GROUP"));
+
+        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T("没有工作音效组；请在左侧创建或选择一个。", "No working group; create or select one in the Browser."),
+                true);
+            return;
+        }
+
+        ImGui.TextWrapped(group.Name + " · " + group.Id);
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("加入当前声音", "Add Current Sound"),
+                "SoundAddToWorkingGroup",
+                DevToolButtonTone.Primary,
+                true))
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.AddSoundToGroup,
+                index: selected.Index,
+                key: group.Id));
+            ActionToastOverlay.Notify(
+                "已加入工作音效组：" + group.Name,
+                "Added to working group: " + group.Name);
+        }
+    }
+
+    internal static void DrawAddSelectionToGroup(int[] indices)
+    {
+        ImGui.Separator();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("工作音效组", "WORKING GROUP"));
+
+        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T("没有工作音效组；请在左侧创建或选择一个。", "No working group; create or select one in the Browser."),
+                true);
+            return;
+        }
+
+        int count = indices?.Length ?? 0;
+        ImGui.TextWrapped(group.Name + " · " + group.Id);
+        if (count <= 0) return;
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T($"加入选中的 {count} 个声音", $"Add {count} Selected Sounds"),
+                "SoundAddSelectionToWorkingGroup",
+                DevToolButtonTone.Primary,
+                true))
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.AddSoundsToGroup,
+                key: group.Id,
+                indices: indices));
+            ActionToastOverlay.Notify(
+                $"已向 {group.Name} 加入 {count} 个声音",
+                $"Added {count} sounds to {group.Name}");
+        }
+    }
+
+    internal static void DrawSelectedResourceStatus(EditorSoundPresentationSnapshot snapshot, EditorSoundSnapshot selected)
+    {
+        DevToolSourceMark source = DevToolSourcePresentation.FromSound(
+            selected.ResourceSourceKind,
+            selected.ResourceSourceId,
+            selected.ResourceSourceName);
+        DevToolSourcePresentation.DrawInline(source, DevToolUiSettings.T("资源：", "Resource:"));
+    }
+
+    internal static void DrawProblemsOnce() => SoundGroupProblemsWindow.DrawOnce();
+
+    private static void DrawLibraryDestination()
+    {
+        bool hasGroup = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group);
+        if (!hasGroup && SoundWorkspaceState.LibraryDestination != SoundLibraryDestination.Scene)
+            SoundWorkspaceState.LibraryDestination = SoundLibraryDestination.Scene;
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T("添加目标", "Destination"));
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo("##SoundLibraryDestination", DestinationName(SoundWorkspaceState.LibraryDestination)))
+        {
+            DrawDestinationOption(SoundLibraryDestination.Scene, DevToolUiSettings.T("场景", "Scene"), true);
+            DrawDestinationOption(
+                SoundLibraryDestination.WorkingGroup,
+                hasGroup ? DevToolUiSettings.T("工作音效组 · ", "Working Group · ") + group.Name : DevToolUiSettings.T("工作音效组", "Working Group"),
+                hasGroup);
+            DrawDestinationOption(
+                SoundLibraryDestination.SceneAndWorkingGroup,
+                hasGroup ? DevToolUiSettings.T("场景 + 工作音效组 · ", "Scene + Working Group · ") + group.Name : DevToolUiSettings.T("场景 + 工作音效组", "Scene + Working Group"),
+                hasGroup);
+            ImGui.EndCombo();
+        }
+
+        if (!hasGroup)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("创建工作音效组后，可一键直接写入 Group 或同时写入 Scene + Group。", "Create a working group to write directly to it, or to Scene + Group in one click."), true);
+    }
+
+    private static void DrawDestinationOption(SoundLibraryDestination value, string label, bool enabled)
+    {
+        if (!enabled) ImGui.BeginDisabled();
+        bool selected = SoundWorkspaceState.LibraryDestination == value;
+        if (ImGui.Selectable(label + "##SoundDestination" + value, selected) && enabled)
+            SoundWorkspaceState.LibraryDestination = value;
+        if (selected) ImGui.SetItemDefaultFocus();
+        if (!enabled) ImGui.EndDisabled();
+    }
+
+    private static void DrawLibrarySettings(SoundGroupLibrarySnapshot library)
+    {
         DevToolWidgets.FullWidthInputText(
             DevToolUiSettings.T("保存目录", "Library folder"),
             "SoundGroupLibraryFolder",
@@ -113,153 +313,65 @@ internal static class SoundLibraryGroupsView
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.ReloadGroups));
         }
 
-        if (InGameFolderPicker.Draw(
-                DevToolUiSettings.T("选择音效组库文件夹", "Select Sound Group Library Folder"),
-                out string selectedFolder))
-        {
-            groupPathEdit = selectedFolder;
-            SetGroupDirectory(selectedFolder);
-        }
-
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T("当前文件：", "Current file: ") + library.LocalFilePath,
-            true);
+        DevToolWidgets.MutedText(DevToolUiSettings.T("当前文件：", "Current file: ") + library.LocalFilePath, true);
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "需要让其他地图开发者自动读取编组时，请在 Mod 中创建：mods\\ModName\\music\\sound-groups.xml",
-                "For portable groups, create: mods\\ModName\\music\\sound-groups.xml"),
+                "共享给其他地图开发者时，在 Mod 中使用：mods\\ModName\\music\\sound-groups.xml",
+                "For portable groups use: mods\\ModName\\music\\sound-groups.xml"),
             true);
+    }
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("新建本地音效组", "NEW LOCAL SOUND GROUP"), BrowserBodyFontScale);
-        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("编组 ID", "Group ID"), "SoundGroupNewId", ref groupIdEdit, 128);
-        bool nonAsciiLetterId = ContainsNonAsciiLetter(groupIdEdit);
-        if (nonAsciiLetterId)
-        {
-            ImGui.TextColored(
-                new Num.Vector4(1f, 0.64f, 0.30f, 1f),
-                DevToolUiSettings.T(
-                    "检测到非英文字母字符。建议 Group ID 仅使用 A-Z / a-z；中文和其他字符请写在显示名称里。",
-                    "Group ID contains non-letter characters. Prefer A-Z / a-z only; use Display name for Unicode text."));
-        }
+    private static void DrawQuickGroupPopup()
+    {
+        if (!ImGui.BeginPopup("##SoundQuickGroupPopup")) return;
 
-        DrawUnicodeInputText(
-            DevToolUiSettings.T("显示名称", "Display name"),
-            "SoundGroupNewName",
-            ref groupNameEdit,
-            512);
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T(
-                "显示名称支持中文和其他 Unicode 字符；Group ID 用于去重和共享，建议只使用英文字母 A-Z / a-z。",
-                "Display names support Unicode; Group IDs are used for deduplication and sharing, so A-Z / a-z only is recommended."),
-            true);
+        ImGui.TextUnformatted(DevToolUiSettings.T("新建工作音效组", "New Working Group"));
+        ImGui.Separator();
 
-        bool canCreate = !string.IsNullOrWhiteSpace(groupIdEdit) && !string.IsNullOrWhiteSpace(groupNameEdit);
+        DevToolWidgets.MutedText(DevToolUiSettings.T("显示名称", "Display name"));
+        ImGui.SetNextItemWidth(340f);
+        bool nameChanged = ImGui.InputText("##SoundQuickGroupName", ref quickGroupName, 512);
+        if (nameChanged && !quickGroupIdManual)
+            quickGroupId = SoundWorkspaceState.SuggestUniqueGroupId(quickGroupName);
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T("编组 ID", "Group ID"));
+        ImGui.SetNextItemWidth(340f);
+        ImGui.InputText("##SoundQuickGroupId", ref quickGroupId, 128);
+        if (ImGui.IsItemEdited()) quickGroupIdManual = true;
+
+        bool validId = SoundWorkspaceState.IsValidGroupId(quickGroupId);
+        bool duplicate = SoundWorkspaceState.GroupIdExists(quickGroupId);
+        if (!validId && !string.IsNullOrWhiteSpace(quickGroupId))
+            ImGui.TextColored(new Num.Vector4(1f, 0.64f, 0.30f, 1f), DevToolUiSettings.T("ID 仅使用 A-Z / a-z / 0-9 / _ / -。", "Use only A-Z / a-z / 0-9 / _ / - in Group IDs."));
+        else if (duplicate)
+            ImGui.TextColored(new Num.Vector4(1f, 0.64f, 0.30f, 1f), DevToolUiSettings.T("这个 Group ID 已存在。", "This Group ID already exists."));
+
+        bool canCreate = !string.IsNullOrWhiteSpace(quickGroupName) && validId && !duplicate;
         if (!canCreate) ImGui.BeginDisabled();
         if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("创建音效组", "Create Group"),
-                "SoundGroupCreate",
-                DevToolButtonTone.Primary,
-                true))
+                DevToolUiSettings.T("创建并设为工作组", "Create & Use"),
+                "SoundQuickGroupConfirm",
+                DevToolButtonTone.Primary))
         {
-            string nextId = groupIdEdit.Trim();
+            string id = quickGroupId.Trim();
+            string name = quickGroupName.Trim();
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
                 SoundEditorCommandKind.CreateGroup,
-                key: nextId,
-                text: groupNameEdit.Trim()));
-            targetGroupId = nextId;
-            groupIdEdit = string.Empty;
-            groupNameEdit = string.Empty;
+                key: id,
+                text: name));
+            SoundWorkspaceState.SetActiveGroup(id);
+            ActionToastOverlay.Notify("已创建工作音效组：" + name, "Created working group: " + name);
+            ImGui.CloseCurrentPopup();
         }
         if (!canCreate) ImGui.EndDisabled();
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("已加载音效组", "LOADED SOUND GROUPS"), BrowserBodyFontScale);
-        SoundGroupSnapshot[] groups = library.Groups ?? Array.Empty<SoundGroupSnapshot>();
-        if (groups.Length == 0)
-        {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("还没有音效组。", "No sound groups loaded."), true);
-            return;
-        }
-
-        for (int i = 0; i < groups.Length; i++)
-            DrawGroupCard(groups[i], i);
+        ImGui.EndPopup();
     }
-
-    internal static void DrawAddToGroup(EditorSoundSnapshot selected)
-    {
-        SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
-        SoundGroupSnapshot firstLocal = null;
-        SoundGroupSnapshot current = null;
-
-        // Do not allocate a temporary List every frame. Groups are already a stable snapshot; scan
-        // that array directly and skip non-local entries when the combo is actually opened.
-        for (int i = 0; i < groups.Length; i++)
-        {
-            SoundGroupSnapshot group = groups[i];
-            if (!group.IsLocal) continue;
-            firstLocal ??= group;
-            if (string.Equals(group.Id, targetGroupId, StringComparison.OrdinalIgnoreCase))
-                current = group;
-        }
-
-        ImGui.Separator();
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("音效组", "SOUND GROUP"));
-
-        if (firstLocal == null)
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T("没有可写入的本地音效组，请先在“音效组”页新建。", "No writable local group. Create one in the Groups tab first."),
-                true);
-            return;
-        }
-
-        if (current == null)
-        {
-            current = firstLocal;
-            targetGroupId = current.Id;
-        }
-
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo("##SoundTargetGroup", current.Name + " · " + current.Id))
-        {
-            for (int i = 0; i < groups.Length; i++)
-            {
-                SoundGroupSnapshot group = groups[i];
-                if (!group.IsLocal) continue;
-                bool chosen = string.Equals(group.Id, targetGroupId, StringComparison.OrdinalIgnoreCase);
-                if (ImGui.Selectable(group.Name + " · " + group.Id + "##TargetGroup" + i, chosen))
-                    targetGroupId = group.Id;
-                if (chosen) ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
-
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("加入当前声音", "Add Current Sound"),
-                "SoundAddToGroup",
-                DevToolButtonTone.Primary,
-                true))
-        {
-            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                SoundEditorCommandKind.AddSoundToGroup,
-                index: selected.Index,
-                key: targetGroupId));
-        }
-    }
-
-    internal static void DrawSelectedResourceStatus(EditorSoundPresentationSnapshot snapshot, EditorSoundSnapshot selected)
-    {
-        DevToolSourceMark source = DevToolSourcePresentation.FromSound(
-            selected.ResourceSourceKind,
-            selected.ResourceSourceId,
-            selected.ResourceSourceName);
-        DevToolSourcePresentation.DrawInline(source, DevToolUiSettings.T("资源：", "Resource:"));
-    }
-
-    internal static void DrawProblemsOnce() => SoundGroupProblemsWindow.DrawOnce();
 
     private static void DrawGroupCard(SoundGroupSnapshot group, int index)
     {
-        string header = group.Name + " · " + group.Id + "##SoundGroup" + index;
+        bool active = group.IsLocal && string.Equals(group.Id, SoundWorkspaceState.ActiveGroupId, StringComparison.OrdinalIgnoreCase);
+        string header = (active ? "● " : string.Empty) + group.Name + " · " + group.Id + "##SoundGroup" + index;
         if (!ImGui.CollapsingHeader(header)) return;
 
         DevToolWidgets.MutedText(DevToolUiSettings.T("来源：", "Source: ") + group.SourceName, true);
@@ -295,14 +407,32 @@ internal static class SoundLibraryGroupsView
             DevToolSourcePresentation.DrawInline(source);
         }
 
+        if (group.IsLocal && !active)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("设为工作组", "Set Working"),
+                    "SoundGroupSetWorking" + index,
+                    DevToolButtonTone.Subtle))
+            {
+                SoundWorkspaceState.SetActiveGroup(group.Id);
+            }
+            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("应用到房间", "Apply to Room")));
+        }
+        else if (active)
+        {
+            ImGui.TextDisabled(DevToolUiSettings.T("当前工作组", "Current Working Group"));
+        }
+
         string applyLabel = group.HasMissingResources
             ? DevToolUiSettings.T("应用可用项", "Apply Available")
             : DevToolUiSettings.T("应用到当前房间", "Apply to Room");
         if (DevToolWidgets.ActionButton(applyLabel, "SoundGroupApply" + index, DevToolButtonTone.Primary))
         {
+            SoundWorkspaceState.ClearSelection();
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
                 SoundEditorCommandKind.ApplyGroup,
                 key: group.Id));
+            ActionToastOverlay.Notify("已应用音效组：" + group.Name, "Applied sound group: " + group.Name);
         }
         if (group.HasMissingResources && ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T("缺失资源会被跳过，详细信息见预警窗口。", "Missing resources are skipped; see the Problems window."));
@@ -318,12 +448,44 @@ internal static class SoundLibraryGroupsView
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
                     SoundEditorCommandKind.DeleteGroup,
                     key: group.Id));
-                if (string.Equals(targetGroupId, group.Id, StringComparison.OrdinalIgnoreCase))
-                    targetGroupId = string.Empty;
+                if (active) SoundWorkspaceState.SetActiveGroup(string.Empty);
             }
         }
 
         ImGui.Spacing();
+    }
+
+    private static void NotifyLibraryDestination(string sample, SoundLibraryDestination destination, SoundGroupSnapshot group)
+    {
+        switch (destination)
+        {
+            case SoundLibraryDestination.WorkingGroup:
+                ActionToastOverlay.Notify(
+                    "已加入工作音效组：" + (group?.Name ?? sample),
+                    "Added to working group: " + (group?.Name ?? sample));
+                break;
+            case SoundLibraryDestination.SceneAndWorkingGroup:
+                ActionToastOverlay.Notify(
+                    "已加入场景和工作音效组",
+                    "Added to Scene and Working Group");
+                break;
+            default:
+                ActionToastOverlay.Notify("已加入场景：" + sample, "Added to Scene: " + sample);
+                break;
+        }
+    }
+
+    private static string DestinationName(SoundLibraryDestination destination)
+    {
+        bool hasGroup = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group);
+        return destination switch
+        {
+            SoundLibraryDestination.WorkingGroup when hasGroup => DevToolUiSettings.T("工作音效组 · ", "Working Group · ") + group.Name,
+            SoundLibraryDestination.SceneAndWorkingGroup when hasGroup => DevToolUiSettings.T("场景 + 工作音效组 · ", "Scene + Working Group · ") + group.Name,
+            SoundLibraryDestination.WorkingGroup => DevToolUiSettings.T("工作音效组", "Working Group"),
+            SoundLibraryDestination.SceneAndWorkingGroup => DevToolUiSettings.T("场景 + 工作音效组", "Scene + Working Group"),
+            _ => DevToolUiSettings.T("场景", "Scene")
+        };
     }
 
     private static void SetGroupDirectory(string directory)
@@ -339,26 +501,6 @@ internal static class SoundLibraryGroupsView
         if (string.Equals(path, observedGroupPath, StringComparison.Ordinal)) return;
         observedGroupPath = path;
         groupPathEdit = path;
-    }
-
-    private static bool DrawUnicodeInputText(string label, string id, ref string value, uint utf8Capacity)
-    {
-        DevToolWidgets.MutedText(label);
-        ImGui.SetNextItemWidth(-1f);
-        value ??= string.Empty;
-        return ImGui.InputText("##" + id, ref value, utf8Capacity);
-    }
-
-    private static bool ContainsNonAsciiLetter(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return false;
-        for (int i = 0; i < value.Length; i++)
-        {
-            char c = value[i];
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) continue;
-            return true;
-        }
-        return false;
     }
 
     private static bool MatchesSample(EditorSoundSampleSnapshot value, string query)
