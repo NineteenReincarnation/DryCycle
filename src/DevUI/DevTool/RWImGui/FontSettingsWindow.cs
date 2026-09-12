@@ -119,6 +119,7 @@ internal static class FontSettingsWindow
     {
         string[] families = DevToolFontCatalog.GetAvailableChineseFamilies();
         string selectedFamily = DevToolUiSettings.ChineseFontFamily;
+        int localFontFiles = DevToolFontCatalog.CountLocalFontFiles();
 
         DevToolWidgets.MutedText("中文字体");
         ImGui.SetNextItemWidth(-1f);
@@ -138,17 +139,17 @@ internal static class FontSettingsWindow
         if (families.Length == 0)
         {
             ImGui.TextWrapped(
-                "未检测到可用的简体中文字体。请把支持中文的 .ttf / .otf / .ttc 放入下面目录，并重新启动游戏。"
+                "RWImGui 的共享字体 Atlas 中暂未检测到可用于中文界面的字体。DryCycle 不会在运行期直接修改共享 Atlas，以避免破坏渲染器字体纹理。"
             );
         }
         else
         {
-            ImGui.TextDisabled($"已检测 {families.Length} 个中文字体族 · 默认 HarmonyOS Sans SC Bold");
+            ImGui.TextDisabled($"Atlas 中可选 {families.Length} 个字体族 · 中文偏好默认 HarmonyOS Sans SC Bold");
         }
 
         DevToolWidgets.MutedText("字体目录");
         ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-        ImGui.TextDisabled("新增字体需在启动 RWImGui 前存在于该目录；重启后会自动加入此列表。");
+        ImGui.TextDisabled($"目录中检测到 {localFontFiles} 个字体文件。只有已经由 RWImGui 在其字体初始化阶段加入共享 Atlas 的字体，才会出现在上面的列表中。");
         ImGui.Spacing();
     }
 }
