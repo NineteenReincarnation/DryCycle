@@ -75,6 +75,7 @@ internal static class WorldMapView
         }
 
         MapRoomGeometryPresentationHub.Prime(DevToolRuntime.ActiveSession);
+        WorldMapShortcutPresentation.Prime(DevToolRuntime.ActiveSession, snapshot.SelectedRoomIndex);
         SynchronizeRegion(snapshot);
         SynchronizePositions(snapshot);
         SynchronizeLinkState(snapshot);
@@ -246,6 +247,7 @@ internal static class WorldMapView
         }
 
         DrawExitPorts(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
+        DrawCreatureShortcuts(draw, snapshot, canvasMin, canvasSize);
     }
 
     private static void DrawRoomGeometry(
@@ -275,8 +277,6 @@ internal static class WorldMapView
             draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
         }
 
-        // Even at low zoom keep the real room silhouette. Detail is reduced by hiding water and
-        // labels rather than replacing the room with a fake card/rectangle.
         if (showTerrain && visual.DetailedRasterAvailable)
         {
             EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
@@ -356,6 +356,14 @@ internal static class WorldMapView
 
     private static uint ShortcutGoldDark() =>
         ImGui.GetColorU32(new Num.Vector4(0.34f, 0.22f, 0.055f, 1.00f));
+
+    private static uint CreatureShortcutGreen(bool bright) =>
+        ImGui.GetColorU32(bright
+            ? new Num.Vector4(0.32f, 1.00f, 0.46f, 1.00f)
+            : new Num.Vector4(0.10f, 0.72f, 0.28f, 1.00f));
+
+    private static uint CreatureShortcutGreenDark() =>
+        ImGui.GetColorU32(new Num.Vector4(0.025f, 0.24f, 0.08f, 1.00f));
 
     private static uint ConnectionColor(WorldConnectionDirection direction) =>
         ImGui.GetColorU32(direction == WorldConnectionDirection.Bidirectional
@@ -491,6 +499,36 @@ internal static class WorldMapView
                     draw.AddRect(labelPos - pad, labelPos + labelSize + pad, ShortcutGold(false), 3f, ImDrawFlags.None, 1f);
                     draw.AddText(labelPos, ShortcutGold(true), label);
                 }
+            }
+        }
+    }
+
+    private static void DrawCreatureShortcuts(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize)
+    {
+        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
+
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            EditorMapRoomSnapshot room = rooms[i];
+            if (!IsLayerVisible(room.Layer)) continue;
+
+            WorldMapShortcutPresentation.ShortcutMarker[] holes =
+                WorldMapShortcutPresentation.GetCreatureHoles(room.RoomIndex);
+            if (holes == null || holes.Length == 0) continue;
+
+            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
+            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 32f)) continue;
+
+            for (int h = 0; h < holes.Length; h++)
+            {
+                Num.Vector2 point = LocalToScreen(min, visual, holes[h].X, holes[h].Y);
+                DrawCreatureShortcutSocket(draw, point, shadow);
             }
         }
     }
@@ -691,12 +729,19 @@ internal static class WorldMapView
     private static Num.Vector2 EndpointPosition(EditorMapRoomSnapshot room, int nodeIndex, Num.Vector2 canvasMin)
     {
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+        Num.Vector2 roomMin = ToScreen(canvasMin, GetPosition(room));
+
+        if (WorldMapShortcutPresentation.TryGetExitMouth(
+                room.RoomIndex,
+                nodeIndex,
+                out WorldMapShortcutPresentation.ShortcutMarker mouth))
+            return LocalToScreen(roomMin, visual, mouth.X, mouth.Y);
+
         EditorMapNodeVisualSnapshot[] nodes = visual.Nodes ?? Array.Empty<EditorMapNodeVisualSnapshot>();
         for (int i = 0; i < nodes.Length; i++)
         {
             if (nodes[i].NodeIndex != nodeIndex) continue;
-            Num.Vector2 min = ToScreen(canvasMin, GetPosition(room));
-            return LocalToScreen(min, visual, nodes[i].X, nodes[i].Y);
+            return LocalToScreen(roomMin, visual, nodes[i].X, nodes[i].Y);
         }
 
         EditorMapRoomNodeSnapshot[] roomNodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
@@ -708,13 +753,13 @@ internal static class WorldMapView
             if (roomNodes[i].NodeIndex == nodeIndex) ordinal = exits;
             exits++;
         }
-        GetRoomRect(room, visual, canvasMin, out Num.Vector2 roomMin, out Num.Vector2 roomMax);
-        if (exits <= 0) return (roomMin + roomMax) * 0.5f;
+        GetRoomRect(room, visual, canvasMin, out Num.Vector2 fallbackMin, out Num.Vector2 roomMax);
+        if (exits <= 0) return (fallbackMin + roomMax) * 0.5f;
         bool right = ordinal % 2 == 0;
         int row = ordinal / 2;
         int rows = right ? (exits + 1) / 2 : exits / 2;
         float t = (row + 1f) / (rows + 1f);
-        return new Num.Vector2(right ? roomMax.X : roomMin.X, roomMin.Y + (roomMax.Y - roomMin.Y) * t);
+        return new Num.Vector2(right ? roomMax.X : fallbackMin.X, fallbackMin.Y + (roomMax.Y - fallbackMin.Y) * t);
     }
 
     private static Num.Vector2 LocalToScreen(
@@ -844,7 +889,6 @@ internal static class WorldMapView
         Num.Vector2 hole = new(holeHalf, holeHalf);
         draw.AddRectFilled(point - hole, point + hole, shadow, Math.Max(1f, 1.8f * iconScale));
 
-        // Four notches make the marker read as a shortcut socket instead of a generic graph node.
         float notchHalf = Math.Max(1f, 1.35f * iconScale);
         float notchDepth = Math.Max(2.7f, 3.7f * iconScale);
         draw.AddRectFilled(
@@ -866,6 +910,50 @@ internal static class WorldMapView
 
         if (emphasized)
             draw.AddRect(point - haloSize, point + haloSize, ShortcutGold(true), rounding + 1.5f, ImDrawFlags.None, Math.Max(1.6f, 2f * iconScale));
+    }
+
+    private static void DrawCreatureShortcutSocket(ImDrawListPtr draw, Num.Vector2 point, uint shadow)
+    {
+        float iconScale = zoom < 0.30f ? 0.90f : 1f;
+        float half = 7.8f * iconScale;
+        float halo = half + 2.8f * iconScale;
+        float rounding = Math.Max(2.2f, 3.2f * iconScale);
+        Num.Vector2 haloSize = new(halo, halo);
+        Num.Vector2 bodySize = new(half, half);
+
+        uint bright = CreatureShortcutGreen(true);
+        uint mid = CreatureShortcutGreen(false);
+        uint dark = CreatureShortcutGreenDark();
+
+        draw.AddRectFilled(point - haloSize, point + haloSize, shadow, rounding + 1.2f);
+        draw.AddRectFilled(point - bodySize, point + bodySize, dark, rounding);
+        draw.AddRect(point - bodySize, point + bodySize, bright, rounding, ImDrawFlags.None, Math.Max(2f, 2.3f * iconScale));
+
+        float innerHalf = half - 2.5f * iconScale;
+        Num.Vector2 inner = new(innerHalf, innerHalf);
+        draw.AddRect(point - inner, point + inner, mid, Math.Max(1.2f, rounding - 1f), ImDrawFlags.None, Math.Max(1f, 1.2f * iconScale));
+
+        float holeRadius = 2.8f * iconScale;
+        draw.AddCircleFilled(point, holeRadius, shadow, 12);
+
+        float notchHalf = Math.Max(0.9f, 1.15f * iconScale);
+        float notchDepth = Math.Max(2.4f, 3.2f * iconScale);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - notchHalf, point.Y - half - 0.5f),
+            new Num.Vector2(point.X + notchHalf, point.Y - half + notchDepth),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - notchHalf, point.Y + half - notchDepth),
+            new Num.Vector2(point.X + notchHalf, point.Y + half + 0.5f),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - half - 0.5f, point.Y - notchHalf),
+            new Num.Vector2(point.X - half + notchDepth, point.Y + notchHalf),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X + half - notchDepth, point.Y - notchHalf),
+            new Num.Vector2(point.X + half + 0.5f, point.Y + notchHalf),
+            shadow);
     }
 
     private static void DrawConnectionStroke(
@@ -905,20 +993,8 @@ internal static class WorldMapView
             if (length >= 34f)
             {
                 float arrowSize = Math.Max(6.2f, Math.Min(9.2f, 6.2f + coreThickness * 0.55f));
-                DrawArrowHead(
-                    draw,
-                    Num.Vector2.Lerp(a, b, 0.62f) + normal * railOffset,
-                    delta,
-                    shadow,
-                    core,
-                    arrowSize);
-                DrawArrowHead(
-                    draw,
-                    Num.Vector2.Lerp(a, b, 0.38f) - normal * railOffset,
-                    -delta,
-                    shadow,
-                    core,
-                    arrowSize);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.62f) + normal * railOffset, delta, shadow, core, arrowSize);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.38f) - normal * railOffset, -delta, shadow, core, arrowSize);
             }
             return;
         }
