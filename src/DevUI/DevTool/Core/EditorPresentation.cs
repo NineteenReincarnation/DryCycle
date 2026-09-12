@@ -216,7 +216,8 @@ public enum EditorUiCommandKind
     SetLegacySlider,
     ResetLegacySlider,
     SetLegacyText,
-    SetLegacyDirection
+    SetLegacyDirection,
+    SetLegacyColor
 }
 
 public readonly struct EditorUiCommand
@@ -363,6 +364,16 @@ public static class EditorUiCommandQueue
                 break;
             case EditorUiCommandKind.SetLegacyDirection:
                 EditorActions.SetLegacyDirection(session, ResolveObject(session, command.Index), command.Text, command.X, command.Y);
+                break;
+            case EditorUiCommandKind.SetLegacyColor:
+                EditorActions.SetLegacyColor(
+                    session,
+                    ResolveObject(session, command.Index),
+                    command.Text,
+                    command.PropertyValue.X,
+                    command.PropertyValue.Y,
+                    command.PropertyValue.Z,
+                    command.PropertyValue.W);
                 break;
         }
     }
