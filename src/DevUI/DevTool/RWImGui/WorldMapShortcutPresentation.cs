@@ -127,7 +127,7 @@ internal static class WorldMapShortcutPresentation
     private static void RefreshPriority(int roomIndex)
     {
         if (roomIndex < 0 || !cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
-        if (Refresh(entry, allowTextureScan: true, forcePoll: true) && scansRemaining > 0)
+        if (Refresh(entry, allowTextureScan: true, forcePoll: false) && scansRemaining > 0)
             scansRemaining--;
     }
 
@@ -276,9 +276,6 @@ internal static class WorldMapShortcutPresentation
             }
         }
 
-        // ShortcutMapper indexes room exits top-to-bottom, then left-to-right. AbstractRoom Exit
-        // nodes use that same ordering. This lets cached MapTex data recover the destination-node
-        // mapping without realizing the room just for DevTool presentation.
         exits.Sort(CompareShortcutScanOrder);
         List<int> exitNodes = new();
         AbstractRoomNode[] nodes = entry.Room.nodes ?? Array.Empty<AbstractRoomNode>();
@@ -301,7 +298,6 @@ internal static class WorldMapShortcutPresentation
 
     private static bool IsRoomExitPixel(Color color)
     {
-        // Vanilla MapObject uses (0, 1, 0.2) for RoomExit and then may blend water into it.
         return color.r < 0.18f &&
                color.g > 0.52f &&
                color.g > color.b + 0.08f &&
@@ -310,8 +306,6 @@ internal static class WorldMapShortcutPresentation
 
     private static bool IsCreatureHolePixel(Color color)
     {
-        // Vanilla MapObject uses magenta (1, 0, 1) for CreatureHole; underwater blending keeps
-        // blue high and green near zero, so use a tolerant signature rather than exact equality.
         return color.r > 0.55f &&
                color.g < 0.20f &&
                color.b > 0.72f;
