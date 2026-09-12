@@ -72,7 +72,9 @@ internal static class FontSettingsWindow
         ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
                            (string.IsNullOrEmpty(fontName) ? DevToolUiSettings.T("默认", "Default") : fontName));
         ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);
-        ImGui.TextDisabled(DevToolUiSettings.T("默认字号：36 px（旧版 18 px 的 2 倍）", "Default size: 36 px (2x the old 18 px scale)"));
+        ImGui.TextDisabled(DevToolUiSettings.T(
+            "默认字号：中文 42 px / 英文 36 px",
+            "Default size: Chinese 42 px / English 36 px"));
 
         if (DevToolUiSettings.IsChinese && weightVariants <= 1)
         {
