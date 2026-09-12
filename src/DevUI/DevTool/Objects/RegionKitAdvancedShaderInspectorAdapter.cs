@@ -323,7 +323,7 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     {
         try
         {
-            Room room = DevTool.Core.DevToolRuntime.ActiveSession?.Owner?.room;
+            global::Room room = DevTool.Core.DevToolRuntime.ActiveSession?.Owner?.room;
             if (room?.updateList == null) return;
             for (int i = 0; i < room.updateList.Count; i++)
             {
