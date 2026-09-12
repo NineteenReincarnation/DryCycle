@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using DryCycle.DevUI.DevTool.Compatibility;
 using UnityEngine;
@@ -19,6 +20,8 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     public const string DataTypeName = "RegionKit.Modules.Objects.AdvancedShaderController.AdvancedShader+Data";
     public const string RepresentationTypeName = "RegionKit.Modules.Objects.AdvancedShaderController.AdvancedShaderRepresentation";
     private const string RuntimeTypeName = "RegionKit.Modules.Objects.AdvancedShaderController.AdvancedShader";
+    private const int PngScanDepthLimit = 32;
+    private const int PngScanEntryLimit = 8192;
 
     public static readonly RegionKitAdvancedShaderInspectorAdapter Instance = new();
 
@@ -27,6 +30,8 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     private static int cachedShaderCount = -1;
     private static string[] cachedSprites = Array.Empty<string>();
     private static int cachedSpriteCount = -1;
+    private static string[] cachedPngAssets = Array.Empty<string>();
+    private static bool pngAssetsScanned;
 
     static RegionKitAdvancedShaderInspectorAdapter()
     {
@@ -51,22 +56,25 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         if (!CanInspect(target)) return Array.Empty<EditorPropertySnapshot>();
 
         object data = target.data;
-        List<EditorPropertySnapshot> result = new(96);
+        List<EditorPropertySnapshot> result = new(112);
 
         string shader = ReadString(data, "shader", "Basic");
-        string[] shaders = ShaderNames();
-        result.Add(EnumProperty("rk.as.shader", "Shader", "Material", shader, shaders));
+        result.Add(EnumProperty("rk.as.shader", "Shader", "Material", shader, ShaderNames()));
 
         bool useFile = ReadBool(data, "useFile");
         result.Add(BooleanProperty("rk.as.useFile", "Use File", "Material", useFile));
         if (useFile)
         {
+            string filePath = ReadString(data, "filePath", "illustrations/icon0.png");
+            string[] pngAssets = PngAssetPaths(filePath);
+            if (pngAssets.Length > 0)
+                result.Add(EnumProperty("rk.as.fileAsset", "PNG Asset", "Material", filePath, pngAssets));
             result.Add(StringProperty(
                 "rk.as.filePath",
-                "PNG File Path",
+                "Manual PNG Path",
                 "Material",
-                ReadString(data, "filePath", "illustrations/icon0.png"),
-                "RegionKit FilePicker equivalent; path is resolved through Rain World's AssetManager."));
+                filePath,
+                "AssetManager-relative path. The searchable PNG Asset list replaces RegionKit's paged FilePicker; manual entry remains available for merged or late-loaded assets."));
         }
         else
         {
@@ -96,6 +104,7 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         bool lockColors = ReadBool(data, "lockColors");
         result.Add(BooleanProperty("rk.as.restrictColors", "Clamp Colors", "Vertex Colors", restrictColors));
         result.Add(BooleanProperty("rk.as.lockColors", "Sync Colors", "Vertex Colors", lockColors));
+        result.Add(ActionProperty("rk.as.resetColors", "Reset Colors", "Vertex Colors"));
 
         Color[] colors = ReadField(data, "colors") as Color[] ?? Array.Empty<Color>();
         for (int i = 0; i < colors.Length; i++)
@@ -120,6 +129,7 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
             {
                 Vector2[] channelValues = uvs[channel] ?? Array.Empty<Vector2>();
                 string group = "UVs · Channel " + channel;
+                result.Add(ActionProperty("rk.as.resetUv." + channel, "Reset Channel " + channel, group));
                 for (int vertex = 0; vertex < channelValues.Length; vertex++)
                     result.Add(VectorProperty("rk.as.uv." + channel + "." + vertex,
                         "Vertex " + vertex, group, channelValues[vertex]));
@@ -143,6 +153,13 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         if (key == "rk.as.useFile")
         {
             if (value.Kind != EditorPropertyKind.Boolean || !WriteField(data, "useFile", value.Boolean)) return false;
+            RefreshRuntime(target);
+            return true;
+        }
+        if (key == "rk.as.fileAsset")
+        {
+            string current = ReadString(data, "filePath", "illustrations/icon0.png");
+            if (!TrySetEnumString(data, "filePath", PngAssetPaths(current), value)) return false;
             RefreshRuntime(target);
             return true;
         }
@@ -173,10 +190,21 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
             return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "restrictColors", value.Boolean);
         if (key == "rk.as.lockColors")
             return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "lockColors", value.Boolean);
+        if (key == "rk.as.resetColors")
+        {
+            if (value.Kind != EditorPropertyKind.Action) return false;
+            return InvokeDataMethod(data, "ResetColors");
+        }
         if (key == "rk.as.restrictUVs")
             return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "restrictUVs", value.Boolean);
         if (key == "rk.as.lockUVs")
             return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "lockUVs", value.Boolean);
+
+        if (TryParseIndexedKey(key, "rk.as.resetUv.", 1, out int[] resetUvParts))
+        {
+            if (value.Kind != EditorPropertyKind.Action) return false;
+            return InvokeDataMethod(data, "ResetUVs", resetUvParts[0]);
+        }
 
         if (TryParseIndexedKey(key, "rk.as.vertex.", 1, out int[] vertexParts))
         {
@@ -335,6 +363,15 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         HasRange = restrict
     };
 
+    private static EditorPropertySnapshot ActionProperty(string key, string label, string group) => new()
+    {
+        Key = key,
+        DisplayName = label,
+        Group = group,
+        Source = "RegionKit AdvancedShader",
+        Kind = EditorPropertyKind.Action
+    };
+
     private static string[] ShaderNames()
     {
         try
@@ -390,6 +427,81 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
             return cachedSprites.Length > 0 ? cachedSprites : new[] { "Futile_White" };
         }
     }
+
+    private static string[] PngAssetPaths(string current)
+    {
+        lock (CacheGate)
+        {
+            if (!pngAssetsScanned)
+            {
+                cachedPngAssets = ScanPngAssets();
+                pngAssetsScanned = true;
+            }
+
+            string normalizedCurrent = NormalizeAssetPath(current);
+            if (string.IsNullOrWhiteSpace(normalizedCurrent)) return (string[])cachedPngAssets.Clone();
+
+            for (int i = 0; i < cachedPngAssets.Length; i++)
+                if (string.Equals(cachedPngAssets[i], normalizedCurrent, StringComparison.OrdinalIgnoreCase))
+                    return (string[])cachedPngAssets.Clone();
+
+            string[] withCurrent = new string[cachedPngAssets.Length + 1];
+            withCurrent[0] = normalizedCurrent;
+            Array.Copy(cachedPngAssets, 0, withCurrent, 1, cachedPngAssets.Length);
+            return withCurrent;
+        }
+    }
+
+    private static string[] ScanPngAssets()
+    {
+        HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> found = new(StringComparer.OrdinalIgnoreCase);
+        ScanPngDirectory(string.Empty, 0, visited, found);
+        List<string> sorted = new(found);
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        return sorted.ToArray();
+    }
+
+    private static void ScanPngDirectory(string relativeDirectory, int depth, HashSet<string> visited, HashSet<string> found)
+    {
+        if (depth > PngScanDepthLimit || found.Count >= PngScanEntryLimit) return;
+        string normalizedDirectory = NormalizeAssetPath(relativeDirectory).Trim('/');
+        if (!visited.Add(normalizedDirectory)) return;
+
+        try
+        {
+            string[] files = AssetManager.ListDirectory(normalizedDirectory, false, false, false) ?? Array.Empty<string>();
+            for (int i = 0; i < files.Length && found.Count < PngScanEntryLimit; i++)
+            {
+                string name = Path.GetFileName(files[i]);
+                if (string.IsNullOrWhiteSpace(name) || !name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
+                found.Add(CombineAssetPath(normalizedDirectory, name));
+            }
+
+            string[] folders = AssetManager.ListDirectory(normalizedDirectory, true, false, false) ?? Array.Empty<string>();
+            for (int i = 0; i < folders.Length && found.Count < PngScanEntryLimit; i++)
+            {
+                string raw = (folders[i] ?? string.Empty).TrimEnd('/', '\\');
+                string name = Path.GetFileName(raw);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                ScanPngDirectory(CombineAssetPath(normalizedDirectory, name), depth + 1, visited, found);
+            }
+        }
+        catch (Exception error)
+        {
+            if (depth == 0)
+                Plugin.Logger?.LogWarning("DevTool RegionKit AdvancedShader PNG asset scan failed: " + error.Message);
+        }
+    }
+
+    private static string CombineAssetPath(string directory, string name)
+    {
+        if (string.IsNullOrWhiteSpace(directory)) return NormalizeAssetPath(name);
+        return NormalizeAssetPath(directory.TrimEnd('/', '\\') + "/" + (name ?? string.Empty).TrimStart('/', '\\'));
+    }
+
+    private static string NormalizeAssetPath(string path) =>
+        (path ?? string.Empty).Replace('\\', '/').Trim();
 
     private static void RefreshRuntime(PlacedObject target)
     {
@@ -462,7 +574,7 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         return ReadField(instance, name) is Vector2 value ? value : fallback;
     }
 
-    private static void InvokeDataMethod(object data, string name, params object[] args)
+    private static bool InvokeDataMethod(object data, string name, params object[] args)
     {
         try
         {
@@ -473,11 +585,14 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
                 null,
                 signature,
                 null);
-            method?.Invoke(data, args);
+            if (method == null) return false;
+            method.Invoke(data, args);
+            return true;
         }
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool RegionKit AdvancedShader data method failed: " + error.Message);
+            return false;
         }
     }
 
