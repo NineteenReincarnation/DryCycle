@@ -46,17 +46,15 @@ public sealed class BridgePlugin : BaseUnityPlugin
         bool sessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
         bool sessionPaused = sessionVisible && game?.GamePaused == true;
 
-        // Escape only hides the rebuilt UI long enough to hand ownership to Warp Menu or another
-        // RWImGui consumer. It must never become a persistent global state. Recover when DevTools
-        // comes back through H/O, when a pause/menu closes, or when an external RWImGui context has
-        // finished and released ownership after Escape.
+        // Escape must actually get the rebuilt overlay out of the way while Rain World's pause /
+        // Warp Menu owns the screen. Do not reopen merely because Escape was released or because
+        // RWImGui currently has no context: that was the old one-frame hide bug. Restore only when
+        // the pause/menu closes or when DevTools itself is closed and opened again.
         if (EditorUiModeState.OverlayHidden && sessionVisible)
         {
             bool sessionReturned = !sessionWasVisible;
             bool resumedFromPause = sessionWasPaused && !sessionPaused;
-            bool escapeReleased = !global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.Escape);
-            bool externalContextReleased = escapeReleased && !ImGUIAPI.HasContext;
-            if (sessionReturned || resumedFromPause || externalContextReleased)
+            if (sessionReturned || resumedFromPause)
                 EditorUiModeState.SetOverlayHidden(false);
         }
 
