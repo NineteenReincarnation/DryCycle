@@ -214,7 +214,8 @@ public enum EditorUiCommandKind
     SetSelectionProperty,
     InvokeLegacyButton,
     SetLegacySlider,
-    ResetLegacySlider
+    ResetLegacySlider,
+    SetLegacyText
 }
 
 public readonly struct EditorUiCommand
@@ -355,6 +356,9 @@ public static class EditorUiCommandQueue
                 break;
             case EditorUiCommandKind.ResetLegacySlider:
                 EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index), command.Text);
+                break;
+            case EditorUiCommandKind.SetLegacyText:
+                EditorActions.SetLegacyText(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue.Text);
                 break;
         }
     }
