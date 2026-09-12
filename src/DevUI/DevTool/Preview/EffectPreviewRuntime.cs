@@ -222,6 +222,20 @@ internal static class EffectPreviewRuntime
             return;
         }
 
+        // The add-effect browser also lists effect types that already exist locally. Inserting the
+        // temporary preview entry in front of one of those entries changes GetEffectAmount because
+        // Rain World returns the first matching effect. Camera-driven effects can therefore pulse
+        // between their real amount and PreviewAmount merely by hovering the browser row. A local
+        // effect is already visible in the room and AddRoomEffect itself is a no-op for duplicates,
+        // so previewing the duplicate has no useful semantics. Inherited effects are intentionally
+        // left previewable because adding a local override is a real operation.
+        if (HasExistingLocalEffect(session.RoomSettings, requested))
+        {
+            End("effect already present locally");
+            ClearPending();
+            return;
+        }
+
         if (IsActive && string.Equals(activeType, requested, StringComparison.Ordinal))
             return;
 
@@ -252,7 +266,13 @@ internal static class EffectPreviewRuntime
         if (ownership?.RequiresAbort == true)
         {
             string detail = ownership.ContaminationReason;
-            End(string.IsNullOrWhiteSpace(detail) ? "unsafe runtime propagation" : detail);
+            string reason = string.IsNullOrWhiteSpace(detail) ? "unsafe runtime propagation" : detail;
+
+            // A runtime abort is behavioral proof that this type's advanced preview is unsafe.
+            // Remember it immediately. Otherwise the still-hovered row can re-enter stage two after
+            // the debounce delay, producing an abort/restart loop that presents as visual flicker.
+            EffectPreviewSafetyRegistry.MarkUnsafe(activeType, reason);
+            End(reason);
             ClearPending();
             return;
         }
@@ -260,7 +280,9 @@ internal static class EffectPreviewRuntime
         if (EffectPreviewRuntimeVisualOwnership.RequiresAbort)
         {
             string detail = EffectPreviewRuntimeVisualOwnership.AbortReason;
-            End(string.IsNullOrWhiteSpace(detail) ? "unsafe runtime visual propagation" : detail);
+            string reason = string.IsNullOrWhiteSpace(detail) ? "unsafe runtime visual propagation" : detail;
+            EffectPreviewSafetyRegistry.MarkUnsafe(activeType, reason);
+            End(reason);
             ClearPending();
             return;
         }
@@ -291,6 +313,11 @@ internal static class EffectPreviewRuntime
         RoomSettings settings = session?.RoomSettings;
         global::Room room = session?.Room;
         if (settings?.effects == null || room == null || string.IsNullOrWhiteSpace(typeName)) return;
+
+        // Defense in depth for frontends with a stale presentation snapshot. Never create a second
+        // local effect of the same type just for hover preview.
+        if (HasExistingLocalEffect(settings, typeName))
+            return;
 
         try
         {
@@ -514,6 +541,23 @@ internal static class EffectPreviewRuntime
         {
             ClearActiveState();
         }
+    }
+
+    private static bool HasExistingLocalEffect(RoomSettings settings, string typeName)
+    {
+        List<RoomSettings.RoomEffect> effects = settings?.effects;
+        if (effects == null || string.IsNullOrWhiteSpace(typeName)) return false;
+
+        for (int i = 0; i < effects.Count; i++)
+        {
+            RoomSettings.RoomEffect effect = effects[i];
+            if (effect == null || effect.inherited || ReferenceEquals(effect, previewEffect))
+                continue;
+            if (string.Equals(effect.type?.value, typeName, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private static void RollbackRuntimeVisualState(string typeName, string reason)
