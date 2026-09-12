@@ -224,7 +224,7 @@ public sealed class EditorSession
 
     public global::Room Room => Owner?.room;
     public RoomSettings RoomSettings => Room?.roomSettings;
-    public World World => Owner?.game?.world;
+    public global::World World => Owner?.game?.world;
 
     internal void Synchronize(global::DevInterface.DevUI owner)
     {
