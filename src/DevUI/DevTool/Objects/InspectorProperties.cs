@@ -13,7 +13,8 @@ public enum EditorPropertyKind
     String,
     Vector2,
     Color,
-    Enum
+    Enum,
+    Action
 }
 
 /// <summary>
@@ -493,6 +494,30 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
         }
     }
 
+    private sealed class ActionBinding : Binding
+    {
+        private readonly Action<TData> action;
+
+        internal ActionBinding(string key, string displayName, string group, string source, Action<TData> action)
+            : base(key, displayName, group, source) => this.action = action;
+
+        internal override EditorPropertySnapshot Capture(TData data) => new()
+        {
+            Key = Key,
+            DisplayName = DisplayName,
+            Group = Group,
+            Source = Source,
+            Kind = EditorPropertyKind.Action
+        };
+
+        internal override bool Set(TData data, EditorPropertyValue value)
+        {
+            if (action == null || value.Kind != EditorPropertyKind.Action) return false;
+            action(data);
+            return true;
+        }
+    }
+
     private readonly List<Binding> bindings = new();
     private readonly Dictionary<string, Binding> byKey = new(StringComparer.Ordinal);
     private readonly string source;
@@ -534,6 +559,10 @@ public sealed class ObjectInspectorDefinition<TData> : IObjectInspectorAdapter
     public ObjectInspectorDefinition<TData> Enum<TEnum>(string key, string displayName, Func<TData, TEnum> getter,
         Action<TData, TEnum> setter, string group = "Properties") where TEnum : struct, global::System.Enum
         => Add(new EnumBinding<TEnum>(key, displayName, group, source, getter ?? throw new ArgumentNullException(nameof(getter)), setter));
+
+    public ObjectInspectorDefinition<TData> Action(string key, string displayName, Action<TData> action,
+        string group = "Actions")
+        => Add(new ActionBinding(key, displayName, group, source, action ?? throw new ArgumentNullException(nameof(action))));
 
     public bool CanInspect(PlacedObject target) => target?.data is TData;
 
