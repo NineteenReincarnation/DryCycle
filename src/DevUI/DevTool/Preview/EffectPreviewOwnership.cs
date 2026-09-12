@@ -91,8 +91,8 @@ internal static class EffectPreviewObjectCapture
         }
 
         EffectPreviewOwnershipTransaction owner = runtimeOwner;
-        bool observe = owner != null &&
-                       owner.TryBeginRuntimeAdd(self, obj, out EffectPreviewRuntimeAddObservation observation);
+        EffectPreviewRuntimeAddObservation observation = default;
+        bool observe = owner != null && owner.TryBeginRuntimeAdd(self, obj, out observation);
 
         orig(self, obj);
 
