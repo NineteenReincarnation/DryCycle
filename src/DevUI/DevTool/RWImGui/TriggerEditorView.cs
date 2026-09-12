@@ -24,16 +24,22 @@ internal static class TriggerEditorView
             return;
         }
 
+        bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
+        if (!sceneInBrowser) sceneTab = false;
+
         string libraryLabel = sceneTab ? DevToolUiSettings.T("资源库", "Library") : DevToolUiSettings.T("资源库*", "Library*");
         string sceneLabel = sceneTab ? DevToolUiSettings.T("场景*", "Scene*") : DevToolUiSettings.T("场景", "Scene");
         if (DevToolWidgets.ActionButton(libraryLabel, "TriggerLibraryTab", sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             sceneTab = false;
-        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(sceneLabel));
-        if (DevToolWidgets.ActionButton(sceneLabel, "TriggerSceneTab", sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            sceneTab = true;
+        if (sceneInBrowser)
+        {
+            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(sceneLabel));
+            if (DevToolWidgets.ActionButton(sceneLabel, "TriggerSceneTab", sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                sceneTab = true;
+        }
         ImGui.Separator();
 
-        if (sceneTab) DrawScene(snapshot);
+        if (sceneTab && sceneInBrowser) DrawSceneWorkspace(snapshot);
         else DrawLibrary(snapshot);
     }
 
@@ -131,8 +137,14 @@ internal static class TriggerEditorView
         if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."), true);
     }
 
-    private static void DrawScene(EditorTriggerPresentationSnapshot snapshot)
+    internal static void DrawSceneWorkspace(EditorTriggerPresentationSnapshot snapshot)
     {
+        if (snapshot == null || !snapshot.Available)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("触发器场景不可用。", "Trigger scene unavailable."), true);
+            return;
+        }
+
         EditorTriggerSnapshot[] triggers = snapshot.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
         ImGui.TextDisabled(DevToolUiSettings.T($"{triggers.Length} 个触发器", $"{triggers.Length} triggers"));
         ImGui.Separator();
