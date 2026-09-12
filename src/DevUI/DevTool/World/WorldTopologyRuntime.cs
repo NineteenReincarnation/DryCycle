@@ -96,7 +96,7 @@ internal static class WorldTopologyRuntime
     {
         AbstractCreature abstractCreature = creature?.abstractCreature;
         AbstractRoom source = room?.abstractRoom;
-        World world = room?.world;
+        global::World world = room?.world;
         if (abstractCreature == null || source == null || world == null ||
             shortcut.shortCutType != ShortcutData.Type.RoomExit ||
             shortcut.destNode < 0)
