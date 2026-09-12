@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原版虚方法/行为边界驱动 Button、Slider、Cycler 和 IntegerControl；未知复合控件仍保持未映射。",
-            "Buttons, sliders, cyclers and integer controls are delegated through the original virtual behavior boundaries; unknown composite controls remain unmapped."), true);
+            "通过原版虚方法/行为边界驱动 Button、Slider、Cycler、IntegerControl 与选择面板；未知复合控件仍保持未映射。",
+            "Buttons, sliders, cyclers, integer controls and selection panels are delegated through the original behavior boundaries; unknown composite controls remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -311,6 +311,9 @@ internal static class ObjectInspectorView
                     break;
                 case LegacyControlKind.Integer:
                     DrawLegacyInteger(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Select:
+                    DrawLegacySelect(inspector, control, stateKey, visibleLabel);
                     break;
             }
         }
@@ -380,22 +383,54 @@ internal static class ObjectInspectorView
         string stateKey,
         string visibleLabel)
     {
+        DrawLegacyChoice(
+            inspector,
+            control,
+            stateKey,
+            visibleLabel,
+            "LegacyCyclerOption_",
+            i => LegacyDevInterfaceBridge.CyclerAction(control.Path, i));
+    }
+
+    private static void DrawLegacySelect(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        DrawLegacyChoice(
+            inspector,
+            control,
+            stateKey,
+            visibleLabel,
+            "LegacySelectOption_",
+            i => LegacyDevInterfaceBridge.SelectAction(control.Path, i));
+    }
+
+    private static void DrawLegacyChoice(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel,
+        string optionIdPrefix,
+        Func<int, string> actionFactory)
+    {
         string[] options = control.Options ?? Array.Empty<string>();
         string preview = control.SelectedIndex >= 0 && control.SelectedIndex < options.Length
             ? options[control.SelectedIndex]
             : control.ValueText ?? string.Empty;
-        string label = visibleLabel + "##DevToolLegacyCycler_" + stateKey;
+        string label = visibleLabel + "##DevToolLegacyChoice_" + stateKey;
 
         if (!ImGui.BeginCombo(label, preview)) return;
         for (int i = 0; i < options.Length; i++)
         {
             bool selected = i == control.SelectedIndex;
-            if (ImGui.Selectable(options[i] + "##LegacyCyclerOption_" + stateKey + "_" + i, selected))
+            if (ImGui.Selectable(options[i] + "##" + optionIdPrefix + stateKey + "_" + i, selected))
             {
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.InvokeLegacyButton,
                     inspector.ObjectIndex,
-                    text: LegacyDevInterfaceBridge.CyclerAction(control.Path, i)));
+                    text: actionFactory(i)));
             }
             if (selected) ImGui.SetItemDefaultFocus();
         }
