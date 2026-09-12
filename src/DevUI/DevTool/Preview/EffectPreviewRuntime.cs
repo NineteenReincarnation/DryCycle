@@ -172,6 +172,7 @@ internal static class EffectPreviewRuntime
         if (!enabled) return;
         Reset();
         EffectPreviewSafetyRegistry.Clear();
+        EffectPreviewKnowledgeCache.Clear();
         EffectPreviewRuntimeVisualOwnership.Disable();
         EffectPreviewObjectCapture.Disable();
         enabled = false;
@@ -301,6 +302,10 @@ internal static class EffectPreviewRuntime
                 EffectPreviewRuntimeVisualOwnership.CaptureBaseline(room);
 
             bool blocked = EffectPreviewSafetyRegistry.IsAdvancedPreviewBlocked(typeName, out _);
+            bool stageOneCached = EffectPreviewKnowledgeCache.ShouldUseStageOneOnly(room, typeName);
+            if (stageOneCached)
+                blocked = true;
+
             if (!blocked)
             {
                 if (!EffectPreviewVisualStateJournal.TryCaptureForEffect(
@@ -337,6 +342,16 @@ internal static class EffectPreviewRuntime
                     // camera/Futile delta inside this window can be attributed to Preview; later
                     // frame changes are intentionally handled by runtime ownership or rejected.
                     sceneState?.Seal();
+
+                    bool noAdvancedArtifacts =
+                        ownership.ObjectCount == 0 &&
+                        ownership.FieldMutationCount == 0 &&
+                        (sceneState?.CameraMutationCount ?? 0) == 0 &&
+                        (sceneState?.FutileRootCount ?? 0) == 0 &&
+                        (visualState?.ShaderPropertyCount ?? 0) == 0 &&
+                        (visualState?.ShaderKeywordCount ?? 0) == 0;
+                    if (noAdvancedArtifacts)
+                        EffectPreviewKnowledgeCache.MarkStageOneOnly(room, typeName);
 
                     if (ownership.RequiresAbort)
                     {
