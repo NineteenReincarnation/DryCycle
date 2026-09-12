@@ -28,8 +28,8 @@ internal static class SoundGroupProblemsWindow
 
         ImGuiIOPtr io = ImGui.GetIO();
         Num.Vector2 display = io.DisplaySize;
-        float width = Math.Min(560f, Math.Max(360f, display.X * 0.34f));
-        float height = Math.Min(360f, Math.Max(220f, display.Y * 0.32f));
+        float width = Math.Min(620f, Math.Max(400f, display.X * 0.38f));
+        float height = Math.Min(420f, Math.Max(250f, display.Y * 0.36f));
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 12f), Math.Max(8f, display.Y - height - 12f)),
             ImGuiCond.FirstUseEver);
@@ -45,6 +45,8 @@ internal static class SoundGroupProblemsWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("Problems");
+        float bodyScale = DevToolUiSettings.IsChinese ? 1.18f : 1.12f;
+        ImGui.SetWindowFontScale(bodyScale);
 
         ImGui.TextColored(
             errors > 0 ? new Num.Vector4(1f, 0.42f, 0.40f, 1f) : new Num.Vector4(1f, 0.72f, 0.36f, 1f),
@@ -64,6 +66,8 @@ internal static class SoundGroupProblemsWindow
         ImGui.Separator();
         if (ImGui.BeginChild("##SoundGroupProblemsList", new Num.Vector2(0f, 0f), ImGuiChildFlags.None))
         {
+            // Child windows do not inherit FontWindowScale from their parent in ImGui.
+            ImGui.SetWindowFontScale(bodyScale);
             for (int i = 0; i < problems.Length; i++)
             {
                 DevToolProblemSnapshot problem = problems[i];
