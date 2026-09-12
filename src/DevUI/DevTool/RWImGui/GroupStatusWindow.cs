@@ -12,8 +12,8 @@ internal static class GroupStatusWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
-        float width = Math.Min(420f, Math.Max(300f, display.X * 0.20f));
-        float height = Math.Min(360f, Math.Max(220f, display.Y * 0.28f));
+        float width = Math.Min(460f, Math.Max(330f, display.X * 0.22f));
+        float height = Math.Min(400f, Math.Max(250f, display.Y * 0.31f));
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(
@@ -22,8 +22,8 @@ internal static class GroupStatusWindow
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(280f, 180f),
-            new Num.Vector2(Math.Max(280f, display.X - 16f), Math.Max(180f, display.Y - 16f)));
+            new Num.Vector2(310f, 210f),
+            new Num.Vector2(Math.Max(310f, display.X - 16f), Math.Max(210f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(DevToolUiSettings.T("编组###DevToolGroups", "Groups###DevToolGroups"), ImGuiWindowFlags.NoCollapse))
@@ -33,6 +33,7 @@ internal static class GroupStatusWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("Groups");
+        ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.20f : 1.14f);
 
         ImGui.TextDisabled(DevToolUiSettings.T(
             "Shift + 左键框选 · Ctrl+G 编组",
