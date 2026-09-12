@@ -299,6 +299,7 @@ public static class DevUiMigrationCoverage
 
         if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
             LegacyDevInterfaceBridge.CanAdaptBoolean(node) ||
+            LegacyDevInterfaceBridge.CanAdaptExtEnum(node) ||
             LegacyDevInterfaceBridge.CanAdaptText(node) ||
             LegacyDevInterfaceBridge.CanAdaptDirection(node) ||
             LegacyDevInterfaceBridge.CanAdaptPanelSelect(node) ||
@@ -389,6 +390,13 @@ public static class DevUiMigrationCoverage
             return;
         }
 
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptExtEnum(node))
+        {
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "RegionKit ExtEnumCycler native combo adapter";
+            return;
+        }
+
         if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptPanelSelect(node))
         {
             state = DevUiMigrationState.SpecializedAdapter;
@@ -437,8 +445,8 @@ public static class DevUiMigrationCoverage
         }
         if (insideRepresentation && node is Button && LegacyDevInterfaceBridge.IsTerminalSemanticButton(node))
         {
-            state = DevUiMigrationState.GenericAdapter;
-            note = "Verified terminal semantic button bridge";
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "Verified immediate-action button bridge";
             return;
         }
         if (insideRepresentation && node is Button)
