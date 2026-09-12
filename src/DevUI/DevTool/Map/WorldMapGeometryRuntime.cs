@@ -11,8 +11,12 @@ namespace DryCycle.DevUI.DevTool.Map;
 
 public enum EditorMapGeometryKind
 {
+    Air,
+    BackWall,
     Solid,
-    Detail,
+    Structure,
+    Shortcut,
+    Transport,
     Water,
     LocalTerrain,
     CurvedSlope,
@@ -149,6 +153,18 @@ internal static class MapRoomGeometryPresentationHub
         internal int PublishedRevision;
     }
 
+    private readonly struct PixelClassification
+    {
+        internal PixelClassification(EditorMapGeometryKind kind, bool water)
+        {
+            Kind = kind;
+            Water = water;
+        }
+
+        internal EditorMapGeometryKind Kind { get; }
+        internal bool Water { get; }
+    }
+
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
@@ -195,8 +211,6 @@ internal static class MapRoomGeometryPresentationHub
         int currentRoom = session.Room?.abstractRoom?.index ?? -1;
         int selectedRoom = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
 
-        // The room being inspected/played is always fully prioritized. This keeps authoring feedback
-        // immediate while the rest of a large region continues warming in the background.
         RefreshPriorityRoom(currentRoom, page.world);
         if (selectedRoom != currentRoom) RefreshPriorityRoom(selectedRoom, page.world);
 
@@ -266,8 +280,6 @@ internal static class MapRoomGeometryPresentationHub
             entry.RoomRep = panel.roomRep;
             entry.RoomName = room.name ?? entry.RoomName;
 
-            // Bounds are cheap and are enough to display/use the map immediately. Do not decode
-            // the room texture or parse RoomSettings while doing this structural pass.
             RefreshDimensions(entry, panel.roomRep);
             RefreshNodes(entry, panel.roomRep, force: !entry.NodesInitialized);
             Publish(entry);
@@ -394,27 +406,41 @@ internal static class MapRoomGeometryPresentationHub
         if (!allowDecode) return false;
         if (!TryReadMapPixels(source, out Color[] pixels)) return false;
 
-        List<EditorMapRectSnapshot> runs = new();
+        PixelClassification[] classified = new PixelClassification[pixels.Length];
+        for (int i = 0; i < pixels.Length; i++)
+            classified[i] = ClassifyPixel(pixels[i]);
+
+        List<EditorMapRectSnapshot> baseRuns = new();
+        List<EditorMapRectSnapshot> waterRuns = new();
         for (int y = 0; y < source.Height; y++)
         {
             int x = 0;
             while (x < source.Width)
             {
-                EditorMapGeometryKind? kind = ClassifyPixel(pixels[y * source.Width + x]);
-                if (!kind.HasValue)
+                EditorMapGeometryKind kind = classified[y * source.Width + x].Kind;
+                int start = x++;
+                while (x < source.Width && classified[y * source.Width + x].Kind == kind)
+                    x++;
+                baseRuns.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind));
+            }
+
+            x = 0;
+            while (x < source.Width)
+            {
+                if (!classified[y * source.Width + x].Water)
                 {
                     x++;
                     continue;
                 }
 
-                int start = x;
-                x++;
-                while (x < source.Width && ClassifyPixel(pixels[y * source.Width + x]) == kind)
+                int start = x++;
+                while (x < source.Width && classified[y * source.Width + x].Water)
                     x++;
-                runs.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind.Value));
+                waterRuns.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, EditorMapGeometryKind.Water));
             }
         }
 
+        baseRuns.AddRange(waterRuns);
         entry.RasterSourceKey = source.SourceKey;
         entry.RasterWidth = source.Width;
         entry.RasterHeight = source.Height;
@@ -422,7 +448,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.NextRasterPollFrame = Time.frameCount + RasterPollIntervalFrames + Math.Abs(entry.RoomIndex % 37);
         entry.WidthTiles = Math.Max(1f, source.Width);
         entry.HeightTiles = Math.Max(1f, source.Height);
-        entry.BaseRasterRuns = runs.ToArray();
+        entry.BaseRasterRuns = baseRuns.ToArray();
         entry.Revision++;
         return true;
     }
@@ -495,18 +521,86 @@ internal static class MapRoomGeometryPresentationHub
         }
     }
 
-    private static EditorMapGeometryKind? ClassifyPixel(Color color)
+    private static PixelClassification ClassifyPixel(Color color)
     {
-        if (color.b > color.r + 0.12f && color.b > color.g + 0.12f)
-            return EditorMapGeometryKind.Water;
-        if (color.r < 0.40f && color.g < 0.40f && color.b < 0.40f)
-            return EditorMapGeometryKind.Solid;
-        if (color.r >= 0.42f && color.r <= 0.58f &&
-            color.g >= 0.22f && color.g <= 0.42f &&
-            color.b >= 0.22f && color.b <= 0.42f)
-            return EditorMapGeometryKind.Detail;
-        return null;
+        if (TryClassifyVanillaMapColor(color, out EditorMapGeometryKind kind))
+            return new PixelClassification(kind, false);
+
+        // MapObject applies water last with Lerp(base, blue, 0.3). Undo that blend before
+        // classifying so poles, background walls and shortcut tiles remain visible underwater.
+        if (color.b >= 0.28f)
+        {
+            Color unblended = new(
+                Mathf.Clamp01(color.r / 0.7f),
+                Mathf.Clamp01(color.g / 0.7f),
+                Mathf.Clamp01((color.b - 0.3f) / 0.7f));
+            if (TryClassifyVanillaMapColor(unblended, out kind))
+                return new PixelClassification(kind, true);
+        }
+
+        // Modded MapTex producers occasionally use nearby greys rather than the exact vanilla
+        // palette. Keep them visible instead of dropping them from the preview.
+        float greySpread = Math.Max(color.r, Math.Max(color.g, color.b)) - Math.Min(color.r, Math.Min(color.g, color.b));
+        if (greySpread < 0.08f)
+        {
+            if (color.r < 0.40f) return new PixelClassification(EditorMapGeometryKind.Solid, false);
+            if (color.r < 0.55f) return new PixelClassification(EditorMapGeometryKind.BackWall, false);
+            return new PixelClassification(EditorMapGeometryKind.Air, false);
+        }
+
+        return new PixelClassification(EditorMapGeometryKind.Structure, false);
     }
+
+    private static bool TryClassifyVanillaMapColor(Color color, out EditorMapGeometryKind kind)
+    {
+        const float tolerance = 0.055f;
+
+        if (Near(color, 0f, 1f, 0.2f, tolerance) ||
+            Near(color, 1f, 0f, 1f, tolerance) ||
+            Near(color, 1f, 1f, 1f, tolerance))
+        {
+            kind = EditorMapGeometryKind.Shortcut;
+            return true;
+        }
+
+        if (Near(color, 0.7f, 0f, 0f, tolerance) || Near(color, 0f, 0f, 0f, tolerance))
+        {
+            kind = EditorMapGeometryKind.Transport;
+            return true;
+        }
+
+        if (Near(color, 0.3f, 0.3f, 0.3f, tolerance))
+        {
+            kind = EditorMapGeometryKind.Solid;
+            return true;
+        }
+
+        if (Near(color, 0.5f, 0.5f, 0.5f, tolerance))
+        {
+            kind = EditorMapGeometryKind.BackWall;
+            return true;
+        }
+
+        if (Near(color, 0.6f, 0.6f, 0.6f, tolerance))
+        {
+            kind = EditorMapGeometryKind.Air;
+            return true;
+        }
+
+        if (Near(color, 0.5f, 0.3f, 0.3f, tolerance))
+        {
+            kind = EditorMapGeometryKind.Structure;
+            return true;
+        }
+
+        kind = default;
+        return false;
+    }
+
+    private static bool Near(Color color, float r, float g, float b, float tolerance) =>
+        Math.Abs(color.r - r) <= tolerance &&
+        Math.Abs(color.g - g) <= tolerance &&
+        Math.Abs(color.b - b) <= tolerance;
 
     private static void RefreshNodes(
         CacheEntry entry,
@@ -518,8 +612,6 @@ internal static class MapRoomGeometryPresentationHub
         Vector2[] positions = roomRep?.nodePositions;
         if (positions == null || positions.Length == 0)
         {
-            // RoomRepresentation often receives its node positions a little later than its bounds.
-            // Retry quickly until they exist, then switch to the normal low-frequency poll.
             entry.NextNodePollFrame = Time.frameCount + (entry.NodesInitialized ? NodePollIntervalFrames : 1);
             if (entry.NodesInitialized && entry.Nodes.Length == 0) return;
             entry.Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
@@ -556,9 +648,6 @@ internal static class MapRoomGeometryPresentationHub
         }
     }
 
-    /// <summary>
-    /// Returns true only when this call performed an expensive RoomSettings load/rebuild.
-    /// </summary>
     private static bool RefreshCurves(
         CacheEntry entry,
         global::World world,
@@ -685,8 +774,6 @@ internal static class MapRoomGeometryPresentationHub
         List<PlacedObject> objects = settings?.placedObjects;
         if (objects == null) return;
 
-        // TerrainHandle is not a local spline object. Two or more handles jointly define the
-        // room-wide TerrainCurve, so it must be reconstructed as one continuous surface.
         AddRoomTerrainCurve(objects, roomWidthTiles, curves, fills);
 
         for (int i = 0; i < objects.Count; i++)
@@ -704,7 +791,7 @@ internal static class MapRoomGeometryPresentationHub
                     placed.pos,
                     localTerrain.bottom,
                     EditorMapGeometryKind.LocalTerrain,
-                    EditorMapGeometryKind.Detail,
+                    EditorMapGeometryKind.Structure,
                     0f,
                     1f);
                 continue;
@@ -881,8 +968,6 @@ internal static class MapRoomGeometryPresentationHub
         }
 
         AddPairedFillRuns(fills, surface, back, EditorMapGeometryKind.Solid);
-        // SuperSlope is a straight slope band; use the strong slope surface treatment rather than
-        // the subdued LocalTerrain treatment so it remains readable over the vanilla raster.
         AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
     }
 
