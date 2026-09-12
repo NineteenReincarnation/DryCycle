@@ -6,6 +6,8 @@ namespace DryCycle.DevUI.DevTool.Sound;
 public enum EditorSoundSourceKind
 {
     Vanilla,
+    Downpour,
+    Watcher,
     Dlc,
     Mod,
     Missing
@@ -51,6 +53,7 @@ public sealed class SoundGroupEntrySnapshot
     public bool Available { get; init; }
     public EditorSoundSourceKind SourceKind { get; init; }
     public string SourceName { get; init; } = string.Empty;
+    public string SourceId { get; init; } = string.Empty;
 }
 
 public sealed class SoundGroupSnapshot
