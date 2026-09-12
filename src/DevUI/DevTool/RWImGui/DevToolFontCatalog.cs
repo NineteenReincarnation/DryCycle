@@ -15,8 +15,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 ///   <mod root>/newest/plugins/DryCycle.DevTool.RWImGui.dll
 ///   <mod root>/newest/ui/fonts/*.ttf
 ///
-/// Fonts must be present before the RWImGui atlas is built. We register them during plugin
-/// startup and keep runtime switching limited to faces that are already in that atlas.
+/// Fonts must be registered after RWImGui creates its native ImGui context but before the first
+/// renderer frame builds the font atlas texture. Runtime switching only selects faces that are
+/// already present in that startup atlas.
 /// </summary>
 internal static unsafe class DevToolFontCatalog
 {
@@ -36,6 +37,7 @@ internal static unsafe class DevToolFontCatalog
     private static bool registrationComplete;
     private static bool registrationBusy;
     private static bool registrationFailureLogged;
+    private static bool lateRegistrationWarningLogged;
 
     internal static string FontDirectory
     {
@@ -58,6 +60,22 @@ internal static unsafe class DevToolFontCatalog
     {
         if (registrationComplete) return true;
         if (registrationBusy) return false;
+
+        // AddFontFromFileTTF invalidates an already-built atlas. RWImGui's DX11 backend only
+        // uploads that texture during its normal frame lifecycle, so mutating the atlas after a
+        // frame has started causes ImGui::NewFrame() to assert with "Font Atlas not built".
+        // Refuse late mutation rather than risking a native process abort.
+        if (ImGui.GetFrameCount() > 0)
+        {
+            if (!lateRegistrationWarningLogged)
+            {
+                lateRegistrationWarningLogged = true;
+                log?.LogWarning(
+                    "DryCycle DevTool refused late font registration because the ImGui font atlas " +
+                    "has already entered the render loop. Local fonts must be registered before the first frame.");
+            }
+            return false;
+        }
 
         registrationBusy = true;
         try
@@ -122,7 +140,7 @@ internal static unsafe class DevToolFontCatalog
             }
 
             registrationComplete = true;
-            log?.LogInfo($"DryCycle DevTool registered {added} local font face(s) from {directory}.");
+            log?.LogInfo($"DryCycle DevTool registered {added} local font face(s) before the first ImGui frame from {directory}.");
             return true;
         }
         catch (Exception error)
