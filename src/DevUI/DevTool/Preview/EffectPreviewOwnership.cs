@@ -13,9 +13,9 @@ namespace DryCycle.DevUI.DevTool.Preview;
 /// 2. During a live preview, objects spawned synchronously by an exclusively preview-owned runtime
 ///    object are adopted by the same ownership transaction.
 ///
-/// The second path never keys on a mod, assembly or namespace. Causality is inferred from the call
-/// stack only when every live Room object matching the caller's UpdatableAndDeletable type is owned
-/// by the preview. Ambiguous calls fail closed and are left to normal Rain World behavior.
+/// The second path never keys on a mod, assembly or namespace. Causality first uses Room.updateIndex
+/// (the exact object Rain World is currently updating), then falls back to a conservative call-stack
+/// test only outside the normal Room.Update loop. Ambiguous calls fail closed.
 /// </summary>
 internal static class EffectPreviewObjectCapture
 {
@@ -188,8 +188,6 @@ internal sealed class EffectPreviewOwnershipTransaction
     {
         if (room == null || obj == null) return false;
 
-        // RoomEffect preview is a visual/editor facility. Committing a PhysicalObject can mutate
-        // AbstractRoom.entities, creature lists, save-state ownership and consumable state.
         if (obj is PhysicalObject)
         {
             MarkContamination(
@@ -222,11 +220,6 @@ internal sealed class EffectPreviewOwnershipTransaction
         return true;
     }
 
-    /// <summary>
-    /// Called from the global Room.AddObject hook before the real add. Stack inspection is done only
-    /// while an advanced preview is alive, and adoption is allowed only when the caller type is
-    /// unambiguous: every live instance of that UAD type in this room must already be preview-owned.
-    /// </summary>
     internal bool TryBeginRuntimeAdd(
         global::Room targetRoom,
         UpdatableAndDeletable obj,
@@ -237,7 +230,7 @@ internal sealed class EffectPreviewOwnershipTransaction
             !ReferenceEquals(room, targetRoom) || ownedObjectSet.Contains(obj))
             return false;
 
-        if (!HasExclusivelyOwnedCaller())
+        if (!HasOwnedRuntimeCaller())
             return false;
 
         observation = new EffectPreviewRuntimeAddObservation(SnapshotDrawables(room));
@@ -307,19 +300,12 @@ internal sealed class EffectPreviewOwnershipTransaction
     internal EffectPreviewRollbackReport Rollback(string reason)
     {
         if (room == null)
-            return new EffectPreviewRollbackReport(
-                hasStrongLeak: false,
-                softBaselineChanged: false,
-                runtimeContaminated: runtimeContaminated,
-                summary: contaminationReason);
+            return new EffectPreviewRollbackReport(false, false, runtimeContaminated, contaminationReason);
 
         DeactivateRuntimePropagation();
 
         int rollbackErrors = 0;
         int fieldLeaks = 0;
-
-        // Keep room manager/back-reference fields intact while owned objects tear themselves down.
-        // Some load-time scene objects use those fields from Destroy().
         CleanCameraLeasers();
 
         for (int i = ownedObjects.Count - 1; i >= 0; i--)
@@ -388,13 +374,7 @@ internal sealed class EffectPreviewOwnershipTransaction
 
         bool softChanged = baseline.TryDescribeDifference(room, out string baselineDifference);
         string summary = BuildRollbackSummary(
-            reason,
-            rollbackErrors,
-            fieldLeaks,
-            objectLeaks,
-            drawableLeaks,
-            leaserLeaks,
-            baselineDifference);
+            reason, rollbackErrors, fieldLeaks, objectLeaks, drawableLeaks, leaserLeaks, baselineDifference);
 
         if (softChanged && !strongLeak && !runtimeContaminated)
         {
@@ -408,11 +388,7 @@ internal sealed class EffectPreviewOwnershipTransaction
         ownedDrawables.Clear();
         fieldMutations.Clear();
 
-        return new EffectPreviewRollbackReport(
-            strongLeak,
-            softChanged,
-            runtimeContaminated,
-            summary);
+        return new EffectPreviewRollbackReport(strongLeak, softChanged, runtimeContaminated, summary);
     }
 
     internal static void DisposeCapturedObject(UpdatableAndDeletable obj, global::Room room)
@@ -449,8 +425,21 @@ internal sealed class EffectPreviewOwnershipTransaction
             ownedDrawables.Add(direct);
     }
 
-    private bool HasExclusivelyOwnedCaller()
+    private bool HasOwnedRuntimeCaller()
     {
+        // Rain World keeps updateIndex pointing at the exact object whose Update() is executing.
+        // This gives identity-level causality even when a room already contains another instance of
+        // the same controller type as the preview object.
+        int currentIndex = room.updateIndex;
+        if (currentIndex >= 0 && currentIndex < room.updateList.Count)
+        {
+            UpdatableAndDeletable current = room.updateList[currentIndex];
+            if (current != null && ownedObjectSet.Contains(current))
+                return true;
+        }
+
+        // Outside the normal Room.Update loop, keep a conservative fallback for synchronous helper
+        // methods. It is accepted only when every live instance matching that caller type is owned.
         StackFrame[] frames;
         try { frames = new StackTrace(2, false).GetFrames(); }
         catch { return false; }
@@ -652,10 +641,9 @@ internal sealed class EffectPreviewOwnershipTransaction
 }
 
 /// <summary>
-/// A diagnostic baseline captured before advanced bootstrap. Identity/count changes are reported but
-/// not automatically treated as unsafe because normal Rain World rooms create transient particles,
-/// drips and other objects while the mouse is hovering. Strong ownership leaks are checked
-/// separately by EffectPreviewOwnershipTransaction.
+/// Diagnostic baseline captured before advanced bootstrap. Identity changes are reported but do not
+/// automatically blacklist an effect, because a normal Rain World room can create transient drips,
+/// particles and other objects during a hover. Strong preview-owned leaks are checked separately.
 /// </summary>
 internal sealed class EffectPreviewRuntimeBaseline
 {
