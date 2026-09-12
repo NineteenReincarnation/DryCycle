@@ -130,7 +130,11 @@ internal static class DevToolFrontend
         internal int Weight;
     }
 
-    private static readonly DevToolInputContext InputContext = new();
+    // Do not construct a consumer IMGUIContext merely because BepInEx loads the bridge assembly.
+    // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
+    // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
+    // consumer context construction as well as font-atlas mutation.
+    private static DevToolInputContext inputContext;
     private static readonly List<FontCandidate> CjkFonts = new();
     private static ManualLogSource log;
     private static volatile bool visible;
@@ -173,7 +177,8 @@ internal static class DevToolFrontend
     {
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
+            DevToolInputContext context = inputContext;
+            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
                 return;
 
             if (ImGUIAPI.HasContext)
@@ -184,9 +189,15 @@ internal static class DevToolFrontend
                 return;
             }
 
+            if (context == null)
+            {
+                context = new DevToolInputContext();
+                inputContext = context;
+            }
+
             // Never mutate io.Fonts here. Once the renderer is alive, adding fonts invalidates the
             // already-built atlas and Dear ImGui will assert on the next NewFrame.
-            ImGUIAPI.SwitchContext(InputContext);
+            ImGUIAPI.SwitchContext(context);
             Interlocked.Exchange(ref contextBusyLogged, 0);
         }
         catch (Exception error)
@@ -200,7 +211,8 @@ internal static class DevToolFrontend
     {
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
+            DevToolInputContext context = inputContext;
+            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
                 ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
