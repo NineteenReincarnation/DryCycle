@@ -99,14 +99,9 @@ public sealed class DevUiMigrationCoverageSnapshot
 /// <summary>
 /// Capability-based migration audit.
 ///
-/// The old implementation accumulated a growing list of concrete RegionKit control types. This
-/// scanner instead asks a single question for every interactive node in the real runtime tree:
-/// can the generic semantic bridge operate it through the same contract the legacy UI uses?
-///
-/// Buttons, sliders, cyclers, integer controls, select controls and structurally discoverable
-/// value controls are therefore covered regardless of whether they came from vanilla, RegionKit,
-/// DryCycle or another mod. Unknown custom interactive protocols remain Unmapped and are reported
-/// by runtime type/path so the next missing *protocol* can be added once for every mod.
+/// The scanner never needs a RegionKit/DryCycle feature list. Every runtime node is classified by
+/// the interaction/container protocol it exposes. Concrete registrations are reserved for native
+/// rebuilt workspaces; everything else falls through to structural generic rules.
 /// </summary>
 public static class DevUiMigrationCoverage
 {
@@ -304,9 +299,13 @@ public static class DevUiMigrationCoverage
 
     private static bool IsObligation(DevUINode node)
     {
-        if (node == null || node is DevUILabel) return false;
+        if (node == null) return false;
         if (node is Page) return true;
+
+        // Capability must be tested before visual inheritance. Editable text controls can derive
+        // from DevUILabel, so treating every label subclass as passive would create a blind spot.
         if (LegacyDevInterfaceBridge.CanAdaptNode(node)) return true;
+        if (node is DevUILabel) return false;
         if (node is Handle) return true;
         if (MatchesAnyRegistration(node.GetType())) return true;
         return LooksInteractiveByReflection(node.GetType());
@@ -315,9 +314,6 @@ public static class DevUiMigrationCoverage
     private static bool LooksInteractiveByReflection(Type type)
     {
         if (type == null) return false;
-        // These method shapes are common custom DevInterface interaction boundaries. If a new mod
-        // invents one that our semantic bridge cannot drive, it appears as Unmapped instead of
-        // silently disappearing from the audit.
         return HasDeclaredMethod(type, "Clicked", Type.EmptyTypes) ||
                HasDeclaredMethod(type, "NubDragged", new[] { typeof(float) }) ||
                HasDeclaredMethod(type, "NubDragged2", new[] { typeof(float) }) ||
@@ -406,10 +402,24 @@ public static class DevUiMigrationCoverage
             return;
         }
 
+        // These are generic container/scene protocols. Their semantic descendants are audited
+        // separately, so helper methods declared on a custom panel/page must not create fake gaps.
+        if (node is Page)
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "Generic Page container; descendants are mirrored recursively";
+            return;
+        }
+        if (node is Panel)
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "Generic Panel container; descendants are mirrored recursively";
+            return;
+        }
         if (node is Handle)
         {
-            state = DevUiMigrationState.Unmapped;
-            note = "Scene-handle protocol is not yet mirrored by the generic ImGui bridge";
+            state = DevUiMigrationState.GenericAdapter;
+            note = "Generic world-space Handle protocol retained as live scene gizmo";
             return;
         }
 
@@ -485,8 +495,6 @@ public static class DevUiMigrationCoverage
             (StartsWith(ns, "DevInterface") && Contains(assembly, "Assembly-CSharp")))
             return DevUiMigrationSource.Vanilla;
 
-        // POM is the generic backend used by RegionKit and other mods; keep it in Other unless a
-        // custom parent representation already established stronger ownership.
         return DevUiMigrationSource.Other;
     }
 
