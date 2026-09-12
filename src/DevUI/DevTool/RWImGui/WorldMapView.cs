@@ -24,6 +24,7 @@ internal static class WorldMapView
         internal EditorMapRoomNodeSnapshot Node;
         internal Num.Vector2 Position;
         internal bool Free;
+        internal EditorMapConnectionSnapshot Connection;
     }
 
     private sealed class EdgeHit
@@ -106,7 +107,7 @@ internal static class WorldMapView
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
         ImGui.SameLine();
-        DrawCompactCheckbox(DevToolUiSettings.T("端口", "Ports"), "WorldMapPorts", ref showAllPorts);
+        DrawCompactCheckbox(DevToolUiSettings.T("空闲出口", "Free exits"), "WorldMapPorts", ref showAllPorts);
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("子区域", "Subregions"), "WorldMapSubregions", ref showSubregionLabels);
 
@@ -384,23 +385,37 @@ internal static class WorldMapView
         {
             EditorMapConnectionSnapshot connection = connections[i];
             if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
-            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 36f)) continue;
+            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 42f)) continue;
 
             bool selected = string.Equals(selectedConnectionId, connection.ConnectionId, StringComparison.Ordinal);
             bool hovered = string.Equals(hoveredConnectionId, connection.ConnectionId, StringComparison.Ordinal);
-            uint color = ImGui.GetColorU32(
+            uint core = ImGui.GetColorU32(
                 selected ? ImGuiCol.ButtonActive :
                 hovered ? ImGuiCol.ButtonHovered :
-                connection.Ambiguous ? ImGuiCol.TextDisabled : ImGuiCol.Separator);
-            float thickness = selected ? 3.4f : hovered ? 3f : connection.Explicit ? 2.2f : 1.6f;
-            draw.AddLine(a, b, color, thickness);
+                connection.Ambiguous ? ImGuiCol.TextDisabled : ImGuiCol.Text);
+            uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
 
-            if (zoom < 0.40f && !selected && !hovered) continue;
+            float coreThickness = selected ? 4.4f : hovered ? 3.8f : connection.Explicit ? 3.0f : 2.6f;
+            float shadowThickness = coreThickness + (selected || hovered ? 5.2f : 4.2f);
+            DrawConnectionStroke(
+                draw,
+                a,
+                b,
+                shadow,
+                core,
+                shadowThickness,
+                coreThickness,
+                connection.Direction,
+                connection.Ambiguous);
+
+            if (!selected && !hovered && !connection.Ambiguous) continue;
             string glyph = DirectionGlyph(connection.Direction) + (connection.Ambiguous ? " ?" : string.Empty);
             Num.Vector2 size = ImGui.CalcTextSize(glyph);
             Num.Vector2 mid = (a + b) * 0.5f;
-            draw.AddRectFilled(mid - size * 0.5f - new Num.Vector2(4f, 2f), mid + size * 0.5f + new Num.Vector2(4f, 2f), ImGui.GetColorU32(ImGuiCol.ChildBg), 3f);
-            draw.AddText(mid - size * 0.5f, color, glyph);
+            Num.Vector2 pad = new(5f, 3f);
+            draw.AddRectFilled(mid - size * 0.5f - pad, mid + size * 0.5f + pad, shadow, 4f);
+            draw.AddRect(mid - size * 0.5f - pad, mid + size * 0.5f + pad, core, 4f, ImDrawFlags.None, 1f);
+            draw.AddText(mid - size * 0.5f, core, glyph);
         }
     }
 
@@ -418,39 +433,54 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            bool reveal = showAllPorts || linking || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
-            if (!reveal) continue;
 
             EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
-            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 32f)) continue;
+            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
 
+            bool roomContext = linking || showAllPorts || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
             EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
             for (int n = 0; n < nodes.Length; n++)
             {
                 EditorMapRoomNodeSnapshot node = nodes[n];
                 if (!node.Exit) continue;
-                Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
+
+                EditorMapConnectionSnapshot endpointConnection = FindConnectionAtEndpoint(snapshot, room.RoomIndex, node.NodeIndex);
                 bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
+                bool connected = endpointConnection != null || node.ConnectedRoomIndex >= 0;
+                bool persistent = showConnections && connected;
+                if (!persistent && !(roomContext && free)) continue;
+
+                Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
                 bool source = room.RoomIndex == linkingRoom && node.NodeIndex == linkingNode;
                 bool hovered = hoveredPort != null && hoveredPort.Room.RoomIndex == room.RoomIndex && hoveredPort.Node.NodeIndex == node.NodeIndex;
                 bool validTarget = linking && free && room.RoomIndex != linkingRoom;
+                bool selectedLink = endpointConnection != null && string.Equals(
+                    selectedConnectionId,
+                    endpointConnection.ConnectionId,
+                    StringComparison.Ordinal);
 
                 uint color = ImGui.GetColorU32(
-                    source ? ImGuiCol.ButtonActive :
-                    hovered && free ? ImGuiCol.ButtonHovered :
+                    source || selectedLink ? ImGuiCol.ButtonActive :
+                    hovered ? ImGuiCol.ButtonHovered :
                     validTarget ? ImGuiCol.Text :
-                    free ? ImGuiCol.TextDisabled : ImGuiCol.Separator);
-                float radius = hovered || source ? 5.8f : validTarget ? 4.8f : 3.8f;
-                draw.AddCircleFilled(point, radius, color);
+                    connected ? ImGuiCol.Text :
+                    ImGuiCol.TextDisabled);
+                uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
+                bool emphasized = source || hovered || validTarget || selectedLink;
+                DrawShortcutSocket(draw, point, shadow, color, connected, emphasized);
 
-                if (zoom >= 0.58f || hovered || source)
+                if (zoom >= 0.58f || emphasized || room.RoomIndex == snapshot.SelectedRoomIndex)
                 {
                     string label = node.NodeIndex.ToString();
                     Num.Vector2 labelSize = ImGui.CalcTextSize(label);
                     bool left = point.X <= (min.X + max.X) * 0.5f;
-                    float x = left ? point.X - labelSize.X - 7f : point.X + 7f;
-                    draw.AddText(new Num.Vector2(x, point.Y - labelSize.Y * 0.5f), color, label);
+                    float offset = emphasized ? 12f : 10f;
+                    float x = left ? point.X - labelSize.X - offset : point.X + offset;
+                    Num.Vector2 labelPos = new(x, point.Y - labelSize.Y * 0.5f);
+                    Num.Vector2 pad = new(3f, 1f);
+                    draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 2f);
+                    draw.AddText(labelPos, color, label);
                 }
             }
         }
@@ -475,6 +505,10 @@ internal static class WorldMapView
                 {
                     linkingRoom = hoveredPort.Room.RoomIndex;
                     linkingNode = hoveredPort.Node.NodeIndex;
+                }
+                else if (!hoveredPort.Free && hoveredPort.Connection != null)
+                {
+                    selectedConnectionId = hoveredPort.Connection.ConnectionId;
                 }
             }
             else if (hoveredEdge?.Connection != null && showConnections)
@@ -532,15 +566,14 @@ internal static class WorldMapView
         EditorMapRoomSnapshot sourceRoom = FindRoom(snapshot, linkingRoom);
         if (sourceRoom == null) return;
         Num.Vector2 source = EndpointPosition(sourceRoom, linkingNode, canvasMin);
-        Num.Vector2 target = hoveredPort != null && hoveredPort.Free && hoveredPort.Room.RoomIndex != linkingRoom
-            ? hoveredPort.Position
-            : mouse;
+        bool validTarget = hoveredPort != null && hoveredPort.Free && hoveredPort.Room.RoomIndex != linkingRoom;
+        Num.Vector2 target = validTarget ? hoveredPort.Position : mouse;
         uint color = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
-        draw.AddLine(source, target, color, 2.8f);
-        string glyph = DirectionGlyph(linkDirection);
-        Num.Vector2 size = ImGui.CalcTextSize(glyph);
-        Num.Vector2 mid = (source + target) * 0.5f;
-        draw.AddText(mid - size * 0.5f, color, glyph);
+        uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
+        DrawConnectionStroke(draw, source, target, shadow, color, 8f, 3.4f, linkDirection, false);
+        DrawShortcutSocket(draw, source, shadow, ImGui.GetColorU32(ImGuiCol.ButtonActive), true, true);
+        if (validTarget)
+            DrawShortcutSocket(draw, target, shadow, color, false, true);
     }
 
     private static EditorMapRoomSnapshot FindHoveredRoom(
@@ -571,22 +604,28 @@ internal static class WorldMapView
     {
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         ExitPortHit best = null;
-        float bestDistanceSq = 100f;
+        float bestDistanceSq = 196f;
         for (int i = 0; i < rooms.Length; i++)
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            bool reveal = linkingRoom >= 0 || showAllPorts || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
-            if (!reveal) continue;
             EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
-            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 24f)) continue;
+            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 30f)) continue;
 
+            bool roomContext = linkingRoom >= 0 || showAllPorts || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
             EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
             for (int n = 0; n < nodes.Length; n++)
             {
                 EditorMapRoomNodeSnapshot node = nodes[n];
                 if (!node.Exit) continue;
+
+                EditorMapConnectionSnapshot endpointConnection = FindConnectionAtEndpoint(snapshot, room.RoomIndex, node.NodeIndex);
+                bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
+                bool connected = endpointConnection != null || node.ConnectedRoomIndex >= 0;
+                bool persistent = showConnections && connected;
+                if (!persistent && !(roomContext && free)) continue;
+
                 Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
                 float distanceSq = Num.Vector2.DistanceSquared(point, mouse);
                 if (distanceSq > bestDistanceSq) continue;
@@ -596,7 +635,8 @@ internal static class WorldMapView
                     Room = room,
                     Node = node,
                     Position = point,
-                    Free = IsEndpointFree(snapshot, room.RoomIndex, node)
+                    Free = free,
+                    Connection = endpointConnection
                 };
             }
         }
@@ -612,12 +652,12 @@ internal static class WorldMapView
         if (!showConnections) return null;
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
         EdgeHit best = null;
-        float thresholdSq = 64f;
+        float thresholdSq = 144f;
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
             if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
-            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 24f)) continue;
+            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 30f)) continue;
             float distanceSq = DistanceToSegmentSquared(mouse, a, b);
             if (distanceSq > thresholdSq || best != null && distanceSq >= best.DistanceSq) continue;
             best = new EdgeHit { Connection = connection, DistanceSq = distanceSq };
@@ -754,6 +794,173 @@ internal static class WorldMapView
                 return false;
         }
         return true;
+    }
+
+    private static EditorMapConnectionSnapshot FindConnectionAtEndpoint(
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        int nodeIndex)
+    {
+        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        for (int i = 0; i < connections.Length; i++)
+        {
+            EditorMapConnectionSnapshot connection = connections[i];
+            if ((connection.FromRoomIndex == roomIndex && connection.FromNodeIndex == nodeIndex) ||
+                (connection.ToRoomIndex == roomIndex && connection.ToNodeIndex == nodeIndex))
+                return connection;
+        }
+        return null;
+    }
+
+    private static void DrawShortcutSocket(
+        ImDrawListPtr draw,
+        Num.Vector2 point,
+        uint shadow,
+        uint color,
+        bool connected,
+        bool emphasized)
+    {
+        float iconScale = zoom < 0.35f ? 0.86f : 1f;
+        float half = (emphasized ? 7.6f : connected ? 6.7f : 5.9f) * iconScale;
+        float halo = half + 2.5f * iconScale;
+        float rounding = Math.Max(2f, 3f * iconScale);
+        Num.Vector2 haloSize = new(halo, halo);
+        Num.Vector2 bodySize = new(half, half);
+
+        draw.AddRectFilled(point - haloSize, point + haloSize, shadow, rounding + 1f);
+        if (connected || emphasized)
+            draw.AddRectFilled(point - bodySize, point + bodySize, color, rounding);
+        else
+            draw.AddRect(point - bodySize, point + bodySize, color, rounding, ImDrawFlags.None, Math.Max(1.6f, 2f * iconScale));
+
+        float holeHalf = (connected ? 3.15f : 2.7f) * iconScale;
+        Num.Vector2 hole = new(holeHalf, holeHalf);
+        draw.AddRectFilled(point - hole, point + hole, shadow, Math.Max(1f, 1.5f * iconScale));
+
+        // Four notches keep the marker readable as a shortcut socket instead of a generic node dot.
+        float notchHalf = Math.Max(0.8f, 1.15f * iconScale);
+        float notchDepth = Math.Max(2f, 2.8f * iconScale);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - notchHalf, point.Y - half - 0.5f),
+            new Num.Vector2(point.X + notchHalf, point.Y - half + notchDepth),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - notchHalf, point.Y + half - notchDepth),
+            new Num.Vector2(point.X + notchHalf, point.Y + half + 0.5f),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X - half - 0.5f, point.Y - notchHalf),
+            new Num.Vector2(point.X - half + notchDepth, point.Y + notchHalf),
+            shadow);
+        draw.AddRectFilled(
+            new Num.Vector2(point.X + half - notchDepth, point.Y - notchHalf),
+            new Num.Vector2(point.X + half + 0.5f, point.Y + notchHalf),
+            shadow);
+
+        if (emphasized)
+            draw.AddRect(point - haloSize, point + haloSize, color, rounding + 1f, ImDrawFlags.None, Math.Max(1.2f, 1.6f * iconScale));
+    }
+
+    private static void DrawConnectionStroke(
+        ImDrawListPtr draw,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        uint shadow,
+        uint core,
+        float shadowThickness,
+        float coreThickness,
+        WorldConnectionDirection direction,
+        bool dashed)
+    {
+        if (dashed)
+        {
+            DrawDashedLine(draw, a, b, shadow, shadowThickness, 10f, 6f);
+            DrawDashedLine(draw, a, b, core, coreThickness, 10f, 6f);
+        }
+        else
+        {
+            draw.AddLine(a, b, shadow, shadowThickness);
+            draw.AddLine(a, b, core, coreThickness);
+        }
+
+        if (Num.Vector2.DistanceSquared(a, b) < 625f) return;
+        DrawDirectionArrows(draw, a, b, direction, shadow, core, coreThickness);
+    }
+
+    private static void DrawDashedLine(
+        ImDrawListPtr draw,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        uint color,
+        float thickness,
+        float dash,
+        float gap)
+    {
+        Num.Vector2 delta = b - a;
+        float length = delta.Length();
+        if (length <= 0.001f) return;
+        Num.Vector2 direction = delta / length;
+        float step = Math.Max(1f, dash + gap);
+        for (float distance = 0f; distance < length; distance += step)
+        {
+            float end = Math.Min(length, distance + dash);
+            draw.AddLine(a + direction * distance, a + direction * end, color, thickness);
+        }
+    }
+
+    private static void DrawDirectionArrows(
+        ImDrawListPtr draw,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        WorldConnectionDirection direction,
+        uint shadow,
+        uint core,
+        float coreThickness)
+    {
+        Num.Vector2 forward = b - a;
+        float size = Math.Max(5.2f, Math.Min(8f, 5.2f + coreThickness * 0.55f));
+        switch (direction)
+        {
+            case WorldConnectionDirection.AToB:
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.62f), forward, shadow, core, size);
+                break;
+            case WorldConnectionDirection.BToA:
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.38f), -forward, shadow, core, size);
+                break;
+            default:
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.40f), forward, shadow, core, size * 0.92f);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.60f), -forward, shadow, core, size * 0.92f);
+                break;
+        }
+    }
+
+    private static void DrawArrowHead(
+        ImDrawListPtr draw,
+        Num.Vector2 tip,
+        Num.Vector2 direction,
+        uint shadow,
+        uint core,
+        float size)
+    {
+        float length = direction.Length();
+        if (length <= 0.001f) return;
+        Num.Vector2 forward = direction / length;
+        Num.Vector2 normal = new(-forward.Y, forward.X);
+        DrawArrowTriangle(draw, tip, forward, normal, shadow, size + 2.3f);
+        DrawArrowTriangle(draw, tip, forward, normal, core, size);
+    }
+
+    private static void DrawArrowTriangle(
+        ImDrawListPtr draw,
+        Num.Vector2 tip,
+        Num.Vector2 forward,
+        Num.Vector2 normal,
+        uint color,
+        float size)
+    {
+        Num.Vector2 baseCenter = tip - forward * size;
+        float wing = size * 0.58f;
+        draw.AddTriangleFilled(tip, baseCenter + normal * wing, baseCenter - normal * wing, color);
     }
 
     private static void SynchronizeRegion(EditorMapPresentationSnapshot snapshot)
