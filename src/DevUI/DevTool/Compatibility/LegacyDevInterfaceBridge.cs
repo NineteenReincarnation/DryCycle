@@ -14,14 +14,16 @@ public enum LegacyControlKind
     Cycler,
     Integer,
     Select,
+    PanelSelect,
     Text,
-    Direction
+    Direction,
+    Color
 }
 
 /// <summary>
 /// Detached description of a standard Rain World DevInterface control belonging to the
 /// selected PlacedObjectRepresentation. The bridge knows only vanilla DevInterface types;
-/// it never checks the owning mod or a third-party framework.
+/// it never checks the owning mod or a third-party framework at compile time.
 /// </summary>
 public sealed class LegacyControlSnapshot
 {
@@ -33,6 +35,8 @@ public sealed class LegacyControlSnapshot
     public float Factor { get; init; }
     public float X { get; init; }
     public float Y { get; init; }
+    public float Z { get; init; }
+    public float W { get; init; }
     public bool CanReset { get; init; }
     public int SelectedIndex { get; init; } = -1;
     public string[] Options { get; init; } = Array.Empty<string>();
@@ -49,6 +53,9 @@ public static class LegacyDevInterfaceBridge
     private const string CyclerActionPrefix = "@cycler|";
     private const string IntegerActionPrefix = "@integer|";
     private const string SelectActionPrefix = "@select|";
+    private const string PanelSelectActionPrefix = "@panel-select|";
+    private const string RegionKitPanelSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton";
+    private const string RegionKitColorSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.RGBSelectButton";
     private static readonly ConditionalWeakTable<ButtonWithSelectPanel, SelectOptionCache> SelectOptions = new();
 
     internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
@@ -73,8 +80,19 @@ public static class LegacyDevInterfaceBridge
     public static string SelectAction(string path, int selectedIndex) =>
         SelectActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
 
+    public static string PanelSelectAction(string path, int selectedIndex) =>
+        PanelSelectActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
+
     internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
         button != null && ReadSelectOptions(button).Length > 0;
+
+    internal static bool CanAdaptPanelSelect(DevUINode node) =>
+        IsExactType(node, RegionKitPanelSelectType) && node is Button &&
+        TryReadStringArrayMember(node, "values", out string[] options) && options.Length > 0 &&
+        TryReadStringMember(node, "actualValue", out _);
+
+    internal static bool CanAdaptColorSelect(DevUINode node) =>
+        IsExactType(node, RegionKitColorSelectType) && node is Button && TryReadColor(node, out _);
 
     internal static bool CanAdaptText(DevUINode node) =>
         node != null && FindTextCommitMethod(node.GetType()) != null && TryReadTextValue(node, out _);
@@ -90,10 +108,13 @@ public static class LegacyDevInterfaceBridge
             return IncrementInteger(owner, target, integerPath, integerChange);
         if (TryParseCompositeAction(path, SelectActionPrefix, out int selectedIndex, out string selectPath))
             return SetSelect(owner, target, selectPath, selectedIndex);
+        if (TryParseCompositeAction(path, PanelSelectActionPrefix, out int panelIndex, out string panelPath))
+            return SetPanelSelect(owner, target, panelPath, panelIndex);
 
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         if (ResolveNode(representation, path) is not Button button || button is ButtonWithSelectPanel) return false;
+        if (CanAdaptPanelSelect(button) || CanAdaptColorSelect(button)) return false;
 
         try
         {
@@ -129,7 +150,6 @@ public static class LegacyDevInterfaceBridge
                 return true;
             }
 
-            // Ordinary vanilla/custom sliders keep their original virtual behavior boundary.
             slider.NubDragged(factor);
             slider.RefreshNubPos(factor);
             slider.Refresh();
@@ -174,11 +194,6 @@ public static class LegacyDevInterfaceBridge
         {
             cycler.currentAlternative = selectedIndex;
             cycler.Text = (cycler.baseName ?? string.Empty) + (cycler.alternatives[selectedIndex] ?? string.Empty);
-
-            // Vanilla Cycler is polling-based: parent panels generally copy currentAlternative
-            // into their data from Update(), rather than receiving a signal. Run that parent
-            // update immediately so history captures the real data mutation in this command.
-            // Suppress the legacy click edge to prevent Cycler.Update from advancing twice.
             SynchronizePollingParent(owner, cycler);
             owner.activePage?.Refresh();
             return true;
@@ -199,8 +214,6 @@ public static class LegacyDevInterfaceBridge
 
         try
         {
-            // Increment is the virtual behavior boundary used by vanilla IntegerControl itself.
-            // Calling it preserves subclass side effects such as palette/application refreshes.
             control.Increment(change);
             control.Refresh();
             owner.activePage?.Refresh();
@@ -224,8 +237,6 @@ public static class LegacyDevInterfaceBridge
 
         try
         {
-            // A real SelectPanel closes before ButtonWithSelectPanel.OnValueChange is invoked.
-            // Mirror that ordering when the hidden backend happens to have an open panel.
             CloseSelectPanel(button);
             button.OnValueChange(options[selectedIndex]);
             SelectOptions.Remove(button);
@@ -235,6 +246,37 @@ public static class LegacyDevInterfaceBridge
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool legacy select mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static bool SetPanelSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        DevUINode node = ResolveNode(representation, path);
+        if (!CanAdaptPanelSelect(node) || node is not Button button) return false;
+        if (!TryReadStringArrayMember(node, "values", out string[] options) ||
+            selectedIndex < 0 || selectedIndex >= options.Length)
+            return false;
+
+        try
+        {
+            string selected = options[selectedIndex] ?? string.Empty;
+            if (!TryWriteMember(node, "actualValue", selected)) return false;
+            button.Text = selected;
+
+            // RegionKit PanelSelectButton normally receives a child-panel signal and forwards one
+            // ButtonClick to the nearest IDevUISignals parent. Reproduce exactly that final semantic
+            // boundary without creating the hidden ItemSelectPanel.
+            PropagateSignal(button, DevUISignalType.ButtonClick, selected);
+            owner.activePage?.Refresh();
+            return TryReadStringMember(node, "actualValue", out string actual) &&
+                   string.Equals(actual, selected, StringComparison.Ordinal);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool RegionKit panel-select mutation failed: " + error.Message);
             return false;
         }
     }
@@ -251,9 +293,6 @@ public static class LegacyDevInterfaceBridge
 
         try
         {
-            // RegionKit StringControl validates through TrySetValue and only emits StringFinish at
-            // the end of a transaction. Calling that exact protected boundary preserves validators,
-            // OnValueChanged handlers and parent IDevUISignals without linking RegionKit directly.
             commit.Invoke(node, new object[] { value ?? string.Empty, true });
             owner.activePage?.Refresh();
             return TryReadTextValue(node, out string actual) &&
@@ -280,10 +319,6 @@ public static class LegacyDevInterfaceBridge
             direction = direction.sqrMagnitude > 0.000001f ? direction.normalized : Vector2.up;
             directionProperty.SetValue(directionTarget, direction, null);
             node.Refresh();
-
-            // RegionKit DirectionPicker consumers (for example GreenSparksDir) poll Dir from the
-            // containing representation during Update. Synchronize that parent immediately so the
-            // command/history transaction sees the real PlacedObject data change this frame.
             SynchronizePollingParent(owner, node);
             owner.activePage?.Refresh();
             return TryReadDirection(node, out Vector2 actual) && Vector2.Dot(actual, direction) > 0.999f;
@@ -291,6 +326,39 @@ public static class LegacyDevInterfaceBridge
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool legacy direction mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static bool SetColor(
+        global::DevInterface.DevUI owner,
+        PlacedObject target,
+        string path,
+        float r,
+        float g,
+        float b,
+        float a)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        DevUINode node = ResolveNode(representation, path);
+        if (!CanAdaptColorSelect(node) || node is not Button button) return false;
+
+        try
+        {
+            Color color = new Color(Mathf.Clamp01(r), Mathf.Clamp01(g), Mathf.Clamp01(b), Mathf.Clamp01(a));
+            if (!TryWriteMember(node, "actualValue", color)) return false;
+            button.Text = ColorUtility.ToHtmlStringRGB(color);
+
+            // RGBSelectButton forwards a ButtonClick after its RGBSelectPanel has committed the
+            // color. Emit that same final signal directly so its parent updates placed-object data.
+            PropagateSignal(button, DevUISignalType.ButtonClick, string.Empty);
+            owner.activePage?.Refresh();
+            return TryReadColor(node, out Color actual) && ColorDistanceSquared(actual, color) < 0.000001f;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool RegionKit color-select mutation failed: " + error.Message);
             return false;
         }
     }
@@ -305,8 +373,6 @@ public static class LegacyDevInterfaceBridge
             if (node == null) continue;
             string path = string.IsNullOrEmpty(parentPath) ? i.ToString() : parentPath + "." + i;
 
-            // These are composite controls. Capture each as one semantic control and never leak
-            // their implementation labels, arrow buttons or slider nub into the new inspector.
             if (node is Slider slider)
             {
                 output.Add(new LegacyControlSnapshot
@@ -370,13 +436,45 @@ public static class LegacyDevInterfaceBridge
                 continue;
             }
 
+            if (CanAdaptPanelSelect(node) && TryReadStringArrayMember(node, "values", out string[] panelOptions) &&
+                TryReadStringMember(node, "actualValue", out string panelValue))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = SemanticTitle(node, "Select"),
+                    Kind = LegacyControlKind.PanelSelect,
+                    ValueText = panelValue,
+                    SelectedIndex = FindOption(panelOptions, panelValue),
+                    Options = panelOptions
+                });
+                continue;
+            }
+
+            if (CanAdaptColorSelect(node) && TryReadColor(node, out Color color))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = SemanticTitle(node, "Color"),
+                    Kind = LegacyControlKind.Color,
+                    X = color.r,
+                    Y = color.g,
+                    Z = color.b,
+                    W = color.a
+                });
+                continue;
+            }
+
             if (CanAdaptDirection(node) && TryReadDirection(node, out Vector2 direction))
             {
                 output.Add(new LegacyControlSnapshot
                 {
                     Path = path,
                     Id = node.IDstring ?? string.Empty,
-                    Label = DirectionTitle(node),
+                    Label = SemanticTitle(node, "Direction"),
                     Kind = LegacyControlKind.Direction,
                     X = direction.x,
                     Y = direction.y
@@ -390,7 +488,7 @@ public static class LegacyDevInterfaceBridge
                 {
                     Path = path,
                     Id = node.IDstring ?? string.Empty,
-                    Label = TextTitle(node),
+                    Label = SemanticTitle(node, "Text"),
                     Kind = LegacyControlKind.Text,
                     ValueText = textValue
                 });
@@ -440,9 +538,6 @@ public static class LegacyDevInterfaceBridge
     {
         try
         {
-            // RegionKit GenericSlider stores the semantic value/range separately and hides the
-            // vanilla SliderStartCoord. Reading those members avoids showing a wrong factor before
-            // the user even edits the control.
             if (TryReadNumericMember(slider, "actualValue", out float actual) &&
                 TryReadNumericMember(slider, "minValue", out float min) &&
                 TryReadNumericMember(slider, "maxValue", out float max) &&
@@ -478,17 +573,8 @@ public static class LegacyDevInterfaceBridge
     {
         value = 0f;
         if (instance == null || string.IsNullOrEmpty(name)) return false;
-
-        Type type = instance.GetType();
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        FieldInfo field = type.GetField(name, flags);
-        if (field != null && TryConvertFloat(field.GetValue(instance), out value)) return true;
-
-        PropertyInfo property = type.GetProperty(name, flags);
-        if (property != null && property.GetIndexParameters().Length == 0 && property.CanRead &&
-            TryConvertFloat(property.GetValue(instance, null), out value)) return true;
-
-        return false;
+        object raw = ReadMember(instance, name);
+        return TryConvertFloat(raw, out value);
     }
 
     private static bool TryConvertFloat(object raw, out float value)
@@ -523,28 +609,64 @@ public static class LegacyDevInterfaceBridge
         return null;
     }
 
-    private static bool TryReadTextValue(object instance, out string value)
+    private static bool TryReadTextValue(object instance, out string value) =>
+        TryReadStringMember(instance, "actualValue", out value);
+
+    private static bool TryReadStringMember(object instance, string name, out string value)
     {
         value = string.Empty;
-        if (instance == null) return false;
+        object raw = ReadMember(instance, name);
+        if (raw is not string text) return false;
+        value = text;
+        return true;
+    }
 
-        Type type = instance.GetType();
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        FieldInfo field = type.GetField("actualValue", flags);
-        if (field != null && field.FieldType == typeof(string))
+    private static bool TryReadStringArrayMember(object instance, string name, out string[] value)
+    {
+        value = Array.Empty<string>();
+        object raw = ReadMember(instance, name);
+        if (raw is not string[] strings) return false;
+        value = CloneOptions(strings);
+        return true;
+    }
+
+    private static bool TryReadColor(object instance, out Color color)
+    {
+        color = Color.white;
+        object raw = ReadMember(instance, "actualValue");
+        if (raw is not Color value) return false;
+        color = value;
+        return true;
+    }
+
+    private static object ReadMember(object instance, string name)
+    {
+        if (instance == null || string.IsNullOrEmpty(name)) return null;
+        FieldInfo field = FindFieldInHierarchy(instance.GetType(), name);
+        if (field != null) return field.GetValue(instance);
+        PropertyInfo property = FindPropertyInHierarchy(instance.GetType(), name);
+        if (property != null && property.GetIndexParameters().Length == 0 && property.CanRead)
+            return property.GetValue(instance, null);
+        return null;
+    }
+
+    private static bool TryWriteMember(object instance, string name, object value)
+    {
+        if (instance == null || string.IsNullOrEmpty(name)) return false;
+        FieldInfo field = FindFieldInHierarchy(instance.GetType(), name);
+        if (field != null && !field.IsInitOnly && (value == null || field.FieldType.IsInstanceOfType(value)))
         {
-            value = field.GetValue(instance) as string ?? string.Empty;
+            field.SetValue(instance, value);
             return true;
         }
 
-        PropertyInfo property = type.GetProperty("actualValue", flags);
-        if (property != null && property.PropertyType == typeof(string) &&
-            property.GetIndexParameters().Length == 0 && property.CanRead)
+        PropertyInfo property = FindPropertyInHierarchy(instance.GetType(), name);
+        if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0 &&
+            (value == null || property.PropertyType.IsInstanceOfType(value)))
         {
-            value = property.GetValue(instance, null) as string ?? string.Empty;
+            property.SetValue(instance, value, null);
             return true;
         }
-
         return false;
     }
 
@@ -554,14 +676,11 @@ public static class LegacyDevInterfaceBridge
         if (instance == null) return false;
 
         PropertyInfo property = FindPropertyInHierarchy(instance.GetType(), "Dir");
-        if (property != null && property.PropertyType == typeof(Vector2) && property.CanRead)
+        if (property != null && property.PropertyType == typeof(Vector2) && property.CanRead &&
+            property.GetValue(instance, null) is Vector2 vector)
         {
-            object value = property.GetValue(instance, null);
-            if (value is Vector2 vector)
-            {
-                direction = vector.sqrMagnitude > 0.000001f ? vector.normalized : Vector2.up;
-                return true;
-            }
+            direction = vector.sqrMagnitude > 0.000001f ? vector.normalized : Vector2.up;
+            return true;
         }
 
         FieldInfo field = FindFieldInHierarchy(instance.GetType(), "Dir");
@@ -629,17 +748,13 @@ public static class LegacyDevInterfaceBridge
         return null;
     }
 
-    private static string TextTitle(DevUINode node)
-    {
-        string id = node?.IDstring ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(id)) return "Text";
-        return id.Replace('_', ' ').Trim();
-    }
+    private static bool IsExactType(object instance, string fullTypeName) =>
+        instance != null && string.Equals(instance.GetType().FullName, fullTypeName, StringComparison.Ordinal);
 
-    private static string DirectionTitle(DevUINode node)
+    private static string SemanticTitle(DevUINode node, string fallback)
     {
         string id = node?.IDstring ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(id)) return "Direction";
+        if (string.IsNullOrWhiteSpace(id)) return fallback;
         return id.Replace('_', ' ').Trim();
     }
 
@@ -683,12 +798,7 @@ public static class LegacyDevInterfaceBridge
         catch { return string.Empty; }
     }
 
-    private static string SelectTitle(ButtonWithSelectPanel button)
-    {
-        string id = button?.IDstring ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(id)) return "Select";
-        return id.Replace('_', ' ').Trim();
-    }
+    private static string SelectTitle(ButtonWithSelectPanel button) => SemanticTitle(button, "Select");
 
     private static string[] ReadSelectOptions(ButtonWithSelectPanel button)
     {
@@ -776,6 +886,18 @@ public static class LegacyDevInterfaceBridge
         return !string.IsNullOrWhiteSpace(path);
     }
 
+    private static void PropagateSignal(DevUINode source, DevUISignalType type, string message)
+    {
+        DevUINode current = source;
+        while (current != null)
+        {
+            current = current.parentNode;
+            if (current is not IDevUISignals signals) continue;
+            signals.Signal(type, source, message ?? string.Empty);
+            return;
+        }
+    }
+
     private static void SynchronizePollingParent(global::DevInterface.DevUI owner, DevUINode node)
     {
         if (owner == null || node?.parentNode == null) return;
@@ -789,6 +911,15 @@ public static class LegacyDevInterfaceBridge
         {
             owner.mouseClick = oldMouseClick;
         }
+    }
+
+    private static float ColorDistanceSquared(Color a, Color b)
+    {
+        float dr = a.r - b.r;
+        float dg = a.g - b.g;
+        float db = a.b - b.b;
+        float da = a.a - b.a;
+        return dr * dr + dg * dg + db * db + da * da;
     }
 
     private static PlacedObjectRepresentation FindRepresentation(ObjectsPage page, PlacedObject target)
