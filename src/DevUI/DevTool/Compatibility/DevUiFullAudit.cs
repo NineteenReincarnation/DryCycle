@@ -16,9 +16,21 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// bridge cannot drive. Active pages are still scanned every frame by the presentation controller;
 /// inactive instantiated pages are sampled periodically so a developer does not have to manually
 /// open every tab just to discover missing protocol families.
+///
+/// The second half of the audit validates the generic mirror itself: every control that advertises
+/// a supported structural protocol must actually produce a <see cref="LegacyControlSnapshot"/> at
+/// the same tree path. This catches false-positive coverage where a protocol was classified as
+/// supported but silently disappeared from the rebuilt UI projection.
 /// </summary>
 internal static class DevUiFullAudit
 {
+    private sealed class MirrorExpectation
+    {
+        internal string Path;
+        internal string TypeName;
+        internal string Id;
+    }
+
     private const int FullScanIntervalFrames = 120;
     private const int EnumerableItemLimit = 128;
     private const int LoggedGapLimit = 32;
@@ -26,7 +38,19 @@ internal static class DevUiFullAudit
     private static int lastFullScanFrame = int.MinValue / 2;
     private static Page lastActivePage;
     private static string lastGapFingerprint = string.Empty;
+    private static string lastMirrorFingerprint = string.Empty;
     private static int lastPageCount = -1;
+
+    static DevUiFullAudit()
+    {
+        // World-space handles are intentionally retained as live scene gizmos rather than rebuilt
+        // as screen-space ImGui widgets. Treat the entire Handle hierarchy as one generic protocol;
+        // subclasses from vanilla or any mod inherit this behavior without per-type registrations.
+        DevUiMigrationCoverage.RegisterAssignable(
+            typeof(Handle),
+            DevUiMigrationState.GenericAdapter,
+            "Generic world-space Handle protocol retained as live scene gizmo");
+    }
 
     /// <summary>
     /// Entry point used by the legacy presentation layer. Owner discovery is structural so the
@@ -49,6 +73,8 @@ internal static class DevUiFullAudit
 
         // Conservative fallback for an unexpected DevInterface build: still audit the active tree.
         DevUiMigrationCoverage.Observe(activePage);
+        List<string> mirrorGaps = ValidateMirrors(new[] { activePage });
+        LogAuditResult(1, DevUiMigrationCoverage.Observed, mirrorGaps);
     }
 
     internal static void ObserveAll(global::DevInterface.DevUI owner)
@@ -75,7 +101,8 @@ internal static class DevUiFullAudit
         if (active != null)
             DevUiMigrationCoverage.Observe(active);
 
-        LogAuditResult(pages.Count, DevUiMigrationCoverage.Observed);
+        List<string> mirrorGaps = ValidateMirrors(pages);
+        LogAuditResult(pages.Count, DevUiMigrationCoverage.Observed, mirrorGaps);
     }
 
     internal static void Reset()
@@ -83,6 +110,7 @@ internal static class DevUiFullAudit
         lastFullScanFrame = int.MinValue / 2;
         lastActivePage = null;
         lastGapFingerprint = string.Empty;
+        lastMirrorFingerprint = string.Empty;
         lastPageCount = -1;
     }
 
@@ -219,9 +247,85 @@ internal static class DevUiFullAudit
         }
     }
 
-    private static void LogAuditResult(int pageCount, DevUiMigrationCoverageSnapshot snapshot)
+    private static List<string> ValidateMirrors(IEnumerable<Page> pages)
+    {
+        List<string> failures = new();
+        if (pages == null) return failures;
+
+        foreach (Page page in pages)
+        {
+            if (page == null) continue;
+
+            LegacyControlSnapshot[] mirrored;
+            try { mirrored = LegacyDevInterfaceBridge.CaptureRoot(page); }
+            catch (Exception error)
+            {
+                failures.Add(
+                    (page.GetType().FullName ?? page.GetType().Name) + "|<capture>|" + error.GetType().Name + ": " + error.Message);
+                continue;
+            }
+
+            HashSet<string> mirroredPaths = new(StringComparer.Ordinal);
+            for (int i = 0; i < mirrored.Length; i++)
+            {
+                string path = mirrored[i]?.Path;
+                if (!string.IsNullOrWhiteSpace(path)) mirroredPaths.Add(path);
+            }
+
+            List<MirrorExpectation> expected = new();
+            CollectMirrorExpectations(page, string.Empty, expected);
+            for (int i = 0; i < expected.Count; i++)
+            {
+                MirrorExpectation item = expected[i];
+                if (mirroredPaths.Contains(item.Path)) continue;
+                failures.Add(
+                    (page.GetType().FullName ?? page.GetType().Name) + "|" + item.Path + "|" +
+                    item.TypeName + "|" + item.Id);
+            }
+        }
+
+        failures.Sort(StringComparer.Ordinal);
+        return failures;
+    }
+
+    private static void CollectMirrorExpectations(
+        DevUINode parent,
+        string parentPath,
+        List<MirrorExpectation> output)
+    {
+        if (parent?.subNodes == null || output == null) return;
+
+        for (int i = 0; i < parent.subNodes.Count; i++)
+        {
+            DevUINode node = parent.subNodes[i];
+            if (node == null) continue;
+            string path = string.IsNullOrEmpty(parentPath) ? i.ToString() : parentPath + "." + i;
+
+            if (LegacyDevInterfaceBridge.CanAdaptNode(node))
+            {
+                output.Add(new MirrorExpectation
+                {
+                    Path = path,
+                    TypeName = node.GetType().FullName ?? node.GetType().Name,
+                    Id = node.IDstring ?? string.Empty
+                });
+            }
+
+            // Atomic controls intentionally hide presentation-only child nodes such as labels/nubs.
+            // Composite Buttons remain recursive so any dynamically-opened custom panel is audited.
+            if (LegacyDevInterfaceBridge.IsAtomicAdaptedControl(node)) continue;
+            CollectMirrorExpectations(node, path, output);
+        }
+    }
+
+    private static void LogAuditResult(
+        int pageCount,
+        DevUiMigrationCoverageSnapshot snapshot,
+        List<string> mirrorGaps)
     {
         snapshot ??= DevUiMigrationCoverageSnapshot.Empty;
+        mirrorGaps ??= new List<string>();
+
         List<string> gaps = new();
         DevUiMigrationCoverageEntry[] entries = snapshot.Entries ?? Array.Empty<DevUiMigrationCoverageEntry>();
         for (int i = 0; i < entries.Length; i++)
@@ -235,16 +339,20 @@ internal static class DevUiFullAudit
         gaps.Sort(StringComparer.Ordinal);
 
         string fingerprint = string.Join("\n", gaps);
-        if (pageCount == lastPageCount && string.Equals(fingerprint, lastGapFingerprint, StringComparison.Ordinal))
+        string mirrorFingerprint = string.Join("\n", mirrorGaps);
+        if (pageCount == lastPageCount &&
+            string.Equals(fingerprint, lastGapFingerprint, StringComparison.Ordinal) &&
+            string.Equals(mirrorFingerprint, lastMirrorFingerprint, StringComparison.Ordinal))
             return;
 
         lastPageCount = pageCount;
         lastGapFingerprint = fingerprint;
+        lastMirrorFingerprint = mirrorFingerprint;
 
         Plugin.Logger?.LogInfo(
             "DevTool full generic audit scanned " + pageCount + " instantiated page(s); " +
             snapshot.TotalTypeCount + " interactive obligations observed, " +
-            snapshot.UnmappedTypeCount + " protocol gap(s) remain.");
+            snapshot.UnmappedTypeCount + " protocol gap(s), " + mirrorGaps.Count + " mirror gap(s).");
 
         int shown = Math.Min(LoggedGapLimit, gaps.Count);
         for (int i = 0; i < shown; i++)
@@ -252,5 +360,12 @@ internal static class DevUiFullAudit
         if (gaps.Count > shown)
             Plugin.Logger?.LogWarning(
                 "[DevUI protocol gap] " + (gaps.Count - shown) + " additional gap(s) omitted from this log batch.");
+
+        int mirrorShown = Math.Min(LoggedGapLimit, mirrorGaps.Count);
+        for (int i = 0; i < mirrorShown; i++)
+            Plugin.Logger?.LogWarning("[DevUI mirror gap] " + mirrorGaps[i]);
+        if (mirrorGaps.Count > mirrorShown)
+            Plugin.Logger?.LogWarning(
+                "[DevUI mirror gap] " + (mirrorGaps.Count - mirrorShown) + " additional gap(s) omitted from this log batch.");
     }
 }
