@@ -44,6 +44,7 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
     private static readonly Num.Vector4 TertiaryGoldRelief = new(0.25f, 0.16f, 0.06f, 0.64f);
 
+    private const float PrimaryPaneTitleScale = 1.82f;
     private const float InspectorPaneBodyScale = 1.15f;
     private static float paneBodyScale = 1f;
 
@@ -55,7 +56,7 @@ internal static class DevToolWidgets
         if (primary)
         {
             paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
-            DrawFlowingTitle(text, FlowTitleLevel.Primary, 1.55f * restoreScale, 2.0f, paneBodyScale);
+            DrawFlowingTitle(text, FlowTitleLevel.Primary, PrimaryPaneTitleScale * restoreScale, 2.0f, paneBodyScale);
             ImGui.Spacing();
             return;
         }
@@ -91,7 +92,7 @@ internal static class DevToolWidgets
             paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
             titleRestoreScale = paneBodyScale;
             level = FlowTitleLevel.Primary;
-            fontScale = 1.55f * restoreScale;
+            fontScale = PrimaryPaneTitleScale * restoreScale;
             stroke = 2.0f;
         }
         else
