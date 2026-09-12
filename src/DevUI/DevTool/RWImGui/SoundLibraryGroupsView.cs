@@ -15,6 +15,7 @@ internal static class SoundLibraryGroupsView
     private static string groupIdEdit = string.Empty;
     private static string groupNameEdit = string.Empty;
     private static string targetGroupId = string.Empty;
+    private static string folderPickerError = string.Empty;
     private const float BrowserBodyFontScale = 1.22f;
 
     internal static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
@@ -85,6 +86,7 @@ internal static class SoundLibraryGroupsView
     {
         SoundGroupLibrarySnapshot library = SoundGroupLibrary.Current;
         SynchronizeGroupPath(library);
+        ConsumeFolderPickerResult();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("本地音效组库", "LOCAL SOUND GROUP LIBRARY"), BrowserBodyFontScale);
         DevToolWidgets.FullWidthInputText(
@@ -92,31 +94,54 @@ internal static class SoundLibraryGroupsView
             "SoundGroupLibraryFolder",
             ref groupPathEdit,
             512);
-
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("使用此目录", "Use Folder"),
-                "SoundGroupUseFolder",
-                DevToolButtonTone.Primary))
+        if (ImGui.IsItemDeactivatedAfterEdit())
         {
-            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                SoundEditorCommandKind.SetGroupDirectory,
-                text: groupPathEdit));
+            folderPickerError = string.Empty;
+            SetGroupDirectory(groupPathEdit);
         }
+
+        bool choosingFolder = NativeFolderPicker.IsPending;
+        string chooseLabel = choosingFolder
+            ? DevToolUiSettings.T("选择中...", "Choosing...")
+            : DevToolUiSettings.T("选择文件夹", "Choose Folder");
+        if (choosingFolder) ImGui.BeginDisabled();
+        if (DevToolWidgets.ActionButton(
+                chooseLabel,
+                "SoundGroupChooseFolder",
+                DevToolButtonTone.Normal))
+        {
+            folderPickerError = string.Empty;
+            NativeFolderPicker.Request(
+                groupPathEdit,
+                DevToolUiSettings.T("选择音效组库文件夹", "Select Sound Group Library Folder"));
+        }
+        if (choosingFolder) ImGui.EndDisabled();
+
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("恢复默认", "Default")));
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("恢复默认", "Default"),
                 "SoundGroupDefaultFolder",
-                DevToolButtonTone.Subtle))
+                DevToolButtonTone.Normal))
         {
+            folderPickerError = string.Empty;
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.ResetGroupDirectory));
         }
+
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("重新读取", "Reload")));
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("重新读取", "Reload"),
                 "SoundGroupReload",
-                DevToolButtonTone.Subtle))
+                DevToolButtonTone.Normal))
         {
+            folderPickerError = string.Empty;
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.ReloadGroups));
+        }
+
+        if (!string.IsNullOrWhiteSpace(folderPickerError))
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Num.Vector4(1f, 0.58f, 0.36f, 1f));
+            ImGui.TextWrapped(DevToolUiSettings.T("文件夹选择器：", "Folder picker: ") + folderPickerError);
+            ImGui.PopStyleColor();
         }
 
         DevToolWidgets.MutedText(
@@ -296,6 +321,28 @@ internal static class SoundLibraryGroupsView
         }
 
         ImGui.Spacing();
+    }
+
+    private static void ConsumeFolderPickerResult()
+    {
+        if (!NativeFolderPicker.TryConsume(
+                out string selectedPath,
+                out string pickerError,
+                out bool wasCancelled))
+            return;
+
+        folderPickerError = pickerError ?? string.Empty;
+        if (wasCancelled || string.IsNullOrWhiteSpace(selectedPath)) return;
+
+        groupPathEdit = selectedPath.Trim();
+        SetGroupDirectory(groupPathEdit);
+    }
+
+    private static void SetGroupDirectory(string directory)
+    {
+        SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+            SoundEditorCommandKind.SetGroupDirectory,
+            text: directory?.Trim() ?? string.Empty));
     }
 
     private static void SynchronizeGroupPath(SoundGroupLibrarySnapshot library)
