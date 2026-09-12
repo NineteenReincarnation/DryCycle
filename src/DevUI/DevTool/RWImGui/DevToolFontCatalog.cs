@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using BepInEx.Logging;
 using ImGuiNET;
 
@@ -32,6 +33,7 @@ internal static unsafe class DevToolFontCatalog
     private static bool registrationAttempted;
     private static bool registrationSucceeded;
     private static string registrationMessage = "尚未尝试注册本地字体。";
+    private static IntPtr extendedChineseGlyphRanges;
 
     // Font files and the ImGui atlas are stable after startup. The settings window is rendered every
     // frame, so never repeat filesystem enumeration or glyph probing there.
@@ -106,7 +108,7 @@ internal static unsafe class DevToolFontCatalog
             string[] files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly);
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
 
-            IntPtr glyphRanges = io.Fonts.GetGlyphRangesChineseSimplifiedCommon();
+            IntPtr glyphRanges = GetExtendedChineseGlyphRanges(io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
             int added = 0;
             int eligibleFiles = 0;
 
@@ -191,6 +193,47 @@ internal static unsafe class DevToolFontCatalog
             log?.LogWarning("DryCycle DevTool local font registration failed safely: " + error);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Builds one persistent ImGui glyph-range table by extending the Chinese UI range with the
+    /// symbols used by the DevTool itself. GetGlyphRangesChineseSimplifiedCommon intentionally
+    /// keeps the atlas small and does not include arrows/geometric/misc symbols, which previously
+    /// made labels such as ↔ / → / ←, warning signs and room markers render as '?'.
+    /// </summary>
+    private static IntPtr GetExtendedChineseGlyphRanges(IntPtr baseRanges)
+    {
+        if (extendedChineseGlyphRanges != IntPtr.Zero) return extendedChineseGlyphRanges;
+        if (baseRanges == IntPtr.Zero) return IntPtr.Zero;
+
+        ushort* source = (ushort*)baseRanges.ToPointer();
+        int baseValueCount = 0;
+        while (source[baseValueCount] != 0)
+        {
+            baseValueCount += 2;
+            if (baseValueCount > 4096) return baseRanges;
+        }
+
+        // ImGui range format is inclusive [start, end] pairs followed by zero.
+        // Keep this bounded to UI-relevant BMP blocks instead of pulling an entire Unicode font.
+        ushort[] extraRanges =
+        {
+            0x2000, 0x206F, // General Punctuation: bullets, ellipsis, separators.
+            0x2190, 0x21FF, // Arrows: ← ↑ → ↓ ↔ and related direction symbols.
+            0x25A0, 0x25FF, // Geometric Shapes: ● ◆ □ etc.
+            0x2600, 0x26FF, // Misc Symbols: ⚠ and status symbols.
+            0x2700, 0x27BF, // Dingbats: check/cross/status marks.
+            0x2B00, 0x2BFF  // Supplemental arrows and UI markers.
+        };
+
+        int valueCount = baseValueCount + extraRanges.Length + 1;
+        extendedChineseGlyphRanges = Marshal.AllocHGlobal(valueCount * sizeof(ushort));
+        ushort* target = (ushort*)extendedChineseGlyphRanges.ToPointer();
+
+        for (int i = 0; i < baseValueCount; i++) target[i] = source[i];
+        for (int i = 0; i < extraRanges.Length; i++) target[baseValueCount + i] = extraRanges[i];
+        target[valueCount - 1] = 0;
+        return extendedChineseGlyphRanges;
     }
 
     /// <summary>
