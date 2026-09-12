@@ -179,6 +179,6 @@ internal static class MigrationCoverageWindow
         int plus = value.LastIndexOf('+');
         int dot = value.LastIndexOf('.');
         int split = Math.Max(plus, dot);
-        return split >= 0 && split + 1 < value.Length ? value[(split + 1)..] : value;
+        return split >= 0 && split + 1 < value.Length ? value.Substring(split + 1) : value;
     }
 }
