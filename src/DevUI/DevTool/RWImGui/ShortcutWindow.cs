@@ -26,19 +26,22 @@ internal static class ShortcutWindow
     private static readonly Num.Vector4 ModeText = new(0.66f, 0.84f, 1.00f, 1f);
 
     private static Tab tab;
+    private static long cachedRegistryRevision = -1;
+    private static EditorToolMode cachedMode;
+    private static bool cachedModeValid;
+    private static DevToolShortcutDescriptor[] cachedCommon = Array.Empty<DevToolShortcutDescriptor>();
+    private static DevToolShortcutDescriptor[] cachedCurrentMode = Array.Empty<DevToolShortcutDescriptor>();
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         if (snapshot == null || !snapshot.Available) return;
+        EnsureShortcutCache(snapshot.ToolMode);
 
         float scale = Math.Max(0.80f, Math.Min(2.4f, DevToolUiSettings.UiScale));
         float width = DevToolUiSettings.IsChinese
             ? Math.Min(500f, Math.Max(390f, display.X * 0.255f))
             : Math.Min(540f, Math.Max(420f, display.X * 0.275f));
 
-        // Keep the lower-left utility clear of the default Tools window on common 900p layouts.
-        // The content child scrolls, so the window does not need to become tall enough to compete
-        // with the room viewport merely because the common catalog grows over time.
         float height = Math.Min(380f, Math.Max(280f, display.Y * 0.34f));
         width = Math.Min(width * Math.Min(1.12f, scale), Math.Max(300f, display.X - 16f));
         height = Math.Min(height * Math.Min(1.06f, scale), Math.Max(220f, display.Y - 16f));
@@ -77,7 +80,7 @@ internal static class ShortcutWindow
             ImGui.SetWindowFontScale(bodyScale);
             if (tab == Tab.Common)
                 DrawShortcutList(
-                    DevToolShortcutRegistry.GetCommon(),
+                    cachedCommon,
                     DevToolUiSettings.T("通用操作", "GLOBAL OPERATIONS"),
                     DevToolUiSettings.T("在所有 DevTool 模式下可用", "Available across DevTool modes"));
             else
@@ -88,6 +91,25 @@ internal static class ShortcutWindow
         ImGui.PopStyleVar(2);
         ImGui.PopStyleColor(2);
         ImGui.End();
+    }
+
+    private static void EnsureShortcutCache(EditorToolMode mode)
+    {
+        long revision = DevToolShortcutRegistry.Revision;
+        if (revision != cachedRegistryRevision)
+        {
+            cachedRegistryRevision = revision;
+            cachedCommon = DevToolShortcutRegistry.GetCommon();
+            cachedCurrentMode = DevToolShortcutRegistry.GetMode(mode);
+            cachedMode = mode;
+            cachedModeValid = true;
+            return;
+        }
+
+        if (cachedModeValid && cachedMode == mode) return;
+        cachedCurrentMode = DevToolShortcutRegistry.GetMode(mode);
+        cachedMode = mode;
+        cachedModeValid = true;
     }
 
     private static void DrawTabs(EditorPresentationSnapshot snapshot)
@@ -134,7 +156,7 @@ internal static class ShortcutWindow
 
     private static void DrawCurrentMode(EditorPresentationSnapshot snapshot)
     {
-        DevToolShortcutDescriptor[] shortcuts = DevToolShortcutRegistry.GetMode(snapshot.ToolMode);
+        DevToolShortcutDescriptor[] shortcuts = cachedCurrentMode;
         string mode = DevToolUiSettings.ToolMode(snapshot.ToolMode);
 
         ImGui.TextColored(ModeText, mode);
