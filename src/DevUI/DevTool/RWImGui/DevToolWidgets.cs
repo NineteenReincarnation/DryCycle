@@ -56,6 +56,11 @@ internal static class DevToolWidgets
     private const float InspectorPaneBodyScaleChinese = 1.28f;
     private static float paneBodyScale = 1f;
 
+    // RoomSettingsView historically exposed a button literally named "Switch" for the Effect
+    // headers. Preserve its existing toggle command contract, but present the action users actually
+    // get: collapse all on the first press, expand all on the next press.
+    private static bool roomEffectsExpanded = true;
+
     internal static void PaneTitle(string text, float restoreScale = 1f)
     {
         bool primary = IsPrimaryPaneTitle(text);
@@ -87,6 +92,14 @@ internal static class DevToolWidgets
         float restoreScale = 1f,
         DevToolButtonTone tone = DevToolButtonTone.Subtle)
     {
+        bool roomEffectToggle = string.Equals(actionId, "RoomEffectsSwitchAll", StringComparison.Ordinal);
+        if (roomEffectToggle)
+        {
+            actionLabel = roomEffectsExpanded
+                ? DevToolUiSettings.T("折叠所有", "Collapse All")
+                : DevToolUiSettings.T("展开所有", "Expand All");
+        }
+
         bool primary = IsPrimaryPaneTitle(text);
         ImGui.Spacing();
 
@@ -123,6 +136,8 @@ internal static class DevToolWidgets
         if (actionX > rowStartX)
             ImGui.SetCursorPosX(actionX);
         bool pressed = ActionButton(actionLabel, actionId, tone);
+        if (pressed && roomEffectToggle)
+            roomEffectsExpanded = !roomEffectsExpanded;
 
         if (primary)
         {
