@@ -14,6 +14,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Unified command / UI / status surface for the rebuilt DevTool.
 /// This replaces the old three-window chrome with one readable control center so
 /// the room remains visible while the developer can still understand state at a glance.
+/// Shortcut discovery is intentionally delegated to ShortcutWindow.
 /// </summary>
 internal static class ControlCenterWindow
 {
@@ -71,8 +72,6 @@ internal static class ControlCenterWindow
             ImGui.Separator();
             ImGui.Spacing();
             DrawInformationRow(snapshot);
-            ImGui.Spacing();
-            DrawShortcutFooter();
         }
 
         ImGui.End();
@@ -123,7 +122,7 @@ internal static class ControlCenterWindow
             : DevToolUiSettings.T("重做 ", "Redo ") + snapshot.RedoLabel;
 
         if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("保存  Ctrl+S", "Save  Ctrl+S"),
+                DevToolUiSettings.T("保存", "Save"),
                 "ControlCenterSave",
                 DevToolButtonTone.Primary))
             Send(EditorUiCommandKind.Save);
@@ -143,8 +142,8 @@ internal static class ControlCenterWindow
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 snapshot.FocusMode
-                    ? DevToolUiSettings.T("退出专注  Tab", "Exit Focus  Tab")
-                    : DevToolUiSettings.T("专注  Tab", "Focus  Tab"),
+                    ? DevToolUiSettings.T("退出专注", "Exit Focus")
+                    : DevToolUiSettings.T("专注", "Focus"),
                 "ControlCenterFocus",
                 snapshot.FocusMode ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
             Send(EditorUiCommandKind.ToggleFocus);
@@ -251,17 +250,6 @@ internal static class ControlCenterWindow
         DevToolWidgets.MutedText(key);
         ImGui.SameLine(CardKeyColumn());
         ImGui.TextUnformatted(string.IsNullOrEmpty(value) ? "-" : value);
-    }
-
-    private static void DrawShortcutFooter()
-    {
-        float previousScale = 1f;
-        ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.08f : 1.04f);
-        string text = DevToolUiSettings.T(
-            "Shift+左键拖框  多选窗口   ·   Ctrl+G  编组   ·   拖动组内标题栏  整组移动",
-            "Shift+left drag  Multi-select   ·   Ctrl+G  Group   ·   Drag grouped title  Move group");
-        ImGui.TextDisabled(text);
-        ImGui.SetWindowFontScale(previousScale);
     }
 
     private static void ApplyCardBodyScale()
