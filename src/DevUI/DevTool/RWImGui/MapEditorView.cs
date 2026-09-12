@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.World;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -143,7 +144,7 @@ internal static class MapEditorView
                 MapEditorCommandKind.SetRoomSubregion,
                 roomIndex: room.RoomIndex,
                 text: subregion));
-        else if (!subregionChanged && !ImGui.IsItemActive())
+        else if (!subregionChanged && !ImGui.IsAnyItemActive())
             inspectorSubregion = room.Subregion ?? string.Empty;
 
         ImGui.Separator();
@@ -278,18 +279,59 @@ internal static class MapEditorView
     private static void DrawConnections(ImDrawListPtr draw, EditorMapPresentationSnapshot snapshot, Num.Vector2 canvasMin)
     {
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        uint color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
         for (int i = 0; i < connections.Length; i++)
         {
-            EditorMapRoomSnapshot a = FindRoom(snapshot, connections[i].FromRoomIndex);
-            EditorMapRoomSnapshot b = FindRoom(snapshot, connections[i].ToRoomIndex);
+            EditorMapConnectionSnapshot connection = connections[i];
+            EditorMapRoomSnapshot a = FindRoom(snapshot, connection.FromRoomIndex);
+            EditorMapRoomSnapshot b = FindRoom(snapshot, connection.ToRoomIndex);
             if (a == null || b == null || !IsLayerVisible(a.Layer) || !IsLayerVisible(b.Layer)) continue;
 
             Num.Vector2 pa = ToScreen(canvasMin, GetLocalPosition(a)) + NodeSize() * 0.5f;
             Num.Vector2 pb = ToScreen(canvasMin, GetLocalPosition(b)) + NodeSize() * 0.5f;
-            draw.AddLine(pa, pb, color, 2f);
+            Num.Vector2 delta = pb - pa;
+            float length = delta.Length();
+            Num.Vector2 normal = length > 0.001f
+                ? new Num.Vector2(-delta.Y / length, delta.X / length)
+                : Num.Vector2.Zero;
+
+            int ordinal = 0;
+            int total = 0;
+            for (int j = 0; j < connections.Length; j++)
+            {
+                if (!SameRoomPair(connection, connections[j])) continue;
+                if (j < i) ordinal++;
+                total++;
+            }
+
+            float offsetAmount = (ordinal - (total - 1) * 0.5f) * 11f;
+            Num.Vector2 offset = normal * offsetAmount;
+            pa += offset;
+            pb += offset;
+
+            uint color = ImGui.GetColorU32(connection.Ambiguous ? ImGuiCol.TextDisabled : ImGuiCol.TextDisabled);
+            draw.AddLine(pa, pb, color, connection.Explicit ? 2.4f : 2f);
+
+            string arrow = DirectionGlyph(connection.Direction);
+            if (connection.Ambiguous) arrow += " ?";
+            Num.Vector2 labelSize = ImGui.CalcTextSize(arrow);
+            Num.Vector2 midpoint = (pa + pb) * 0.5f;
+            Num.Vector2 labelMin = midpoint - labelSize * 0.5f - new Num.Vector2(3f, 2f);
+            Num.Vector2 labelMax = midpoint + labelSize * 0.5f + new Num.Vector2(3f, 2f);
+            draw.AddRectFilled(labelMin, labelMax, ImGui.GetColorU32(ImGuiCol.ChildBg), 3f);
+            draw.AddText(midpoint - labelSize * 0.5f, color, arrow);
         }
     }
+
+    private static bool SameRoomPair(EditorMapConnectionSnapshot a, EditorMapConnectionSnapshot b) =>
+        (a.FromRoomIndex == b.FromRoomIndex && a.ToRoomIndex == b.ToRoomIndex) ||
+        (a.FromRoomIndex == b.ToRoomIndex && a.ToRoomIndex == b.FromRoomIndex);
+
+    private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
+    {
+        WorldConnectionDirection.AToB => "→",
+        WorldConnectionDirection.BToA => "←",
+        _ => "↔"
+    };
 
     private static void DrawRooms(
         ImDrawListPtr draw,
