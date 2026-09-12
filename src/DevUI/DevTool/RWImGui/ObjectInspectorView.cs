@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select 与文本输入；无法证明等价的复合控件仍保持未映射。",
-            "Buttons, sliders, cyclers, integers, selects and text inputs are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
+            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select、文本输入与方向选择；无法证明等价的复合控件仍保持未映射。",
+            "Buttons, sliders, cyclers, integers, selects, text inputs and direction pickers are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -317,6 +317,9 @@ internal static class ObjectInspectorView
                     break;
                 case LegacyControlKind.Text:
                     DrawLegacyText(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Direction:
+                    DrawLegacyDirection(inspector, control, stateKey, visibleLabel);
                     break;
             }
         }
@@ -496,6 +499,39 @@ internal static class ObjectInspectorView
         {
             StringEdits[stateKey] = control.ValueText ?? string.Empty;
         }
+    }
+
+    private static void DrawLegacyDirection(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string editKey = "legacy-direction:" + stateKey;
+        Num.Vector2 value = Get(Vector2Edits, editKey, new Num.Vector2(control.X, control.Y));
+        string label = visibleLabel + "##DevToolLegacyDirection_" + stateKey;
+        ImGui.SetNextItemWidth(-1f);
+        bool changed = ImGui.InputFloat2(label, ref value, "%.3f");
+        Vector2Edits[editKey] = value;
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacyDirection,
+                inspector.ObjectIndex,
+                text: control.Path,
+                x: value.X,
+                y: value.Y));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            Vector2Edits[editKey] = new Num.Vector2(control.X, control.Y);
+        }
+
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "提交时会标准化为单位方向；零向量按向上处理。",
+                "Normalized to a unit direction on commit; a zero vector becomes up."));
     }
 
     private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
