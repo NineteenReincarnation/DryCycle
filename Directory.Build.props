@@ -10,5 +10,11 @@
     <Compile Remove="**/DesertBatflySocialRoles.cs" />
     <Compile Remove="**/DesertBatflyRoleScores.cs" />
     <Compile Remove="**/Program.SocialRoles.cs" />
+
+    <!-- The RWImGui frontend is a separate BepInEx assembly with its own ImGui/RWImGui
+         references. Keep the core DryCycle project from recursively compiling that
+         sub-project's source files while leaving the frontend project itself untouched. -->
+    <Compile Remove="DevUI/DevTool/RWImGui/**/*.cs"
+             Condition="'$(MSBuildProjectName)' == 'DryCycle'" />
   </ItemGroup>
 </Project>
