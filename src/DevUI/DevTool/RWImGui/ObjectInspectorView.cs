@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原版虚方法/行为边界驱动 Button、Slider、Cycler、IntegerControl 与选择面板；未知复合控件仍保持未映射。",
-            "Buttons, sliders, cyclers, integer controls and selection panels are delegated through the original behavior boundaries; unknown composite controls remain unmapped."), true);
+            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select 与文本输入；无法证明等价的复合控件仍保持未映射。",
+            "Buttons, sliders, cyclers, integers, selects and text inputs are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -314,6 +314,9 @@ internal static class ObjectInspectorView
                     break;
                 case LegacyControlKind.Select:
                     DrawLegacySelect(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Text:
+                    DrawLegacyText(inspector, control, stateKey, visibleLabel);
                     break;
             }
         }
@@ -467,6 +470,32 @@ internal static class ObjectInspectorView
             DevToolTooltip.Show(DevToolUiSettings.T(
                 "步长：默认 1，Shift=10，Ctrl=100，Ctrl+Shift=1000。",
                 "Step: 1 by default, Shift=10, Ctrl=100, Ctrl+Shift=1000."));
+    }
+
+    private static void DrawLegacyText(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string label = visibleLabel + "##DevToolLegacyText_" + stateKey;
+        string value = Get(StringEdits, stateKey, control.ValueText ?? string.Empty);
+        ImGui.SetNextItemWidth(-1f);
+        bool changed = ImGui.InputText(label, ref value, 1024);
+        StringEdits[stateKey] = value;
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacyText,
+                inspector.ObjectIndex,
+                text: control.Path,
+                propertyValue: new EditorPropertyValue(EditorPropertyKind.String, text: value)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            StringEdits[stateKey] = control.ValueText ?? string.Empty;
+        }
     }
 
     private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
