@@ -25,6 +25,9 @@ public sealed class EditorSoundSnapshot
     public float DirectionX { get; init; }
     public float DirectionY { get; init; }
     public bool Selected { get; init; }
+    public bool ResourceAvailable { get; init; }
+    public EditorSoundSourceKind ResourceSourceKind { get; init; }
+    public string ResourceSourceName { get; init; } = string.Empty;
 }
 
 public sealed class EditorSoundPresentationSnapshot
@@ -93,6 +96,12 @@ public static class SoundEditorPresentationHub
         if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
         if (state.SelectedIndex < -1) state.SelectedIndex = -1;
 
+        // Resource discovery belongs to the Rain World / DevUI thread. RWImGui receives only the
+        // immutable presentation snapshots below and never touches AssetManager or the mutable
+        // source catalog from its render thread.
+        EditorSoundSampleSnapshot[] sampleEntries = SoundSampleCatalog.Refresh(page);
+        SoundGroupLibrary.EnsureLoaded();
+
         EditorSoundSnapshot[] sounds = new EditorSoundSnapshot[count];
         for (int i = 0; i < count; i++)
         {
@@ -102,6 +111,7 @@ public static class SoundEditorPresentationHub
             Vector2 pos = sound is SpotSound spot ? spot.pos : Vector2.zero;
             float radius = sound is SpotSound spotForRadius ? spotForRadius.rad : 0f;
             Vector2 direction = sound is DirectionalSound directional ? directional.direction : Vector2.zero;
+            EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sound?.sample ?? string.Empty);
 
             sounds[i] = new EditorSoundSnapshot
             {
@@ -119,12 +129,12 @@ public static class SoundEditorPresentationHub
                 Radius = radius,
                 DirectionX = direction.x,
                 DirectionY = direction.y,
-                Selected = i == state.SelectedIndex
+                Selected = i == state.SelectedIndex,
+                ResourceAvailable = resource.Available,
+                ResourceSourceKind = resource.SourceKind,
+                ResourceSourceName = resource.SourceName
             };
         }
-
-        EditorSoundSampleSnapshot[] sampleEntries = SoundSampleCatalog.Refresh(page);
-        SoundGroupLibrary.EnsureLoaded();
 
         string[] samples = new string[sampleEntries.Length];
         for (int i = 0; i < sampleEntries.Length; i++) samples[i] = sampleEntries[i].Sample;
