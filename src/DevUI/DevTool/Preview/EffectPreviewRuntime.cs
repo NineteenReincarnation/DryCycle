@@ -305,6 +305,17 @@ internal static class EffectPreviewRuntime
                 {
                     EffectPreviewBootstrapper.Bootstrap(room, settings, effect, ownership);
 
+                    // The primary bootstrap intentionally rejects ambiguous scalar constructor
+                    // parameters. If it produced nothing, run the narrower IL-backed scalar
+                    // inference layer before giving up on advanced preview.
+                    if (ownership.ObjectCount == 0 && !ownership.RequiresAbort)
+                    {
+                        EffectPreviewExtendedRecipeBootstrap.TryBootstrap(
+                            room,
+                            effect,
+                            ownership);
+                    }
+
                     if (ownership.RequiresAbort)
                     {
                         EffectPreviewRollbackReport report = ownership.Rollback("unsafe bootstrap result");
