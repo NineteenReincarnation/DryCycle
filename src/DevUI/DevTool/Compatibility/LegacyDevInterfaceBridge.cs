@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using UnityEngine;
@@ -106,9 +107,23 @@ public static class LegacyDevInterfaceBridge
         try
         {
             factor = Mathf.Clamp01(factor);
+
+            // RegionKit GenericSlider deliberately overrides vanilla NubDragged with a no-op and
+            // exposes NubDragged2 as its real semantic mutation boundary. Prefer that boundary when
+            // present instead of relying on the base Slider coordinate math. This is structural and
+            // reflection-based so RegionKit remains an optional dependency.
+            if (TryInvokeSemanticSliderDrag(slider, factor))
+            {
+                slider.Refresh();
+                owner.activePage?.Refresh();
+                return true;
+            }
+
+            // Ordinary vanilla/custom sliders keep their original virtual behavior boundary.
             slider.NubDragged(factor);
             slider.RefreshNubPos(factor);
             slider.Refresh();
+            owner.activePage?.Refresh();
             return true;
         }
         catch (Exception error)
@@ -128,6 +143,7 @@ public static class LegacyDevInterfaceBridge
         {
             slider.ClickedResetToInherent();
             slider.Refresh();
+            owner.activePage?.Refresh();
             return true;
         }
         catch (Exception error)
@@ -331,6 +347,15 @@ public static class LegacyDevInterfaceBridge
     {
         try
         {
+            // RegionKit GenericSlider stores the semantic value/range separately and hides the
+            // vanilla SliderStartCoord. Reading those members avoids showing a wrong factor before
+            // the user even edits the control.
+            if (TryReadNumericMember(slider, "actualValue", out float actual) &&
+                TryReadNumericMember(slider, "minValue", out float min) &&
+                TryReadNumericMember(slider, "maxValue", out float max) &&
+                Math.Abs(max - min) > 0.000001f)
+                return Mathf.InverseLerp(min, max, actual);
+
             int nubIndex = slider.inheritButton ? 3 : 2;
             if (nubIndex < 0 || nubIndex >= slider.subNodes.Count || slider.subNodes[nubIndex] is not Slider.SliderNub nub)
                 return 0f;
@@ -339,6 +364,52 @@ public static class LegacyDevInterfaceBridge
         catch
         {
             return 0f;
+        }
+    }
+
+    private static bool TryInvokeSemanticSliderDrag(Slider slider, float factor)
+    {
+        if (slider == null) return false;
+        MethodInfo method = slider.GetType().GetMethod(
+            "NubDragged2",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(float) },
+            null);
+        if (method == null || method.ReturnType != typeof(void)) return false;
+        method.Invoke(slider, new object[] { factor });
+        return true;
+    }
+
+    private static bool TryReadNumericMember(object instance, string name, out float value)
+    {
+        value = 0f;
+        if (instance == null || string.IsNullOrEmpty(name)) return false;
+
+        Type type = instance.GetType();
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        FieldInfo field = type.GetField(name, flags);
+        if (field != null && TryConvertFloat(field.GetValue(instance), out value)) return true;
+
+        PropertyInfo property = type.GetProperty(name, flags);
+        if (property != null && property.GetIndexParameters().Length == 0 && property.CanRead &&
+            TryConvertFloat(property.GetValue(instance, null), out value)) return true;
+
+        return false;
+    }
+
+    private static bool TryConvertFloat(object raw, out float value)
+    {
+        value = 0f;
+        if (raw == null) return false;
+        try
+        {
+            value = Convert.ToSingle(raw);
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+        catch
+        {
+            return false;
         }
     }
 
