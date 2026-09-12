@@ -35,14 +35,17 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 DangerHover = new(0.74f, 0.27f, 0.29f, 0.96f);
     private static readonly Num.Vector4 Muted = new(0.68f, 0.72f, 0.78f, 1f);
 
-    // Keep the gold hierarchy and relief as the static title treatment. The separate flowing
-    // title effect remains implemented and available, but is intentionally not applied here.
-    private static readonly Num.Vector4 PrimaryGold = new(0.91f, 0.78f, 0.46f, 1f);
-    private static readonly Num.Vector4 PrimaryGoldRelief = new(0.35f, 0.22f, 0.08f, 0.82f);
-    private static readonly Num.Vector4 SecondaryGold = new(0.84f, 0.68f, 0.38f, 1f);
-    private static readonly Num.Vector4 SecondaryGoldRelief = new(0.30f, 0.19f, 0.07f, 0.74f);
-    private static readonly Num.Vector4 TertiaryGold = new(0.73f, 0.57f, 0.32f, 1f);
-    private static readonly Num.Vector4 TertiaryGoldRelief = new(0.25f, 0.16f, 0.06f, 0.64f);
+    // Static gold title hierarchy. The primary title is intentionally the brightest element in
+    // the local information hierarchy; secondary/tertiary headings remain clearly readable over
+    // Rain World's dark and mid-tone rooms instead of fading into the scene behind the editor.
+    // The flowing title shader remains available elsewhere but is deliberately not applied here.
+    private static readonly Num.Vector4 PrimaryGold = new(1.00f, 0.88f, 0.56f, 1f);
+    private static readonly Num.Vector4 PrimaryGoldHighlight = new(1.00f, 0.97f, 0.82f, 0.96f);
+    private static readonly Num.Vector4 PrimaryGoldRelief = new(0.31f, 0.17f, 0.045f, 0.96f);
+    private static readonly Num.Vector4 SecondaryGold = new(0.96f, 0.79f, 0.45f, 1f);
+    private static readonly Num.Vector4 SecondaryGoldRelief = new(0.32f, 0.18f, 0.055f, 0.82f);
+    private static readonly Num.Vector4 TertiaryGold = new(0.90f, 0.72f, 0.40f, 1f);
+    private static readonly Num.Vector4 TertiaryGoldRelief = new(0.28f, 0.16f, 0.05f, 0.74f);
 
     private const float PrimaryPaneTitleScale = 1.82f;
     // Inspector content used to fall back to 1.15, which made controls inside framed sections
@@ -146,7 +149,7 @@ internal static class DevToolWidgets
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
         ImGui.Spacing();
-        DrawOutlinedText(text, color, fontScale, 2f, bodyScale);
+        DrawOutlinedText(text, BrightenSourceColor(color), fontScale, 2f, bodyScale);
         ImGui.Separator();
     }
 
@@ -315,12 +318,34 @@ internal static class DevToolWidgets
         draw.AddText(pos + new Num.Vector2(-stroke, stroke), outline, text);
         draw.AddText(pos + new Num.Vector2(stroke, stroke), outline, text);
 
-        // Keep this inside the black outline and below the body. It reads as a warm metal relief,
-        // not as a second shadow or bloom, and restores depth that was lost during the temporary
-        // blue-palette experiment.
-        draw.AddText(pos + new Num.Vector2(0.8f, 1.0f), ImGui.GetColorU32(relief), text);
+        // Primary titles get a real two-sided relief: a pale upper-left ridge plus a warm dark
+        // lower-right extrusion. Both are offset underneath the face so the result reads as raised
+        // metal rather than glow, and remains legible on both bright and dark Rain World rooms.
+        if (level == FlowTitleLevel.Primary)
+            draw.AddText(pos + new Num.Vector2(-0.9f, -0.8f), ImGui.GetColorU32(PrimaryGoldHighlight), text);
+
+        draw.AddText(
+            pos + (level == FlowTitleLevel.Primary
+                ? new Num.Vector2(1.15f, 1.35f)
+                : new Num.Vector2(0.8f, 1.0f)),
+            ImGui.GetColorU32(relief),
+            text);
+
         ImGui.TextColored(body, text);
         ImGui.SetWindowFontScale(restoreScale);
+    }
+
+    private static Num.Vector4 BrightenSourceColor(Num.Vector4 color)
+    {
+        // Source headings are secondary hierarchy too. Preserve the source hue while lifting the
+        // floor so mod/DLC colours cannot become unreadably dark over the translucent editor.
+        const float floor = 0.58f;
+        const float lift = 0.20f;
+        return new Num.Vector4(
+            System.Math.Min(1f, System.Math.Max(floor, color.X + lift)),
+            System.Math.Min(1f, System.Math.Max(floor, color.Y + lift)),
+            System.Math.Min(1f, System.Math.Max(floor, color.Z + lift)),
+            System.Math.Max(0.92f, color.W));
     }
 
     private static void DrawOutlinedText(string text, Num.Vector4 color, float fontScale, float stroke, float restoreScale)
