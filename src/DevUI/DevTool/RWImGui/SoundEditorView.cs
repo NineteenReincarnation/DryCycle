@@ -19,6 +19,10 @@ internal static class SoundEditorView
     private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> VectorEdits = new(StringComparer.Ordinal);
     private static BrowserTab browserTab;
+    private static string sceneSearch = string.Empty;
+    private static string selectionGroupName = string.Empty;
+    private static string selectionGroupId = string.Empty;
+    private static bool selectionGroupIdManual;
     private const float BrowserBodyFontScale = 1.22f;
 
     internal static void DrawBrowser(EditorSoundPresentationSnapshot snapshot)
@@ -30,6 +34,8 @@ internal static class SoundEditorView
             return;
         }
 
+        SoundWorkspaceState.SynchronizeScene(snapshot);
+
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("声音", "SOUNDS"), BrowserBodyFontScale);
         DrawTabButton(BrowserTab.Library, DevToolUiSettings.T("资源库", "Library"), "SoundLibraryTab");
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("音效组", "Groups")));
@@ -37,6 +43,8 @@ internal static class SoundEditorView
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("场景", "Scene")));
         DrawTabButton(BrowserTab.Scene, DevToolUiSettings.T("场景", "Scene"), "SoundSceneTab");
         ImGui.Separator();
+
+        SoundLibraryGroupsView.DrawWorkingGroupBar();
 
         switch (browserTab)
         {
@@ -61,6 +69,8 @@ internal static class SoundEditorView
             return;
         }
 
+        SoundWorkspaceState.SynchronizeScene(snapshot);
+
         bool collapseAll = DevToolWidgets.PaneTitleWithAction(
             DevToolUiSettings.T("声音", "Sound"),
             DevToolUiSettings.T("折叠所有", "Collapse All"),
@@ -73,6 +83,16 @@ internal static class SoundEditorView
         {
             DrawRoomFloat(SoundEditorKeys.BackgroundDroneVolume, DevToolUiSettings.T("背景低鸣", "Bkg Drone"), snapshot.BackgroundDroneVolume, 0f, 1f);
             DrawRoomFloat(SoundEditorKeys.NoThreatDroneVolume, DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"), snapshot.NoThreatDroneVolume, 0f, 1f);
+        }
+
+        int[] selectedIndices = SoundWorkspaceState.SelectedIndices();
+        if (selectedIndices.Length > 1)
+        {
+            ImGui.Separator();
+            ImGui.TextColored(
+                new Num.Vector4(0.62f, 0.84f, 1f, 1f),
+                DevToolUiSettings.T($"已选择 {selectedIndices.Length} 个声音", $"{selectedIndices.Length} SOUNDS SELECTED"));
+            SoundLibraryGroupsView.DrawAddSelectionToGroup(selectedIndices);
         }
 
         EditorSoundSnapshot selected = FindSelected(snapshot);
@@ -124,13 +144,17 @@ internal static class SoundEditorView
                 ImGui.TextWrapped(DevToolUiSettings.T("继承声音 · 请修改来源模板，或添加本地覆盖。", "Inherited sound · edit its source template or add a local override."));
         }
 
-        SoundLibraryGroupsView.DrawAddToGroup(selected);
+        if (selectedIndices.Length <= 1)
+            SoundLibraryGroupsView.DrawAddToGroup(selected);
 
         if (!selected.Inherited)
         {
             ImGui.Separator();
             if (DevToolWidgets.ActionButton(DevToolUiSettings.T("删除声音", "Delete Sound"), "DeleteSound", DevToolButtonTone.Danger))
+            {
+                SoundWorkspaceState.ClearSelection();
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Delete, selected.Index));
+            }
         }
     }
 
@@ -144,12 +168,50 @@ internal static class SoundEditorView
     private static void DrawScene(EditorSoundPresentationSnapshot snapshot)
     {
         EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
+        SoundWorkspaceState.SynchronizeScene(snapshot);
+
         ImGui.TextDisabled(DevToolUiSettings.T($"{sounds.Length} 个环境声音", $"{sounds.Length} ambient sounds"));
+        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "SoundSceneSearch", ref sceneSearch, 128);
+
+        bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightControl) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftCommand) ||
+                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightCommand);
+        bool shift = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftShift) ||
+                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
+
+        if (!ImGui.GetIO().WantTextInput && ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.A))
+            SoundWorkspaceState.SelectAll(sounds.Length);
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("全选", "Select All"),
+                "SoundSceneSelectAll",
+                DevToolButtonTone.Subtle))
+        {
+            SoundWorkspaceState.SelectAll(sounds.Length);
+        }
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("清除选择", "Clear")));
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("清除选择", "Clear"),
+                "SoundSceneClearSelection",
+                DevToolButtonTone.Subtle))
+        {
+            SoundWorkspaceState.ClearSelection();
+        }
+
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T("单击单选 · Ctrl 追加/取消 · Shift 范围选择 · Ctrl+A 全选", "Click selects · Ctrl toggles · Shift selects a range · Ctrl+A selects all"),
+            true);
         ImGui.Separator();
 
+        int visible = 0;
         for (int i = 0; i < sounds.Length; i++)
         {
             EditorSoundSnapshot sound = sounds[i];
+            if (!MatchesScene(sound, sceneSearch)) continue;
+            visible++;
+
+            bool selected = SoundWorkspaceState.IsSceneSelected(sound.Index);
             string prefix = sound.Type switch
             {
                 "Omnidirectional" => "O",
@@ -157,12 +219,124 @@ internal static class SoundEditorView
                 "Spot" => "S",
                 _ => "?"
             };
-            string label = "[" + prefix + "] " + sound.Sample;
+            string label = (selected ? "☑ " : "☐ ") + "[" + prefix + "] " + sound.Sample;
             if (sound.Inherited) label += DevToolUiSettings.T("  [继承]", "  [Inherited]");
             else if (sound.OverWrite) label += DevToolUiSettings.T("  [覆盖]", "  [Override]");
-            if (ImGui.Selectable(label + "##SoundScene" + sound.Index, sound.Selected))
+
+            if (ImGui.Selectable(label + "##SoundScene" + sound.Index, selected))
+            {
+                SoundWorkspaceState.HandleSceneClick(sound.Index, ctrl, shift);
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
+            }
         }
+
+        if (visible == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景声音。", "No matching scene sounds."), true);
+
+        int[] selectedIndices = SoundWorkspaceState.SelectedIndices();
+        if (selectedIndices.Length == 0) return;
+
+        ImGui.Separator();
+        ImGui.TextColored(
+            new Num.Vector4(0.62f, 0.84f, 1f, 1f),
+            DevToolUiSettings.T($"已选择 {selectedIndices.Length} 个声音", $"{selectedIndices.Length} selected"));
+
+        if (SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("加入工作组 · ", "Add to Working Group · ") + group.Name,
+                    "SoundSceneAddSelectionToGroup",
+                    DevToolButtonTone.Primary,
+                    true))
+            {
+                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                    SoundEditorCommandKind.AddSoundsToGroup,
+                    key: group.Id,
+                    indices: selectedIndices));
+                ActionToastOverlay.Notify(
+                    $"已向 {group.Name} 加入 {selectedIndices.Length} 个声音",
+                    $"Added {selectedIndices.Length} sounds to {group.Name}");
+            }
+        }
+        else
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("先创建工作音效组即可批量加入。", "Create a working group to add the selection in one click."), true);
+        }
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("从选择新建音效组", "New Group From Selection"),
+                "SoundSceneCreateGroupFromSelection",
+                DevToolButtonTone.Subtle,
+                true))
+        {
+            selectionGroupName = string.Empty;
+            selectionGroupId = SoundWorkspaceState.SuggestUniqueGroupId(string.Empty);
+            selectionGroupIdManual = false;
+            ImGui.OpenPopup("##SoundCreateGroupFromSelectionPopup");
+        }
+
+        DrawCreateGroupFromSelectionPopup(selectedIndices);
+    }
+
+    private static void DrawCreateGroupFromSelectionPopup(int[] selectedIndices)
+    {
+        if (!ImGui.BeginPopup("##SoundCreateGroupFromSelectionPopup")) return;
+
+        int count = selectedIndices?.Length ?? 0;
+        ImGui.TextUnformatted(DevToolUiSettings.T("从场景选择创建音效组", "Create Group From Scene Selection"));
+        ImGui.TextDisabled(DevToolUiSettings.T($"将保存 {count} 个声音的当前参数快照", $"Capture current parameters from {count} sounds"));
+        ImGui.Separator();
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T("显示名称", "Display name"));
+        ImGui.SetNextItemWidth(360f);
+        bool nameChanged = ImGui.InputText("##SceneSelectionGroupName", ref selectionGroupName, 512);
+        if (nameChanged && !selectionGroupIdManual)
+            selectionGroupId = SoundWorkspaceState.SuggestUniqueGroupId(selectionGroupName);
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T("编组 ID", "Group ID"));
+        ImGui.SetNextItemWidth(360f);
+        ImGui.InputText("##SceneSelectionGroupId", ref selectionGroupId, 128);
+        if (ImGui.IsItemEdited()) selectionGroupIdManual = true;
+
+        bool validId = SoundWorkspaceState.IsValidGroupId(selectionGroupId);
+        bool duplicate = SoundWorkspaceState.GroupIdExists(selectionGroupId);
+        if (!validId && !string.IsNullOrWhiteSpace(selectionGroupId))
+            ImGui.TextColored(new Num.Vector4(1f, 0.64f, 0.30f, 1f), DevToolUiSettings.T("ID 仅使用 A-Z / a-z / 0-9 / _ / -。", "Use only A-Z / a-z / 0-9 / _ / - in Group IDs."));
+        else if (duplicate)
+            ImGui.TextColored(new Num.Vector4(1f, 0.64f, 0.30f, 1f), DevToolUiSettings.T("这个 Group ID 已存在。", "This Group ID already exists."));
+
+        bool canCreate = count > 0 && !string.IsNullOrWhiteSpace(selectionGroupName) && validId && !duplicate;
+        if (!canCreate) ImGui.BeginDisabled();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("创建并设为工作组", "Create & Use"),
+                "SoundSceneCreateGroupConfirm",
+                DevToolButtonTone.Primary))
+        {
+            string id = selectionGroupId.Trim();
+            string name = selectionGroupName.Trim();
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.CreateGroupFromSounds,
+                key: id,
+                text: name,
+                indices: selectedIndices));
+            SoundWorkspaceState.SetActiveGroup(id);
+            ActionToastOverlay.Notify(
+                $"已创建 {name}，包含 {count} 个声音",
+                $"Created {name} with {count} sounds");
+            ImGui.CloseCurrentPopup();
+        }
+        if (!canCreate) ImGui.EndDisabled();
+
+        ImGui.EndPopup();
+    }
+
+    private static bool MatchesScene(EditorSoundSnapshot sound, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return true;
+        string q = query.Trim();
+        return (sound?.Sample?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+               (sound?.Type?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+               (sound?.ResourceSourceName?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
     private static void DrawRoomFloat(string key, string label, float current, float min, float max)
@@ -228,6 +402,11 @@ internal static class SoundEditorView
     {
         EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
         int index = snapshot.SelectedIndex;
+        if (index >= 0 && index < sounds.Length) return sounds[index];
+
+        int[] selection = SoundWorkspaceState.SelectedIndices();
+        if (selection.Length == 0) return null;
+        index = selection[0];
         return index >= 0 && index < sounds.Length ? sounds[index] : null;
     }
 
