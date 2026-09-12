@@ -25,6 +25,11 @@ internal static class DevToolRuntime
 {
     private static bool enabled;
 
+    // TEMPORARY: live RoomEffect hover preview is disabled while its visual rollback/runtime
+    // behavior is being repaired. Keep the preview implementation intact so restoring it later is
+    // a one-line gate change instead of another architectural rewrite.
+    private const bool EffectLivePreviewEnabled = false;
+
     // Compatibility accessor for infrastructure that needs the live editor session.
     // DevToolSessionHub remains the single source of truth.
     internal static EditorSession ActiveSession => DevToolSessionHub.Current;
@@ -35,7 +40,8 @@ internal static class DevToolRuntime
         BuiltinInspectorAdapters.Enable();
         ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
-        EffectPreviewRuntime.Enable();
+        if (EffectLivePreviewEnabled)
+            EffectPreviewRuntime.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
         On.RainWorldGame.Update += RainWorldGame_Update;
         enabled = true;
@@ -46,7 +52,8 @@ internal static class DevToolRuntime
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
         On.RainWorldGame.Update -= RainWorldGame_Update;
-        EffectPreviewRuntime.Disable();
+        if (EffectLivePreviewEnabled)
+            EffectPreviewRuntime.Disable();
         ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
@@ -77,13 +84,15 @@ internal static class DevToolRuntime
     {
         if (self == null)
         {
-            EffectPreviewRuntime.Reset();
+            if (EffectLivePreviewEnabled)
+                EffectPreviewRuntime.Reset();
             orig(self);
             return;
         }
 
         DevToolSessionHub.Synchronize(self);
-        EffectPreviewRuntime.BeforeDevUiUpdate(self);
+        if (EffectLivePreviewEnabled)
+            EffectPreviewRuntime.BeforeDevUiUpdate(self);
         EditorSession session = DevToolSessionHub.Current;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
@@ -102,7 +111,8 @@ internal static class DevToolRuntime
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
         session?.Synchronize(self);
-        EffectPreviewRuntime.AfterDevUiUpdate(self);
+        if (EffectLivePreviewEnabled)
+            EffectPreviewRuntime.AfterDevUiUpdate(self);
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
         // complete original page while keeping the tiny frontend mode switch available.
@@ -140,7 +150,8 @@ internal static class DevToolRuntime
     private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
     {
         orig(self);
-        EffectPreviewRuntime.OnGameUpdate(self);
+        if (EffectLivePreviewEnabled)
+            EffectPreviewRuntime.OnGameUpdate(self);
     }
 }
 
