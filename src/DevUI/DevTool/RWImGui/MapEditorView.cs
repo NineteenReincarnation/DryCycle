@@ -3,22 +3,17 @@ using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
-using DryCycle.DevUI.DevTool.World;
 using ImGuiNET;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
+/// <summary>
+/// MapPage presentation. This view owns only map layout/Dev Position authoring.
+/// Endpoint topology editing lives in WorldGraphView so graph layout never mutates map layout.
+/// </summary>
 internal static class MapEditorView
 {
-    private sealed class ExitPortHit
-    {
-        internal EditorMapRoomSnapshot Room;
-        internal EditorMapRoomNodeSnapshot Node;
-        internal Num.Vector2 Position;
-        internal bool Free;
-    }
-
     private static readonly Dictionary<int, Num.Vector2> LocalPositions = new();
     private static string search = string.Empty;
     private static readonly bool[] LayerVisible = { true, true, true };
@@ -32,9 +27,6 @@ internal static class MapEditorView
     private static Num.Vector2 inspectorPosition;
     private static string inspectorSubregion = string.Empty;
 
-    private static int linkingRoom = -1;
-    private static int linkingNode = -1;
-
     internal static void DrawBrowser(EditorMapPresentationSnapshot snapshot)
     {
         if (!snapshot.Available)
@@ -44,8 +36,12 @@ internal static class MapEditorView
         }
 
         ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
-        string fitLabel = DevToolUiSettings.T("适配地图", "Fit Map");
-        if (DevToolWidgets.ActionButton(fitLabel, "MapFit", DevToolButtonTone.Normal)) fitRequested = true;
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("适配地图", "Fit Map"),
+                "MapFit",
+                DevToolButtonTone.Normal))
+            fitRequested = true;
+
         if (DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth("100%")))
         {
             if (DevToolWidgets.ActionButton("100%", "MapZoom100", DevToolButtonTone.Subtle)) zoom = 1f;
@@ -60,18 +56,24 @@ internal static class MapEditorView
         for (int i = 0; i < LayerVisible.Length; i++)
         {
             bool visible = LayerVisible[i];
-            string layerLabel = "L" + i;
-            if (ImGui.Checkbox(layerLabel + "##MapLayerFilter" + i, ref visible))
+            string label = "L" + i;
+            if (ImGui.Checkbox(label + "##MapLayerFilter" + i, ref visible))
             {
                 LayerVisible[i] = visible;
                 fitRequested = true;
             }
             if (i < LayerVisible.Length - 1)
-                DevToolWidgets.SameLineIfFits(ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize("L" + (i + 1)).X);
+                DevToolWidgets.SameLineIfFits(
+                    ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X +
+                    ImGui.CalcTextSize("L" + (i + 1)).X);
         }
 
         ImGui.Spacing();
-        DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索房间", "Search rooms"), "MapRoomSearch", ref search, 128);
+        DevToolWidgets.FullWidthInputText(
+            DevToolUiSettings.T("搜索房间", "Search rooms"),
+            "MapRoomSearch",
+            ref search,
+            128);
         ImGui.Separator();
 
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
@@ -88,7 +90,9 @@ internal static class MapEditorView
             if (ImGui.Selectable(label + "##MapBrowserRoom" + room.RoomIndex, room.Selected))
                 Select(room.RoomIndex);
         }
-        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."), true);
+
+        if (matches == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."), true);
     }
 
     internal static void DrawInspector(EditorMapPresentationSnapshot snapshot)
@@ -97,24 +101,15 @@ internal static class MapEditorView
         if (room == null)
         {
             inspectorRoom = -1;
-            ImGui.TextWrapped(DevToolUiSettings.T("从图中或房间列表选择一个房间。", "Select a room from the graph or room list."));
+            ImGui.TextWrapped(DevToolUiSettings.T(
+                "从图中或房间列表选择一个房间。",
+                "Select a room from the map or room list."));
             DrawGenericPageControls();
             return;
         }
 
-        if (inspectorRoom != room.RoomIndex)
-        {
-            inspectorRoom = room.RoomIndex;
-            inspectorPosition = new Num.Vector2(room.X, room.Y);
-            inspectorSubregion = room.Subregion ?? string.Empty;
-        }
-        else if (!ImGui.IsAnyItemActive())
-        {
-            inspectorPosition = new Num.Vector2(room.X, room.Y);
-            inspectorSubregion = room.Subregion ?? string.Empty;
-        }
-
-        ImGui.Text(room.Name);
+        SynchronizeInspector(room);
+        ImGui.TextUnformatted(room.Name);
         ImGui.TextDisabled(DevToolUiSettings.T("房间索引 ", "Room index ") + room.RoomIndex);
         if (room.CurrentRoom) ImGui.TextDisabled(DevToolUiSettings.T("当前镜头房间", "Current camera room"));
         if (room.OffScreenDen) ImGui.TextDisabled(DevToolUiSettings.T("屏幕外巢穴", "Off-screen den"));
@@ -122,7 +117,10 @@ internal static class MapEditorView
         ImGui.Separator();
 
         Num.Vector2 position = inspectorPosition;
-        bool positionChanged = ImGui.InputFloat2(DevToolUiSettings.T("开发位置##MapInspectorPosition", "Dev position##MapInspectorPosition"), ref position, "%.1f");
+        bool positionChanged = ImGui.InputFloat2(
+            DevToolUiSettings.T("开发位置##MapInspectorPosition", "Dev position##MapInspectorPosition"),
+            ref position,
+            "%.1f");
         inspectorPosition = position;
         if (ImGui.IsItemDeactivatedAfterEdit())
             SetPosition(room.RoomIndex, position);
@@ -130,12 +128,14 @@ internal static class MapEditorView
             inspectorPosition = new Num.Vector2(room.X, room.Y);
 
         int layer = room.Layer;
-        if (ImGui.BeginCombo(DevToolUiSettings.T("图层##MapInspectorLayer", "Layer##MapInspectorLayer"), DevToolUiSettings.T("图层 ", "Layer ") + layer))
+        if (ImGui.BeginCombo(
+                DevToolUiSettings.T("图层##MapInspectorLayer", "Layer##MapInspectorLayer"),
+                "L" + layer))
         {
             for (int i = 0; i < 3; i++)
             {
                 bool selected = layer == i;
-                if (ImGui.Selectable(DevToolUiSettings.T("图层 ", "Layer ") + i + "##MapLayer" + i, selected))
+                if (ImGui.Selectable("L" + i + "##MapLayer" + i, selected))
                     MapEditorCommandQueue.Enqueue(new MapEditorCommand(
                         MapEditorCommandKind.SetRoomLayer,
                         roomIndex: room.RoomIndex,
@@ -145,9 +145,9 @@ internal static class MapEditorView
             ImGui.EndCombo();
         }
 
-        string subregion = inspectorSubregion;
         DevToolWidgets.MutedText(DevToolUiSettings.T("子区域", "Subregion"));
         ImGui.SetNextItemWidth(-1f);
+        string subregion = inspectorSubregion;
         bool subregionChanged = ImGui.InputText("##MapInspectorSubregion", ref subregion, 128);
         inspectorSubregion = subregion;
         if (ImGui.IsItemDeactivatedAfterEdit())
@@ -160,13 +160,26 @@ internal static class MapEditorView
 
         ImGui.Separator();
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "拖动中央图中的房间可直接修改 Dev Position；滚轮缩放，中键/右键拖动画布。",
-            "Drag rooms in the center graph to edit Dev Position; wheel zooms and middle/right drag pans."), true);
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "选中房间后会显示 Exit 端口；从空闲端口拖到另一个房间的空闲端口可创建双向连接。",
-            "Selecting a room reveals Exit ports; drag a free port to a free port on another room to create a bidirectional link."), true);
-
+            "拖动中央地图中的房间修改 Dev Position；滚轮缩放，中键/右键平移。世界连接请在 World Graph 中编辑。",
+            "Drag rooms in the map to edit Dev Position; wheel zooms and middle/right drag pans. Edit world links in World Graph."), true);
         DrawGenericPageControls();
+    }
+
+    private static void SynchronizeInspector(EditorMapRoomSnapshot room)
+    {
+        if (inspectorRoom != room.RoomIndex)
+        {
+            inspectorRoom = room.RoomIndex;
+            inspectorPosition = new Num.Vector2(room.X, room.Y);
+            inspectorSubregion = room.Subregion ?? string.Empty;
+            return;
+        }
+
+        if (!ImGui.IsAnyItemActive())
+        {
+            inspectorPosition = new Num.Vector2(room.X, room.Y);
+            inspectorSubregion = room.Subregion ?? string.Empty;
+        }
     }
 
     private static void DrawGenericPageControls()
@@ -185,11 +198,6 @@ internal static class MapEditorView
         UniversalDevUiMirrorView.Draw(generic);
     }
 
-    /// <summary>
-    /// Standalone canvas retained for focus mode. Normal Map mode uses DrawEmbeddedCanvas inside
-    /// the unified Browser | Map | Inspector workspace and therefore no longer opens a second
-    /// floating Region Map window over the editor panel.
-    /// </summary>
     internal static void DrawCanvas(EditorMapPresentationSnapshot snapshot, Num.Vector2 position, Num.Vector2 size)
     {
         if (!snapshot.Available || size.X < 120f || size.Y < 120f) return;
@@ -198,9 +206,12 @@ internal static class MapEditorView
         ImGui.SetNextWindowSize(size, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new Num.Vector2(420f, 300f), new Num.Vector2(4000f, 4000f));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse |
+                                 ImGuiWindowFlags.NoScrollbar |
                                  ImGuiWindowFlags.NoScrollWithMouse;
-        if (!ImGui.Begin(DevToolUiSettings.T("区域地图###DevToolMapCanvas", "Region Map###DevToolMapCanvas"), flags))
+        if (!ImGui.Begin(
+                DevToolUiSettings.T("区域地图###DevToolMapCanvas", "Region Map###DevToolMapCanvas"),
+                flags))
         {
             ImGui.End();
             return;
@@ -223,17 +234,14 @@ internal static class MapEditorView
         ImGui.SameLine();
         ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
         ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("适配", "Fit"), "MapCanvasFit", DevToolButtonTone.Subtle))
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("适配", "Fit"),
+                "MapCanvasFit",
+                DevToolButtonTone.Subtle))
             fitRequested = true;
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton("100%", "MapCanvasZoom100", DevToolButtonTone.Subtle))
             zoom = 1f;
-
-        if (linkingRoom >= 0)
-        {
-            ImGui.SameLine();
-            ImGui.TextDisabled(DevToolUiSettings.T("· 拖动连接中", "· linking exits"));
-        }
 
         ImGui.Spacing();
         DrawCanvasSurface(snapshot, "##MapEmbeddedCanvasInput");
@@ -243,22 +251,20 @@ internal static class MapEditorView
     {
         Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
-        if (canvasSize.X < 50f || canvasSize.Y < 50f)
-            return;
+        if (canvasSize.X < 50f || canvasSize.Y < 50f) return;
 
         ImGui.InvisibleButton(inputId, canvasSize);
         bool hovered = ImGui.IsItemHovered();
         ImGuiIOPtr io = ImGui.GetIO();
 
         SynchronizeLocalPositions(snapshot);
-        SynchronizeLinkState(snapshot);
         if (fitRequested)
         {
             Fit(snapshot, canvasSize);
             fitRequested = false;
         }
 
-        if (hovered && Math.Abs(io.MouseWheel) > 0.0001f && linkingRoom < 0)
+        if (hovered && Math.Abs(io.MouseWheel) > 0.0001f)
         {
             float oldZoom = zoom;
             float nextZoom = Math.Max(0.2f, Math.Min(3.0f, zoom * (io.MouseWheel > 0f ? 1.12f : 0.89f)));
@@ -268,7 +274,7 @@ internal static class MapEditorView
             pan = mouseInCanvas - worldAtMouse * zoom;
         }
 
-        if (hovered && linkingRoom < 0 &&
+        if (hovered &&
             (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || ImGui.IsMouseDragging(ImGuiMouseButton.Right)))
             pan += io.MouseDelta;
 
@@ -295,41 +301,24 @@ internal static class MapEditorView
             draw.AddLine(canvasMin + new Num.Vector2(0f, y), canvasMin + new Num.Vector2(canvasSize.X, y), color);
     }
 
-    private static void DrawConnections(ImDrawListPtr draw, EditorMapPresentationSnapshot snapshot, Num.Vector2 canvasMin)
+    private static void DrawConnections(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin)
     {
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        uint color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
         for (int i = 0; i < connections.Length; i++)
         {
-            EditorMapConnectionSnapshot connection = connections[i];
-            EditorMapRoomSnapshot a = FindRoom(snapshot, connection.FromRoomIndex);
-            EditorMapRoomSnapshot b = FindRoom(snapshot, connection.ToRoomIndex);
+            EditorMapRoomSnapshot a = FindRoom(snapshot, connections[i].FromRoomIndex);
+            EditorMapRoomSnapshot b = FindRoom(snapshot, connections[i].ToRoomIndex);
             if (a == null || b == null || !IsLayerVisible(a.Layer) || !IsLayerVisible(b.Layer)) continue;
 
-            Num.Vector2 pa = EndpointPosition(snapshot, a, connection.FromNodeIndex, canvasMin);
-            Num.Vector2 pb = connection.ToNodeIndex >= 0
-                ? EndpointPosition(snapshot, b, connection.ToNodeIndex, canvasMin)
-                : ToScreen(canvasMin, GetLocalPosition(b)) + NodeSize() * 0.5f;
-
-            uint color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
-            draw.AddLine(pa, pb, color, connection.Explicit ? 2.4f : 2f);
-
-            string arrow = DirectionGlyph(connection.Direction);
-            if (connection.Ambiguous) arrow += " ?";
-            Num.Vector2 labelSize = ImGui.CalcTextSize(arrow);
-            Num.Vector2 midpoint = (pa + pb) * 0.5f;
-            Num.Vector2 labelMin = midpoint - labelSize * 0.5f - new Num.Vector2(3f, 2f);
-            Num.Vector2 labelMax = midpoint + labelSize * 0.5f + new Num.Vector2(3f, 2f);
-            draw.AddRectFilled(labelMin, labelMax, ImGui.GetColorU32(ImGuiCol.ChildBg), 3f);
-            draw.AddText(midpoint - labelSize * 0.5f, color, arrow);
+            Num.Vector2 pa = ToScreen(canvasMin, GetLocalPosition(a)) + NodeSize() * 0.5f;
+            Num.Vector2 pb = ToScreen(canvasMin, GetLocalPosition(b)) + NodeSize() * 0.5f;
+            draw.AddLine(pa, pb, color, 1.6f);
         }
     }
-
-    private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
-    {
-        WorldConnectionDirection.AToB => "→",
-        WorldConnectionDirection.BToA => "←",
-        _ => "↔"
-    };
 
     private static void DrawRooms(
         ImDrawListPtr draw,
@@ -346,55 +335,26 @@ internal static class MapEditorView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            Num.Vector2 world = GetLocalPosition(room);
-            Num.Vector2 min = ToScreen(canvasMin, world);
+            Num.Vector2 min = ToScreen(canvasMin, GetLocalPosition(room));
             Num.Vector2 max = min + nodeSize;
             if (canvasHovered && Contains(min, max, io.MousePos)) hoveredRoom = room;
         }
 
-        ExitPortHit hoveredPort = canvasHovered
-            ? FindHoveredExitPort(snapshot, canvasMin, io.MousePos)
-            : null;
-
         if (canvasHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            if (hoveredPort != null)
-            {
-                Select(hoveredPort.Room.RoomIndex);
-                draggingRoom = -1;
-                if (hoveredPort.Free && linkingRoom < 0)
-                {
-                    linkingRoom = hoveredPort.Room.RoomIndex;
-                    linkingNode = hoveredPort.Node.NodeIndex;
-                }
-            }
-            else if (linkingRoom < 0 && hoveredRoom != null)
+            if (hoveredRoom != null)
             {
                 Select(hoveredRoom.RoomIndex);
                 draggingRoom = hoveredRoom.RoomIndex;
                 dragStartMouse = io.MousePos;
                 dragStartWorld = GetLocalPosition(hoveredRoom);
             }
-            else if (linkingRoom < 0)
+            else
             {
                 Select(-1);
                 draggingRoom = -1;
             }
         }
-
-        if (linkingRoom >= 0 && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
-        {
-            if (hoveredPort != null && hoveredPort.Free &&
-                (hoveredPort.Room.RoomIndex != linkingRoom || hoveredPort.Node.NodeIndex != linkingNode) &&
-                hoveredPort.Room.RoomIndex != linkingRoom)
-            {
-                CompleteDraggedConnection(snapshot, hoveredPort);
-            }
-            CancelDraggedConnection();
-        }
-
-        if (linkingRoom >= 0 && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-            CancelDraggedConnection();
 
         if (draggingRoom >= 0)
         {
@@ -418,7 +378,8 @@ internal static class MapEditorView
             Num.Vector2 max = min + nodeSize;
             bool hovered = ReferenceEquals(room, hoveredRoom);
 
-            uint fill = ImGui.GetColorU32(room.Selected ? ImGuiCol.ButtonActive :
+            uint fill = ImGui.GetColorU32(
+                room.Selected ? ImGuiCol.ButtonActive :
                 room.CurrentRoom ? ImGuiCol.Header :
                 hovered ? ImGuiCol.ButtonHovered : ImGuiCol.FrameBg);
             uint border = ImGui.GetColorU32(room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Border);
@@ -432,202 +393,6 @@ internal static class MapEditorView
             if (room.OffScreenDen) meta += " · DEN";
             draw.AddText(min + new Num.Vector2(7f, 20f), ImGui.GetColorU32(ImGuiCol.TextDisabled), meta);
         }
-
-        DrawExitPorts(draw, snapshot, canvasMin, hoveredPort);
-        DrawDraggedConnectionPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
-    }
-
-    private static void DrawExitPorts(
-        ImDrawListPtr draw,
-        EditorMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        ExitPortHit hoveredPort)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        bool linking = linkingRoom >= 0;
-
-        for (int roomIndex = 0; roomIndex < rooms.Length; roomIndex++)
-        {
-            EditorMapRoomSnapshot room = rooms[roomIndex];
-            if (!IsLayerVisible(room.Layer)) continue;
-            if (!linking && room.RoomIndex != snapshot.SelectedRoomIndex) continue;
-
-            EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-            for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
-            {
-                EditorMapRoomNodeSnapshot node = nodes[nodeIndex];
-                if (!node.Exit) continue;
-
-                Num.Vector2 position = EndpointPosition(snapshot, room, node.NodeIndex, canvasMin);
-                bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
-                bool source = room.RoomIndex == linkingRoom && node.NodeIndex == linkingNode;
-                bool hovered = hoveredPort != null &&
-                               hoveredPort.Room.RoomIndex == room.RoomIndex &&
-                               hoveredPort.Node.NodeIndex == node.NodeIndex;
-
-                uint color = ImGui.GetColorU32(source
-                    ? ImGuiCol.ButtonActive
-                    : hovered && free
-                        ? ImGuiCol.ButtonHovered
-                        : free
-                            ? ImGuiCol.Text
-                            : ImGuiCol.TextDisabled);
-
-                float radius = hovered || source ? 5.5f : 4f;
-                draw.AddCircleFilled(position, radius, color);
-                if (room.RoomIndex == snapshot.SelectedRoomIndex || linking || hovered)
-                {
-                    string index = node.NodeIndex.ToString();
-                    Num.Vector2 size = ImGui.CalcTextSize(index);
-                    float x = position.X <= ToScreen(canvasMin, GetLocalPosition(room)).X + NodeSize().X * 0.5f
-                        ? position.X - size.X - 7f
-                        : position.X + 7f;
-                    draw.AddText(new Num.Vector2(x, position.Y - size.Y * 0.5f), color, index);
-                }
-            }
-        }
-    }
-
-    private static void DrawDraggedConnectionPreview(
-        ImDrawListPtr draw,
-        EditorMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        Num.Vector2 mouse,
-        ExitPortHit hoveredPort)
-    {
-        if (linkingRoom < 0 || linkingNode < 0) return;
-        EditorMapRoomSnapshot sourceRoom = FindRoom(snapshot, linkingRoom);
-        if (sourceRoom == null) return;
-
-        Num.Vector2 source = EndpointPosition(snapshot, sourceRoom, linkingNode, canvasMin);
-        Num.Vector2 target = hoveredPort != null && hoveredPort.Free && hoveredPort.Room.RoomIndex != linkingRoom
-            ? hoveredPort.Position
-            : mouse;
-        uint color = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
-        draw.AddLine(source, target, color, 2.5f);
-
-        string label = "↔";
-        Num.Vector2 labelSize = ImGui.CalcTextSize(label);
-        Num.Vector2 midpoint = (source + target) * 0.5f;
-        draw.AddText(midpoint - labelSize * 0.5f, color, label);
-    }
-
-    private static ExitPortHit FindHoveredExitPort(
-        EditorMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        Num.Vector2 mouse)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        bool linking = linkingRoom >= 0;
-        ExitPortHit best = null;
-        float bestDistanceSq = 64f;
-
-        for (int roomIndex = 0; roomIndex < rooms.Length; roomIndex++)
-        {
-            EditorMapRoomSnapshot room = rooms[roomIndex];
-            if (!IsLayerVisible(room.Layer)) continue;
-            if (!linking && room.RoomIndex != snapshot.SelectedRoomIndex) continue;
-
-            EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-            for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
-            {
-                EditorMapRoomNodeSnapshot node = nodes[nodeIndex];
-                if (!node.Exit) continue;
-                Num.Vector2 position = EndpointPosition(snapshot, room, node.NodeIndex, canvasMin);
-                float distanceSq = Num.Vector2.DistanceSquared(position, mouse);
-                if (distanceSq > bestDistanceSq) continue;
-                bestDistanceSq = distanceSq;
-                best = new ExitPortHit
-                {
-                    Room = room,
-                    Node = node,
-                    Position = position,
-                    Free = IsEndpointFree(snapshot, room.RoomIndex, node)
-                };
-            }
-        }
-        return best;
-    }
-
-    private static bool IsEndpointFree(
-        EditorMapPresentationSnapshot snapshot,
-        int roomIndex,
-        EditorMapRoomNodeSnapshot node)
-    {
-        if (node == null || !node.Exit || node.ConnectedRoomIndex >= 0) return false;
-        EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        for (int i = 0; i < connections.Length; i++)
-        {
-            EditorMapConnectionSnapshot connection = connections[i];
-            if (!connection.Explicit) continue;
-            if ((connection.FromRoomIndex == roomIndex && connection.FromNodeIndex == node.NodeIndex) ||
-                (connection.ToRoomIndex == roomIndex && connection.ToNodeIndex == node.NodeIndex))
-                return false;
-        }
-        return true;
-    }
-
-    private static void CompleteDraggedConnection(
-        EditorMapPresentationSnapshot snapshot,
-        ExitPortHit target)
-    {
-        EditorMapRoomSnapshot source = FindRoom(snapshot, linkingRoom);
-        if (source == null || target?.Room == null || target.Node == null) return;
-
-        WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
-            WorldTopologyCommandKind.CreateConnection,
-            region: snapshot.RegionName,
-            roomA: source.Name,
-            nodeA: linkingNode,
-            roomB: target.Room.Name,
-            nodeB: target.Node.NodeIndex,
-            direction: WorldConnectionDirection.Bidirectional));
-    }
-
-    private static void CancelDraggedConnection()
-    {
-        linkingRoom = -1;
-        linkingNode = -1;
-    }
-
-    private static void SynchronizeLinkState(EditorMapPresentationSnapshot snapshot)
-    {
-        if (linkingRoom < 0) return;
-        EditorMapRoomSnapshot room = FindRoom(snapshot, linkingRoom);
-        EditorMapRoomNodeSnapshot node = FindNode(room, linkingNode);
-        if (room == null || node == null || !IsEndpointFree(snapshot, linkingRoom, node))
-            CancelDraggedConnection();
-    }
-
-    private static Num.Vector2 EndpointPosition(
-        EditorMapPresentationSnapshot snapshot,
-        EditorMapRoomSnapshot room,
-        int nodeIndex,
-        Num.Vector2 canvasMin)
-    {
-        Num.Vector2 min = ToScreen(canvasMin, GetLocalPosition(room));
-        Num.Vector2 size = NodeSize();
-        EditorMapRoomNodeSnapshot[] nodes = room?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-
-        int exitCount = 0;
-        int ordinal = -1;
-        for (int i = 0; i < nodes.Length; i++)
-        {
-            if (!nodes[i].Exit) continue;
-            if (nodes[i].NodeIndex == nodeIndex) ordinal = exitCount;
-            exitCount++;
-        }
-
-        if (ordinal < 0 || exitCount == 0)
-            return min + size * 0.5f;
-
-        bool right = ordinal % 2 == 0;
-        int row = ordinal / 2;
-        int rowsOnSide = right ? (exitCount + 1) / 2 : exitCount / 2;
-        float t = (row + 1f) / (rowsOnSide + 1f);
-        float y = min.Y + 5f + (size.Y - 10f) * t;
-        float x = right ? min.X + size.X : min.X;
-        return new Num.Vector2(x, y);
     }
 
     private static void SynchronizeLocalPositions(EditorMapPresentationSnapshot snapshot)
@@ -675,7 +440,7 @@ internal static class MapEditorView
         Num.Vector2 span = Num.Vector2.Max(max - min, new Num.Vector2(1f, 1f));
         float availableX = Math.Max(100f, canvasSize.X - 80f);
         float availableY = Math.Max(100f, canvasSize.Y - 80f);
-        zoom = Math.Max(0.2f, Math.Min(2.0f, Math.Min(availableX / span.X, availableY / span.Y)));
+        zoom = Math.Max(0.2f, Math.Min(2f, Math.Min(availableX / span.X, availableY / span.Y)));
         Num.Vector2 center = (min + max) * 0.5f;
         pan = canvasSize * 0.5f - center * zoom;
     }
@@ -689,7 +454,8 @@ internal static class MapEditorView
     private static Num.Vector2 ToScreen(Num.Vector2 canvasMin, Num.Vector2 world) =>
         canvasMin + pan + world * zoom;
 
-    private static Num.Vector2 NodeSize() => new(130f * Math.Max(0.65f, Math.Min(1.3f, zoom)), 42f);
+    private static Num.Vector2 NodeSize() =>
+        new(130f * Math.Max(0.65f, Math.Min(1.3f, zoom)), 42f);
 
     private static void Select(int roomIndex) =>
         MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex));
@@ -705,14 +471,6 @@ internal static class MapEditorView
         EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = 0; i < rooms.Length; i++)
             if (rooms[i].RoomIndex == roomIndex) return rooms[i];
-        return null;
-    }
-
-    private static EditorMapRoomNodeSnapshot FindNode(EditorMapRoomSnapshot room, int nodeIndex)
-    {
-        EditorMapRoomNodeSnapshot[] nodes = room?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-        for (int i = 0; i < nodes.Length; i++)
-            if (nodes[i].NodeIndex == nodeIndex) return nodes[i];
         return null;
     }
 
