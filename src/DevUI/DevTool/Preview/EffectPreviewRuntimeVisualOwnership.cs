@@ -9,15 +9,7 @@ namespace DryCycle.DevUI.DevTool.Preview;
 
 /// <summary>
 /// Extends preview ownership beyond Room.AddObject into runtime Futile and camera mutations.
-///
-/// The tracker never identifies a mod. It learns the exact runtime objects created during the
-/// synchronous preview bootstrap, then follows descendants created from those objects through the
-/// public Room.AddObject choke point. While one of those objects is actually executing, Futile
-/// add/reorder/remove operations are journaled by identity and reversed when hover ends.
-///
-/// Direct RoomCamera field writes are supported only when the written field is safely restorable and
-/// no currently-live non-preview controller (nor the camera's normal per-frame DrawUpdate path) is
-/// also known to write that field. Non-trivial RoomCamera method calls still fail closed.
+/// Compatibility is behavioral: no mod id, assembly allow-list or private registry is consulted.
 /// </summary>
 internal static class EffectPreviewRuntimeVisualOwnership
 {
@@ -36,6 +28,9 @@ internal static class EffectPreviewRuntimeVisualOwnership
     private delegate void HookRemoveChild(OrigRemoveChild orig, FContainer self, FNode node);
     private delegate void OrigRemoveAllChildren(FContainer self);
     private delegate void HookRemoveAllChildren(OrigRemoveAllChildren orig, FContainer self);
+
+    internal static bool RequiresAbort => active?.RequiresAbort == true;
+    internal static string AbortReason => active?.AbortReason ?? string.Empty;
 
     internal static void Enable()
     {
@@ -75,9 +70,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
             if (removeChild != null)
                 removeChildHook = new Hook(removeChild, (HookRemoveChild)FContainer_RemoveChild);
             if (removeAllChildren != null)
-                removeAllChildrenHook = new Hook(
-                    removeAllChildren,
-                    (HookRemoveAllChildren)FContainer_RemoveAllChildren);
+                removeAllChildrenHook = new Hook(removeAllChildren, (HookRemoveAllChildren)FContainer_RemoveAllChildren);
 
             On.Room.AddObject += Room_AddObject;
             enabled = true;
@@ -111,6 +104,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
             new(ReferenceEqualityComparer<UpdatableAndDeletable>.Instance);
         List<UpdatableAndDeletable> list = room?.updateList;
         if (list == null) return result;
+
         for (int i = 0; i < list.Count; i++)
         {
             UpdatableAndDeletable item = list[i];
@@ -167,10 +161,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
         return session?.Rollback(reason) ?? EffectPreviewRuntimeVisualRollbackReport.Clean;
     }
 
-    internal static void DetachWithoutRollback()
-    {
-        active = null;
-    }
+    internal static void DetachWithoutRollback() => active = null;
 
     private static void Room_AddObject(
         On.Room.orig_AddObject orig,
@@ -182,15 +173,13 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         orig(self, obj);
 
-        if (!propagate || obj == null || obj is PhysicalObject || session == null)
-            return;
-
-        if (!ReferenceEquals(self, session.Room))
+        if (!propagate || obj == null || obj is PhysicalObject || session == null ||
+            !ReferenceEquals(self, session.Room))
             return;
 
         bool attached = ReferenceEquals(obj.room, self) || ContainsReference(self.updateList, obj);
         if (attached)
-            session.AddOwnedRuntimeObject(obj);
+            session.AdoptRuntimeObject(obj);
     }
 
     private static void FContainer_AddChild(OrigAddChild orig, FContainer self, FNode node)
@@ -265,23 +254,16 @@ internal static class EffectPreviewRuntimeVisualOwnership
         for (int i = 0; i < probes.Count; i++)
         {
             NodeMutationProbe probe = probes[i];
-            session.ObserveNodeMutation(
-                probe.Node,
-                probe.Before,
-                NodePlacement.Capture(probe.Node));
+            session.ObserveNodeMutation(probe.Node, probe.Before, NodePlacement.Capture(probe.Node));
         }
     }
 
     private static void DisposeHooks()
     {
-        try { addChildHook?.Dispose(); }
-        catch { }
-        try { addChildAtIndexHook?.Dispose(); }
-        catch { }
-        try { removeChildHook?.Dispose(); }
-        catch { }
-        try { removeAllChildrenHook?.Dispose(); }
-        catch { }
+        try { addChildHook?.Dispose(); } catch { }
+        try { addChildAtIndexHook?.Dispose(); } catch { }
+        try { removeChildHook?.Dispose(); } catch { }
+        try { removeAllChildrenHook?.Dispose(); } catch { }
         addChildHook = null;
         addChildAtIndexHook = null;
         removeChildHook = null;
@@ -301,12 +283,12 @@ internal static class EffectPreviewRuntimeVisualOwnership
         private readonly global::Room room;
         private readonly HashSet<UpdatableAndDeletable> ownedRuntimeObjects;
         private readonly RuntimeCameraFieldJournal cameraJournal;
-        private readonly HashSet<FNode> ownedNodes =
-            new(ReferenceEqualityComparer<FNode>.Instance);
+        private readonly HashSet<FNode> ownedNodes = new(ReferenceEqualityComparer<FNode>.Instance);
         private readonly List<FNode> ownedNodeOrder = new();
         private readonly Dictionary<FNode, NodeMoveMutation> nodeMoves =
             new(ReferenceEqualityComparer<FNode>.Instance);
         private readonly List<FNode> movedNodeOrder = new();
+        private string abortReason = string.Empty;
 
         internal RuntimeSession(
             global::Room room,
@@ -321,10 +303,15 @@ internal static class EffectPreviewRuntimeVisualOwnership
         }
 
         internal global::Room Room => room;
+        internal bool RequiresAbort => !string.IsNullOrEmpty(abortReason);
+        internal string AbortReason => abortReason;
 
-        internal void AddOwnedRuntimeObject(UpdatableAndDeletable obj)
+        internal void AdoptRuntimeObject(UpdatableAndDeletable obj)
         {
-            if (obj != null) ownedRuntimeObjects.Add(obj);
+            if (obj == null || !ownedRuntimeObjects.Add(obj)) return;
+
+            if (!cameraJournal.TryAdoptType(obj.GetType(), ownedRuntimeObjects, out string reason))
+                MarkAbort("preview descendant cannot be safely journaled: " + reason);
         }
 
         internal void ObserveAfterGameUpdate(global::RainWorldGame game)
@@ -390,26 +377,19 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         internal void ObserveNodeMutation(FNode node, NodePlacement before, NodePlacement after)
         {
-            if (node == null || before.Equals(after))
-                return;
-
-            if (ownedNodes.Contains(node))
-                return;
+            if (node == null || before.Equals(after)) return;
+            if (ownedNodes.Contains(node)) return;
 
             if (before.Container == null && after.Container != null)
             {
-                if (ownedNodes.Add(node))
-                    ownedNodeOrder.Add(node);
+                if (ownedNodes.Add(node)) ownedNodeOrder.Add(node);
                 return;
             }
-
-            if (before.Container == null)
-                return;
+            if (before.Container == null) return;
 
             if (!nodeMoves.TryGetValue(node, out NodeMoveMutation mutation))
             {
-                mutation = new NodeMoveMutation(before, after);
-                nodeMoves[node] = mutation;
+                nodeMoves[node] = new NodeMoveMutation(before, after);
                 movedNodeOrder.Add(node);
             }
             else
@@ -431,16 +411,8 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 if (node == null) continue;
                 try { node.RemoveFromContainer(); }
                 catch { nodeLeaks++; }
-
-                try
-                {
-                    if (node.container != null)
-                        nodeLeaks++;
-                }
-                catch
-                {
-                    nodeLeaks++;
-                }
+                try { if (node.container != null) nodeLeaks++; }
+                catch { nodeLeaks++; }
             }
 
             for (int i = movedNodeOrder.Count - 1; i >= 0; i--)
@@ -450,9 +422,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     continue;
 
                 NodePlacement current = NodePlacement.Capture(node);
-                if (current.Equals(mutation.OriginalPlacement))
-                    continue;
-
+                if (current.Equals(mutation.OriginalPlacement)) continue;
                 if (!current.Equals(mutation.PreviewPlacement))
                 {
                     ambiguousMoves++;
@@ -470,8 +440,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     {
                         int count = original._childNodes?.Count ?? 0;
                         int index = mutation.OriginalPlacement.Index;
-                        if (index < 0) index = count;
-                        if (index > count) index = count;
+                        if (index < 0 || index > count) index = count;
                         original.AddChildAtIndex(node, index);
                     }
 
@@ -485,7 +454,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             }
 
             RuntimeCameraRollbackReport camera = cameraJournal?.Rollback(reason) ?? RuntimeCameraRollbackReport.Clean;
-
             bool leak = nodeLeaks > 0 || moveLeaks > 0 || ambiguousMoves > 0 || camera.HasLeak;
             string summary = leak
                 ? "runtime visual rollback: nodeLeaks=" + nodeLeaks +
@@ -502,6 +470,12 @@ internal static class EffectPreviewRuntimeVisualOwnership
             ownedRuntimeObjects.Clear();
             return new EffectPreviewRuntimeVisualRollbackReport(leak, summary);
         }
+
+        private void MarkAbort(string reason)
+        {
+            if (string.IsNullOrEmpty(abortReason))
+                abortReason = string.IsNullOrWhiteSpace(reason) ? "unsafe runtime visual descendant" : reason;
+        }
     }
 
     private readonly struct NodeMutationProbe
@@ -511,7 +485,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             Node = node;
             Before = before;
         }
-
         internal FNode Node { get; }
         internal NodePlacement Before { get; }
     }
@@ -523,7 +496,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             Container = container;
             Index = index;
         }
-
         internal FContainer Container { get; }
         internal int Index { get; }
 
@@ -543,7 +515,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         public bool Equals(NodePlacement other) =>
             ReferenceEquals(Container, other.Container) && Index == other.Index;
-
         public override bool Equals(object obj) => obj is NodePlacement other && Equals(other);
         public override int GetHashCode() =>
             ((Container == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Container)) * 397) ^ Index;
@@ -556,7 +527,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             OriginalPlacement = originalPlacement;
             PreviewPlacement = previewPlacement;
         }
-
         internal NodePlacement OriginalPlacement;
         internal NodePlacement PreviewPlacement;
     }
@@ -564,29 +534,30 @@ internal static class EffectPreviewRuntimeVisualOwnership
     private sealed class RuntimeCameraFieldJournal
     {
         private readonly global::Room room;
+        private readonly HashSet<FieldInfo> trackedFields = new();
         private readonly List<CameraFieldState> states = new();
 
         internal RuntimeCameraFieldJournal(global::Room room, HashSet<FieldInfo> fields)
         {
             this.room = room;
-            if (room?.game?.cameras == null || fields == null || fields.Count == 0)
-                return;
+            AddFields(fields);
+        }
 
-            RoomCamera[] cameras = room.game.cameras;
-            for (int i = 0; i < cameras.Length; i++)
-            {
-                RoomCamera camera = cameras[i];
-                if (camera == null || !ReferenceEquals(camera.room, room))
-                    continue;
+        internal bool TryAdoptType(
+            Type type,
+            HashSet<UpdatableAndDeletable> owned,
+            out string failureReason)
+        {
+            if (!RuntimeCameraUsageScanner.TryGetSafeFields(
+                    room,
+                    owned,
+                    new[] { type },
+                    out HashSet<FieldInfo> fields,
+                    out failureReason))
+                return false;
 
-                foreach (FieldInfo field in fields)
-                {
-                    object value;
-                    try { value = field.GetValue(camera); }
-                    catch { continue; }
-                    states.Add(new CameraFieldState(camera, field, value));
-                }
-            }
+            AddFields(fields);
+            return true;
         }
 
         internal void Observe()
@@ -594,23 +565,15 @@ internal static class EffectPreviewRuntimeVisualOwnership
             for (int i = 0; i < states.Count; i++)
             {
                 CameraFieldState state = states[i];
-                if (state.Camera == null || state.Field == null)
-                    continue;
-
+                if (state.Camera == null || state.Field == null) continue;
                 if (!ReferenceEquals(state.Camera.room, room))
                 {
                     state.Ambiguous = true;
                     continue;
                 }
 
-                try
-                {
-                    state.PreviewValue = state.Field.GetValue(state.Camera);
-                }
-                catch
-                {
-                    state.Ambiguous = true;
-                }
+                try { state.PreviewValue = state.Field.GetValue(state.Camera); }
+                catch { state.Ambiguous = true; }
             }
         }
 
@@ -618,13 +581,10 @@ internal static class EffectPreviewRuntimeVisualOwnership
         {
             int fieldLeaks = 0;
             int ambiguous = 0;
-
             for (int i = states.Count - 1; i >= 0; i--)
             {
                 CameraFieldState state = states[i];
-                if (state.Camera == null || state.Field == null)
-                    continue;
-
+                if (state.Camera == null || state.Field == null) continue;
                 if (state.Ambiguous)
                 {
                     ambiguous++;
@@ -634,9 +594,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 try
                 {
                     object current = state.Field.GetValue(state.Camera);
-                    if (SameValue(current, state.OriginalValue))
-                        continue;
-
+                    if (SameValue(current, state.OriginalValue)) continue;
                     if (!SameValue(current, state.PreviewValue))
                     {
                         ambiguous++;
@@ -647,20 +605,37 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     if (!SameValue(state.Field.GetValue(state.Camera), state.OriginalValue))
                         fieldLeaks++;
                 }
-                catch
-                {
-                    fieldLeaks++;
-                }
+                catch { fieldLeaks++; }
             }
 
             states.Clear();
+            trackedFields.Clear();
             bool leak = fieldLeaks > 0 || ambiguous > 0;
             string summary = leak
-                ? "runtimeCameraFields=" + fieldLeaks +
-                  ", ambiguousCameraFields=" + ambiguous +
+                ? "runtimeCameraFields=" + fieldLeaks + ", ambiguousCameraFields=" + ambiguous +
                   (string.IsNullOrWhiteSpace(reason) ? string.Empty : " during " + reason)
                 : string.Empty;
             return new RuntimeCameraRollbackReport(leak, summary);
+        }
+
+        private void AddFields(HashSet<FieldInfo> fields)
+        {
+            if (room?.game?.cameras == null || fields == null || fields.Count == 0) return;
+            RoomCamera[] cameras = room.game.cameras;
+
+            foreach (FieldInfo field in fields)
+            {
+                if (field == null || !trackedFields.Add(field)) continue;
+                for (int i = 0; i < cameras.Length; i++)
+                {
+                    RoomCamera camera = cameras[i];
+                    if (camera == null || !ReferenceEquals(camera.room, room)) continue;
+                    object value;
+                    try { value = field.GetValue(camera); }
+                    catch { continue; }
+                    states.Add(new CameraFieldState(camera, field, value));
+                }
+            }
         }
 
         private sealed class CameraFieldState
@@ -672,7 +647,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 OriginalValue = originalValue;
                 PreviewValue = originalValue;
             }
-
             internal RoomCamera Camera;
             internal FieldInfo Field;
             internal object OriginalValue;
@@ -688,7 +662,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             HasLeak = hasLeak;
             Summary = summary ?? string.Empty;
         }
-
         internal bool HasLeak { get; }
         internal string Summary { get; }
         internal static RuntimeCameraRollbackReport Clean => new(false, string.Empty);
@@ -708,31 +681,37 @@ internal static class EffectPreviewRuntimeVisualOwnership
             out string failureReason)
         {
             journal = null;
+            Type[] types = OwnedTypes(owned);
+            if (!TryGetSafeFields(room, owned, types, out HashSet<FieldInfo> fields, out failureReason))
+                return false;
+            journal = new RuntimeCameraFieldJournal(room, fields);
+            return true;
+        }
+
+        internal static bool TryGetSafeFields(
+            global::Room room,
+            HashSet<UpdatableAndDeletable> owned,
+            IEnumerable<Type> types,
+            out HashSet<FieldInfo> fields,
+            out string failureReason)
+        {
+            fields = new HashSet<FieldInfo>();
             failureReason = string.Empty;
-            if (room == null || owned == null || owned.Count == 0)
-                return true;
+            if (room == null || types == null) return true;
 
-            HashSet<FieldInfo> fields = new();
-            HashSet<Type> ownedTypes = new();
-            foreach (UpdatableAndDeletable obj in owned)
+            foreach (Type type in types)
             {
-                Type type = obj?.GetType();
-                if (type == null || !ownedTypes.Add(type)) continue;
-
+                if (type == null) continue;
                 CameraUsage usage = GetUsage(type);
                 if (!string.IsNullOrEmpty(usage.UnsafeReason))
                 {
                     failureReason = type.FullName + ": " + usage.UnsafeReason;
                     return false;
                 }
-
-                foreach (FieldInfo field in usage.Fields)
-                    fields.Add(field);
+                foreach (FieldInfo field in usage.Fields) fields.Add(field);
             }
 
-            if (fields.Count == 0)
-                return true;
-
+            if (fields.Count == 0) return true;
             HashSet<FieldInfo> normalCameraWrites = GetCameraFrameWrites();
             foreach (FieldInfo field in fields)
             {
@@ -741,7 +720,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     failureReason = "runtime camera field " + field.Name + " is not safely restorable";
                     return false;
                 }
-
                 if (normalCameraWrites.Contains(field))
                 {
                     failureReason = "RoomCamera.DrawUpdate also writes runtime field " + field.Name;
@@ -753,12 +731,9 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 for (int i = 0; i < live.Count; i++)
                 {
                     UpdatableAndDeletable candidate = live[i];
-                    if (candidate == null || owned.Contains(candidate))
-                        continue;
-
+                    if (candidate == null || owned?.Contains(candidate) == true) continue;
                     CameraUsage competing = GetUsage(candidate.GetType());
-                    if (!competing.Fields.Contains(field))
-                        continue;
+                    if (!competing.Fields.Contains(field)) continue;
 
                     failureReason = "non-preview runtime object " + candidate.GetType().FullName +
                                     " also writes RoomCamera field " + field.Name;
@@ -766,7 +741,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 }
             }
 
-            journal = new RuntimeCameraFieldJournal(room, fields);
             return true;
         }
 
@@ -779,18 +753,30 @@ internal static class EffectPreviewRuntimeVisualOwnership
             }
         }
 
+        private static Type[] OwnedTypes(HashSet<UpdatableAndDeletable> owned)
+        {
+            if (owned == null || owned.Count == 0) return Array.Empty<Type>();
+            HashSet<Type> types = new();
+            foreach (UpdatableAndDeletable obj in owned)
+            {
+                Type type = obj?.GetType();
+                if (type != null) types.Add(type);
+            }
+            Type[] result = new Type[types.Count];
+            types.CopyTo(result);
+            return result;
+        }
+
         private static CameraUsage GetUsage(Type rootType)
         {
             if (rootType == null) return CameraUsage.Empty;
             lock (Cache)
             {
-                if (Cache.TryGetValue(rootType, out CameraUsage cached))
-                    return cached;
+                if (Cache.TryGetValue(rootType, out CameraUsage cached)) return cached;
             }
 
             CameraUsage usage = ScanType(rootType);
-            lock (Cache)
-                Cache[rootType] = usage;
+            lock (Cache) Cache[rootType] = usage;
             return usage;
         }
 
@@ -798,7 +784,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
         {
             CameraUsage usage = new();
             HashSet<MethodBase> visited = new();
-
             MethodInfo[] methods;
             try
             {
@@ -806,14 +791,10 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
                     BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             }
-            catch
-            {
-                return usage;
-            }
+            catch { return usage; }
 
             for (int i = 0; i < methods.Length; i++)
                 ScanMethod(methods[i], rootType.Assembly, usage, visited, 0);
-
             return usage;
         }
 
@@ -824,8 +805,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
             HashSet<MethodBase> visited,
             int depth)
         {
-            if (method == null || depth > MaxDepth || visited.Count >= MaxMethods || !visited.Add(method))
-                return;
+            if (method == null || depth > MaxDepth || visited.Count >= MaxMethods || !visited.Add(method)) return;
 
             List<DecodedInstruction> il = DecodedInstructionReader.Read(method);
             for (int i = 0; i < il.Count; i++)
@@ -838,9 +818,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
                     continue;
                 }
 
-                if (instruction.Operand is not MethodBase called)
-                    continue;
-
+                if (instruction.Operand is not MethodBase called) continue;
                 Type declaring = called.DeclaringType;
                 if (declaring != null && typeof(RoomCamera).IsAssignableFrom(declaring) &&
                     !IsSafeCameraCall(called) && string.IsNullOrEmpty(usage.UnsafeReason))
@@ -849,10 +827,8 @@ internal static class EffectPreviewRuntimeVisualOwnership
                                          " calls mutable RoomCamera API " + called.Name;
                 }
 
-                if (called.Module?.Assembly != rootAssembly || called == method)
-                    continue;
-
-                ScanMethod(called, rootAssembly, usage, visited, depth + 1);
+                if (called.Module?.Assembly == rootAssembly && called != method)
+                    ScanMethod(called, rootAssembly, usage, visited, depth + 1);
             }
         }
 
@@ -860,16 +836,14 @@ internal static class EffectPreviewRuntimeVisualOwnership
         {
             lock (Cache)
             {
-                if (cameraFrameWrites != null)
-                    return cameraFrameWrites;
+                if (cameraFrameWrites != null) return cameraFrameWrites;
             }
 
             HashSet<FieldInfo> result = new();
             MethodInfo drawUpdate = typeof(RoomCamera).GetMethod(
                 "DrawUpdate",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            HashSet<MethodBase> visited = new();
-            CollectCameraWrites(drawUpdate, result, visited, 0);
+            CollectCameraWrites(drawUpdate, result, new HashSet<MethodBase>(), 0);
 
             lock (Cache)
             {
@@ -884,8 +858,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
             HashSet<MethodBase> visited,
             int depth)
         {
-            if (method == null || depth > 4 || visited.Count >= 128 || !visited.Add(method))
-                return;
+            if (method == null || depth > 4 || visited.Count >= 128 || !visited.Add(method)) return;
 
             List<DecodedInstruction> il = DecodedInstructionReader.Read(method);
             for (int i = 0; i < il.Count; i++)
@@ -901,7 +874,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 if (instruction.Operand is not MethodBase called ||
                     called.DeclaringType != typeof(RoomCamera) || called == method)
                     continue;
-
                 CollectCameraWrites(called, result, visited, depth + 1);
             }
         }
@@ -909,10 +881,9 @@ internal static class EffectPreviewRuntimeVisualOwnership
         private static bool IsSafeCameraCall(MethodBase method)
         {
             string name = method?.Name ?? string.Empty;
-            if (name.StartsWith("get_", StringComparison.Ordinal)) return true;
-            if (name == "ReturnFContainer") return true;
-            if (name == "NewObjectInRoom") return true;
-            return false;
+            return name.StartsWith("get_", StringComparison.Ordinal) ||
+                   name == "ReturnFContainer" ||
+                   name == "NewObjectInRoom";
         }
 
         private static bool SafeCameraFieldType(Type type)
@@ -923,8 +894,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
             if (typeof(FNode).IsAssignableFrom(type)) return true;
             if (typeof(UpdatableAndDeletable).IsAssignableFrom(type)) return true;
             if (typeof(IDrawable).IsAssignableFrom(type)) return true;
-            if (type == typeof(RoomSettings.RoomEffect.Type)) return true;
-            return false;
+            return type == typeof(RoomSettings.RoomEffect.Type);
         }
 
         private sealed class CameraUsage
@@ -951,9 +921,7 @@ internal readonly struct EffectPreviewRuntimeVisualRollbackReport
         HasLeak = hasLeak;
         Summary = summary ?? string.Empty;
     }
-
     internal bool HasLeak { get; }
     internal string Summary { get; }
-
     internal static EffectPreviewRuntimeVisualRollbackReport Clean => new(false, string.Empty);
 }
