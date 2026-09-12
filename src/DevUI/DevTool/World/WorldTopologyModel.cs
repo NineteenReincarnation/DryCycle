@@ -29,8 +29,8 @@ internal readonly struct WorldConnectionEndpoint : IEquatable<WorldConnectionEnd
 
     internal string Room { get; }
     internal int NodeIndex { get; }
-    internal bool IsValid => Room.Length > 0 && NodeIndex >= 0;
-    internal string Key => Room + ":" + NodeIndex;
+    internal bool IsValid => !string.IsNullOrEmpty(Room) && NodeIndex >= 0;
+    internal string Key => (Room ?? string.Empty) + ":" + NodeIndex;
 
     public bool Equals(WorldConnectionEndpoint other) =>
         NodeIndex == other.NodeIndex &&
@@ -40,7 +40,7 @@ internal readonly struct WorldConnectionEndpoint : IEquatable<WorldConnectionEnd
         obj is WorldConnectionEndpoint other && Equals(other);
 
     public override int GetHashCode() =>
-        (StringComparer.OrdinalIgnoreCase.GetHashCode(Room) * 397) ^ NodeIndex;
+        ((Room == null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Room)) * 397) ^ NodeIndex;
 
     public override string ToString() => Key;
 
