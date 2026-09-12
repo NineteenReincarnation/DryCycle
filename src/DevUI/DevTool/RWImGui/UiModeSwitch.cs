@@ -16,8 +16,14 @@ internal static class UiModeSwitch
         // ControlCenterWindow. Vanilla keeps only this deliberately small return surface so the
         // original DevUI remains readable and the developer can always switch back.
         if (EditorUiModeState.UseVanilla)
+        {
             DrawVanillaReturnPanel();
-        else
+            return;
+        }
+
+        // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
+        // no selection/group exists prevents an empty fourth panel from competing with the room.
+        if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
             GroupStatusWindow.Draw(ImGui.GetIO().DisplaySize);
     }
 
