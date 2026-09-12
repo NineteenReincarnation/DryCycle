@@ -6,6 +6,35 @@ Sound Group 是 **DevTool 编辑器模板**，不是 Rain World 房间运行时�
 
 点击“应用到当前房间”后，组内项目会被展开成普通的 `AmbientSound` / `DirectionalSound` / `SpotSound` 并写入 `RoomSettings.ambientSounds`。房间保存之后不再依赖 `sound-groups.xml`；发布地图时，即使玩家没有任何 Sound Group XML，也不会因此产生运行时依赖。
 
+## 一体化工作流
+
+Sound 编辑器使用一个跨页面共享的 **Working Group / 工作音效组**。选择一次后，Library、Scene 和 Inspector 都使用同一个目标组，不需要在每个声音上重复选择 Group。
+
+### Library
+
+Library 的 `Destination` 支持三种模式：
+
+- `Scene`：只创建到当前房间。
+- `Working Group`：不经过 Scene，直接把资源以当前声音类型的默认参数加入工作音效组。
+- `Scene + Working Group`：一次点击同时创建到当前房间，并把实际创建出来的声音参数快照写入工作音效组。
+
+目标模式会保持不变，适合连续录入一批声音。
+
+### Scene
+
+Scene 支持多选：
+
+- 单击：单选。
+- `Ctrl + Click`：追加或取消选择。
+- `Shift + Click`：范围选择。
+- `Ctrl + A`：全选。
+
+选中多个声音后可以一次加入 Working Group，也可以直接使用“从选择新建音效组”。后者会保存每个声音当前的类型、音量、音高、方向、位置、半径和衰减等参数快照。
+
+### Inspector
+
+单选声音时可以直接“加入当前声音”；多选时 Inspector 会改为批量加入当前 Working Group。Working Group 的选择本身仍由 Browser 顶部统一管理。
+
 ## 文件位置
 
 ### 本地开发者库
@@ -16,7 +45,7 @@ Sound Group 是 **DevTool 编辑器模板**，不是 Rain World 房间运行时�
 Rain World/BepInEx/config/DryCycle/DevTool/sound-groups.xml
 ```
 
-Sound 页面可以指定另一个本地文件夹。自定义目录只影响开发者个人库。
+Sound 页面可以指定另一个本地文件夹。自定义目录只影响开发者个人库。目录、Reload、Default 等低频设置收纳在 Groups 页的 `Library Settings` 中，不占用日常编组流程。
 
 ### Mod 可移植标准
 
@@ -106,3 +135,5 @@ DevTool 会持续报告：
 ## Undo
 
 应用整个 Sound Group 是一次编辑操作：无论组里有多少声音，只产生一条 History 记录，因此一次 Undo 即可撤销整个应用。
+
+Sound Group 本地库本身是开发者模板数据，不和房间 `RoomSettings` 的 Undo 栈绑定；加入或创建 Group 不会制造房间 History 噪音。
