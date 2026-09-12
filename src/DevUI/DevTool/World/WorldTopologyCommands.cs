@@ -121,7 +121,7 @@ internal static class WorldTopologyCommandQueue
 
     private static void AddExplicitMapping(
         EditorSession session,
-        World world,
+        global::World world,
         string region,
         WorldTopologyCommand command)
     {
@@ -189,7 +189,7 @@ internal static class WorldTopologyCommandQueue
 
     private static void CreateConnection(
         EditorSession session,
-        World world,
+        global::World world,
         string region,
         WorldTopologyCommand command)
     {
@@ -258,7 +258,7 @@ internal static class WorldTopologyCommandQueue
 
     private static void DeleteConnection(
         EditorSession session,
-        World world,
+        global::World world,
         string region,
         WorldTopologyCommand command)
     {
@@ -313,7 +313,7 @@ internal static class WorldTopologyCommandQueue
 
     private static void SetDirection(
         EditorSession session,
-        World world,
+        global::World world,
         string region,
         string edgeId,
         WorldConnectionDirection direction)
@@ -378,7 +378,7 @@ internal static class WorldTopologyCommandQueue
 
     private static void RemoveExplicitMapping(
         EditorSession session,
-        World world,
+        global::World world,
         string region,
         string edgeId)
     {
@@ -411,8 +411,6 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        // Vanilla needs reciprocal room references in order to recover an entrance node through
-        // ExitIndex(sourceRoom). Restore that shape before removing the exact endpoint sidecar.
         if (!ApplyDirectionToWorld(
                 region,
                 roomA,
@@ -438,7 +436,7 @@ internal static class WorldTopologyCommandQueue
     }
 
     private static WorldTopologyEditSnapshot Capture(
-        World world,
+        global::World world,
         string region,
         AbstractRoom roomA,
         int nodeA,
@@ -525,7 +523,7 @@ internal static class WorldTopologyCommandQueue
     }
 
     private static bool TryResolveEndpoints(
-        World world,
+        global::World world,
         WorldTopologyCommand command,
         out AbstractRoom roomA,
         out AbstractRoom roomB,
