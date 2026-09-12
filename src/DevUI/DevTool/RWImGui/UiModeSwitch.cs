@@ -27,6 +27,10 @@ internal static class UiModeSwitch
             // key hints into every editor panel. The window is itself part of the floating layout.
             ShortcutWindow.Draw(EditorPresentationHub.Current, display);
 
+            // Migration coverage is compact by default and expands only on demand. It audits the
+            // real live DevInterface tree, including RegionKit/DryCycle nodes injected at runtime.
+            MigrationCoverageWindow.Draw(display);
+
             // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
             // no selection/group exists prevents an empty fourth panel from competing with the room.
             if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
